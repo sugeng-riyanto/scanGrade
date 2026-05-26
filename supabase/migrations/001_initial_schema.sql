@@ -1,0 +1,2 @@
+-- Migration 001: Initial schema
+-- Copy content from supabase/schema.sql
