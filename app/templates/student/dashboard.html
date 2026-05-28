@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Ujian - ScanGrade{% endblock %}
+{% block content %}
+<div class="space-y-6">
+    <h1 class="text-2xl font-extrabold text-stone-800">Ujian Tersedia</h1>
+
+    {% if exams %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for e in exams %}
+        {% set has_audio = e.question_audio and e.question_audio|length > 0 %}
+        {% set qtypes = e.question_types or {} %}
+        {% set has_canvas = qtypes.values()|select('eq', 'essay_canvas')|list|length > 0 %}
+        {% set has_essay = qtypes.values()|select('eq', 'essay_text')|list|length > 0 or has_canvas %}
+        {% set mcq_count = qtypes.values()|select('eq', 'mcq')|list|length if e.question_types else e.total_questions %}
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 hover:shadow-xl hover:shadow-stone-200/70 transition flex flex-col border border-stone-100">
+            <div class="p-4 sm:p-6 flex-1">
+                <div class="flex items-start justify-between mb-3">
+                    <div class="bg-gradient-to-br from-amber-100 to-orange-100 p-3 rounded-2xl">
+                        <i class="fas fa-file-alt text-orange-600 text-xl"></i>
+                    </div>
+                    <span class="px-3 py-1.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-700 shrink-0">{{ e.status }}</span>
+                </div>
+                <h3 class="text-base sm:text-lg font-extrabold text-stone-800">{{ e.title }}</h3>
+                <p class="text-sm font-semibold text-stone-500 mt-1">{{ e.subject or '-' }}</p>
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-xs font-bold text-stone-500">
+                    <span><i class="fas fa-question-circle mr-1"></i>{{ e.total_questions }} soal</span>
+                    <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes }} menit</span>
+                    <span><i class="fas fa-check-circle mr-1"></i>{{ mcq_count }} PG</span>
+                    {% if has_essay %}<span class="text-amber-600"><i class="fas fa-pencil-alt mr-1"></i>Essay</span>{% endif %}
+                    {% if has_audio %}<span class="text-orange-500"><i class="fas fa-headphones mr-1"></i>Audio</span>{% endif %}
+                    {% if has_canvas %}<span class="text-emerald-500"><i class="fas fa-paint-brush mr-1"></i>Canvas</span>{% endif %}
+                </div>
+                <a href="/student/exams/{{ e.id }}"
+                   class="mt-4 block text-center bg-gradient-to-r from-orange-500 to-amber-500 text-white py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold transition shadow-lg shadow-orange-200/60">
+                    <i class="fas fa-play mr-1"></i>Mulai Ujian
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-8 sm:p-12 text-center text-stone-400 border border-stone-100">
+        <i class="fas fa-file-alt text-5xl sm:text-6xl mb-4"></i>
+        <p class="text-lg sm:text-xl font-extrabold">Tidak ada ujian tersedia</p>
+        <p class="text-sm font-semibold mt-1">Hubungi guru Anda untuk mendapatkan akses</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

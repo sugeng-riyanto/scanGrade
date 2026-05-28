@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - ScanGrade{% endblock %}
+{% block content %}
+<div class="space-y-6">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-extrabold text-stone-800">Dashboard</h1>
+        <a href="{{ url_for('teacher.exam_form') }}"
+           class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-5 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold shadow-lg shadow-orange-200/60 transition">
+            <i class="fas fa-plus mr-1"></i>Buat Exam Baru
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <div class="flex items-center">
+                <div class="bg-gradient-to-br from-amber-100 to-orange-100 p-3.5 rounded-2xl">
+                    <i class="fas fa-file-alt text-orange-600 text-xl"></i>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-bold text-stone-500">Total Exams</p>
+                    <p class="text-2xl font-extrabold text-stone-800">{{ exams|length }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <div class="flex items-center">
+                <div class="bg-gradient-to-br from-emerald-100 to-green-100 p-3.5 rounded-2xl">
+                    <i class="fas fa-check-circle text-emerald-600 text-xl"></i>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-bold text-stone-500">Active</p>
+                    <p class="text-2xl font-extrabold text-stone-800">{{ exams|selectattr('status', 'equalto', 'active')|list|length }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <div class="flex items-center">
+                <div class="bg-gradient-to-br from-amber-100 to-yellow-100 p-3.5 rounded-2xl">
+                    <i class="fas fa-users text-amber-600 text-xl"></i>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-bold text-stone-500">Siswa</p>
+                    <p class="text-2xl font-extrabold text-stone-800">0</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <div class="flex items-center">
+                <div class="bg-gradient-to-br from-stone-100 to-orange-100 p-3.5 rounded-2xl">
+                    <i class="fas fa-chart-line text-stone-600 text-xl"></i>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-bold text-stone-500">Rata-rata</p>
+                    <p class="text-2xl font-extrabold text-stone-800">-</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 border border-stone-100">
+        <div class="px-6 py-4 border-b border-stone-100">
+            <h2 class="text-lg font-extrabold text-stone-800">Exam Saya</h2>
+        </div>
+        <div class="p-6">
+            {% if exams %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-stone-500 border-b border-stone-100">
+                            <th class="pb-3 font-extrabold">Judul</th>
+                            <th class="pb-3 font-extrabold">Soal</th>
+                            <th class="pb-3 font-extrabold">Durasi</th>
+                            <th class="pb-3 font-extrabold">Status</th>
+                            <th class="pb-3 font-extrabold">Published</th>
+                            <th class="pb-3 font-extrabold">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for exam in exams %}
+                        <tr class="border-b border-stone-100 last:border-0 hover:bg-orange-50/30 transition">
+                            <td class="py-3 font-extrabold text-stone-800">{{ exam.title }}</td>
+                            <td class="py-3 font-bold text-stone-600">{{ exam.total_questions or '-' }}</td>
+                            <td class="py-3 font-bold text-stone-600">{{ exam.duration_minutes }} menit</td>
+                            <td class="py-3">
+                                <span class="px-3 py-1.5 text-xs font-bold rounded-full
+                                    {% if exam.status == 'active' %}bg-emerald-100 text-emerald-700
+                                    {% elif exam.status == 'draft' %}bg-stone-100 text-stone-700
+                                    {% else %}bg-red-100 text-red-700{% endif %}">
+                                    {{ exam.status }}
+                                </span>
+                            </td>
+                            <td class="py-3">
+                                {% if exam.is_published %}
+                                <span class="text-xs font-extrabold text-emerald-600"><i class="fas fa-check-circle"></i> Yes</span>
+                                {% else %}
+                                <span class="text-xs font-extrabold text-stone-400"><i class="fas fa-times-circle"></i> No</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 flex gap-1 flex-wrap">
+                                <a href="{{ url_for('teacher.preview_exam', exam_id=exam.id) }}" class="text-orange-600 hover:bg-orange-50 p-2 rounded-xl transition" title="Preview">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{{ url_for('teacher.exam_detail', exam_id=exam.id) }}" class="text-orange-600 hover:bg-orange-50 p-2 rounded-xl transition" title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <a href="{{ url_for('teacher.bubble_sheet', exam_id=exam.id) }}" class="text-emerald-600 hover:bg-emerald-50 p-2 rounded-xl transition" title="Cetak LJK">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                                <a href="{{ url_for('teacher.scan_page', exam_id=exam.id) }}" class="text-sky-600 hover:bg-sky-50 p-2 rounded-xl transition" title="Scan">
+                                    <i class="fas fa-camera"></i>
+                                </a>
+                                <a href="{{ url_for('teacher.results', exam_id=exam.id) }}" class="text-amber-600 hover:bg-amber-50 p-2 rounded-xl transition" title="Hasil">
+                                    <i class="fas fa-chart-bar"></i>
+                                </a>
+                                <button onclick="deleteExam('{{ exam.id }}')" class="text-red-500 hover:bg-red-50 p-2 rounded-xl transition" title="Hapus">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-12 text-stone-400">
+                <i class="fas fa-file-alt text-5xl mb-4"></i>
+                <p class="text-lg font-extrabold">Belum ada exam</p>
+                <p class="text-sm font-bold mt-1">Buat exam baru untuk memulai</p>
+                <a href="{{ url_for('teacher.exam_form') }}"
+                   class="inline-block mt-4 bg-gradient-to-r from-orange-500 to-amber-500 text-white px-6 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold shadow-lg shadow-orange-200/60 transition">
+                    <i class="fas fa-plus mr-1"></i>Buat Exam
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function deleteExam(id) {
+    if (!confirm('Yakin hapus exam ini? Semua data submission akan ikut terhapus.')) return;
+    fetch('/teacher/exams/' + id, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(d => { if (d.success) window.location.reload(); else alert('Gagal: ' + (d.error || '?')); })
+        .catch(e => alert('Gagal: ' + e.message));
+}
+</script>
+{% endblock %}

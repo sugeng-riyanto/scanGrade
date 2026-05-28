@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Hasil - ScanGrade{% endblock %}
+{% block content %}
+<div class="space-y-6">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-extrabold text-stone-800">Hasil Ujian</h1>
+        <div class="flex gap-2">
+            {% if exams and not exam_id %}
+            {% elif exam_id %}
+            <a href="/teacher/export/xlsx?exam_id={{ exam_id }}" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
+                <i class="fas fa-file-excel mr-1 text-emerald-600"></i>XLSX
+            </a>
+            <a href="/teacher/export/pdf?exam_id={{ exam_id }}" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
+                <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
+            </a>
+            <a href="/teacher/export/bubble-sheet/{{ exam_id }}" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
+                <i class="fas fa-print mr-1 text-orange-600"></i>Cetak LJK
+            </a>
+            <form method="POST" action="/teacher/publish/{{ exam_id }}" class="inline">
+                <button type="submit" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-4 py-2 rounded-xl hover:from-emerald-600 hover:to-green-600 text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition"
+                        onclick="return confirm('Publikasikan nilai ke semua siswa?')">
+                    <i class="fas fa-share mr-1"></i>Publish
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not exam_id %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+        <h2 class="text-lg font-extrabold text-stone-800 mb-4">Pilih Exam</h2>
+        {% if exams %}
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {% for e in exams %}
+            <a href="/teacher/results?exam_id={{ e.id }}" class="block p-4 border-2 border-stone-200 rounded-2xl hover:bg-orange-50 hover:border-orange-300 transition">
+                <p class="font-extrabold text-stone-800">{{ e.title }}</p>
+                <p class="text-sm font-bold text-stone-500">{{ e.subject or '-' }}</p>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-stone-400 font-bold text-center py-8">Belum ada exam</p>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <p class="text-sm font-bold text-stone-500">Rata-rata</p>
+            <p class="text-3xl font-extrabold text-orange-600">{{ stats.avg }}</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <p class="text-sm font-bold text-stone-500">Tertinggi</p>
+            <p class="text-3xl font-extrabold text-emerald-600">{{ stats.max }}</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <p class="text-sm font-bold text-stone-500">Terendah</p>
+            <p class="text-3xl font-extrabold text-red-600">{{ stats.min }}</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
+            <p class="text-sm font-bold text-stone-500">Peserta</p>
+            <p class="text-3xl font-extrabold text-stone-800">{{ stats.count }}</p>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 border border-stone-100">
+        <div class="px-6 py-4 border-b border-stone-100 flex justify-between items-center">
+            <h2 class="text-lg font-extrabold text-stone-800">Daftar Nilai</h2>
+            <span class="text-sm font-bold text-stone-500">{{ submissions|length }} siswa</span>
+        </div>
+        <div class="p-6">
+            {% if submissions %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-stone-500 border-b border-stone-100">
+                            <th class="pb-3 font-extrabold">#</th>
+                            <th class="pb-3 font-extrabold">Siswa</th>
+                            <th class="pb-3 font-extrabold">Skor</th>
+                            <th class="pb-3 font-extrabold">Penalti</th>
+                            <th class="pb-3 font-extrabold">Final</th>
+                            <th class="pb-3 font-extrabold">Status</th>
+                            <th class="pb-3 font-extrabold">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in submissions %}
+                        <tr class="border-b border-stone-100 last:border-0 hover:bg-orange-50/30 transition">
+                            <td class="py-3 font-bold text-stone-600">{{ loop.index }}</td>
+                            <td class="py-3 font-extrabold text-stone-800">{{ s.student_id[:12] }}...</td>
+                            <td class="py-3 font-bold text-stone-600">{{ s.score or '-' }}</td>
+                            <td class="py-3 font-bold text-red-600">{{ s.penalty or 0 }}</td>
+                            <td class="py-3 font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
+                                {{ s.final_score or s.score or '-' }}
+                            </td>
+                            <td class="py-3">
+                                <span class="px-3 py-1.5 text-xs font-bold rounded-full
+                                    {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700
+                                    {% elif s.status == 'published' %}bg-sky-100 text-sky-700
+                                    {% else %}bg-amber-100 text-amber-700{% endif %}">
+                                    {{ s.status }}
+                                </span>
+                            </td>
+                            <td class="py-3">
+                                <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block">
+                                    <i class="fas fa-eye mr-1"></i>Detail
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-12 text-stone-400">
+                <i class="fas fa-chart-bar text-5xl mb-4"></i>
+                <p class="font-extrabold">Belum ada data nilai</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

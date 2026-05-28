@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Preview: {{ exam.title }} - ScanGrade{% endblock %}
+{% block head_extra %}
+<style>
+.text-box { position: absolute; min-width: 120px; z-index: 5; }
+.text-box .box-content { width: 100%; min-height: 36px; font-size: 14px; padding: 4px 8px; border: 2px solid #f97316; border-radius: 8px; background: rgba(255,255,255,0.9); }
+</style>
+{% endblock %}
+{% block content %}
+<div x-data="previewApp()">
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky top-0 z-30 flex items-center justify-between border border-stone-100">
+        <div class="flex items-center gap-3">
+            <a href="/teacher/exams/{{ exam.id }}" class="text-stone-500 hover:text-stone-700 p-2 hover:bg-stone-100 rounded-xl transition">
+                <i class="fas fa-arrow-left"></i>
+            </a>
+            <h1 class="font-extrabold text-stone-800">Preview: {{ exam.title }}</h1>
+            <span class="text-xs font-bold bg-amber-100 text-amber-700 px-3 py-1 rounded-full">
+                <i class="fas fa-eye mr-1"></i>Preview Mode
+            </span>
+        </div>
+        <div class="flex items-center gap-2">
+            {% if not exam.is_published %}
+            <form method="POST" action="/teacher/exams/{{ exam.id }}/publish-exam" class="inline"
+                  onsubmit="return confirm('Publikasikan exam ke siswa?')">
+                <button type="submit" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-6 py-2 rounded-xl hover:from-emerald-600 hover:to-green-600 text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition">
+                    <i class="fas fa-globe mr-1"></i>Publish ke Siswa
+                </button>
+            </form>
+            {% else %}
+            <span class="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl text-sm font-extrabold">
+                <i class="fas fa-check-circle mr-1"></i>Sudah Dipublikasikan
+            </span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 mb-3 p-3 sticky top-[60px] z-10 border border-stone-100">
+        <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs font-extrabold text-stone-500 shrink-0">Soal:</span>
+            <div class="flex gap-1 flex-wrap pb-1">
+                {% for i in range(exam.total_questions) %}
+                {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
+                {% set has_audio = (exam.question_audio or {}).get(i|string) %}
+                {% set has_canvas = (exam.question_canvas or {}).get(i|string) %}
+                {% set is_essay_bg = qtype in ('essay_text', 'essay_canvas') and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+                <span class="q-btn w-9 h-9 text-xs font-bold rounded-xl border-2 shrink-0 flex items-center justify-center relative cursor-pointer transition"
+                      @click="currentQ = {{ i }}"
+                      :class="currentQ === {{ i }} ? 'ring-2 ring-orange-400 shadow-lg shadow-orange-200/40' : ''
+                          {% if qtype == 'essay_text' %} bg-amber-50 border-amber-300 text-amber-700
+                          {% elif qtype == 'essay_canvas' %} bg-emerald-50 border-emerald-300 text-emerald-700
+                          {% else %}bg-white text-stone-600 border-stone-300{% endif %}">
+                    {{ i + 1 }}
+                    {% if has_audio %}<sup class="absolute -top-1.5 -right-1.5 text-[8px] text-orange-500"><i class="fas fa-headphones"></i></sup>{% endif %}
+                    {% if has_canvas %}<sup class="absolute -top-1.5 -right-1.5 text-[8px] text-emerald-500"><i class="fas fa-paint-brush"></i></sup>{% endif %}
+                    {% if is_essay_bg %}<sup class="absolute -bottom-1.5 -right-2 text-[7px] text-orange-400"><i class="fas fa-image"></i></sup>{% endif %}
+                </span>
+                {% endfor %}
+            </div>
+            <span class="text-xs font-bold text-stone-400 shrink-0 ml-auto">{{ exam.total_questions }} soal</span>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+            {% for i in range(exam.total_questions) %}
+            {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
+            {% set has_audio = (exam.question_audio or {}).get(i|string) %}
+            {% set has_canvas = (exam.question_canvas or {}).get(i|string) %}
+            {% set is_essay_bg = qtype in ('essay_text', 'essay_canvas') and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+            <div class="flex items-center gap-1.5 mr-3">
+                <span class="text-xs font-extrabold text-stone-500">#{{ i+1 }}</span>
+                {% if qtype == 'mcq' %}
+                {% for opt in ['A','B','C','D','E'] %}
+                <span class="opt-btn px-2 py-0.5 border-2 rounded-lg text-xs font-bold bg-stone-50 text-stone-400 border-stone-200">{{ opt }}</span>
+                {% endfor %}
+                {% else %}
+                <span class="text-xs font-extrabold {% if qtype == 'essay_text' %}text-amber-600{% else %}text-emerald-600{% endif %}">
+                    {% if qtype == 'essay_text' %}(Teks){% else %}(Canvas){% endif %}
+                </span>
+                {% endif %}
+                {% if has_audio %}<i class="fas fa-headphones text-orange-400 text-[10px] ml-1" title="Audio"></i>{% endif %}
+                {% if has_canvas %}<i class="fas fa-paint-brush text-emerald-500 text-[10px] ml-0.5" title="Canvas"></i>{% endif %}
+                {% if is_essay_bg %}<i class="fas fa-image text-orange-400 text-[10px] ml-0.5" title="PDF background"></i>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Combined Essay preview (both essay_text & essay_canvas) -->
+    {% for i in range(exam.total_questions) %}
+    {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
+    {% set has_audio = (exam.question_audio or {}).get(i|string) %}
+    {% if qtype in ('essay_text', 'essay_canvas') and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 mb-3 p-4 border border-stone-100" x-show="currentQ === {{ i }}" style="display:none">
+        <div class="flex items-center gap-2 text-xs font-bold
+            {% if qtype == 'essay_text' %}text-amber-700 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-100{% else %}text-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100{% endif %}
+            rounded-xl px-3 py-2 mb-2">
+            <span class="font-extrabold">{% if qtype == 'essay_text' %}Essay Teks{% else %}Essay Canvas{% endif %} #{{ i+1 }}</span>
+            {% if has_audio %}<i class="fas fa-headphones text-orange-400" title="Audio"></i>{% endif %}
+            <span><i class="fas fa-image mr-1"></i>PDF latar — siswa dapat {% if qtype == 'essay_text' %}menempatkan teks + corat-coret{% else %}menggambar + teks{% endif %} di atas PDF</span>
+        </div>
+        <div class="border-2 {% if qtype == 'essay_text' %}border-amber-200{% else %}border-emerald-200{% endif %} rounded-xl overflow-hidden bg-white relative">
+            <img :src="pages[page - 1]" class="w-full" alt="PDF page">
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
+        <div class="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100">
+            <div class="flex items-center gap-2">
+                <button @click="prevPage" :disabled="page <= 1"
+                        class="px-3 py-1.5 text-sm font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                    <i class="fas fa-chevron-left text-[10px]"></i>
+                </button>
+                <span class="font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                <button @click="nextPage" :disabled="page >= totalPages"
+                        class="px-3 py-1.5 text-sm font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                    <i class="fas fa-chevron-right text-[10px]"></i>
+                </button>
+            </div>
+            {% if exam.pdf_url %}
+            <a href="{{ exam.pdf_url }}" target="_blank" class="text-xs font-extrabold text-orange-600 hover:text-orange-700">
+                <i class="fas fa-external-link-alt mr-1"></i>Buka PDF
+            </a>
+            {% endif %}
+        </div>
+        <div class="bg-stone-50 min-h-[60vh] flex items-center justify-center p-4">
+            {% if exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+            <img :src="pages[page - 1]" class="max-w-full h-auto shadow-xl rounded-xl" alt="Halaman soal">
+            {% else %}
+            <div class="text-center text-stone-400 py-20">
+                <i class="fas fa-file-pdf text-5xl mb-3"></i>
+                {% if exam.pdf_url %}
+                <p class="font-bold">Loading...</p>
+                {% else %}
+                <p class="font-extrabold text-stone-600">Belum upload PDF</p>
+                <a href="/teacher/exams/{{ exam.id }}/upload-pdf" class="text-orange-600 hover:text-orange-700 font-extrabold mt-2 inline-block">
+                    <i class="fas fa-upload mr-1"></i>Upload PDF sekarang
+                </a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function previewApp() {
+    return {
+        page: 1,
+        totalPages: {{ (exam.pdf_page_urls or []) | length }},
+        pages: {{ (exam.pdf_page_urls or []) | tojson | safe }},
+        currentQ: 0,
+        canvasInited: {},
+        init() {},
+        prevPage() { if (this.page > 1) this.page-- },
+        nextPage() { if (this.page < this.totalPages) this.page++ },
+    };
+}
+</script>
+{% endblock %}

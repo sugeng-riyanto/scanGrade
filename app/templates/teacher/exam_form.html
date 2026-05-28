@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if exam else 'Buat' }} Exam - ScanGrade{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <div class="flex items-center mb-6">
+        <a href="{{ url_for('teacher.dashboard') }}" class="text-stone-500 hover:text-stone-700 mr-4 p-2 hover:bg-stone-100 rounded-xl transition">
+            <i class="fas fa-arrow-left"></i>
+        </a>
+        <h1 class="text-2xl font-extrabold text-stone-800">{{ 'Edit' if exam else 'Buat' }} Exam</h1>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2">
+            <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6">
+                <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 space-y-4 border border-stone-100">
+                    <div>
+                        <label class="block text-sm font-extrabold text-stone-700 mb-1">Judul Exam</label>
+                        <input type="text" name="title" value="{{ exam.title if exam else '' }}" required
+                               class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-extrabold text-stone-700 mb-1">Mata Pelajaran</label>
+                        <input type="text" name="subject" value="{{ exam.subject if exam else '' }}"
+                               class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-bold">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-extrabold text-stone-700 mb-1">Jumlah Soal</label>
+                            <input type="number" value="{{ exam.total_questions or 10 }}" min="1" max="200"
+                                   class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-bold"
+                                   id="total-questions" readonly>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-extrabold text-stone-700 mb-1">Durasi (menit)</label>
+                            <input type="number" name="duration_minutes" value="{{ exam.duration_minutes or 60 }}" min="1"
+                                   class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-bold">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-extrabold text-stone-700 mb-1">Nilai Minimal Lulus</label>
+                        <input type="number" name="passing_score" value="{{ exam.passing_score or 70 }}" min="0" max="100"
+                               class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-extrabold text-stone-700 mb-1">Deskripsi</label>
+                        <textarea name="description" rows="3"
+                                  class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-bold">{{ exam.description if exam else '' }}</textarea>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100" x-data="questionManager()">
+                    <h2 class="text-lg font-extrabold text-stone-800 mb-4">Soal & Kunci Jawaban</h2>
+
+                    <!-- Bulk Add Buttons -->
+                    <div class="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl p-4 mb-6 space-y-2 border border-amber-100">
+                        <p class="text-xs font-extrabold text-amber-700 mb-2">Tambah Soal Secara Massal:</p>
+                        <div class="flex flex-wrap gap-3">
+                            <div class="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border-2 border-stone-200">
+                                <i class="fas fa-list-ol text-orange-500 text-xs"></i>
+                                <input type="number" x-model="bulkMcq" min="1" max="100"
+                                       class="w-14 text-sm border-0 p-0 focus:ring-0 text-center font-bold" placeholder="0">
+                                <span class="text-xs font-bold text-stone-600">MCQ</span>
+                                <button type="button" @click="addBulk('mcq')"
+                                        class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-extrabold hover:from-orange-600 hover:to-amber-600 transition">
+                                    + Tambah
+                                </button>
+                            </div>
+                            <div class="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border-2 border-stone-200">
+                                <i class="fas fa-font text-amber-600 text-xs"></i>
+                                <input type="number" x-model="bulkText" min="1" max="50"
+                                       class="w-14 text-sm border-0 p-0 focus:ring-0 text-center font-bold" placeholder="0">
+                                <span class="text-xs font-bold text-stone-600">Essay (Teks)</span>
+                                <button type="button" @click="addBulk('essay_text')"
+                                        class="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-extrabold hover:bg-amber-700 transition">
+                                    + Tambah
+                                </button>
+                            </div>
+                            <div class="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border-2 border-stone-200">
+                                <i class="fas fa-paint-brush text-emerald-600 text-xs"></i>
+                                <input type="number" x-model="bulkCanvas" min="1" max="50"
+                                       class="w-14 text-sm border-0 p-0 focus:ring-0 text-center font-bold" placeholder="0">
+                                <span class="text-xs font-bold text-stone-600">Essay (Canvas)</span>
+                                <button type="button" @click="addBulk('essay_canvas')"
+                                        class="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-extrabold hover:bg-emerald-700 transition">
+                                    + Tambah
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Question List -->
+                    <template x-if="questions.length === 0">
+                        <div class="text-center py-8 text-stone-400">
+                            <i class="fas fa-inbox text-3xl mb-2"></i>
+                            <p class="text-sm font-bold">Belum ada soal. Gunakan tombol di atas untuk menambah soal.</p>
+                        </div>
+                    </template>
+
+                    <div id="questions-list" class="space-y-3">
+                        <template x-for="(q, i) in questions" :key="i">
+                            <div class="p-4 bg-stone-50 rounded-2xl border-2 border-stone-200 question-item">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1)"></span>
+                                        <span class="text-xs px-2 py-1 rounded-full font-extrabold"
+                                              :class="q.type === 'mcq' ? 'bg-orange-100 text-orange-700' :
+                                                      q.type === 'essay_text' ? 'bg-amber-100 text-amber-700' :
+                                                      'bg-emerald-100 text-emerald-700'"
+                                              x-text="q.type === 'mcq' ? 'MCQ' : q.type === 'essay_text' ? 'Essay Teks' : 'Essay Canvas'">
+                                        </span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-stone-200 rounded-xl px-2 py-1 focus:border-orange-500"
+                                                x-model="q.type" @change="onTypeChange(i)">
+                                            <option value="mcq">MCQ</option>
+                                            <option value="essay_text">Essay - Teks di Gambar</option>
+                                            <option value="essay_canvas">Essay - Canvas</option>
+                                        </select>
+                                        <button type="button" @click="removeQuestion(i)" class="text-red-400 hover:text-red-600 text-xs p-1 rounded-xl hover:bg-red-50 transition" title="Hapus soal">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- MCQ answer key -->
+                                <div x-show="q.type === 'mcq'" class="mcq-options">
+                                    <label class="text-xs font-extrabold text-stone-500">Kunci Jawaban:</label>
+                                    <div class="flex gap-2 mt-1 flex-wrap">
+                                        <template x-for="opt in ['A','B','C','D','E']">
+                                            <label class="flex items-center gap-1 text-sm font-extrabold cursor-pointer px-3 py-1.5 rounded-xl border-2"
+                                                   :class="q.answer === opt ? 'bg-orange-100 border-orange-300 text-orange-700' : 'bg-white border-stone-200 text-stone-600'">
+                                                <input type="radio" :name="'answer_' + i" :value="opt" class="sr-only"
+                                                       x-model="q.answer">
+                                                <span x-text="opt"></span>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- Essay type description -->
+                                <div x-show="q.type === 'essay_text'" class="text-xs font-bold text-amber-700 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-3 py-2 border border-amber-100">
+                                    <i class="fas fa-font mr-1"></i>Essay — siswa mengetik teks + corat-coret di atas halaman PDF
+                                </div>
+                                <div x-show="q.type === 'essay_canvas'" class="text-xs font-bold text-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl px-3 py-2 border border-emerald-100">
+                                    <i class="fas fa-paint-brush mr-1"></i>Essay — siswa menggambar + teks di atas kanvas dengan latar PDF
+                                </div>
+
+                                <!-- Audio URL -->
+                                <div class="flex items-center gap-1 mt-2 max-w-xs">
+                                    <i class="fas fa-music text-xs text-stone-400"></i>
+                                    <input type="text" :name="'audio_' + i" placeholder="URL audio (opsional)"
+                                           x-model="q.audio"
+                                           class="text-xs font-bold border-2 border-stone-200 rounded-xl px-3 py-1.5 w-full focus:border-orange-500">
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <input type="hidden" name="total_questions" id="total-questions-input" :value="questions.length">
+                    <input type="hidden" name="question_types" id="question-types-input" :value="getTypesJson()">
+                </div>
+
+                <div class="flex justify-end gap-3">
+                    <button type="submit" name="action" value="save_draft"
+                            class="px-6 py-3 border-2 border-stone-200 rounded-xl text-stone-700 hover:bg-stone-50 font-extrabold text-sm transition">
+                        Simpan Draft
+                    </button>
+                    <button type="submit" name="action" value="save_active"
+                            class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-6 py-3 rounded-xl hover:from-orange-600 hover:to-amber-600 font-extrabold shadow-lg shadow-orange-200/60 transition">
+                        <i class="fas fa-save mr-1"></i>Simpan & Aktifkan
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="lg:col-span-1">
+            {% if exam and exam.id %}
+            <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 space-y-4 sticky top-20 border border-stone-100">
+                <h3 class="font-extrabold text-stone-800">Pengaturan Exam</h3>
+                {% if exam.pdf_url %}
+                <div class="p-3 bg-emerald-50 rounded-xl flex items-center gap-2 border border-emerald-100">
+                    <i class="fas fa-check-circle text-emerald-600"></i>
+                    <span class="text-sm font-bold text-emerald-700">PDF sudah diupload</span>
+                </div>
+                {% endif %}
+                <div class="border-t border-stone-100 pt-4">
+                    <p class="text-sm font-extrabold text-stone-700 mb-2">PDF Soal</p>
+                    {% if exam.pdf_url %}
+                    <div class="p-3 bg-emerald-50 rounded-xl mb-2 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-700"><i class="fas fa-check mr-1"></i>PDF terupload</p>
+                    </div>
+                    {% else %}
+                    <p class="text-xs font-bold text-stone-400 mb-2">Upload PDF soal ujian</p>
+                    {% endif %}
+                    <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
+                       class="text-sm font-extrabold text-orange-600 hover:text-orange-700 transition">
+                        <i class="fas fa-upload mr-1"></i>{{ 'Ganti PDF' if exam.pdf_url else 'Upload PDF' }}
+                    </a>
+                </div>
+                <div class="border-t border-stone-100 pt-4 space-y-2">
+                    <p class="text-sm font-extrabold text-stone-700 mb-2">Aksi</p>
+                    <a href="{{ url_for('teacher.preview_exam', exam_id=exam.id) }}"
+                       class="block text-sm bg-gradient-to-r from-orange-500 to-amber-500 text-white px-3 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 font-extrabold text-center shadow-lg shadow-orange-200/60 transition">
+                        <i class="fas fa-eye mr-1"></i>{{ 'Lihat Preview' if not exam.is_published else 'Lihat Halaman Siswa' }}
+                    </a>
+                    <a href="{{ url_for('teacher.bubble_sheet', exam_id=exam.id) }}"
+                       class="block text-sm font-extrabold text-orange-600 hover:text-orange-700 transition px-3 py-2 hover:bg-orange-50 rounded-xl">
+                        <i class="fas fa-print mr-1"></i>Cetak LJK
+                    </a>
+                    <a href="{{ url_for('teacher.results', exam_id=exam.id) }}"
+                       class="block text-sm font-extrabold text-orange-600 hover:text-orange-700 transition px-3 py-2 hover:bg-orange-50 rounded-xl">
+                        <i class="fas fa-chart-bar mr-1"></i>Lihat Hasil
+                    </a>
+                    <a href="{{ url_for('teacher.scan_page', exam_id=exam.id) }}"
+                       class="block text-sm font-extrabold text-orange-600 hover:text-orange-700 transition px-3 py-2 hover:bg-orange-50 rounded-xl">
+                        <i class="fas fa-camera mr-1"></i>Scan Jawaban
+                    </a>
+                    <button type="button" onclick="deleteExam('{{ exam.id }}')"
+                            class="block w-full text-sm font-extrabold text-red-600 hover:text-red-700 transition px-3 py-2 hover:bg-red-50 rounded-xl text-left">
+                        <i class="fas fa-trash mr-1"></i>Hapus Exam
+                    </button>
+                </div>
+            </div>
+            {% else %}
+            <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 sticky top-20 border border-stone-100">
+                <h3 class="font-extrabold text-stone-800 mb-4">Langkah Selanjutnya</h3>
+                <ol class="space-y-3 text-sm font-bold text-stone-600">
+                    <li class="flex items-start gap-2">
+                        <span class="bg-gradient-to-br from-orange-100 to-amber-100 text-orange-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">1</span>
+                        <span>Isi data exam dan klik <strong class="text-stone-800">Simpan</strong></span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="bg-gradient-to-br from-orange-100 to-amber-100 text-orange-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">2</span>
+                        <span><strong class="text-stone-800">Upload PDF</strong> soal ujian</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="bg-gradient-to-br from-orange-100 to-amber-100 text-orange-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">3</span>
+                        <span><strong class="text-stone-800">Cetak LJK</strong> (bubble sheet) untuk siswa</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="bg-gradient-to-br from-orange-100 to-amber-100 text-orange-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">4</span>
+                        <span>Siswa kerjakan ujian, guru <strong class="text-stone-800">koreksi & publikasi</strong></span>
+                    </li>
+                </ol>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function deleteExam(id) {
+    if (!confirm('Yakin hapus exam ini? Semua data submission akan ikut terhapus.')) return;
+    fetch('/teacher/exams/' + id, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(d => { if (d.success) window.location.href = '/teacher/dashboard'; else alert('Gagal: ' + (d.error || '?')); })
+        .catch(e => alert('Gagal: ' + e.message));
+}
+function questionManager() {
+    const existing = {{ (exam.question_types if exam else {}) | tojson | safe }};
+    const existingAudio = {{ (exam.question_audio if exam else {}) | tojson | safe }};
+    const existingAnswer = {{ (exam.answer_key if exam else {}) | tojson | safe }};
+    const totalExisting = {{ exam.total_questions if exam else 0 }};
+
+    let initial = [];
+    if (totalExisting > 0) {
+        for (let i = 0; i < totalExisting; i++) {
+            initial.push({
+                type: existing[i] || 'mcq',
+                answer: existingAnswer[i] || null,
+                audio: existingAudio[i] || '',
+            });
+        }
+    }
+
+    return {
+        questions: initial,
+        bulkMcq: 10,
+        bulkText: 1,
+        bulkCanvas: 1,
+        addBulk(type) {
+            const count = type === 'mcq' ? this.bulkMcq : type === 'essay_text' ? this.bulkText : this.bulkCanvas;
+            for (let n = 0; n < count; n++) {
+                this.questions.push({
+                    type: type,
+                    answer: null,
+                    audio: '',
+                });
+            }
+        },
+        removeQuestion(i) {
+            this.questions.splice(i, 1);
+        },
+        onTypeChange(i) {
+            if (this.questions[i].type !== 'mcq') {
+                this.questions[i].answer = null;
+            }
+        },
+        getTypesJson() {
+            const obj = {};
+            this.questions.forEach((q, i) => { obj[i] = q.type; });
+            return JSON.stringify(obj);
+        },
+    };
+}
+</script>
+{% endblock %}

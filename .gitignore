@@ -43,3 +43,12 @@ pytest_cache/
 .htmlcov/
 .coverage
 coverage/
+
+# Dev artifacts
+cookies.txt
+gradeout.html
+flask_*.log
+flask_*.txt
+improve/
+references/
+.opencode/

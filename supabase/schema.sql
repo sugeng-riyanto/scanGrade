@@ -21,8 +21,10 @@ CREATE TABLE IF NOT EXISTS exams (
     total_questions INT DEFAULT 0,
     passing_score INT DEFAULT 70,
     status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'closed')),
+    is_published BOOLEAN DEFAULT FALSE,
     pdf_url TEXT,
     answer_key JSONB,
+    question_types JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -207,6 +209,16 @@ CREATE TRIGGER set_analytics_cache_updated_at
 -- Storage bucket for exam PDFs
 INSERT INTO storage.buckets (id, name, public) VALUES ('exam-pdfs', 'exam-pdfs', true)
 ON CONFLICT (id) DO NOTHING;
+
+-- Storage RLS policies for exam-pdfs
+CREATE POLICY "exam_pdfs_select" ON storage.objects
+  FOR SELECT TO public USING (bucket_id = 'exam-pdfs');
+
+CREATE POLICY "exam_pdfs_insert" ON storage.objects
+  FOR INSERT TO authenticated WITH CHECK (bucket_id = 'exam-pdfs');
+
+CREATE POLICY "exam_pdfs_delete" ON storage.objects
+  FOR DELETE TO authenticated USING (bucket_id = 'exam-pdfs');
 
 -- Seed data (optional)
 -- INSERT INTO profiles (id, full_name, role) VALUES

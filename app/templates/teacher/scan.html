@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Scan LJK - ScanGrade{% endblock %}
+{% block head_extra %}
+<style>
+#camera-preview { width: 100%; max-height: 70vh; object-fit: contain; background: #000; border-radius: 12px; transform: scaleX(-1); }
+#alignment-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.align-box { fill: none; stroke: #4ade80; stroke-width: 3; stroke-dasharray: 8, 4; }
+.align-corner { fill: #4ade80; }
+.loading-spinner { border: 3px solid #e5e7eb; border-top: 3px solid #f97316; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <h1 class="text-2xl font-extrabold text-stone-800 mb-6">Scan Lembar Jawaban</h1>
+
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
+        <!-- Exam selector -->
+        <div class="mb-4">
+            <label class="block text-sm font-extrabold text-stone-700 mb-1">Pilih Exam</label>
+            <select id="exam-select" class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl text-sm font-bold focus:border-orange-500">
+                {% for exam in exams %}
+                <option value="{{ exam.id }}" data-questions="{{ exam.total_questions }}"
+                        {{ 'selected' if request.args.get('exam_id') == exam.id }}>
+                    {{ exam.title }} ({{ exam.total_questions }} soal, {{ exam.subject or '-' }})
+                </option>
+                {% endfor %}
+                <option value="__custom__">Lainnya (isi manual jumlah soal)</option>
+            </select>
+            <div id="custom-questions" class="mt-2 hidden">
+                <input type="number" id="manual-qcount" value="50" min="10" max="200"
+                       class="w-32 px-3 py-2 border-2 border-stone-200 rounded-xl text-sm font-bold" placeholder="Jumlah soal">
+            </div>
+        </div>
+
+        <!-- Student selector -->
+        <div class="mb-4">
+            <label class="block text-sm font-extrabold text-stone-700 mb-1">Pilih Siswa</label>
+            <select id="student-select" class="w-full px-4 py-3 border-2 border-stone-200 rounded-xl text-sm font-bold focus:border-orange-500">
+                <option value="">-- Pilih Siswa --</option>
+                {% for s in students %}
+                <option value="{{ s.id }}">{{ s.full_name or s.id[:8] }} {% if s.phone %}({{ s.phone }}){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Camera area -->
+        <div id="camera-area" class="relative bg-stone-800 rounded-xl overflow-hidden mb-4" style="min-height:300px">
+            <video id="camera-preview" autoplay playsinline class="w-full h-full object-contain" style="transform:scaleX(-1)"></video>
+            <svg id="alignment-overlay" class="absolute inset-0 w-full h-full pointer-events-none">
+                <rect class="align-box" x="15%" y="10%" width="70%" height="80%" rx="8"/>
+                <circle class="align-corner" cx="15%" cy="10%" r="4"/>
+                <circle class="align-corner" cx="85%" cy="10%" r="4"/>
+                <circle class="align-corner" cx="85%" cy="90%" r="4"/>
+                <circle class="align-corner" cx="15%" cy="90%" r="4"/>
+            </svg>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex flex-wrap items-center gap-3">
+            <button id="btn-start-cam" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-5 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold shadow-lg shadow-orange-200/60 transition">
+                <i class="fas fa-camera mr-1"></i>Buka Kamera
+            </button>
+            <button id="btn-capture" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-5 py-2.5 rounded-xl hover:from-emerald-600 hover:to-green-600 text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition hidden">
+                <i class="fas fa-camera-retro mr-1"></i>Ambil Foto
+            </button>
+            <button id="btn-stop-cam" class="border-2 border-stone-200 px-5 py-2.5 rounded-xl text-stone-700 hover:bg-stone-50 text-sm font-bold transition hidden">
+                <i class="fas fa-stop mr-1"></i>Stop
+            </button>
+            <span id="scan-status" class="text-sm font-bold text-stone-500 hidden"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</span>
+        </div>
+    </div>
+
+    <!-- Scan Result -->
+    <div id="scan-result" class="hidden mt-6 space-y-4">
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="font-extrabold text-stone-800">Hasil Scan</h2>
+                <div id="score-badge" class="hidden bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-extrabold"></div>
+            </div>
+            <div id="answers-grid" class="grid grid-cols-5 sm:grid-cols-10 gap-1.5 text-xs"></div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
+            <h3 class="font-extrabold text-stone-700 mb-2">Debug</h3>
+            <img id="debug-image" class="max-w-full h-auto rounded-xl border border-stone-200" alt="Debug view">
+        </div>
+
+        <div class="flex gap-3">
+            <button id="btn-save" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-5 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold shadow-lg shadow-orange-200/60 transition hidden">
+                <i class="fas fa-save mr-1"></i>Simpan Hasil
+            </button>
+            <button id="btn-scan-again" class="border px-5 py-2 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">
+                <i class="fas fa-redo mr-1"></i>Scan Lagi
+            </button>
+        </div>
+    </div>
+
+    <!-- Error -->
+    <div id="scan-error" class="hidden mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
+        <p class="text-red-700 font-medium text-sm"><i class="fas fa-exclamation-circle mr-1"></i><span id="error-text"></span></p>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let stream = null;
+let lastAnswers = null;
+
+// Exam select toggle
+document.getElementById('exam-select').addEventListener('change', function() {
+    document.getElementById('custom-questions').classList.toggle('hidden', this.value !== '__custom__');
+});
+
+// Start camera
+document.getElementById('btn-start-cam').addEventListener('click', async function() {
+    try {
+        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: isMobile ? { exact: "environment" } : "environment",
+                width: { ideal: 1920 }, height: { ideal: 1080 }
+            }
+        });
+        document.getElementById('camera-preview').srcObject = stream;
+        this.classList.add('hidden');
+        document.getElementById('btn-capture').classList.remove('hidden');
+        document.getElementById('btn-stop-cam').classList.remove('hidden');
+        document.getElementById('scan-result').classList.add('hidden');
+        document.getElementById('scan-error').classList.add('hidden');
+    } catch (err) {
+        alert('Kamera tidak tersedia: ' + err.message);
+    }
+});
+
+// Stop camera
+document.getElementById('btn-stop-cam').addEventListener('click', function() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    document.getElementById('camera-preview').srcObject = null;
+    this.classList.add('hidden');
+    document.getElementById('btn-capture').classList.add('hidden');
+    document.getElementById('btn-start-cam').classList.remove('hidden');
+});
+
+// Capture photo
+document.getElementById('btn-capture').addEventListener('click', async function() {
+    const video = document.getElementById('camera-preview');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    // Mirror the image (since video is mirrored)
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob(async (blob) => {
+        await processScan(blob);
+    }, 'image/jpeg', 0.85);
+});
+
+async function processScan(blob) {
+    const status = document.getElementById('scan-status');
+    const error = document.getElementById('scan-error');
+    const result = document.getElementById('scan-result');
+    status.classList.remove('hidden');
+
+    const examSelect = document.getElementById('exam-select');
+    let totalQ = 50;
+    if (examSelect.value === '__custom__') {
+        totalQ = parseInt(document.getElementById('manual-qcount').value) || 50;
+    } else {
+        totalQ = parseInt(examSelect.options[examSelect.selectedIndex].dataset.questions) || 50;
+    }
+
+    const formData = new FormData();
+    formData.append('image', blob, 'scan.jpg');
+    formData.append('exam_id', examSelect.value === '__custom__' ? '' : examSelect.value);
+    formData.append('total_questions', totalQ);
+
+    try {
+        const resp = await fetch('/api/scan/process', { method: 'POST', body: formData });
+        const data = await resp.json();
+        status.classList.add('hidden');
+
+        if (data.error) {
+            showError(data.error);
+            if (data.debug_image) showDebug(data.debug_image);
+            return;
+        }
+
+        lastAnswers = data.answers || {};
+        const scoreBadge = document.getElementById('score-badge');
+
+        if (data.score !== undefined) {
+            scoreBadge.classList.remove('hidden');
+            scoreBadge.textContent = 'Skor: ' + data.score + '% (' + data.correct + ' benar)';
+        } else {
+            scoreBadge.classList.add('hidden');
+        }
+
+        renderAnswers(lastAnswers, totalQ);
+        if (data.debug_image) showDebug(data.debug_image);
+        result.classList.remove('hidden');
+        document.getElementById('btn-save').classList.remove('hidden');
+
+    } catch (err) {
+        status.classList.add('hidden');
+        showError('Gagal memproses: ' + err.message);
+    }
+}
+
+function renderAnswers(answers, total) {
+    const grid = document.getElementById('answers-grid');
+    grid.innerHTML = '';
+    const labels = ['A', 'B', 'C', 'D', 'E'];
+    for (let i = 0; i < total; i++) {
+        const div = document.createElement('div');
+        div.className = 'flex flex-col items-center p-1.5 rounded-xl ' +
+            (answers[i] ? 'bg-orange-50 border-2 border-orange-200' : 'bg-stone-50 border-2 border-stone-200');
+        div.innerHTML = '<span class="text-stone-400 font-bold text-[10px]">' + (i + 1) + '</span>' +
+            '<span class="font-extrabold text-sm ' + (answers[i] ? 'text-orange-700' : 'text-stone-300') + '">' +
+            (answers[i] || '-') + '</span>';
+        grid.appendChild(div);
+    }
+}
+
+function showDebug(b64) {
+    document.getElementById('debug-image').src = 'data:image/jpeg;base64,' + b64;
+}
+
+function showError(msg) {
+    document.getElementById('error-text').textContent = msg;
+    document.getElementById('scan-error').classList.remove('hidden');
+}
+
+// Scan again
+document.getElementById('btn-scan-again').addEventListener('click', function() {
+    document.getElementById('scan-result').classList.add('hidden');
+    document.getElementById('scan-error').classList.add('hidden');
+});
+
+// Save results
+document.getElementById('btn-save').addEventListener('click', async function() {
+    if (!lastAnswers) return;
+    const examId = document.getElementById('exam-select').value;
+    const studentId = document.getElementById('student-select').value;
+    if (examId === '__custom__') {
+        alert('Pilih exam terlebih dahulu untuk menyimpan hasil.');
+        return;
+    }
+    if (!studentId) {
+        alert('Pilih siswa terlebih dahulu.');
+        return;
+    }
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>Menyimpan...';
+    try {
+        const resp = await fetch('/api/scan/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                exam_id: examId,
+                student_id: studentId,
+                answers: lastAnswers,
+            }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            alert('Hasil scan disimpan! Skor: ' + data.score + '% (' + data.correct + '/' + data.total + ' benar)');
+        } else {
+            alert('Gagal menyimpan: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Gagal menyimpan: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save mr-1"></i>Simpan Hasil';
+    }
+});
+</script>
+{% endblock %}

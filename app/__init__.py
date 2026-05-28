@@ -1,6 +1,6 @@
 import logging
 import time
-from flask import Flask, g, request, jsonify
+from flask import Flask, g, request, jsonify, redirect
 from flask_cors import CORS
 from supabase import create_client, Client
 
@@ -29,6 +29,25 @@ def create_app(env=None):
     _register_blueprints(app)
     _register_error_handlers(app)
     _register_request_logging(app)
+
+    import json as _json
+
+    @app.template_filter("from_json")
+    def from_json_filter(val):
+        if val is None:
+            return None
+        if isinstance(val, (dict, list)):
+            return val
+        if isinstance(val, str):
+            try:
+                return _json.loads(val)
+            except (TypeError, ValueError):
+                return None
+        return val
+
+    @app.route("/")
+    def index():
+        return redirect("/auth/login")
 
     @app.route("/health")
     def health():
@@ -60,7 +79,9 @@ def _register_blueprints(app):
 def _register_error_handlers(app):
     @app.errorhandler(401)
     def unauthorized(e):
-        return jsonify({"error": "Unauthorized"}), 401
+        if "application/json" in request.headers.get("Accept", ""):
+            return jsonify({"error": "Unauthorized"}), 401
+        return redirect("/auth/login")
 
     @app.errorhandler(403)
     def forbidden(e):
@@ -68,20 +89,26 @@ def _register_error_handlers(app):
 
     @app.errorhandler(404)
     def not_found(e):
-        return jsonify({"error": "Not found"}), 404
+        if "application/json" in request.headers.get("Accept", ""):
+            return jsonify({"error": "Not found"}), 404
+        return redirect("/auth/login")
 
     @app.errorhandler(500)
     def server_error(e):
+        app.logger.error("500 error: %s", str(e), exc_info=True)
+        if app.debug:
+            import traceback
+            return jsonify({"error": "Internal server error", "detail": str(e), "traceback": traceback.format_exc()}), 500
         return jsonify({"error": "Internal server error"}), 500
 
 
 def _register_request_logging(app):
-    if app.debug:
-        @app.before_request
-        def start_timer():
-            g.start = time.time()
-            g.user_id = None
+    @app.before_request
+    def init_request():
+        g.start = time.time()
+        g.user_id = None
 
+    if app.debug:
         @app.after_request
         def log_request(response):
             if hasattr(g, "start"):
@@ -91,7 +118,6 @@ def _register_request_logging(app):
                     request.method,
                     request.path,
                     response.status_code,
-                    duration,
                     g.get("user_id"),
                 )
             return response

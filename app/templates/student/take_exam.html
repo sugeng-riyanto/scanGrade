@@ -1,0 +1,868 @@
+{% extends "base.html" %}
+{% block title %}{{ exam.title }} - ScanGrade{% endblock %}
+{% block head_extra %}
+<script src="{{ url_for('static', filename='js/anti-cheat.js') }}"></script>
+<style>
+.pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
+.q-btn { transition: all 0.2s; font-weight: 700; }
+.q-btn:hover { transform: scale(1.08); }
+.opt-btn { transition: all 0.15s; border-radius: 0.75rem; font-weight: 700; }
+.opt-btn.selected { background: #f97316; color: white; border-color: #f97316; box-shadow: 0 4px 12px rgba(249,115,22,0.3); }
+.opt-btn:not(.selected):hover { background: #fff7ed; border-color: #fdba74; }
+.sticky-topbar { position: sticky; top: 0; z-index: 20; }
+.sticky-questions { position: sticky; top: 60px; z-index: 10; }
+.draw-toolbar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.draw-toolbar button { padding: 5px 10px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 12px; background: white; cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
+.draw-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
+.draw-toolbar button.active { background: #f97316; color: white; border-color: #f97316; }
+.draw-toolbar input[type="color"] { width: 26px; height: 26px; border: none; cursor: pointer; padding: 0; border-radius: 6px; }
+.draw-canvas-wrap { border: 2px dashed #d1d5db; border-radius: 12px; overflow: hidden; touch-action: none; max-height: 140px; }
+.draw-canvas-wrap.essay-bg { max-height: none; border-style: solid; border-color: #fdba74; }
+.draw-canvas-wrap canvas { display: block; width: 100%; }
+.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: hidden; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.full-canvas-wrap canvas { display: block; width: 100%; }
+.text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: 10; touch-action: none; }
+.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; }
+.text-box textarea:focus { outline: none; border-color: #ea580c; background: #fff; box-shadow: 0 4px 20px rgba(249,115,22,0.3); }
+.text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
+.text-box .box-handle:active { cursor: grabbing; }
+.text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.essay-canvas-area { position: relative; }
+@media (max-width: 768px) {
+    .sticky-questions { position: static !important; }
+    .draw-canvas-wrap { max-height: 100px; }
+    .draw-canvas-wrap.essay-bg { max-height: none; }
+    .pdf-container { min-height: 40vh !important; }
+}
+@media (max-width: 480px) {
+    .opt-btn { padding: 6px 12px !important; font-size: 12px !important; }
+    .q-btn { width: 34px !important; height: 34px !important; font-size: 12px !important; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
+    <!-- Top Bar -->
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky-topbar flex items-center justify-between border border-stone-100">
+        <div class="flex items-center gap-3">
+            <button type="button" @click="sidebarOpen = !sidebarOpen" class="text-stone-400 hover:text-orange-500 text-lg p-1.5 hover:bg-orange-50 rounded-xl transition">
+                <i class="fas" :class="sidebarOpen ? 'fa-chevron-left' : 'fa-bars'"></i>
+            </button>
+            <div>
+                <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-stone-800">{{ exam.title }}</h1>
+                <span class="text-[10px] text-stone-400 font-semibold">{{ exam.subject }} &middot; {{ exam.total_questions }} soal</span>
+            </div>
+        </div>
+        <div class="flex items-center gap-3">
+            <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="formatTime(timeLeft)" :class="timeLeft < 60 ? 'text-red-500' : 'text-orange-500'"></div>
+            <button x-show="!submitted" @click="submitExam()" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-5 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-bold shadow-lg shadow-orange-200/50 transition">
+                <i class="fas fa-check mr-1.5"></i>Kumpulkan
+            </button>
+        </div>
+    </div>
+
+    <div class="flex gap-3">
+        <!-- Left Sidebar: Question Navigation -->
+        <div class="shrink-0 transition-all duration-300 ease-out flex flex-col items-center gap-1"
+             :style="sidebarOpen ? 'width:150px' : 'width:44px'">
+            <!-- Scroll Up -->
+            <button type="button" @click="scrollSidebar(-60)"
+                    class="w-full flex items-center justify-center py-1 text-stone-400 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition disabled:opacity-20"
+                    :disabled="!canScrollUp">
+                <i class="fas fa-chevron-up text-xs"></i>
+            </button>
+            <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-2.5 sticky-questions overflow-y-auto border border-stone-100 scroll-smooth flex-1" style="max-height:calc(100vh - 170px)" x-ref="sidebarScroll">
+                <div x-show="!sidebarOpen" class="flex flex-col items-center gap-1.5 py-2">
+                    <template x-for="(q, i) in questions" :key="i">
+                        <button type="button" @click="currentQ = i"
+                                class="q-btn w-8 h-8 text-xs rounded-xl font-bold border shrink-0 relative"
+                                :class="{
+                                    'bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-200': answered[i],
+                                    'bg-white text-stone-500 border-stone-200 hover:border-orange-300': !answered[i] && currentQ !== i,
+                                    'ring-2 ring-orange-400 ring-offset-1': currentQ === i
+                                }"
+                                x-text="i + 1">
+                        </button>
+                    </template>
+                    <div class="text-[9px] font-bold text-stone-400 mt-2 text-center bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ"></div>
+                </div>
+                <div x-show="sidebarOpen">
+                    <div class="flex items-center justify-between mb-2.5 px-0.5">
+                        <span class="text-xs font-extrabold text-stone-500 uppercase tracking-wider">Soal</span>
+                        <span class="text-[10px] font-bold text-stone-400 bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ + ' terjawab'"></span>
+                    </div>
+                    <div class="grid grid-cols-4 gap-1.5">
+                        <template x-for="(q, i) in questions" :key="i">
+                            <button type="button" @click="currentQ = i"
+                                    class="q-btn w-full aspect-square text-xs rounded-xl font-bold border relative"
+                                    :class="{
+                                        'bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-200': answered[i],
+                                        'bg-white text-stone-500 border-stone-200 hover:border-orange-300 hover:bg-orange-50': !answered[i] && currentQ !== i,
+                                        'ring-2 ring-orange-400 ring-offset-1': currentQ === i
+                                    }"
+                                    x-text="i + 1">
+                                <span class="absolute -top-1.5 -right-1.5 text-[7px] leading-none"
+                                      :class="q.type === 'essay_text' ? 'text-amber-500' : q.type === 'essay_canvas' ? 'text-emerald-500' : 'text-orange-400'"
+                                      x-show="q.type !== 'mcq'">
+                                    <i :class="q.type === 'essay_text' ? 'fas fa-font' : 'fas fa-paint-brush'"></i>
+                                </span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </div>
+            <!-- Scroll Down -->
+            <button type="button" @click="scrollSidebar(60)"
+                    class="w-full flex items-center justify-center py-1 text-stone-400 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition disabled:opacity-20"
+                    :disabled="!canScrollDown">
+                <i class="fas fa-chevron-down text-xs"></i>
+            </button>
+            <!-- Answered count button -->
+            <div class="text-[9px] font-bold text-stone-400 text-center bg-stone-100 rounded-full px-2 py-0.5 w-full" x-text="answeredCount + '/' + totalQ"></div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="flex-1 min-w-0">
+    <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit">
+            <!-- PDF Viewer (for MCQ) — placed BEFORE soal -->
+            <div x-show="!isEssayBgCurrent()" style="display:none" class="mb-3">
+                <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
+                    <div class="flex items-center justify-end gap-2 px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100">
+                        <button type="button" @click="prevPage" :disabled="page <= 1"
+                                class="px-3 py-1.5 text-sm font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                            <i class="fas fa-chevron-left text-[10px]"></i>
+                        </button>
+                        <span class="text-sm font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                        <button type="button" @click="nextPage" :disabled="page >= totalPages"
+                                class="px-3 py-1.5 text-sm font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                            <i class="fas fa-chevron-right text-[10px]"></i>
+                        </button>
+                    </div>
+                    <div class="pdf-container flex items-center justify-center p-4">
+                        {% if exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+                        <img :src="pages[page - 1]" class="max-w-full h-auto shadow-xl rounded-xl" alt="Halaman soal">
+                        {% else %}
+                        <div class="flex items-center justify-center text-stone-400 py-20">
+                            <i class="fas fa-file-pdf text-5xl mb-3"></i>
+                            <p class="font-semibold">PDF belum diupload</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Essay: Combined drawing + text on PDF image — placed BEFORE soal -->
+            <div x-show="isEssayTypeCurrent()" style="display:none" class="mb-3">
+                <template x-for="(q, i) in questions" :key="'essay-' + i">
+                    <div x-show="(q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') && currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
+                        <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold"
+                             :class="q.type === 'essay_text' ? 'bg-gradient-to-r from-amber-50 to-orange-50 text-amber-700 border-amber-100' : 'bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700 border-emerald-100'">
+                            <i :class="q.type === 'essay_text' ? 'fas fa-font' : 'fas fa-pen-fancy'"></i>
+                            <span x-text="q.type === 'essay_text' ? 'Corat-coret &amp; teks pada halaman PDF' : 'Gambar &amp; teks pada halaman PDF'"></span>
+                            <span class="ml-auto" x-text="'Soal #' + (i+1) + ' (' + (q.type === 'essay_text' ? 'Teks+Coretan' : 'Canvas') + ')'"></span>
+                        </div>
+                        <div class="draw-toolbar px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100">
+                            <button type="button" @click="setEssayCanvasMode(i, 'pen')" :class="essayCanvasMode[i] === 'pen' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-pencil-alt mr-1"></i> Pena</button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'eraser')" :class="essayCanvasMode[i] === 'eraser' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-eraser mr-1"></i> Hapus</button>
+                            <input type="color" :value="essayCanvasColor[i]" @input="essayCanvasColor[i] = $event.target.value; if(canvasDraw[i]) canvasDraw[i].ctx.strokeStyle = $event.target.value" class="w-7 h-7 border-2 rounded-lg cursor-pointer p-0.5">
+                            <button type="button" @click="setEssayCanvasMode(i, 'text')" :class="essayCanvasMode[i] === 'text' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-font mr-1"></i> Teks</button>
+                            <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-3 py-1.5 font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-30"><i class="fas fa-undo mr-1"></i> Undo</button>
+                            <span class="w-px h-5 bg-stone-200 mx-0.5"></span>
+                            <button type="button" @click="clearCanvas(i)" class="px-3 py-1.5 font-bold text-red-500 hover:bg-red-50 border-red-200"><i class="fas fa-trash-alt mr-1"></i> Hapus</button>
+                            <span class="text-xs font-bold text-stone-400 ml-auto" x-text="((textBoxes[i]||{})[page-1]?.length || 0) + ' teks hlm ini' + ((hasDrawn[i]||{})[page-1] ? ', coretan' : '')"></span>
+                        </div>
+                        <!-- Page navigation for essay section -->
+                        <div class="flex items-center justify-end gap-2 px-4 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100" x-show="pages.length > 0">
+                            <button type="button" @click="prevPage" :disabled="page <= 1"
+                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                                <i class="fas fa-chevron-left text-[9px]"></i>
+                            </button>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                            <button type="button" @click="nextPage" :disabled="page >= totalPages"
+                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                                <i class="fas fa-chevron-right text-[9px]"></i>
+                            </button>
+                        </div>
+                        <div class="pdf-container p-4 flex items-start justify-center" style="min-height:50vh">
+                            <div class="full-canvas-wrap max-w-full essay-canvas-area" :id="'ec-area-' + i" :style="pages.length > 0 ? '' : 'min-height:400px'">
+                                <img x-show="pages.length > 0" :src="pages[page - 1]" class="w-full" alt="PDF page" style="display:block"
+                                     @click="if(essayCanvasMode[i]==='text') onPdfClick(i, $event)">
+                                <div x-show="pages.length === 0" class="flex items-center justify-center text-stone-300 border-2 border-dashed rounded-xl mb-3" style="height:300px">
+                                    <div class="text-center">
+                                        <i class="fas fa-image text-4xl mb-2"></i>
+                                        <p class="text-sm font-semibold">PDF belum diupload — kanvas kosong</p>
+                                    </div>
+                                </div>
+                                <canvas :id="'ec-canvas-' + i"
+                                        class="absolute inset-0 w-full h-full"
+                                        style="cursor:crosshair; touch-action:none"></canvas>
+                                <template x-for="(box, bi) in ((textBoxes[i] || {})[page - 1] || [])" :key="'tb-'+bi">
+                                    <div class="text-box"
+                                         :style="'left:' + (box.x_pct * 100) + '%;top:' + (box.y_pct * 100) + '%;'"
+                                         @mousedown="startTextBoxDrag(i, bi, $event)"
+                                         @touchstart="startTextBoxDrag(i, bi, $event)">
+                                        <div class="box-handle"><i class="fas fa-grip-lines text-white text-[8px]"></i></div>
+                                        <button type="button" class="box-del" @click="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
+                                        <textarea x-model="box.text"
+                                                  @input="onTextBoxInput(i); textBoxes = {...(textBoxes || {})}"
+                                                  placeholder="Ketik..."
+                                                  @mousedown.stop @touchstart.stop></textarea>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Current question answer options — placed SETELAH PDF -->
+            <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100">
+            <template x-for="(q, i) in questions" :key="i">
+                <div x-show="currentQ === i" class="">
+                    <!-- Audio player -->
+                    <template x-if="q.audio">
+                        <div class="mb-3 flex items-center gap-2 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-2.5 border border-amber-200/50">
+                            <i class="fas fa-headphones text-orange-500"></i>
+                            <audio :src="q.audio" controls class="h-8 w-full max-w-xs"></audio>
+                            <span class="text-xs font-semibold text-stone-500">Putar audio soal</span>
+                        </div>
+                    </template>
+
+                    <template x-if="q.type === 'mcq'">
+                        <div class="">
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
+                                <div class="flex gap-2">
+                                    <template x-for="opt in ['A','B','C','D','E']">
+                                        <label class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
+                                               :class="selectedAnswer(i) === opt ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
+                                            <input type="radio" :name="'q_' + i" :value="opt" class="sr-only"
+                                                   @change="markAnswered(i, opt)" x-model="q.answer">
+                                            <span x-text="opt"></span>
+                                        </label>
+                                    </template>
+                                </div>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i>Terjawab
+                                </span>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="q.type === 'essay_text' || q.type === 'essay'">
+                        <div class="">
+                            <div class="flex items-center gap-2 mb-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">Essay Teks</span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i>Terjawab
+                                </span>
+                            </div>
+                            <div class="text-xs font-semibold text-amber-600 bg-amber-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-amber-200/50">
+                                <i class="fas fa-mouse-pointer text-amber-500"></i>
+                                <span>Klik PDF untuk teks &bull; Pilih <strong>Pena</strong> untuk corat-coret</span>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="q.type === 'essay_canvas'">
+                        <div class="">
+                            <div class="flex items-center gap-2 mb-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Canvas</span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i>Terjawab
+                                </span>
+                            </div>
+                            <div class="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-emerald-200/50">
+                                <i class="fas fa-paint-brush text-emerald-500"></i>
+                                <span>Gambar &amp; teks pada halaman PDF di atas</span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+            </div>
+    </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
+const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
+
+function examApp(duration, totalQ) {
+    return {
+        timeLeft: duration,
+        sidebarOpen: window.innerWidth > 768,
+        submitted: false,
+        page: 1,
+        totalPages: {{ (exam.pdf_page_urls or []) | length }},
+        pages: {{ (exam.pdf_page_urls or []) | tojson | safe }},
+        currentQ: 0,
+        totalQ: totalQ,
+        answered: {},
+        questions: Array.from({length: totalQ}, (_, i) => ({
+            type: ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] || 'mcq',
+            answer: null,
+            audio: QUESTION_AUDIO[i] || null,
+            canvas: QUESTION_CANVAS[i] || false,
+        })),
+        // Per-page per-question storage
+        textBoxes: {},         // {i: {p: [{x_pct, y_pct, text}, ...]}}
+        hasDrawn: {},          // {i: {p: true/false}}
+        canvasData: {},        // {i: {p: "data:..."}} — saved canvas data URLs per page
+        canvasHistory: {},     // {i: {p: ["data:..."]}} — undo history per page
+        // Drawing state
+        dragState: null,
+        pdfImgWidth: 700,
+        canvasDraw: {},
+        canvasTool: {},
+        canvasColor: {},
+        canvasHeight: {},
+        showCanvas: {},
+        canvasBg: {},
+        fullCanvasInited: {},
+        essayCanvasMode: {},
+        essayCanvasColor: {},
+        ecCanvasInited: {},
+        canScrollUp: false,
+        canScrollDown: false,
+        init() {
+            this.timer = setInterval(() => {
+                if (this.timeLeft <= 0) this.submitExam();
+                else this.timeLeft--;
+            }, 1000);
+            // Auto-save every 30 seconds
+            this.autoSaveTimer = setInterval(() => this.autoSaveDraft(), 30000);
+            this.$watch('currentQ', (val) => {
+                if (this.questions[val] && this.questions[val].canvas && this.showCanvas[val] && !this.isEssayWithBg(val)) {
+                    this.$nextTick(() => this.initCanvas(val));
+                }
+                if (this.questions[val]?.type !== 'mcq') {
+                    this.$nextTick(() => this.initEcCanvas(val));
+                }
+            });
+            this.$nextTick(() => {
+                const v = this.currentQ;
+                if (this.questions[v]?.type !== 'mcq') this.initEcCanvas(v);
+                this.updateScrollState();
+                this.loadDraft();
+            });
+        },
+        scrollSidebar(amount) {
+            const el = this.$refs.sidebarScroll;
+            if (el) {
+                el.scrollBy({ top: amount, behavior: 'smooth' });
+                setTimeout(() => this.updateScrollState(), 100);
+            }
+        },
+        updateScrollState() {
+            this.$nextTick(() => {
+                const el = this.$refs.sidebarScroll;
+                if (el) {
+                    this.canScrollUp = el.scrollTop > 2;
+                    this.canScrollDown = el.scrollTop < el.scrollHeight - el.clientHeight - 2;
+                }
+            });
+        },
+        isEssayWithBg(i) {
+            const q = this.questions[i];
+            return q && (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas');
+        },
+        isEssayBgCurrent() {
+            return this.isEssayWithBg(this.currentQ);
+        },
+        isEssayTypeCurrent() {
+            const q = this.questions[this.currentQ];
+            return q && (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas');
+        },
+        setEssayCanvasMode(i, mode) {
+            this.essayCanvasMode[i] = mode;
+        },
+        initEcCanvas(i) {
+            const area = document.getElementById('ec-area-' + i);
+            const canvas = document.getElementById('ec-canvas-' + i);
+            if (!area || !canvas || this.ecCanvasInited[i]) return;
+            const img = area.querySelector('img');
+            if (this.pages && this.pages.length > 0 && (!img || img.naturalWidth === 0)) {
+                setTimeout(() => this.initEcCanvas(i), 200);
+                return;
+            }
+            const ctx = canvas.getContext('2d');
+            const rect = area.getBoundingClientRect();
+            canvas.width = rect.width || 700;
+            canvas.height = rect.height || 400;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
+            ctx.lineWidth = 2;
+            this.essayCanvasMode[i] = this.essayCanvasMode[i] || 'pen';
+            this.essayCanvasColor[i] = this.essayCanvasColor[i] || '#0000ff';
+            let drawing = false, lx = 0, ly = 0;
+            const getPos = e => {
+                const src = e.touches ? e.touches[0] : e;
+                const r = canvas.getBoundingClientRect();
+                return { x: (src.clientX - r.left) * (canvas.width / r.width), y: (src.clientY - r.top) * (canvas.height / r.height) };
+            };
+            const onStart = e => {
+                const mode = this.essayCanvasMode[i];
+                if (mode === 'text') {
+                    const p = getPos(e);
+                    const x_pct = p.x / canvas.width;
+                    const y_pct = p.y / canvas.height;
+                    if (!this.textBoxes[i]) this.textBoxes[i] = [];
+                    this.textBoxes[i].push({ x_pct, y_pct, text: '' });
+                    this.onTextBoxInput(i);
+                    this.$nextTick(() => {
+                        const t = area.querySelector('.text-box:last-child textarea');
+                        if (t) t.focus();
+                    });
+                    return;
+                }
+                e.preventDefault();
+                const p = getPos(e);
+                lx = p.x; ly = p.y;
+                drawing = true;
+                this.hasDrawn[i] = true;
+            };
+            const onMove = e => {
+                if (!drawing) return;
+                e.preventDefault();
+                const p = getPos(e);
+                if (this.essayCanvasMode[i] === 'eraser') {
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
+                } else {
+                    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(p.x, p.y); ctx.stroke();
+                }
+                lx = p.x; ly = p.y;
+            };
+            const onEnd = e => {
+                if (!drawing) return;
+                drawing = false; e.preventDefault();
+                this.saveCanvasState(i);
+            };
+            const onKey = e => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                    e.preventDefault();
+                    this.undoCanvas(i);
+                }
+            };
+            canvas.addEventListener('mousedown', onStart);
+            canvas.addEventListener('mousemove', onMove);
+            canvas.addEventListener('mouseup', onEnd);
+            canvas.addEventListener('mouseleave', () => {
+                if (drawing) { drawing = false; this.saveCanvasState(i); }
+            });
+            canvas.addEventListener('touchstart', onStart, { passive: false });
+            canvas.addEventListener('touchmove', onMove, { passive: false });
+            canvas.addEventListener('touchend', onEnd, { passive: false });
+            document.addEventListener('keydown', onKey);
+            this.ecCanvasInited[i] = true;
+            this.canvasDraw[i] = { el: canvas, ctx };
+            // Restore per-page data after init
+            setTimeout(() => {
+                this._restorePage(i, this.page - 1);
+                this.saveCanvasState(i);
+            }, 50);
+        },
+        onPdfClick(i, event) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const x_pct = (event.clientX - rect.left) / rect.width;
+            const y_pct = (event.clientY - rect.top) / rect.height;
+            const p = this.page - 1;
+            if (!this.textBoxes[i]) this.textBoxes[i] = {};
+            if (!this.textBoxes[i][p]) this.textBoxes[i][p] = [];
+            this.textBoxes[i][p].push({ x_pct, y_pct, text: '' });
+            this.textBoxes[i] = { ...this.textBoxes[i] }; // trigger reactivity
+            this.markAnswered(i, true);
+            this.$nextTick(() => {
+                const area = document.getElementById('ec-area-' + i);
+                if (area) {
+                    const boxes = area.querySelectorAll('.text-box textarea');
+                    if (boxes.length > 0) boxes[boxes.length - 1].focus();
+                }
+            });
+        },
+        removeTextBox(i, bi) {
+            const p = this.page - 1;
+            const boxes = this.textBoxes[i]?.[p];
+            if (boxes) {
+                boxes.splice(bi, 1);
+                if (this.textBoxes[i]) this.textBoxes[i] = { ...this.textBoxes[i] };
+                const allEmpty = Object.values(this.textBoxes[i] || {}).every(arr => !arr || arr.length === 0);
+                if (allEmpty) {
+                    this.answered[i] = false;
+                    this.questions[i].answer = null;
+                }
+            }
+        },
+        onTextBoxInput(i) {
+            const p = this.page - 1;
+            const boxes = this.textBoxes[i]?.[p] || [];
+            const hasText = boxes.some(b => b.text.trim());
+            if (hasText) {
+                this.markAnswered(i, true);
+            }
+        },
+        startTextBoxDrag(i, bi, event) {
+            event.preventDefault();
+            const boxes = (this.textBoxes[i] || {})[this.page - 1] || [];
+            const box = boxes[bi];
+            if (!box) return;
+            const src = event.touches ? event.touches[0] : event;
+            const startX = src.clientX;
+            const startY = src.clientY;
+            const startPctX = box.x_pct;
+            const startPctY = box.y_pct;
+            const area = document.getElementById('ec-area-' + i) || document.querySelector('#essay-text-' + i);
+            const imgRect = area ? area.getBoundingClientRect() : { width: 1, height: 1 };
+            const onMove = (e) => {
+                const s = e.touches ? e.touches[0] : e;
+                box.x_pct = Math.max(0, Math.min(1, startPctX + (s.clientX - startX) / imgRect.width));
+                box.y_pct = Math.max(0, Math.min(1, startPctY + (s.clientY - startY) / imgRect.height));
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onUp);
+        },
+        toggleCanvas(i) {
+            this.showCanvas[i] = !this.showCanvas[i];
+            if (this.showCanvas[i]) this.$nextTick(() => this.initCanvas(i));
+        },
+        _saveCurrentPage(i) {
+            if (!i && i !== 0) i = this.currentQ;
+            const q = this.questions[i];
+            if (!q || q.type === 'mcq') return;
+            const p = this.page - 1;
+            if (!this.textBoxes[i]) this.textBoxes[i] = {};
+            const allBoxes = [];
+            const area = document.getElementById('ec-area-' + i);
+            if (area) {
+                area.querySelectorAll('.text-box textarea').forEach(ta => {
+                    const box = ta.closest('.text-box');
+                    if (box) {
+                        const left = parseFloat(box.style.left) || 0;
+                        const top = parseFloat(box.style.top) || 0;
+                        allBoxes.push({ x_pct: left / 100, y_pct: top / 100, text: ta.value });
+                    }
+                });
+            }
+            this.textBoxes[i][p] = allBoxes;
+            const d = this.canvasDraw[i];
+            if (d && d.el) {
+                if (!this.canvasData[i]) this.canvasData[i] = {};
+                this.canvasData[i][p] = d.el.toDataURL();
+            }
+            if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+            this.hasDrawn[i][p] = !!(d && this._hasNonEmptyCanvas(i));
+        },
+        _hasNonEmptyCanvas(i) {
+            const d = this.canvasDraw[i];
+            if (!d || !d.el) return false;
+            const ctx = d.ctx || d.el.getContext('2d');
+            if (!ctx) return false;
+            const pd = ctx.getImageData(0, 0, d.el.width, d.el.height).data;
+            for (let k = 3; k < pd.length; k += 4) { if (pd[k] > 0) return true; }
+            return false;
+        },
+        _restorePage(i, p) {
+            if (!i && i !== 0) i = this.currentQ;
+            const q = this.questions[i];
+            if (!q || q.type === 'mcq') return;
+            if (p === undefined) p = this.page - 1;
+            // Restore text boxes — Alpine reactivity handles display
+            if (this.textBoxes[i] && this.textBoxes[i][p]) {
+                this.textBoxes[i] = { ...this.textBoxes[i] };
+            } else {
+                if (!this.textBoxes[i]) this.textBoxes[i] = {};
+                this.textBoxes[i][p] = [];
+                this.textBoxes[i] = { ...this.textBoxes[i] };
+            }
+            // Restore canvas
+            const saved = this.canvasData[i]?.[p];
+            const d = this.canvasDraw[i];
+            if (saved && d && d.ctx) {
+                const img = new Image();
+                img.onload = () => { d.ctx.clearRect(0, 0, d.el.width, d.el.height); d.ctx.drawImage(img, 0, 0, d.el.width, d.el.height); };
+                img.src = saved;
+            } else if (d && d.ctx) {
+                d.ctx.clearRect(0, 0, d.el.width, d.el.height);
+            }
+        },
+        prevPage() {
+            this._saveCurrentPage();
+            if (this.page > 1) { this.page--; this.$nextTick(() => this._restorePage()); }
+        },
+        nextPage() {
+            this._saveCurrentPage();
+            if (this.page < this.totalPages) { this.page++; this.$nextTick(() => this._restorePage()); }
+        },
+        markAnswered(i, val) {
+            this.answered[i] = true;
+            this.questions[i].answer = val;
+        },
+        selectedAnswer(i) { return this.questions[i].answer; },
+        get answeredCount() { return Object.keys(this.answered).length; },
+        _redrawBg(i) {
+            const d = this.canvasDraw[i];
+            if (!d) return;
+            d.ctx.clearRect(0, 0, d.el.width, d.el.height);
+            if (this.canvasBg[i]) {
+                d.ctx.drawImage(this.canvasBg[i], 0, 0, d.el.width, d.el.height);
+            }
+        },
+        _setupCanvasEvents(i, el) {
+            if (el._inited) return;
+            const ctx = el.getContext('2d');
+            let drawing = false, lx = 0, ly = 0;
+            const getPos = e => {
+                const src = e.touches ? e.touches[0] : e;
+                const r = el.getBoundingClientRect();
+                return { x: (src.clientX - r.left) * (el.width / r.width), y: (src.clientY - r.top) * (el.height / r.height) };
+            };
+            const onStart = e => { e.preventDefault(); const p = getPos(e); lx = p.x; ly = p.y; drawing = true; };
+            const onMove = e => {
+                if (!drawing) return; e.preventDefault(); const p = getPos(e);
+                if (this.canvasTool[i] === 'eraser') {
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
+                } else {
+                    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(p.x, p.y); ctx.stroke();
+                }
+                lx = p.x; ly = p.y;
+            };
+            const onEnd = e => { drawing = false; e.preventDefault(); };
+            el.addEventListener('mousedown', onStart);
+            el.addEventListener('mousemove', onMove);
+            el.addEventListener('mouseup', onEnd);
+            el.addEventListener('mouseleave', () => { drawing = false; });
+            el.addEventListener('touchstart', onStart, { passive: false });
+            el.addEventListener('touchmove', onMove, { passive: false });
+            el.addEventListener('touchend', onEnd, { passive: false });
+            el._inited = true;
+            this.canvasDraw[i] = { el, ctx };
+        },
+        initFullCanvas(i) {
+            const el = document.getElementById('full-canvas-' + i);
+            if (!el) return;
+            const ctx = el.getContext('2d');
+            const parent = el.parentElement;
+            const w = parent ? parent.clientWidth : 700;
+            if (w <= 1) { setTimeout(() => this.initFullCanvas(i), 200); return; }
+            const img = new Image();
+            img.crossOrigin = 'Anonymous';
+            img.onload = () => {
+                el.width = Math.max(w - 8, 200);
+                const aspect = img.naturalHeight / img.naturalWidth;
+                el.height = Math.round(el.width * aspect);
+                ctx.clearRect(0, 0, el.width, el.height);
+                ctx.drawImage(img, 0, 0, el.width, el.height);
+                this.canvasBg[i] = img;
+                this.canvasHeight[i] = el.height;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.strokeStyle = this.canvasColor[i] || '#000';
+                ctx.lineWidth = 2;
+                this._setupCanvasEvents(i, el);
+                this.fullCanvasInited[i] = true;
+            };
+            img.src = this.pages[0];
+        },
+        fullCanvasAutoResize(i) {
+            this.fullCanvasInited[i] = false;
+            const el = document.getElementById('full-canvas-' + i);
+            if (el) { el._inited = false; }
+            this.$nextTick(() => this.initFullCanvas(i));
+        },
+        initCanvas(i) {
+            const el = document.getElementById('canvas-' + i);
+            if (!el || el._inited) return;
+            const ctx = el.getContext('2d');
+            const p = el.parentElement;
+            const w = p ? p.clientWidth : 400;
+            if (w <= 1) { setTimeout(() => this.initCanvas(i), 100); return; }
+            this.canvasHeight[i] = this.canvasHeight[i] || 120;
+            el.width = Math.max(w - 4, 100);
+            el.height = this.canvasHeight[i];
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            this._setupCanvasEvents(i, el);
+        },
+        setCanvasTool(i, tool) {
+            this.canvasTool[i] = tool;
+            if (this.canvasDraw[i]) {
+                this.canvasDraw[i].ctx.globalCompositeOperation = 'source-over';
+            }
+        },
+        setCanvasColor(i, color) {
+            this.canvasColor[i] = color;
+            if (this.canvasDraw[i]) {
+                this.canvasDraw[i].ctx.strokeStyle = color;
+            }
+        },
+        undoCanvas(i) { },
+        saveCanvasState(i) {
+            if (!this.canvasDraw[i]) return;
+            if (!this.canvasHistory[i]) this.canvasHistory[i] = {};
+            if (!this.canvasHistory[i][this.page - 1]) this.canvasHistory[i][this.page - 1] = [];
+            this.canvasHistory[i][this.page - 1].push(this.canvasDraw[i].el.toDataURL());
+        },
+        undoCanvas(i) {
+            const h = this.canvasHistory[i]?.[this.page - 1];
+            if (!h || h.length < 2) return;
+            h.pop();
+            const prev = h[h.length - 1];
+            if (!this.canvasDraw[i]) return;
+            const d = this.canvasDraw[i];
+            const img = new Image();
+            img.onload = () => {
+                if (d.ctx) {
+                    d.ctx.clearRect(0, 0, d.el.width, d.el.height);
+                    d.ctx.drawImage(img, 0, 0, d.el.width, d.el.height);
+                }
+            };
+            img.src = prev;
+            if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+            this.hasDrawn[i][this.page - 1] = h.length > 1;
+        },
+        clearCanvas(i) {
+            if (!this.canvasDraw[i]) return;
+            const d = this.canvasDraw[i];
+            d.ctx.clearRect(0, 0, d.el.width, d.el.height);
+            if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+            this.hasDrawn[i][this.page - 1] = false;
+            if (this.canvasHistory[i]?.[this.page - 1]) this.canvasHistory[i][this.page - 1] = [this.canvasHistory[i][this.page - 1][0]];
+            // Also clear saved data
+            if (this.canvasData[i]) delete this.canvasData[i][this.page - 1];
+        },
+        resizeCanvas(i, delta) {
+            this.canvasHeight[i] = (this.canvasHeight[i] || 120) + delta;
+            if (this.canvasDraw[i]) {
+                const d = this.canvasDraw[i];
+                d.el.height = this.canvasHeight[i];
+            }
+        },
+        // Auto-save methods
+        autoSaveDraft() {
+            this._saveCurrentPage();
+            try {
+                const data = this.getAnswers();
+                localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify({
+                    answers: data,
+                    savedAt: Date.now(),
+                }));
+                // Also save to server via sendBeacon
+                const blob = new Blob([JSON.stringify({ exam_id: '{{ exam.id }}', answers: data })],
+                    { type: 'application/json' });
+                navigator.sendBeacon('/api/student/auto-save', blob);
+            } catch(e) { console.warn('Auto-save failed:', e); }
+        },
+        loadDraft() {
+            try {
+                const saved = localStorage.getItem('exam_draft_' + '{{ exam.id }}');
+                if (!saved) return;
+                const data = JSON.parse(saved);
+                if (!data.answers) return;
+                const answers = data.answers;
+                this.questions.forEach((q, i) => {
+                if (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') {
+                        const qData = answers[i];
+                        if (qData && qData.pages) {
+                            Object.entries(qData.pages).forEach(([p, pageData]) => {
+                                const pIdx = parseInt(p);
+                                if (pageData.textBoxes) {
+                                    if (!this.textBoxes[i]) this.textBoxes[i] = {};
+                                    this.textBoxes[i][pIdx] = pageData.textBoxes;
+                                }
+                                if (pageData.canvas) {
+                                    if (!this.canvasData[i]) this.canvasData[i] = {};
+                                    this.canvasData[i][pIdx] = pageData.canvas;
+                                }
+                                if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+                                this.hasDrawn[i][pIdx] = !!pageData.canvas;
+                            });
+                            if (Object.keys(qData.pages).length > 0) this.answered[i] = true;
+                        }
+                    } else if (q.type === 'mcq' && answers[i]) {
+                        q.answer = answers[i];
+                        this.answered[i] = true;
+                    }
+                });
+            } catch(e) { console.warn('Load draft failed:', e); }
+        },
+        getAnswers() {
+            // Save current page first
+            this._saveCurrentPage();
+            const data = {};
+            this.questions.forEach((q, i) => {
+                if (q.type === 'essay_text' || q.type === 'essay_canvas') {
+                    const pagesData = {};
+                    const totalP = this.totalPages || 1;
+                    for (let p = 0; p < totalP; p++) {
+                        const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
+                        const hasDrawing = !!(this.hasDrawn[i]?.[p]);
+                        const canvasUrl = this.canvasData[i]?.[p];
+                        if (boxes.length > 0 || hasDrawing || canvasUrl) {
+                            const pageEntry = {};
+                            if (boxes.length > 0) pageEntry.textBoxes = boxes;
+                            if (hasDrawing && canvasUrl) {
+                                // Downscale canvas
+                                try {
+                                    const img = new Image();
+                                    img.src = canvasUrl;
+                                    const c = document.createElement('canvas');
+                                    c.width = Math.min(img.naturalWidth || 400, 400);
+                                    c.height = Math.round((img.naturalHeight || 300) * c.width / (img.naturalWidth || 400));
+                                    const cx = c.getContext('2d');
+                                    cx.fillStyle = '#ffffff';
+                                    cx.fillRect(0, 0, c.width, c.height);
+                                    cx.drawImage(img, 0, 0, c.width, c.height);
+                                    pageEntry.canvas = c.toDataURL('image/jpeg', 0.5);
+                                } catch(e) { pageEntry.canvas = canvasUrl; }
+                            }
+                            pagesData[p] = pageEntry;
+                        }
+                    }
+                    data[i] = { type: q.type, pages: pagesData };
+                } else if (q.answer) {
+                    data[i] = q.answer;
+                }
+            });
+            return data;
+        },
+        submitExam() {
+            if (this.submitted) return;
+            if (!confirm('Yakin ingin mengumpulkan? Soal terjawab: ' + this.answeredCount + '/' + this.totalQ)) return;
+            this.submitted = true;
+            clearInterval(this.timer);
+            clearInterval(this.autoSaveTimer);
+            this.autoSaveDraft(); // one final save
+            // Mark submit hint for anti-cheat
+            if (window.markExamSubmitted) window.markExamSubmitted();
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'answers_json';
+            input.value = JSON.stringify(this.getAnswers());
+            document.getElementById('exam-form').appendChild(input);
+            document.getElementById('exam-form').submit();
+        },
+        formatTime(s) {
+            let m = Math.floor(s / 60), sec = s % 60;
+            return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+        },
+    };
+}
+</script>
+{% endblock %}

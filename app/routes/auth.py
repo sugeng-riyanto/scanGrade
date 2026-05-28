@@ -1,52 +1,64 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, render_template, redirect, url_for, make_response
 from app.utils.auth import login_required, get_supabase
 
 auth_bp = Blueprint("auth", __name__)
 
 
-@auth_bp.route("/register", methods=["POST"])
+@auth_bp.route("/register", methods=["GET", "POST"])
 def register():
-    data = request.get_json()
-    email = data.get("email")
-    password = data.get("password")
-    role = data.get("role", "student")
+    if request.method == "GET":
+        return render_template("auth/register.html")
+
+    email = request.form.get("email")
+    password = request.form.get("password")
+    role = request.form.get("role", "student")
 
     if not email or not password:
-        return jsonify({"error": "Email and password required"}), 400
+        return render_template("auth/register.html", error="Email dan password wajib diisi")
 
     supabase = get_supabase()
     try:
-        res = supabase.auth.admin.create_user({
+        supabase.auth.admin.create_user({
             "email": email,
             "password": password,
             "user_metadata": {"role": role},
             "email_confirm": True,
         })
-        return jsonify({"user": res.user.id}), 201
+        return redirect("/auth/login")
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return render_template("auth/register.html", error=str(e))
 
 
-@auth_bp.route("/login", methods=["POST"])
+@auth_bp.route("/login", methods=["GET", "POST"])
 def login():
-    data = request.get_json()
-    email = data.get("email")
-    password = data.get("password")
+    if request.method == "GET":
+        return render_template("auth/login.html")
+
+    email = request.form.get("email")
+    password = request.form.get("password")
 
     if not email or not password:
-        return jsonify({"error": "Email and password required"}), 400
+        return render_template("auth/login.html", error="Email dan password wajib diisi")
 
     supabase = get_supabase()
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        return jsonify({
-            "access_token": res.session.access_token,
-            "refresh_token": res.session.refresh_token,
-            "user": res.user.id,
-            "role": res.user.user_metadata.get("role"),
-        })
+        role = res.user.user_metadata.get("role")
+        redirect_url = "/teacher/dashboard" if role == "teacher" else "/student/exams"
+        resp = make_response(redirect(redirect_url))
+        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/")
+        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/")
+        return resp
     except Exception as e:
-        return jsonify({"error": str(e)}), 401
+        return render_template("auth/login.html", error="Email atau password salah")
+
+
+@auth_bp.route("/logout")
+def logout():
+    resp = make_response(redirect("/auth/login"))
+    resp.delete_cookie("access_token")
+    resp.delete_cookie("refresh_token")
+    return resp
 
 
 @auth_bp.route("/me", methods=["GET"])
