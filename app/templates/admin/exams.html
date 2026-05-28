@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Kelola Ujian - ScanGrade{% endblock %}
+{% block page_title %}Kelola Ujian{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang')||'id', filter:'all', search:'' }">
+    <div>
+        <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Manage Exams':'Kelola Ujian'"></h2>
+        <p class="text-sm text-slate-500 font-medium mt-0.5">{{ exams|length }} ujian</p>
+    </div>
+
+    <div class="flex flex-col sm:flex-row gap-3">
+        <div class="flex bg-slate-100 rounded-xl p-1">
+            <button @click="filter='all'" :class="filter==='all'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition" x-text="lang==='en'?'All':'Semua'"></button>
+            <button @click="filter='active'" :class="filter==='active'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition">Active</button>
+            <button @click="filter='draft'" :class="filter==='draft'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition">Draft</button>
+            <button @click="filter='closed'" :class="filter==='closed'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition" x-text="lang==='en'?'Closed':'Ditutup'"></button>
+        </div>
+        <input type="text" x-model="search" :placeholder="lang==='en'?'Search exams...':'Cari ujian...'" class="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+    </div>
+
+    <!-- Table -->
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                        <th class="text-left px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Exam':'Ujian'"></th>
+                        <th class="text-left px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Teacher':'Guru'"></th>
+                        <th class="text-center px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider">Status</th>
+                        <th class="text-center px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Visible':'Terlihat'"></th>
+                        <th class="text-center px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Submissions':'Jawaban'"></th>
+                        <th class="text-center px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Actions':'Aksi'"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-50">
+                    {% for e in exams %}
+                    <tr class="hover:bg-slate-50 transition"
+                        x-show="(filter==='all'||'{{ e.status }}'===filter)&&(!search||'{{ e.title|lower }}'.includes(search.toLowerCase()))">
+                        <td class="px-5 py-3">
+                            <p class="font-bold text-slate-800">{{ e.title }}</p>
+                            <p class="text-xs text-slate-400 font-medium">{{ e.subject or '-' }} &middot; {{ e.total_questions or 0 }} soal</p>
+                        </td>
+                        <td class="px-5 py-3 text-slate-600 font-medium">{{ e.teacher_name }}</td>
+                        <td class="px-5 py-3 text-center">
+                            <span class="badge {% if e.status=='active' %}bg-emerald-50 text-emerald-700{% elif e.status=='draft' %}bg-slate-100 text-slate-600{% else %}bg-red-50 text-red-600{% endif %}">{{ e.status }}</span>
+                        </td>
+                        <td class="px-5 py-3 text-center">
+                            {% if e.is_published %}
+                            <span class="badge bg-brand-50 text-brand-700"><i class="fas fa-eye mr-0.5"></i>Yes</span>
+                            {% else %}
+                            <span class="badge bg-slate-100 text-slate-500"><i class="fas fa-eye-slash mr-0.5"></i>No</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-3 text-center font-bold text-slate-700">{{ e.submission_count }}</td>
+                        <td class="px-5 py-3">
+                            <div class="flex items-center justify-center gap-1.5">
+                                <form method="POST" action="/admin/exams/{{ e.id }}/toggle-status">
+                                    <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold transition {% if e.status=='active' %}bg-amber-50 text-amber-700 hover:bg-amber-100{% else %}bg-emerald-50 text-emerald-700 hover:bg-emerald-100{% endif %}" title="{% if e.status=='active' %}Deactivate{% else %}Activate{% endif %}">
+                                        <i class="fas {% if e.status=='active' %}fa-pause{% else %}fa-play{% endif %}"></i>
+                                    </button>
+                                </form>
+                                <form method="POST" action="/admin/exams/{{ e.id }}/toggle-visibility">
+                                    <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold transition {% if e.is_published %}bg-slate-100 text-slate-600 hover:bg-slate-200{% else %}bg-brand-50 text-brand-700 hover:bg-brand-100{% endif %}" title="{% if e.is_published %}Hide{% else %}Show{% endif %}">
+                                        <i class="fas {% if e.is_published %}fa-eye-slash{% else %}fa-eye{% endif %}"></i>
+                                    </button>
+                                </form>
+                                <button onclick="deleteExam('{{ e.id }}','{{ e.title }}')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 hover:bg-red-100 transition" title="Delete">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not exams %}
+                    <tr><td colspan="6" class="px-5 py-12 text-center text-slate-400 font-medium" x-text="lang==='en'?'No exams yet':'Belum ada ujian'"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function deleteExam(id, title) {
+    if (!confirm('Yakin hapus "' + title + '"? Semua jawaban siswa juga akan dihapus.')) return;
+    fetch('/admin/exams/' + id + '/delete', { method: 'POST', headers: {'Accept':'application/json','Content-Type':'application/json'} })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert('Gagal: ' + (d.error||'?')); })
+        .catch(e => alert('Gagal: ' + e.message));
+}
+</script>
+{% endblock %}

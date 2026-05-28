@@ -1,117 +1,234 @@
 <!DOCTYPE html>
-<html lang="id" class="h-full scroll-smooth">
+<html lang="id" class="h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}ScanGrade{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    brand: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a5f' },
+                },
+                fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+            }
+        }
+    }
+    </script>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <style>
-        * { font-family: 'Nunito', system-ui, sans-serif; }
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        body { background: #f8fafc; }
+        .sidebar-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; border-radius: 0.75rem; font-weight: 600; font-size: 0.875rem; transition: all 0.15s; color: #94a3b8; }
+        .sidebar-item:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
+        .sidebar-item.active { background: rgba(59,130,246,0.2); color: #60a5fa; }
+        .sidebar-item i { width: 20px; text-align: center; font-size: 0.9rem; }
+        .card { background: #fff; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+        .card-hover:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-1px); transition: all 0.2s; }
+        .stat-card { padding: 1.25rem 1.5rem; }
+        .stat-icon { width: 48px; height: 48px; border-radius: 0.75rem; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; }
+        .badge { display: inline-flex; align-items: center; padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; }
+        @media (max-width: 1023px) {
+            .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
     {% block head_extra %}{% endblock %}
 </head>
-<body class="h-full bg-gradient-to-br from-orange-50 via-stone-50 to-amber-50" data-exam-id="{{ exam.id if exam else '' }}">
-    <div x-data="{ sidebarOpen: false }" class="min-h-full">
-        {% if g.user_id %}
-        <nav class="bg-gradient-to-r from-orange-600 via-orange-500 to-amber-500 text-white shadow-lg shadow-orange-200/50">
-            <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                <div class="flex h-16 items-center justify-between">
-                    <div class="flex items-center">
-                        <button @click="sidebarOpen = !sidebarOpen" class="lg:hidden mr-2">
-                            <i class="fas fa-bars text-xl"></i>
-                        </button>
-                        <a href="{{ url_for('teacher.dashboard') }}" class="text-xl font-extrabold tracking-tight">
-                            <i class="fas fa-graduation-cap mr-2"></i>ScanGrade
-                        </a>
-                    <div class="hidden lg:ml-10 lg:flex lg:space-x-2">
-                        {% if g.user_role == 'admin' %}
-                        <a href="{{ url_for('admin.dashboard') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-home mr-1"></i>Dashboard
-                        </a>
-                        <a href="{{ url_for('admin.users') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-users mr-1"></i>Users
-                        </a>
-                        {% elif g.user_role == 'teacher' %}
-                        <a href="{{ url_for('teacher.dashboard') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-home mr-1"></i>Dashboard
-                        </a>
-                        <a href="{{ url_for('teacher.exam_form') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-plus mr-1"></i>Buat Exam
-                        </a>
-                        <a href="{{ url_for('teacher.scan_page') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-camera mr-1"></i>Scan
-                        </a>
-                        <a href="{{ url_for('teacher.results') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-chart-bar mr-1"></i>Results
-                        </a>
-                        {% elif g.user_role == 'student' %}
-                        <a href="{{ url_for('student.exam_list') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-home mr-1"></i>Ujian
-                        </a>
-                        <a href="{{ url_for('student.results') }}" class="px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                            <i class="fas fa-chart-bar mr-1"></i>Hasil
-                        </a>
-                        {% endif %}
-                    </div>
-                    </div>
-                    <div class="flex items-center space-x-3">
-                        <span class="text-sm hidden sm:block font-medium opacity-80">{{ g.user_id[:8] }}...</span>
-                        <a href="{{ url_for('auth.logout') }}" class="text-sm font-semibold bg-white/15 px-3 py-1.5 rounded-xl hover:bg-white/25 transition">
-                            <i class="fas fa-sign-out-alt mr-1"></i>Logout
-                        </a>
-                    </div>
-                </div>
-            </div>
-            <div x-show="sidebarOpen" class="lg:hidden border-t border-white/20">
-                <div class="space-y-1 px-4 py-3">
-                    {% if g.user_role == 'admin' %}
-                    <a href="{{ url_for('admin.dashboard') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-home mr-2"></i>Dashboard
-                    </a>
-                    <a href="{{ url_for('admin.users') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-users mr-2"></i>Users
-                    </a>
-                    {% elif g.user_role == 'teacher' %}
-                    <a href="{{ url_for('teacher.dashboard') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-home mr-2"></i>Dashboard
-                    </a>
-                    <a href="{{ url_for('teacher.exam_form') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-plus mr-2"></i>Buat Exam
-                    </a>
-                    <a href="{{ url_for('teacher.scan_page') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-camera mr-2"></i>Scan
-                    </a>
-                    <a href="{{ url_for('teacher.results') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-chart-bar mr-2"></i>Results
-                    </a>
-                    {% elif g.user_role == 'student' %}
-                    <a href="{{ url_for('student.exam_list') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-home mr-2"></i>Ujian
-                    </a>
-                    <a href="{{ url_for('student.results') }}" class="block px-3 py-2 rounded-xl text-sm font-semibold hover:bg-white/20 transition">
-                        <i class="fas fa-chart-bar mr-2"></i>Hasil
-                    </a>
-                    {% endif %}
-                </div>
-            </div>
-        </nav>
-        {% endif %}
+<body class="h-full" x-data="{ sidebarOpen: window.innerWidth >= 1024, lang: localStorage.getItem('sg_lang') || 'id' }" @resize.window="if(window.innerWidth >= 1024) sidebarOpen = true">
 
-        <main>
-            <div class="mx-auto max-w-7xl px-3 py-5 sm:px-6 lg:px-8">
+{% if g.user_id %}
+<div class="flex h-full">
+    <!-- Sidebar -->
+    <aside class="fixed inset-y-0 left-0 z-40 w-64 bg-gradient-to-b from-slate-900 to-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto"
+           :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+           @keydown.escape.window="if(window.innerWidth<1024) sidebarOpen=false">
+
+        <!-- Logo -->
+        <div class="flex items-center gap-3 px-5 h-16 border-b border-white/10">
+            <div class="w-9 h-9 rounded-lg bg-brand-500 flex items-center justify-center shadow-lg shadow-brand-500/30">
+                <i class="fas fa-graduation-cap text-white text-sm"></i>
+            </div>
+            <span class="text-white font-extrabold text-lg tracking-tight">ScanGrade</span>
+            <button @click="sidebarOpen=false" class="lg:hidden ml-auto text-slate-400 hover:text-white"><i class="fas fa-times"></i></button>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto" style="max-height:calc(100vh - 8rem)">
+            {% if g.user_role == 'admin' %}
+            <a href="/admin/dashboard" class="sidebar-item {% if request.path == '/admin/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="lang==='en'?'Dashboard':'Dashboard'"></span></a>
+            <a href="/admin/exams" class="sidebar-item {% if request.path == '/admin/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span></a>
+            <a href="/admin/teachers" class="sidebar-item {% if request.path == '/admin/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span x-text="lang==='en'?'Teachers':'Guru'"></span></a>
+            <a href="/admin/students" class="sidebar-item {% if request.path == '/admin/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="lang==='en'?'Students':'Siswa'"></span></a>
+            <a href="/admin/classes" class="sidebar-item {% if request.path == '/admin/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="lang==='en'?'Classes':'Kelas'"></span></a>
+            <a href="/admin/users" class="sidebar-item {% if request.path == '/admin/users' %}active{% endif %}"><i class="fas fa-users-cog"></i><span x-text="lang==='en'?'All Users':'Semua User'"></span></a>
+            <a href="/admin/school" class="sidebar-item {% if request.path == '/admin/school' %}active{% endif %}"><i class="fas fa-cog"></i><span x-text="lang==='en'?'Settings':'Pengaturan'"></span></a>
+
+            {% elif g.user_role == 'teacher' %}
+            <a href="/teacher/dashboard" class="sidebar-item {% if request.path == '/teacher/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="lang==='en'?'Dashboard':'Dashboard'"></span></a>
+            <a href="/teacher/exams" class="sidebar-item {% if request.path == '/teacher/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="lang==='en'?'My Exams':'Ujian Saya'"></span></a>
+            <a href="/teacher/exams/new" class="sidebar-item {% if request.path == '/teacher/exams/new' %}active{% endif %}"><i class="fas fa-plus-circle"></i><span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span></a>
+            <a href="/teacher/scan" class="sidebar-item {% if request.path == '/teacher/scan' %}active{% endif %}"><i class="fas fa-camera"></i><span x-text="lang==='en'?'Scan OMR':'Scan OMR'"></span></a>
+            <a href="/teacher/grading" class="sidebar-item {% if request.path == '/teacher/grading' %}active{% endif %}"><i class="fas fa-pen-alt"></i><span x-text="lang==='en'?'Grading':'Koreksi'"></span></a>
+            <a href="/teacher/results" class="sidebar-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span x-text="lang==='en'?'Results':'Hasil'"></span></a>
+            <a href="/teacher/analytics" class="sidebar-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="lang==='en'?'Analytics':'Analitik'"></span></a>
+            <div class="pt-3 mt-3 border-t border-white/10">
+                <p class="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2" x-text="lang==='en'?'Manage':'Kelola'"></p>
+                <a href="/teacher/students" class="sidebar-item {% if request.path == '/teacher/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="lang==='en'?'Students':'Siswa'"></span></a>
+            </div>
+
+            {% elif g.user_role == 'student' %}
+            <a href="/student/dashboard" class="sidebar-item {% if request.path == '/student/dashboard' %}active{% endif %}"><i class="fas fa-home"></i><span x-text="lang==='en'?'Dashboard':'Beranda'"></span></a>
+            <a href="/student/exams" class="sidebar-item {% if request.path == '/student/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="lang==='en'?'My Exams':'Ujian Saya'"></span></a>
+            <a href="/student/results" class="sidebar-item {% if request.path == '/student/results' %}active{% endif %}"><i class="fas fa-chart-bar"></i><span x-text="lang==='en'?'My Scores':'Nilai Saya'"></span></a>
+            {% endif %}
+        </nav>
+
+        <!-- User section -->
+        <div class="border-t border-white/10 p-3">
+            <div class="flex items-center gap-3 px-2 py-2">
+                <div class="w-9 h-9 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-400 font-bold text-sm">
+                    {{ (g.user_name or g.user_email or "U")[:1]|upper }}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-white truncate">{{ g.user_name or g.user_email[:20] }}</p>
+                    <p class="text-[10px] font-medium text-slate-500 uppercase">{{ g.user_role }}</p>
+                </div>
+                <a href="/auth/logout" class="text-slate-500 hover:text-red-400 transition" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Mobile overlay -->
+    <div x-show="sidebarOpen && window.innerWidth < 1024" class="sidebar-overlay lg:hidden" @click="sidebarOpen=false" x-transition.opacity></div>
+
+    <!-- Main content area -->
+    <div class="flex-1 flex flex-col min-w-0">
+        <!-- Top bar -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-20">
+            <div class="flex items-center gap-3">
+                <button @click="sidebarOpen = !sidebarOpen" class="lg:hidden text-slate-500 hover:text-slate-700 p-2 -ml-2 rounded-lg hover:bg-slate-100 transition">
+                    <i class="fas fa-bars text-lg"></i>
+                </button>
+                <h1 class="text-lg font-bold text-slate-800">{% block page_title %}{% endblock %}</h1>
+            </div>
+            <div class="flex items-center gap-2">
+                <button @click="document.getElementById('tz-modal').showModal()"
+                        class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center gap-1">
+                    <i class="fas fa-globe"></i><span>UTC{{ '+%d'|format(g.tz_offset) if g.tz_offset >= 0 else g.tz_offset }}</span>
+                </button>
+                <button @click="lang = lang==='id'?'en':'id'; localStorage.setItem('sg_lang', lang)"
+                        class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition"
+                        x-text="lang==='id'?'EN':'ID'">
+                </button>
+                <button class="relative p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition">
+                    <i class="fas fa-bell"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Page content -->
+        <main class="flex-1 overflow-y-auto">
+            <div class="p-4 lg:p-6 max-w-7xl mx-auto">
                 {% block content %}{% endblock %}
             </div>
         </main>
-    </div>
 
-    {% block modals %}{% endblock %}
-    {% block scripts %}{% endblock %}
+        <!-- Mobile bottom nav -->
+        <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex z-20 pb-safe">
+            {% if g.user_role == 'teacher' %}
+            <a href="/teacher/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/dashboard' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-chart-pie text-lg mb-0.5"></i><span x-text="lang==='en'?'Home':'Beranda'"></span>
+            </a>
+            <a href="/teacher/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/exams' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-file-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span>
+            </a>
+            <a href="/teacher/exams/new" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/exams/new' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <div class="w-10 h-10 -mt-4 rounded-full bg-brand-500 text-white flex items-center justify-center shadow-lg shadow-brand-500/30"><i class="fas fa-plus text-sm"></i></div>
+                <span class="-mt-0.5" x-text="lang==='en'?'Create':'Buat'"></span>
+            </a>
+            <a href="/teacher/grading" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/grading' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-pen-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Grade':'Koreksi'"></span>
+            </a>
+            <a href="/teacher/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path.startswith('/teacher/results') %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-chart-bar text-lg mb-0.5"></i><span x-text="lang==='en'?'Results':'Hasil'"></span>
+            </a>
+            {% elif g.user_role == 'student' %}
+            <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/student/dashboard' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-home text-lg mb-0.5"></i><span x-text="lang==='en'?'Home':'Beranda'"></span>
+            </a>
+            <a href="/student/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/student/exams' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-file-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span>
+            </a>
+            <a href="/student/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/student/results' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-chart-bar text-lg mb-0.5"></i><span x-text="lang==='en'?'Scores':'Nilai'"></span>
+            </a>
+            {% elif g.user_role == 'admin' %}
+            <a href="/admin/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/admin/dashboard' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span>
+            </a>
+            <a href="/admin/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/admin/exams' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-file-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span>
+            </a>
+            <a href="/admin/users" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/admin/users' %}text-brand-600{% else %}text-slate-400{% endif %}">
+                <i class="fas fa-users text-lg mb-0.5"></i><span x-text="lang==='en'?'Users':'User'"></span>
+            </a>
+            {% endif %}
+        </nav>
+    </div>
+</div>
+{% else %}
+<!-- Not logged in: no sidebar -->
+<main class="min-h-screen bg-slate-50">
+    {% block content_noauth %}{% endblock %}
+</main>
+{% endif %}
+
+<!-- Timezone Modal -->
+<dialog id="tz-modal" class="rounded-2xl p-0 backdrop:bg-black/40 shadow-2xl border border-slate-200 w-full max-w-sm">
+    <form method="dialog" class="p-6 space-y-4">
+        <div class="flex items-center justify-between">
+            <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Timezone':'Zona Waktu'"></h3>
+            <button value="cancel" class="text-slate-400 hover:text-slate-600 p-1"><i class="fas fa-times"></i></button>
+        </div>
+        <p class="text-xs text-slate-500 font-medium" x-text="lang==='en'?'Select your UTC offset. All times will be displayed in this timezone.':'Pilih offset UTC Anda. Semua waktu akan ditampilkan dalam zona waktu ini.'"></p>
+        <div class="grid grid-cols-5 gap-2">
+            {% for h in range(-12, 15) %}
+            <label class="cursor-pointer">
+                <input type="radio" name="tz_val" value="{{ h }}" class="peer sr-only" {% if h == g.tz_offset %}checked{% endif %}>
+                <div class="text-center py-2 rounded-lg border-2 border-slate-200 text-xs font-bold text-slate-600 peer-checked:border-brand-500 peer-checked:bg-brand-50 peer-checked:text-brand-700 hover:bg-slate-50 transition">
+                    UTC{{ "+%d"|format(h) if h >= 0 else h }}
+                </div>
+            </label>
+            {% endfor %}
+        </div>
+        <button type="button" onclick="saveTz()" class="w-full bg-brand-600 hover:bg-brand-700 text-white py-2.5 rounded-xl font-bold text-sm transition" x-text="lang==='en'?'Save':'Simpan'"></button>
+    </form>
+</dialog>
+<script>
+function saveTz() {
+    var checked = document.querySelector('input[name=tz_val]:checked');
+    if (!checked) return;
+    fetch('/auth/set-timezone', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tz_offset: parseInt(checked.value)})
+    }).then(function() { location.reload(); });
+}
+</script>
+
+{% block modals %}{% endblock %}
+{% block scripts %}{% endblock %}
 </body>
 </html>

@@ -4,6 +4,7 @@
 {% set fb_comments = feedback.get('comments', {}) %}
 {% set fb_overlay = feedback.get('overlay_pages', {}) %}
 {% block title %}Koreksi - ScanGrade{% endblock %}
+{% block page_title %}Koreksi{% endblock %}
 {% block head_extra %}
 <style>
 .pdf-container { background: #f8fafc; min-height: 50vh; }
@@ -147,6 +148,20 @@
                             <button type="button" @click="setMode('eraser')" :class="mode === 'eraser' ? 'active' : ''"><i class="fas fa-eraser mr-1"></i>Hapus</button>
                             <input type="color" :value="color" @input="color=$event.target.value; if(ctx)ctx.strokeStyle=$event.target.value">
                             <button type="button" @click="setMode('text')" :class="mode === 'text' ? 'active' : ''"><i class="fas fa-font mr-1"></i>Teks</button>
+                            <template x-if="mode === 'text'">
+                                <div class="flex items-center gap-1">
+                                    <select x-model="textFontSize" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white">
+                                        <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
+                                    </select>
+                                    <select x-model="textFontFamily" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white max-w-[80px]">
+                                        <option value="Nunito, sans-serif">Nunito</option>
+                                        <option value="Arial, sans-serif">Arial</option>
+                                        <option value="Georgia, serif">Georgia</option>
+                                        <option value="Courier New, monospace">Courier</option>
+                                        <option value="Times New Roman, serif">Times NR</option>
+                                    </select>
+                                </div>
+                            </template>
                             <button type="button" @click="undoCanvas()" :disabled="history.length<2" class="text-stone-500 hover:bg-stone-100 disabled:opacity-30 px-2 py-1 text-xs font-bold border rounded-lg bg-white">&#8617;</button>
                             <button type="button" @click="clearTeacherCanvas()" class="text-red-500 hover:bg-red-50 px-2 py-1 text-xs font-bold border border-red-200 rounded-lg bg-white"><i class="fas fa-trash-alt"></i></button>
                         </div>
@@ -208,7 +223,8 @@
                         </div>
 
                         <div class="flex items-center gap-3 px-4 py-3 bg-stone-50 border-t no-print">
-                            <label class="text-xs font-extrabold text-stone-700">Skor #{{ i+1 }}:</label>
+                            {% set qweight = (exam.question_weights or {}).get(i|string, 0) %}
+                            <label class="text-xs font-extrabold text-stone-700">Skor #{{ i+1 }} <span class="text-orange-500">({{ qweight }} poin)</span>:</label>
                             <input type="number" x-model="scoreVal" min="0" max="100"
                                    class="w-20 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-center font-extrabold text-lg focus:border-orange-500"
                                    @input="scheduleSave">
@@ -241,15 +257,14 @@ const PDF_LEN = PDF_PAGES.length;
 const MCQ_TOTAL = {{ (exam.answer_key or {}) | length }};
 let autoSaveTimer = null;
 
-function compressCanvas(canvas, maxW, quality) {
+function compressCanvas(canvas, maxW) {
     maxW = maxW || 600;
-    quality = quality || 0.4;
     const scale = Math.min(maxW / Math.max(canvas.width, 1), 1);
     const c = document.createElement('canvas');
     c.width = Math.round(canvas.width * scale);
     c.height = Math.round(canvas.height * scale);
     c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', quality);
+    return c.toDataURL('image/png');
 }
 
 function gradeApp() {
@@ -296,6 +311,8 @@ function gradeQuestion(qIdx) {
     return {
         qIdx, page: 1, totalPages: PDF_LEN,
         mode: 'pen', color: '#059669',
+        textFontSize: 14,
+        textFontFamily: 'Nunito, sans-serif',
         ctx: null, canvas: null, drawing: false, lx: 0, ly: 0, history: [],
         scoreVal: SAVED_SCORES[qIdx] || '',
         commentVal: SAVED_COMMENTS[qIdx] || '',
@@ -355,7 +372,20 @@ function gradeQuestion(qIdx) {
             sc.width = this.canvas.width; sc.height = this.canvas.height;
             const sCtx = sc.getContext('2d');
             const img = new Image();
-            img.onload = () => { sCtx.clearRect(0, 0, sc.width, sc.height); sCtx.drawImage(img, 0, 0, sc.width, sc.height); };
+            img.onload = () => {
+                sCtx.clearRect(0, 0, sc.width, sc.height);
+                sCtx.drawImage(img, 0, 0, sc.width, sc.height);
+                if (pd.canvas.startsWith('data:image/jpeg')) {
+                    const imageData = sCtx.getImageData(0, 0, sc.width, sc.height);
+                    const d = imageData.data;
+                    for (let i = 0; i < d.length; i += 4) {
+                        const r = d[i], g = d[i+1], b = d[i+2];
+                        if (r < 20 && g < 20 && b < 20) { d[i+3] = 0; }
+                        else if (r < 60 && g < 60 && b < 60) { d[i+3] = Math.round((r+g+b)/3*255/60); }
+                    }
+                    sCtx.putImageData(imageData, 0, 0);
+                }
+            };
             img.src = pd.canvas;
         },
 
@@ -364,7 +394,20 @@ function gradeQuestion(qIdx) {
             const saved = SAVED_OVERLAY[this.qIdx]?.[p];
             if (!saved || !saved.canvas || !this.ctx) return;
             const img = new Image();
-            img.onload = () => { this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height); };
+            img.onload = () => {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+                if (saved.canvas.startsWith('data:image/jpeg')) {
+                    const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                    const d = imageData.data;
+                    for (let i = 0; i < d.length; i += 4) {
+                        const r = d[i], g = d[i+1], b = d[i+2];
+                        if (r < 20 && g < 20 && b < 20) { d[i+3] = 0; }
+                        else if (r < 60 && g < 60 && b < 60) { d[i+3] = Math.round((r+g+b)/3*255/60); }
+                    }
+                    this.ctx.putImageData(imageData, 0, 0);
+                }
+            };
             img.src = saved.canvas;
         },
 
@@ -446,7 +489,20 @@ function gradeQuestion(qIdx) {
                 const saved = GRADE_STATE[this.qIdx]?.[p];
                 if(saved && saved.canvas && this.ctx) {
                     const img = new Image();
-                    img.onload=()=>{ this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height); this.ctx.drawImage(img,0,0,this.canvas.width,this.canvas.height); };
+                    img.onload=()=>{
+                        this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+                        this.ctx.drawImage(img,0,0,this.canvas.width,this.canvas.height);
+                        if (saved.canvas.startsWith('data:image/jpeg')) {
+                            const imageData = this.ctx.getImageData(0,0,this.canvas.width,this.canvas.height);
+                            const d = imageData.data;
+                            for (let i = 0; i < d.length; i += 4) {
+                                const r=d[i], g=d[i+1], b=d[i+2];
+                                if (r<20 && g<20 && b<20) { d[i+3]=0; }
+                                else if (r<60 && g<60 && b<60) { d[i+3]=Math.round((r+g+b)/3*255/60); }
+                            }
+                            this.ctx.putImageData(imageData,0,0);
+                        }
+                    };
                     img.src=saved.canvas;
                 } else {
                     this.restoreSavedOverlay();
@@ -494,37 +550,36 @@ function doAutoSave() {
 setInterval(()=>doAutoSave(),15000);
 
 function calcFinal() {
-    let total=0, count=0;
+    const weights = {{ (exam.question_weights or {}) | tojson | safe }};
+    const answerKey = {{ (exam.answer_key or {}) | tojson | safe }};
+    const qTypes = {{ (exam.question_types or {}) | tojson | safe }};
+    const studentAns = {{ submission.answers | tojson | safe }};
+    let earned = 0;
     for (let q = 0; q < TOTAL_Q; q++) {
-        const inst = QUESTION_INSTANCES[q];
-        if (!inst) continue;
-        if(inst.scoreVal !== undefined && inst.scoreVal !== '') {
-            const s = parseFloat(inst.scoreVal);
-            if(!isNaN(s)){ total+=s; count++; }
+        const w = parseFloat(weights[q] || 0);
+        if (w <= 0) continue;
+        const qtype = qTypes[q] || 'mcq';
+        const key = answerKey[q];
+        if (qtype === 'mcq' && key) {
+            const ans = studentAns[q];
+            let correct = false;
+            if (key === 'bonus') { correct = ans && String(ans).trim() !== ''; }
+            else if (Array.isArray(key)) { correct = key.includes(ans); }
+            else { correct = ans === key; }
+            if (correct) earned += w;
+        } else {
+            const inst = QUESTION_INSTANCES[q];
+            if (inst && inst.scoreVal !== undefined && inst.scoreVal !== '') {
+                const s = parseFloat(inst.scoreVal);
+                if (!isNaN(s)) earned += (s / 100) * w;
+            }
         }
     }
-    const mcqKit = {{ (exam.answer_key or {}) | tojson | safe }};
-    const mcqQTypes = {{ (exam.question_types or {}) | tojson | safe }};
-    const mcqAns = {{ submission.answers | tojson | safe }};
-    let mcqCorrect = 0, mcqTotal = 0;
-    for (let k in mcqKit) {
-        if (!mcqQTypes[k] || mcqQTypes[k] === 'mcq') {
-            mcqTotal++;
-            if (mcqAns[k] === mcqKit[k]) mcqCorrect++;
-        }
-    }
-    if (mcqTotal > 0) {
-        const mcqScore = Math.round((mcqCorrect / mcqTotal) * 100);
-        total += mcqScore;
-        count++;
-    }
-    if (count > 0) {
-        const avg = Math.round((total / count) * 10) / 10;
-        document.getElementById('final-score-hidden').value = avg;
-        document.getElementById('final-display').textContent = avg;
-        return avg;
-    }
-    return 0;
+    const penalty = {{ submission.penalty or 0 }};
+    const final = Math.max(0, Math.round(Math.min(earned, 100) * 100 - penalty * 100) / 100);
+    document.getElementById('final-score-hidden').value = final;
+    document.getElementById('final-display').textContent = final;
+    return final;
 }
 
 setInterval(() => { calcFinal(); }, 2000);

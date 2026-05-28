@@ -1,90 +1,119 @@
 {% extends "base.html" %}
 {% block title %}Admin Dashboard - ScanGrade{% endblock %}
+{% block page_title %}Admin Dashboard{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <h1 class="text-2xl font-extrabold text-stone-800">Dashboard Admin</h1>
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <div>
+        <h2 class="text-2xl font-extrabold text-slate-800">
+            <span x-show="lang==='id'">Selamat {{ greeting() }}, Admin</span>
+            <span x-show="lang==='en'">Good {{ greeting_en() }}, Admin</span>
+        </h2>
+        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Platform overview':'Ringkasan platform'"></p>
+    </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <p class="text-xs sm:text-sm font-bold text-stone-500">Total Users</p>
-            <p class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ total_users }}</p>
+    <!-- Stat Cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-brand-50 text-brand-600"><i class="fas fa-users"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Total Users':'Total Pengguna'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ total_users }}</p>
+                </div>
+            </div>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <p class="text-xs sm:text-sm font-bold text-stone-500">Guru</p>
-            <p class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ total_teachers }}</p>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-chalkboard-teacher"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Teachers':'Guru'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ total_teachers }}</p>
+                </div>
+            </div>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <p class="text-xs sm:text-sm font-bold text-stone-500">Siswa</p>
-            <p class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ total_students }}</p>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-user-graduate"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ total_students }}</p>
+                </div>
+            </div>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <p class="text-xs sm:text-sm font-bold text-stone-500">Total Exam</p>
-            <p class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ total_exams }}</p>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-file-alt"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Total Exams':'Total Ujian'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ total_exams }}</p>
+                </div>
+            </div>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <p class="text-xs sm:text-sm font-bold text-stone-500">Exam Aktif</p>
-            <p class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ active_exams }}</p>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-rose-50 text-rose-600"><i class="fas fa-check-double"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Active Exams':'Ujian Aktif'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ active_exams }}</p>
+                </div>
+            </div>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <p class="text-xs sm:text-sm font-bold text-stone-500">Pengumpulan</p>
-            <p class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ total_submissions }}</p>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-cyan-50 text-cyan-600"><i class="fas fa-paper-plane"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Submissions':'Pengumpulan'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ total_submissions }}</p>
+                </div>
+            </div>
         </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <h2 class="text-base sm:text-lg font-extrabold text-stone-800 mb-4">Users</h2>
-            <div class="overflow-x-auto -mx-4 sm:mx-0">
-                <table class="w-full text-sm">
-                    <thead><tr class="text-left text-stone-500 border-b border-stone-100">
-                        <th class="pb-3 font-extrabold px-4 sm:px-0">Email</th>
-                        <th class="pb-3 font-extrabold px-4 sm:px-0">Role</th>
-                    </tr></thead>
-                    <tbody>
-                        {% for u in users %}
-                        <tr class="border-b border-stone-100 last:border-0 hover:bg-orange-50/30 transition">
-                            <td class="py-3 px-4 sm:px-0 font-bold text-stone-700 truncate max-w-[120px] sm:max-w-none">{{ u.email }}</td>
-                            <td class="py-3 px-4 sm:px-0">
-                                <span class="px-3 py-1.5 text-xs font-bold rounded-full
-                                    {% if u.role == 'teacher' %}bg-emerald-100 text-emerald-700
-                                    {% elif u.role == 'admin' %}bg-purple-100 text-purple-700
-                                    {% else %}bg-sky-100 text-sky-700{% endif %}">
-                                    {{ u.role }}
-                                </span>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+        <!-- Users List -->
+        <div class="card">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Recent Users':'Pengguna Terbaru'"></h3>
+                <a href="/admin/users" class="text-sm font-semibold text-brand-600 hover:text-brand-700" x-text="lang==='en'?'View all':'Lihat semua'"></a>
             </div>
-        </div>
-
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <h2 class="text-base sm:text-lg font-extrabold text-stone-800 mb-4">Exam Terbaru</h2>
-            {% if exams %}
-            <div class="space-y-3">
-                {% for e in exams[:5] %}
-                {% set has_audio = e.question_audio and e.question_audio|length > 0 %}
-                {% set has_canvas = e.question_canvas and e.question_canvas|length > 0 %}
-                <div class="flex items-center justify-between p-3 bg-gradient-to-r from-stone-50 to-orange-50/30 rounded-xl border border-stone-100 gap-2">
-                    <div class="min-w-0">
-                        <p class="font-extrabold text-sm text-stone-800 truncate">{{ e.title }}</p>
-                        <p class="text-xs font-bold text-stone-500 truncate">
-                            {{ e.subject or '-' }} &middot; {{ e.total_questions }} soal
-                            {% if has_audio %}<i class="fas fa-headphones text-orange-400 ml-1"></i>{% endif %}
-                            {% if has_canvas %}<i class="fas fa-paint-brush text-emerald-500 ml-1"></i>{% endif %}
-                        </p>
+            <div class="divide-y divide-slate-50">
+                {% for u in users[:8] %}
+                <div class="px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full {% if u.role == 'admin' %}bg-purple-50 text-purple-600{% elif u.role == 'teacher' %}bg-emerald-50 text-emerald-600{% else %}bg-brand-50 text-brand-600{% endif %} flex items-center justify-center font-bold text-xs">
+                            {{ (u.full_name or u.email or 'U')[:1]|upper }}
+                        </div>
+                        <div>
+                            <p class="font-semibold text-sm text-slate-700">{{ u.full_name or u.email[:20] }}</p>
+                            <p class="text-xs text-slate-400 font-medium">{{ u.email[:30] if u.email else '' }}</p>
+                        </div>
                     </div>
-                    <span class="px-3 py-1.5 text-xs font-bold rounded-full shrink-0
-                        {% if e.status == 'active' %}bg-emerald-100 text-emerald-700{% else %}bg-stone-100 text-stone-700{% endif %}">
-                        {{ e.status }}
-                    </span>
+                    <span class="badge {% if u.role == 'admin' %}bg-purple-50 text-purple-700{% elif u.role == 'teacher' %}bg-emerald-50 text-emerald-700{% else %}bg-brand-50 text-brand-700{% endif %}">{{ u.role }}</span>
                 </div>
                 {% endfor %}
             </div>
-            {% else %}
-            <p class="text-stone-400 font-bold text-center py-8">Belum ada exam</p>
-            {% endif %}
+        </div>
+
+        <!-- Recent Exams -->
+        <div class="card">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Recent Exams':'Ujian Terbaru'"></h3>
+                <a href="/admin/exams" class="text-sm font-semibold text-brand-600 hover:text-brand-700" x-text="lang==='en'?'Manage all':'Kelola semua'"></a>
+            </div>
+            <div class="divide-y divide-slate-50">
+                {% for e in exams[:8] %}
+                <div class="px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition">
+                    <div>
+                        <p class="font-semibold text-sm text-slate-700">{{ e.title }}</p>
+                        <p class="text-xs text-slate-400 font-medium">{{ e.subject or '-' }} &middot; {{ e.total_questions or 0 }} soal</p>
+                    </div>
+                    <span class="badge {% if e.status == 'active' %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">{{ e.status }}</span>
+                </div>
+                {% endfor %}
+                {% if not exams %}
+                <div class="px-5 py-8 text-center text-slate-400 font-medium" x-text="lang==='en'?'No exams yet':'Belum ada ujian'"></div>
+                {% endif %}
+            </div>
         </div>
     </div>
 </div>

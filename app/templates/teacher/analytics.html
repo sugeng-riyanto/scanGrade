@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Analitik - ScanGrade{% endblock %}
+{% block page_title %}Analitik{% endblock %}
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <div>
+        <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Analytics':'Analitik'"></h2>
+        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Performance insights across your exams':'Wawasan performa di seluruh ujian Anda'"></p>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-brand-50 text-brand-600"><i class="fas fa-file-alt"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Total Exams':'Total Ujian'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ stats.total_exams }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-user-check"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Submissions':'Pengumpulan'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ stats.total_submissions }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-chart-line"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Avg Score':'Rata-rata'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ stats.avg_score }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-trophy"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Pass Rate':'Kelulusan'"></p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ stats.pass_rate }}%</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="card">
+            <div class="px-5 py-4 border-b border-slate-100">
+                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Score Distribution':'Distribusi Nilai'"></h3>
+            </div>
+            <div class="p-5">
+                <canvas id="distChart" height="220"></canvas>
+            </div>
+        </div>
+        <div class="card">
+            <div class="px-5 py-4 border-b border-slate-100">
+                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Exam Performance':'Performa per Ujian'"></h3>
+            </div>
+            <div class="p-5">
+                <canvas id="examChart" height="220"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Per-Exam Breakdown -->
+    <div class="card">
+        <div class="px-5 py-4 border-b border-slate-100">
+            <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Per-Exam Breakdown':'Rincian per Ujian'"></h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Submissions':'Pengumpulan'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Average':'Rata-rata'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Highest':'Tertinggi'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Lowest':'Terendah'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Pass %':'Lulus %'"></th>
+                </tr></thead>
+                <tbody>
+                    {% for e in exam_breakdown %}
+                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
+                        <td class="px-5 py-3 font-semibold text-slate-700">{{ e.title }}</td>
+                        <td class="px-5 py-3 text-slate-600">{{ e.count }}</td>
+                        <td class="px-5 py-3 font-bold text-slate-800">{{ e.avg }}</td>
+                        <td class="px-5 py-3 text-emerald-600 font-semibold">{{ e.max }}</td>
+                        <td class="px-5 py-3 text-red-500 font-semibold">{{ e.min }}</td>
+                        <td class="px-5 py-3">
+                            <div class="flex items-center gap-2">
+                                <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500 rounded-full" style="width:{{ e.pass_pct }}%"></div></div>
+                                <span class="text-xs font-semibold text-slate-600">{{ e.pass_pct }}%</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not exam_breakdown %}
+                    <tr><td colspan="6" class="px-5 py-8 text-center text-slate-400 font-medium" x-text="lang==='en'?'No data yet':'Belum ada data'"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const distCtx = document.getElementById('distChart');
+    if (distCtx) {
+        const bins = {{ dist_bins|tojson|safe if dist_bins else '[0,0,0,0,0]' }};
+        new Chart(distCtx, {
+            type: 'bar',
+            data: {
+                labels: ['0-19','20-39','40-59','60-79','80-100'],
+                datasets: [{ data: bins, backgroundColor: ['#ef4444','#f59e0b','#eab308','#22c55e','#3b82f6'], borderRadius: 6, borderSkipped: false }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { grid: { display: false } } } }
+        });
+    }
+    const examCtx = document.getElementById('examChart');
+    if (examCtx) {
+        const labels = {{ exam_labels|tojson|safe if exam_labels else '[]' }};
+        const avgs = {{ exam_avgs|tojson|safe if exam_avgs else '[]' }};
+        new Chart(examCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{ label: 'Avg Score', data: avgs, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: '#3b82f6' }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { grid: { display: false } } } }
+        });
+    }
+});
+</script>
+{% endblock %}

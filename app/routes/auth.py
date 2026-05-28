@@ -50,8 +50,9 @@ def login():
     supabase = get_auth_client()
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        role = res.user.user_metadata.get("role")
-        redirect_url = "/teacher/dashboard" if role == "teacher" else "/student/exams"
+        role = res.user.user_metadata.get("role", "student")
+        redirect_map = {"admin": "/admin/dashboard", "teacher": "/teacher/dashboard", "student": "/student/dashboard"}
+        redirect_url = redirect_map.get(role, "/student/dashboard")
         resp = make_response(redirect(redirect_url))
         resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/")
         resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/")
@@ -75,3 +76,19 @@ def me():
         "user_id": g.user_id,
         "role": g.user_role,
     })
+
+
+@auth_bp.route("/set-timezone", methods=["POST"])
+@login_required
+def set_timezone():
+    from flask import make_response
+    offset = request.form.get("tz_offset") or request.get_json(silent=True, force=True).get("tz_offset", 7) if request.is_json else request.form.get("tz_offset", 7)
+    try:
+        offset = int(offset)
+        if offset < -12 or offset > 14:
+            offset = 7
+    except (ValueError, TypeError):
+        offset = 7
+    resp = make_response(jsonify({"ok": True, "tz_offset": offset}))
+    resp.set_cookie("tz_offset", str(offset), httponly=False, samesite="Lax", path="/", max_age=365 * 86400)
+    return resp

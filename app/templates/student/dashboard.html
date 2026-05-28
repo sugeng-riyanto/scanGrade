@@ -1,48 +1,125 @@
 {% extends "base.html" %}
-{% block title %}Ujian - ScanGrade{% endblock %}
+{% block title %}Beranda - ScanGrade{% endblock %}
+{% block page_title %}Beranda{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <h1 class="text-2xl font-extrabold text-stone-800">Ujian Tersedia</h1>
-
-    {% if exams %}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {% for e in exams %}
-        {% set has_audio = e.question_audio and e.question_audio|length > 0 %}
-        {% set qtypes = e.question_types or {} %}
-        {% set has_canvas = qtypes.values()|select('eq', 'essay_canvas')|list|length > 0 %}
-        {% set has_essay = qtypes.values()|select('eq', 'essay_text')|list|length > 0 or has_canvas %}
-        {% set mcq_count = qtypes.values()|select('eq', 'mcq')|list|length if e.question_types else e.total_questions %}
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 hover:shadow-xl hover:shadow-stone-200/70 transition flex flex-col border border-stone-100">
-            <div class="p-4 sm:p-6 flex-1">
-                <div class="flex items-start justify-between mb-3">
-                    <div class="bg-gradient-to-br from-amber-100 to-orange-100 p-3 rounded-2xl">
-                        <i class="fas fa-file-alt text-orange-600 text-xl"></i>
-                    </div>
-                    <span class="px-3 py-1.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-700 shrink-0">{{ e.status }}</span>
-                </div>
-                <h3 class="text-base sm:text-lg font-extrabold text-stone-800">{{ e.title }}</h3>
-                <p class="text-sm font-semibold text-stone-500 mt-1">{{ e.subject or '-' }}</p>
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-xs font-bold text-stone-500">
-                    <span><i class="fas fa-question-circle mr-1"></i>{{ e.total_questions }} soal</span>
-                    <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes }} menit</span>
-                    <span><i class="fas fa-check-circle mr-1"></i>{{ mcq_count }} PG</span>
-                    {% if has_essay %}<span class="text-amber-600"><i class="fas fa-pencil-alt mr-1"></i>Essay</span>{% endif %}
-                    {% if has_audio %}<span class="text-orange-500"><i class="fas fa-headphones mr-1"></i>Audio</span>{% endif %}
-                    {% if has_canvas %}<span class="text-emerald-500"><i class="fas fa-paint-brush mr-1"></i>Canvas</span>{% endif %}
-                </div>
-                <a href="/student/exams/{{ e.id }}"
-                   class="mt-4 block text-center bg-gradient-to-r from-orange-500 to-amber-500 text-white py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold transition shadow-lg shadow-orange-200/60">
-                    <i class="fas fa-play mr-1"></i>Mulai Ujian
-                </a>
-            </div>
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id', showScores: false }">
+    <!-- Welcome -->
+    <div class="card p-6 bg-gradient-to-r from-brand-600 to-brand-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+        <div class="relative z-10">
+            <h2 class="text-2xl font-extrabold">
+                <span x-show="lang==='id'">Selamat {{ greeting() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
+                <span x-show="lang==='en'">Good {{ greeting_en() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
+            </h2>
+            <p class="text-brand-200 font-medium mt-1" x-text="lang==='en'?'Ready for your next exam?':'Siap untuk ujian berikutnya?'"></p>
         </div>
-        {% endfor %}
     </div>
-    {% else %}
-    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-8 sm:p-12 text-center text-stone-400 border border-stone-100">
-        <i class="fas fa-file-alt text-5xl sm:text-6xl mb-4"></i>
-        <p class="text-lg sm:text-xl font-extrabold">Tidak ada ujian tersedia</p>
-        <p class="text-sm font-semibold mt-1">Hubungi guru Anda untuk mendapatkan akses</p>
+
+    <!-- Quick Stats -->
+    <div class="grid grid-cols-3 gap-4">
+        <div class="card stat-card text-center">
+            <p class="text-2xl font-extrabold text-brand-600">{{ available_exams|length }}</p>
+            <p class="text-xs font-semibold text-slate-500 mt-1" x-text="lang==='en'?'Available':'Tersedia'"></p>
+        </div>
+        <div class="card stat-card text-center">
+            <p class="text-2xl font-extrabold text-emerald-600">{{ completed_exams|length }}</p>
+            <p class="text-xs font-semibold text-slate-500 mt-1" x-text="lang==='en'?'Completed':'Selesai'"></p>
+        </div>
+        <div class="card stat-card text-center relative">
+            <template x-if="showScores">
+                <p class="text-2xl font-extrabold text-amber-600">{{ avg_score }}</p>
+            </template>
+            <template x-if="!showScores">
+                <p class="text-2xl font-extrabold text-slate-300">•••</p>
+            </template>
+            <p class="text-xs font-semibold text-slate-500 mt-1" x-text="lang==='en'?'Avg Score':'Rata-rata'"></p>
+        </div>
+    </div>
+
+    <!-- Available Exams -->
+    <div>
+        <h3 class="font-bold text-slate-800 mb-3" x-text="lang==='en'?'Available Exams':'Ujian Tersedia'"></h3>
+        {% if available_exams %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for e in available_exams %}
+            <div class="card card-hover">
+                <div class="p-5">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                            <i class="fas fa-file-alt"></i>
+                        </div>
+                        <span class="badge bg-emerald-50 text-emerald-700">Active</span>
+                    </div>
+                    <h3 class="font-bold text-slate-800 mb-1">{{ e.title }}</h3>
+                    <p class="text-sm text-slate-500 font-medium">{{ e.subject or '-' }}</p>
+                    <div class="flex gap-3 mt-3 text-xs text-slate-500 font-semibold">
+                        <span><i class="fas fa-question-circle mr-1"></i>{{ e.total_questions }} soal</span>
+                        <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes }} min</span>
+                    </div>
+                    <a href="/student/exams/{{ e.id }}"
+                       class="mt-4 block text-center bg-brand-600 hover:bg-brand-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-brand-600/20 transition">
+                        <i class="fas fa-play mr-1"></i><span x-text="lang==='en'?'Start Exam':'Mulai Ujian'"></span>
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="card p-8 text-center text-slate-400">
+            <i class="fas fa-inbox text-4xl mb-3"></i>
+            <p class="font-bold" x-text="lang==='en'?'No exams available':'Tidak ada ujian tersedia'"></p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Recent Results -->
+    {% if completed_exams %}
+    <div>
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Recent Results':'Hasil Terakhir'"></h3>
+            <button @click="showScores = !showScores" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition"
+                    :class="showScores ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'">
+                <i class="fas" :class="showScores ? 'fa-eye' : 'fa-eye-slash'"></i>
+                <span x-text="showScores ? (lang==='en'?'Hide Scores':'Sembunyikan') : (lang==='en'?'Show Scores':'Tampilkan Nilai')"></span>
+            </button>
+        </div>
+        <div class="card overflow-hidden">
+            <table class="w-full text-sm">
+                <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Score':'Nilai'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Status':'Status'"></th>
+                    <th class="px-5 py-3 font-semibold"></th>
+                </tr></thead>
+                <tbody>
+                    {% for s in completed_exams[:5] %}
+                    {% set exam = s.exam or {} %}
+                    {% set score_val = s.final_score if s.final_score is not none else (s.score if s.score is not none else None) %}
+                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
+                        <td class="px-5 py-3 font-semibold text-slate-700">{{ exam.get('title', '-') }}</td>
+                        <td class="px-5 py-3 font-bold">
+                            <template x-if="showScores">
+                                <span class="{% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ score_val if score_val is not none else '-' }}</span>
+                            </template>
+                            <template x-if="!showScores">
+                                <span class="text-slate-300">•••</span>
+                            </template>
+                        </td>
+                        <td class="px-5 py-3">
+                            <span class="badge {% if s.status == 'published' %}bg-emerald-50 text-emerald-700{% elif s.status == 'graded' %}bg-brand-50 text-brand-700{% else %}bg-amber-50 text-amber-700{% endif %}">
+                                {{ s.status }}
+                            </span>
+                        </td>
+                        <td class="px-5 py-3">
+                            {% if s.status in ('graded', 'published') %}
+                            <a href="/student/results" class="text-brand-600 hover:text-brand-700 font-semibold text-xs"><i class="fas fa-eye mr-1"></i>View</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
     {% endif %}
 </div>

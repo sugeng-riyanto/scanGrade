@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Ujian - ScanGrade{% endblock %}
+{% block page_title %}Ujian{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <div>
+        <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Available Exams':'Ujian Tersedia'"></h2>
+        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Exams you can take right now':'Ujian yang bisa Anda kerjakan sekarang'"></p>
+    </div>
+
+    {% if exams %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for e in exams %}
+        {% set qtypes = e.question_types or {} %}
+        {% set has_essay = qtypes.values()|select('in', ['essay_text','essay_canvas','essay'])|list|length > 0 %}
+        <div class="card card-hover">
+            <div class="p-5">
+                <div class="flex items-start justify-between mb-3">
+                    <div class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                        <i class="fas fa-file-alt"></i>
+                    </div>
+                    <span class="badge bg-emerald-50 text-emerald-700" x-text="lang==='en'?'Available':'Tersedia'"></span>
+                </div>
+                <h3 class="font-bold text-slate-800 mb-1">{{ e.title }}</h3>
+                <p class="text-sm text-slate-500 font-medium">{{ e.subject or '-' }}</p>
+                <div class="flex flex-wrap gap-3 mt-3 text-xs text-slate-500 font-semibold">
+                    <span><i class="fas fa-question-circle mr-1"></i>{{ e.total_questions or 0 }} soal</span>
+                    <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes or 60 }} min</span>
+                    {% if has_essay %}<span class="text-amber-600"><i class="fas fa-pencil-alt mr-1"></i>Essay</span>{% endif %}
+                </div>
+                <a href="/student/exams/{{ e.id }}"
+                   class="mt-4 block text-center bg-brand-600 hover:bg-brand-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-brand-600/20 transition">
+                    <i class="fas fa-play mr-1"></i><span x-text="lang==='en'?'Start Exam':'Mulai Ujian'"></span>
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card p-12 text-center text-slate-400">
+        <i class="fas fa-inbox text-5xl mb-4"></i>
+        <p class="text-lg font-bold" x-text="lang==='en'?'No exams available':'Tidak ada ujian tersedia'"></p>
+        <p class="text-sm font-medium mt-1" x-text="lang==='en'?'No active exams right now. If your teacher deleted or deactivated an exam, it will be removed from this list.':'Tidak ada ujian aktif saat ini. Jika guru menghapus atau menonaktifkan ujian, ujian tersebut akan hilang dari daftar ini.'"></p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

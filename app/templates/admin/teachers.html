@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Kelola Guru - ScanGrade{% endblock %}
+{% block page_title %}Kelola Guru{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang')||'id', search:'', importing: false, importResult: null }">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Manage Teachers':'Kelola Guru'"></h2>
+            <p class="text-sm text-slate-500 font-medium mt-0.5">{{ teachers|length }} guru</p>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+            <a href="/auth/register" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 transition">
+                <i class="fas fa-plus"></i><span x-text="lang==='en'?'Add Teacher':'Tambah Guru'"></span>
+            </a>
+            <a href="/admin/teachers/export" class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-600/20 transition">
+                <i class="fas fa-file-excel"></i><span x-text="lang==='en'?'Export XLSX':'Export XLSX'"></span>
+            </a>
+            <button @click="$refs.importFile.click()" class="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-amber-500/20 transition">
+                <i class="fas fa-file-import"></i><span x-text="lang==='en'?'Import XLSX':'Import XLSX'"></span>
+            </button>
+            <input type="file" x-ref="importFile" accept=".xlsx,.xls" class="hidden" @change="doImport($event)">
+        </div>
+    </div>
+
+    <!-- Import result -->
+    <div x-show="importResult" x-transition class="card p-4 space-y-2">
+        <template x-if="importResult">
+            <div>
+                <p class="font-bold text-sm" :class="importResult?.errors?.length ? 'text-amber-600' : 'text-emerald-600'"
+                   x-text="importResult?.errors?.length ? 'Import selesai dengan error' : 'Import berhasil!'"></p>
+                <p class="text-xs text-slate-600" x-text="'Berhasil: ' + (importResult?.created||0) + ' guru'"></p>
+                <template x-if="importResult?.errors?.length">
+                    <ul class="text-xs text-red-500 list-disc list-inside mt-1">
+                        <template x-for="e in importResult.errors" :key="e">
+                            <li x-text="e"></li>
+                        </template>
+                    </ul>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- Import format hint -->
+    <div class="card p-4 bg-blue-50 border-blue-200">
+        <p class="text-xs font-bold text-blue-700 mb-1" x-text="lang==='en'?'Import Format:':'Format Import:'"></p>
+        <p class="text-xs text-blue-600" x-text="lang==='en'?'Column A: Full Name, B: Phone. Row 1 = header.':'Kolom A: Nama Lengkap, B: No. HP. Baris 1 = header.'"></p>
+        <p class="text-xs text-blue-600 mt-0.5" x-text="lang==='en'?'Default email: guru.{name}@school.local, password: guru123':'Email default: guru.{nama}@school.local, password: guru123'"></p>
+    </div>
+
+    <input type="text" x-model="search" :placeholder="lang==='en'?'Search teachers...':'Cari guru...'" class="w-full sm:w-80 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+
+    <div class="card overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 border-b border-slate-200">
+                <tr>
+                    <th class="text-left px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Name':'Nama'"></th>
+                    <th class="text-center px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Exams':'Ujian'"></th>
+                    <th class="text-center px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Actions':'Aksi'"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">
+                {% for t in teachers %}
+                <tr class="hover:bg-slate-50 transition" x-show="!search||'{{ (t.full_name or '')|lower }}'.includes(search.toLowerCase())">
+                    <td class="px-5 py-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-9 h-9 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs">{{ (t.full_name or 'G')[:1]|upper }}</div>
+                            <div>
+                                <p class="font-bold text-slate-800">{{ t.full_name or '-' }}</p>
+                                <p class="text-xs text-slate-400 font-medium">{{ t.phone or '' }}</p>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-5 py-3 text-center font-bold text-slate-700">{{ t.exam_count }}</td>
+                    <td class="px-5 py-3 text-center">
+                        <button onclick="deleteTeacher('{{ t.id }}','{{ t.full_name }}')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not teachers %}
+                <tr><td colspan="3" class="px-5 py-12 text-center text-slate-400 font-medium" x-text="lang==='en'?'No teachers yet':'Belum ada guru'"></td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function doImport(event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    var fd = new FormData();
+    fd.append('file', file);
+    var root = document.querySelector('[x-data]');
+    var alpine = Alpine.raw(root).__x;
+    alpine.$data.importing = true;
+    alpine.$data.importResult = null;
+    fetch('/admin/teachers/import', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            alpine.$data.importing = false;
+            alpine.$data.importResult = d;
+            if (d.success && d.created > 0) setTimeout(function() { location.reload(); }, 2000);
+        })
+        .catch(function(e) {
+            alpine.$data.importing = false;
+            alpine.$data.importResult = { created: 0, errors: [e.message] };
+        });
+    event.target.value = '';
+}
+function deleteTeacher(id, name) {
+    if (!confirm('Yakin hapus guru "' + name + '"? Semua ujian mereka juga akan dihapus.')) return;
+    fetch('/admin/teachers/' + id + '/delete', { method: 'POST', headers: {'Accept':'application/json','Content-Type':'application/json'} })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert('Gagal: ' + (d.error||'?')); })
+        .catch(e => alert('Gagal: ' + e.message));
+}
+</script>
+{% endblock %}

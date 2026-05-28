@@ -5,10 +5,46 @@ CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name TEXT,
     phone TEXT,
+    nisn TEXT,
+    nis TEXT,
     role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'teacher', 'admin')),
+    class_id UUID REFERENCES classes(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 1b. Classes
+CREATE TABLE IF NOT EXISTS classes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    grade INT,
+    academic_year TEXT DEFAULT '2025/2026',
+    teacher_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_classes_teacher ON classes(teacher_id);
+
+-- 1c. School Settings (single-row)
+CREATE TABLE IF NOT EXISTS school_settings (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    school_name TEXT,
+    npsn TEXT,
+    address TEXT,
+    province TEXT,
+    city TEXT,
+    district TEXT,
+    academic_year TEXT DEFAULT '2025/2026',
+    principal_name TEXT,
+    logo_url TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Ensure single row exists
+INSERT INTO school_settings (id, school_name) VALUES (1, 'ScanGrade School')
+ON CONFLICT (id) DO NOTHING;
 
 -- 2. Exams
 CREATE TABLE IF NOT EXISTS exams (
@@ -57,8 +93,9 @@ CREATE TABLE IF NOT EXISTS submissions (
     violations INT DEFAULT 0,
     penalty DECIMAL(5,2) DEFAULT 0,
     final_score DECIMAL(5,2),
-    status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'graded', 'published')),
+    status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('draft', 'submitted', 'graded', 'published', 'retracted')),
     is_published BOOLEAN DEFAULT FALSE,
+    is_hidden BOOLEAN DEFAULT FALSE,
     started_at TIMESTAMPTZ,
     submitted_at TIMESTAMPTZ DEFAULT NOW(),
     graded_at TIMESTAMPTZ,
@@ -102,6 +139,31 @@ ALTER TABLE exam_access_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE violation_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analytics_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE school_settings ENABLE ROW LEVEL SECURITY;
+
+-- School Settings Policies (service key manages, anyone can read)
+DROP POLICY IF EXISTS "school_select_all" ON school_settings;
+CREATE POLICY "school_select_all" ON school_settings FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "school_update_service" ON school_settings;
+CREATE POLICY "school_update_service" ON school_settings FOR UPDATE USING (true);
+
+DROP POLICY IF EXISTS "school_insert_service" ON school_settings;
+CREATE POLICY "school_insert_service" ON school_settings FOR INSERT WITH CHECK (true);
+
+-- Classes Policies
+DROP POLICY IF EXISTS "classes_select_all" ON classes;
+CREATE POLICY "classes_select_all" ON classes FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "classes_insert_service" ON classes;
+CREATE POLICY "classes_insert_service" ON classes FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "classes_update_service" ON classes;
+CREATE POLICY "classes_update_service" ON classes FOR UPDATE USING (true);
+
+DROP POLICY IF EXISTS "classes_delete_service" ON classes;
+CREATE POLICY "classes_delete_service" ON classes FOR DELETE USING (true);
 
 -- Profiles Policies
 DROP POLICY IF EXISTS "profiles_select_own" ON profiles;
@@ -242,6 +304,16 @@ CREATE TRIGGER set_submissions_updated_at
 DROP TRIGGER IF EXISTS set_analytics_cache_updated_at ON analytics_cache;
 CREATE TRIGGER set_analytics_cache_updated_at
     BEFORE UPDATE ON analytics_cache
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS set_classes_updated_at ON classes;
+CREATE TRIGGER set_classes_updated_at
+    BEFORE UPDATE ON classes
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS set_school_settings_updated_at ON school_settings;
+CREATE TRIGGER set_school_settings_updated_at
+    BEFORE UPDATE ON school_settings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Storage bucket for exam PDFs

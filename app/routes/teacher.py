@@ -8,6 +8,70 @@ from app.services.pdf_service import upload_pdf
 teacher_bp = Blueprint("teacher", __name__)
 
 
+def _is_mcq_correct(student_ans, key_val):
+    if key_val == "bonus":
+        return bool(student_ans and student_ans.strip())
+    if isinstance(key_val, list):
+        if not student_ans:
+            return False
+        return student_ans in key_val
+    return student_ans == key_val
+
+
+def _recalculate_scores(exam_id):
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    if not exam:
+        return
+    answer_key = exam.get("answer_key") or {}
+    question_types = exam.get("question_types") or {}
+    question_weights = exam.get("question_weights") or {}
+    total_q = exam.get("total_questions", 0)
+    if not question_weights and total_q > 0:
+        mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
+        if mcq_count > 0:
+            each = round(100 / mcq_count, 2)
+            for i in range(total_q):
+                if question_types.get(str(i), "mcq") == "mcq":
+                    question_weights[str(i)] = each
+    subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
+    for sub in subs:
+        answers = sub.get("answers") or {}
+        earned = 0.0
+        for i in range(total_q):
+            qtype = question_types.get(str(i), "mcq")
+            key_val = answer_key.get(str(i))
+            w = float(question_weights.get(str(i), 0))
+            if w <= 0:
+                continue
+            if qtype == "mcq":
+                if _is_mcq_correct(answers.get(str(i)), key_val):
+                    earned += w
+        fb = sub.get("teacher_feedback") or {}
+        fb_scores = fb.get("scores", {}) or {}
+        for qi, sv in fb_scores.items():
+            if sv is not None and sv != "":
+                ew = float(question_weights.get(str(qi), 0))
+                if ew > 0:
+                    earned += float(sv) / 100.0 * ew
+        final = round(min(earned, 100), 2)
+        penalty = float(sub.get("penalty") or 0)
+        final = max(0, round(final - penalty, 2))
+        mcq_correct = 0
+        mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
+        for i in range(total_q):
+            qtype = question_types.get(str(i), "mcq")
+            key_val = answer_key.get(str(i))
+            if qtype == "mcq" and key_val:
+                if _is_mcq_correct(answers.get(str(i)), key_val):
+                    mcq_correct += 1
+        mcq_score = round((mcq_correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
+        supabase.table("submissions").update({
+            "score": mcq_score,
+            "final_score": final,
+        }).eq("id", sub["id"]).execute()
+
+
 @teacher_bp.route("/dashboard")
 @teacher_or_admin_required
 def dashboard():
@@ -26,7 +90,8 @@ def dashboard():
 
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
 
-    return render_template("teacher/dashboard.html", exams=exams, total_students=total_students, avg_score=avg_score)
+    user_name = g.user_name or g.user_email or ""
+    return render_template("teacher/dashboard.html", exams=exams, total_students=total_students, avg_score=avg_score, all_scores=all_scores, user_name=user_name)
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
@@ -45,17 +110,13 @@ def exam_form():
     action = request.form.get("action", "save_draft")
 
     question_types = json.loads(request.form.get("question_types", "{}"))
-    answer_key = {}
+    answer_key = json.loads(request.form.get("answer_key", "{}"))
+    question_weights = json.loads(request.form.get("question_weights", "{}"))
     question_audio = {}
     question_canvas = {}
     for i in range(total_questions):
         qtype = question_types.get(str(i), "mcq")
-        if qtype == "mcq":
-            answer_key[str(i)] = request.form.get(f"answer_{i}", "A")
-        elif qtype == "essay_text":
-            answer_key[str(i)] = "essay_text"
-        else:
-            answer_key[str(i)] = "essay_canvas"
+        if qtype != "mcq":
             question_canvas[str(i)] = True
         audio_url = request.form.get(f"audio_{i}", "").strip()
         youtube_url = request.form.get(f"youtube_{i}", "").strip()
@@ -78,10 +139,15 @@ def exam_form():
         "status": "active" if action == "save_active" else "draft",
         "answer_key": answer_key,
         "question_types": question_types,
+        "question_weights": question_weights,
         "question_audio": question_audio,
         "question_canvas": question_canvas,
     }
-    res = supabase.table("exams").insert(data).execute()
+    try:
+        res = supabase.table("exams").insert(data).execute()
+    except Exception:
+        data.pop("question_weights", None)
+        res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
     return redirect(f"/teacher/exams/{exam_id}")
 
@@ -94,8 +160,13 @@ def exam_detail(exam_id):
         supabase.table("exams").delete().eq("id", exam_id).execute()
         return jsonify({"success": True})
     if request.method == "GET":
-        res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
-        return render_template("teacher/exam_form.html", exam=res.data)
+        try:
+            res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
+        except Exception:
+            res = supabase.table("exams").select("id,title,subject,total_questions,duration_minutes,passing_score,description,status,answer_key,question_types,question_audio,question_canvas,teacher_id,created_at").eq("id", exam_id).single().execute()
+        exam_data = res.data
+        exam_data.setdefault("question_weights", {})
+        return render_template("teacher/exam_form.html", exam=exam_data)
 
     title = request.form.get("title")
     subject = request.form.get("subject")
@@ -105,17 +176,13 @@ def exam_detail(exam_id):
     description = request.form.get("description", "")
     action = request.form.get("action", "save_draft")
     question_types = json.loads(request.form.get("question_types", "{}"))
-    answer_key = {}
+    answer_key = json.loads(request.form.get("answer_key", "{}"))
+    question_weights = json.loads(request.form.get("question_weights", "{}"))
     question_audio = {}
     question_canvas = {}
     for i in range(total_questions):
         qtype = question_types.get(str(i), "mcq")
-        if qtype == "mcq":
-            answer_key[str(i)] = request.form.get(f"answer_{i}", "A")
-        elif qtype == "essay_text":
-            answer_key[str(i)] = "essay_text"
-        else:
-            answer_key[str(i)] = "essay_canvas"
+        if qtype != "mcq":
             question_canvas[str(i)] = True
         audio_url = request.form.get(f"audio_{i}", "").strip()
         youtube_url = request.form.get(f"youtube_{i}", "").strip()
@@ -137,10 +204,16 @@ def exam_detail(exam_id):
         "status": "active" if action == "save_active" else "draft",
         "answer_key": answer_key,
         "question_types": question_types,
+        "question_weights": question_weights,
         "question_audio": question_audio,
         "question_canvas": question_canvas,
     }
-    supabase.table("exams").update(data).eq("id", exam_id).execute()
+    try:
+        supabase.table("exams").update(data).eq("id", exam_id).execute()
+    except Exception:
+        data.pop("question_weights", None)
+        supabase.table("exams").update(data).eq("id", exam_id).execute()
+    _recalculate_scores(exam_id)
     return redirect(f"/teacher/exams/{exam_id}")
 
 
@@ -188,8 +261,46 @@ def upload_exam_pdf(exam_id):
 @teacher_or_admin_required
 def my_exams():
     supabase = get_supabase()
-    res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).execute()
-    return jsonify(res.data)
+    res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
+    return render_template("teacher/exams.html", exams=res.data or [])
+
+
+@teacher_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])
+@teacher_or_admin_required
+def toggle_exam_status(exam_id):
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("status").eq("id", exam_id).single().execute().data
+    new_status = "draft" if exam["status"] == "active" else "active"
+    supabase.table("exams").update({"status": new_status}).eq("id", exam_id).execute()
+    if request.headers.get("Accept", "") == "application/json" or request.is_json:
+        return jsonify({"success": True, "status": new_status})
+    return redirect(request.referrer or "/teacher/exams")
+
+
+@teacher_bp.route("/exams/<exam_id>/toggle-visibility", methods=["POST"])
+@teacher_or_admin_required
+def toggle_exam_visibility(exam_id):
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("is_published").eq("id", exam_id).single().execute().data
+    new_val = not exam["is_published"]
+    supabase.table("exams").update({"is_published": new_val}).eq("id", exam_id).execute()
+    if request.headers.get("Accept", "") == "application/json" or request.is_json:
+        return jsonify({"success": True, "is_published": new_val})
+    return redirect(request.referrer or "/teacher/exams")
+
+
+@teacher_bp.route("/exams/<exam_id>/delete", methods=["POST"])
+@teacher_or_admin_required
+def delete_exam(exam_id):
+    supabase = get_supabase()
+    supabase.table("violation_logs").delete().eq("exam_id", exam_id).execute()
+    supabase.table("exam_access_codes").delete().eq("exam_id", exam_id).execute()
+    supabase.table("analytics_cache").delete().eq("exam_id", exam_id).execute()
+    supabase.table("submissions").delete().eq("exam_id", exam_id).execute()
+    supabase.table("exams").delete().eq("id", exam_id).execute()
+    if request.headers.get("Accept", "") == "application/json" or request.is_json:
+        return jsonify({"success": True})
+    return redirect("/teacher/exams")
 
 
 @teacher_bp.route("/scan")
@@ -238,6 +349,7 @@ def grade_detail(submission_id):
     supabase = get_supabase()
     sub = supabase.table("submissions").select("*").eq("id", submission_id).single().execute().data
     exam = supabase.table("exams").select("*").eq("id", sub["exam_id"]).single().execute().data
+    exam.setdefault("question_weights", {})
     student = supabase.table("profiles").select("id,full_name,phone").eq("id", sub["student_id"]).single().execute().data or {}
     return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
 
@@ -329,3 +441,93 @@ def bubble_sheet(exam_id):
     )
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"LJK_{exam_id[:8]}.pdf")
+
+
+@teacher_bp.route("/grading")
+@teacher_or_admin_required
+def grading_center():
+    supabase = get_supabase()
+    exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
+    pending_subs = []
+    graded_subs = []
+    if exam_ids:
+        subs = supabase.table("submissions").select("id,student_id,exam_id,score,final_score,status,submitted_at,exams(title),profiles(full_name)").in_("exam_id", exam_ids).order("submitted_at", desc=True).execute().data or []
+        for s in subs:
+            s["student_name"] = (s.get("profiles") or {}).get("full_name", "-") if s.get("profiles") else "-"
+            s["exam_title"] = (s.get("exams") or {}).get("title", "-") if s.get("exams") else "-"
+            if s["status"] == "submitted":
+                pending_subs.append(s)
+            elif s["status"] in ("graded", "published"):
+                graded_subs.append(s)
+    return render_template("teacher/grading.html", pending_subs=pending_subs, graded_subs=graded_subs)
+
+
+@teacher_bp.route("/analytics")
+@teacher_or_admin_required
+def analytics():
+    supabase = get_supabase()
+    exams = supabase.table("exams").select("id,title,passing_score").eq("teacher_id", g.user_id).execute().data or []
+    exam_ids = [e["id"] for e in exams]
+    all_scores = []
+    exam_breakdown = []
+    dist_bins = [0, 0, 0, 0, 0]
+    exam_labels = []
+    exam_avgs = []
+    total_submissions = 0
+    pass_count = 0
+    for e in exams:
+        subs = supabase.table("submissions").select("score,final_score").eq("exam_id", e["id"]).execute().data or []
+        scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs if s.get("final_score") or s.get("score")]
+        all_scores.extend(scores)
+        total_submissions += len(subs)
+        passing = e.get("passing_score") or 70
+        pc = sum(1 for sc in scores if sc >= passing)
+        pass_count += pc
+        if scores:
+            exam_breakdown.append({
+                "title": e["title"],
+                "count": len(scores),
+                "avg": round(sum(scores) / len(scores), 1),
+                "max": round(max(scores), 1),
+                "min": round(min(scores), 1),
+                "pass_pct": round(pc / len(scores) * 100),
+            })
+            exam_labels.append(e["title"][:20])
+            exam_avgs.append(round(sum(scores) / len(scores), 1))
+    for sc in all_scores:
+        if sc < 20: dist_bins[0] += 1
+        elif sc < 40: dist_bins[1] += 1
+        elif sc < 60: dist_bins[2] += 1
+        elif sc < 80: dist_bins[3] += 1
+        else: dist_bins[4] += 1
+    avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else 0
+    pass_rate = round(pass_count / len(all_scores) * 100) if all_scores else 0
+    stats = {
+        "total_exams": len(exams),
+        "total_submissions": total_submissions,
+        "avg_score": avg_score,
+        "pass_rate": pass_rate,
+    }
+    return render_template("teacher/analytics.html", stats=stats, exam_breakdown=exam_breakdown, dist_bins=dist_bins, exam_labels=exam_labels, exam_avgs=exam_avgs)
+
+
+@teacher_bp.route("/students")
+@teacher_or_admin_required
+def students():
+    supabase = get_supabase()
+    students = supabase.table("profiles").select("id,full_name,phone,role").eq("role", "student").execute().data or []
+    exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
+    if exam_ids:
+        subs = supabase.table("submissions").select("student_id,score,final_score").in_("exam_id", exam_ids).execute().data or []
+        sub_map = {}
+        for s in subs:
+            sid = s["student_id"]
+            if sid not in sub_map:
+                sub_map[sid] = []
+            sc = float(s.get("final_score") or s.get("score") or 0)
+            sub_map[sid].append(sc)
+        for st in students:
+            st_scores = sub_map.get(st["id"], [])
+            st["sub_count"] = len(st_scores)
+            st["avg_score"] = round(sum(st_scores) / len(st_scores), 1) if st_scores else None
+    return render_template("teacher/students.html", students=students)

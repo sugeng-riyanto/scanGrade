@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Kelola Kelas - ScanGrade{% endblock %}
+{% block page_title %}Kelola Kelas{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang')||'id', search:'', showForm: false, formName:'', formGrade:'', formTeacherId:'' }">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Manage Classes':'Kelola Kelas'"></h2>
+            <p class="text-sm text-slate-500 font-medium mt-0.5">{{ classes|length }} kelas</p>
+        </div>
+        <button @click="showForm=!showForm" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 transition">
+            <i class="fas fa-plus"></i><span x-text="lang==='en'?'Add Class':'Tambah Kelas'"></span>
+        </button>
+    </div>
+
+    <!-- Add form -->
+    <div x-show="showForm" x-transition class="card p-5 space-y-4">
+        <h3 class="font-bold text-slate-800" x-text="lang==='en'?'New Class':'Kelas Baru'"></h3>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <input type="text" x-model="formName" :placeholder="lang==='en'?'Class name (e.g. 7A)':'Nama kelas (mis. 7A)'" class="px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+            <input type="text" x-model="formGrade" :placeholder="lang==='en'?'Grade level (e.g. 7)':'Tingkat (mis. 7)'" class="px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+            <input type="text" x-model="formTeacherId" :placeholder="lang==='en'?'Teacher ID (optional)':'ID Guru (opsional)'" class="px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+        </div>
+        <div class="flex gap-2">
+            <button @click="createClass()" class="bg-brand-600 hover:bg-brand-700 text-white px-5 py-2 rounded-xl font-bold text-sm transition" x-text="lang==='en'?'Save':'Simpan'"></button>
+            <button @click="showForm=false" class="bg-slate-100 text-slate-600 px-5 py-2 rounded-xl font-bold text-sm hover:bg-slate-200 transition" x-text="lang==='en'?'Cancel':'Batal'"></button>
+        </div>
+    </div>
+
+    <input type="text" x-model="search" :placeholder="lang==='en'?'Search classes...':'Cari kelas...'" class="w-full sm:w-80 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for c in classes %}
+        <div class="card card-hover p-5" x-show="!search||'{{ (c.name or '')|lower }}'.includes(search.toLowerCase())">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center font-extrabold">
+                    {{ (c.name or 'K')[:2] }}
+                </div>
+                <button onclick="deleteClass('{{ c.id }}','{{ c.name }}')" class="text-red-400 hover:text-red-600 transition p-1">
+                    <i class="fas fa-trash text-xs"></i>
+                </button>
+            </div>
+            <h3 class="font-bold text-slate-800 text-lg">{{ c.name or '-' }}</h3>
+            <div class="flex gap-3 mt-2 text-xs text-slate-500 font-semibold">
+                <span><i class="fas fa-layer-group mr-1"></i>{{ c.grade_level or '-' }}</span>
+                <span><i class="fas fa-user-graduate mr-1"></i>{{ c.student_count }} siswa</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-1"><i class="fas fa-chalkboard-teacher mr-1"></i>{{ c.teacher_name }}</p>
+        </div>
+        {% endfor %}
+        {% if not classes %}
+        <div class="col-span-full card p-12 text-center text-slate-400">
+            <i class="fas fa-school text-5xl mb-4"></i>
+            <p class="text-lg font-bold" x-text="lang==='en'?'No classes yet':'Belum ada kelas'"></p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function createClass() {
+    var d = Alpine.raw(document.querySelector('[x-data]').__x);
+    var data = {
+        name: d.$data.formName,
+        grade_level: d.$data.formGrade,
+        teacher_id: d.$data.formTeacherId || null,
+        school_id: 1
+    };
+    if (!data.name) { alert('Nama kelas wajib diisi'); return; }
+    fetch('/admin/classes/create', {
+        method: 'POST',
+        headers: {'Accept':'application/json','Content-Type':'application/json'},
+        body: JSON.stringify(data)
+    }).then(r => r.json()).then(d => { if (d.success) location.reload(); else alert('Gagal: '+(d.error||'?')); })
+      .catch(e => alert('Gagal: '+e.message));
+}
+function deleteClass(id, name) {
+    if (!confirm('Yakin hapus kelas "'+name+'"?')) return;
+    fetch('/admin/classes/'+id+'/delete', { method: 'POST', headers: {'Accept':'application/json','Content-Type':'application/json'} })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert('Gagal: '+(d.error||'?')); })
+        .catch(e => alert('Gagal: '+e.message));
+}
+</script>
+{% endblock %}

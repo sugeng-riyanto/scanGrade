@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<style>
+@page { margin: 15mm; size: A4; }
+body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10pt; line-height: 1.5; margin: 0; }
+
+.header { border-bottom: 3px solid #2563eb; padding-bottom: 10px; margin-bottom: 16px; }
+.header h1 { font-size: 16pt; color: #1e293b; margin: 0 0 4px; }
+.header .meta { font-size: 8pt; color: #64748b; margin: 2px 0; }
+.header .meta span { margin-right: 16px; }
+.score-box { float: right; text-align: center; border: 3px solid #2563eb; border-radius: 10px; padding: 8px 18px; }
+.score-box .score-val { font-size: 28pt; font-weight: bold; color: #2563eb; }
+.score-box .score-label { font-size: 7pt; color: #64748b; font-weight: bold; text-transform: uppercase; }
+
+.summary-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 12px 0; }
+.summary-table th { background: #f1f5f9; padding: 5px 8px; text-align: left; font-weight: bold; border: 1px solid #d1d5db; }
+.summary-table td { padding: 5px 8px; border: 1px solid #d1d5db; }
+.summary-table td.correct { color: #059669; font-weight: bold; }
+.summary-table td.wrong { color: #dc2626; font-weight: bold; }
+.summary-table td.bonus { color: #7c3aed; font-weight: bold; }
+
+.q-block { margin-bottom: 14px; border: 1px solid #d1d5db; overflow: hidden; }
+.q-block.correct-border { border-color: #86efac; background: #f0fdf4; }
+.q-block.wrong-border { border-color: #fca5a5; background: #fef2f2; }
+.q-header { background: #f1f5f9; padding: 5px 10px; font-weight: bold; font-size: 9pt; border-bottom: 1px solid #d1d5db; }
+.q-header .q-num { color: #1e293b; }
+.q-header .q-type { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 8px; border-radius: 99px; }
+.q-header .q-type.mcq { background: #dbeafe; color: #1d4ed8; }
+.q-header .q-type.essay { background: #fef3c7; color: #92400e; }
+.q-body { padding: 8px 10px; }
+
+.mcq-answer .label { color: #64748b; font-weight: bold; }
+.mcq-answer .value { font-weight: bold; }
+.mcq-answer .value.correct { color: #059669; }
+.mcq-answer .value.wrong { color: #dc2626; }
+
+.essay-page-wrap { position: relative; border: 1px solid #d1d5db; overflow: hidden; background: #fff; margin: 6px 0; }
+.essay-page-wrap .pdf-bg { width: 100%; display: block; }
+.essay-page-wrap .overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.text-box-overlay { position: absolute; min-width: 40px; }
+.text-box-overlay .box-content { font-size: 9px; padding: 2px 5px; border-radius: 4px; word-break: break-word; white-space: pre-wrap; }
+.text-box-overlay.student .box-content { border: 2px solid #f97316; background: #ffffffee; }
+.text-box-overlay.teacher .box-content { border: 2px dashed #059669; background: #ecfdf5ee; }
+
+.teacher-note { margin-top: 6px; font-size: 8pt; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 4px 8px; color: #065f46; }
+
+.weight-badge { font-size: 7pt; padding: 1px 6px; border-radius: 99px; font-weight: bold; background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; }
+
+.score-row { width: 100%; border-collapse: collapse; margin: 12px 0; }
+.score-row td { text-align: center; padding: 8px; border-radius: 8px; width: 33%; }
+.score-row td.mcq-cell { background: #ecfdf5; }
+.score-row td.penalty-cell { background: #fef2f2; }
+.score-row td.final-cell { background: #fff7ed; border: 1px solid #fed7aa; }
+.score-row td .val { font-size: 14pt; font-weight: bold; }
+.score-row td.mcq-cell .val { color: #059669; }
+.score-row td.penalty-cell .val { color: #dc2626; }
+.score-row td.final-cell .val { color: #ea580c; }
+.score-row td .lbl { font-size: 7pt; font-weight: bold; color: #64748b; }
+
+.footer { margin-top: 20px; padding-top: 8px; border-top: 2px solid #e2e8f0; font-size: 7pt; color: #94a3b8; text-align: center; }
+</style>
+</head>
+<body>
+
+{% set exam = submission.exam or {} %}
+{% set fb = submission.teacher_feedback or {} %}
+{% set fb_scores = fb.get('scores', {}) %}
+{% set fb_comments = fb.get('comments', {}) %}
+{% set fb_overlay = fb.get('overlay_pages', {}) %}
+{% set answer_key = exam.get('answer_key', {}) %}
+{% set question_types = exam.get('question_types', {}) %}
+{% set question_weights = exam.get('question_weights', {}) %}
+{% set total_q = exam.get('total_questions', 0) %}
+{% set pdf_pages = exam.get('pdf_page_urls', []) or [] %}
+{% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else None) %}
+{% set answers = submission.answers or {} %}
+
+<div class="header">
+    <div class="score-box">
+        <div class="score-val">{{ score if score is not none else '-' }}</div>
+        <div class="score-label">Nilai Akhir</div>
+    </div>
+    <h1>{{ exam.get('title', 'Ujian') }}</h1>
+    <div class="meta">
+        <span><strong>Siswa:</strong> {{ student_name }}</span>
+        <span><strong>Mata Pelajaran:</strong> {{ exam.get('subject', '-') }}</span>
+        <span><strong>Soal:</strong> {{ total_q }} butir</span>
+    </div>
+    <div class="meta">
+        <span><strong>Dikumpulkan:</strong> {{ submission.submitted_at if submission.submitted_at else '-' }}</span>
+        <span><strong>MCQ:</strong> {{ submission.score if submission.score is not none else '-' }}</span>
+        <span><strong>Penalti:</strong> {{ submission.penalty if submission.penalty is not none else 0 }}</span>
+        <span><strong>Status:</strong> {{ submission.status }}</span>
+    </div>
+    <div style="clear:both;"></div>
+</div>
+
+<table class="score-row">
+    <tr>
+        <td class="mcq-cell"><div class="val">{{ submission.score if submission.score is not none else 0 }}</div><div class="lbl">SKOR MCQ</div></td>
+        <td class="penalty-cell"><div class="val">{{ submission.penalty if submission.penalty is not none else 0 }}</div><div class="lbl">PENALTI</div></td>
+        <td class="final-cell"><div class="val">{{ score if score is not none else 0 }}</div><div class="lbl">NILAI AKHIR</div></td>
+    </tr>
+</table>
+
+{% if answers is mapping and total_q > 0 %}
+<table class="summary-table">
+    <thead>
+        <tr><th>No</th><th>Tipe</th><th>Jawaban Siswa</th><th>Kunci</th><th>Hasil</th><th>Bobot</th>
+        {% if submission.status in ('graded', 'published') %}<th>Skor Guru</th><th>Komentar</th>{% endif %}</tr>
+    </thead>
+    <tbody>
+    {% for i in range(total_q) %}
+        {% set q_idx_str = i|string %}
+        {% set qtype = (question_types or {}).get(i|string, 'mcq') %}
+        {% set correct = answer_key.get(i|string, '') %}
+        {% set student_ans = answers.get(i|string, '') %}
+        {% set is_bonus = correct == 'bonus' %}
+        {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
+        {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
+        {% set qweight = question_weights.get(q_idx_str, '') %}
+        {% set teacher_score = fb_scores.get(q_idx_str, '') %}
+        {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
+        <tr>
+            <td>{{ i + 1 }}</td>
+            <td>{{ 'MCQ' if qtype == 'mcq' else 'Esai' }}</td>
+            <td>{{ student_ans if student_ans is string else '--' }}</td>
+            <td>{{ correct_list | join(', ') if correct_list else ('Bonus' if is_bonus else ('Esai' if qtype != 'mcq' else '--')) }}</td>
+            <td class="{% if is_bonus %}bonus{% elif is_correct %}correct{% elif qtype != 'mcq' %}{% else %}wrong{% endif %}">
+                {% if is_bonus %}★{% elif is_correct %}✓{% elif qtype != 'mcq' %}--{% else %}✗{% endif %}
+            </td>
+            <td>{{ qweight if qweight else '--' }}</td>
+            {% if submission.status in ('graded', 'published') %}
+            <td>{{ teacher_score if teacher_score is defined and teacher_score != '' else '--' }}</td>
+            <td>{{ teacher_comment if teacher_comment else '--' }}</td>
+            {% endif %}
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% for i in range(total_q) %}
+{% set q_idx_str = i|string %}
+{% set qtype = (question_types or {}).get(i|string, 'mcq') %}
+{% set correct = answer_key.get(i|string, '') %}
+{% set student_ans = answers.get(i|string, '') %}
+{% set is_bonus = correct == 'bonus' %}
+{% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
+{% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
+{% set teacher_score = fb_scores.get(q_idx_str, '') %}
+{% set teacher_comment = fb_comments.get(q_idx_str, '') %}
+{% set teacher_overlay = fb_overlay.get(q_idx_str, {}) %}
+{% set qweight = question_weights.get(q_idx_str, 0) %}
+{% set essay_ans = student_ans if student_ans is mapping else {} %}
+
+<div class="q-block {% if qtype == 'mcq' and submission.status in ('graded', 'published') %}{% if is_correct %}correct-border{% else %}wrong-border{% endif %}{% endif %}">
+    <div class="q-header">
+        <span class="q-num">Soal #{{ i + 1 }}
+            {% if qweight %} <span class="weight-badge">{{ qweight }} poin</span>{% endif %}
+        </span>
+        <span class="q-type {{ 'mcq' if qtype == 'mcq' else 'essay' }}">{{ 'MCQ' if qtype == 'mcq' else 'ESAI' }}</span>
+    </div>
+    <div class="q-body">
+        {% if qtype == 'mcq' %}
+            <div class="mcq-answer">
+                <span class="label">Jawaban: </span>
+                <span class="value {% if submission.status in ('graded','published') %}{% if is_correct %}correct{% else %}wrong{% endif %}{% endif %}">{{ student_ans or '-' }}</span>
+                {% if submission.status in ('graded', 'published') %}
+                {% if is_bonus %}
+                <span style="color:#7c3aed; font-weight:bold; margin-left:8px;">★ Bonus</span>
+                {% elif correct_list %}
+                <span class="label" style="margin-left:12px;">Kunci: </span>
+                <span class="value correct">{{ correct_list | join(', ') }}</span>
+                {% endif %}
+                {% if is_correct %}<span style="color:#059669; margin-left:8px;">✓</span>
+                {% else %}<span style="color:#dc2626; margin-left:8px;">✗</span>{% endif %}
+                {% endif %}
+            </div>
+            {% if teacher_score is defined and teacher_score != '' %}
+            <div class="teacher-note"><strong>Guru:</strong> {{ teacher_score }}{% if teacher_comment %} — {{ teacher_comment }}{% endif %}</div>
+            {% endif %}
+        {% else %}
+            {% if essay_ans is mapping and essay_ans.get('pages') %}
+                {% set s_pages = essay_ans.get('pages', {}) %}
+                {% for p_idx_str, p_data in s_pages.items() %}
+                {% set p_idx = p_idx_str|int %}
+                {% set pdf_idx = p_idx if (s_pages and '0' in s_pages) else (p_idx - 1) %}
+                {% set pdf_url = pdf_pages[pdf_idx] if (pdf_idx >= 0 and pdf_idx < (pdf_pages|length)) else '' %}
+                {% set ov_key = p_idx_str %}
+                {% set ov_data = teacher_overlay.get(ov_key, {}) %}
+                {% set canvas_raw = p_data.get('canvas', '') %}
+                {% set is_png = canvas_raw.startswith('data:image/png') %}
+                {% set has_canvas = canvas_raw and canvas_raw|length > (800 if is_png else 3000) %}
+                {% set has_textboxes = p_data.get('textBoxes') and p_data.get('textBoxes')|length > 0 %}
+                {% set ov_canvas_raw = ov_data.get('canvas', '') %}
+                {% set is_ov_png = ov_canvas_raw.startswith('data:image/png') %}
+                {% set has_ov_canvas = ov_canvas_raw and ov_canvas_raw|length > (800 if is_ov_png else 1000) %}
+                {% set has_ov_textboxes = ov_data.get('textBoxes') and ov_data.get('textBoxes')|length > 0 %}
+
+                {% if pdf_url or has_canvas or has_textboxes or has_ov_canvas or has_ov_textboxes %}
+                <div class="essay-page-wrap">
+                    {% if pdf_url %}
+                    <img src="{{ pdf_url }}" class="pdf-bg">
+                    {% elif has_canvas %}
+                    <img src="{{ canvas_raw }}" class="pdf-bg">
+                    {% else %}
+                    <div class="pdf-bg" style="min-height:200px; background:#f5f5f4;">&nbsp;</div>
+                    {% endif %}
+                    {% if has_canvas and pdf_url %}
+                    <img src="{{ canvas_raw }}" class="overlay-img">
+                    {% endif %}
+                    {% for box in (p_data.get('textBoxes') or []) %}
+                    {% if box.text and box.text.strip() %}
+                    <div class="text-box-overlay student" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%;">
+                        <div class="box-content">{{ box.text }}</div>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                    {% if has_ov_canvas %}
+                    <img src="{{ ov_canvas_raw }}" class="overlay-img">
+                    {% endif %}
+                    {% for box in (ov_data.get('textBoxes') or []) %}
+                    {% if box.text and box.text.strip() %}
+                    <div class="text-box-overlay teacher" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%;">
+                        <div class="box-content">{{ box.text }}</div>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                {% elif canvas_raw and canvas_raw|length > 100 %}
+                <div class="essay-page-wrap">
+                    <img src="{{ canvas_raw }}" class="pdf-bg">
+                </div>
+                {% else %}
+                <div style="font-size:8pt; color:#94a3b8; font-style:italic;">Halaman {{ p_idx + 1 }} — tidak ada jawaban</div>
+                {% endif %}
+                {% endfor %}
+            {% else %}
+                {% if student_ans is string and student_ans %}
+                <p style="font-size:9pt; font-weight:bold; color:#475569;">{{ student_ans }}</p>
+                {% else %}
+                <p style="font-size:8pt; color:#94a3b8; font-style:italic;">Jawaban kosong</p>
+                {% endif %}
+            {% endif %}
+
+            {% if teacher_score is defined and teacher_score != '' or teacher_comment %}
+            <div class="teacher-note">
+                <strong>Koreksi Guru:</strong>
+                {% if teacher_score is defined and teacher_score != '' %} Skor {{ teacher_score }}{% endif %}
+                {% if teacher_comment %} — {{ teacher_comment }}{% endif %}
+            </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<p style="text-align:center; color:#94a3b8; padding:20px;">Data jawaban tidak tersedia</p>
+{% endif %}
+
+<div class="footer">ScanGrade — Dicetak pada {{ submission.submitted_at if submission.submitted_at else '-' }}</div>
+</body>
+</html>

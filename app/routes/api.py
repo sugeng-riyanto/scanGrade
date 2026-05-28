@@ -187,6 +187,95 @@ def grade_auto_save(submission_id):
     return jsonify({"saved": True, "at": int(time.time())})
 
 
+@api_bp.route("/grade/batch", methods=["POST"])
+@login_required
+def grade_batch():
+    """Batch grade all submissions for an exam. Optimized for <2s grading speed."""
+    import json, time as _time
+    from app.utils.auth import get_supabase, teacher_or_admin_required
+    data = request.get_json()
+    exam_id = data.get("exam_id") if data else None
+    if not exam_id:
+        return jsonify({"error": "exam_id required"}), 400
+    if g.user_role not in ("teacher", "admin"):
+        return jsonify({"error": "Forbidden"}), 403
+    supabase = get_supabase()
+    t0 = _time.time()
+    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "Exam not found"}), 404
+    answer_key = exam.get("answer_key") or {}
+    question_types = exam.get("question_types") or {}
+    question_weights = exam.get("question_weights") or {}
+    total_q = exam.get("total_questions", 0)
+    if not question_weights and total_q > 0:
+        mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
+        if mcq_count > 0:
+            each = round(100 / mcq_count, 2)
+            for i in range(total_q):
+                if question_types.get(str(i), "mcq") == "mcq":
+                    question_weights[str(i)] = each
+    subs = supabase.table("submissions").select("id,answers,penalty,teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
+    graded = 0
+    for sub in subs:
+        answers = sub.get("answers") or {}
+        earned = 0.0
+        for i in range(total_q):
+            qtype = question_types.get(str(i), "mcq")
+            key_val = answer_key.get(str(i))
+            w = float(question_weights.get(str(i), 0))
+            if w <= 0:
+                continue
+            if qtype == "mcq":
+                ans = answers.get(str(i))
+                if key_val == "bonus":
+                    if ans and str(ans).strip():
+                        earned += w
+                elif isinstance(key_val, list):
+                    if ans in key_val:
+                        earned += w
+                elif ans == key_val:
+                    earned += w
+        fb = sub.get("teacher_feedback") or {}
+        fb_scores = fb.get("scores", {}) or {}
+        for qi, sv in fb_scores.items():
+            if sv is not None and sv != "":
+                ew = float(question_weights.get(str(qi), 0))
+                if ew > 0:
+                    earned += float(sv) / 100.0 * ew
+        final = round(min(earned, 100), 2)
+        penalty = float(sub.get("penalty") or 0)
+        final = max(0, round(final - penalty, 2))
+        mcq_correct = 0
+        mcq_count_q = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
+        for i in range(total_q):
+            qtype = question_types.get(str(i), "mcq")
+            key_val = answer_key.get(str(i))
+            if qtype == "mcq" and key_val:
+                ans = answers.get(str(i))
+                if key_val == "bonus":
+                    if ans and str(ans).strip():
+                        mcq_correct += 1
+                elif isinstance(key_val, list):
+                    if ans in key_val:
+                        mcq_correct += 1
+                elif ans == key_val:
+                    mcq_correct += 1
+        mcq_score = round((mcq_correct / max(mcq_count_q, 1)) * 100, 2) if mcq_count_q > 0 else 0
+        supabase.table("submissions").update({
+            "score": mcq_score,
+            "final_score": final,
+        }).eq("id", sub["id"]).execute()
+        graded += 1
+    elapsed = round((_time.time() - t0) * 1000)
+    return jsonify({
+        "success": True,
+        "graded": graded,
+        "elapsed_ms": elapsed,
+        "per_submission_ms": round(elapsed / max(graded, 1), 1),
+    })
+
+
 @api_bp.route("/scan/save", methods=["POST"])
 @login_required
 def scan_save():

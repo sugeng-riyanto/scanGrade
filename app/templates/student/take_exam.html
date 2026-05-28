@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
+{% block page_title %}{{ exam.title }}{% endblock %}
 {% block head_extra %}
 <script src="{{ url_for('static', filename='js/anti-cheat.js') }}"></script>
 <style>
@@ -27,6 +28,15 @@
 .text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
 .text-box .box-handle:active { cursor: grabbing; }
 .text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.text-box .box-font-controls { display: flex; align-items: center; gap: 3px; position: absolute; top: -40px; left: 0; background: #1e293b; border-radius: 8px; padding: 3px 6px; white-space: nowrap; z-index: 20; }
+.text-box .box-font-controls select, .text-box .box-font-controls input { font-size: 10px; border-radius: 4px; border: 1px solid #475569; background: #334155; color: #f1f5f9; padding: 1px 3px; height: 20px; }
+.text-box .box-font-controls select { max-width: 90px; }
+.text-box .box-font-controls input { width: 40px; text-align: center; }
+.tool-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+.tool-overlay svg { position: absolute; pointer-events: none; }
+.tool-overlay .tool-handle { pointer-events: none; }
+.tool-overlay .tool-rotate { pointer-events: auto; cursor: grab; }
+.tool-overlay .tool-resize { pointer-events: auto; cursor: nwse-resize; }
 .essay-canvas-area { position: relative; }
 @media (max-width: 768px) {
     .sticky-questions { position: static !important; }
@@ -179,11 +189,48 @@
                         </div>
                         <div class="draw-toolbar px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100">
                             <button type="button" @click="setEssayCanvasMode(i, 'pen')" :class="essayCanvasMode[i] === 'pen' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-pencil-alt mr-1"></i> Pena</button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'line')" :class="essayCanvasMode[i] === 'line' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-slash mr-1"></i> Garis</button>
+                            <template x-if="essayCanvasMode[i] === 'line'">
+                                <div class="flex items-center gap-1">
+                                    <select x-model="essayLineWidth[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white w-16">
+                                        <option value="0.5">0.5 px</option>
+                                        <option value="1">1 px</option>
+                                        <option value="1.5">1.5 px</option>
+                                        <option value="2">2 px</option>
+                                        <option value="3">3 px</option>
+                                        <option value="4">4 px</option>
+                                        <option value="6">6 px</option>
+                                        <option value="8">8 px</option>
+                                    </select>
+                                    <select x-model="lineDash[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white">
+                                        <option value="solid">— Solid</option>
+                                        <option value="dashed">--- Dashed</option>
+                                        <option value="dotted">··· Dotted</option>
+                                    </select>
+                                </div>
+                            </template>
                             <button type="button" @click="setEssayCanvasMode(i, 'eraser')" :class="essayCanvasMode[i] === 'eraser' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-eraser mr-1"></i> Hapus</button>
                             <input type="color" :value="essayCanvasColor[i]" @input="essayCanvasColor[i] = $event.target.value; if(canvasDraw[i]) canvasDraw[i].ctx.strokeStyle = $event.target.value" class="w-7 h-7 border-2 rounded-lg cursor-pointer p-0.5">
                             <button type="button" @click="setEssayCanvasMode(i, 'text')" :class="essayCanvasMode[i] === 'text' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-font mr-1"></i> Teks</button>
-                            <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-3 py-1.5 font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-30"><i class="fas fa-undo mr-1"></i> Undo</button>
+                            <template x-if="essayCanvasMode[i] === 'text'">
+                                <div class="flex items-center gap-1">
+                                    <select x-model="textFontSize[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white" @change="updateTextBoxFonts(i)">
+                                        <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
+                                    </select>
+                                    <select x-model="textFontFamily[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white max-w-[90px]" @change="updateTextBoxFonts(i)">
+                                        <option value="Nunito, sans-serif">Nunito</option>
+                                        <option value="Arial, sans-serif">Arial</option>
+                                        <option value="Georgia, serif">Georgia</option>
+                                        <option value="Courier New, monospace">Courier</option>
+                                        <option value="Times New Roman, serif">Times NR</option>
+                                    </select>
+                                </div>
+                            </template>
                             <span class="w-px h-5 bg-stone-200 mx-0.5"></span>
+                            <button type="button" @click="toggleRuler(i)" :class="showRuler[i] ? 'active' : ''" class="px-3 py-1.5 font-bold" title="Penggaris"><i class="fas fa-ruler mr-1"></i> Penggaris</button>
+                            <button type="button" @click="toggleProtractor(i)" :class="showProtractor[i] ? 'active' : ''" class="px-3 py-1.5 font-bold" title="Busur derajat"><i class="fas fa-drafting-compass mr-1"></i> Busur</button>
+                            <span class="w-px h-5 bg-stone-200 mx-0.5"></span>
+                            <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-3 py-1.5 font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-30"><i class="fas fa-undo mr-1"></i> Undo</button>
                             <button type="button" @click="clearCanvas(i)" class="px-3 py-1.5 font-bold text-red-500 hover:bg-red-50 border-red-200"><i class="fas fa-trash-alt mr-1"></i> Hapus</button>
                             <span class="text-xs font-bold text-stone-400 ml-auto" x-text="((textBoxes[i]||{})[page-1]?.length || 0) + ' teks hlm ini' + ((hasDrawn[i]||{})[page-1] ? ', coretan' : '')"></span>
                         </div>
@@ -211,15 +258,93 @@
                                 </div>
                                 <canvas :id="'ec-canvas-' + i"
                                         class="absolute inset-0 w-full h-full"
-                                        style="cursor:crosshair; touch-action:none"></canvas>
+                                        :style="'cursor:' + (essayCanvasMode[i]==='line' ? 'crosshair' : essayCanvasMode[i]==='eraser' ? 'cell' : essayCanvasMode[i]==='text' ? 'text' : 'crosshair') + ';touch-action:none'"></canvas>
+                                 <!-- Ruler overlay -->
+                                <div x-show="showRuler[i]" class="tool-overlay" :id="'ruler-overlay-' + i">
+                                    <svg :id="'ruler-svg-' + i" class="tool-handle" style="overflow:visible;"
+                                         :style="'transform:rotate('+(rulerAngle[i]||0)+'deg);transform-origin:50% 50%;width:'+(rulerWidth[i]||500)+'px;height:'+(rulerWidth[i]||500)*50/400+'px;left:'+(rulerX[i]||50)+'px;top:'+(rulerY[i]||100)+'px;'"
+                                         viewBox="0 0 400 50" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="0" y="0" width="400" height="50" fill="rgba(200,220,255,0.28)" stroke="rgba(0,0,150,0.5)" stroke-width="1" rx="2"/>
+                                        <line x1="0" y1="0" x2="400" y2="0" stroke="rgba(0,0,150,0.6)" stroke-width="0.8"/>
+                                        {% for t in range(41) %}
+                                        <line x1="{{ t*10 }}" x2="{{ t*10 }}" y1="0" y2="{{ 16 if t%10==0 else (11 if t%5==0 else 6) }}" stroke="rgba(0,0,150,0.5)" stroke-width="{{ 1 if t%10==0 else 0.4 }}"/>
+                                        {% endfor %}
+                                        {% for cm in range(0,21,2) %}
+                                        <text x="{{ cm*20-3 }}" y="15" font-size="5.5" fill="rgba(0,0,150,0.7)" font-weight="bold">{{ cm }}</text>
+                                        {% endfor %}
+                                        <line x1="0" y1="50" x2="400" y2="50" stroke="rgba(150,0,0,0.6)" stroke-width="0.8"/>
+                                        {% for t in range(33) %}
+                                        <line x1="{{ t*12.5 }}" x2="{{ t*12.5 }}" y1="50" y2="{{ 34 if t%4==0 else (39 if t%2==0 else 45) }}" stroke="rgba(150,0,0,0.5)" stroke-width="{{ 1 if t%4==0 else 0.4 }}"/>
+                                        {% endfor %}
+                                        {% for inch in range(9) %}
+                                        <text x="{{ inch*50-3 }}" y="48" font-size="5.5" fill="rgba(150,0,0,0.7)" font-weight="bold">{{ inch }}″</text>
+                                        {% endfor %}
+                                        <line x1="0" y1="25" x2="400" y2="25" stroke="rgba(255,0,0,0.5)" stroke-width="1.2" stroke-dasharray="6,3"/>
+                                        <text x="2" y="23" font-size="4.5" fill="rgba(0,0,150,0.5)" font-weight="bold">cm</text>
+                                        <text x="2" y="32" font-size="4.5" fill="rgba(150,0,0,0.5)" font-weight="bold">inch</text>
+                                    </svg>
+                                    <div class="absolute flex items-center gap-1.5 bg-slate-800/90 text-white rounded-lg px-2.5 py-1.5 text-[10px] font-bold pointer-events-auto" :style="'left:'+(rulerX[i]||50)+'px;top:'+((rulerY[i]||100)-32)+'px;'">
+                                        <i class="fas fa-grip-lines cursor-move" @mousedown.stop="startToolDrag(i,'ruler',$event)" @touchstart.stop="startToolDrag(i,'ruler',$event)" title="Drag"></i>
+                                        <i class="fas fa-magnet cursor-pointer" :class="snapRuler[i]?'text-emerald-400':'text-slate-400'" @click="snapRuler[i]=!snapRuler[i]" title="Snap to ruler"></i>
+                                        <i class="fas fa-sync-alt cursor-pointer" @mousedown.stop="startToolRotate(i,'ruler',$event)" @touchstart.stop="startToolRotate(i,'ruler',$event)" title="Rotate"></i>
+                                        <input type="range" min="200" max="1200" :value="rulerWidth[i]||500" @input="rulerWidth[i]=+$event.target.value" class="w-20 h-1.5 accent-orange-400" title="Size">
+                                        <i class="fas fa-times cursor-pointer text-red-400" @click="showRuler[i]=false"></i>
+                                    </div>
+                                </div>
+                                <!-- Protractor overlay -->
+                                <div x-show="showProtractor[i]" class="tool-overlay" :id="'protractor-overlay-' + i">
+                                    <svg :id="'protractor-svg-' + i" class="tool-handle" style="overflow:visible;"
+                                         :style="'transform:rotate('+(protractorAngle[i]||0)+'deg);transform-origin:50% 92.8%;width:'+(protractorSize[i]||350)+'px;height:'+(protractorSize[i]||350)*140/260+'px;left:'+(protractorX[i]||100)+'px;top:'+(protractorY[i]||80)+'px;'"
+                                         viewBox="0 0 260 140" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M 10 130 A 120 120 0 0 1 250 130 Z" fill="rgba(200,220,255,0.15)" stroke="rgba(0,0,150,0.5)" stroke-width="0.8"/>
+                                        {% for d in range(181) %}
+                                        {% set rad = d * 3.14159265 / 180 %}
+                                        {% set inner_r = 102 if d%10==0 else (111 if d%5==0 else 116) %}
+                                        <line x1="{{ (130 + 120*cos(rad))|round(2) }}" y1="{{ (130 - 120*sin(rad))|round(2) }}" x2="{{ (130 + inner_r*cos(rad))|round(2) }}" y2="{{ (130 - inner_r*sin(rad))|round(2) }}" stroke="rgba(0,0,150,0.5)" stroke-width="{{ 1 if d%10==0 else 0.3 }}"/>
+                                        {% endfor %}
+                                        {% for d in range(0,181,10) %}
+                                        {% set rad = d * 3.14159265 / 180 %}
+                                        <text x="{{ (130 + 94*cos(rad) - 5)|round(2) }}" y="{{ (130 - 94*sin(rad) + 3)|round(2) }}" font-size="5.5" fill="rgba(0,0,150,0.65)" font-weight="bold">{{ d }}</text>
+                                        {% endfor %}
+                                        {% for d in range(0,181,10) %}
+                                        {% set rev_rad = (180 - d) * 3.14159265 / 180 %}
+                                        <line x1="{{ (130 + 102*cos(rev_rad))|round(2) }}" y1="{{ (130 - 102*sin(rev_rad))|round(2) }}" x2="{{ (130 + 94*cos(rev_rad))|round(2) }}" y2="{{ (130 - 94*sin(rev_rad))|round(2) }}" stroke="rgba(150,50,0,0.35)" stroke-width="0.7"/>
+                                        <text x="{{ (130 + 85*cos(rev_rad) - 5)|round(2) }}" y="{{ (130 - 85*sin(rev_rad) + 3)|round(2) }}" font-size="5" fill="rgba(150,50,0,0.45)" font-weight="bold">{{ d }}</text>
+                                        {% endfor %}
+                                        <line x1="10" y1="130" x2="250" y2="130" stroke="rgba(255,0,0,0.4)" stroke-width="0.8" stroke-dasharray="5,3"/>
+                                        <line x1="130" y1="130" x2="130" y2="10" stroke="rgba(255,0,0,0.15)" stroke-width="0.5" stroke-dasharray="2,3"/>
+                                        <circle cx="130" cy="130" r="2.5" fill="rgba(255,0,0,0.6)"/>
+                                        <circle cx="130" cy="130" r="5" fill="none" stroke="rgba(255,0,0,0.4)" stroke-width="0.5"/>
+                                    </svg>
+                                    <div class="absolute flex items-center gap-1.5 bg-slate-800/90 text-white rounded-lg px-2.5 py-1.5 text-[10px] font-bold pointer-events-auto" :style="'left:'+(protractorX[i]||100)+'px;top:'+((protractorY[i]||80)-32)+'px;'">
+                                        <i class="fas fa-grip-lines cursor-move" @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" title="Drag"></i>
+                                        <i class="fas fa-magnet cursor-pointer" :class="snapProtractor[i]?'text-emerald-400':'text-slate-400'" @click="snapProtractor[i]=!snapProtractor[i]" title="Snap to protractor"></i>
+                                        <i class="fas fa-sync-alt cursor-pointer" @mousedown.stop="startToolRotate(i,'protractor',$event)" @touchstart.stop="startToolRotate(i,'protractor',$event)" title="Rotate"></i>
+                                        <input type="range" min="180" max="700" :value="protractorSize[i]||350" @input="protractorSize[i]=+$event.target.value" class="w-20 h-1.5 accent-orange-400" title="Size">
+                                        <i class="fas fa-times cursor-pointer text-red-400" @click="showProtractor[i]=false"></i>
+                                    </div>
+                                </div>
                                 <template x-for="(box, bi) in ((textBoxes[i] || {})[page - 1] || [])" :key="'tb-'+bi">
                                     <div class="text-box"
                                          :style="'left:' + (box.x_pct * 100) + '%;top:' + (box.y_pct * 100) + '%;'"
                                          @mousedown="startTextBoxDrag(i, bi, $event)"
                                          @touchstart="startTextBoxDrag(i, bi, $event)">
+                                        <div class="box-font-controls" x-show="essayCanvasMode[i] === 'text'" @mousedown.stop @touchstart.stop>
+                                            <select x-model="box.fontSize" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
+                                                <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
+                                            </select>
+                                            <select x-model="box.fontFamily" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
+                                                <option value="Nunito, sans-serif">Nunito</option>
+                                                <option value="Arial, sans-serif">Arial</option>
+                                                <option value="Georgia, serif">Georgia</option>
+                                                <option value="Courier New, monospace">Courier</option>
+                                                <option value="Times New Roman, serif">Times NR</option>
+                                            </select>
+                                        </div>
                                         <div class="box-handle"><i class="fas fa-grip-lines text-white text-[8px]"></i></div>
                                         <button type="button" class="box-del" @click="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
                                         <textarea x-model="box.text"
+                                                  :style="'font-size:' + (box.fontSize || 14) + 'px; font-family:' + (box.fontFamily || 'Nunito, sans-serif')"
                                                   @input="onTextBoxInput(i); textBoxes = {...(textBoxes || {})}"
                                                   @copy.prevent @paste.prevent @cut.prevent @contextmenu.prevent
                                                   placeholder="Ketik..."
@@ -236,7 +361,22 @@
             <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100">
             <template x-for="(q, i) in questions" :key="i">
                 <div x-show="currentQ === i" class="">
-                    <!-- Audio player -->
+                    <!-- Media players -->
+                    <template x-if="q.youtube">
+                        <div class="mb-3 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl px-4 py-3 border border-red-200/50">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i class="fab fa-youtube text-red-500"></i>
+                                <span class="text-xs font-semibold text-stone-500">Video soal</span>
+                            </div>
+                            <div class="relative w-full" style="padding-bottom:56.25%">
+                                <iframe class="absolute inset-0 w-full h-full rounded-lg"
+                                    :src="youtubeEmbedUrl(q.youtube)"
+                                    frameborder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowfullscreen></iframe>
+                            </div>
+                        </div>
+                    </template>
                     <template x-if="q.audio">
                         <div class="mb-3 flex items-center gap-2 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-2.5 border border-amber-200/50">
                             <i class="fas fa-headphones text-orange-500"></i>
@@ -251,12 +391,11 @@
                                 <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
                                 <div class="flex gap-2">
                                     <template x-for="opt in ['A','B','C','D','E']">
-                                        <label class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
-                                               :class="selectedAnswer(i) === opt ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
-                                            <input type="radio" :name="'q_' + i" :value="opt" class="sr-only"
-                                                   @change="markAnswered(i, opt)" x-model="q.answer">
+                                        <button type="button" @click="markAnswered(i, opt)"
+                                                class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
+                                                :class="q.answer === opt ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
                                             <span x-text="opt"></span>
-                                        </label>
+                                        </button>
                                     </template>
                                 </div>
                                 <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
@@ -318,12 +457,16 @@ function examApp(duration, totalQ) {
         currentQ: 0,
         totalQ: totalQ,
         answered: {},
-        questions: Array.from({length: totalQ}, (_, i) => ({
-            type: ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] || 'mcq',
-            answer: null,
-            audio: QUESTION_AUDIO[i] || null,
-            canvas: QUESTION_CANVAS[i] || false,
-        })),
+        questions: Array.from({length: totalQ}, (_, i) => {
+            const rawMedia = QUESTION_AUDIO[i] || {};
+            return {
+                type: ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] || 'mcq',
+                answer: null,
+                audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
+                youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
+                canvas: QUESTION_CANVAS[i] || false,
+            };
+        }),
         // Per-page per-question storage
         textBoxes: {},         // {i: {p: [{x_pct, y_pct, text}, ...]}}
         hasDrawn: {},          // {i: {p: true/false}}
@@ -341,7 +484,23 @@ function examApp(duration, totalQ) {
         fullCanvasInited: {},
         essayCanvasMode: {},
         essayCanvasColor: {},
+        essayLineWidth: {},
+        lineDash: {},
         ecCanvasInited: {},
+        textFontSize: {},
+        textFontFamily: {},
+        showRuler: {},
+        rulerX: {},
+        rulerY: {},
+        rulerWidth: {},
+        rulerAngle: {},
+        snapRuler: {},
+        showProtractor: {},
+        protractorX: {},
+        protractorY: {},
+        protractorSize: {},
+        protractorAngle: {},
+        snapProtractor: {},
         canScrollUp: false,
         canScrollDown: false,
         syncStatus: navigator.onLine ? 'synced' : 'offline',
@@ -456,7 +615,12 @@ function examApp(duration, totalQ) {
             ctx.lineWidth = 2;
             this.essayCanvasMode[i] = this.essayCanvasMode[i] || 'pen';
             this.essayCanvasColor[i] = this.essayCanvasColor[i] || '#0000ff';
+            this.essayLineWidth[i] = this.essayLineWidth[i] || '1.5';
+            this.lineDash[i] = this.lineDash[i] || 'solid';
+            this.textFontSize[i] = this.textFontSize[i] || 14;
+            this.textFontFamily[i] = this.textFontFamily[i] || 'Nunito, sans-serif';
             let drawing = false, lx = 0, ly = 0;
+            let lineDrawing = false, lineStartX = 0, lineStartY = 0, lineSnapshot = null;
             const getPos = e => {
                 const src = e.touches ? e.touches[0] : e;
                 const r = canvas.getBoundingClientRect();
@@ -471,25 +635,59 @@ function examApp(duration, totalQ) {
                     const y_pct = p.y / canvas.height;
                     if (!this.textBoxes[i]) this.textBoxes[i] = {};
                     if (!this.textBoxes[i][p_idx]) this.textBoxes[i][p_idx] = [];
-                    this.textBoxes[i][p_idx].push({ x_pct, y_pct, text: '' });
+                    this.textBoxes[i][p_idx].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 14, fontFamily: this.textFontFamily[i] || 'Nunito, sans-serif' });
                     this.onTextBoxInput(i);
-                    this.$nextTick(() => {
-                        const t = area.querySelector('.text-box:last-child textarea');
-                        if (t) t.focus();
-                    });
-                    return;
+            this.$nextTick(() => {
+                const area = document.getElementById('ec-area-' + i);
+                if (area) {
+                    const t = area.querySelector('.text-box:last-child textarea');
+                    if (t) t.focus();
+                }
+            });
+            return;
                 }
                 e.preventDefault();
                 const p = getPos(e);
+                if (mode === 'line') {
+                    lineDrawing = true;
+                    lineStartX = p.x; lineStartY = p.y;
+                    lineSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+                    this.hasDrawn[i][p_idx] = true;
+                    this.markAnswered(i, true);
+                    return;
+                }
                 lx = p.x; ly = p.y;
                 drawing = true;
                 if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
                 this.hasDrawn[i][p_idx] = true;
+                this.markAnswered(i, true);
             };
             const onMove = e => {
-                if (!drawing) return;
+                if (!drawing && !lineDrawing) return;
                 e.preventDefault();
-                const p = getPos(e);
+                let p = getPos(e);
+                if (this.snapRuler[i] || this.snapProtractor[i]) {
+                    p = this._snapPoint(i, p.x, p.y);
+                }
+                if (lineDrawing) {
+                    if (lineSnapshot) ctx.putImageData(lineSnapshot, 0, 0);
+                    const lw = parseFloat(this.essayLineWidth[i]) || 1;
+                    ctx.save();
+                    ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
+                    ctx.lineWidth = lw;
+                    ctx.lineCap = 'round';
+                    const dash = this.lineDash[i] || 'solid';
+                    if (dash === 'dashed') ctx.setLineDash([lw * 4, lw * 2]);
+                    else if (dash === 'dotted') ctx.setLineDash([lw, lw * 2]);
+                    else ctx.setLineDash([]);
+                    ctx.beginPath();
+                    ctx.moveTo(lineStartX, lineStartY);
+                    ctx.lineTo(p.x, p.y);
+                    ctx.stroke();
+                    ctx.restore();
+                    return;
+                }
                 if (this.essayCanvasMode[i] === 'eraser') {
                     ctx.globalCompositeOperation = 'destination-out';
                     ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
@@ -500,7 +698,17 @@ function examApp(duration, totalQ) {
                 lx = p.x; ly = p.y;
             };
             const onEnd = e => {
-                if (!drawing) return;
+                if (!drawing && !lineDrawing) return;
+                if (lineDrawing) {
+                    lineDrawing = false;
+                    lineSnapshot = null;
+                    e.preventDefault();
+                    this.saveCanvasState(i);
+                    if (!this.canvasDirty[i]) this.canvasDirty[i] = {};
+                    this.canvasDirty[i][this.page - 1] = true;
+                    this.markDirty();
+                    return;
+                }
                 drawing = false; e.preventDefault();
                 this.saveCanvasState(i);
                 if (!this.canvasDirty[i]) this.canvasDirty[i] = {};
@@ -518,6 +726,7 @@ function examApp(duration, totalQ) {
             canvas.addEventListener('mouseup', onEnd);
             canvas.addEventListener('mouseleave', () => {
                 if (drawing) { drawing = false; this.saveCanvasState(i); }
+                if (lineDrawing) { lineDrawing = false; lineSnapshot = null; this.saveCanvasState(i); }
             });
             canvas.addEventListener('touchstart', onStart, { passive: false });
             canvas.addEventListener('touchmove', onMove, { passive: false });
@@ -538,7 +747,7 @@ function examApp(duration, totalQ) {
             const p = this.page - 1;
             if (!this.textBoxes[i]) this.textBoxes[i] = {};
             if (!this.textBoxes[i][p]) this.textBoxes[i][p] = [];
-            this.textBoxes[i][p].push({ x_pct, y_pct, text: '' });
+            this.textBoxes[i][p].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 14, fontFamily: this.textFontFamily[i] || 'Nunito, sans-serif' });
             this.textBoxes[i] = { ...this.textBoxes[i] }; // trigger reactivity
             this.markAnswered(i, true);
             this.$nextTick(() => {
@@ -617,7 +826,9 @@ function examApp(duration, totalQ) {
                     if (box) {
                         const left = parseFloat(box.style.left) || 0;
                         const top = parseFloat(box.style.top) || 0;
-                        allBoxes.push({ x_pct: left / 100, y_pct: top / 100, text: ta.value });
+                        const fs = ta.style.fontSize ? parseInt(ta.style.fontSize) : 14;
+                        const ff = ta.style.fontFamily || 'Nunito, sans-serif';
+                        allBoxes.push({ x_pct: left / 100, y_pct: top / 100, text: ta.value, fontSize: fs, fontFamily: ff });
                     }
                 });
             }
@@ -625,14 +836,7 @@ function examApp(duration, totalQ) {
             const d = this.canvasDraw[i];
             if (d && d.el) {
                 if (!this.canvasData[i]) this.canvasData[i] = {};
-                const src = d.el;
-                const scale = Math.min(500 / Math.max(src.width, 1), 1);
-                const c = document.createElement('canvas');
-                c.width = Math.round(src.width * scale);
-                c.height = Math.round(src.height * scale);
-                const cx = c.getContext('2d');
-                cx.drawImage(src, 0, 0, c.width, c.height);
-                this.canvasData[i][p] = c.toDataURL('image/jpeg', 0.4);
+                this.canvasData[i][p] = d.el.toDataURL('image/png');
             }
             if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
             this.hasDrawn[i][p] = !!(d && this._hasNonEmptyCanvas(i));
@@ -678,12 +882,26 @@ function examApp(duration, totalQ) {
             this._saveCurrentPage();
             if (this.page < this.totalPages) { this.page++; this.$nextTick(() => this._restorePage()); }
         },
+        youtubeEmbedUrl(url) {
+            if (!url) return '';
+            let videoId = '';
+            const patterns = [
+                /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+                /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+            ];
+            for (const p of patterns) {
+                const m = url.match(p);
+                if (m) { videoId = m[1]; break; }
+            }
+            if (!videoId) return url;
+            return 'https://www.youtube.com/embed/' + videoId + '?rel=0&modestbranding=1';
+        },
         markAnswered(i, val) {
             this.answered[i] = true;
             this.questions[i].answer = val;
             this.markDirty();
         },
-        selectedAnswer(i) { return this.questions[i].answer; },
+        selectedAnswer(i) { return this.questions[i]?.answer; },
         get answeredCount() { return Object.keys(this.answered).length; },
         _redrawBg(i) {
             const d = this.canvasDraw[i];
@@ -1010,6 +1228,203 @@ function examApp(duration, totalQ) {
                 alert('Internet terputus. Jawaban tersimpan dan akan otomatis dikirim saat internet kembali. JANGAN TUTUP halaman ini.');
                 this._startOfflineSubmitPoll();
             });
+        },
+        applyBoxFont(box) {
+            box.fontSize = box.fontSize || this.textFontSize[this.currentQ] || 14;
+            box.fontFamily = box.fontFamily || this.textFontFamily[this.currentQ] || 'Nunito, sans-serif';
+        },
+        updateTextBoxFonts(i) {
+            const p = this.page - 1;
+            const boxes = (this.textBoxes[i] || {})[p] || [];
+            boxes.forEach(b => {
+                if (!b.fontSize) b.fontSize = this.textFontSize[i] || 14;
+                if (!b.fontFamily) b.fontFamily = this.textFontFamily[i] || 'Nunito, sans-serif';
+            });
+            this.textBoxes = {...(this.textBoxes || {})};
+        },
+        _snapPoint(i, px, py) {
+            const SNAP_DIST = 15;
+            let bestDist = SNAP_DIST + 1, bestPt = null;
+            const canvas = this.canvasDraw[i]?.el;
+            if (!canvas) return { x: px, y: py };
+            const cw = canvas.width, ch = canvas.height;
+            const canvasRect = canvas.getBoundingClientRect();
+            const scaleX = cw / canvasRect.width;
+            const scaleY = ch / canvasRect.height;
+            const toCanvas = (clientX, clientY) => ({
+                x: (clientX - canvasRect.left) * scaleX,
+                y: (clientY - canvasRect.top) * scaleY
+            });
+            if (this.snapRuler[i] && this.showRuler[i]) {
+                const svgEl = document.getElementById('ruler-svg-' + i);
+                if (svgEl) {
+                    const svgRect = svgEl.getBoundingClientRect();
+                    const angle = (this.rulerAngle[i] || 0) * Math.PI / 180;
+                    const cosA = Math.cos(angle), sinA = Math.sin(angle);
+                    const svgCX = svgRect.left + svgRect.width / 2;
+                    const svgCY = svgRect.top + svgRect.height / 2;
+                    const halfW = svgRect.width / 2;
+                    const halfH = svgRect.height / 2;
+                    const edges = [0, halfH, svgRect.height];
+                    for (const edgeY of edges) {
+                        for (let t = 0; t <= 1; t += 0.02) {
+                            const lx = -halfW + t * svgRect.width;
+                            const ly = edgeY - halfH;
+                            const rotX = lx * cosA - ly * sinA + svgCX;
+                            const rotY = lx * sinA + ly * cosA + svgCY;
+                            const cp = toCanvas(rotX, rotY);
+                            const d = Math.hypot(cp.x - px, cp.y - py);
+                            if (d < bestDist) { bestDist = d; bestPt = cp; }
+                        }
+                    }
+                }
+            }
+            if (this.snapProtractor[i] && this.showProtractor[i]) {
+                const svgEl = document.getElementById('protractor-svg-' + i);
+                if (svgEl) {
+                    const svgRect = svgEl.getBoundingClientRect();
+                    const angle = (this.protractorAngle[i] || 0) * Math.PI / 180;
+                    const cosA = Math.cos(angle), sinA = Math.sin(angle);
+                    const vbW = 260, vbH = 140;
+                    const pcxVb = 130, pcyVb = 130, arcRVb = 120;
+                    const scX = svgRect.width / vbW, scY = svgRect.height / vbH;
+                    const centerPxX = svgRect.left + pcxVb * scX;
+                    const centerPxY = svgRect.top + pcyVb * scY;
+                    const arcRx = arcRVb * scX, arcRy = arcRVb * scY;
+                    for (let deg = 0; deg <= 180; deg += 1) {
+                        const rad = deg * Math.PI / 180;
+                        const lx = arcRx * Math.cos(rad);
+                        const ly = -arcRy * Math.sin(rad);
+                        const rotX = lx * cosA - ly * sinA + centerPxX;
+                        const rotY = lx * sinA + ly * cosA + centerPxY;
+                        const cp = toCanvas(rotX, rotY);
+                        const d = Math.hypot(cp.x - px, cp.y - py);
+                        if (d < bestDist) { bestDist = d; bestPt = cp; }
+                    }
+                    const baseEnds = [
+                        { lx: arcRx, ly: 0 },
+                        { lx: -arcRx, ly: 0 }
+                    ];
+                    for (const end of baseEnds) {
+                        const rotX = end.lx * cosA - end.ly * sinA + centerPxX;
+                        const rotY = end.lx * sinA + end.ly * cosA + centerPxY;
+                        const cp = toCanvas(rotX, rotY);
+                        for (let t = 0; t <= 1; t += 0.02) {
+                            const bx = cp.x + t * (toCanvas(centerPxX - cosA * arcRx, centerPxY - sinA * arcRx).x - cp.x);
+                        }
+                    }
+                    const b1 = toCanvas(
+                        arcRx * cosA + centerPxX,
+                        arcRx * sinA + centerPxY
+                    );
+                    const b2 = toCanvas(
+                        -arcRx * cosA + centerPxX,
+                        -arcRx * sinA + centerPxY
+                    );
+                    for (let t = 0; t <= 1; t += 0.02) {
+                        const bx = b1.x + t * (b2.x - b1.x);
+                        const by = b1.y + t * (b2.y - b1.y);
+                        const d = Math.hypot(bx - px, by - py);
+                        if (d < bestDist) { bestDist = d; bestPt = { x: bx, y: by }; }
+                    }
+                    const cc = toCanvas(centerPxX, centerPxY);
+                    const cd = Math.hypot(cc.x - px, cc.y - py);
+                    if (cd < bestDist) { bestDist = cd; bestPt = cc; }
+                    for (let deg = 0; deg <= 180; deg += 15) {
+                        const rad = deg * Math.PI / 180;
+                        const lx = arcRx * Math.cos(rad);
+                        const ly = -arcRy * Math.sin(rad);
+                        const rotX = lx * cosA - ly * sinA + centerPxX;
+                        const rotY = lx * sinA + ly * cosA + centerPxY;
+                        const from = toCanvas(centerPxX, centerPxY);
+                        const to = toCanvas(rotX, rotY);
+                        for (let t = 0; t <= 1; t += 0.05) {
+                            const lx2 = from.x + t * (to.x - from.x);
+                            const ly2 = from.y + t * (to.y - from.y);
+                            const d = Math.hypot(lx2 - px, ly2 - py);
+                            if (d < bestDist) { bestDist = d; bestPt = { x: lx2, y: ly2 }; }
+                        }
+                    }
+                }
+            }
+            return bestDist <= SNAP_DIST && bestPt ? bestPt : { x: px, y: py };
+        },
+        toggleRuler(i) {
+            this.showRuler[i] = !this.showRuler[i];
+            if (this.showRuler[i]) {
+                this.rulerX[i] = this.rulerX[i] || 30;
+                this.rulerY[i] = this.rulerY[i] || 80;
+                this.rulerWidth[i] = this.rulerWidth[i] || 500;
+                this.rulerAngle[i] = this.rulerAngle[i] || 0;
+                this.snapRuler[i] = this.snapRuler[i] || false;
+            }
+        },
+        toggleProtractor(i) {
+            this.showProtractor[i] = !this.showProtractor[i];
+            if (this.showProtractor[i]) {
+                this.protractorX[i] = this.protractorX[i] || 60;
+                this.protractorY[i] = this.protractorY[i] || 40;
+                this.protractorSize[i] = this.protractorSize[i] || 350;
+                this.protractorAngle[i] = this.protractorAngle[i] || 0;
+                this.snapProtractor[i] = this.snapProtractor[i] || false;
+            }
+        },
+        startToolDrag(i, type, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const src = event.touches ? event.touches[0] : event;
+            const startX = src.clientX, startY = src.clientY;
+            const startLeft = type === 'ruler' ? (this.rulerX[i] || 50) : (this.protractorX[i] || 100);
+            const startTop = type === 'ruler' ? (this.rulerY[i] || 100) : (this.protractorY[i] || 80);
+            const onMove = (ev) => {
+                ev.preventDefault();
+                const s = ev.touches ? ev.touches[0] : ev;
+                const dx = s.clientX - startX, dy = s.clientY - startY;
+                if (type === 'ruler') { this.rulerX[i] = startLeft + dx; this.rulerY[i] = startTop + dy; }
+                else { this.protractorX[i] = startLeft + dx; this.protractorY[i] = startTop + dy; }
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onUp);
+        },
+        startToolRotate(i, type, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const svgEl = document.getElementById(type + '-svg-' + i);
+            if (!svgEl) return;
+            const rect = svgEl.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const src = event.touches ? event.touches[0] : event;
+            const startAngle = Math.atan2(src.clientY - cy, src.clientX - cx);
+            const origAngle = type === 'ruler' ? (this.rulerAngle[i] || 0) : (this.protractorAngle[i] || 0);
+            const origRad = origAngle * Math.PI / 180;
+            const onMove = (ev) => {
+                ev.preventDefault();
+                const s = ev.touches ? ev.touches[0] : ev;
+                const curAngle = Math.atan2(s.clientY - cy, s.clientX - cx);
+                const delta = (curAngle - startAngle) * 180 / Math.PI;
+                const newAngle = origAngle + delta;
+                if (type === 'ruler') this.rulerAngle[i] = newAngle;
+                else this.protractorAngle[i] = newAngle;
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onUp);
         },
         formatTime(s) {
             let m = Math.floor(s / 60), sec = s % 60;

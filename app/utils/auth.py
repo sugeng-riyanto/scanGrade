@@ -28,47 +28,39 @@ def login_required(f):
             g.user_id = user.user.id
             g.user_role = user.user.user_metadata.get("role", "student")
             g.user_token = token
+            g.user_email = user.user.email
+            g.user_name = user.user.user_metadata.get("full_name", "")
         except Exception:
             return _unauthorized()
         return f(*args, **kwargs)
     return wrapper
 
 
+def role_required(*roles):
+    def decorator(f):
+        @functools.wraps(f)
+        @login_required
+        def wrapper(*args, **kwargs):
+            if g.get("user_role") not in roles:
+                if _wants_json():
+                    return jsonify({"error": "Forbidden"}), 403
+                role_redirect = {"admin": "/admin/dashboard", "teacher": "/teacher/dashboard", "student": "/student/dashboard"}
+                return redirect(role_redirect.get(g.get("user_role"), "/auth/login"))
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 def teacher_required(f):
-    @functools.wraps(f)
-    @login_required
-    def wrapper(*args, **kwargs):
-        if g.get("user_role") != "teacher":
-            if _wants_json():
-                return jsonify({"error": "Forbidden"}), 403
-            return redirect("/auth/login")
-        return f(*args, **kwargs)
-    return wrapper
+    return role_required("teacher")(f)
 
 
 def admin_required(f):
-    @functools.wraps(f)
-    @login_required
-    def wrapper(*args, **kwargs):
-        if g.get("user_role") != "admin":
-            if _wants_json():
-                return jsonify({"error": "Forbidden"}), 403
-            return redirect("/auth/login")
-        return f(*args, **kwargs)
-    return wrapper
+    return role_required("admin")(f)
 
 
 def teacher_or_admin_required(f):
-    """Decorator that allows both teachers and admins to access the route."""
-    @functools.wraps(f)
-    @login_required
-    def wrapper(*args, **kwargs):
-        if g.get("user_role") not in ("teacher", "admin"):
-            if _wants_json():
-                return jsonify({"error": "Forbidden"}), 403
-            return redirect("/auth/login")
-        return f(*args, **kwargs)
-    return wrapper
+    return role_required("teacher", "admin")(f)
 
 
 def _unauthorized():

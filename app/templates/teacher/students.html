@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Siswa - ScanGrade{% endblock %}
+{% block page_title %}Daftar Siswa{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id', search: '' }">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Student Roster':'Daftar Siswa'"></h2>
+            <p class="text-sm text-slate-500 font-medium mt-0.5">{{ students|length }} siswa</p>
+        </div>
+        <input type="text" x-model="search" :placeholder="lang==='en'?'Search students...':'Cari siswa...'" class="sm:w-64 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+    </div>
+
+    {% if students %}
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Name':'Nama'"></th>
+                    <th class="px-5 py-3 font-semibold">Phone</th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Submissions':'Pengumpulan'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Avg Score':'Rata-rata'"></th>
+                </tr></thead>
+                <tbody>
+                    {% for s in students %}
+                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition"
+                        x-show="!search || '{{ (s.full_name or '')|lower }}'.includes(search.toLowerCase()) || '{{ (s.phone or '')|lower }}'.includes(search.toLowerCase())">
+                        <td class="px-5 py-3">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center font-bold text-xs shrink-0">
+                                    {{ (s.full_name or 'S')[:1]|upper }}
+                                </div>
+                                <span class="font-semibold text-slate-700">{{ s.full_name or '-' }}</span>
+                            </div>
+                        </td>
+                        <td class="px-5 py-3 text-slate-500 font-medium">{{ s.phone or '-' }}</td>
+                        <td class="px-5 py-3 text-slate-600">{{ s.sub_count or 0 }}</td>
+                        <td class="px-5 py-3 font-bold {% if (s.avg_score or 0) >= 70 %}text-emerald-600{% elif (s.avg_score or 0) >= 50 %}text-amber-600{% else %}text-red-500{% endif %}">
+                            {{ s.avg_score if s.avg_score is not none else '-' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="card p-12 text-center text-slate-400">
+        <i class="fas fa-user-graduate text-5xl mb-4"></i>
+        <p class="text-lg font-bold" x-text="lang==='en'?'No students yet':'Belum ada siswa'"></p>
+        <p class="text-sm font-medium mt-1" x-text="lang==='en'?'Students will appear here after they submit exams':'Siswa akan muncul setelah mengumpulkan ujian'"></p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

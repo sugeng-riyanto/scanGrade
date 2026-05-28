@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Hasil - ScanGrade{% endblock %}
+{% block page_title %}Hasil Ujian{% endblock %}
 {% block content %}
 <div class="space-y-6">
     <div class="flex items-center justify-between">
@@ -93,7 +94,7 @@
                             <td class="py-3 font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
                                 {{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}
                             </td>
-                            <td class="py-3 text-xs font-bold text-stone-500">{{ s.submitted_at[:16] if s.submitted_at else '-' }}</td>
+                            <td class="py-3 text-xs font-bold text-stone-500">{{ s.submitted_at|tz if s.submitted_at else '-' }}</td>
                             <td class="py-3">
                                 <span class="px-3 py-1.5 text-xs font-bold rounded-full
                                     {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700

@@ -141,12 +141,34 @@ def perspective_correct(img: np.ndarray, corners, output_size=(OUT_W, OUT_H)):
     return warped
 
 
-def _bubble_filled(roi: np.ndarray, threshold: float = 0.40) -> bool:
-    """Check if a bubble region is filled (dark enough)."""
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    filled_ratio = cv2.countNonZero(thresh) / (roi.shape[0] * roi.shape[1])
-    return filled_ratio > threshold
+def _bubble_filled(roi: np.ndarray, threshold: float = 0.40) -> tuple:
+    """Check if a bubble region is filled (dark enough).
+
+    Returns (is_filled: bool, fill_ratio: float, mean_darkness: float).
+    Uses both OTSU and adaptive thresholding for higher accuracy.
+    """
+    if roi.size == 0:
+        return False, 0.0, 0.0
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi
+    h, w = gray.shape
+    if h == 0 or w == 0:
+        return False, 0.0, 0.0
+
+    mean_darkness = 255 - np.mean(gray)
+
+    _, thresh_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    filled_otsu = cv2.countNonZero(thresh_otsu) / (h * w)
+
+    block_size = max(3, min(h, w) // 2)
+    if block_size % 2 == 0:
+        block_size += 1
+    thresh_adapt = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                          cv2.THRESH_BINARY_INV, block_size, 5)
+    filled_adapt = cv2.countNonZero(thresh_adapt) / (h * w)
+
+    fill_ratio = max(filled_otsu, filled_adapt)
+    is_filled = fill_ratio > threshold
+    return is_filled, fill_ratio, mean_darkness
 
 
 def detect_answers(
@@ -173,12 +195,15 @@ def detect_answers(
 
     answers = {}
     confidence_map = {}
+    ambiguous = {}
 
     for q_idx in range(total_questions):
         if q_idx not in questions:
             continue
 
         filled_opts = []
+        opt_fill_ratios = {}
+        opt_darkness = {}
         for opt_idx, cx, cy in questions[q_idx]:
             x1 = max(0, cx - b_r - 2)
             y1 = max(0, cy - b_r - 2)
@@ -187,36 +212,48 @@ def detect_answers(
             roi = warped[y1:y2, x1:x2]
             if roi.size == 0:
                 continue
-            if _bubble_filled(roi):
+            is_filled, fill_ratio, mean_dark = _bubble_filled(roi)
+            opt_fill_ratios[opt_idx] = fill_ratio
+            opt_darkness[opt_idx] = mean_dark
+            if is_filled:
                 filled_opts.append(opt_idx)
 
         if len(filled_opts) == 1:
             answers[str(q_idx)] = opt_labels[filled_opts[0]]
-            confidence_map[str(q_idx)] = 1.0
+            confidence_map[str(q_idx)] = min(1.0, opt_fill_ratios.get(filled_opts[0], 0.5) / 0.6)
         elif len(filled_opts) > 1:
-            # Multiple filled: pick darkest one
-            best_opt = filled_opts[0]
-            best_dark = 0
-            for opt_idx in filled_opts:
-                _, _, cx, cy = questions[q_idx][opt_idx]
-                x1 = max(0, cx - b_r)
-                y1 = max(0, cy - b_r)
-                x2 = min(w, cx + b_r)
-                y2 = min(h, cy + b_r)
-                roi = warped[y1:y2, x1:x2]
-                if roi.size == 0:
-                    continue
-                gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                mean_dark = 255 - np.mean(gray_roi)
-                if mean_dark > best_dark:
-                    best_dark = mean_dark
-                    best_opt = opt_idx
-            answers[str(q_idx)] = opt_labels[best_opt]
+            best_opt = max(filled_opts, key=lambda o: opt_darkness.get(o, 0))
+            best_dark = opt_darkness.get(best_opt, 0)
+            second_dark = sorted([opt_darkness.get(o, 0) for o in filled_opts], reverse=True)
+            gap = best_dark - (second_dark[1] if len(second_dark) > 1 else 0)
+            if gap > 15:
+                answers[str(q_idx)] = opt_labels[best_opt]
+                confidence_map[str(q_idx)] = min(1.0, gap / 80)
+            else:
+                ambiguous[str(q_idx)] = [opt_labels[o] for o in filled_opts]
+                answers[str(q_idx)] = opt_labels[best_opt]
+                confidence_map[str(q_idx)] = max(0.3, gap / 80)
+        else:
+            unfilled_dark = [(opt_darkness.get(o, 0), o) for o in range(len(questions[q_idx]))]
+            unfilled_dark.sort(reverse=True)
+            if unfilled_dark and unfilled_dark[0][0] > 30:
+                best_d, best_o = unfilled_dark[0]
+                answers[str(q_idx)] = opt_labels[best_o]
+                confidence_map[str(q_idx)] = max(0.1, best_d / 120)
+            else:
+                confidence_map[str(q_idx)] = 0.0
+
+    high_conf = sum(1 for c in confidence_map.values() if c >= 0.7)
+    avg_conf = round(sum(confidence_map.values()) / max(len(confidence_map), 1), 3)
 
     return {
         "answers": answers,
         "detected": len(answers),
         "total": total_questions,
+        "confidence": confidence_map,
+        "avg_confidence": avg_conf,
+        "high_confidence_count": high_conf,
+        "ambiguous": ambiguous,
     }
 
 

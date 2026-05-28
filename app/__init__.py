@@ -1,10 +1,34 @@
 import logging
+import math as _math
 import time
+from datetime import datetime, timedelta, timezone
 from flask import Flask, g, request, jsonify, redirect
 from flask_cors import CORS
 from supabase import create_client, Client
 
 from app.config import get_config
+
+DEFAULT_TZ_OFFSET = 7
+
+_lru_cache = {}
+_lru_cache_ttl = {}
+_lru_max = 256
+
+
+def cache_get(key, ttl=60):
+    now = time.time()
+    if key in _lru_cache and now - _lru_cache_ttl.get(key, 0) < ttl:
+        return _lru_cache[key]
+    return None
+
+
+def cache_set(key, value):
+    if len(_lru_cache) >= _lru_max:
+        oldest = min(_lru_cache_ttl, key=_lru_cache_ttl.get)
+        _lru_cache.pop(oldest, None)
+        _lru_cache_ttl.pop(oldest, None)
+    _lru_cache[key] = value
+    _lru_cache_ttl[key] = time.time()
 
 
 def create_app(env=None):
@@ -30,6 +54,7 @@ def create_app(env=None):
     _register_blueprints(app)
     _register_error_handlers(app)
     _register_request_logging(app)
+    _register_performance_middleware(app)
 
     import json as _json
 
@@ -46,13 +71,94 @@ def create_app(env=None):
                 return None
         return val
 
+    @app.template_filter("tz")
+    def tz_format_filter(val, fmt="%d %b %Y %H:%M"):
+        if not val:
+            return "-"
+        try:
+            if isinstance(val, str):
+                for fmt_in in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        dt = datetime.strptime(val, fmt_in)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    return val[:16].replace("T", " ")
+            elif isinstance(val, datetime):
+                dt = val
+            else:
+                return str(val)
+            offset = getattr(g, "tz_offset", DEFAULT_TZ_OFFSET)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.astimezone(timezone(timedelta(hours=offset)))
+            return dt.strftime(fmt)
+        except Exception:
+            return str(val)[:16] if val else "-"
+
+    @app.template_filter("tz_short")
+    def tz_short_filter(val):
+        offset = getattr(g, "tz_offset", DEFAULT_TZ_OFFSET)
+        sign = "+" if offset >= 0 else ""
+        return f"UTC{sign}{offset}"
+
+    app.jinja_env.globals["cos"] = _math.cos
+    app.jinja_env.globals["sin"] = _math.sin
+
+    @app.template_global()
+    def greeting():
+        offset = getattr(g, "tz_offset", DEFAULT_TZ_OFFSET)
+        from datetime import timedelta, timezone as _tz
+        now = datetime.now(_tz(timedelta(hours=offset)))
+        h = now.hour
+        if 5 <= h < 11:
+            return "pagi"
+        elif 11 <= h < 15:
+            return "siang"
+        elif 15 <= h < 18:
+            return "sore"
+        else:
+            return "malam"
+
+    @app.template_global()
+    def greeting_en():
+        offset = getattr(g, "tz_offset", DEFAULT_TZ_OFFSET)
+        from datetime import timedelta, timezone as _tz
+        now = datetime.now(_tz(timedelta(hours=offset)))
+        h = now.hour
+        if 5 <= h < 11:
+            return "morning"
+        elif 11 <= h < 15:
+            return "afternoon"
+        elif 15 <= h < 18:
+            return "evening"
+        else:
+            return "evening"
+
     @app.route("/")
     def index():
+        token = request.cookies.get("access_token")
+        if token:
+            try:
+                user = app.extensions["supabase_auth"].auth.get_user(token)
+                role = user.user.user_metadata.get("role", "student")
+                redirect_map = {"admin": "/admin/dashboard", "teacher": "/teacher/dashboard", "student": "/student/dashboard"}
+                return redirect(redirect_map.get(role, "/student/dashboard"))
+            except Exception:
+                pass
         return redirect("/auth/login")
 
     @app.route("/health")
     def health():
-        return jsonify({"status": "ok", "supabase": "connected"})
+        return jsonify({
+            "status": "ok",
+            "supabase": "connected",
+            "cache_size": len(_lru_cache),
+            "uptime_ms": int((time.time() - app._start_time) * 1000) if hasattr(app, '_start_time') else 0,
+        })
+
+    app._start_time = time.time()
 
     return app
 
@@ -103,11 +209,29 @@ def _register_error_handlers(app):
         return jsonify({"error": "Internal server error"}), 500
 
 
+def _register_performance_middleware(app):
+    @app.after_request
+    def add_performance_headers(response):
+        if hasattr(g, "start"):
+            duration_ms = int((time.time() - g.start) * 1000)
+            response.headers["X-Response-Time-ms"] = str(duration_ms)
+        if request.path.startswith("/static/"):
+            response.cache_control.max_age = 86400
+            response.cache_control.public = True
+        elif request.path.startswith("/api/") or request.path.startswith("/health"):
+            response.cache_control.no_cache = True
+        return response
+
+
 def _register_request_logging(app):
     @app.before_request
     def init_request():
         g.start = time.time()
         g.user_id = None
+        try:
+            g.tz_offset = int(request.cookies.get("tz_offset", str(DEFAULT_TZ_OFFSET)))
+        except (ValueError, TypeError):
+            g.tz_offset = DEFAULT_TZ_OFFSET
 
     if app.debug:
         @app.after_request
@@ -119,6 +243,7 @@ def _register_request_logging(app):
                     request.method,
                     request.path,
                     response.status_code,
+                    duration,
                     g.get("user_id"),
                 )
             return response
