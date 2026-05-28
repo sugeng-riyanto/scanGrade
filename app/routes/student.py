@@ -25,16 +25,25 @@ def take_exam(exam_id):
 @student_bp.route("/exams/<exam_id>/submit", methods=["POST"])
 @login_required
 def submit_exam(exam_id):
+    import json
     supabase = get_supabase()
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
 
     answers = {}
-    answers_json = request.form.get("answers_json", "{}")
-    try:
-        import json
-        answers = json.loads(answers_json)
-    except json.JSONDecodeError:
-        pass
+    if request.is_json:
+        data = request.get_json()
+        answers = data.get("answers_json", data.get("answers", {}))
+        if isinstance(answers, str):
+            try:
+                answers = json.loads(answers)
+            except json.JSONDecodeError:
+                pass
+    else:
+        answers_json = request.form.get("answers_json", "{}")
+        try:
+            answers = json.loads(answers_json)
+        except json.JSONDecodeError:
+            pass
 
     mcq_count = sum(1 for v in (exam.get("answer_key") or {}).values() if v not in ("essay", "essay_text", "essay_canvas"))
     correct = 0
@@ -60,6 +69,8 @@ def submit_exam(exam_id):
         import traceback
         current_app.logger.error("Submit error: %s\n%s", str(e), traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+    if request.is_json:
+        return jsonify({"success": True})
     return redirect("/student/results")
 
 
@@ -68,7 +79,12 @@ def submit_exam(exam_id):
 def results():
     supabase = get_supabase()
     res = supabase.table("submissions") \
-        .select("*") \
+        .select("*, exams(id, title, answer_key, question_types, total_questions, pdf_page_urls)") \
         .eq("student_id", g.user_id) \
+        .order("submitted_at", desc=True) \
         .execute()
-    return render_template("student/results.html", submissions=res.data or [])
+    submissions = res.data or []
+    for s in submissions:
+        if s.get("exams"):
+            s["exam"] = s.pop("exams")
+    return render_template("student/results.html", submissions=submissions)

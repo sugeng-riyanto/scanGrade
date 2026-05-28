@@ -1,10 +1,33 @@
 import io
 import time
+import threading
 from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file
 from app.utils.auth import login_required, get_supabase
 from app.services.anti_cheat_service import validate_violation_log
 
 api_bp = Blueprint("api", __name__)
+
+_sync_locks = {}
+_sync_lock_mutex = threading.Lock()
+_sync_last = {}
+
+
+def _get_sync_lock(user_id, exam_id):
+    key = f"{user_id}:{exam_id}"
+    with _sync_lock_mutex:
+        if key not in _sync_locks:
+            _sync_locks[key] = threading.Lock()
+        return _sync_locks[key]
+
+
+def _check_rate_limit(user_id, exam_id, min_interval=5):
+    key = f"{user_id}:{exam_id}"
+    now = time.time()
+    last = _sync_last.get(key, 0)
+    if now - last < min_interval:
+        return False
+    _sync_last[key] = now
+    return True
 
 
 @api_bp.route("/violation/log", methods=["POST"])
@@ -100,8 +123,50 @@ def student_auto_save():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
-    # Store draft in a submissions draft table or log it
-    # For now, just acknowledge (frontend uses localStorage anyway)
+    return jsonify({"saved": True, "at": int(time.time())})
+
+
+@api_bp.route("/student/sync-draft", methods=["POST"])
+@login_required
+def student_sync_draft():
+    """Sync student draft — lightweight MCQ/text every 20s, canvas every 60s."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"saved": True, "at": int(time.time())})
+    exam_id = data.get("exam_id")
+    answers = data.get("answers", {})
+    is_light = data.get("light", True)
+    if not exam_id:
+        return jsonify({"saved": True, "at": int(time.time())})
+    if not _check_rate_limit(g.user_id, exam_id, min_interval=3 if is_light else 10):
+        return jsonify({"saved": True, "at": int(time.time()), "throttled": True})
+    lock = _get_sync_lock(g.user_id, exam_id)
+    if not lock.acquire(blocking=False):
+        return jsonify({"saved": True, "at": int(time.time()), "busy": True})
+    try:
+        from app.utils.auth import get_supabase
+        supabase = get_supabase()
+        existing = supabase.table("submissions").select("id,status,answers").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
+        if existing and existing[0].get("status") == "draft":
+            if is_light and existing[0].get("answers"):
+                merged = existing[0]["answers"]
+                if isinstance(merged, dict):
+                    merged.update(answers)
+                    answers = merged
+            supabase.table("submissions").update({"answers": answers}).eq("id", existing[0]["id"]).execute()
+        elif not existing:
+            supabase.table("submissions").insert({
+                "exam_id": exam_id,
+                "student_id": g.user_id,
+                "answers": answers,
+                "score": 0,
+                "max_score": 100,
+                "status": "draft",
+            }).execute()
+    except Exception:
+        pass
+    finally:
+        lock.release()
     return jsonify({"saved": True, "at": int(time.time())})
 
 

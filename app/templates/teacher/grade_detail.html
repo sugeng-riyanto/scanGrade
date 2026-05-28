@@ -3,221 +3,224 @@
 {% set fb_scores = feedback.get('scores', {}) %}
 {% set fb_comments = feedback.get('comments', {}) %}
 {% set fb_overlay = feedback.get('overlay_pages', {}) %}
-{% block title %}Detail Koreksi - ScanGrade{% endblock %}
+{% block title %}Koreksi - ScanGrade{% endblock %}
 {% block head_extra %}
 <style>
-.ans-card { transition: all 0.15s; }
-.text-box-overlay { position: absolute; min-width: 80px; z-index: 15; }
-.text-box-overlay .box-content { font-size: 12px; padding: 3px 7px; border-radius: 6px; word-break: break-word; }
-.text-box-overlay.student .box-content { border: 2px solid #f97316; background: rgba(255,255,255,0.92); }
-.text-box-overlay.teacher .box-content { border: 2px dashed #059669; background: rgba(236,253,245,0.92); }
-.text-box-overlay .box-handle { cursor: grab; position: absolute; top: -16px; left: 0; right: 20px; height: 14px; border-radius: 6px 6px 0 0; display: flex; align-items: center; padding: 0 6px; }
-.text-box-overlay.student .box-handle { background: #f97316; }
-.text-box-overlay.teacher .box-handle { background: #059669; }
-.text-box-overlay .box-del { position: absolute; top: -16px; right: 0; width: 18px; height: 14px; border: none; border-radius: 0 6px 0 0; color: white; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.text-box-overlay.teacher .box-del { background: #ef4444; }
-.grade-canvas-wrap { position: relative; overflow: hidden; border-radius: 12px; border: 2px solid #e5e7eb; }
-.grade-canvas-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
-.teacher-toolbar { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; padding: 6px 10px; background: #f8fafc; border-bottom: 1px solid #e5e7eb; }
-.teacher-toolbar button { padding: 3px 8px; border: 1.5px solid #e5e7eb; border-radius: 8px; font-size: 11px; background: white; cursor: pointer; font-weight: 700; transition: all 0.15s; }
-.teacher-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
-.teacher-toolbar button.active { background: #059669; color: white; border-color: #059669; }
-.teacher-toolbar input[type="color"] { width: 22px; height: 22px; border: none; cursor: pointer; padding: 0; border-radius: 4px; }
-.score-col { width: 180px; }
-@media (max-width: 768px) { .score-col { width: 100%; } }
+.pdf-container { background: #f8fafc; min-height: 50vh; }
+.q-btn { transition: all 0.2s; font-weight: 700; }
+.q-btn:hover { transform: scale(1.08); }
+.draw-toolbar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.draw-toolbar button { padding: 5px 10px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 12px; background: white; cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
+.draw-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
+.draw-toolbar button.active { background: #059669; color: white; border-color: #059669; }
+.draw-toolbar button.student-tool { cursor: default; opacity: 0.5; }
+.draw-toolbar button.student-tool:hover { background: white; border-color: #e5e7eb; }
+.draw-toolbar input[type=color] { width: 26px; height: 26px; border: none; cursor: pointer; padding: 0; border-radius: 6px; }
+.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: hidden; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.full-canvas-wrap canvas { display: block; width: 100%; }
+.full-canvas-wrap img { display: block; width: 100%; pointer-events: none; }
+.text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: 10; }
+.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); }
+.text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
+.text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.teacher-box textarea { border-color: #059669 !important; }
+.teacher-box .box-handle { background: #059669 !important; }
+.sticky-topbar { position: sticky; top: 0; z-index: 20; }
+.sticky-questions { position: sticky; top: 60px; z-index: 10; }
+.student-overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.65; }
+.teacher-overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 </style>
 {% endblock %}
 {% block content %}
-<div class="max-w-7xl mx-auto space-y-6">
-    <div class="flex items-center justify-between flex-wrap gap-2">
-        <div>
-            <a href="/teacher/results?exam_id={{ exam_id }}" class="text-stone-500 hover:text-stone-700 mr-3 p-2 hover:bg-stone-100 rounded-xl transition">
+<div x-data="gradeApp()" x-init="init()">
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky-topbar flex items-center justify-between border border-stone-100">
+        <div class="flex items-center gap-3">
+            <a href="/teacher/results?exam_id={{ exam_id }}" class="text-stone-400 hover:text-orange-500 text-lg p-1.5 hover:bg-orange-50 rounded-xl transition no-print">
                 <i class="fas fa-arrow-left"></i>
             </a>
-            <h1 class="text-2xl font-extrabold inline text-stone-800">Detail Koreksi</h1>
+            <div>
+                <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-stone-800">{{ exam.title }}</h1>
+                <span class="text-[10px] text-stone-400 font-semibold">{{ student.full_name or 'Siswa' }} &middot; MCQ: {{ submission.score if submission.score is not none else '-' }} &middot; Final: <span id="final-display" class="text-orange-600 font-extrabold">{{ submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else '-') }}</span></span>
+            </div>
         </div>
-        <div class="flex items-center gap-2">
-            <span id="auto-save-status" class="text-xs font-bold text-stone-400 px-3 py-1.5 rounded-full bg-stone-50 border border-stone-200"><i class="fas fa-circle text-stone-300 mr-1 text-[8px]"></i>Auto-save aktif</span>
-            <button onclick="window.print()" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
-                <i class="fas fa-print mr-1"></i>Print
+        <div class="flex items-center gap-2 no-print">
+            <span id="auto-save-status" class="text-[10px] font-bold text-stone-400"><i class="fas fa-circle text-stone-300 mr-1 text-[8px]"></i>Auto-save</span>
+            <button onclick="window.print()" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition"><i class="fas fa-print mr-1"></i>Print</button>
+            <button type="button" @click="saveAll()" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-bold shadow-lg shadow-orange-200/50 transition">
+                <i class="fas fa-save mr-1.5"></i>Simpan
             </button>
         </div>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100">
-            <p class="text-xs font-bold text-stone-500">Siswa</p>
-            <p class="font-extrabold text-sm text-stone-800 truncate">{{ submission.student_id[:16] }}...</p>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100">
-            <p class="text-xs font-bold text-stone-500">MCQ Otomatis</p>
-            <p class="font-extrabold text-lg text-stone-800">{{ submission.score or '-' }}</p>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100">
-            <p class="text-xs font-bold text-stone-500">Penalti</p>
-            <p class="font-extrabold text-lg text-stone-800">{{ submission.penalty or 0 }}</p>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100 border-l-4 border-orange-500">
-            <p class="text-xs font-bold text-stone-500">Nilai Final</p>
-            <p class="font-extrabold text-2xl text-orange-600">{{ submission.final_score or submission.score or '-' }}</p>
-        </div>
-    </div>
-
-    <form method="POST" action="/teacher/grade/{{ submission.id }}/override">
+    <form method="POST" action="/teacher/grade/{{ submission.id }}/override" id="grade-form">
         <input type="hidden" name="teacher_feedback" id="feedback-input" value="">
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-100">
-            <h3 class="font-extrabold mb-4 text-stone-800">Jawaban per Soal</h3>
-            {% if exam.answer_key and submission.answers %}
-            <div class="space-y-4">
+        <input type="hidden" name="final_score" id="final-score-hidden" value="{{ submission.final_score or submission.score or 0 }}">
+
+        <div class="flex gap-3">
+            <div class="shrink-0 flex flex-col items-center gap-1">
+                <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-2.5 sticky-questions border border-stone-100" style="max-height:calc(100vh - 170px)">
+                    <div class="flex flex-col items-center gap-1.5 py-2">
+                        {% for i in range(exam.total_questions) %}
+                        {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
+                        <button type="button" @click="currentQ = {{ i }}"
+                                class="q-btn w-8 h-8 text-xs rounded-xl font-bold border shrink-0 relative"
+                                :class="{
+                                    'bg-white text-stone-500 border-stone-200 hover:border-orange-300': currentQ !== {{ i }},
+                                    'ring-2 ring-orange-400 ring-offset-1 bg-orange-500 text-white border-orange-500': currentQ === {{ i }}
+                                }">
+                            {{ i+1 }}
+                            {% if qtype != 'mcq' %}
+                            <span class="absolute -top-1.5 -right-1.5 text-[7px] {% if qtype == 'essay_text' %}text-amber-500{% else %}text-emerald-500{% endif %}">
+                                <i class="fas {% if qtype == 'essay_text' %}fa-font{% else %}fa-paint-brush{% endif %}"></i>
+                            </span>
+                            {% endif %}
+                        </button>
+                        {% endfor %}
+                        <div class="text-[9px] font-bold text-stone-400 mt-2 text-center bg-stone-100 rounded-full px-2 py-0.5">{{ exam.total_questions }} soal</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 min-w-0">
                 {% for i in range(exam.total_questions) %}
                 {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
                 {% set correct = exam.answer_key.get(i|string, '') %}
                 {% set student_ans = submission.answers.get(i|string, '') %}
-                {% set is_correct = correct == student_ans %}
-                {% set has_audio = (exam.question_audio or {}).get(i|string) %}
+                {% set is_correct = (qtype == 'mcq' and correct and student_ans == correct) %}
+                {% set ans_obj = student_ans if student_ans is mapping else (student_ans|from_json or {}) %}
                 {% set pdf_pages = exam.pdf_page_urls or [] %}
-                {% set total_pages = pdf_pages|length %}
 
-                <div class="ans-card p-4 rounded-2xl border-2
-                    {% if qtype == 'mcq' %}{% if is_correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %}
-                    {% else %}bg-white border-stone-200{% endif %}"
-                    x-data="gradeQuestion({{ i }}, {{ 'true' if qtype in ('essay_text', 'essay_canvas') else 'false' }}, {{ submission.id|tojson }})">
-
-                    <div class="flex items-start gap-3 flex-wrap">
-                        <span class="font-extrabold text-sm w-12 pt-0.5 shrink-0 text-stone-700">#{{ i + 1 }}</span>
-
-                        {% if qtype == 'mcq' %}
-                        <div class="flex-1 flex items-center gap-3 flex-wrap min-w-0">
-                            <span class="text-sm font-bold">Kunci: <strong class="text-emerald-700">{{ correct }}</strong></span>
-                            <span class="text-sm font-bold">Jawab: <strong class="{% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}">{{ student_ans or '-' }}</strong></span>
-                            {% if is_correct %}<i class="fas fa-check-circle text-emerald-500 ml-auto"></i>
-                            {% else %}<i class="fas fa-times-circle text-red-500 ml-auto"></i>{% endif %}
-                        </div>
-
-                        {% else %}
-                        {# === ESSAY: two-column layout (PDF viewer left, score right) === #}
-                        <div class="flex-1 min-w-0 grid grid-cols-1 lg:grid-cols-3 gap-4">
-                            {# LEFT: PDF page viewer with student + teacher overlay #}
-                            <div class="lg:col-span-2 space-y-2">
-                                <div class="flex items-center gap-2 text-xs font-bold text-stone-500 mb-1">
-                                    {% if qtype == 'essay_text' %}
-                                    <span class="bg-gradient-to-r from-amber-50 to-orange-50 text-amber-700 px-2 py-1 rounded-lg">Essay Teks</span>
+                {% if qtype == 'mcq' %}
+                <div x-show="currentQ === {{ i }}" style="display:none" class="mb-3">
+                    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
+                        <div class="pdf-container flex flex-col items-center justify-center p-4">
+                            <div class="w-full max-w-md space-y-4">
+                                <div class="flex items-center gap-3">
+                                    <span class="font-extrabold text-lg text-stone-700">Soal #{{ i+1 }}</span>
+                                    <span class="text-xs px-2 py-0.5 rounded-full font-extrabold bg-orange-100 text-orange-700">Pilihan Ganda</span>
+                                    {% if is_correct %}
+                                    <i class="fas fa-check-circle text-emerald-500 ml-auto text-xl"></i>
                                     {% else %}
-                                    <span class="bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700 px-2 py-1 rounded-lg">Essay Canvas</span>
+                                    <i class="fas fa-times-circle text-red-500 ml-auto text-xl"></i>
                                     {% endif %}
-                                    {% if has_audio %}<span class="text-orange-400"><i class="fas fa-headphones"></i></span>{% endif %}
                                 </div>
-
-                                {% if pdf_pages|length > 0 %}
-                                <!-- PDF Page Navigation -->
-                                <div class="flex items-center gap-2" x-show="totalPages > 0">
-                                    <button type="button" @click="prevPage" :disabled="page <= 1"
-                                            class="px-2 py-1 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
-                                        <i class="fas fa-chevron-left text-[9px]"></i>
-                                    </button>
-                                    <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
-                                    <button type="button" @click="nextPage" :disabled="page >= totalPages"
-                                            class="px-2 py-1 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
-                                        <i class="fas fa-chevron-right text-[9px]"></i>
-                                    </button>
-                                </div>
-
-                                <!-- PDF + Student Canvas + Teacher Overlay -->
-                                <div class="grade-canvas-wrap" :id="'grade-area-' + qIdx" style="background:#fff;">
-                                    {% for p in range(total_pages) %}
-                                    <img x-show="page === {{ p + 1 }}" :id="'grade-pdf-' + qIdx + '-' + {{ p }}"
-                                         src="{{ pdf_pages[p] }}" class="w-full" alt="PDF page {{ p+1 }}" style="display:block; pointer-events:none;">
-                                    {% endfor %}
-                                    <!-- Student canvas layer -->
-                                    <canvas :id="'student-canvas-' + qIdx" class="absolute inset-0 w-full h-full" style="pointer-events:none; opacity:0.7;"></canvas>
-                                    <!-- Teacher overlay canvas -->
-                                    <canvas :id="'teacher-canvas-' + qIdx" class="absolute inset-0 w-full h-full"></canvas>
-                                    <!-- Student text boxes -->
-                                    {% set ans_obj = student_ans if student_ans is mapping else (student_ans|from_json or {}) %}
-                                    {# Handle both new format (pages dict) and old format (top-level text_boxes) #}
-                                    {% set s_pages = ans_obj.get('pages', {}) if ans_obj.get('pages') else {'0': {'textBoxes': ans_obj.get('text_boxes', ans_obj.get('boxes', []))}} if ans_obj.get('text_boxes') or ans_obj.get('boxes') else {} %}
-                                    {% for p_idx, p_data in s_pages.items() %}
-                                    {% for box in p_data.get('textBoxes', []) %}
-                                    <div class="text-box-overlay student" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:none;"
-                                         :style="'left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:' + (page === {{ p_idx|int + 1 }} ? 'block' : 'none')">
-                                        <div class="box-handle"><i class="fas fa-grip-lines text-white text-[7px]"></i></div>
-                                        <div class="box-content">{{ box.text }}</div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="p-4 rounded-xl border-2 {% if is_correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %}">
+                                        <p class="text-xs font-bold text-stone-500 mb-1">Jawaban Siswa</p>
+                                        <p class="text-2xl font-extrabold {% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}">{{ student_ans or '-' }}</p>
                                     </div>
-                                    {% endfor %}
-                                    {% endfor %}
-                                    <!-- Teacher text boxes -->
-                                    {% set ov_pages = fb_overlay.get(i|string, {}) %}
-                                    {% for p_idx, p_data in ov_pages.items() %}
-                                    {% for box in p_data.get('textBoxes', []) %}
-                                    <div class="text-box-overlay teacher" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:none;"
-                                         :style="'left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:' + (page === {{ p_idx|int + 1 }} ? 'block' : 'none')">
-                                        <div class="box-handle"><i class="fas fa-grip-lines text-white text-[7px]"></i></div>
-                                        <button type="button" class="box-del" @click="removeTeacherTextBox({{ p_idx }}, {{ loop.index0 }})">&times;</button>
-                                        <div class="box-content" x-text="getTeacherBoxText({{ p_idx }}, {{ loop.index0 }})"></div>
+                                    <div class="p-4 rounded-xl border-2 bg-emerald-50 border-emerald-200">
+                                        <p class="text-xs font-bold text-stone-500 mb-1">Kunci Jawaban</p>
+                                        <p class="text-2xl font-extrabold text-emerald-700">{{ correct }}</p>
                                     </div>
-                                    {% endfor %}
-                                    {% endfor %}
                                 </div>
-
-                                <!-- Teacher Drawing Tools -->
-                                <div class="teacher-toolbar">
-                                    <button type="button" @click="setMode('pen')" :class="mode === 'pen' ? 'active' : ''"><i class="fas fa-pencil-alt mr-1"></i>Pena</button>
-                                    <button type="button" @click="setMode('eraser')" :class="mode === 'eraser' ? 'active' : ''"><i class="fas fa-eraser mr-1"></i>Hapus</button>
-                                    <input type="color" :value="color" @input="color = $event.target.value; if(ctx) ctx.strokeStyle = $event.target.value">
-                                    <button type="button" @click="setMode('text')" :class="mode === 'text' ? 'active' : ''"><i class="fas fa-font mr-1"></i>Teks</button>
-                                    <button type="button" @click="undoCanvas()" :disabled="history.length < 2" class="font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-30"><i class="fas fa-undo mr-1"></i></button>
-                                    <button type="button" @click="clearTeacherCanvas()" class="font-bold text-red-500 hover:bg-red-50"><i class="fas fa-trash-alt mr-1"></i></button>
-                                    <span class="text-[10px] font-bold text-emerald-600 ml-auto"><i class="fas fa-pen mr-1"></i>Korektor</span>
-                                </div>
-                                {% else %}
-                                <div class="text-center py-8 text-stone-400 border-2 border-dashed rounded-xl">
-                                    <i class="fas fa-file-pdf text-3xl mb-2"></i>
-                                    <p class="text-sm font-semibold">PDF belum diupload — tidak ada halaman</p>
+                                {% set s = fb_scores.get(i|string, '') %}{% set c = fb_comments.get(i|string, '') %}
+                                {% if s or c %}
+                                <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs font-bold text-emerald-700">
+                                    <i class="fas fa-pen mr-1"></i>Guru: skor {{ s }}{% if c %} — {{ c }}{% endif %}
                                 </div>
                                 {% endif %}
                             </div>
-
-                            {# RIGHT: Score + Comment column #}
-                            <div class="score-col space-y-3 p-4 bg-stone-50 rounded-2xl border border-stone-200 self-start">
-                                <p class="text-xs font-extrabold text-stone-700 border-b border-stone-200 pb-2">Koreksi Soal #{{ i+1 }}</p>
-                                <div>
-                                    <label class="text-xs font-bold text-stone-500 block mb-1">Nilai (0-100)</label>
-                                    <input type="number" x-model="scoreVal" min="0" max="100"
-                                           class="w-full px-3 py-2 border-2 border-stone-200 rounded-xl text-center font-extrabold text-lg focus:border-orange-500"
-                                           @input="scheduleSave">
-                                </div>
-                                <div>
-                                    <label class="text-xs font-bold text-stone-500 block mb-1">Komentar</label>
-                                    <textarea x-model="commentVal" rows="3"
-                                              class="w-full px-3 py-2 border-2 border-stone-200 rounded-xl text-xs font-bold focus:border-orange-500 resize-none"
-                                              placeholder="Komentar..." @input="scheduleSave"></textarea>
-                                </div>
-                                <div class="pt-2 border-t border-stone-200">
-                                    <p class="text-xs font-bold text-stone-400">Klik PDF untuk teks korektor</p>
-                                    <p class="text-xs text-stone-300">Pilih <strong>Pena</strong> untuk corat-coret</p>
-                                </div>
-                            </div>
                         </div>
-                        {% endif %}
                     </div>
                 </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-stone-400 font-bold text-center py-8">Data jawaban tidak tersedia</p>
-            {% endif %}
-        </div>
 
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 mt-4 border border-stone-100">
-            <div class="flex items-center gap-4 flex-wrap">
-                <label class="text-sm font-extrabold text-stone-700">Nilai Final:</label>
-                <input type="number" name="final_score" value="{{ submission.final_score or submission.score or 0 }}"
-                       min="0" max="100" step="0.5"
-                       class="w-24 px-3 py-2 border-2 border-stone-200 rounded-xl text-center font-extrabold text-lg focus:border-orange-500">
-                <button type="submit" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-6 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold shadow-lg shadow-orange-200/60 transition"
-                        onclick="document.getElementById('feedback-input').value = JSON.stringify(collectFeedback()); return confirm('Simpan semua nilai & komentar?')">
-                    <i class="fas fa-save mr-1"></i>Simpan Semua
-                </button>
+                {% else %}
+                <div x-show="currentQ === {{ i }}" style="display:none" class="mb-3" id="grade-card-{{ i }}"
+                     x-data="gradeQuestion({{ i }})" x-init="qInit()">
+                    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
+                        <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold
+                            {% if qtype == 'essay_text' %}bg-gradient-to-r from-amber-50 to-orange-50 text-amber-700{% else %}bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700{% endif %}">
+                            <i class="fas {% if qtype == 'essay_text' %}fa-font{% else %}fa-pen-fancy{% endif %}"></i>
+                            <span>Soal #{{ i+1 }} — Jawaban {{ 'Teks+Coretan' if qtype == 'essay_text' else 'Canvas' }}</span>
+                            <span class="ml-auto" x-text="totalPages>0 ? 'Hlm '+page+'/'+totalPages : ''"></span>
+                        </div>
+
+                        <div class="draw-toolbar px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b">
+                            <span class="text-[10px] font-extrabold text-orange-500 mr-1"><i class="fas fa-user-edit mr-0.5"></i>Murid:</span>
+                            <button type="button" class="student-tool"><i class="fas fa-pencil-alt mr-1"></i>Pena</button>
+                            <button type="button" class="student-tool"><i class="fas fa-eraser mr-1"></i>Hapus</button>
+                            <button type="button" class="student-tool"><i class="fas fa-font mr-1"></i>Teks</button>
+                            <span class="w-px h-5 bg-stone-300 mx-1.5"></span>
+                            <span class="text-[10px] font-extrabold text-emerald-600 mr-1"><i class="fas fa-pen mr-0.5"></i>Koreksi:</span>
+                            <button type="button" @click="setMode('pen')" :class="mode === 'pen' ? 'active' : ''"><i class="fas fa-pencil-alt mr-1"></i>Pena</button>
+                            <button type="button" @click="setMode('eraser')" :class="mode === 'eraser' ? 'active' : ''"><i class="fas fa-eraser mr-1"></i>Hapus</button>
+                            <input type="color" :value="color" @input="color=$event.target.value; if(ctx)ctx.strokeStyle=$event.target.value">
+                            <button type="button" @click="setMode('text')" :class="mode === 'text' ? 'active' : ''"><i class="fas fa-font mr-1"></i>Teks</button>
+                            <button type="button" @click="undoCanvas()" :disabled="history.length<2" class="text-stone-500 hover:bg-stone-100 disabled:opacity-30 px-2 py-1 text-xs font-bold border rounded-lg bg-white">&#8617;</button>
+                            <button type="button" @click="clearTeacherCanvas()" class="text-red-500 hover:bg-red-50 px-2 py-1 text-xs font-bold border border-red-200 rounded-lg bg-white"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+
+                        <div class="flex items-center justify-end gap-2 px-4 py-2 bg-stone-50/50 border-b" x-show="totalPages > 0">
+                            <button type="button" @click="prevPage" :disabled="page <= 1"
+                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 flex items-center gap-1">
+                                <i class="fas fa-chevron-left text-[9px]"></i>
+                            </button>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                            <button type="button" @click="nextPage" :disabled="page >= totalPages"
+                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 flex items-center gap-1">
+                                <i class="fas fa-chevron-right text-[9px]"></i>
+                            </button>
+                        </div>
+
+                        <div class="p-0">
+                            {% if pdf_pages|length > 0 %}
+                            <div class="full-canvas-wrap" :id="'grade-area-' + qIdx">
+                                {% for p in range(pdf_pages|length) %}
+                                <img x-show="page === {{ p+1 }}" :id="'grade-pdf-' + qIdx + '-' + {{ p }}"
+                                     src="{{ pdf_pages[p] }}" alt="PDF page {{ p+1 }}">
+                                {% endfor %}
+
+                                <canvas :id="'student-canvas-' + qIdx" class="absolute inset-0 w-full h-full" style="pointer-events:none; opacity:0.65;"></canvas>
+                                <canvas :id="'teacher-canvas-' + qIdx" class="absolute inset-0 w-full h-full"></canvas>
+
+                                {% set s_pages = ans_obj.get('pages', {}) if ans_obj.get('pages') else {} %}
+                                {% if not s_pages and (ans_obj.get('text_boxes') or ans_obj.get('boxes')) %}
+                                    {% set s_pages = {'0': {'textBoxes': ans_obj.get('text_boxes', ans_obj.get('boxes', []))}} %}
+                                {% endif %}
+                                {% for pk, pv in s_pages.items() %}{% set pn = pk|int %}
+                                {% for box in pv.get('textBoxes', []) %}
+                                <div class="text-box" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:none;"
+                                     :style="'left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:' + (page=={{ pn+1 }}||page=={{ pn }}?'block':'none')">
+                                    <div class="box-handle"><i class="fas fa-grip-lines text-white text-[7px]"></i></div>
+                                    <textarea readonly class="pointer-events-none">{{ box.text }}</textarea>
+                                </div>
+                                {% endfor %}{% endfor %}
+
+                                {% set ov = fb_overlay.get(i|string, {}) %}
+                                {% for opk, opv in ov.items() %}{% set opn = opk|int %}
+                                {% for box in opv.get('textBoxes', []) %}
+                                <div class="text-box teacher-box" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:none;"
+                                     :style="'left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:' + (page=={{ opn+1 }}||page=={{ opn }}?'block':'none')">
+                                    <div class="box-handle"><i class="fas fa-grip-lines text-white text-[7px]"></i></div>
+                                    <button type="button" class="box-del" @click="removeTeacherTextBox({{ opk }},{{ loop.index0 }})">&times;</button>
+                                    <textarea x-text="getTeacherBoxText({{ opk }},{{ loop.index0 }})"
+                                              @input="setTeacherBoxText({{ opk }},{{ loop.index0 }}, $event.target.value); scheduleSave()"></textarea>
+                                </div>
+                                {% endfor %}{% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="text-center py-16 text-stone-400 border-2 border-dashed rounded-xl m-4">
+                                <i class="fas fa-file-pdf text-3xl mb-2"></i>
+                                <p class="text-sm font-bold">PDF belum diupload</p>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="flex items-center gap-3 px-4 py-3 bg-stone-50 border-t no-print">
+                            <label class="text-xs font-extrabold text-stone-700">Skor #{{ i+1 }}:</label>
+                            <input type="number" x-model="scoreVal" min="0" max="100"
+                                   class="w-20 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-center font-extrabold text-lg focus:border-orange-500"
+                                   @input="scheduleSave">
+                            <label class="text-xs font-extrabold text-stone-700 ml-2">Komentar:</label>
+                            <input type="text" x-model="commentVal" placeholder="Komentar..."
+                                   class="flex-1 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-xs font-bold focus:border-orange-500"
+                                   @input="scheduleSave">
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
             </div>
         </div>
     </form>
@@ -226,77 +229,136 @@
 
 {% block scripts %}
 <script>
-// Store all grading state per question
 const GRADE_STATE = {};
+const QUESTION_INSTANCES = {};
 const PDF_PAGES = {{ (exam.pdf_page_urls or []) | tojson | safe }};
 const STUDENT_ANSWERS = {{ submission.answers | tojson | safe }};
-const SAVED_OVERLAY = {{ (feedback.get('overlay_pages', {}) | tojson | safe }};
+const SAVED_OVERLAY = {{ feedback.get('overlay_pages', {}) | tojson | safe }};
 const SAVED_SCORES = {{ fb_scores | tojson | safe }};
 const SAVED_COMMENTS = {{ fb_comments | tojson | safe }};
-
+const TOTAL_Q = {{ exam.total_questions }};
+const PDF_LEN = PDF_PAGES.length;
+const MCQ_TOTAL = {{ (exam.answer_key or {}) | length }};
 let autoSaveTimer = null;
 
-function gradeQuestion(qIdx, isEssay, subId) {
-    if (!isEssay) return {};
+function compressCanvas(canvas, maxW, quality) {
+    maxW = maxW || 600;
+    quality = quality || 0.4;
+    const scale = Math.min(maxW / Math.max(canvas.width, 1), 1);
+    const c = document.createElement('canvas');
+    c.width = Math.round(canvas.width * scale);
+    c.height = Math.round(canvas.height * scale);
+    c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', quality);
+}
+
+function gradeApp() {
     return {
-        qIdx: qIdx,
-        page: 1,
-        totalPages: PDF_PAGES.length,
-        mode: 'pen',
-        color: '#059669',
-        ctx: null,
-        canvas: null,
-        drawing: false,
-        lx: 0, ly: 0,
-        history: [],
+        currentQ: 0,
+        init() {
+            this.$watch('currentQ', val => {
+                this.$nextTick(() => {
+                    setTimeout(() => {
+                        const inst = QUESTION_INSTANCES[val];
+                        if (inst) inst.initCanvas();
+                    }, 250);
+                });
+            });
+            this.$nextTick(() => {
+                setTimeout(() => {
+                    const inst = QUESTION_INSTANCES[0];
+                    if (inst) inst.initCanvas();
+                }, 300);
+            });
+        },
+        saveAll() {
+            document.querySelectorAll('[id^="grade-card-"]').forEach(el => {
+                const idx = parseInt(el.id.replace('grade-card-', ''));
+                const inst = QUESTION_INSTANCES[idx];
+                if (inst) inst.saveOverlayForPage();
+            });
+            const fb = collectFeedback();
+            const fs = calcFinal();
+            const st = document.getElementById('auto-save-status');
+            if(st) st.innerHTML='<i class="fas fa-spinner fa-spin mr-1 text-[8px]"></i>Menyimpan...';
+            fetch('/teacher/grade/{{ submission.id }}/override', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({teacher_feedback: fb, final_score: fs})
+            })
+            .then(r => { if(r.ok) window.location.href = '/teacher/results?exam_id={{ exam_id }}'; else return r.json().then(d => alert(d.error||'Gagal')); })
+            .catch(e => alert('Gagal: '+e.message));
+        },
+    };
+}
+
+function gradeQuestion(qIdx) {
+    return {
+        qIdx, page: 1, totalPages: PDF_LEN,
+        mode: 'pen', color: '#059669',
+        ctx: null, canvas: null, drawing: false, lx: 0, ly: 0, history: [],
         scoreVal: SAVED_SCORES[qIdx] || '',
         commentVal: SAVED_COMMENTS[qIdx] || '',
-        teacherBoxes: SAVED_OVERLAY[qIdx] || {},
-        init() {
-            if (PDF_PAGES.length === 0) return;
-            this.$nextTick(() => this.initCanvas());
+        teacherBoxes: JSON.parse(JSON.stringify(SAVED_OVERLAY[qIdx] || {})),
+        canvasInited: false,
+
+        qInit() {
+            QUESTION_INSTANCES[qIdx] = this;
         },
+
         initCanvas() {
             const el = document.getElementById('teacher-canvas-' + this.qIdx);
             const wrap = document.getElementById('grade-area-' + this.qIdx);
-            if (!el || !wrap) { setTimeout(() => this.initCanvas(), 200); return; }
-            const w = wrap.clientWidth;
-            if (w <= 1) { setTimeout(() => this.initCanvas(), 200); return; }
-            const h = wrap.clientHeight || (w * 1.4);
-            el.width = w;
-            el.height = h;
+            if (!el || !wrap) return;
+            if (el.offsetWidth <= 1 || el.offsetHeight <= 1) return;
+            if (this.canvasInited) {
+                this.redrawOverlays();
+                return;
+            }
+            el.width = el.offsetWidth;
+            el.height = el.offsetHeight;
             const ctx = el.getContext('2d');
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.strokeStyle = this.color;
-            ctx.lineWidth = 2.5;
-            this.canvas = el;
-            this.ctx = ctx;
-            // Draw student canvas as background
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.strokeStyle = this.color; ctx.lineWidth = 2.5;
+            this.canvas = el; this.ctx = ctx;
+            this.canvasInited = true;
             this.drawStudentCanvas();
-            // Restore saved overlay
             this.restoreSavedOverlay();
-            // Setup events
             this.setupEvents();
-            // Save initial blank state
             this.history = [el.toDataURL()];
         },
-        drawStudentCanvas() {
+
+        redrawOverlays() {
+            if (!this.ctx) return;
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.drawStudentCanvas();
             const p = this.page - 1;
-            const ans = STUDENT_ANSWERS[this.qIdx];
-            if (!ans || !ans.pages || !ans.pages[p] || !ans.pages[p].canvas) return;
-            const studentCanvas = document.getElementById('student-canvas-' + this.qIdx);
-            if (!studentCanvas) return;
-            studentCanvas.width = this.canvas.width;
-            studentCanvas.height = this.canvas.height;
-            const sCtx = studentCanvas.getContext('2d');
-            const img = new Image();
-            img.onload = () => {
-                sCtx.clearRect(0, 0, studentCanvas.width, studentCanvas.height);
-                sCtx.drawImage(img, 0, 0, studentCanvas.width, studentCanvas.height);
-            };
-            img.src = ans.pages[p].canvas;
+            const saved = GRADE_STATE[this.qIdx]?.[p];
+            if (saved && saved.canvas) {
+                const img = new Image();
+                img.onload = () => { this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height); };
+                img.src = saved.canvas;
+            } else {
+                this.restoreSavedOverlay();
+            }
         },
+
+        drawStudentCanvas() {
+            const ans = STUDENT_ANSWERS[this.qIdx];
+            if (!ans || !ans.pages) return;
+            const p0 = String(this.page - 1);
+            const p1 = String(this.page);
+            let pd = ans.pages[p0] || ans.pages[p1];
+            if (!pd || !pd.canvas) return;
+            const sc = document.getElementById('student-canvas-' + this.qIdx);
+            if (!sc) return;
+            sc.width = this.canvas.width; sc.height = this.canvas.height;
+            const sCtx = sc.getContext('2d');
+            const img = new Image();
+            img.onload = () => { sCtx.clearRect(0, 0, sc.width, sc.height); sCtx.drawImage(img, 0, 0, sc.width, sc.height); };
+            img.src = pd.canvas;
+        },
+
         restoreSavedOverlay() {
             const p = this.page - 1;
             const saved = SAVED_OVERLAY[this.qIdx]?.[p];
@@ -305,233 +367,175 @@ function gradeQuestion(qIdx, isEssay, subId) {
             img.onload = () => { this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height); };
             img.src = saved.canvas;
         },
+
         setupEvents() {
             const el = this.canvas;
-            const getPos = (e) => {
+            const gp = e => {
                 const src = e.touches ? e.touches[0] : e;
                 const r = el.getBoundingClientRect();
                 return { x: (src.clientX - r.left) * (el.width / r.width), y: (src.clientY - r.top) * (el.height / r.height) };
             };
-            el.addEventListener('mousedown', (e) => {
-                if (this.mode === 'text') {
-                    const p = getPos(e);
-                    this.addTeacherTextBox(p.x / el.width, p.y / el.height);
-                    return;
-                }
-                const p = getPos(e);
-                this.lx = p.x; this.ly = p.y; this.drawing = true;
+            el.addEventListener('mousedown', e => {
+                if (this.mode === 'text') { const p = gp(e); this.addTeacherTextBox(p.x/el.width, p.y/el.height); return; }
+                const p = gp(e); this.lx = p.x; this.ly = p.y; this.drawing = true;
             });
-            el.addEventListener('mousemove', (e) => {
-                if (!this.drawing) return;
-                const p = getPos(e);
-                if (this.mode === 'eraser') {
-                    this.ctx.globalCompositeOperation = 'destination-out';
-                    this.ctx.beginPath(); this.ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); this.ctx.fill();
-                    this.ctx.globalCompositeOperation = 'source-over';
-                } else {
-                    this.ctx.beginPath(); this.ctx.moveTo(this.lx, this.ly); this.ctx.lineTo(p.x, p.y); this.ctx.stroke();
-                }
+            el.addEventListener('mousemove', e => {
+                if (!this.drawing) return; const p = gp(e);
+                if (this.mode === 'eraser') { this.ctx.globalCompositeOperation='destination-out'; this.ctx.beginPath(); this.ctx.arc(p.x,p.y,12,0,Math.PI*2); this.ctx.fill(); this.ctx.globalCompositeOperation='source-over'; }
+                else { this.ctx.beginPath(); this.ctx.moveTo(this.lx,this.ly); this.ctx.lineTo(p.x,p.y); this.ctx.stroke(); }
                 this.lx = p.x; this.ly = p.y;
             });
-            el.addEventListener('mouseup', () => { if (this.drawing) { this.drawing = false; this.saveState(); this.scheduleSave(); }});
-            el.addEventListener('mouseleave', () => { if (this.drawing) { this.drawing = false; this.saveState(); }});
-            el.addEventListener('touchstart', (e) => {
-                if (this.mode === 'text') {
-                    const p = getPos(e);
-                    this.addTeacherTextBox(p.x / el.width, p.y / el.height);
-                    e.preventDefault(); return;
-                }
-                const p = getPos(e); this.lx = p.x; this.ly = p.y; this.drawing = true;
-            }, { passive: false });
-            el.addEventListener('touchmove', (e) => {
-                if (!this.drawing) return; e.preventDefault();
-                const p = getPos(e);
-                if (this.mode === 'eraser') {
-                    this.ctx.globalCompositeOperation = 'destination-out';
-                    this.ctx.beginPath(); this.ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); this.ctx.fill();
-                    this.ctx.globalCompositeOperation = 'source-over';
-                } else {
-                    this.ctx.beginPath(); this.ctx.moveTo(this.lx, this.ly); this.ctx.lineTo(p.x, p.y); this.ctx.stroke();
-                }
-                this.lx = p.x; this.ly = p.y;
-            }, { passive: false });
-            el.addEventListener('touchend', (e) => {
-                if (this.drawing) { this.drawing = false; this.saveState(); this.scheduleSave(); }
-            }, { passive: false });
+            el.addEventListener('mouseup', () => { if(this.drawing){this.drawing=false; this.saveState(); this.scheduleSave();} });
+            el.addEventListener('mouseleave', () => { if(this.drawing){this.drawing=false; this.saveState();} });
+            el.addEventListener('touchstart', e => {
+                if (this.mode === 'text') { const p = gp(e); this.addTeacherTextBox(p.x/el.width, p.y/el.height); e.preventDefault(); return; }
+                const p = gp(e); this.lx=p.x; this.ly=p.y; this.drawing=true;
+            }, {passive:false});
+            el.addEventListener('touchmove', e => {
+                if (!this.drawing) return; e.preventDefault(); const p = gp(e);
+                if (this.mode === 'eraser') { this.ctx.globalCompositeOperation='destination-out'; this.ctx.beginPath(); this.ctx.arc(p.x,p.y,12,0,Math.PI*2); this.ctx.fill(); this.ctx.globalCompositeOperation='source-over'; }
+                else { this.ctx.beginPath(); this.ctx.moveTo(this.lx,this.ly); this.ctx.lineTo(p.x,p.y); this.ctx.stroke(); }
+                this.lx=p.x; this.ly=p.y;
+            }, {passive:false});
+            el.addEventListener('touchend', () => { if(this.drawing){this.drawing=false; this.saveState(); this.scheduleSave();} }, {passive:false});
         },
         setMode(m) { this.mode = m; },
-        setColor(c) { this.color = c; if (this.ctx) this.ctx.strokeStyle = c; },
-        saveState() {
-            if (!this.canvas) return;
-            this.history.push(this.canvas.toDataURL());
-            if (this.history.length > 50) this.history.shift();
-        },
+        saveState() { if(!this.canvas)return; this.history.push(this.canvas.toDataURL()); if(this.history.length>50)this.history.shift(); },
         undoCanvas() {
-            if (this.history.length < 2) return;
-            this.history.pop();
-            const prev = this.history[this.history.length - 1];
-            if (!this.ctx) return;
+            if(this.history.length<2)return; this.history.pop();
+            const prev = this.history[this.history.length-1];
+            if(!this.ctx)return;
             const img = new Image();
-            img.onload = () => { this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height); };
-            img.src = prev;
+            img.onload=()=>{ this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height); this.ctx.drawImage(img,0,0,this.canvas.width,this.canvas.height); };
+            img.src=prev;
         },
         clearTeacherCanvas() {
-            if (!this.ctx) return;
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            this.redrawStudentBackground();
-            this.history = [this.canvas.toDataURL()];
-        },
-        redrawStudentBackground() {
-            const studentCanvas = document.getElementById('student-canvas-' + this.qIdx);
-            if (!studentCanvas) return;
-            this.ctx.drawImage(studentCanvas, 0, 0, this.canvas.width, this.canvas.height);
+            if(!this.ctx)return;
+            this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+            this.history=[this.canvas.toDataURL()];
         },
         addTeacherTextBox(xPct, yPct) {
             const p = this.page - 1;
-            if (!this.teacherBoxes[p]) this.teacherBoxes[p] = [];
-            this.teacherBoxes[p] = [...this.teacherBoxes[p], { x_pct: xPct, y_pct: yPct, text: '' }];
+            if(!this.teacherBoxes[p])this.teacherBoxes[p]=[];
+            this.teacherBoxes[p] = [...this.teacherBoxes[p], {x_pct:xPct, y_pct:yPct, text:''}];
             this.teacherBoxes = {...this.teacherBoxes};
             this.$nextTick(() => {
-                const area = document.getElementById('grade-area-' + this.qIdx);
-                if (area) {
-                    const tas = area.querySelectorAll('.text-box-overlay.teacher textarea');
-                    if (tas.length > 0) tas[tas.length - 1].focus();
-                }
+                const area = document.getElementById('grade-area-'+this.qIdx);
+                if(area) { const tas = area.querySelectorAll('.teacher-box textarea'); if(tas.length)tas[tas.length-1].focus(); }
             });
         },
         removeTeacherTextBox(pIdx, bIdx) {
-            if (this.teacherBoxes[pIdx]) {
-                this.teacherBoxes[pIdx].splice(bIdx, 1);
-                this.teacherBoxes = {...this.teacherBoxes};
-            }
+            if(this.teacherBoxes[pIdx]){ this.teacherBoxes[pIdx].splice(bIdx,1); this.teacherBoxes={...this.teacherBoxes}; }
         },
-        getTeacherBoxText(pIdx, bIdx) {
-            return this.teacherBoxes[pIdx]?.[bIdx]?.text || '';
-        },
-        onTeacherBoxInput(pIdx, bIdx, val) {
-            if (this.teacherBoxes[pIdx]?.[bIdx]) {
-                this.teacherBoxes[pIdx][bIdx].text = val;
-                this.scheduleSave();
-            }
-        },
-        prevPage() { if (this.page > 1) { this.saveOverlayForPage(); this.page--; this.$nextTick(() => this.onPageChange()); }},
-        nextPage() { if (this.page < this.totalPages) { this.saveOverlayForPage(); this.page++; this.$nextTick(() => this.onPageChange()); }},
+        getTeacherBoxText(pIdx, bIdx) { return this.teacherBoxes[pIdx]?.[bIdx]?.text || ''; },
+        setTeacherBoxText(pIdx, bIdx, val) { if(this.teacherBoxes[pIdx]?.[bIdx]) this.teacherBoxes[pIdx][bIdx].text = val; },
+        prevPage() { if(this.page>1){ this.saveOverlayForPage(); this.page--; this.$nextTick(()=>{ this.onPageChange(); }); }},
+        nextPage() { if(this.page<this.totalPages){ this.saveOverlayForPage(); this.page++; this.$nextTick(()=>{ this.onPageChange(); }); }},
         saveOverlayForPage() {
-            if (!this.canvas || !this.ctx) return;
-            const p = this.page - 1;
-            const dataUrl = this.canvas.toDataURL();
-            // Store in global state
-            if (!GRADE_STATE[this.qIdx]) GRADE_STATE[this.qIdx] = {};
-            GRADE_STATE[this.qIdx][p] = { canvas: dataUrl, textBoxes: this.teacherBoxes[p] || [] };
+            if(!this.canvas||!this.ctx)return;
+            const p=this.page-1;
+            if(!GRADE_STATE[this.qIdx])GRADE_STATE[this.qIdx]={};
+            GRADE_STATE[this.qIdx][p] = {canvas: compressCanvas(this.canvas), textBoxes: this.teacherBoxes[p]||[]};
         },
         onPageChange() {
-            // Reload student canvas for new page
-            const studentCanvas = document.getElementById('student-canvas-' + this.qIdx);
-            if (studentCanvas) {
-                studentCanvas.width = this.canvas.width;
-                studentCanvas.height = this.canvas.height;
-            }
-            this.drawStudentCanvas();
-            // Restore teacher overlay for new page
-            const p = this.page - 1;
-            const saved = GRADE_STATE[this.qIdx]?.[p];
-            if (saved && saved.canvas && this.ctx) {
-                const img = new Image();
-                img.onload = () => {
-                    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                    this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
-                };
-                img.src = saved.canvas;
-            } else if (this.ctx) {
+            this.$nextTick(() => {
+                if (!this.canvas || !this.ctx) return;
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                this.redrawStudentBackground();
-            }
+                this.drawStudentCanvas();
+                const p=this.page-1;
+                const saved = GRADE_STATE[this.qIdx]?.[p];
+                if(saved && saved.canvas && this.ctx) {
+                    const img = new Image();
+                    img.onload=()=>{ this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height); this.ctx.drawImage(img,0,0,this.canvas.width,this.canvas.height); };
+                    img.src=saved.canvas;
+                } else {
+                    this.restoreSavedOverlay();
+                }
+            });
         },
         scheduleSave() {
-            // Schedule auto-save for all grading
-            if (autoSaveTimer) clearTimeout(autoSaveTimer);
-            autoSaveTimer = setTimeout(() => doAutoSave(), 3000);
-            // Also save immediately the overlay for current page
+            if(autoSaveTimer)clearTimeout(autoSaveTimer);
+            autoSaveTimer=setTimeout(()=>doAutoSave(),3000);
             this.saveOverlayForPage();
         },
     };
 }
 
-// Collect all feedback from all question Alpine instances
 function collectFeedback() {
-    const scores = {};
-    const comments = {};
-    const overlayPages = {};
-    // Read from Alpine instances via window.__alpine or DOM
-    document.querySelectorAll('[x-data^="gradeQuestion"]').forEach(el => {
-        const alpine = el.__x;
-        if (!alpine) return;
-        const data = alpine.getUnboundMethods ? alpine : alpine.$data;
-        const qIdx = data.qIdx;
-        if (data.scoreVal !== undefined && data.scoreVal !== '') scores[qIdx] = parseFloat(data.scoreVal) || 0;
-        if (data.commentVal) comments[qIdx] = data.commentVal;
-        // Collect teacher overlay per page
-        const qOverlay = {};
-        const pageCount = PDF_PAGES.length;
-        for (let p = 0; p < pageCount; p++) {
-            const pageData = GRADE_STATE[qIdx]?.[p];
-            const tBoxes = data.teacherBoxes?.[p] || [];
-            const hasCanvas = pageData?.canvas && pageData.canvas.length > 1000;
-            const hasText = tBoxes.some(b => b.text.trim());
-            if (hasCanvas || hasText) {
-                qOverlay[p] = {};
-                if (hasCanvas) qOverlay[p].canvas = pageData.canvas;
-                if (hasText) qOverlay[p].textBoxes = tBoxes.filter(b => b.text.trim());
+    const scores={}, comments={}, overlayPages={};
+    for (let q = 0; q < TOTAL_Q; q++) {
+        const inst = QUESTION_INSTANCES[q];
+        if (!inst) continue;
+        if(inst.scoreVal !== undefined && inst.scoreVal !== '') scores[q] = parseFloat(inst.scoreVal)||0;
+        if(inst.commentVal) comments[q] = inst.commentVal;
+        inst.saveOverlayForPage();
+        const qOv = {};
+        for(let p=0; p<PDF_LEN; p++) {
+            const pd = GRADE_STATE[q]?.[p];
+            const tB = inst.teacherBoxes?.[p] || [];
+            if((pd?.canvas && pd.canvas.length>1000) || tB.some(b=>b.text.trim())) {
+                qOv[p] = {};
+                if(pd?.canvas && pd.canvas.length>1000) qOv[p].canvas = pd.canvas;
+                if(tB.some(b=>b.text.trim())) qOv[p].textBoxes = tB.filter(b=>b.text.trim());
             }
         }
-        if (Object.keys(qOverlay).length > 0) overlayPages[qIdx] = qOverlay;
-    });
-    return { scores, comments, overlay_pages: overlayPages };
+        if(Object.keys(qOv).length) overlayPages[q] = qOv;
+    }
+    return {scores, comments, overlay_pages: overlayPages};
 }
 
-// Auto-save to server
 function doAutoSave() {
     const fb = collectFeedback();
-    const status = document.getElementById('auto-save-status');
-    if (status) {
-        status.innerHTML = '<i class="fas fa-circle text-amber-400 mr-1 text-[8px]"></i>Menyimpan...';
-        status.className = 'text-xs font-bold text-amber-600 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200';
-    }
-    const subId = '{{ submission.id }}';
-    navigator.sendBeacon('/api/grade/auto-save/' + subId, new Blob([JSON.stringify({ teacher_feedback: fb })], { type: 'application/json' }));
-    // Update display
-    setTimeout(() => {
-        if (status) {
-            status.innerHTML = '<i class="fas fa-circle text-emerald-500 mr-1 text-[8px]"></i>Auto-save aktif';
-            status.className = 'text-xs font-bold text-stone-400 px-3 py-1.5 rounded-full bg-stone-50 border border-stone-200';
+    const st = document.getElementById('auto-save-status');
+    if(st) st.innerHTML='<i class="fas fa-spinner fa-spin mr-1 text-[8px]"></i>Menyimpan...';
+    navigator.sendBeacon('/api/grade/auto-save/{{ submission.id }}', new Blob([JSON.stringify({teacher_feedback:fb})],{type:'application/json'}));
+    setTimeout(()=>{ if(st) st.innerHTML='<i class="fas fa-circle text-emerald-500 mr-1 text-[8px]"></i>Auto-save'; },1500);
+}
+setInterval(()=>doAutoSave(),15000);
+
+function calcFinal() {
+    let total=0, count=0;
+    for (let q = 0; q < TOTAL_Q; q++) {
+        const inst = QUESTION_INSTANCES[q];
+        if (!inst) continue;
+        if(inst.scoreVal !== undefined && inst.scoreVal !== '') {
+            const s = parseFloat(inst.scoreVal);
+            if(!isNaN(s)){ total+=s; count++; }
         }
-    }, 1500);
+    }
+    const mcqKit = {{ (exam.answer_key or {}) | tojson | safe }};
+    const mcqQTypes = {{ (exam.question_types or {}) | tojson | safe }};
+    const mcqAns = {{ submission.answers | tojson | safe }};
+    let mcqCorrect = 0, mcqTotal = 0;
+    for (let k in mcqKit) {
+        if (!mcqQTypes[k] || mcqQTypes[k] === 'mcq') {
+            mcqTotal++;
+            if (mcqAns[k] === mcqKit[k]) mcqCorrect++;
+        }
+    }
+    if (mcqTotal > 0) {
+        const mcqScore = Math.round((mcqCorrect / mcqTotal) * 100);
+        total += mcqScore;
+        count++;
+    }
+    if (count > 0) {
+        const avg = Math.round((total / count) * 10) / 10;
+        document.getElementById('final-score-hidden').value = avg;
+        document.getElementById('final-display').textContent = avg;
+        return avg;
+    }
+    return 0;
 }
 
-// Also save page overlay data when clicking away from a question
-document.addEventListener('click', function() {
-    // Save current page overlay for any active grading areas
-    document.querySelectorAll('[x-data^="gradeQuestion"]').forEach(el => {
-        const alpine = el.__x;
-        if (!alpine) return;
-        const data = alpine.getUnboundMethods ? alpine : alpine.$data;
-        if (data.saveOverlayForPage) data.saveOverlayForPage();
-    });
-});
+setInterval(() => { calcFinal(); }, 2000);
 
-// Auto-save every 15 seconds
-setInterval(() => doAutoSave(), 15000);
-
-// Keyboard shortcut: Ctrl+Z undo
-document.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+document.addEventListener('keydown', e => {
+    if((e.ctrlKey||e.metaKey) && e.key==='z') {
         e.preventDefault();
-        document.querySelectorAll('[x-data^="gradeQuestion"]').forEach(el => {
-            const alpine = el.__x;
-            if (!alpine) return;
-            const data = alpine.getUnboundMethods ? alpine : alpine.$data;
-            if (data.undoCanvas) data.undoCanvas();
-        });
+        for (let q = 0; q < TOTAL_Q; q++) {
+            const inst = QUESTION_INSTANCES[q];
+            if (inst && inst.undoCanvas) inst.undoCanvas();
+        }
     }
 });
 </script>

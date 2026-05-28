@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS exams (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_exams_teacher ON exams(teacher_id);
-CREATE INDEX idx_exams_status ON exams(status);
+CREATE INDEX IF NOT EXISTS idx_exams_teacher ON exams(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_exams_status ON exams(status);
 
 -- 3. Exam Access Codes
 CREATE TABLE IF NOT EXISTS exam_access_codes (
@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS exam_access_codes (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_access_codes_exam ON exam_access_codes(exam_id);
-CREATE INDEX idx_access_codes_code ON exam_access_codes(code);
+CREATE INDEX IF NOT EXISTS idx_access_codes_exam ON exam_access_codes(exam_id);
+CREATE INDEX IF NOT EXISTS idx_access_codes_code ON exam_access_codes(code);
 
 -- 4. Submissions
 CREATE TABLE IF NOT EXISTS submissions (
@@ -66,9 +66,9 @@ CREATE TABLE IF NOT EXISTS submissions (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_submissions_exam ON submissions(exam_id);
-CREATE INDEX idx_submissions_student ON submissions(student_id);
-CREATE INDEX idx_submissions_published ON submissions(is_published) WHERE is_published = TRUE;
+CREATE INDEX IF NOT EXISTS idx_submissions_exam ON submissions(exam_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_student ON submissions(student_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_published ON submissions(is_published) WHERE is_published = TRUE;
 
 -- 5. Violation Logs
 CREATE TABLE IF NOT EXISTS violation_logs (
@@ -80,8 +80,8 @@ CREATE TABLE IF NOT EXISTS violation_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_violations_exam ON violation_logs(exam_id);
-CREATE INDEX idx_violations_user ON violation_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_violations_exam ON violation_logs(exam_id);
+CREATE INDEX IF NOT EXISTS idx_violations_user ON violation_logs(user_id);
 
 -- 6. Analytics Cache
 CREATE TABLE IF NOT EXISTS analytics_cache (
@@ -104,82 +104,116 @@ ALTER TABLE violation_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analytics_cache ENABLE ROW LEVEL SECURITY;
 
 -- Profiles Policies
+DROP POLICY IF EXISTS "profiles_select_own" ON profiles;
 CREATE POLICY "profiles_select_own" ON profiles
     FOR SELECT USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "profiles_update_own" ON profiles;
 CREATE POLICY "profiles_update_own" ON profiles
     FOR UPDATE USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "profiles_insert_trigger" ON profiles;
 CREATE POLICY "profiles_insert_trigger" ON profiles
     FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- Exams Policies
+DROP POLICY IF EXISTS "exams_select_active" ON exams;
 CREATE POLICY "exams_select_active" ON exams
     FOR SELECT USING (status = 'active');
 
+DROP POLICY IF EXISTS "exams_select_teacher" ON exams;
 CREATE POLICY "exams_select_teacher" ON exams
     FOR SELECT USING (teacher_id = auth.uid());
 
+DROP POLICY IF EXISTS "exams_insert_teacher" ON exams;
 CREATE POLICY "exams_insert_teacher" ON exams
     FOR INSERT WITH CHECK (teacher_id = auth.uid());
 
+DROP POLICY IF EXISTS "exams_update_teacher" ON exams;
 CREATE POLICY "exams_update_teacher" ON exams
     FOR UPDATE USING (teacher_id = auth.uid());
 
+DROP POLICY IF EXISTS "exams_delete_teacher" ON exams;
 CREATE POLICY "exams_delete_teacher" ON exams
     FOR DELETE USING (teacher_id = auth.uid());
 
 -- Access Codes Policies
+DROP POLICY IF EXISTS "codes_select_teacher" ON exam_access_codes;
 CREATE POLICY "codes_select_teacher" ON exam_access_codes
     FOR SELECT USING (
         EXISTS (SELECT 1 FROM exams WHERE id = exam_id AND teacher_id = auth.uid())
     );
 
+DROP POLICY IF EXISTS "codes_select_student" ON exam_access_codes;
 CREATE POLICY "codes_select_student" ON exam_access_codes
     FOR SELECT USING (student_id = auth.uid() AND is_used = FALSE);
 
+DROP POLICY IF EXISTS "codes_insert_teacher" ON exam_access_codes;
 CREATE POLICY "codes_insert_teacher" ON exam_access_codes
     FOR INSERT WITH CHECK (
         EXISTS (SELECT 1 FROM exams WHERE id = exam_id AND teacher_id = auth.uid())
     );
 
 -- Submissions Policies
+DROP POLICY IF EXISTS "submissions_select_teacher" ON submissions;
 CREATE POLICY "submissions_select_teacher" ON submissions
     FOR SELECT USING (
         EXISTS (SELECT 1 FROM exams WHERE id = exam_id AND teacher_id = auth.uid())
     );
 
+DROP POLICY IF EXISTS "submissions_select_student" ON submissions;
 CREATE POLICY "submissions_select_student" ON submissions
     FOR SELECT USING (student_id = auth.uid() AND is_published = TRUE);
 
+DROP POLICY IF EXISTS "submissions_insert_student" ON submissions;
 CREATE POLICY "submissions_insert_student" ON submissions
     FOR INSERT WITH CHECK (student_id = auth.uid());
 
+DROP POLICY IF EXISTS "submissions_update_teacher" ON submissions;
 CREATE POLICY "submissions_update_teacher" ON submissions
     FOR UPDATE USING (
         EXISTS (SELECT 1 FROM exams WHERE id = exam_id AND teacher_id = auth.uid())
     );
 
 -- Violation Logs Policies
+DROP POLICY IF EXISTS "violations_select_teacher" ON violation_logs;
 CREATE POLICY "violations_select_teacher" ON violation_logs
     FOR SELECT USING (
         EXISTS (SELECT 1 FROM exams WHERE id = exam_id AND teacher_id = auth.uid())
     );
 
 -- Service key bypasses RLS, but we allow insert via service role
+DROP POLICY IF EXISTS "violations_insert_service" ON violation_logs;
 CREATE POLICY "violations_insert_service" ON violation_logs
     FOR INSERT WITH CHECK (true);
 
 -- Analytics Cache Policies
+DROP POLICY IF EXISTS "analytics_select_teacher" ON analytics_cache;
 CREATE POLICY "analytics_select_teacher" ON analytics_cache
     FOR SELECT USING (
         EXISTS (SELECT 1 FROM exams WHERE id = exam_id AND teacher_id = auth.uid())
     );
 
+DROP POLICY IF EXISTS "analytics_insert_teacher" ON analytics_cache;
 CREATE POLICY "analytics_insert_teacher" ON analytics_cache
     FOR INSERT WITH CHECK (
         EXISTS (SELECT 1 FROM exams WHERE id = exam_id AND teacher_id = auth.uid())
     );
+
+-- Auto-create profile on user signup
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO profiles (id, full_name, role)
+    VALUES (NEW.id, NEW.raw_user_meta_data->>'full_name', COALESCE(NEW.raw_user_meta_data->>'role', 'student'));
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 
 -- Triggers for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at()
@@ -190,18 +224,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS set_profiles_updated_at ON profiles;
 CREATE TRIGGER set_profiles_updated_at
     BEFORE UPDATE ON profiles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS set_exams_updated_at ON exams;
 CREATE TRIGGER set_exams_updated_at
     BEFORE UPDATE ON exams
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS set_submissions_updated_at ON submissions;
 CREATE TRIGGER set_submissions_updated_at
     BEFORE UPDATE ON submissions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS set_analytics_cache_updated_at ON analytics_cache;
 CREATE TRIGGER set_analytics_cache_updated_at
     BEFORE UPDATE ON analytics_cache
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
@@ -211,12 +249,15 @@ INSERT INTO storage.buckets (id, name, public) VALUES ('exam-pdfs', 'exam-pdfs',
 ON CONFLICT (id) DO NOTHING;
 
 -- Storage RLS policies for exam-pdfs
+DROP POLICY IF EXISTS "exam_pdfs_select" ON storage.objects;
 CREATE POLICY "exam_pdfs_select" ON storage.objects
   FOR SELECT TO public USING (bucket_id = 'exam-pdfs');
 
+DROP POLICY IF EXISTS "exam_pdfs_insert" ON storage.objects;
 CREATE POLICY "exam_pdfs_insert" ON storage.objects
   FOR INSERT TO authenticated WITH CHECK (bucket_id = 'exam-pdfs');
 
+DROP POLICY IF EXISTS "exam_pdfs_delete" ON storage.objects;
 CREATE POLICY "exam_pdfs_delete" ON storage.objects
   FOR DELETE TO authenticated USING (bucket_id = 'exam-pdfs');
 

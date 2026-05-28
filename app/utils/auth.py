@@ -7,6 +7,10 @@ def get_supabase() -> Client:
     return current_app.extensions["supabase"]
 
 
+def get_auth_client() -> Client:
+    return current_app.extensions["supabase_auth"]
+
+
 def _wants_json():
     accept = request.headers.get("Accept", "")
     return "application/json" in accept or request.path.startswith("/api/")
@@ -19,7 +23,7 @@ def login_required(f):
         if not token:
             return _unauthorized()
         try:
-            supabase = get_supabase()
+            supabase = get_auth_client()
             user = supabase.auth.get_user(token)
             g.user_id = user.user.id
             g.user_role = user.user.user_metadata.get("role", "student")

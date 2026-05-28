@@ -13,7 +13,20 @@ teacher_bp = Blueprint("teacher", __name__)
 def dashboard():
     supabase = get_supabase()
     res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).execute()
-    return render_template("teacher/dashboard.html", exams=res.data)
+    exams = res.data or []
+
+    exam_ids = [e["id"] for e in exams]
+    total_students = 0
+    all_scores = []
+    if exam_ids:
+        subs = supabase.table("submissions").select("student_id,score,final_score").in_("exam_id", exam_ids).execute().data or []
+        unique_students = set(s["student_id"] for s in subs)
+        total_students = len(unique_students)
+        all_scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs if s.get("final_score") or s.get("score")]
+
+    avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
+
+    return render_template("teacher/dashboard.html", exams=exams, total_students=total_students, avg_score=avg_score)
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
@@ -45,8 +58,14 @@ def exam_form():
             answer_key[str(i)] = "essay_canvas"
             question_canvas[str(i)] = True
         audio_url = request.form.get(f"audio_{i}", "").strip()
+        youtube_url = request.form.get(f"youtube_{i}", "").strip()
+        media = {}
         if audio_url:
-            question_audio[str(i)] = audio_url
+            media["audio"] = audio_url
+        if youtube_url:
+            media["youtube"] = youtube_url
+        if media:
+            question_audio[str(i)] = media
 
     data = {
         "teacher_id": g.user_id,
@@ -99,8 +118,14 @@ def exam_detail(exam_id):
             answer_key[str(i)] = "essay_canvas"
             question_canvas[str(i)] = True
         audio_url = request.form.get(f"audio_{i}", "").strip()
+        youtube_url = request.form.get(f"youtube_{i}", "").strip()
+        media = {}
         if audio_url:
-            question_audio[str(i)] = audio_url
+            media["audio"] = audio_url
+        if youtube_url:
+            media["youtube"] = youtube_url
+        if media:
+            question_audio[str(i)] = media
 
     data = {
         "title": title,
@@ -186,8 +211,12 @@ def results():
         return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams)
 
     supabase = get_supabase()
-    subs = supabase.table("submissions").select("*").eq("exam_id", exam_id).execute().data or []
+    subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     exams = supabase.table("exams").select("id,title").eq("teacher_id", g.user_id).execute().data or []
+
+    for s in subs:
+        if s.get("profiles"):
+            s["student_name"] = s.pop("profiles").get("full_name", "")
 
     if subs:
         scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs]
@@ -209,24 +238,32 @@ def grade_detail(submission_id):
     supabase = get_supabase()
     sub = supabase.table("submissions").select("*").eq("id", submission_id).single().execute().data
     exam = supabase.table("exams").select("*").eq("id", sub["exam_id"]).single().execute().data
-    return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"])
+    student = supabase.table("profiles").select("id,full_name,phone").eq("id", sub["student_id"]).single().execute().data or {}
+    return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
 
 
 @teacher_bp.route("/grade/<submission_id>/override", methods=["POST"])
 @teacher_or_admin_required
 def override_score(submission_id):
-    new_score = request.form.get("final_score")
+    if request.is_json:
+        data = request.get_json()
+        new_score = data.get("final_score")
+        feedback = data.get("teacher_feedback", {})
+    else:
+        new_score = request.form.get("final_score")
+        feedback_raw = request.form.get("teacher_feedback", "{}")
+        try:
+            feedback = json.loads(feedback_raw)
+        except json.JSONDecodeError:
+            feedback = {}
     supabase = get_supabase()
-    feedback_raw = request.form.get("teacher_feedback", "{}")
-    try:
-        feedback = json.loads(feedback_raw)
-    except json.JSONDecodeError:
-        feedback = {}
     supabase.table("submissions").update({
         "final_score": float(new_score) if new_score else None,
         "status": "graded",
         "teacher_feedback": feedback,
     }).eq("id", submission_id).execute()
+    if request.is_json:
+        return jsonify({"success": True, "final_score": float(new_score) if new_score else None})
     return redirect(request.referrer or "/teacher/results")
 
 
@@ -239,6 +276,18 @@ def publish_scores(exam_id):
         .eq("exam_id", exam_id) \
         .execute()
     return redirect("/teacher/results?exam_id=" + exam_id)
+
+
+@teacher_bp.route("/publish/submission/<submission_id>", methods=["POST"])
+@teacher_or_admin_required
+def publish_single(submission_id):
+    supabase = get_supabase()
+    sub = supabase.table("submissions").select("exam_id").eq("id", submission_id).single().execute().data
+    supabase.table("submissions") \
+        .update({"is_published": True, "status": "published"}) \
+        .eq("id", submission_id) \
+        .execute()
+    return redirect("/teacher/results?exam_id=" + sub["exam_id"])
 
 
 # --- Export ---

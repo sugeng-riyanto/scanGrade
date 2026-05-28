@@ -34,8 +34,13 @@ instance/
 *.sqlite3
 static/uploads/
 static/reports/
+app/static/uploads/
 logs/
 *.log
+
+# Temp files
+temp_*
+scripts/
 
 # Testing
 .cache/

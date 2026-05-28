@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, g, render_template, redirect, url_for, make_response
-from app.utils.auth import login_required, get_supabase
+from app.utils.auth import login_required, get_supabase, get_auth_client
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -12,19 +12,26 @@ def register():
     email = request.form.get("email")
     password = request.form.get("password")
     role = request.form.get("role", "student")
+    full_name = request.form.get("full_name", "")
 
     if not email or not password:
         return render_template("auth/register.html", error="Email dan password wajib diisi")
 
     supabase = get_supabase()
     try:
-        supabase.auth.admin.create_user({
+        res = supabase.auth.admin.create_user({
             "email": email,
             "password": password,
-            "user_metadata": {"role": role},
+            "user_metadata": {"role": role, "full_name": full_name},
             "email_confirm": True,
         })
-        return redirect("/auth/login")
+        uid = res.user.id
+        supabase.table("profiles").insert({
+            "id": uid,
+            "full_name": full_name or email.split("@")[0],
+            "role": role,
+        }).execute()
+        return redirect("/auth/login?registered=1")
     except Exception as e:
         return render_template("auth/register.html", error=str(e))
 
@@ -40,7 +47,7 @@ def login():
     if not email or not password:
         return render_template("auth/login.html", error="Email dan password wajib diisi")
 
-    supabase = get_supabase()
+    supabase = get_auth_client()
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         role = res.user.user_metadata.get("role")

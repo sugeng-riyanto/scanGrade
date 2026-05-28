@@ -78,6 +78,7 @@
                             <th class="pb-3 font-extrabold">Skor</th>
                             <th class="pb-3 font-extrabold">Penalti</th>
                             <th class="pb-3 font-extrabold">Final</th>
+                            <th class="pb-3 font-extrabold">Waktu</th>
                             <th class="pb-3 font-extrabold">Status</th>
                             <th class="pb-3 font-extrabold">Aksi</th>
                         </tr>
@@ -86,12 +87,13 @@
                         {% for s in submissions %}
                         <tr class="border-b border-stone-100 last:border-0 hover:bg-orange-50/30 transition">
                             <td class="py-3 font-bold text-stone-600">{{ loop.index }}</td>
-                            <td class="py-3 font-extrabold text-stone-800">{{ s.student_id[:12] }}...</td>
-                            <td class="py-3 font-bold text-stone-600">{{ s.score or '-' }}</td>
-                            <td class="py-3 font-bold text-red-600">{{ s.penalty or 0 }}</td>
+                            <td class="py-3 font-extrabold text-stone-800">{{ s.student_name or s.student_id[:12] ~ '...' }}</td>
+                            <td class="py-3 font-bold text-stone-600">{{ s.score if s.score is not none else '-' }}</td>
+                            <td class="py-3 font-bold text-red-600">{{ s.penalty if s.penalty is not none else 0 }}</td>
                             <td class="py-3 font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
-                                {{ s.final_score or s.score or '-' }}
+                                {{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}
                             </td>
+                            <td class="py-3 text-xs font-bold text-stone-500">{{ s.submitted_at[:16] if s.submitted_at else '-' }}</td>
                             <td class="py-3">
                                 <span class="px-3 py-1.5 text-xs font-bold rounded-full
                                     {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700
@@ -101,9 +103,18 @@
                                 </span>
                             </td>
                             <td class="py-3">
-                                <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block">
-                                    <i class="fas fa-eye mr-1"></i>Detail
-                                </a>
+                                <div class="flex items-center gap-1">
+                                    <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block">
+                                        <i class="fas fa-eye mr-1"></i>Detail
+                                    </a>
+                                    {% if s.status != 'published' %}
+                                    <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan nilai ke siswa ini?')">
+                                        <button type="submit" class="text-emerald-600 hover:text-emerald-700 font-extrabold text-xs p-2 hover:bg-emerald-50 rounded-xl transition" title="Publish">
+                                            <i class="fas fa-share"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}

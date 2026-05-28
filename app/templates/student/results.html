@@ -2,35 +2,54 @@
 {% block title %}Hasil - ScanGrade{% endblock %}
 {% block head_extra %}
 <style>
-.text-box-view { position: absolute; min-width: 80px; z-index: 5; }
-.text-box-view .box-content { font-size: 11px; padding: 3px 7px; border-radius: 6px; word-break: break-word; }
-.text-box-view.student .box-content { border: 2px solid #f97316; background: rgba(255,255,255,0.92); }
-.text-box-view.teacher .box-content { border: 2px dashed #059669; background: rgba(236,253,245,0.92); }
-.result-canvas-wrap { position: relative; overflow: hidden; border-radius: 12px; border: 2px solid #e5e7eb; }
-.result-canvas-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+@media print {
+    body { background: #fff !important; padding: 0 !important; }
+    .no-print { display: none !important; }
+    .print-break { page-break-before: always; }
+    .shadow-lg, .shadow-stone-200\/60 { box-shadow: none !important; }
+    .rounded-2xl { border-radius: 0 !important; }
+    .border { border: 1px solid #ddd !important; }
+    .max-w-4xl { max-width: 100% !important; }
+    header, nav { display: none !important; }
+}
+.essay-page-wrap { position: relative; border-radius: 12px; border: 2px solid #e5e7eb; overflow: hidden; background: #fff; }
+.essay-page-wrap .pdf-bg { width: 100%; display: block; }
+.essay-page-wrap .overlay-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.text-box-overlay { position: absolute; min-width: 40px; z-index: 10; }
+.text-box-overlay .box-content { font-size: 10px; padding: 2px 5px; border-radius: 4px; word-break: break-word; white-space: pre-wrap; }
+.text-box-overlay.student .box-content { border: 2px solid #f97316; background: rgba(255,255,255,0.92); }
+.text-box-overlay.teacher .box-content { border: 2px dashed #059669; background: rgba(236,253,245,0.92); }
 </style>
 {% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto space-y-6">
-    <h1 class="text-2xl font-extrabold text-stone-800">Hasil Ujian</h1>
+<div class="max-w-4xl mx-auto space-y-6">
+    <div class="flex items-center justify-between no-print">
+        <h1 class="text-2xl font-extrabold text-stone-800">Hasil Ujian</h1>
+    </div>
 
     {% if submissions %}
-    <div class="space-y-4">
+    <div class="space-y-6">
         {% for s in submissions %}
+        {% set exam = s.exam or {} %}
         {% set fb = s.teacher_feedback or {} %}
         {% set fb_scores = fb.get('scores', {}) %}
         {% set fb_comments = fb.get('comments', {}) %}
         {% set fb_overlay = fb.get('overlay_pages', {}) %}
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 border border-stone-100" x-data="{ open: false }">
-            <div class="p-6">
-                <div class="flex items-center justify-between">
+        {% set answer_key = exam.get('answer_key', {}) %}
+        {% set question_types = exam.get('question_types', {}) %}
+        {% set total_q = exam.get('total_questions', 0) %}
+        {% set pdf_pages = exam.get('pdf_page_urls', []) or [] %}
+
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 border border-stone-100" id="result-{{ s.id }}">
+            <div class="p-6 border-b border-stone-100 no-print">
+                <div class="flex items-center justify-between flex-wrap gap-3">
                     <div>
-                        <h3 class="font-extrabold text-lg text-stone-800">{{ s.exam_title or 'Exam' }}</h3>
+                        <h3 class="font-extrabold text-lg text-stone-800">{{ exam.get('title', 'Exam') }}</h3>
                         <p class="text-sm font-bold text-stone-500">Dikumpulkan: {{ s.submitted_at[:16] if s.submitted_at else '-' }}</p>
                     </div>
                     <div class="text-right">
                         <p class="text-3xl font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
-                            {{ s.final_score or s.score or '-' }}
+                            {{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}
                         </p>
                         <p class="text-sm font-bold text-stone-500">Nilai</p>
                     </div>
@@ -38,66 +57,152 @@
                 {% if s.status == 'graded' or s.status == 'published' %}
                 <div class="mt-4 grid grid-cols-3 gap-4 text-center text-sm">
                     <div class="bg-emerald-50 p-3 rounded-xl">
-                        <p class="text-emerald-700 font-extrabold">{{ s.score or 0 }}</p>
+                        <p class="text-emerald-700 font-extrabold">{{ s.score if s.score is not none else 0 }}</p>
                         <p class="text-emerald-600 font-bold">Skor MCQ</p>
                     </div>
                     <div class="bg-red-50 p-3 rounded-xl">
-                        <p class="text-red-700 font-extrabold">{{ s.penalty or 0 }}</p>
+                        <p class="text-red-700 font-extrabold">{{ s.penalty if s.penalty is not none else 0 }}</p>
                         <p class="text-red-600 font-bold">Penalti</p>
                     </div>
                     <div class="bg-gradient-to-br from-orange-50 to-amber-50 p-3 rounded-xl border border-amber-100">
-                        <p class="text-orange-700 font-extrabold">{{ s.final_score or s.score or 0 }}</p>
+                        <p class="text-orange-700 font-extrabold">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else 0) }}</p>
                         <p class="text-orange-600 font-bold">Final</p>
                     </div>
                 </div>
-                <!-- Lihat detail button -->
-                <button @click="open = !open" class="mt-3 text-sm font-extrabold text-orange-600 hover:text-orange-700 transition flex items-center gap-1">
-                    <i class="fas" :class="open ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
-                    <span x-text="open ? 'Sembunyikan detail' : 'Lihat detail koreksi'"></span>
-                </button>
                 {% elif s.status == 'submitted' %}
                 <div class="mt-4 text-center text-sm font-extrabold text-amber-600 bg-amber-50 p-3 rounded-xl border border-amber-100">
                     <i class="fas fa-clock mr-1"></i>Menunggu koreksi guru
                 </div>
                 {% endif %}
+                <button onclick="window.print()" class="mt-3 text-sm font-extrabold bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2 rounded-xl hover:from-orange-600 hover:to-amber-600 transition">
+                    <i class="fas fa-print mr-1"></i>Cetak / PDF
+                </button>
             </div>
 
-            <!-- Expandable detail section -->
-            <div x-show="open" x-collapse class="border-t border-stone-100 p-6 space-y-4">
-                {% if s.answers is mapping %}
-                {% set answers = s.answers %}
-                {% set exam_id = s.exam_id %}
-                {# We don't have exam context here, so we'll need to pass pdf_page_urls #}
-                {# For now show scores/comments per question #}
-                <p class="text-xs font-extrabold text-stone-500 uppercase tracking-wider">Koreksi per Soal</p>
-                {% for key, val in fb_scores.items() %}
-                {% set q_idx = key|int %}
-                {% set comment = fb_comments.get(key, '') %}
-                <div class="p-4 bg-stone-50 rounded-2xl border border-stone-200">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <span class="font-extrabold text-stone-700">Soal #{{ q_idx + 1 }}</span>
-                            {% if comment %}
-                            <p class="text-xs font-bold text-stone-500 mt-1">{{ comment }}</p>
+            <div class="p-6 space-y-4">
+                {% set answers = s.answers or {} %}
+                {% if answers is mapping and total_q > 0 %}
+                    <p class="text-xs font-extrabold text-stone-500 uppercase tracking-wider mb-2">Jawaban per Soal</p>
+                    {% for i in range(total_q) %}
+                    {% set q_idx_str = i|string %}
+                    {% set qtype = (question_types or {}).get(i|string, 'mcq') %}
+                    {% set correct = answer_key.get(i|string, '') %}
+                    {% set student_ans = answers.get(i|string, '') %}
+                    {% set is_correct = (qtype == 'mcq' and correct and student_ans == correct) %}
+                    {% set teacher_score = fb_scores.get(q_idx_str, '') %}
+                    {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
+                    {% set teacher_overlay = fb_overlay.get(q_idx_str, {}) %}
+
+                    <div class="p-4 rounded-2xl border-2
+                        {% if qtype == 'mcq' %}
+                            {% if s.status in ('graded', 'published') and correct %}
+                                {% if student_ans == correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %}
+                            {% else %}bg-stone-50 border-stone-200{% endif %}
+                        {% else %}bg-white border-stone-200{% endif %}">
+
+                        <div class="flex items-start gap-3 flex-wrap mb-3 no-print">
+                            <span class="font-extrabold text-sm w-10 shrink-0 text-stone-700">#{{ i + 1 }}</span>
+                            {% if qtype == 'mcq' %}
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-3 flex-wrap">
+                                    <span class="text-sm font-bold">Jawaban: <strong class="{% if s.status in ('graded', 'published') %}{% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}{% else %}text-amber-700{% endif %}">{{ student_ans or '-' }}</strong></span>
+                                    {% if s.status in ('graded', 'published') %}
+                                    <span class="text-sm font-bold">Kunci: <strong class="text-emerald-700">{{ correct }}</strong></span>
+                                    {% if is_correct %}<i class="fas fa-check-circle text-emerald-500 ml-auto"></i>
+                                    {% else %}<i class="fas fa-times-circle text-red-500 ml-auto"></i>{% endif %}
+                                    {% endif %}
+                                </div>
+                                {% if teacher_score is defined and teacher_score != '' %}
+                                <div class="mt-2 text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-1.5 border border-emerald-100">
+                                    <i class="fas fa-check-circle mr-1"></i>Guru: skor {{ teacher_score }}{% if teacher_comment %} — {{ teacher_comment }}{% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
                             {% endif %}
                         </div>
-                        <div class="text-right">
-                            <span class="font-extrabold text-lg text-emerald-600">{{ val }}</span>
+
+                        {% if qtype != 'mcq' %}
+                        {% set essay_ans = student_ans if student_ans is mapping else (student_ans|from_json if student_ans is string else {}) %}
+                        <div class="space-y-3">
+                            {% if essay_ans is mapping and essay_ans.get('pages') %}
+                                {% set s_pages = essay_ans.get('pages', {}) %}
+                                {% for p_idx_str, p_data in s_pages.items() %}
+                                {% set p_idx = p_idx_str|int %}
+                                {% set pdf_idx = p_idx if (s_pages and '0' in s_pages) else (p_idx - 1) %}
+                                {% set pdf_url = pdf_pages[pdf_idx] if (pdf_idx >= 0 and pdf_idx < (pdf_pages|length)) else '' %}
+                                {% set ov_key = p_idx_str %}
+                                {% set ov_data = teacher_overlay.get(ov_key, {}) %}
+
+                                {% set has_canvas = p_data.get('canvas') and p_data.get('canvas')|length > 3000 %}
+                                {% set has_textboxes = p_data.get('textBoxes') and p_data.get('textBoxes')|length > 0 %}
+                                {% set has_ov_canvas = ov_data.get('canvas') and ov_data.get('canvas')|length > 1000 %}
+                                {% set has_ov_textboxes = ov_data.get('textBoxes') and ov_data.get('textBoxes')|length > 0 %}
+
+                                {% if pdf_url or has_canvas or has_textboxes or has_ov_canvas or has_ov_textboxes %}
+                                <div class="essay-page-wrap">
+                                    {% if pdf_url %}
+                                    <img src="{{ pdf_url }}" class="pdf-bg" alt="Soal halaman {{ pdf_idx + 1 }}">
+                                    {% elif has_canvas %}
+                                    <img src="{{ p_data.canvas }}" class="pdf-bg" alt="Jawaban halaman {{ p_idx + 1 }}">
+                                    {% else %}
+                                    <div class="pdf-bg bg-stone-100" style="min-height:200px;"></div>
+                                    {% endif %}
+
+                                    {% if has_canvas and pdf_url %}
+                                    <img src="{{ p_data.canvas }}" class="overlay-layer" style="opacity:0.6;" alt="Jawaban">
+                                    {% endif %}
+
+                                    {% for box in (p_data.get('textBoxes') or []) %}
+                                    {% if box.text and box.text.strip() %}
+                                    <div class="text-box-overlay student" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%;">
+                                        <div class="box-content">{{ box.text }}</div>
+                                    </div>
+                                    {% endif %}
+                                    {% endfor %}
+
+                                    {% if has_ov_canvas %}
+                                    <img src="{{ ov_data.canvas }}" class="overlay-layer" style="opacity:0.8;" alt="Koreksi guru">
+                                    {% endif %}
+
+                                    {% for box in (ov_data.get('textBoxes') or []) %}
+                                    {% if box.text and box.text.strip() %}
+                                    <div class="text-box-overlay teacher" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%;">
+                                        <div class="box-content">{{ box.text }}</div>
+                                    </div>
+                                    {% endif %}
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                {% if p_data.get('canvas') and not has_canvas %}
+                                <div class="text-xs text-stone-400 italic">Canvas kosong (halaman {{ p_idx + 1 }})</div>
+                                {% endif %}
+                                {% endif %}
+                                {% endfor %}
+                            {% else %}
+                                {% if student_ans is string and student_ans %}
+                                <p class="text-sm font-bold text-stone-600">{{ student_ans }}</p>
+                                {% else %}
+                                <p class="text-xs text-stone-400 italic">Jawaban kosong</p>
+                                {% endif %}
+                            {% endif %}
+
+                            {% if teacher_score is defined and teacher_score != '' or teacher_comment %}
+                            <div class="mt-3 p-3 bg-emerald-50 rounded-xl border border-emerald-200 no-print">
+                                <p class="text-xs font-extrabold text-emerald-700 mb-1"><i class="fas fa-pen mr-1"></i>Koreksi Guru</p>
+                                {% if teacher_score is defined and teacher_score != '' %}
+                                <p class="text-sm font-extrabold text-emerald-700">Skor: {{ teacher_score }}</p>
+                                {% endif %}
+                                {% if teacher_comment %}
+                                <p class="text-xs font-bold text-emerald-600">{{ teacher_comment }}</p>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </div>
+                        {% endif %}
                     </div>
-                    {% set overlay = fb_overlay.get(key, {}) %}
-                    {% if overlay %}
-                    <div class="mt-2 bg-white rounded-xl p-2 border border-stone-200">
-                        <p class="text-[10px] font-bold text-emerald-600 mb-1"><i class="fas fa-pen mr-1"></i>Koreksi guru tersedia</p>
-                    </div>
-                    {% endif %}
-                </div>
-                {% endfor %}
-                {% if fb_scores|length == 0 %}
-                <p class="text-sm font-bold text-stone-400 italic">Belum ada koreksi per soal</p>
-                {% endif %}
+                    {% endfor %}
                 {% else %}
-                <p class="text-sm font-bold text-stone-400 italic">Data jawaban tidak tersedia</p>
+                    <p class="text-sm font-bold text-stone-400 italic text-center py-4">Data jawaban tidak tersedia</p>
                 {% endif %}
             </div>
         </div>
@@ -110,4 +215,11 @@
     </div>
     {% endif %}
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const style = document.createElement('style');
+style.textContent = '@media print { .no-print { display: none !important; } }';
+document.head.appendChild(style);
+</script>
 {% endblock %}

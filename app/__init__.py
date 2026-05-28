@@ -25,6 +25,7 @@ def create_app(env=None):
 
     supabase: Client = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_SERVICE_KEY)
     app.extensions["supabase"] = supabase
+    app.extensions["supabase_auth"] = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY)
 
     _register_blueprints(app)
     _register_error_handlers(app)

@@ -22,7 +22,7 @@
 .full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: hidden; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
 .text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: 10; touch-action: none; }
-.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; }
+.text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; -webkit-user-select: text; }
 .text-box textarea:focus { outline: none; border-color: #ea580c; background: #fff; box-shadow: 0 4px 20px rgba(249,115,22,0.3); }
 .text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
 .text-box .box-handle:active { cursor: grabbing; }
@@ -54,6 +54,22 @@
             </div>
         </div>
         <div class="flex items-center gap-3">
+            <!-- Connection Status Indicator -->
+            <div x-show="!submitted" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold transition-all"
+                 :class="{
+                     'bg-emerald-50 text-emerald-600 border border-emerald-200': syncStatus === 'synced',
+                     'bg-amber-50 text-amber-600 border border-amber-200': syncStatus === 'saving',
+                     'bg-stone-100 text-stone-400 border border-stone-200': syncStatus === 'offline',
+                     'bg-red-50 text-red-500 border border-red-200': syncStatus === 'error'
+                 }">
+                <i :class="{
+                    'fas fa-check-circle': syncStatus === 'synced',
+                    'fas fa-sync-alt fa-spin': syncStatus === 'saving',
+                    'fas fa-cloud-upload-alt': syncStatus === 'offline',
+                    'fas fa-exclamation-circle': syncStatus === 'error'
+                }"></i>
+                <span x-text="syncLabel"></span>
+            </div>
             <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="formatTime(timeLeft)" :class="timeLeft < 60 ? 'text-red-500' : 'text-orange-500'"></div>
             <button x-show="!submitted" @click="submitExam()" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-5 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-bold shadow-lg shadow-orange-200/50 transition">
                 <i class="fas fa-check mr-1.5"></i>Kumpulkan
@@ -205,6 +221,7 @@
                                         <button type="button" class="box-del" @click="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
                                         <textarea x-model="box.text"
                                                   @input="onTextBoxInput(i); textBoxes = {...(textBoxes || {})}"
+                                                  @copy.prevent @paste.prevent @cut.prevent @contextmenu.prevent
                                                   placeholder="Ketik..."
                                                   @mousedown.stop @touchstart.stop></textarea>
                                     </div>
@@ -327,13 +344,22 @@ function examApp(duration, totalQ) {
         ecCanvasInited: {},
         canScrollUp: false,
         canScrollDown: false,
+        syncStatus: navigator.onLine ? 'synced' : 'offline',
+        syncLabel: navigator.onLine ? 'Tersinkron' : 'Offline — tersimpan lokal',
+        lastSyncAt: Date.now(),
+        pendingSync: false,
+        dirty: false,
+        canvasDirty: {},
+        lastSyncHash: '',
+        _syncInFlight: false,
+        _canvasSyncInFlight: false,
         init() {
             this.timer = setInterval(() => {
                 if (this.timeLeft <= 0) this.submitExam();
                 else this.timeLeft--;
             }, 1000);
-            // Auto-save every 30 seconds
-            this.autoSaveTimer = setInterval(() => this.autoSaveDraft(), 30000);
+            this.autoSaveTimer = setInterval(() => this.periodicSync(), 20000);
+            this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 60000);
             this.$watch('currentQ', (val) => {
                 if (this.questions[val] && this.questions[val].canvas && this.showCanvas[val] && !this.isEssayWithBg(val)) {
                     this.$nextTick(() => this.initCanvas(val));
@@ -342,12 +368,44 @@ function examApp(duration, totalQ) {
                     this.$nextTick(() => this.initEcCanvas(val));
                 }
             });
+            window.addEventListener('online', () => this.onGoOnline());
+            window.addEventListener('offline', () => this.onGoOffline());
+            window.addEventListener('beforeunload', (e) => {
+                this.saveToLocal();
+                if (this.dirty) {
+                    const data = this.getAnswersLight();
+                    navigator.sendBeacon('/api/student/sync-draft',
+                        new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data})], {type: 'application/json'}));
+                }
+            });
             this.$nextTick(() => {
                 const v = this.currentQ;
                 if (this.questions[v]?.type !== 'mcq') this.initEcCanvas(v);
                 this.updateScrollState();
                 this.loadDraft();
             });
+        },
+        onGoOnline() {
+            this.syncStatus = 'saving';
+            this.syncLabel = 'Menyinkronkan...';
+            this.saveToLocal();
+            this.$nextTick(() => this.syncToServer());
+            if (Object.keys(this.canvasDirty).length > 0) this.syncCanvasToServer();
+        },
+        onGoOffline() {
+            this.syncStatus = 'offline';
+            this.syncLabel = 'Offline — tersimpan lokal';
+            this.saveToLocal();
+        },
+        markDirty() {
+            this.dirty = true;
+        },
+        periodicSync() {
+            this.saveToLocal();
+            if (this.dirty && navigator.onLine) this.syncToServer();
+        },
+        periodicCanvasSync() {
+            if (Object.keys(this.canvasDirty).length > 0 && navigator.onLine) this.syncCanvasToServer();
         },
         scrollSidebar(amount) {
             const el = this.$refs.sidebarScroll;
@@ -406,12 +464,14 @@ function examApp(duration, totalQ) {
             };
             const onStart = e => {
                 const mode = this.essayCanvasMode[i];
+                const p_idx = this.page - 1;
                 if (mode === 'text') {
                     const p = getPos(e);
                     const x_pct = p.x / canvas.width;
                     const y_pct = p.y / canvas.height;
-                    if (!this.textBoxes[i]) this.textBoxes[i] = [];
-                    this.textBoxes[i].push({ x_pct, y_pct, text: '' });
+                    if (!this.textBoxes[i]) this.textBoxes[i] = {};
+                    if (!this.textBoxes[i][p_idx]) this.textBoxes[i][p_idx] = [];
+                    this.textBoxes[i][p_idx].push({ x_pct, y_pct, text: '' });
                     this.onTextBoxInput(i);
                     this.$nextTick(() => {
                         const t = area.querySelector('.text-box:last-child textarea');
@@ -423,7 +483,8 @@ function examApp(duration, totalQ) {
                 const p = getPos(e);
                 lx = p.x; ly = p.y;
                 drawing = true;
-                this.hasDrawn[i] = true;
+                if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+                this.hasDrawn[i][p_idx] = true;
             };
             const onMove = e => {
                 if (!drawing) return;
@@ -442,6 +503,9 @@ function examApp(duration, totalQ) {
                 if (!drawing) return;
                 drawing = false; e.preventDefault();
                 this.saveCanvasState(i);
+                if (!this.canvasDirty[i]) this.canvasDirty[i] = {};
+                this.canvasDirty[i][this.page - 1] = true;
+                this.markDirty();
             };
             const onKey = e => {
                 if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -505,6 +569,7 @@ function examApp(duration, totalQ) {
             if (hasText) {
                 this.markAnswered(i, true);
             }
+            this.markDirty();
         },
         startTextBoxDrag(i, bi, event) {
             event.preventDefault();
@@ -560,7 +625,14 @@ function examApp(duration, totalQ) {
             const d = this.canvasDraw[i];
             if (d && d.el) {
                 if (!this.canvasData[i]) this.canvasData[i] = {};
-                this.canvasData[i][p] = d.el.toDataURL();
+                const src = d.el;
+                const scale = Math.min(500 / Math.max(src.width, 1), 1);
+                const c = document.createElement('canvas');
+                c.width = Math.round(src.width * scale);
+                c.height = Math.round(src.height * scale);
+                const cx = c.getContext('2d');
+                cx.drawImage(src, 0, 0, c.width, c.height);
+                this.canvasData[i][p] = c.toDataURL('image/jpeg', 0.4);
             }
             if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
             this.hasDrawn[i][p] = !!(d && this._hasNonEmptyCanvas(i));
@@ -609,6 +681,7 @@ function examApp(duration, totalQ) {
         markAnswered(i, val) {
             this.answered[i] = true;
             this.questions[i].answer = val;
+            this.markDirty();
         },
         selectedAnswer(i) { return this.questions[i].answer; },
         get answeredCount() { return Object.keys(this.answered).length; },
@@ -754,23 +827,90 @@ function examApp(duration, totalQ) {
                 d.el.height = this.canvasHeight[i];
             }
         },
-        // Auto-save methods
-        autoSaveDraft() {
-            this._saveCurrentPage();
+        saveToLocal() {
             try {
                 const data = this.getAnswers();
-                localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify({
-                    answers: data,
-                    savedAt: Date.now(),
-                }));
-                // Also save to server via sendBeacon
-                const blob = new Blob([JSON.stringify({ exam_id: '{{ exam.id }}', answers: data })],
-                    { type: 'application/json' });
-                navigator.sendBeacon('/api/student/auto-save', blob);
-            } catch(e) { console.warn('Auto-save failed:', e); }
+                const payload = { answers: data, savedAt: Date.now(), examId: '{{ exam.id }}' };
+                localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
+            } catch(e) {
+                console.warn('localStorage save failed:', e);
+            }
+        },
+        getAnswersLight() {
+            const data = {};
+            this.questions.forEach((q, i) => {
+                if (q.type === 'essay_text' || q.type === 'essay_canvas' || q.type === 'essay') {
+                    const pagesData = {};
+                    const totalP = this.totalPages || 1;
+                    for (let p = 0; p < totalP; p++) {
+                        const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
+                        if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
+                    }
+                    data[i] = { type: q.type, pages: pagesData };
+                } else if (q.answer) {
+                    data[i] = q.answer;
+                }
+            });
+            return data;
+        },
+        getAnswersWithCanvas() {
+            this._saveCurrentPage();
+            const data = this.getAnswersLight();
+            this.questions.forEach((q, i) => {
+                if (q.type !== 'mcq' && data[i] && data[i].pages) {
+                    const totalP = this.totalPages || 1;
+                    for (let p = 0; p < totalP; p++) {
+                        const hasDrawing = !!(this.hasDrawn[i]?.[p]);
+                        const canvasUrl = this.canvasData[i]?.[p];
+                        if ((hasDrawing || canvasUrl) && !data[i].pages[p]) data[i].pages[p] = {};
+                        if (hasDrawing && canvasUrl) data[i].pages[p].canvas = canvasUrl;
+                    }
+                }
+            });
+            return data;
+        },
+        syncToServer() {
+            if (this.submitted || this._syncInFlight) return;
+            const lightData = this.getAnswersLight();
+            const hash = JSON.stringify(lightData);
+            if (hash === this.lastSyncHash) { this.dirty = false; return; }
+            this._syncInFlight = true;
+            this.syncStatus = 'saving';
+            this.syncLabel = 'Menyinkronkan...';
+            fetch('/api/student/sync-draft', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ exam_id: '{{ exam.id }}', answers: lightData, light: true })
+            })
+            .then(r => { if (r.ok) { this.lastSyncHash = hash; this.dirty = false; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
+            .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; this.pendingSync = true; })
+            .finally(() => { this._syncInFlight = false; });
+        },
+        syncCanvasToServer() {
+            if (this.submitted || this._canvasSyncInFlight) return;
+            this._saveCurrentPage();
+            const data = this.getAnswersWithCanvas();
+            this._canvasSyncInFlight = true;
+            fetch('/api/student/sync-draft', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ exam_id: '{{ exam.id }}', answers: data, light: false })
+            })
+            .then(r => { if (r.ok) { this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
+            .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; })
+            .finally(() => { this._canvasSyncInFlight = false; });
         },
         loadDraft() {
             try {
+                const pendingSubmit = localStorage.getItem('exam_pending_submit_' + '{{ exam.id }}');
+                if (pendingSubmit) {
+                    const parsed = JSON.parse(pendingSubmit);
+                    if (navigator.onLine) {
+                        this.submitted = true;
+                        this._doSubmit(parsed.answers_json);
+                        return;
+                    }
+                }
                 const saved = localStorage.getItem('exam_draft_' + '{{ exam.id }}');
                 if (!saved) return;
                 const data = JSON.parse(saved);
@@ -803,44 +943,7 @@ function examApp(duration, totalQ) {
             } catch(e) { console.warn('Load draft failed:', e); }
         },
         getAnswers() {
-            // Save current page first
-            this._saveCurrentPage();
-            const data = {};
-            this.questions.forEach((q, i) => {
-                if (q.type === 'essay_text' || q.type === 'essay_canvas') {
-                    const pagesData = {};
-                    const totalP = this.totalPages || 1;
-                    for (let p = 0; p < totalP; p++) {
-                        const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
-                        const hasDrawing = !!(this.hasDrawn[i]?.[p]);
-                        const canvasUrl = this.canvasData[i]?.[p];
-                        if (boxes.length > 0 || hasDrawing || canvasUrl) {
-                            const pageEntry = {};
-                            if (boxes.length > 0) pageEntry.textBoxes = boxes;
-                            if (hasDrawing && canvasUrl) {
-                                // Downscale canvas
-                                try {
-                                    const img = new Image();
-                                    img.src = canvasUrl;
-                                    const c = document.createElement('canvas');
-                                    c.width = Math.min(img.naturalWidth || 400, 400);
-                                    c.height = Math.round((img.naturalHeight || 300) * c.width / (img.naturalWidth || 400));
-                                    const cx = c.getContext('2d');
-                                    cx.fillStyle = '#ffffff';
-                                    cx.fillRect(0, 0, c.width, c.height);
-                                    cx.drawImage(img, 0, 0, c.width, c.height);
-                                    pageEntry.canvas = c.toDataURL('image/jpeg', 0.5);
-                                } catch(e) { pageEntry.canvas = canvasUrl; }
-                            }
-                            pagesData[p] = pageEntry;
-                        }
-                    }
-                    data[i] = { type: q.type, pages: pagesData };
-                } else if (q.answer) {
-                    data[i] = q.answer;
-                }
-            });
-            return data;
+            return this.getAnswersWithCanvas();
         },
         submitExam() {
             if (this.submitted) return;
@@ -848,15 +951,65 @@ function examApp(duration, totalQ) {
             this.submitted = true;
             clearInterval(this.timer);
             clearInterval(this.autoSaveTimer);
-            this.autoSaveDraft(); // one final save
-            // Mark submit hint for anti-cheat
+            this.saveToLocal();
             if (window.markExamSubmitted) window.markExamSubmitted();
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'answers_json';
-            input.value = JSON.stringify(this.getAnswers());
-            document.getElementById('exam-form').appendChild(input);
-            document.getElementById('exam-form').submit();
+            const answers = this.getAnswers();
+            if (!navigator.onLine) {
+                localStorage.setItem('exam_pending_submit_' + '{{ exam.id }}', JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
+                this.syncStatus = 'offline';
+                this.syncLabel = 'Menunggu koneksi...';
+                alert('Internet terputus. Jawaban tersimpan lokal dan akan otomatis dikirim saat internet kembali tersedia. JANGAN TUTUP halaman ini.');
+                this.submitted = false;
+                this._startOfflineSubmitPoll();
+                return;
+            }
+            this._doSubmit(answers);
+        },
+        _startOfflineSubmitPoll() {
+            this._offlinePollTimer = setInterval(() => {
+                if (navigator.onLine) {
+                    clearInterval(this._offlinePollTimer);
+                    const pending = localStorage.getItem('exam_pending_submit_' + '{{ exam.id }}');
+                    if (pending) {
+                        const parsed = JSON.parse(pending);
+                        this.syncStatus = 'saving';
+                        this.syncLabel = 'Mengirim jawaban...';
+                        this.submitted = true;
+                        this._doSubmit(parsed.answers_json);
+                    }
+                }
+            }, 3000);
+        },
+        _doSubmit(answers) {
+            this.syncStatus = 'saving';
+            this.syncLabel = 'Mengirim...';
+            fetch('/student/exams/{{ exam.id }}/submit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({answers_json: answers})
+            })
+            .then(r => {
+                if (r.ok) {
+                    localStorage.removeItem('exam_pending_submit_' + '{{ exam.id }}');
+                    localStorage.removeItem('exam_draft_' + '{{ exam.id }}');
+                    window.location.href = '/student/results';
+                } else {
+                    return r.json().then(d => {
+                        alert('Gagal kirim: ' + (d.error || 'coba lagi'));
+                        this.submitted = false;
+                        this.syncStatus = 'error';
+                        this.syncLabel = 'Gagal kirim — coba lagi';
+                    });
+                }
+            })
+            .catch(e => {
+                this.submitted = false;
+                this.syncStatus = 'offline';
+                this.syncLabel = 'Offline — tersimpan lokal';
+                localStorage.setItem('exam_pending_submit_' + '{{ exam.id }}', JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
+                alert('Internet terputus. Jawaban tersimpan dan akan otomatis dikirim saat internet kembali. JANGAN TUTUP halaman ini.');
+                this._startOfflineSubmitPoll();
+            });
         },
         formatTime(s) {
             let m = Math.floor(s / 60), sec = s % 60;
