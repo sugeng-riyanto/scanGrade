@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}UU PDP - ScanGrade{% endblock %}
+{% block page_title %}UU Perlindungan Data Pribadi{% endblock %}
+{% block content %}
+<div class="space-y-6 max-w-4xl mx-auto" x-data="{ lang: localStorage.getItem('sg_lang') || 'id', activeSection: null }">
+    <!-- Header -->
+    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="relative z-10">
+            <div class="flex items-center gap-3 mb-2">
+                <div class="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><i class="fas fa-gavel text-xl"></i></div>
+                <div>
+                    <h2 class="text-2xl font-extrabold">UU No. 27 Tahun 2022</h2>
+                    <p class="text-primary-200 font-medium text-sm">Undang-Undang Perlindungan Data Pribadi</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Card -->
+    <div class="card p-5 bg-amber-50 border-amber-200 animate-slide-down">
+        <div class="flex items-start gap-3">
+            <i class="fas fa-info-circle text-amber-600 mt-0.5"></i>
+            <div>
+                <p class="font-bold text-amber-800 text-sm">Tentang Halaman Ini</p>
+                <p class="text-xs text-amber-700 font-medium mt-0.5">
+                    Halaman ini berisi referensi implementasi UU PDP No. 27 Tahun 2022 pada aplikasi ScanGrade.
+                    Digunakan untuk kepatuhan dan audit internal.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Compliance Principles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="card p-5 card-hover">
+            <div class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3"><i class="fas fa-check-double"></i></div>
+            <h4 class="font-bold text-surface-800 text-sm">Pasal 16 — Persetujuan</h4>
+            <p class="text-xs text-surface-500 mt-1">Pemrosesan data pribadi memerlukan persetujuan eksplisit pengguna. ScanGrade mencatat persetujuan saat registrasi.</p>
+        </div>
+        <div class="card p-5 card-hover">
+            <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-3"><i class="fas fa-eye"></i></div>
+            <h4 class="font-bold text-surface-800 text-sm">Pasal 19 — Tujuan</h4>
+            <p class="text-xs text-surface-500 mt-1">Data diproses sesuai tujuan yang diinformasikan: manajemen ujian, penilaian, dan administrasi sekolah.</p>
+        </div>
+        <div class="card p-5 card-hover">
+            <div class="w-10 h-10 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center mb-3"><i class="fas fa-shield-alt"></i></div>
+            <h4 class="font-bold text-surface-800 text-sm">Pasal 35 — Keamanan</h4>
+            <p class="text-xs text-surface-500 mt-1">Penyelenggara wajib melindungi data pribadi dari akses tidak sah. ScanGate menggunakan RLS + enkripsi.</p>
+        </div>
+        <div class="card p-5 card-hover">
+            <div class="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center mb-3"><i class="fas fa-clock"></i></div>
+            <h4 class="font-bold text-surface-800 text-sm">Pasal 43 — Retensi</h4>
+            <p class="text-xs text-surface-500 mt-1">Data disimpan sesuai periode retensi yang ditentukan. Sekolah dapat menghapus data siswa yang tidak aktif.</p>
+        </div>
+        <div class="card p-5 card-hover">
+            <div class="w-10 h-10 rounded-lg bg-red-50 text-red-600 flex items-center justify-center mb-3"><i class="fas fa-user-times"></i></div>
+            <h4 class="font-bold text-surface-800 text-sm">Pasal 47 — Penghapusan</h4>
+            <p class="text-xs text-surface-500 mt-1">Pengguna berhak meminta penghapusan data pribadi. Admin sekolah dapat menghapus akun siswa/guru.</p>
+        </div>
+        <div class="card p-5 card-hover">
+            <div class="w-10 h-10 rounded-lg bg-cyan-50 text-cyan-600 flex items-center justify-center mb-3"><i class="fas fa-file-export"></i></div>
+            <h4 class="font-bold text-surface-800 text-sm">Pasal 52 — Portabilitas</h4>
+            <p class="text-xs text-surface-500 mt-1">Pengguna berhak mendapatkan data pribadi dalam format yang umum digunakan. ScanGrade mendukung ekspor XLSX.</p>
+        </div>
+    </div>
+
+    <!-- Full Law Reference -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100 bg-surface-50">
+            <h3 class="font-bold text-surface-800"><i class="fas fa-book-open text-primary-500 mr-2"></i>Referensi Lengkap UU PDP</h3>
+        </div>
+        <div class="p-5 space-y-4 text-sm text-surface-600 leading-relaxed">
+            <div @click="activeSection = activeSection === 'p1' ? null : 'p1'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p1' && 'rotate-90'"></i>
+                    Pasal 1 — Ketentuan Umum
+                </div>
+                <div x-show="activeSection === 'p1'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>Data Pribadi adalah data tentang orang perseorangan yang teridentifikasi atau dapat diidentifikasi secara tersendiri atau dikombinasi dengan informasi lainnya, baik secara langsung maupun tidak langsung melalui sistem elektronik atau nonelektronik.</p>
+                    <p>Perlindungan Data Pribadi adalah keseluruhan upaya untuk melindungi Data Pribadi dalam rangkaian pemrosesan Data Pribadi guna menjamin hak konstitusional subjek data pribadi.</p>
+                </div>
+            </div>
+            <div @click="activeSection = activeSection === 'p2' ? null : 'p2'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p2' && 'rotate-90'"></i>
+                    Pasal 16 — Persetujuan Pemrosesan
+                </div>
+                <div x-show="activeSection === 'p2'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>(1) Pemrosesan Data Pribadi wajib didasarkan pada persetujuan yang sah dari Subjek Data Pribadi.</p>
+                    <p>(2) Persetujuan sebagaimana dimaksud pada ayat (1) diberikan secara tertulis dan/atau melalui rekaman elektronik.</p>
+                    <p><strong>Implementasi ScanGrade:</strong> Persetujuan diperoleh saat registrasi sekolah melalui form pendaftaran. Pengguna menyetujui syarat & ketentuan sebelum akun diaktifkan.</p>
+                </div>
+            </div>
+            <div @click="activeSection = activeSection === 'p3' ? null : 'p3'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p3' && 'rotate-90'"></i>
+                    Pasal 19 — Tujuan Pemrosesan
+                </div>
+                <div x-show="activeSection === 'p3'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>Pemrosesan Data Pribadi dilakukan untuk tujuan tertentu, sah, dan telah diinformasikan kepada Subjek Data Pribadi.</p>
+                    <p><strong>Implementasi ScanGrade:</strong> Data siswa dan guru diproses untuk tujuan akademik: pendaftaran ujian, koreksi jawaban, penerbitan nilai, dan administrasi sekolah.</p>
+                </div>
+            </div>
+            <div @click="activeSection = activeSection === 'p4' ? null : 'p4'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p4' && 'rotate-90'"></i>
+                    Pasal 35 — Kewajiban Keamanan Data
+                </div>
+                <div x-show="activeSection === 'p4'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>(1) Penyelenggara Sistem Elektronik wajib menyelenggarakan sistem elektronik secara andal, aman, dan bertanggung jawab.</p>
+                    <p>(2) Penyelenggara wajib memiliki dan menerapkan kebijakan, prosedur, dan sarana keamanan data pribadi.</p>
+                    <p><strong>Implementasi ScanGrade:</strong> Row Level Security (RLS) pada database, autentikasi JWT, cookie HttpOnly, rate limiting API, validasi input di semua endpoint.</p>
+                </div>
+            </div>
+            <div @click="activeSection = activeSection === 'p5' ? null : 'p5'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p5' && 'rotate-90'"></i>
+                    Pasal 43 — Batas Waktu Penyimpanan
+                </div>
+                <div x-show="activeSection === 'p5'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>Penyelenggara wajib menyimpan Data Pribadi paling singkat selama 5 (lima) tahun sejak Data Pribadi selesai diproses, kecuali ditentukan lain oleh peraturan perundang-undangan.</p>
+                    <p><strong>Implementasi ScanGrade:</strong> Data akademik disimpan selama masa aktif sekolah. Data siswa yang lulus/dropout dialihkan ke status alumni. Penghapusan data tersedia bagi admin sekolah.</p>
+                </div>
+            </div>
+            <div @click="activeSection = activeSection === 'p6' ? null : 'p6'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p6' && 'rotate-90'"></i>
+                    Pasal 47 — Hak Penghapusan Data
+                </div>
+                <div x-show="activeSection === 'p6'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>Subjek data pribadi berhak untuk meminta penghapusan data pribadi miliknya pada penyelenggara sistem elektronik.</p>
+                    <p><strong>Implementasi ScanGrade:</strong> Admin sekolah dapat menghapus akun siswa/guru kapan saja. Penghapusan mencakup data profil, submissions, dan akun autentikasi. Audit log mencatat semua penghapusan.</p>
+                </div>
+            </div>
+            <div @click="activeSection = activeSection === 'p7' ? null : 'p7'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p7' && 'rotate-90'"></i>
+                    Pasal 52 — Portabilitas Data
+                </div>
+                <div x-show="activeSection === 'p7'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>Subjek Data Pribadi berhak untuk mendapatkan Data Pribadi miliknya dalam format yang lazim digunakan atau dapat dibaca oleh sistem.</p>
+                    <p><strong>Implementasi ScanGrade:</strong> Fitur ekspor data tersedia dalam format XLSX (Excel) untuk data siswa, guru, dan mata pelajaran. Hasil ujian dapat diekspor ke XLSX dan PDF.</p>
+                </div>
+            </div>
+            <div @click="activeSection = activeSection === 'p8' ? null : 'p8'" class="cursor-pointer">
+                <div class="flex items-center gap-2 font-bold text-surface-800">
+                    <i class="fas fa-chevron-right text-xs transition" :class="activeSection==='p8' && 'rotate-90'"></i>
+                    Pasal 55 — Sanksi Administratif
+                </div>
+                <div x-show="activeSection === 'p8'" x-collapse class="mt-2 pl-6 text-xs space-y-2">
+                    <p>Pelanggaran terhadap UU PDP dapat dikenakan sanksi administratif berupa: peringatan tertulis, penghentian sementara, penghapusan data, denda administratif.</p>
+                    <p><strong>Implementasi ScanGrade:</strong> Semua aktivitas tercatat dalam audit trail. Pelanggaran keamanan dapat dilacak melalui log aktivitas.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Implementation Summary -->
+    <div class="card p-5">
+        <h3 class="font-bold text-surface-800 mb-3"><i class="fas fa-clipboard-check text-primary-500 mr-2"></i>Ringkasan Kepatuhan ScanGrade</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
+                    <th class="px-4 py-2 font-semibold">Aspek</th>
+                    <th class="px-4 py-2 font-semibold">Pasal</th>
+                    <th class="px-4 py-2 font-semibold">Status</th>
+                    <th class="px-4 py-2 font-semibold">Keterangan</th>
+                </tr></thead>
+                <tbody class="divide-y divide-surface-50">
+                    <tr><td class="px-4 py-2 font-semibold text-surface-700">Persetujuan</td><td class="px-4 py-2 text-surface-500">Pasal 16</td><td class="px-4 py-2"><span class="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Terpenuhi</span></td><td class="px-4 py-2 text-surface-400 text-xs">Saat registrasi</td></tr>
+                    <tr><td class="px-4 py-2 font-semibold text-surface-700">Tujuan Pemrosesan</td><td class="px-4 py-2 text-surface-500">Pasal 19</td><td class="px-4 py-2"><span class="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Terpenuhi</span></td><td class="px-4 py-2 text-surface-400 text-xs">Tujuan akademik</td></tr>
+                    <tr><td class="px-4 py-2 font-semibold text-surface-700">Keamanan Data</td><td class="px-4 py-2 text-surface-500">Pasal 35</td><td class="px-4 py-2"><span class="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Terpenuhi</span></td><td class="px-4 py-2 text-surface-400 text-xs">RLS + JWT + Rate Limit</td></tr>
+                    <tr><td class="px-4 py-2 font-semibold text-surface-700">Retensi Data</td><td class="px-4 py-2 text-surface-500">Pasal 43</td><td class="px-4 py-2"><span class="badge bg-amber-50 text-amber-700 border border-amber-200">Partial</span></td><td class="px-4 py-2 text-surface-400 text-xs">Perlu kebijakan retensi formal</td></tr>
+                    <tr><td class="px-4 py-2 font-semibold text-surface-700">Hak Penghapusan</td><td class="px-4 py-2 text-surface-500">Pasal 47</td><td class="px-4 py-2"><span class="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Terpenuhi</span></td><td class="px-4 py-2 text-surface-400 text-xs">Admin dapat hapus akun</td></tr>
+                    <tr><td class="px-4 py-2 font-semibold text-surface-700">Portabilitas</td><td class="px-4 py-2 text-surface-500">Pasal 52</td><td class="px-4 py-2"><span class="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Terpenuhi</span></td><td class="px-4 py-2 text-surface-400 text-xs">Ekspor XLSX</td></tr>
+                    <tr><td class="px-4 py-2 font-semibold text-surface-700">Audit Trail</td><td class="px-4 py-2 text-surface-500">Pasal 35(2)</td><td class="px-4 py-2"><span class="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Terpenuhi</span></td><td class="px-4 py-2 text-surface-400 text-xs">Semua aktivitas tercatat</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

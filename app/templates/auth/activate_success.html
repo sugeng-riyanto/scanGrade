@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Aktivasi Berhasil - ScanGrade{% endblock %}
+{% block content_noauth %}
+<div class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center p-4">
+    <div class="w-full max-w-md text-center">
+        <div class="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center mb-6 shadow-lg shadow-emerald-500/20">
+            <i class="fas fa-check-circle text-4xl text-emerald-500"></i>
+        </div>
+        <h1 class="text-3xl font-extrabold text-surface-800 mb-2">Aktivasi Berhasil!</h1>
+        <p class="text-surface-500 font-medium mb-8">Akun Anda sekarang aktif. Silakan login untuk memulai.</p>
+        <a href="{{ url_for('auth.login') }}" class="inline-block bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-8 py-3 rounded-xl font-extrabold shadow-lg shadow-primary-500/25 transition">
+            <i class="fas fa-sign-in-alt mr-2"></i>Login Sekarang
+        </a>
+    </div>
+</div>
+{% endblock %}

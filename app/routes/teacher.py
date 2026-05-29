@@ -4,6 +4,7 @@ from app.utils.auth import teacher_or_admin_required, get_supabase
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.ljk_generator import generate_bubble_sheet_pdf
 from app.services.pdf_service import upload_pdf
+from app.services.audit_service import log_activity
 
 teacher_bp = Blueprint("teacher", __name__)
 
@@ -90,8 +91,45 @@ def dashboard():
 
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
 
+    # Get teacher's school_id (column may not exist in older schema)
+    school_id = None
+    try:
+        profile = supabase.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
+        school_id = profile.get("school_id")
+    except Exception:
+        pass
+
+    # Get assignments and available classes/subjects (tables may not exist)
+    assignments = []
+    classes = []
+    subjects = []
+    if school_id:
+        try:
+            assignments = supabase.table("teacher_assignments") \
+                .select("*, classes(id, name, grade_level), subjects(id, name, code)") \
+                .eq("teacher_id", g.user_id) \
+                .eq("school_id", school_id) \
+                .execute().data or []
+        except Exception:
+            pass
+        try:
+            classes = supabase.table("classes").select("id, name, grade_level") \
+                .eq("school_id", school_id) \
+                .order("name").execute().data or []
+        except Exception:
+            pass
+        try:
+            subjects = supabase.table("subjects").select("id, name, code") \
+                .eq("school_id", school_id) \
+                .eq("is_active", True) \
+                .order("name").execute().data or []
+        except Exception:
+            pass
+
     user_name = g.user_name or g.user_email or ""
-    return render_template("teacher/dashboard.html", exams=exams, total_students=total_students, avg_score=avg_score, all_scores=all_scores, user_name=user_name)
+    return render_template("teacher/dashboard.html", exams=exams, total_students=total_students,
+                           avg_score=avg_score, all_scores=all_scores, user_name=user_name,
+                           assignments=assignments, classes=classes, subjects=subjects)
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
@@ -149,6 +187,7 @@ def exam_form():
         data.pop("question_weights", None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
+    log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions}, user_id=g.user_id)
     return redirect(f"/teacher/exams/{exam_id}")
 
 
@@ -214,6 +253,7 @@ def exam_detail(exam_id):
         data.pop("question_weights", None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     _recalculate_scores(exam_id)
+    log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
     return redirect(f"/teacher/exams/{exam_id}")
 
 
@@ -233,6 +273,7 @@ def publish_exam(exam_id):
         "is_published": True,
         "status": "active",
     }).eq("id", exam_id).execute()
+    log_activity("publish", "exam", exam_id, user_id=g.user_id)
     return redirect(f"/teacher/preview/{exam_id}")
 
 
@@ -254,6 +295,7 @@ def upload_exam_pdf(exam_id):
         "pdf_url": result["pdf_path"],
         "pdf_page_urls": result["page_urls"],
     }).eq("id", exam_id).execute()
+    log_activity("upload", "exam", exam_id, new_data={"pages": len(result.get("page_urls", []))}, user_id=g.user_id)
     return redirect(f"/teacher/preview/{exam_id}")
 
 
@@ -298,6 +340,7 @@ def delete_exam(exam_id):
     supabase.table("analytics_cache").delete().eq("exam_id", exam_id).execute()
     supabase.table("submissions").delete().eq("exam_id", exam_id).execute()
     supabase.table("exams").delete().eq("id", exam_id).execute()
+    log_activity("delete", "exam", exam_id, user_id=g.user_id)
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
         return jsonify({"success": True})
     return redirect("/teacher/exams")
@@ -308,7 +351,7 @@ def delete_exam(exam_id):
 def scan_page():
     supabase = get_supabase()
     res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).execute()
-    students = supabase.table("profiles").select("id,full_name,phone").eq("role", "student").execute()
+    students = supabase.table("profiles").select("id,full_name,phone").eq("role", "murid").execute()
     return render_template("teacher/scan.html", exams=res.data, students=students.data)
 
 
@@ -511,11 +554,113 @@ def analytics():
     return render_template("teacher/analytics.html", stats=stats, exam_breakdown=exam_breakdown, dist_bins=dist_bins, exam_labels=exam_labels, exam_avgs=exam_avgs)
 
 
+@teacher_bp.route("/classes")
+@teacher_or_admin_required
+def teacher_classes():
+    supabase = get_supabase()
+    school_id = None
+    try:
+        profile = supabase.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
+        school_id = profile.get("school_id")
+    except Exception:
+        pass
+
+    assignments = []
+    classes = []
+    subjects = []
+    if school_id:
+        try:
+            assignments = supabase.table("teacher_assignments") \
+                .select("*, classes(id, name, grade_level), subjects(id, name, code)") \
+                .eq("teacher_id", g.user_id) \
+                .eq("school_id", school_id) \
+                .execute().data or []
+        except Exception:
+            pass
+        try:
+            classes = supabase.table("classes").select("id, name, grade_level") \
+                .eq("school_id", school_id) \
+                .order("name").execute().data or []
+        except Exception:
+            pass
+        try:
+            subjects = supabase.table("subjects").select("id, name, code") \
+                .eq("school_id", school_id) \
+                .eq("is_active", True) \
+                .order("name").execute().data or []
+        except Exception:
+            pass
+
+    return render_template("teacher/classes.html", assignments=assignments, classes=classes, subjects=subjects)
+
+
+@teacher_bp.route("/assignments", methods=["GET", "POST"])
+@teacher_or_admin_required
+def assignments():
+    supabase = get_supabase()
+    school_id = None
+    try:
+        profile = supabase.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
+        school_id = profile.get("school_id")
+    except Exception:
+        pass
+    if not school_id:
+        if request.is_json or request.headers.get("HX-Request"):
+            return jsonify({"error": "School not found"}), 400
+        return redirect("/teacher/dashboard")
+
+    if request.method == "POST":
+        class_id = request.form.get("class_id")
+        subject_id = request.form.get("subject_id")
+        if not class_id or not subject_id:
+            if request.is_json or request.headers.get("HX-Request"):
+                return jsonify({"error": "Class and subject required"}), 400
+            return redirect("/teacher/dashboard")
+        try:
+            res = supabase.table("teacher_assignments").upsert({
+                "teacher_id": g.user_id,
+                "class_id": class_id,
+                "subject_id": subject_id,
+                "school_id": school_id,
+            }).execute()
+            aid = res.data[0]["id"] if res.data else None
+            log_activity("create", "teacher_assignment", aid, new_data={"class_id": class_id, "subject_id": subject_id}, user_id=g.user_id)
+            if request.is_json or request.headers.get("HX-Request"):
+                return jsonify({"success": True})
+            return redirect("/teacher/dashboard")
+        except Exception as e:
+            if request.is_json or request.headers.get("HX-Request"):
+                return jsonify({"error": str(e)}), 400
+            return redirect("/teacher/dashboard")
+
+    try:
+        assignments = supabase.table("teacher_assignments") \
+            .select("*, classes(id, name, grade_level), subjects(id, name, code)") \
+            .eq("teacher_id", g.user_id) \
+            .eq("school_id", school_id) \
+            .execute().data or []
+    except Exception:
+        assignments = []
+    return jsonify(assignments)
+
+
+@teacher_bp.route("/assignments/<assignment_id>", methods=["DELETE"])
+@teacher_or_admin_required
+def delete_assignment(assignment_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("teacher_assignments").delete().eq("id", assignment_id).eq("teacher_id", g.user_id).execute()
+        log_activity("delete", "teacher_assignment", assignment_id, user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @teacher_bp.route("/students")
 @teacher_or_admin_required
 def students():
     supabase = get_supabase()
-    students = supabase.table("profiles").select("id,full_name,phone,role").eq("role", "student").execute().data or []
+    students = supabase.table("profiles").select("id,full_name,phone,role").eq("role", "murid").execute().data or []
     exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
     if exam_ids:
         subs = supabase.table("submissions").select("student_id,score,final_score").in_("exam_id", exam_ids).execute().data or []

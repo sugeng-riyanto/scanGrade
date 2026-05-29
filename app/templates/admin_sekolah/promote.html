@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Naik Kelas - ScanGrade{% endblock %}
+{% block page_title %}Naik Kelas{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <div class="card p-6 lg:p-8">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center"><i class="fas fa-arrow-up text-xl"></i></div>
+            <div>
+                <h3 class="font-extrabold text-stone-800">Promosi Kenaikan Kelas</h3>
+                <p class="text-sm text-stone-500 font-medium">Pindahkan semua murid aktif ke kelas yang lebih tinggi.</p>
+            </div>
+        </div>
+
+        <form method="POST" class="space-y-5">
+            <div>
+                <label class="block text-sm font-bold text-stone-700 mb-1.5">Kelas Asal</label>
+                <select name="source_class_id" required
+                        class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                    <option value="">- Pilih Kelas -</option>
+                    {% for c in classes %}
+                    <option value="{{ c.id }}">{{ c.name }} ({{ c.student_count or 0 }} murid) - {{ c.school_year_name or '' }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div x-data="{ targetType: 'existing' }">
+                <label class="block text-sm font-bold text-stone-700 mb-3">Kelas Tujuan</label>
+                <div class="flex gap-3 mb-3">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="target_type" value="existing" x-model="targetType"
+                               class="w-4 h-4 text-orange-500 focus:ring-orange-500">
+                        <span class="font-semibold text-sm text-stone-700">Kelas Sudah Ada</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="target_type" value="new" x-model="targetType"
+                               class="w-4 h-4 text-orange-500 focus:ring-orange-500">
+                        <span class="font-semibold text-sm text-stone-700">Buat Kelas Baru</span>
+                    </label>
+                </div>
+
+                <!-- Existing class -->
+                <div x-show="targetType === 'existing'" x-collapse>
+                    <select name="target_class_id"
+                            class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                        <option value="">- Pilih Kelas -</option>
+                        {% for c in classes %}
+                        <option value="{{ c.id }}">{{ c.name }} ({{ c.student_count or 0 }} murid)</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- New class -->
+                <div x-show="targetType === 'new'" x-collapse class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-bold text-stone-700 mb-1.5">Nama Kelas Baru</label>
+                        <input type="text" name="new_class_name" placeholder="Contoh: 8A"
+                               class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-stone-700 mb-1.5">Tingkat</label>
+                        <select name="new_grade_level"
+                                class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                            {% for g in ['7', '8', '9', '10', '11', '12'] %}
+                            <option value="{{ g }}">Kelas {{ g }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm font-semibold text-amber-700">
+                <i class="fas fa-info-circle mr-2"></i>
+                Semua murid aktif dari kelas asal akan dipindahkan. Murid yang sudah tidak aktif tidak akan dipindahkan.
+            </div>
+
+            <button type="submit"
+                    class="w-full bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white py-3 px-4 rounded-xl font-extrabold shadow-lg shadow-emerald-500/25 transition">
+                <i class="fas fa-arrow-up mr-2"></i>Naikkan Kelas
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

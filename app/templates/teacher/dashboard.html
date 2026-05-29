@@ -1,133 +1,162 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - ScanGrade{% endblock %}
-{% block page_title %}Dashboard{% endblock %}
+{% block title %}Dashboard Guru - ScanGrade{% endblock %}
+{% block page_title %}Dashboard Guru{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+<div class="space-y-6"
+     x-data="{
+       lang: localStorage.getItem('sg_lang') || 'id',
+       showAssignForm: false,
+       assigningClassId: null,
+       assigningSubjectId: null,
+       assignLoading: false,
+     }">
+
     <!-- Welcome -->
-    <div class="flex items-center justify-between">
-        <div>
-            <h2 class="text-2xl font-extrabold text-slate-800">
-                <span x-show="lang==='id'">Selamat {{ greeting() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
-                <span x-show="lang==='en'">Good {{ greeting_en() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
-            </h2>
-            <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Here is your teaching overview':'Ringkasan aktivitas mengajar Anda'"></p>
+    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="absolute -bottom-6 -left-6 w-32 h-32 bg-white/5 rounded-full"></div>
+        <div class="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+                <h2 class="text-2xl font-extrabold">
+                    <span x-show="lang==='en'">Good {{ greeting_en() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
+                    <span x-show="lang==='id'">Selamat {{ greeting() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
+                </h2>
+                <p class="text-primary-200 font-medium mt-1" x-text="lang==='en'?'Here is your teaching overview':'Ringkasan aktivitas mengajar Anda'"></p>
+            </div>
+            <a href="/teacher/exams/new"
+               class="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 text-white px-5 py-2.5 rounded-xl font-bold text-sm backdrop-blur-sm border border-white/10 transition shrink-0">
+                <i class="fas fa-plus"></i><span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span>
+            </a>
         </div>
-        <a href="/teacher/exams/new"
-           class="hidden sm:inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 transition">
-            <i class="fas fa-plus"></i><span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span>
-        </a>
     </div>
 
-    <!-- Stat Cards -->
+    <!-- Stats -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="card stat-card">
+        <div class="card stat-card animate-slide-up">
             <div class="flex items-center gap-3">
-                <div class="stat-icon bg-brand-50 text-brand-600"><i class="fas fa-file-alt"></i></div>
+                <div class="stat-icon bg-primary-50 text-primary-600"><i class="fas fa-file-alt"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Total Exams':'Total Ujian'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ exams|length }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Total Exams':'Total Ujian'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ exams|length }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card">
+        <div class="card stat-card animate-slide-up" style="animation-delay:50ms">
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-check-circle"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Active':'Aktif'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ exams|selectattr('status', 'equalto', 'active')|list|length }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Active':'Aktif'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ exams|selectattr('status', 'equalto', 'active')|list|length }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card">
+        <div class="card stat-card animate-slide-up" style="animation-delay:100ms">
             <div class="flex items-center gap-3">
-                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-users"></i></div>
+                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-users"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ total_students }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ total_students }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card">
+        <div class="card stat-card animate-slide-up" style="animation-delay:150ms">
             <div class="flex items-center gap-3">
-                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-chart-line"></i></div>
+                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-chart-line"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Avg Score':'Rata-rata'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ avg_score }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Avg Score':'Rata-rata'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ avg_score }}</p>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Recent Exams -->
-        <div class="lg:col-span-2 card">
-            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Recent Exams':'Ujian Terbaru'"></h3>
-                <a href="/teacher/exams" class="text-sm font-semibold text-brand-600 hover:text-brand-700" x-text="lang==='en'?'View all':'Lihat semua'"></a>
+        <!-- Assigned Classes & Subjects -->
+        <div class="lg:col-span-1 card">
+            <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+                <h3 class="font-bold text-surface-800">
+                    <i class="fas fa-school text-primary-500 mr-2"></i>
+                    <span x-text="lang==='en'?"My Classes":"Kelas & Mapel""></span>
+                </h3>
+                <button @click="showAssignForm = !showAssignForm" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
+                    <i class="fas fa-plus mr-1"></i><span x-text="lang==='en'?'Assign':'Tambah'"></span>
+                </button>
             </div>
-            <div class="p-5">
-                {% if exams %}
-                <div class="space-y-3">
-                    {% for exam in exams[:5] %}
-                    <div class="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition group">
-                        <div class="flex items-center gap-3 min-w-0">
-                            <div class="w-10 h-10 rounded-lg {% if exam.status == 'active' %}bg-emerald-50 text-emerald-600{% elif exam.status == 'draft' %}bg-slate-100 text-slate-400{% else %}bg-red-50 text-red-500{% endif %} flex items-center justify-center shrink-0">
-                                <i class="fas fa-file-alt text-sm"></i>
-                            </div>
-                            <div class="min-w-0">
-                                <p class="font-bold text-sm text-slate-800 truncate">{{ exam.title }}</p>
-                                <p class="text-xs text-slate-500 font-medium">{{ exam.subject or '-' }} &middot; {{ exam.total_questions or 0 }} soal &middot; {{ exam.duration_minutes }} min</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="badge {% if exam.status == 'active' %}bg-emerald-50 text-emerald-700{% elif exam.status == 'draft' %}bg-slate-100 text-slate-600{% else %}bg-red-50 text-red-600{% endif %}">{{ exam.status }}</span>
-                            <a href="/teacher/exams/{{ exam.id }}" class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-brand-600 transition p-1"><i class="fas fa-arrow-right text-xs"></i></a>
-                        </div>
+            <div class="p-4 space-y-3">
+                {% for a in assignments %}
+                <div class="flex items-start gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition group">
+                    <div class="w-10 h-10 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center shrink-0">
+                        <i class="fas fa-book-open text-sm"></i>
                     </div>
-                    {% endfor %}
+                    <div class="flex-1 min-w-0">
+                        <p class="font-bold text-sm text-surface-800">{{ a.subjects.name if a.subjects else '-' }}</p>
+                        <p class="text-xs text-surface-500 font-medium">{{ a.classes.name if a.classes else '-' }} {% if a.classes and a.classes.grade_level %}&middot; Kelas {{ a.classes.grade_level }}{% endif %}</p>
+                    </div>
+                    <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus assignment ini?"
+                            class="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-red-500 transition p-1"><i class="fas fa-times text-xs"></i></button>
                 </div>
                 {% else %}
-                <div class="text-center py-8 text-slate-400">
-                    <i class="fas fa-file-alt text-4xl mb-3"></i>
-                    <p class="font-bold" x-text="lang==='en'?'No exams yet':'Belum ada ujian'"></p>
-                    <a href="/teacher/exams/new" class="inline-block mt-3 text-brand-600 font-semibold text-sm" x-text="lang==='en'?'Create your first exam':'Buat ujian pertama'"></a>
+                <div class="text-center py-6">
+                    <div class="w-12 h-12 rounded-full bg-surface-100 flex items-center justify-center mx-auto mb-2">
+                        <i class="fas fa-school text-surface-400"></i>
+                    </div>
+                    <p class="text-sm font-semibold text-surface-500" x-text="lang==='en'?'No class/subject assigned':'Belum ada kelas & mapel'"></p>
+                    <p class="text-xs text-surface-400 mt-1" x-text="lang==='en'?'Click + to assign':'Klik + untuk menambah'"></p>
                 </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Score Distribution Chart -->
-        <div class="card">
-            <div class="px-5 py-4 border-b border-slate-100">
-                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Score Distribution':'Distribusi Nilai'"></h3>
-            </div>
-            <div class="p-5">
-                <canvas id="scoreChart" height="200"></canvas>
+                {% endfor %}
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Quick Actions -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <a href="/teacher/exams/new" class="card card-hover p-4 flex items-center gap-3 group">
-            <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center group-hover:bg-brand-100 transition"><i class="fas fa-plus"></i></div>
-            <span class="font-semibold text-sm text-slate-700" x-text="lang==='en'?'New Exam':'Ujian Baru'"></span>
-        </a>
-        <a href="/teacher/scan" class="card card-hover p-4 flex items-center gap-3 group">
-            <div class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-100 transition"><i class="fas fa-camera"></i></div>
-            <span class="font-semibold text-sm text-slate-700" x-text="lang==='en'?'Scan OMR':'Scan OMR'"></span>
-        </a>
-        <a href="/teacher/grading" class="card card-hover p-4 flex items-center gap-3 group">
-            <div class="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center group-hover:bg-amber-100 transition"><i class="fas fa-pen-alt"></i></div>
-            <span class="font-semibold text-sm text-slate-700" x-text="lang==='en'?'Grade Essays':'Koreksi'"></span>
-        </a>
-        <a href="/teacher/analytics" class="card card-hover p-4 flex items-center gap-3 group">
-            <div class="w-10 h-10 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center group-hover:bg-violet-100 transition"><i class="fas fa-chart-line"></i></div>
-            <span class="font-semibold text-sm text-slate-700" x-text="lang==='en'?'Analytics':'Analitik'"></span>
-        </a>
+    <!-- ===== ASSIGN NEW CLASS/SUBJECT FORM ===== -->
+    <div x-show="showAssignForm" x-cloak x-transition:enter="animate-slide-up" class="card p-6 border border-primary-200 bg-primary-50/50">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-surface-800"><i class="fas fa-plus-circle text-primary-500 mr-2"></i><span x-text="lang==='en'?'Assign New Class/Subject':'Tambah Kelas & Mapel'"></span></h3>
+            <button @click="showAssignForm=false; assigningClassId=null; assigningSubjectId=null" class="text-surface-400 hover:text-surface-600 p-1 rounded-lg hover:bg-surface-200/50 transition"><i class="fas fa-times"></i></button>
+        </div>
+
+        <form hx-post="/teacher/assignments" hx-target="this" hx-swap="outerHTML"
+              @submit="assignLoading = true"
+              @htmx:after-request="if(event.detail.successful) { showAssignForm=false; $dispatch('assignment-added'); } assignLoading = false"
+              class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+                <label class="block text-sm font-bold text-surface-700 mb-1.5">Mata Pelajaran <span class="text-red-500">*</span></label>
+                <select name="subject_id" required x-model="assigningSubjectId"
+                        class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-surface-700 font-medium bg-white transition">
+                    <option value="">- Pilih Mapel -</option>
+                    {% for s in subjects %}
+                    <option value="{{ s.id }}">{{ s.name }}{% if s.code %} ({{ s.code }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-surface-700 mb-1.5">Kelas <span class="text-red-500">*</span></label>
+                <select name="class_id" required x-model="assigningClassId"
+                        class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-surface-700 font-medium bg-white transition">
+                    <option value="">- Pilih Kelas -</option>
+                    {% for c in classes %}
+                    <option value="{{ c.id }}">{{ c.name }} {% if c.grade_level %}(Kelas {{ c.grade_level }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="flex items-end gap-2">
+                <button type="submit" :disabled="assignLoading"
+                        class="flex-1 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary-600/20 transition">
+                    <i class="fas fa-check mr-1"></i><span x-text="lang==='en'?'Assign':'Tambah'"></span>
+                </button>
+                <button type="button" @click="showAssignForm=false" class="px-4 py-3 border border-surface-200 rounded-xl font-bold text-surface-600 hover:bg-surface-50 transition text-sm">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </form>
     </div>
+
+    <!-- HTMX target for updates -->
+    <div id="assignments-update"></div>
 </div>
 {% endblock %}
+
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -143,8 +172,7 @@ document.addEventListener('DOMContentLoaded', function() {
             datasets: [{ data: bins, backgroundColor: ['#ef4444','#f59e0b','#eab308','#22c55e','#3b82f6'], borderRadius: 6, borderSkipped: false }]
         },
         options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
+            responsive: true, plugins: { legend: { display: false } },
             scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { grid: { display: false } } }
         }
     });

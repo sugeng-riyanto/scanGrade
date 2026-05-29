@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Compliance - ScanGrade{% endblock %}
+{% block page_title %}Compliance &amp; Keamanan{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <!-- Header -->
+    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="relative z-10">
+            <h2 class="text-2xl font-extrabold"><i class="fas fa-shield-alt mr-2"></i>Compliance Dashboard</h2>
+            <p class="text-primary-200 font-medium mt-1">Ringkasan keamanan data &amp; kepatuhan UU PDP</p>
+        </div>
+    </div>
+
+    <!-- Security Score -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <div class="card p-5 lg:col-span-1 text-center animate-slide-up">
+            <div class="relative w-28 h-28 mx-auto mb-3">
+                <svg class="w-28 h-28 -rotate-90" viewBox="0 0 120 120">
+                    <circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" stroke-width="10"/>
+                    <circle cx="60" cy="60" r="52" fill="none" stroke="{% if security_score >= 80 %}#22c55e{% elif security_score >= 50 %}#f59e0b{% else %}#ef4444{% endif %}" stroke-width="10"
+                            stroke-dasharray="{{ 2 * 3.14159 * 52 }}" stroke-dashoffset="{{ 2 * 3.14159 * 52 * (1 - security_score/100) }}" stroke-linecap="round"/>
+                </svg>
+                <div class="absolute inset-0 flex items-center justify-center">
+                    <span class="text-3xl font-extrabold text-surface-800">{{ security_score }}%</span>
+                </div>
+            </div>
+            <p class="font-bold text-surface-600 text-sm">Security Score</p>
+            <p class="text-xs text-surface-400 font-medium mt-1">{{ days }}-day overview</p>
+        </div>
+
+        <div class="lg:col-span-3 grid grid-cols-3 gap-4">
+            <div class="card stat-card animate-slide-up" style="animation-delay:50ms">
+                <div class="flex items-center gap-3">
+                    <div class="stat-icon bg-primary-50 text-primary-600"><i class="fas fa-users"></i></div>
+                    <div>
+                        <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider">Users</p>
+                        <p class="text-2xl font-extrabold text-surface-800">{{ user_count }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card stat-card animate-slide-up" style="animation-delay:100ms">
+                <div class="flex items-center gap-3">
+                    <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-school"></i></div>
+                    <div>
+                        <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider">Schools</p>
+                        <p class="text-2xl font-extrabold text-surface-800">{{ school_count }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card stat-card animate-slide-up" style="animation-delay:150ms">
+                <div class="flex items-center gap-3">
+                    <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-file-alt"></i></div>
+                    <div>
+                        <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider">Exams</p>
+                        <p class="text-2xl font-extrabold text-surface-800">{{ exam_count }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card stat-card animate-slide-up" style="animation-delay:200ms">
+                <div class="flex items-center gap-3">
+                    <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-history"></i></div>
+                    <div>
+                        <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider">Audit Events</p>
+                        <p class="text-2xl font-extrabold text-surface-800">{{ summary.total }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card stat-card animate-slide-up" style="animation-delay:250ms">
+                <div class="flex items-center gap-3">
+                    <div class="stat-icon bg-blue-50 text-blue-600"><i class="fas fa-sign-in-alt"></i></div>
+                    <div>
+                        <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider">Logins</p>
+                        <p class="text-2xl font-extrabold text-surface-800">{{ summary.logins }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card stat-card animate-slide-up" style="animation-delay:300ms">
+                <div class="flex items-center gap-3">
+                    <div class="stat-icon bg-red-50 text-red-600"><i class="fas fa-trash"></i></div>
+                    <div>
+                        <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider">Deletes</p>
+                        <p class="text-2xl font-extrabold text-surface-800">{{ summary.deletes }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Checklist -->
+    <div class="card p-5 animate-slide-up" style="animation-delay:100ms">
+        <h3 class="font-bold text-surface-800 mb-4"><i class="fas fa-check-circle text-emerald-500 mr-2"></i>Security Checklist</h3>
+        <div class="space-y-2">
+            {% for c in checks %}
+            <div class="flex items-start gap-3 p-3 rounded-xl {% if c.status %}bg-emerald-50{% else %}bg-red-50{% endif %}">
+                <div class="mt-0.5 w-5 h-5 rounded-full flex items-center justify-center {% if c.status %}bg-emerald-200 text-emerald-700{% else %}bg-red-200 text-red-700{% endif %} shrink-0">
+                    <i class="fas fa-{% if c.status %}check{% else %}times{% endif %} text-[10px]"></i>
+                </div>
+                <div class="flex-1">
+                    <p class="font-bold text-sm text-surface-700">{{ c.name }}</p>
+                    <p class="text-xs font-medium text-surface-500">{{ c.detail }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Activity Summary -->
+        <div class="card p-5 animate-slide-up" style="animation-delay:150ms">
+            <h3 class="font-bold text-surface-800 mb-4"><i class="fas fa-chart-bar text-primary-500 mr-2"></i>Activity Summary ({{ days }} days)</h3>
+            <div class="space-y-3">
+                {% for action, count in (summary.by_action or {}).items() %}
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-semibold text-surface-600 capitalize">{{ action }}</span>
+                    <div class="flex items-center gap-2">
+                        <div class="w-32 bg-surface-100 rounded-full h-2">
+                            <div class="bg-primary-500 h-2 rounded-full" style="width: {{ (count / (summary.total if summary.total > 0 else 1)) * 100 }}%"></div>
+                        </div>
+                        <span class="text-sm font-bold text-surface-700 w-8 text-right">{{ count }}</span>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-sm text-surface-400 font-medium">Belum ada aktivitas tercatat</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="card p-5 animate-slide-up" style="animation-delay:200ms">
+            <h3 class="font-bold text-surface-800 mb-4"><i class="fas fa-link text-primary-500 mr-2"></i>Quick Links</h3>
+            <div class="space-y-3">
+                <a href="/admin/compliance/logs" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
+                    <div class="w-9 h-9 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center"><i class="fas fa-history"></i></div>
+                    <div><p class="font-bold text-sm text-surface-700">Audit Trail Logs</p><p class="text-xs text-surface-400">Lihat semua aktivitas sistem</p></div>
+                </a>
+                <a href="/admin/compliance/pdp" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
+                    <div class="w-9 h-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fas fa-gavel"></i></div>
+                    <div><p class="font-bold text-sm text-surface-700">UU PDP No. 27/2022</p><p class="text-xs text-surface-400">Referensi Undang-Undang Perlindungan Data Pribadi</p></div>
+                </a>
+                <a href="/admin/registration-requests" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
+                    <div class="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center"><i class="fas fa-school-circle-check"></i></div>
+                    <div><p class="font-bold text-sm text-surface-700">Registrasi Sekolah</p><p class="text-xs text-surface-400">Kelola permintaan registrasi &amp; approval</p></div>
+                </a>
+                <a href="/admin/users" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
+                    <div class="w-9 h-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center"><i class="fas fa-users-cog"></i></div>
+                    <div><p class="font-bold text-sm text-surface-700">User Management</p><p class="text-xs text-surface-400">Kelola semua akun pengguna &amp; reset password</p></div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Audit Logs -->
+    <div class="card animate-slide-up" style="animation-delay:250ms">
+        <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+            <h3 class="font-bold text-surface-800"><i class="fas fa-stream text-primary-500 mr-2"></i>Recent Activity</h3>
+            <a href="/admin/compliance/logs" class="text-sm font-semibold text-primary-600 hover:text-primary-700">View All</a>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
+                    <th class="px-4 py-3 font-semibold">Time</th>
+                    <th class="px-4 py-3 font-semibold">User</th>
+                    <th class="px-4 py-3 font-semibold">Action</th>
+                    <th class="px-4 py-3 font-semibold">Entity</th>
+                    <th class="px-4 py-3 font-semibold">IP</th>
+                </tr></thead>
+                <tbody class="divide-y divide-surface-50">
+                    {% for log in recent_logs[:10] %}
+                    {% set profile = log.profiles or {} %}
+                    <tr class="hover:bg-surface-50 transition">
+                        <td class="px-4 py-3 text-xs text-surface-500 whitespace-nowrap">{{ log.created_at[:19] if log.created_at else '-' }}</td>
+                        <td class="px-4 py-3 font-semibold text-surface-700">{{ profile.get('full_name') or profile.get('email') or (log.user_id[:8] if log.user_id else 'System') }}</td>
+                        <td class="px-4 py-3"><span class="badge bg-primary-50 text-primary-700 border border-primary-200 capitalize">{{ log.action }}</span></td>
+                        <td class="px-4 py-3 text-surface-500"><span class="font-mono text-xs">{{ log.entity_type }}{% if log.entity_id %}:{{ log.entity_id[:8] }}{% endif %}</span></td>
+                        <td class="px-4 py-3 text-surface-400 text-xs font-mono">{{ log.ip_address or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="px-4 py-8 text-center text-surface-400 font-medium">Belum ada aktivitas tercatat</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

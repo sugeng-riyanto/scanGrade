@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block title %}Generate Answer Sheet - ScanGrade{% endblock %}
+{% block page_title %}Answer Sheet Generator{% endblock %}
+{% block content %}
+<div class="space-y-6"
+     x-data="{
+        totalQ: 50,
+        markType: 'circle',
+        examVersion: 'A',
+        studentName: '',
+        className: '',
+        subject: '',
+        date: '',
+        previewUrl: null,
+        generating: false,
+        get previewQuestions() {
+            return Array.from({length: 10}, (_, i) => i + 1);
+        },
+        get gridCols() {
+            return 5;
+        },
+        get gridRows() {
+            return 10;
+        }
+     }">
+
+    <!-- Header -->
+    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="relative z-10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><i class="fas fa-print text-xl"></i></div>
+                <div>
+                    <h2 class="text-2xl font-extrabold">Answer Sheet Generator</h2>
+                    <p class="text-primary-200 font-medium text-sm">Generate print-ready OMR answer sheets</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <!-- Left: Form -->
+        <div class="lg:col-span-2 space-y-4">
+            <!-- Settings -->
+            <div class="card p-5 animate-slide-up">
+                <h3 class="font-bold text-surface-800 mb-4"><i class="fas fa-cog text-primary-500 mr-2"></i>Sheet Settings</h3>
+
+                <div class="space-y-4">
+                    <!-- Mark Type -->
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-2">Mark Type</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <template x-for="m in [{id:'circle',label:'Circle',icon:'fa-circle'},{id:'square',label:'Square',icon:'fa-square'}]" :key="m.id">
+                                <label class="cursor-pointer">
+                                    <input type="radio" name="markType" :value="m.id" x-model="markType" class="peer sr-only">
+                                    <div class="text-center py-3 rounded-xl border-2 border-surface-200 text-sm font-bold text-surface-600 peer-checked:border-primary-500 peer-checked:bg-primary-50 peer-checked:text-primary-700 hover:bg-surface-50 transition">
+                                        <i :class="'fas ' + m.icon + ' mr-1.5'"></i><span x-text="m.label"></span>
+                                    </div>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Exam Version -->
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-2">Exam Version</label>
+                        <div class="flex gap-2">
+                            <template x-for="v in ['A','B','C','D','E']" :key="v">
+                                <label class="cursor-pointer flex-1">
+                                    <input type="radio" name="examVersion" :value="v" x-model="examVersion" class="peer sr-only">
+                                    <div class="text-center py-3 rounded-xl border-2 border-surface-200 text-sm font-bold text-surface-600 peer-checked:border-primary-500 peer-checked:bg-primary-50 peer-checked:text-primary-700 hover:bg-surface-50 transition"
+                                         x-text="v"></div>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Header Fields -->
+            <div class="card p-5 animate-slide-up" style="animation-delay:50ms">
+                <h3 class="font-bold text-surface-800 mb-4"><i class="fas fa-id-card text-primary-500 mr-2"></i>Header Information</h3>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-1">Student Name</label>
+                        <input type="text" x-model="studentName" placeholder="Enter student name" class="field">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-1">Class</label>
+                        <input type="text" x-model="className" placeholder="e.g. XII IPA 1" class="field">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-1">Subject</label>
+                        <input type="text" x-model="subject" placeholder="e.g. Matematika" class="field">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-1">Date</label>
+                        <input type="date" x-model="date" class="field">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Download -->
+            <div class="card p-5 animate-slide-up" style="animation-delay:100ms">
+                <form @submit.prevent="generating = true; $el.submit()"
+                      method="POST" action="/tools/generate-answer-sheet"
+                      class="space-y-3">
+                    <input type="hidden" name="mark_type" :value="markType">
+                    <input type="hidden" name="exam_version" :value="examVersion">
+                    <input type="hidden" name="student_name" :value="studentName">
+                    <input type="hidden" name="class_name" :value="className">
+                    <input type="hidden" name="subject" :value="subject">
+                    <input type="hidden" name="date" :value="date">
+
+                    <button type="submit"
+                            :disabled="generating"
+                            class="w-full bg-primary-600 hover:bg-primary-700 disabled:bg-primary-300 text-white py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-primary-600/20 flex items-center justify-center gap-2">
+                        <i class="fas fa-file-pdf text-base" :class="generating ? 'animate-pulse' : ''"></i>
+                        <span x-text="generating ? 'Generating...' : 'Download PDF'"></span>
+                    </button>
+                </form>
+                <p class="text-[10px] text-surface-400 font-medium text-center mt-2">
+                    A4 Portrait \u2022 Print-ready \u2022 High contrast
+                </p>
+            </div>
+        </div>
+
+        <!-- Right: Preview -->
+        <div class="lg:col-span-3 animate-slide-up" style="animation-delay:50ms">
+            <div class="card overflow-hidden sticky top-20">
+                <div class="px-5 py-3 border-b border-surface-100 bg-surface-50 flex items-center justify-between">
+                    <h3 class="font-bold text-surface-800 text-sm"><i class="fas fa-eye text-primary-500 mr-2"></i>Preview</h3>
+                    <div class="flex items-center gap-2 text-xs text-surface-400 font-medium">
+                        <span>50 Questions</span>
+                        <span class="w-1 h-1 rounded-full bg-surface-300"></span>
+                        <span x-text="markType === 'circle' ? 'Circle Marks' : 'Square Marks'"></span>
+                        <span class="w-1 h-1 rounded-full bg-surface-300"></span>
+                        <span x-text="'v' + examVersion"></span>
+                    </div>
+                </div>
+                <div class="p-4 bg-surface-100 flex justify-center">
+                    <div class="bg-white shadow-lg rounded-xl overflow-hidden" style="width:450px; min-height:580px; font-family:'Courier New',monospace;">
+                        <!-- Preview Sheet -->
+                        <div class="p-4 text-[8px] leading-tight">
+                            <!-- Corner Markers -->
+                            <div class="flex justify-between mb-2">
+                                <div class="w-4 h-4 border-l-2 border-t-2 border-black"></div>
+                                <div class="w-4 h-4 border-r-2 border-t-2 border-black"></div>
+                            </div>
+
+                            <!-- Header -->
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <div class="text-[11px] font-bold">ScanGrade</div>
+                                    <div class="text-[5px] text-gray-400">OMR Answer Sheet</div>
+                                </div>
+                                <div class="w-9 h-9 bg-gray-100 flex items-center justify-center text-[5px] text-gray-400 border border-gray-200 rounded">[QR]</div>
+                            </div>
+
+                            <!-- Header Fields -->
+                            <div class="grid grid-cols-3 gap-1 mb-2">
+                                <div class="border border-gray-300 rounded p-1 col-span-3">
+                                    <span class="text-[5px] text-gray-500">Student Name:</span>
+                                    <div class="text-[7px] font-bold truncate" x-text="studentName || '___________________'"></div>
+                                </div>
+                                <div class="border border-gray-300 rounded p-1">
+                                    <span class="text-[5px] text-gray-500">Class:</span>
+                                    <div class="text-[7px] font-bold truncate" x-text="className || '___________________'"></div>
+                                </div>
+                                <div class="border border-gray-300 rounded p-1">
+                                    <span class="text-[5px] text-gray-500">Subject:</span>
+                                    <div class="text-[7px] font-bold truncate" x-text="subject || '___________________'"></div>
+                                </div>
+                                <div class="border border-gray-300 rounded p-1">
+                                    <span class="text-[5px] text-gray-500">Date:</span>
+                                    <div class="text-[7px] font-bold" x-text="date ? date.split('-').reverse().join('/') : '___________________'"></div>
+                                </div>
+                            </div>
+
+                            <!-- Answer Grid + NISN at bottom -->
+                            <div class="flex gap-1 mb-2">
+                                <div class="flex-1 border border-gray-200 rounded p-1">
+                                    <div class="flex items-center gap-1 mb-1">
+                                        <div class="text-[6px] font-bold">Questions 1-50</div>
+                                        <div class="ml-auto flex gap-1 text-[5px] font-bold text-gray-500">
+                                            <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
+                                        </div>
+                                    </div>
+                                    <div class="grid gap-y-[1px]"
+                                         :style="{ gridTemplateColumns: 'repeat(' + gridCols + ',1fr)' }">
+                                        <template x-for="q in 25" :key="q">
+                                            <div class="flex items-center gap-[1px]">
+                                                <span class="text-[4px] text-gray-400 w-[8px] text-right shrink-0" x-text="q"></span>
+                                                <template x-for="opt in 5" :key="opt">
+                                                    <template x-if="markType === 'circle'">
+                                                        <div class="rounded-full border border-black shrink-0" style="width:5px;height:5px"></div>
+                                                    </template>
+                                                    <template x-if="markType === 'square'">
+                                                        <div class="border border-black shrink-0" style="width:4.5px;height:4.5px"></div>
+                                                    </template>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Version -->
+                            <div class="mb-2 flex items-center gap-2">
+                                <span class="text-[6px] font-bold">Version:</span>
+                                <span class="text-[14px] font-bold" x-text="examVersion"></span>
+                            </div>
+
+                            <!-- Footer -->
+                            <div class="border-t border-gray-300 pt-1 text-center">
+                                <div class="text-[5px] font-bold text-gray-600">Use 2B pencil &bull; Fill the <span x-text="markType"></span> completely &bull; Do not fold or bend the sheet</div>
+                                <div class="text-[4px] text-gray-400 mt-[1px] flex justify-between">
+                                    <span>ScanGrade Answer Sheet | 50 Questions | Mark: <span x-text="markType === 'circle' ? 'Circle' : 'Square'"></span></span>
+                                    <span>scan-grade.app</span>
+                                </div>
+                            </div>
+
+                            <!-- Bottom Corner Markers -->
+                            <div class="flex justify-between mt-2">
+                                <div class="w-4 h-4 border-l-2 border-b-2 border-black"></div>
+                                <div class="w-4 h-4 border-r-2 border-b-2 border-black"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

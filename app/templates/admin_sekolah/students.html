@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Murid - ScanGrade{% endblock %}
+{% block page_title %}Data Murid{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '' }">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <!-- Password Modal -->
+    <div x-show="showPassword" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showPassword=false">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border-t-4 border-emerald-500">
+            <div class="text-center">
+                <div class="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3"><i class="fas fa-check-circle text-2xl"></i></div>
+                <h3 class="font-extrabold text-stone-800 mb-2">Murid Berhasil Dibuat!</h3>
+                <p class="text-sm text-stone-500 mb-4">Password default untuk login:</p>
+                <div class="bg-stone-50 rounded-xl p-4 mb-4">
+                    <code class="text-lg font-bold text-stone-800 select-all" x-text="generatedPassword"></code>
+                </div>
+                <p class="text-xs text-stone-400 font-medium mb-4">Murid dapat mengganti password setelah login.</p>
+                <button @click="showPassword=false" class="w-full py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold transition">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex items-center justify-between">
+        <p class="text-sm text-stone-500 font-medium">{{ students|length }} murid</p>
+        <button @click="showForm=!showForm" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-500/25 transition">
+            <i class="fas fa-plus mr-1"></i>Tambah Murid
+        </button>
+    </div>
+
+    <!-- Add Form -->
+    <div x-show="showForm" x-collapse class="card p-6 border border-orange-200">
+        <form method="POST" action="/admin-sekolah/students/create" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-bold text-stone-700 mb-1.5">NISN</label>
+                <input type="text" name="nisn" required
+                       class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-stone-700 mb-1.5">Nama Lengkap</label>
+                <input type="text" name="name" required
+                       class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-stone-700 mb-1.5">Email (opsional)</label>
+                <input type="email" name="email"
+                       class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-stone-700 mb-1.5">Kelas</label>
+                <select name="class_id"
+                        class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                    <option value="">- Pilih Kelas -</option>
+                    {% for c in classes %}
+                    <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="sm:col-span-2 flex gap-3 pt-2">
+                <button type="button" @click="showForm=false" class="flex-1 py-2.5 border border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-50 transition">Batal</button>
+                <button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold shadow-lg shadow-orange-500/25 transition">Simpan</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Search -->
+    <div class="card p-4">
+        <div class="relative">
+            <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-stone-400"></i>
+            <input type="text" id="studentSearch" placeholder="Cari murid..." class="w-full pl-10 pr-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-stone-50 text-xs font-bold text-stone-500 uppercase">
+                    <tr>
+                        <th class="text-left px-4 py-3">NISN</th>
+                        <th class="text-left px-4 py-3">Nama</th>
+                        <th class="text-left px-4 py-3">Kelas</th>
+                        <th class="text-left px-4 py-3">Email</th>
+                        <th class="text-right px-4 py-3">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-stone-50" id="studentTableBody">
+                    {% for s in students %}
+                    <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }">
+                        <td class="px-4 py-3 font-mono font-bold text-stone-700">{{ s.nisn }}</td>
+                        <td class="px-4 py-3 font-bold text-stone-700">{{ s.name }}</td>
+                        <td class="px-4 py-3"><span class="badge bg-violet-50 text-violet-700 border border-violet-200">{{ s.class_name or '-' }}</span></td>
+                        <td class="px-4 py-3 text-stone-500">{{ s.email or '-' }}</td>
+                        <td class="px-4 py-3 text-right">
+                            <div class="flex items-center justify-end gap-1">
+                                <button @click="editing=!editing" class="px-2.5 py-1.5 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition border border-amber-200"><i class="fas fa-edit"></i></button>
+                                <button hx-post="/admin-sekolah/students/{{ s.id }}/reset-password" hx-target="this"
+                                        class="px-2.5 py-1.5 text-xs font-bold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition border border-blue-200"
+                                        hx-swap="outerHTML">Reset PW</button>
+                                <button hx-post="/admin-sekolah/students/{{ s.id }}/delete" hx-target="body" hx-confirm="Hapus murid {{ s.name }}?"
+                                        class="px-2.5 py-1.5 text-xs font-bold bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200">Hapus</button>
+                            </div>
+                            <!-- Edit Inline -->
+                            <div x-show="editing" x-collapse x-cloak class="mt-3 text-left">
+                                <form method="POST" action="/admin-sekolah/students/{{ s.id }}/edit" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-stone-50 rounded-xl">
+                                    <input type="text" name="nisn" value="{{ s.nisn }}"
+                                           class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                    <input type="text" name="name" value="{{ s.name }}"
+                                           class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                    <input type="email" name="email" value="{{ s.email or '' }}"
+                                           class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                    <select name="class_id"
+                                            class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium bg-white">
+                                        <option value="">- Kelas -</option>
+                                        {% for c in classes %}
+                                        <option value="{{ c.id }}" {% if s.class_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="col-span-full px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm hover:bg-emerald-200 transition">Simpan</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="px-4 py-12 text-center text-stone-400 font-medium">
+                            <i class="fas fa-user-graduate text-3xl mb-2 block text-stone-300"></i>
+                            Belum ada murid
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const search = document.getElementById('studentSearch');
+    const tbody = document.getElementById('studentTableBody');
+    if (search && tbody) {
+        search.addEventListener('input', function() {
+            const q = this.value.toLowerCase();
+            tbody.querySelectorAll('tr').forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(q) ? '' : 'none';
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

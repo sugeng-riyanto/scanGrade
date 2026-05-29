@@ -15,9 +15,10 @@
         <input type="text" x-model="search" :placeholder="lang==='en'?'Search users...':'Cari pengguna...'" class="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
         <select x-model="roleFilter" class="px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition bg-white">
             <option value="" x-text="lang==='en'?'All Roles':'Semua Role'"></option>
-            <option value="admin">Admin</option>
-            <option value="teacher" x-text="lang==='en'?'Teacher':'Guru'"></option>
-            <option value="student" x-text="lang==='en'?'Student':'Siswa'"></option>
+            <option value="super_admin">Super Admin</option>
+            <option value="admin_sekolah">Admin Sekolah</option>
+            <option value="guru" x-text="lang==='en'?'Teacher':'Guru'"></option>
+            <option value="murid" x-text="lang==='en'?'Student':'Siswa'"></option>
         </select>
     </div>
 
@@ -37,7 +38,7 @@
                         x-show="(!search || '{{ (u.full_name or '')|lower }}'.includes(search.toLowerCase()) || '{{ (u.email or '')|lower }}'.includes(search.toLowerCase())) && (!roleFilter || '{{ u.role }}'===roleFilter)">
                         <td class="px-5 py-3">
                             <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-full {% if u.role == 'admin' %}bg-purple-50 text-purple-600{% elif u.role == 'teacher' %}bg-emerald-50 text-emerald-600{% else %}bg-brand-50 text-brand-600{% endif %} flex items-center justify-center font-bold text-xs shrink-0">
+                                <div class="w-8 h-8 rounded-full {% if u.role == 'super_admin' %}bg-purple-50 text-purple-600{% elif u.role == 'admin_sekolah' %}bg-violet-50 text-violet-600{% elif u.role == 'guru' %}bg-emerald-50 text-emerald-600{% else %}bg-brand-50 text-brand-600{% endif %} flex items-center justify-center font-bold text-xs shrink-0">
                                     {{ (u.full_name or 'U')[:1]|upper }}
                                 </div>
                                 <span class="font-semibold text-slate-700">{{ u.full_name or '-' }}</span>
@@ -45,7 +46,7 @@
                         </td>
                         <td class="px-5 py-3 text-slate-500 font-medium">{{ u.email or '-' }}</td>
                         <td class="px-5 py-3">
-                            <span class="badge {% if u.role == 'admin' %}bg-purple-50 text-purple-700{% elif u.role == 'teacher' %}bg-emerald-50 text-emerald-700{% else %}bg-brand-50 text-brand-700{% endif %}">{{ u.role }}</span>
+                            <span class="badge {% if u.role == 'super_admin' %}bg-purple-50 text-purple-700{% elif u.role == 'admin_sekolah' %}bg-violet-50 text-violet-700{% elif u.role == 'guru' %}bg-emerald-50 text-emerald-700{% else %}bg-brand-50 text-brand-700{% endif %}">{{ u.role }}</span>
                         </td>
                         <td class="px-5 py-3 text-slate-400 font-medium">{{ u.created_at|tz("%d %b %Y") if u.created_at else '-' }}</td>
                     </tr>

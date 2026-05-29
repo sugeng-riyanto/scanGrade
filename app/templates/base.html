@@ -10,9 +10,22 @@
         theme: {
             extend: {
                 colors: {
-                    brand: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a5f' },
+                    primary: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' },
+                    surface: { 50:'#f8fafc',100:'#f1f5f9',200:'#e2e8f0',300:'#cbd5e1',400:'#94a3b8',500:'#64748b',600:'#475569',700:'#334155',800:'#1e293b',900:'#0f172a' },
                 },
                 fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+                animation: {
+                    'fade-in': 'fadeIn 0.2s ease-out',
+                    'slide-up': 'slideUp 0.2s ease-out',
+                    'slide-down': 'slideDown 0.2s ease-out',
+                    'scale-in': 'scaleIn 0.15s ease-out',
+                },
+                keyframes: {
+                    fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+                    slideUp: { '0%': { opacity: '0', transform: 'translateY(8px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+                    slideDown: { '0%': { opacity: '0', transform: 'translateY(-8px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+                    scaleIn: { '0%': { opacity: '0', transform: 'scale(0.95)' }, '100%': { opacity: '1', transform: 'scale(1)' } },
+                }
             }
         }
     }
@@ -26,207 +39,312 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <style>
         * { font-family: 'Inter', system-ui, sans-serif; }
-        body { background: #f8fafc; }
-        .sidebar-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; border-radius: 0.75rem; font-weight: 600; font-size: 0.875rem; transition: all 0.15s; color: #94a3b8; }
-        .sidebar-item:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
-        .sidebar-item.active { background: rgba(59,130,246,0.2); color: #60a5fa; }
-        .sidebar-item i { width: 20px; text-align: center; font-size: 0.9rem; }
-        .card { background: #fff; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-        .card-hover:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-1px); transition: all 0.2s; }
+        body { background: #f1f5f9; }
+        .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; border-radius: 0.75rem; font-weight: 600; font-size: 0.875rem; transition: all 0.15s; color: #94a3b8; }
+        .nav-item:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
+        .nav-item.active { background: rgba(59,130,246,0.15); color: #93c5fd; }
+        .nav-item i { width: 20px; text-align: center; font-size: 0.9rem; }
+        .nav-section-title { padding: 0.5rem 0.875rem 0.25rem; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; }
+        .card { background: #fff; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+        .card-hover:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); transform: translateY(-1px); transition: all 0.2s; }
         .stat-card { padding: 1.25rem 1.5rem; }
-        .stat-icon { width: 48px; height: 48px; border-radius: 0.75rem; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; }
+        .stat-icon { width: 44px; height: 44px; border-radius: 0.75rem; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; }
         .badge { display: inline-flex; align-items: center; padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; }
+        [x-cloak] { display: none !important; }
+        .toast-enter { animation: slideUp 0.25s ease-out forwards; }
+        .toast-leave { animation: fadeIn 0.2s ease-in reverse forwards; }
         @media (max-width: 1023px) {
-            .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
+            .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 40; backdrop-filter: blur(4px); }
         }
-        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        dialog { max-height: 90vh; }
+        dialog::backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
     </style>
     {% block head_extra %}{% endblock %}
 </head>
-<body class="h-full" x-data="{ sidebarOpen: window.innerWidth >= 1024, lang: localStorage.getItem('sg_lang') || 'id' }" @resize.window="if(window.innerWidth >= 1024) sidebarOpen = true">
+<body class="h-full antialiased"
+      x-data="{
+        sidebarOpen: window.innerWidth >= 1024,
+        lang: localStorage.getItem('sg_lang') || 'id',
+        loading: false,
+        toasts: [],
+        toastId: 0,
+        notify(msg, type='success') {
+            const id = ++this.toastId;
+            this.toasts.push({ id, msg, type });
+            setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 4000);
+        },
+        userMenuOpen: false,
+      }"
+      @resize.window="if(window.innerWidth >= 1024) sidebarOpen = true"
+      @htmx:before-request.window="loading = true"
+      @htmx:after-request.window="loading = false"
+      @htmx:response-error.window="notify('Terjadi kesalahan', 'error')">
 
 {% if g.user_id %}
 <div class="flex h-full">
-    <!-- Sidebar -->
-    <aside class="fixed inset-y-0 left-0 z-40 w-64 bg-gradient-to-b from-slate-900 to-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto"
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="fixed inset-y-0 left-0 z-50 w-64 bg-gradient-to-b from-surface-900 via-surface-800 to-surface-900 transform transition-transform duration-250 ease-out lg:translate-x-0 lg:static lg:z-auto shadow-xl"
            :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
            @keydown.escape.window="if(window.innerWidth<1024) sidebarOpen=false">
 
         <!-- Logo -->
-        <div class="flex items-center gap-3 px-5 h-16 border-b border-white/10">
-            <div class="w-9 h-9 rounded-lg bg-brand-500 flex items-center justify-center shadow-lg shadow-brand-500/30">
+        <div class="flex items-center gap-2.5 px-5 h-16 border-b border-white/[0.06]">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/30 shrink-0">
                 <i class="fas fa-graduation-cap text-white text-sm"></i>
             </div>
             <span class="text-white font-extrabold text-lg tracking-tight">ScanGrade</span>
-            <button @click="sidebarOpen=false" class="lg:hidden ml-auto text-slate-400 hover:text-white"><i class="fas fa-times"></i></button>
+            <button @click="sidebarOpen=false" class="lg:hidden ml-auto text-white/40 hover:text-white transition"><i class="fas fa-times"></i></button>
         </div>
 
         <!-- Navigation -->
-        <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto" style="max-height:calc(100vh - 8rem)">
-            {% if g.user_role == 'admin' %}
-            <a href="/admin/dashboard" class="sidebar-item {% if request.path == '/admin/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="lang==='en'?'Dashboard':'Dashboard'"></span></a>
-            <a href="/admin/exams" class="sidebar-item {% if request.path == '/admin/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span></a>
-            <a href="/admin/teachers" class="sidebar-item {% if request.path == '/admin/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span x-text="lang==='en'?'Teachers':'Guru'"></span></a>
-            <a href="/admin/students" class="sidebar-item {% if request.path == '/admin/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="lang==='en'?'Students':'Siswa'"></span></a>
-            <a href="/admin/classes" class="sidebar-item {% if request.path == '/admin/classes' %}active{% endif %}"><i class="fas fa-school"></i><span x-text="lang==='en'?'Classes':'Kelas'"></span></a>
-            <a href="/admin/users" class="sidebar-item {% if request.path == '/admin/users' %}active{% endif %}"><i class="fas fa-users-cog"></i><span x-text="lang==='en'?'All Users':'Semua User'"></span></a>
-            <a href="/admin/school" class="sidebar-item {% if request.path == '/admin/school' %}active{% endif %}"><i class="fas fa-cog"></i><span x-text="lang==='en'?'Settings':'Pengaturan'"></span></a>
+        <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto" style="max-height:calc(100vh - 8rem)">
 
-            {% elif g.user_role == 'teacher' %}
-            <a href="/teacher/dashboard" class="sidebar-item {% if request.path == '/teacher/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="lang==='en'?'Dashboard':'Dashboard'"></span></a>
-            <a href="/teacher/exams" class="sidebar-item {% if request.path == '/teacher/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="lang==='en'?'My Exams':'Ujian Saya'"></span></a>
-            <a href="/teacher/exams/new" class="sidebar-item {% if request.path == '/teacher/exams/new' %}active{% endif %}"><i class="fas fa-plus-circle"></i><span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span></a>
-            <a href="/teacher/scan" class="sidebar-item {% if request.path == '/teacher/scan' %}active{% endif %}"><i class="fas fa-camera"></i><span x-text="lang==='en'?'Scan OMR':'Scan OMR'"></span></a>
-            <a href="/teacher/grading" class="sidebar-item {% if request.path == '/teacher/grading' %}active{% endif %}"><i class="fas fa-pen-alt"></i><span x-text="lang==='en'?'Grading':'Koreksi'"></span></a>
-            <a href="/teacher/results" class="sidebar-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span x-text="lang==='en'?'Results':'Hasil'"></span></a>
-            <a href="/teacher/analytics" class="sidebar-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="lang==='en'?'Analytics':'Analitik'"></span></a>
-            <div class="pt-3 mt-3 border-t border-white/10">
-                <p class="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2" x-text="lang==='en'?'Manage':'Kelola'"></p>
-                <a href="/teacher/students" class="sidebar-item {% if request.path == '/teacher/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="lang==='en'?'Students':'Siswa'"></span></a>
-            </div>
+{% if g.user_role == 'super_admin' %}
+            <div class="nav-section-title">Utama</div>
+            <a href="/admin/dashboard" class="nav-item {% if request.path == '/admin/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
+            <a href="/admin/registration-requests" class="nav-item {% if request.path == '/admin/registration-requests' %}active{% endif %}"><i class="fas fa-school-circle-check"></i><span>Registrasi Sekolah</span></a>
+            <div class="nav-section-title pt-2">Master Data</div>
+            <a href="/admin/users" class="nav-item {% if request.path == '/admin/users' %}active{% endif %}"><i class="fas fa-users-cog"></i><span>Semua User</span></a>
+            <a href="/admin/teachers" class="nav-item {% if request.path == '/admin/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span>Guru</span></a>
+            <a href="/admin/students" class="nav-item {% if request.path == '/admin/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span>Siswa</span></a>
+            <a href="/admin/classes" class="nav-item {% if request.path == '/admin/classes' %}active{% endif %}"><i class="fas fa-school"></i><span>Kelas</span></a>
+            <a href="/admin/exams" class="nav-item {% if request.path == '/admin/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian</span></a>
+            <div class="nav-section-title pt-2">Pengaturan</div>
+            <a href="/admin/school" class="nav-item {% if request.path == '/admin/school' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan</span></a>
+            <div class="nav-section-title pt-2">Tools</div>
+            <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
 
-            {% elif g.user_role == 'student' %}
-            <a href="/student/dashboard" class="sidebar-item {% if request.path == '/student/dashboard' %}active{% endif %}"><i class="fas fa-home"></i><span x-text="lang==='en'?'Dashboard':'Beranda'"></span></a>
-            <a href="/student/exams" class="sidebar-item {% if request.path == '/student/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span x-text="lang==='en'?'My Exams':'Ujian Saya'"></span></a>
-            <a href="/student/results" class="sidebar-item {% if request.path == '/student/results' %}active{% endif %}"><i class="fas fa-chart-bar"></i><span x-text="lang==='en'?'My Scores':'Nilai Saya'"></span></a>
-            {% endif %}
+{% elif g.user_role == 'admin_sekolah' %}
+            <div class="nav-section-title">Utama</div>
+            <a href="/admin-sekolah/dashboard" class="nav-item {% if request.path == '/admin-sekolah/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
+            <a href="/admin-sekolah/profile" class="nav-item {% if request.path == '/admin-sekolah/profile' %}active{% endif %}"><i class="fas fa-building"></i><span>Profil Sekolah</span></a>
+            <div class="nav-section-title pt-2">Akademik</div>
+            <a href="/admin-sekolah/school-years" class="nav-item {% if request.path == '/admin-sekolah/school-years' %}active{% endif %}"><i class="fas fa-calendar"></i><span>Tahun Ajaran</span></a>
+            <a href="/admin-sekolah/classes" class="nav-item {% if request.path == '/admin-sekolah/classes' %}active{% endif %}"><i class="fas fa-school"></i><span>Kelas</span></a>
+            <a href="/admin-sekolah/promote" class="nav-item {% if request.path == '/admin-sekolah/promote' %}active{% endif %}"><i class="fas fa-arrow-up"></i><span>Naik Kelas</span></a>
+            <div class="nav-section-title pt-2">Pengguna</div>
+            <a href="/admin-sekolah/teachers" class="nav-item {% if request.path == '/admin-sekolah/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span>Guru</span></a>
+            <a href="/admin-sekolah/students" class="nav-item {% if request.path == '/admin-sekolah/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span>Murid</span></a>
+            <div class="nav-section-title pt-2">Data</div>
+            <a href="/admin-sekolah/import" class="nav-item {% if request.path == '/admin-sekolah/import' %}active{% endif %}"><i class="fas fa-upload"></i><span>Import Excel</span></a>
+            <div class="nav-section-title pt-2">Tools</div>
+            <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
+
+{% elif g.user_role == 'guru' %}
+            <div class="nav-section-title">Utama</div>
+            <a href="/teacher/dashboard" class="nav-item {% if request.path == '/teacher/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
+            <a href="/teacher/classes" class="nav-item {% if request.path == '/teacher/classes' %}active{% endif %}"><i class="fas fa-school"></i><span>Kelas &amp; Mapel</span></a>
+            <div class="nav-section-title pt-2">Ujian</div>
+            <a href="/teacher/exams" class="nav-item {% if request.path == '/teacher/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian Saya</span></a>
+            <a href="/teacher/exams/new" class="nav-item {% if request.path == '/teacher/exams/new' %}active{% endif %}"><i class="fas fa-plus-circle"></i><span>Buat Ujian</span></a>
+            <div class="nav-section-title pt-2">Koreksi</div>
+            <a href="/teacher/scan" class="nav-item {% if request.path == '/teacher/scan' %}active{% endif %}"><i class="fas fa-camera"></i><span>Scan OMR</span></a>
+            <a href="/teacher/grading" class="nav-item {% if request.path == '/teacher/grading' %}active{% endif %}"><i class="fas fa-pen-alt"></i><span>Koreksi Esai</span></a>
+            <div class="nav-section-title pt-2">Laporan</div>
+            <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Hasil Ujian</span></a>
+            <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>
+            <div class="nav-section-title pt-2">Tools</div>
+            <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
+
+{% elif g.user_role == 'murid' %}
+            <div class="nav-section-title">Utama</div>
+            <a href="/student/dashboard" class="nav-item {% if request.path == '/student/dashboard' %}active{% endif %}"><i class="fas fa-home"></i><span>Beranda</span></a>
+            <div class="nav-section-title pt-2">Ujian</div>
+            <a href="/student/exams" class="nav-item {% if request.path == '/student/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian Saya</span></a>
+            <a href="/student/results" class="nav-item {% if request.path == '/student/results' %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Nilai Saya</span></a>
+{% endif %}
         </nav>
 
-        <!-- User section -->
-        <div class="border-t border-white/10 p-3">
-            <div class="flex items-center gap-3 px-2 py-2">
-                <div class="w-9 h-9 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-400 font-bold text-sm">
+        <!-- User -->
+        <div class="border-t border-white/[0.06] p-3">
+            <div class="flex items-center gap-3 px-2 py-1.5">
+                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white font-bold text-sm shadow-lg shrink-0">
                     {{ (g.user_name or g.user_email or "U")[:1]|upper }}
                 </div>
                 <div class="flex-1 min-w-0">
                     <p class="text-sm font-semibold text-white truncate">{{ g.user_name or g.user_email[:20] }}</p>
-                    <p class="text-[10px] font-medium text-slate-500 uppercase">{{ g.user_role }}</p>
+                    <p class="text-[10px] font-medium text-white/40 uppercase tracking-wider">{{ g.user_role|replace('_', ' ') }}</p>
                 </div>
-                <a href="/auth/logout" class="text-slate-500 hover:text-red-400 transition" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
+                <a href="/auth/logout" class="text-white/30 hover:text-red-400 transition p-1.5 rounded-lg hover:bg-white/5" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
             </div>
         </div>
     </aside>
 
     <!-- Mobile overlay -->
-    <div x-show="sidebarOpen && window.innerWidth < 1024" class="sidebar-overlay lg:hidden" @click="sidebarOpen=false" x-transition.opacity></div>
+    <template x-teleport="body">
+        <div x-show="sidebarOpen && window.innerWidth < 1024" class="sidebar-overlay lg:hidden" @click="sidebarOpen=false" x-transition.opacity></div>
+    </template>
 
-    <!-- Main content area -->
-    <div class="flex-1 flex flex-col min-w-0">
-        <!-- Top bar -->
-        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-20">
-            <div class="flex items-center gap-3">
-                <button @click="sidebarOpen = !sidebarOpen" class="lg:hidden text-slate-500 hover:text-slate-700 p-2 -ml-2 rounded-lg hover:bg-slate-100 transition">
+    <!-- ===== MAIN ===== -->
+    <div class="flex-1 flex flex-col min-w-0 max-w-full">
+
+        <!-- Topbar -->
+        <header class="h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-sm">
+            <div class="flex items-center gap-3 min-w-0">
+                <button @click="sidebarOpen = !sidebarOpen" class="lg:hidden text-surface-400 hover:text-surface-700 p-2 -ml-2 rounded-lg hover:bg-surface-100 transition">
                     <i class="fas fa-bars text-lg"></i>
                 </button>
-                <h1 class="text-lg font-bold text-slate-800">{% block page_title %}{% endblock %}</h1>
+                <!-- Breadcrumb -->
+                <nav class="flex items-center gap-1.5 text-sm min-w-0">
+                    {% set parts = request.path.strip('/').split('/') %}
+                    <a href="/{% if g.user_role in ('super_admin','admin_sekolah') %}admin{% elif g.user_role == 'guru' %}teacher{% else %}student{% endif %}/dashboard"
+                       class="text-surface-400 hover:text-primary-600 font-medium whitespace-nowrap transition">
+                        <i class="fas fa-home text-xs"></i>
+                    </a>
+                    {% for p in parts %}
+                    <i class="fas fa-chevron-right text-[8px] text-surface-300 shrink-0"></i>
+                    <span class="text-surface-600 font-semibold truncate max-w-[120px] sm:max-w-[200px]">{{ p|replace('-',' ')|title }}</span>
+                    {% endfor %}
+                </nav>
             </div>
-            <div class="flex items-center gap-2">
-                <button @click="document.getElementById('tz-modal').showModal()"
-                        class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center gap-1">
-                    <i class="fas fa-globe"></i><span>UTC{{ '+%d'|format(g.tz_offset) if g.tz_offset >= 0 else g.tz_offset }}</span>
+            <div class="flex items-center gap-1.5 sm:gap-2">
+                <!-- Loading indicator -->
+                <div x-show="loading" x-cloak class="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+
+                <!-- Timezone -->
+                <button @click="$refs.tzDialog.showModal()"
+                        class="hidden sm:inline-flex text-xs font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 text-surface-500 hover:bg-surface-50 hover:text-surface-700 transition items-center gap-1">
+                    <i class="fas fa-globe text-[10px]"></i><span>UTC{{ '+%d'|format(g.tz_offset) if g.tz_offset >= 0 else g.tz_offset }}</span>
                 </button>
+
+                <!-- Language -->
                 <button @click="lang = lang==='id'?'en':'id'; localStorage.setItem('sg_lang', lang)"
-                        class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition"
+                        class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 text-surface-500 hover:bg-surface-50 hover:text-surface-700 transition"
                         x-text="lang==='id'?'EN':'ID'">
                 </button>
-                <button class="relative p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition">
-                    <i class="fas fa-bell"></i>
-                </button>
+
+                <!-- User dropdown -->
+                <div class="relative" @click.outside="userMenuOpen = false">
+                    <button @click="userMenuOpen = !userMenuOpen"
+                            class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-surface-100 transition">
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+                            {{ (g.user_name or g.user_email or "U")[:1]|upper }}
+                        </div>
+                        <span class="hidden sm:block text-sm font-semibold text-surface-700 max-w-[120px] truncate">{{ g.user_name or g.user_email[:15] }}</span>
+                        <i class="fas fa-chevron-down text-[10px] text-surface-400" :class="userMenuOpen && 'rotate-180'"></i>
+                    </button>
+                    <div x-show="userMenuOpen" x-cloak x-transition:enter="animate-fade-in"
+                         @click="userMenuOpen = false"
+                         class="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-surface-200 py-1.5 z-50">
+                        <div class="px-4 py-2 border-b border-surface-100">
+                            <p class="text-sm font-bold text-surface-800 truncate">{{ g.user_name or g.user_email }}</p>
+                            <p class="text-[10px] font-medium text-surface-400 uppercase tracking-wider">{{ g.user_role|replace('_', ' ') }}</p>
+                        </div>
+                        <a href="/auth/logout" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 transition">
+                            <i class="fas fa-sign-out-alt text-xs"></i> Logout
+                        </a>
+                    </div>
+                </div>
             </div>
         </header>
 
-        <!-- Page content -->
+        <!-- Page Content -->
         <main class="flex-1 overflow-y-auto">
-            <div class="p-4 lg:p-6 max-w-7xl mx-auto">
+            <div class="p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
                 {% block content %}{% endblock %}
             </div>
         </main>
 
-        <!-- Mobile bottom nav -->
-        <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex z-20 pb-safe">
-            {% if g.user_role == 'teacher' %}
-            <a href="/teacher/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/dashboard' %}text-brand-600{% else %}text-slate-400{% endif %}">
+        <!-- Mobile Bottom Nav -->
+        <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-surface-200 flex z-40 pb-safe shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+{% if g.user_role == 'guru' %}
+            <a href="/teacher/dashboard" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path == '/teacher/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chart-pie text-lg mb-0.5"></i><span x-text="lang==='en'?'Home':'Beranda'"></span>
             </a>
-            <a href="/teacher/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/exams' %}text-brand-600{% else %}text-slate-400{% endif %}">
-                <i class="fas fa-file-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span>
+            <a href="/teacher/classes" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path == '/teacher/classes' %}text-primary-600{% else %}text-surface-400{% endif %} transition">
+                <i class="fas fa-school text-lg mb-0.5"></i><span x-text="lang==='en'?'Classes':'Kelas'"></span>
             </a>
-            <a href="/teacher/exams/new" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/exams/new' %}text-brand-600{% else %}text-slate-400{% endif %}">
-                <div class="w-10 h-10 -mt-4 rounded-full bg-brand-500 text-white flex items-center justify-center shadow-lg shadow-brand-500/30"><i class="fas fa-plus text-sm"></i></div>
-                <span class="-mt-0.5" x-text="lang==='en'?'Create':'Buat'"></span>
+            <a href="/teacher/exams/new" class="flex-1 flex flex-col items-center py-1.5 relative">
+                <div class="w-10 h-10 -mt-3 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white flex items-center justify-center shadow-lg shadow-primary-500/30">
+                    <i class="fas fa-plus text-sm"></i>
+                </div>
+                <span class="-mt-0.5 text-[10px] font-bold text-primary-600" x-text="lang==='en'?'Create':'Buat'"></span>
             </a>
-            <a href="/teacher/grading" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/teacher/grading' %}text-brand-600{% else %}text-slate-400{% endif %}">
+            <a href="/teacher/grading" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path == '/teacher/grading' %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-pen-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Grade':'Koreksi'"></span>
             </a>
-            <a href="/teacher/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path.startswith('/teacher/results') %}text-brand-600{% else %}text-slate-400{% endif %}">
+            <a href="/teacher/results" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path.startswith('/teacher/results') %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chart-bar text-lg mb-0.5"></i><span x-text="lang==='en'?'Results':'Hasil'"></span>
             </a>
-            {% elif g.user_role == 'student' %}
-            <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/student/dashboard' %}text-brand-600{% else %}text-slate-400{% endif %}">
+{% elif g.user_role == 'murid' %}
+            <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path == '/student/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-home text-lg mb-0.5"></i><span x-text="lang==='en'?'Home':'Beranda'"></span>
             </a>
-            <a href="/student/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/student/exams' %}text-brand-600{% else %}text-slate-400{% endif %}">
+            <a href="/student/exams" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path == '/student/exams' %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-file-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span>
             </a>
-            <a href="/student/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/student/results' %}text-brand-600{% else %}text-slate-400{% endif %}">
+            <a href="/student/results" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path == '/student/results' %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chart-bar text-lg mb-0.5"></i><span x-text="lang==='en'?'Scores':'Nilai'"></span>
             </a>
-            {% elif g.user_role == 'admin' %}
-            <a href="/admin/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/admin/dashboard' %}text-brand-600{% else %}text-slate-400{% endif %}">
+{% elif g.user_role in ('super_admin', 'admin_sekolah') %}
+            <a href="/{% if g.user_role == 'super_admin' %}admin{% else %}admin-sekolah{% endif %}/dashboard" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path.endswith('/dashboard') %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span>
             </a>
-            <a href="/admin/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/admin/exams' %}text-brand-600{% else %}text-slate-400{% endif %}">
-                <i class="fas fa-file-alt text-lg mb-0.5"></i><span x-text="lang==='en'?'Exams':'Ujian'"></span>
+            <a href="/{% if g.user_role == 'super_admin' %}admin{% else %}admin-sekolah{% endif %}/teachers" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold transition">
+                <i class="fas fa-chalkboard-teacher text-lg mb-0.5"></i><span x-text="lang==='en'?'Teachers':'Guru'"></span>
             </a>
-            <a href="/admin/users" class="flex-1 flex flex-col items-center py-2 text-[10px] font-semibold {% if request.path == '/admin/users' %}text-brand-600{% else %}text-slate-400{% endif %}">
-                <i class="fas fa-users text-lg mb-0.5"></i><span x-text="lang==='en'?'Users':'User'"></span>
+            <a href="/{% if g.user_role == 'super_admin' %}admin{% else %}admin-sekolah{% endif %}/students" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold transition">
+                <i class="fas fa-user-graduate text-lg mb-0.5"></i><span x-text="lang==='en'?'Students':'Murid'"></span>
             </a>
-            {% endif %}
+{% endif %}
         </nav>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="fixed top-4 right-4 z-[100] space-y-2 w-full max-w-sm pointer-events-none" aria-live="polite">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="pointer-events-auto toast-enter flex items-start gap-3 p-4 rounded-xl shadow-xl border backdrop-blur-sm"
+                 :class="{
+                   'bg-emerald-50 border-emerald-200 text-emerald-800': toast.type === 'success',
+                   'bg-red-50 border-red-200 text-red-800': toast.type === 'error',
+                   'bg-amber-50 border-amber-200 text-amber-800': toast.type === 'warning',
+                   'bg-blue-50 border-blue-200 text-blue-800': toast.type === 'info',
+                 }">
+                <i class="fas fa-check-circle mt-0.5 text-emerald-500" x-show="toast.type==='success'"></i>
+                <i class="fas fa-exclamation-circle mt-0.5 text-red-500" x-show="toast.type==='error'"></i>
+                <i class="fas fa-exclamation-triangle mt-0.5 text-amber-500" x-show="toast.type==='warning'"></i>
+                <i class="fas fa-info-circle mt-0.5 text-blue-500" x-show="toast.type==='info'"></i>
+                <p class="flex-1 text-sm font-semibold" x-text="toast.msg"></p>
+                <button @click="toasts = toasts.filter(t => t.id !== toast.id)" class="shrink-0 opacity-60 hover:opacity-100 transition">
+                    <i class="fas fa-times text-xs"></i>
+                </button>
+            </div>
+        </template>
     </div>
 </div>
 {% else %}
-<!-- Not logged in: no sidebar -->
-<main class="min-h-screen bg-slate-50">
+<!-- Not logged in -->
+<main class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
     {% block content_noauth %}{% endblock %}
 </main>
 {% endif %}
 
-<!-- Timezone Modal -->
-<dialog id="tz-modal" class="rounded-2xl p-0 backdrop:bg-black/40 shadow-2xl border border-slate-200 w-full max-w-sm">
+<!-- Timezone Dialog -->
+<dialog x-ref="tzDialog" class="rounded-2xl p-0 shadow-2xl border border-surface-200 w-full max-w-sm backdrop:bg-black/40 backdrop:backdrop-blur-sm">
     <form method="dialog" class="p-6 space-y-4">
         <div class="flex items-center justify-between">
-            <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Timezone':'Zona Waktu'"></h3>
-            <button value="cancel" class="text-slate-400 hover:text-slate-600 p-1"><i class="fas fa-times"></i></button>
+            <h3 class="font-bold text-surface-800"><span x-text="lang==='en'?'Timezone':'Zona Waktu'"></span></h3>
+            <button value="cancel" class="text-surface-400 hover:text-surface-600 p-1 rounded-lg hover:bg-surface-100 transition"><i class="fas fa-times"></i></button>
         </div>
-        <p class="text-xs text-slate-500 font-medium" x-text="lang==='en'?'Select your UTC offset. All times will be displayed in this timezone.':'Pilih offset UTC Anda. Semua waktu akan ditampilkan dalam zona waktu ini.'"></p>
-        <div class="grid grid-cols-5 gap-2">
+        <p class="text-xs text-surface-500 font-medium" x-text="lang==='en'?'Select UTC offset. All times will be shown in this timezone.':'Pilih offset UTC. Semua waktu akan ditampilkan dalam zona waktu ini.'"></p>
+        <div class="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1 -m-1">
             {% for h in range(-12, 15) %}
             <label class="cursor-pointer">
                 <input type="radio" name="tz_val" value="{{ h }}" class="peer sr-only" {% if h == g.tz_offset %}checked{% endif %}>
-                <div class="text-center py-2 rounded-lg border-2 border-slate-200 text-xs font-bold text-slate-600 peer-checked:border-brand-500 peer-checked:bg-brand-50 peer-checked:text-brand-700 hover:bg-slate-50 transition">
+                <div class="text-center py-2 rounded-lg border-2 border-surface-200 text-xs font-bold text-surface-600 peer-checked:border-primary-500 peer-checked:bg-primary-50 peer-checked:text-primary-700 hover:bg-surface-50 transition">
                     UTC{{ "+%d"|format(h) if h >= 0 else h }}
                 </div>
             </label>
             {% endfor %}
         </div>
-        <button type="button" onclick="saveTz()" class="w-full bg-brand-600 hover:bg-brand-700 text-white py-2.5 rounded-xl font-bold text-sm transition" x-text="lang==='en'?'Save':'Simpan'"></button>
+        <button type="button" @click="document.querySelector('input[name=tz_val]:checked') && fetch('/auth/set-timezone', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tz_offset:parseInt(document.querySelector('input[name=tz_val]:checked').value)})}).then(()=>location.reload())"
+                class="w-full bg-primary-600 hover:bg-primary-700 text-white py-2.5 rounded-xl font-bold text-sm transition shadow-lg shadow-primary-600/20" x-text="lang==='en'?'Save':'Simpan'"></button>
     </form>
 </dialog>
-<script>
-function saveTz() {
-    var checked = document.querySelector('input[name=tz_val]:checked');
-    if (!checked) return;
-    fetch('/auth/set-timezone', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({tz_offset: parseInt(checked.value)})
-    }).then(function() { location.reload(); });
-}
-</script>
 
 {% block modals %}{% endblock %}
 {% block scripts %}{% endblock %}

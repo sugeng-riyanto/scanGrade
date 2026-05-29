@@ -1,6 +1,7 @@
 import io
 from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response
 from app.utils.auth import login_required, get_supabase
+from app.services.audit_service import log_activity
 
 student_bp = Blueprint("student", __name__)
 
@@ -9,12 +10,14 @@ student_bp = Blueprint("student", __name__)
 @login_required
 def dashboard():
     supabase = get_supabase()
-    if g.get("user_role") != "student":
+    if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
+
     available_exams = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").execute().data or []
     subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
     submitted_ids = {s["exam_id"] for s in subs}
     available_exams = [e for e in available_exams if e["id"] not in submitted_ids]
+
     subs = supabase.table("submissions").select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, teacher_feedback, exams(id, title, answer_key, question_types, total_questions, pdf_page_urls)").eq("student_id", g.user_id).order("submitted_at", desc=True).execute().data or []
     completed_exams = []
     all_scores = []
@@ -28,14 +31,40 @@ def dashboard():
             all_scores.append(float(sc))
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
     user_name = g.user_name or g.user_email or ""
-    return render_template("student/dashboard.html", available_exams=available_exams, completed_exams=completed_exams[:5], avg_score=avg_score, user_name=user_name)
+
+    # Get student's class info
+    student_class = None
+    subject_count = 0
+    try:
+        profile = supabase.table("profiles").select("class_id, school_id").eq("id", g.user_id).single().execute().data or {}
+        if profile.get("class_id"):
+            cls = supabase.table("classes").select("name, grade_level").eq("id", profile["class_id"]).single().execute().data
+            if cls:
+                student_class = cls
+        if profile.get("school_id"):
+            cnt = supabase.table("teacher_assignments").select("id", count="exact") \
+                .eq("school_id", profile["school_id"]) \
+                .execute()
+            subject_count = cnt.count or 0
+            if student_class and student_class.get("name"):
+                class_subj = supabase.table("teacher_assignments").select("id", count="exact") \
+                    .eq("school_id", profile["school_id"]) \
+                    .execute()
+                subject_count = class_subj.count or 0
+    except Exception:
+        pass
+
+    return render_template("student/dashboard.html", available_exams=available_exams,
+                           completed_exams=completed_exams[:5], avg_score=avg_score,
+                           user_name=user_name, student_class=student_class,
+                           subject_count=subject_count)
 
 
 @student_bp.route("/exams")
 @login_required
 def exam_list():
     supabase = get_supabase()
-    if g.get("user_role") != "student":
+    if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
     res = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").order("created_at", desc=True).execute()
     exams = res.data or []
@@ -113,6 +142,7 @@ def submit_exam(exam_id):
     }
     try:
         supabase.table("submissions").insert(submission).execute()
+        log_activity("submit", "submission", None, new_data={"exam_id": exam_id, "score": score}, user_id=g.user_id)
     except Exception as e:
         import traceback
         current_app.logger.error("Submit error: %s\n%s", str(e), traceback.format_exc())
@@ -206,6 +236,7 @@ def retract_submission(submission_id):
             return jsonify({"error": "Not found"}), 404
         return redirect("/student/results")
     supabase.table("submissions").update({"status": "retracted"}).eq("id", submission_id).execute()
+    log_activity("retract", "submission", submission_id, user_id=g.user_id)
     if request.is_json:
         return jsonify({"success": True})
     return redirect("/student/results")

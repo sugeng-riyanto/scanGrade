@@ -55,6 +55,7 @@ def create_app(env=None):
     _register_error_handlers(app)
     _register_request_logging(app)
     _register_performance_middleware(app)
+    _register_rate_limiter(app)
 
     import json as _json
 
@@ -142,8 +143,8 @@ def create_app(env=None):
         if token:
             try:
                 user = app.extensions["supabase_auth"].auth.get_user(token)
-                role = user.user.user_metadata.get("role", "student")
-                redirect_map = {"admin": "/admin/dashboard", "teacher": "/teacher/dashboard", "student": "/student/dashboard"}
+                role = user.user.user_metadata.get("role", "murid")
+                redirect_map = {"super_admin": "/admin/dashboard", "admin_sekolah": "/admin/dashboard", "guru": "/teacher/dashboard", "murid": "/student/dashboard", "admin": "/admin/dashboard", "teacher": "/teacher/dashboard", "student": "/student/dashboard"}
                 return redirect(redirect_map.get(role, "/student/dashboard"))
             except Exception:
                 pass
@@ -172,6 +173,8 @@ def _register_blueprints(app):
     from app.routes.api import api_bp
     from app.routes.publish import publish_bp
     from app.routes.webhook import webhook_bp
+    from app.routes.admin_sekolah import admin_sekolah_bp
+    from app.routes.tools import tools_bp
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(exam_bp, url_prefix="/exam")
@@ -181,6 +184,8 @@ def _register_blueprints(app):
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(publish_bp, url_prefix="/publish")
     app.register_blueprint(webhook_bp, url_prefix="/webhook")
+    app.register_blueprint(admin_sekolah_bp, url_prefix="/admin-sekolah")
+    app.register_blueprint(tools_bp, url_prefix="/tools")
 
 
 def _register_error_handlers(app):
@@ -207,6 +212,11 @@ def _register_error_handlers(app):
             import traceback
             return jsonify({"error": "Internal server error", "detail": str(e), "traceback": traceback.format_exc()}), 500
         return jsonify({"error": "Internal server error"}), 500
+
+
+def _register_rate_limiter(app):
+    from app.utils.rate_limiter import get_rate_limiter
+    get_rate_limiter(app)
 
 
 def _register_performance_middleware(app):

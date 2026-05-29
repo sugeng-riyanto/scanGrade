@@ -1,119 +1,100 @@
 {% extends "base.html" %}
 {% block title %}Admin Dashboard - ScanGrade{% endblock %}
-{% block page_title %}Admin Dashboard{% endblock %}
+{% block page_title %}Admin{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
-    <div>
-        <h2 class="text-2xl font-extrabold text-slate-800">
-            <span x-show="lang==='id'">Selamat {{ greeting() }}, Admin</span>
-            <span x-show="lang==='en'">Good {{ greeting_en() }}, Admin</span>
-        </h2>
-        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Platform overview':'Ringkasan platform'"></p>
+    <!-- Welcome -->
+    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+                <h2 class="text-2xl font-extrabold">
+                    <span x-show="lang==='id'">Selamat {{ greeting() }}, Admin</span>
+                    <span x-show="lang==='en'">Good {{ greeting_en() }}, Admin</span>
+                </h2>
+                <p class="text-primary-200 font-medium mt-1" x-text="lang==='en'?'Platform overview':'Ringkasan platform'"></p>
+            </div>
+            {% if g.user_role == 'super_admin' and pending_requests > 0 %}
+            <a href="/admin/registration-requests?status=pending"
+               class="inline-flex items-center gap-2 px-4 py-2 bg-amber-100/80 border border-white/20 rounded-xl text-amber-100 font-bold text-sm hover:bg-amber-100/60 transition backdrop-blur-sm shrink-0">
+                <i class="fas fa-clock"></i>
+                <span>{{ pending_requests }} menunggu</span>
+            </a>
+            {% endif %}
+        </div>
     </div>
 
-    <!-- Stat Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <div class="card stat-card">
+    <!-- Stats -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card stat-card animate-slide-up">
             <div class="flex items-center gap-3">
-                <div class="stat-icon bg-brand-50 text-brand-600"><i class="fas fa-users"></i></div>
+                <div class="stat-icon bg-primary-50 text-primary-600"><i class="fas fa-users"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Total Users':'Total Pengguna'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ total_users }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Total Users':'Total User'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ total_users }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card">
+        <div class="card stat-card animate-slide-up" style="animation-delay:50ms">
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-chalkboard-teacher"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Teachers':'Guru'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ total_teachers }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Teachers':'Guru'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ total_teachers }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card">
+        <div class="card stat-card animate-slide-up" style="animation-delay:100ms">
             <div class="flex items-center gap-3">
-                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-user-graduate"></i></div>
+                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-user-graduate"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ total_students }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ total_students }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card">
+        <div class="card stat-card animate-slide-up" style="animation-delay:150ms">
             <div class="flex items-center gap-3">
-                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-file-alt"></i></div>
+                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-file-alt"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Total Exams':'Total Ujian'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ total_exams }}</p>
-                </div>
-            </div>
-        </div>
-        <div class="card stat-card">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-rose-50 text-rose-600"><i class="fas fa-check-double"></i></div>
-                <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Active Exams':'Ujian Aktif'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ active_exams }}</p>
-                </div>
-            </div>
-        </div>
-        <div class="card stat-card">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-cyan-50 text-cyan-600"><i class="fas fa-paper-plane"></i></div>
-                <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Submissions':'Pengumpulan'"></p>
-                    <p class="text-2xl font-extrabold text-slate-800">{{ total_submissions }}</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Exams':'Ujian'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ total_exams }}</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Users List -->
-        <div class="card">
-            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Recent Users':'Pengguna Terbaru'"></h3>
-                <a href="/admin/users" class="text-sm font-semibold text-brand-600 hover:text-brand-700" x-text="lang==='en'?'View all':'Lihat semua'"></a>
-            </div>
-            <div class="divide-y divide-slate-50">
-                {% for u in users[:8] %}
-                <div class="px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full {% if u.role == 'admin' %}bg-purple-50 text-purple-600{% elif u.role == 'teacher' %}bg-emerald-50 text-emerald-600{% else %}bg-brand-50 text-brand-600{% endif %} flex items-center justify-center font-bold text-xs">
-                            {{ (u.full_name or u.email or 'U')[:1]|upper }}
-                        </div>
-                        <div>
-                            <p class="font-semibold text-sm text-slate-700">{{ u.full_name or u.email[:20] }}</p>
-                            <p class="text-xs text-slate-400 font-medium">{{ u.email[:30] if u.email else '' }}</p>
-                        </div>
-                    </div>
-                    <span class="badge {% if u.role == 'admin' %}bg-purple-50 text-purple-700{% elif u.role == 'teacher' %}bg-emerald-50 text-emerald-700{% else %}bg-brand-50 text-brand-700{% endif %}">{{ u.role }}</span>
-                </div>
-                {% endfor %}
-            </div>
+    <!-- Exam List -->
+    <div class="card animate-slide-up" style="animation-delay:100ms">
+        <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+            <h3 class="font-bold text-surface-800" x-text="lang==='en'?'All Exams':'Semua Ujian'"></h3>
+            <span class="text-xs text-surface-400 font-medium">{{ total_exams }} total, {{ active_exams }} aktif</span>
         </div>
-
-        <!-- Recent Exams -->
-        <div class="card">
-            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Recent Exams':'Ujian Terbaru'"></h3>
-                <a href="/admin/exams" class="text-sm font-semibold text-brand-600 hover:text-brand-700" x-text="lang==='en'?'Manage all':'Kelola semua'"></a>
-            </div>
-            <div class="divide-y divide-slate-50">
-                {% for e in exams[:8] %}
-                <div class="px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition">
-                    <div>
-                        <p class="font-semibold text-sm text-slate-700">{{ e.title }}</p>
-                        <p class="text-xs text-slate-400 font-medium">{{ e.subject or '-' }} &middot; {{ e.total_questions or 0 }} soal</p>
-                    </div>
-                    <span class="badge {% if e.status == 'active' %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">{{ e.status }}</span>
-                </div>
-                {% endfor %}
-                {% if not exams %}
-                <div class="px-5 py-8 text-center text-slate-400 font-medium" x-text="lang==='en'?'No exams yet':'Belum ada ujian'"></div>
-                {% endif %}
-            </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
+                        <th class="px-5 py-3 font-semibold">Judul</th>
+                        <th class="px-5 py-3 font-semibold">Guru</th>
+                        <th class="px-5 py-3 font-semibold">Soal</th>
+                        <th class="px-5 py-3 font-semibold">Status</th>
+                        <th class="px-5 py-3 font-semibold">Dibuat</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-50">
+                    {% for e in exams %}
+                    <tr class="hover:bg-surface-50 transition">
+                        <td class="px-5 py-3 font-semibold text-surface-700">{{ e.title }}</td>
+                        <td class="px-5 py-3 text-surface-500">{{ e.teacher_name }}</td>
+                        <td class="px-5 py-3 text-surface-500">{{ e.total_questions or '-' }}</td>
+                        <td class="px-5 py-3"><span class="badge {% if e.status == 'active' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-surface-100 text-surface-500{% endif %}">{{ e.status }}</span></td>
+                        <td class="px-5 py-3 text-surface-400 text-xs">{{ e.created_at[:10] if e.created_at else '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="px-5 py-8 text-center text-surface-400 font-medium">Belum ada ujian</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>

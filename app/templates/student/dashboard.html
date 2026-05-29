@@ -1,63 +1,98 @@
 {% extends "base.html" %}
-{% block title %}Beranda - ScanGrade{% endblock %}
+{% block title %}Beranda Murid - ScanGrade{% endblock %}
 {% block page_title %}Beranda{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id', showScores: false }">
+
     <!-- Welcome -->
-    <div class="card p-6 bg-gradient-to-r from-brand-600 to-brand-700 border-0 text-white relative overflow-hidden">
-        <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="absolute -bottom-6 -left-6 w-32 h-32 bg-white/5 rounded-full"></div>
         <div class="relative z-10">
             <h2 class="text-2xl font-extrabold">
-                <span x-show="lang==='id'">Selamat {{ greeting() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
                 <span x-show="lang==='en'">Good {{ greeting_en() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
+                <span x-show="lang==='id'">Selamat {{ greeting() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
             </h2>
-            <p class="text-brand-200 font-medium mt-1" x-text="lang==='en'?'Ready for your next exam?':'Siap untuk ujian berikutnya?'"></p>
+            <p class="text-primary-200 font-medium mt-1" x-text="lang==='en'?'Ready for your next exam?':'Siap untuk ujian berikutnya?'"></p>
         </div>
     </div>
 
-    <!-- Quick Stats -->
+    <!-- Assigned Class & Subject Info -->
+    <div class="card p-5 animate-slide-up">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex items-center gap-3 p-3 rounded-xl bg-surface-50">
+                <div class="w-11 h-11 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center">
+                    <i class="fas fa-school text-lg"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Class':'Kelas'"></p>
+                    <p class="font-extrabold text-surface-800 text-lg">{{ student_class.name if student_class else '-' }}</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3 p-3 rounded-xl bg-surface-50">
+                <div class="w-11 h-11 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center">
+                    <i class="fas fa-book-open text-lg"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Subjects':'Mapel'"></p>
+                    <p class="font-extrabold text-surface-800 text-lg">{{ subject_count }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats -->
     <div class="grid grid-cols-3 gap-4">
-        <div class="card stat-card text-center">
-            <p class="text-2xl font-extrabold text-brand-600">{{ available_exams|length }}</p>
-            <p class="text-xs font-semibold text-slate-500 mt-1" x-text="lang==='en'?'Available':'Tersedia'"></p>
+        <div class="card stat-card text-center animate-slide-up">
+            <p class="text-2xl font-extrabold text-primary-600">{{ available_exams|length }}</p>
+            <p class="text-xs font-semibold text-surface-500 mt-1" x-text="lang==='en'?'Available':'Tersedia'"></p>
         </div>
-        <div class="card stat-card text-center">
+        <div class="card stat-card text-center animate-slide-up" style="animation-delay:50ms">
             <p class="text-2xl font-extrabold text-emerald-600">{{ completed_exams|length }}</p>
-            <p class="text-xs font-semibold text-slate-500 mt-1" x-text="lang==='en'?'Completed':'Selesai'"></p>
+            <p class="text-xs font-semibold text-surface-500 mt-1" x-text="lang==='en'?'Completed':'Selesai'"></p>
         </div>
-        <div class="card stat-card text-center relative">
+        <div class="card stat-card text-center animate-slide-up" style="animation-delay:100ms">
             <template x-if="showScores">
                 <p class="text-2xl font-extrabold text-amber-600">{{ avg_score }}</p>
             </template>
             <template x-if="!showScores">
-                <p class="text-2xl font-extrabold text-slate-300">•••</p>
+                <p class="text-2xl font-extrabold text-surface-300">•••</p>
             </template>
-            <p class="text-xs font-semibold text-slate-500 mt-1" x-text="lang==='en'?'Avg Score':'Rata-rata'"></p>
+            <p class="text-xs font-semibold text-surface-500 mt-1">
+                <span x-text="lang==='en'?'Avg Score':'Rata-rata'"></span>
+                <button @click="showScores = !showScores" class="ml-1 text-surface-400 hover:text-surface-600 transition">
+                    <i class="fas" :class="showScores ? 'fa-eye' : 'fa-eye-slash'"></i>
+                </button>
+            </p>
         </div>
     </div>
 
     <!-- Available Exams -->
-    <div>
-        <h3 class="font-bold text-slate-800 mb-3" x-text="lang==='en'?'Available Exams':'Ujian Tersedia'"></h3>
+    <div class="animate-slide-up" style="animation-delay:100ms">
+        <h3 class="font-bold text-surface-800 mb-3 flex items-center gap-2">
+            <i class="fas fa-file-alt text-primary-500"></i>
+            <span x-text="lang==='en'?'Available Exams':'Ujian Tersedia'"></span>
+            {% if available_exams %}<span class="badge bg-primary-50 text-primary-700 border border-primary-200">{{ available_exams|length }}</span>{% endif %}
+        </h3>
         {% if available_exams %}
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {% for e in available_exams %}
             <div class="card card-hover">
                 <div class="p-5">
                     <div class="flex items-start justify-between mb-3">
-                        <div class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                        <div class="w-11 h-11 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center">
                             <i class="fas fa-file-alt"></i>
                         </div>
-                        <span class="badge bg-emerald-50 text-emerald-700">Active</span>
+                        <span class="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Active</span>
                     </div>
-                    <h3 class="font-bold text-slate-800 mb-1">{{ e.title }}</h3>
-                    <p class="text-sm text-slate-500 font-medium">{{ e.subject or '-' }}</p>
-                    <div class="flex gap-3 mt-3 text-xs text-slate-500 font-semibold">
+                    <h3 class="font-bold text-surface-800 mb-1">{{ e.title }}</h3>
+                    <p class="text-sm text-surface-500 font-medium">{{ e.subject or '-' }}</p>
+                    <div class="flex gap-3 mt-3 text-xs text-surface-500 font-semibold">
                         <span><i class="fas fa-question-circle mr-1"></i>{{ e.total_questions }} soal</span>
                         <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes }} min</span>
                     </div>
                     <a href="/student/exams/{{ e.id }}"
-                       class="mt-4 block text-center bg-brand-600 hover:bg-brand-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-brand-600/20 transition">
+                       class="mt-4 block text-center bg-primary-600 hover:bg-primary-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-600/20 transition">
                         <i class="fas fa-play mr-1"></i><span x-text="lang==='en'?'Start Exam':'Mulai Ujian'"></span>
                     </a>
                 </div>
@@ -65,54 +100,58 @@
             {% endfor %}
         </div>
         {% else %}
-        <div class="card p-8 text-center text-slate-400">
+        <div class="card p-8 text-center text-surface-400">
             <i class="fas fa-inbox text-4xl mb-3"></i>
             <p class="font-bold" x-text="lang==='en'?'No exams available':'Tidak ada ujian tersedia'"></p>
+            <p class="text-sm mt-1" x-text="lang==='en'?'Check back later or contact your teacher':'Cek kembali nanti atau hubungi guru Anda'"></p>
         </div>
         {% endif %}
     </div>
 
     <!-- Recent Results -->
     {% if completed_exams %}
-    <div>
+    <div class="animate-slide-up" style="animation-delay:150ms">
         <div class="flex items-center justify-between mb-3">
-            <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Recent Results':'Hasil Terakhir'"></h3>
-            <button @click="showScores = !showScores" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition"
-                    :class="showScores ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'">
-                <i class="fas" :class="showScores ? 'fa-eye' : 'fa-eye-slash'"></i>
-                <span x-text="showScores ? (lang==='en'?'Hide Scores':'Sembunyikan') : (lang==='en'?'Show Scores':'Tampilkan Nilai')"></span>
-            </button>
+            <h3 class="font-bold text-surface-800 flex items-center gap-2">
+                <i class="fas fa-chart-bar text-primary-500"></i>
+                <span x-text="lang==='en'?'Recent Results':'Hasil Terakhir'"></span>
+            </h3>
+            <a href="/student/results" class="text-sm font-semibold text-primary-600 hover:text-primary-700 transition" x-text="lang==='en'?'View all':'Lihat semua'"></a>
         </div>
-        <div class="card overflow-hidden">
+        <div class="card overflow-hidden border border-surface-200">
             <table class="w-full text-sm">
-                <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Score':'Nilai'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Status':'Status'"></th>
-                    <th class="px-5 py-3 font-semibold"></th>
-                </tr></thead>
+                <thead>
+                    <tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
+                        <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
+                        <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Score':'Nilai'"></th>
+                        <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Status':'Status'"></th>
+                        <th class="px-5 py-3 font-semibold"></th>
+                    </tr>
+                </thead>
                 <tbody>
                     {% for s in completed_exams[:5] %}
                     {% set exam = s.exam or {} %}
                     {% set score_val = s.final_score if s.final_score is not none else (s.score if s.score is not none else None) %}
-                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
-                        <td class="px-5 py-3 font-semibold text-slate-700">{{ exam.get('title', '-') }}</td>
+                    <tr class="border-b border-surface-50 last:border-0 hover:bg-surface-50 transition">
+                        <td class="px-5 py-3 font-semibold text-surface-700">{{ exam.get('title', '-') }}</td>
                         <td class="px-5 py-3 font-bold">
                             <template x-if="showScores">
                                 <span class="{% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ score_val if score_val is not none else '-' }}</span>
                             </template>
                             <template x-if="!showScores">
-                                <span class="text-slate-300">•••</span>
+                                <span class="text-surface-300">•••</span>
                             </template>
                         </td>
                         <td class="px-5 py-3">
-                            <span class="badge {% if s.status == 'published' %}bg-emerald-50 text-emerald-700{% elif s.status == 'graded' %}bg-brand-50 text-brand-700{% else %}bg-amber-50 text-amber-700{% endif %}">
+                            <span class="badge {% if s.status == 'published' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif s.status == 'graded' %}bg-primary-50 text-primary-700 border border-primary-200{% else %}bg-amber-50 text-amber-700 border border-amber-200{% endif %}">
                                 {{ s.status }}
                             </span>
                         </td>
                         <td class="px-5 py-3">
                             {% if s.status in ('graded', 'published') %}
-                            <a href="/student/results" class="text-brand-600 hover:text-brand-700 font-semibold text-xs"><i class="fas fa-eye mr-1"></i>View</a>
+                            <a href="/student/results" class="text-primary-600 hover:text-primary-700 font-semibold text-xs">
+                                <i class="fas fa-eye mr-1"></i><span x-text="lang==='en'?'View':'Lihat'"></span>
+                            </a>
                             {% endif %}
                         </td>
                     </tr>

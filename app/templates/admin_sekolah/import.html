@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Import Excel - ScanGrade{% endblock %}
+{% block page_title %}Import Data Sekolah{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif cat == 'warning' %}bg-amber-50 text-amber-700 border border-amber-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% elif cat == 'warning' %}exclamation-triangle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <div class="card p-6 lg:p-8">
+        <h3 class="font-extrabold text-stone-800 mb-2">Upload File Excel</h3>
+        <p class="text-sm text-stone-500 font-medium mb-6">File Excel dengan 3 sheet: <strong>Murid</strong>, <strong>Guru</strong>, dan <strong>Mata Pelajaran</strong>.</p>
+
+        <form method="POST" enctype="multipart/form-data" class="space-y-6"
+              x-data="{ dragging: false, file: null }"
+              @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false" @drop.prevent="dragging=false; file=$event.dataTransfer.files[0]; $refs.fileInput.files=$event.dataTransfer.files">
+            <div class="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition"
+                 :class="dragging ? 'border-orange-500 bg-orange-50' : 'border-stone-300 hover:border-stone-400 bg-stone-50'"
+                 @click="$refs.fileInput.click()">
+                <i class="fas fa-file-excel text-4xl text-emerald-500 mb-3 block"></i>
+                <p class="font-bold text-stone-700" x-text="file ? file.name : 'Klik atau drag file Excel di sini'"></p>
+                <p class="text-xs text-stone-400 font-medium mt-1">Format: .xlsx, .xls</p>
+                <input type="file" name="file" accept=".xlsx,.xls" x-ref="fileInput" hidden
+                       @change="file = $event.target.files[0]">
+            </div>
+
+            <div class="bg-stone-50 rounded-xl p-4 space-y-2">
+                <p class="font-bold text-sm text-stone-700">Format Sheet:</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div class="bg-white rounded-lg p-3 border border-stone-200">
+                        <p class="font-bold text-brand-600 mb-1">Sheet 1: Murid</p>
+                        <p class="text-stone-500">NISN, Nama, Kelas, Level, Email</p>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 border border-stone-200">
+                        <p class="font-bold text-emerald-600 mb-1">Sheet 2: Guru</p>
+                        <p class="text-stone-500">Nomor Pegawai, Nama, Mapel, Email, No HP</p>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 border border-stone-200">
+                        <p class="font-bold text-violet-600 mb-1">Sheet 3: Mapel</p>
+                        <p class="text-stone-500">Nama Mata Pelajaran, Kode</p>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit"
+                    class="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white py-3 px-4 rounded-xl font-extrabold shadow-lg shadow-orange-500/25 transition">
+                <i class="fas fa-upload mr-2"></i>Upload &amp; Import
+            </button>
+        </form>
+    </div>
+
+    <div class="card p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-extrabold text-stone-800">Download Template</h3>
+        </div>
+        <a href="/admin-sekolah/export"
+           class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
+            <i class="fas fa-download"></i>Download Data Excel
+        </a>
+        <p class="text-xs text-stone-400 font-medium mt-2">File akan berisi data yang sudah ada. Hapus data contoh sebelum mengisi data baru.</p>
+    </div>
+</div>
+{% endblock %}

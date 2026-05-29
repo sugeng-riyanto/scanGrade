@@ -6,7 +6,7 @@ def get_supabase() -> Client:
     return current_app.extensions["supabase"]
 
 
-def create_user(email: str, password: str, role: str = "student"):
+def create_user(email: str, password: str, role: str = "murid"):
     supabase = get_supabase()
     return supabase.auth.admin.create_user({
         "email": email,

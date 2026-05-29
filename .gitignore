@@ -33,6 +33,7 @@ instance/
 *.sqlite
 *.sqlite3
 static/uploads/
+app/static/uploads/
 static/reports/
 app/static/uploads/
 logs/

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Audit Logs - ScanGrade{% endblock %}
+{% block page_title %}Audit Trail{% endblock %}
+{% set total_pages = ((total / per_page) | round(0, 'ceil')) | int if total > per_page else 1 %}
+{% block content %}
+<div class="space-y-6" x-data="{ filters: { action: '{{ action }}', entity: '{{ entity }}', days: '{{ days }}' } }">
+    <!-- Header -->
+    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="relative z-10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><i class="fas fa-history text-xl"></i></div>
+                <div>
+                    <h2 class="text-2xl font-extrabold">Audit Trail</h2>
+                    <p class="text-primary-200 font-medium text-sm">Log aktivitas seluruh sistem</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card p-4 animate-slide-down">
+        <form method="GET" action="{{ url_for('admin.audit_logs_view') }}" class="flex flex-wrap items-end gap-3">
+            <div>
+                <label class="block text-xs font-bold text-surface-600 mb-1">Action</label>
+                <select name="action" class="field" x-model="filters.action" @change="$el.form.submit()" style="min-width:130px">
+                    <option value="" {% if not action %}selected{% endif %}>Semua Action</option>
+                    {% for a in ['login','logout','register','activate','create','update','delete','approve','reject','export','import','publish','grade','submit','retract','reset_password','promote'] %}
+                    <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a|replace('_',' ')|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-surface-600 mb-1">Entity</label>
+                <select name="entity" class="field" x-model="filters.entity" @change="$el.form.submit()" style="min-width:130px">
+                    <option value="" {% if not entity %}selected{% endif %}>Semua Entity</option>
+                    {% for e in ['user','school','class','teacher','student','exam','submission','registration','school_year','subject','assignment'] %}
+                    <option value="{{ e }}" {% if entity == e %}selected{% endif %}>{{ e|replace('_',' ')|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-surface-600 mb-1">Periode</label>
+                <select name="days" class="field" x-model="filters.days" @change="$el.form.submit()" style="min-width:120px">
+                    <option value="1" {% if days == 1 %}selected{% endif %}>24 Jam</option>
+                    <option value="7" {% if days == 7 %}selected{% endif %}>7 Hari</option>
+                    <option value="30" {% if days == 30 %}selected{% endif %}>30 Hari</option>
+                    <option value="90" {% if days == 90 %}selected{% endif %}>90 Hari</option>
+                    <option value="365" {% if days == 365 %}selected{% endif %}>1 Tahun</option>
+                    <option value="0" {% if days == 0 %}selected{% endif %}>Semua</option>
+                </select>
+            </div>
+            <button type="button" onclick="window.location='{{ url_for('admin.audit_logs_view') }}'" class="btn btn-ghost text-sm font-semibold">
+                <i class="fas fa-undo mr-1"></i> Reset
+            </button>
+            <span class="text-xs text-surface-400 font-medium ml-auto">Total: <strong class="text-surface-600">{{ total }}</strong> log(s)</span>
+        </form>
+    </div>
+
+    <!-- Logs Table -->
+    <div class="card p-0 animate-fade-in">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
+                    <th class="px-4 py-3 font-semibold">#</th>
+                    <th class="px-4 py-3 font-semibold">Timestamp</th>
+                    <th class="px-4 py-3 font-semibold">User</th>
+                    <th class="px-4 py-3 font-semibold">Action</th>
+                    <th class="px-4 py-3 font-semibold">Entity</th>
+                    <th class="px-4 py-3 font-semibold">Entity ID</th>
+                    <th class="px-4 py-3 font-semibold">IP</th>
+                    <th class="px-4 py-3 font-semibold">User-Agent</th>
+                </tr></thead>
+                <tbody class="divide-y divide-surface-50 text-xs">
+                    {% for log in logs %}
+                    {% set p = log.profiles or {} %}
+                    <tr class="hover:bg-surface-50 transition">
+                        <td class="px-4 py-3 text-surface-300 font-mono">{{ loop.index + (page - 1) * per_page }}</td>
+                        <td class="px-4 py-3 text-surface-500 whitespace-nowrap">{{ log.created_at[:19] if log.created_at else '-' }}</td>
+                        <td class="px-4 py-3 font-semibold text-surface-700">{{ p.get('full_name') or p.get('email') or (log.user_id[:8] + '...' if log.user_id else 'System') }}</td>
+                        <td class="px-4 py-3"><span class="badge bg-primary-50 text-primary-700 border border-primary-200 capitalize">{{ log.action }}</span></td>
+                        <td class="px-4 py-3 text-surface-500"><span class="font-semibold">{{ log.entity_type }}</span></td>
+                        <td class="px-4 py-3 text-surface-400 font-mono">{{ log.entity_id[:12] + '...' if log.entity_id and log.entity_id|length > 12 else (log.entity_id or '-') }}</td>
+                        <td class="px-4 py-3 text-surface-400 font-mono">{{ log.ip_address or '-' }}</td>
+                        <td class="px-4 py-3 text-surface-300 max-w-[120px] truncate" title="{{ log.user_agent or '' }}">{{ log.user_agent[:40] + '...' if log.user_agent and log.user_agent|length > 40 else (log.user_agent or '-') }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="8" class="px-4 py-12 text-center text-surface-400 font-medium">Belum ada log aktivitas dengan filter ini</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div class="flex justify-center gap-2 animate-fade-in">
+        {% if page > 1 %}
+        <a href="?page={{ page - 1 }}&action={{ action }}&entity={{ entity }}&days={{ days }}" class="btn btn-ghost text-sm">&laquo; Prev</a>
+        {% endif %}
+        {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}
+        <span class="btn bg-primary-500 text-white text-sm font-bold px-4 rounded-xl">{{ p }}</span>
+        {% elif p <= 3 or p > total_pages - 3 or (p >= page - 2 and p <= page + 2) %}
+        <a href="?page={{ p }}&action={{ action }}&entity={{ entity }}&days={{ days }}" class="btn btn-ghost text-sm px-3">{{ p }}</a>
+        {% elif p == 4 or p == total_pages - 3 %}
+        <span class="text-surface-300 self-center">&hellip;</span>
+        {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <a href="?page={{ page + 1 }}&action={{ action }}&entity={{ entity }}&days={{ days }}" class="btn btn-ghost text-sm">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

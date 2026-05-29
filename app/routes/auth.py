@@ -1,73 +1,354 @@
-from flask import Blueprint, request, jsonify, g, render_template, redirect, url_for, make_response
+from datetime import datetime, timezone
+from flask import Blueprint, request, jsonify, g, render_template, redirect, url_for, make_response, current_app
 from app.utils.auth import login_required, get_supabase, get_auth_client
+from app.services.audit_service import log_activity
+from app.utils.security import sanitize_input
 
 auth_bp = Blueprint("auth", __name__)
 
+
+# ─── REGISTER (Admin sekolah) ────────────────────────
 
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "GET":
         return render_template("auth/register.html")
 
-    email = request.form.get("email")
-    password = request.form.get("password")
-    role = request.form.get("role", "student")
-    full_name = request.form.get("full_name", "")
+    npsn = request.form.get("npsn", "").strip()
+    school_name = request.form.get("school_name", "").strip()
+    wa = request.form.get("wa", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    position = request.form.get("position", "")
 
-    if not email or not password:
-        return render_template("auth/register.html", error="Email dan password wajib diisi")
+    if not all([npsn, school_name, wa, email, password, position]):
+        return render_template("auth/register.html", error="Semua field wajib diisi")
+
+    if len(password) < 6:
+        return render_template("auth/register.html", error="Password minimal 6 karakter")
 
     supabase = get_supabase()
+
     try:
+        # 1. Create Supabase Auth user
         res = supabase.auth.admin.create_user({
             "email": email,
             "password": password,
-            "user_metadata": {"role": role, "full_name": full_name},
+            "user_metadata": {"role": "admin_sekolah", "full_name": position},
             "email_confirm": True,
         })
         uid = res.user.id
-        supabase.table("profiles").insert({
-            "id": uid,
-            "full_name": full_name or email.split("@")[0],
-            "role": role,
-        }).execute()
-        return redirect("/auth/login?registered=1")
-    except Exception as e:
-        return render_template("auth/register.html", error=str(e))
 
+        # 2. Create profile (trigger will set default; update status to pending)
+        supabase.table("profiles").upsert({
+            "id": uid,
+            "full_name": position,
+            "phone": wa,
+            "role": "admin_sekolah",
+            "status": "pending",
+        }).execute()
+
+        # 3. Create school registration request (pending — super admin will approve)
+        supabase.table("school_registration_requests").insert({
+            "school_name": school_name,
+            "npsn": npsn,
+            "requester_name": position,
+            "requester_email": email,
+            "requester_phone": wa,
+            "requester_position": position,
+            "is_activated": False,
+            "status": "pending",
+            "profile_id": uid,
+        }).execute()
+
+        log_activity("register", "user", uid, new_data={"email": email, "school_name": school_name, "role": "admin_sekolah", "status": "pending"})
+
+        return render_template("auth/register_success.html", email=email)
+
+    except Exception as e:
+        err_msg = str(e)
+        if "already exists" in err_msg.lower() or "duplicate" in err_msg.lower():
+            return render_template("auth/register.html", error="Email sudah terdaftar")
+        return render_template("auth/register.html", error=f"Gagal mendaftar: {err_msg}")
+
+
+# ─── ACTIVATE ────────────────────────────────────────
+
+@auth_bp.route("/activate", methods=["GET", "POST"])
+def activate():
+    if request.method == "GET":
+        prefill_email = request.args.get("email", "")
+        return render_template("auth/activate.html", email=prefill_email)
+
+    email = request.form.get("email", "").strip().lower()
+    code = request.form.get("code", "").strip().replace(" ", "").upper()
+
+    if not email or not code:
+        return render_template("auth/activate.html", error="Email dan kode aktivasi wajib diisi", email=email)
+
+    if len(code) != 12 or not code.isalnum():
+        return render_template("auth/activate.html", error="Kode aktivasi harus 12 karakter alfanumerik", email=email)
+
+    supabase = get_supabase()
+
+    try:
+        now = "now()"
+        from datetime import datetime, timezone
+
+        req_res = supabase.table("school_registration_requests") \
+            .select("*") \
+            .eq("requester_email", email) \
+            .eq("activation_code", code) \
+            .eq("is_activated", False) \
+            .eq("status", "approved") \
+            .single() \
+            .execute()
+
+        req = req_res.data
+        if not req:
+            return render_template("auth/activate.html", error="Kode aktivasi tidak valid atau sudah digunakan", email=email)
+
+        # Check expiry
+        expires_at = req.get("expires_at")
+        if expires_at:
+            expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if expires_dt < datetime.now(timezone.utc):
+                return render_template("auth/activate.html", error="Kode aktivasi sudah kedaluwarsa. Silakan hubungi admin.", email=email)
+
+        # Update request
+        supabase.table("school_registration_requests") \
+            .update({"is_activated": True}) \
+            .eq("id", req["id"]) \
+            .execute()
+
+        # Update profile status to active
+        profile_id = req.get("profile_id")
+        if profile_id:
+            supabase.table("profiles") \
+                .update({"status": "active"}) \
+                .eq("id", profile_id) \
+                .execute()
+
+        log_activity("activate", "user", profile_id, new_data={"status": "active", "code": code[:4] + "****"})
+        return render_template("auth/activate_success.html")
+    except Exception as e:
+        current_app.logger.error(f"Activation error: {e}")
+        return render_template("auth/activate.html", error="Kode aktivasi tidak valid atau sudah kedaluwarsa", email=email)
+
+
+# ─── LOGIN (Admin & Super Admin) ─────────────────────
 
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
         return render_template("auth/login.html")
 
-    email = request.form.get("email")
-    password = request.form.get("password")
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
 
     if not email or not password:
         return render_template("auth/login.html", error="Email dan password wajib diisi")
 
-    supabase = get_auth_client()
+    supabase_auth = get_auth_client()
+    supabase = get_supabase()
+
     try:
-        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        role = res.user.user_metadata.get("role", "student")
-        redirect_map = {"admin": "/admin/dashboard", "teacher": "/teacher/dashboard", "student": "/student/dashboard"}
+        res = supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
+
+        # Check profile status
+        try:
+            profile = supabase.table("profiles") \
+                .select("role, status, school_id") \
+                .eq("id", res.user.id) \
+                .single() \
+                .execute()
+            pdata = profile.data or {}
+            role = pdata.get("role", "admin_sekolah")
+            status = pdata.get("status", "active")
+
+            if status == "pending":
+                return redirect(f"/auth/activate?email={email}&pending=1")
+
+            if role not in ("super_admin", "admin_sekolah"):
+                return render_template("auth/login.html", error="Halaman ini untuk Admin. Guru/Murid silakan masuk di halaman login terpisah.")
+
+        except Exception:
+            role = res.user.user_metadata.get("role", "admin_sekolah")
+            status = "active"
+
+        redirect_map = {
+            "super_admin": "/admin/dashboard",
+            "admin_sekolah": "/admin/dashboard",
+            "guru": "/teacher/dashboard",
+            "murid": "/student/dashboard",
+        }
+        redirect_url = redirect_map.get(role, "/admin/dashboard")
+        resp = make_response(redirect(redirect_url))
+        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/")
+        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/")
+        log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
+        return resp
+    except Exception:
+        return render_template("auth/login.html", error="Email atau password salah")
+
+
+# ─── LOGIN USER (Guru & Murid) ───────────────────────
+
+@auth_bp.route("/login-user", methods=["GET", "POST"])
+def login_user():
+    if request.method == "GET":
+        return render_template("auth/login_user.html")
+
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    if not email or not password:
+        return render_template("auth/login_user.html", error="Email dan password wajib diisi")
+
+    supabase_auth = get_auth_client()
+    supabase = get_supabase()
+
+    try:
+        res = supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
+
+        try:
+            profile = supabase.table("profiles") \
+                .select("role, status") \
+                .eq("id", res.user.id) \
+                .single() \
+                .execute()
+            pdata = profile.data or {}
+            role = pdata.get("role", "murid")
+            status = pdata.get("status", "active")
+
+            if status == "pending":
+                return redirect(f"/auth/activate?email={email}&pending=1")
+
+            if role not in ("guru", "murid"):
+                return render_template("auth/login_user.html",
+                                       error="Halaman ini untuk Guru/Murid. Admin silakan masuk di halaman login utama.")
+
+        except Exception:
+            role = res.user.user_metadata.get("role", "murid")
+
+        redirect_map = {
+            "guru": "/teacher/dashboard",
+            "murid": "/student/dashboard",
+        }
         redirect_url = redirect_map.get(role, "/student/dashboard")
         resp = make_response(redirect(redirect_url))
         resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/")
         resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/")
+        log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
-    except Exception as e:
-        return render_template("auth/login.html", error="Email atau password salah")
+    except Exception:
+        return render_template("auth/login_user.html", error="Email atau password salah")
 
+
+# ─── FORGOT PASSWORD ─────────────────────────────────
+
+@auth_bp.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "GET":
+        return render_template("auth/forgot_password.html")
+
+    email = request.form.get("email", "").strip().lower()
+    if not email:
+        return render_template("auth/forgot_password.html", error="Email wajib diisi")
+
+    supabase = get_auth_client()
+    try:
+        supabase.auth.reset_password_email(
+            email,
+            {"redirect_to": request.host_url.rstrip("/") + "/auth/reset-password"}
+        )
+        return render_template("auth/forgot_password.html", sent=True, email=email)
+    except Exception as e:
+        current_app.logger.error(f"Forgot password error: {e}")
+        return render_template("auth/forgot_password.html", error="Gagal mengirim email reset. Coba lagi nanti.")
+
+
+# ─── RESET PASSWORD ──────────────────────────────────
+
+@auth_bp.route("/reset-password", methods=["GET", "POST"])
+def reset_password():
+    if request.method == "GET":
+        return render_template("auth/reset_password.html")
+
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm_password", "")
+
+    if not password or not confirm:
+        return render_template("auth/reset_password.html", error="Semua field wajib diisi")
+
+    if password != confirm:
+        return render_template("auth/reset_password.html", error="Password tidak cocok")
+
+    if len(password) < 6:
+        return render_template("auth/reset_password.html", error="Password minimal 6 karakter")
+
+    access_token = request.form.get("access_token", "") or request.args.get("access_token", "")
+
+    if not access_token:
+        return render_template("auth/reset_password.html", error="Token reset tidak ditemukan. Silakan ulangi proses reset password.")
+
+    supabase = get_auth_client()
+    try:
+        supabase.auth.set_session(access_token, "")
+        supabase.auth.update_user({"password": password})
+        return render_template("auth/reset_password_success.html")
+    except Exception as e:
+        current_app.logger.error(f"Reset password error: {e}")
+        return render_template("auth/reset_password.html", error="Gagal mereset password. Token mungkin kedaluwarsa.")
+
+
+# ─── RESET PASSWORD (client-side token exchange) ─────
+
+@auth_bp.route("/reset-password-exchange", methods=["POST"])
+def reset_password_exchange():
+    """Accepts access_token from URL fragment (sent by client JS) + new password."""
+    data = request.get_json(silent=True) or {}
+    access_token = data.get("access_token", "")
+    refresh_token = data.get("refresh_token", "")
+    password = data.get("password", "")
+
+    if not access_token or not password:
+        return jsonify({"error": "access_token and password required"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "Password minimal 6 karakter"}), 400
+
+    supabase = get_auth_client()
+    try:
+        if refresh_token:
+            supabase.auth.set_session(access_token, refresh_token)
+        else:
+            supabase.auth.set_session(access_token, "")
+        supabase.auth.update_user({"password": password})
+        return jsonify({"ok": True})
+    except Exception as e:
+        current_app.logger.error(f"Password exchange error: {e}")
+        return jsonify({"error": str(e)}), 400
+
+
+# ─── LOGOUT ──────────────────────────────────────────
 
 @auth_bp.route("/logout")
 def logout():
+    uid = getattr(g, "user_id", None)
+    try:
+        supabase = get_auth_client()
+        supabase.auth.sign_out()
+    except Exception:
+        pass
+    if uid:
+        log_activity("logout", "user", uid)
     resp = make_response(redirect("/auth/login"))
-    resp.delete_cookie("access_token")
-    resp.delete_cookie("refresh_token")
+    resp.delete_cookie("access_token", path="/")
+    resp.delete_cookie("refresh_token", path="/")
     return resp
 
+
+# ─── ME ──────────────────────────────────────────────
 
 @auth_bp.route("/me", methods=["GET"])
 @login_required
@@ -75,14 +356,18 @@ def me():
     return jsonify({
         "user_id": g.user_id,
         "role": g.user_role,
+        "school_id": str(g.user_school_id) if g.user_school_id else None,
+        "status": g.get("user_status", "active"),
     })
 
+
+# ─── SET TIMEZONE ────────────────────────────────────
 
 @auth_bp.route("/set-timezone", methods=["POST"])
 @login_required
 def set_timezone():
     from flask import make_response
-    offset = request.form.get("tz_offset") or request.get_json(silent=True, force=True).get("tz_offset", 7) if request.is_json else request.form.get("tz_offset", 7)
+    offset = request.form.get("tz_offset") or (request.get_json(silent=True, force=True).get("tz_offset", 7) if request.is_json else request.form.get("tz_offset", 7))
     try:
         offset = int(offset)
         if offset < -12 or offset > 14:

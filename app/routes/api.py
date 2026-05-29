@@ -197,7 +197,7 @@ def grade_batch():
     exam_id = data.get("exam_id") if data else None
     if not exam_id:
         return jsonify({"error": "exam_id required"}), 400
-    if g.user_role not in ("teacher", "admin"):
+    if g.user_role not in ("guru", "super_admin", "admin_sekolah"):
         return jsonify({"error": "Forbidden"}), 403
     supabase = get_supabase()
     t0 = _time.time()
