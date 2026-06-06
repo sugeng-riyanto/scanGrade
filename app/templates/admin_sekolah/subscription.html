@@ -15,11 +15,41 @@
     <!-- Subscription Status -->
     <div class="card p-6 mb-6">
         <div class="flex items-center gap-4">
-            <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl ...">
-                <i class="fas ..."></i>
+            <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl
+                {% if sub and sub.status == 'active' %}bg-emerald-100 text-emerald-600
+                {% elif sub and sub.status == 'trial' %}bg-amber-100 text-amber-600
+                {% elif sub and sub.status == 'trial_expired' %}bg-red-100 text-red-600
+                {% elif sub and sub.status == 'expired' %}bg-red-100 text-red-600
+                {% else %}bg-slate-100 text-slate-500{% endif %}">
+                <i class="fas {% if sub and sub.status == 'active' %}fa-check-circle
+                    {% elif sub and sub.status == 'trial' %}fa-hourglass-half
+                    {% elif sub and sub.status == 'expired' or sub.status == 'trial_expired' %}fa-exclamation-circle
+                    {% else %}fa-credit-card{% endif %}"></i>
             </div>
             <div class="flex-1">
-                ... (same as before but alpine for dynamic parts)
+                {% if sub and sub.status == 'active' %}
+                <h3 class="font-extrabold text-lg text-emerald-700" x-text="lang==='en'?'Active':'Aktif'"></h3>
+                <p class="text-sm text-slate-600 font-medium">
+                    {% if sub.subscription_end %}
+                    <span x-text="lang==='en'?'Valid until:':'Berlaku sampai:'"></span> {{ sub.subscription_end[:10] }}
+                    {% else %}
+                    <span x-text="lang==='en'?'Lifetime':'Selamanya'"></span>
+                    {% endif %}
+                    {% if sub.plan_name %} &middot; {{ sub.plan_name }}{% endif %}
+                </p>
+                {% elif sub and sub.status == 'trial' %}
+                <h3 class="font-extrabold text-lg text-amber-700" x-text="lang==='en'?'Trial Period':'Masa Trial'"></h3>
+                <p class="text-sm text-slate-600 font-medium">
+                    <span x-text="lang==='en'?'Remaining:':'Sisa:'"></span>
+                    {% if sub.trial_end %}{{ sub.trial_end[:10] }}{% else %}{{ trial_days }} hari{% endif %}
+                </p>
+                {% elif sub and sub.status in ('expired', 'trial_expired') %}
+                <h3 class="font-extrabold text-lg text-red-700" x-text="lang==='en'?'Expired':'Kadaluarsa'"></h3>
+                <p class="text-sm text-slate-600 font-medium" x-text="lang==='en'?'Your subscription has expired. Please renew.':'Langganan Anda telah habis. Silakan perpanjang.'"></p>
+                {% else %}
+                <h3 class="font-extrabold text-lg text-slate-700" x-text="lang==='en'?'No Subscription':'Belum Berlangganan'"></h3>
+                <p class="text-sm text-slate-500 font-medium" x-text="lang==='en'?'Choose a plan to get started':'Pilih paket untuk memulai'"></p>
+                {% endif %}
             </div>
             <div class="text-right text-xs text-slate-400 font-medium">
                 <template x-if="scaledActive">
