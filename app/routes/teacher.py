@@ -1,6 +1,6 @@
 import json
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file
-from app.utils.auth import teacher_or_admin_required, get_supabase
+from app.utils.auth import teacher_or_admin_required, get_supabase, login_required
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
