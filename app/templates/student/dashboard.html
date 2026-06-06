@@ -124,6 +124,7 @@
                     <tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
                         <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
                         <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Score':'Nilai'"></th>
+                        <th class="px-5 py-3 font-semibold text-red-600">Penalti</th>
                         <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Status':'Status'"></th>
                         <th class="px-5 py-3 font-semibold"></th>
                     </tr>
@@ -142,6 +143,7 @@
                                 <span class="text-surface-300">•••</span>
                             </template>
                         </td>
+                        <td class="px-5 py-3 text-center font-bold {% if s.penalty and s.penalty > 0 %}text-red-600{% else %}text-slate-400{% endif %}">{{ s.penalty or 0 }}</td>
                         <td class="px-5 py-3">
                             <span class="badge {% if s.status == 'published' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif s.status == 'graded' %}bg-primary-50 text-primary-700 border border-primary-200{% else %}bg-amber-50 text-amber-700 border border-amber-200{% endif %}">
                                 {{ s.status }}
