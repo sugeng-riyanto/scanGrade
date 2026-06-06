@@ -225,12 +225,17 @@ def submit_exam(exam_id):
 @login_required
 def results():
     supabase = get_supabase()
-    res = supabase.table("submissions") \
-        .select("id, status, score, final_score, penalty, submitted_at, answers, exams(id, title, subject)") \
-        .eq("student_id", g.user_id) \
-        .order("submitted_at", desc=True) \
-        .execute()
-    submissions = res.data or []
+    submissions = []
+    try:
+        res = supabase.table("submissions") \
+            .select("id, status, score, final_score, penalty, submitted_at, answers, exams(id, title, subject)") \
+            .eq("student_id", g.user_id) \
+            .order("submitted_at", desc=True) \
+            .execute()
+        submissions = res.data or []
+    except Exception as e:
+        current_app.logger.error(f"Results query error: {e}")
+        submissions = []
     for s in submissions:
         if s.get("exams"):
             s["exam"] = s.pop("exams")
