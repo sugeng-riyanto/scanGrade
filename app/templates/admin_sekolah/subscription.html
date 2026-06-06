@@ -239,7 +239,7 @@
                                 </button>
                             </div>
                         </td>
-                        <td>{{ tx.get('subscription_plans', {}).get('name', '-') }}</td>
+                        <td>{{ (tx.get('subscription_plans') or {}).get('name', '-') }}</td>
                         <td>Rp {{ "{:,.0f}".format(tx.gross_amount).replace(',','.') if tx.gross_amount else '-' }}</td>
                         <td>
                             <span class="badge {% if tx.status == 'success' %}bg-emerald-50 text-emerald-700{% elif tx.status == 'pending' %}bg-amber-50 text-amber-700{% else %}bg-red-50 text-red-600{% endif %}">

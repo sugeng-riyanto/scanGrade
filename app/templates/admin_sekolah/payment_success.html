@@ -71,7 +71,7 @@ x-init="
             </div>
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500 font-medium">Paket</span>
-                <span class="font-bold text-slate-700">{{ tx.get('subscription_plans', {}).get('name', '-') }}</span>
+                <span class="font-bold text-slate-700">{{ (tx.get('subscription_plans') or {}).get('name', '-') }}</span>
             </div>
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500 font-medium">Jumlah</span>
