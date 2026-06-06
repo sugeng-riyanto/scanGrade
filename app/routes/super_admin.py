@@ -586,6 +586,85 @@ def send_activation_code(school_id):
     return redirect("/super-admin/activation-codes")
 
 
+@super_bp.route("/activation-codes/generate", methods=["POST"])
+@_sa_required
+def generate_code_by_npsn():
+    supabase = get_supabase()
+    npsn = request.form.get("npsn", "").strip()
+    if not npsn:
+        flash("Masukkan NPSN", "error")
+        return redirect("/super-admin/activation-codes")
+
+    try:
+        school = supabase.table("schools").select("id, name, npsn").eq("npsn", npsn).single().execute()
+        school = school.data
+    except Exception:
+        flash(f"Sekolah dengan NPSN {npsn} tidak ditemukan", "error")
+        return redirect("/super-admin/activation-codes")
+
+    school_id = school["id"]
+
+    from app.services.midtrans_service import generate_activation_code
+    code = generate_activation_code()
+
+    npsn_short = npsn if npsn else "0000"
+    supabase.table("payment_transactions").insert({
+        "school_id": school_id,
+        "plan_id": None,
+        "order_id": f"CSH-{npsn_short}-{datetime.now(timezone.utc).strftime('%y%m%d%H%M%S')}-{secrets.randbelow(9000)+1000}",
+        "gross_amount": 0,
+        "status": "cash",
+        "activation_code": code,
+        "payment_type": "cash",
+    }).execute()
+
+    flash(f"✅ Generate untuk {school['name']} (NPSN: {npsn}): {code}", "success")
+    return redirect("/super-admin/activation-codes")
+
+
+@super_bp.route("/activation-codes/<school_id>/activate-cash", methods=["POST"])
+@_sa_required
+def activate_cash(school_id):
+    supabase = get_supabase()
+    try:
+        from app.services.midtrans_service import generate_activation_code
+        code = generate_activation_code()
+
+        school = supabase.table("schools").select("name, npsn").eq("id", school_id).single().execute()
+        school_name = school.data.get("name", "") if school.data else ""
+        npsn = school.data.get("npsn", "") if school.data else ""
+
+        supabase.table("payment_transactions").insert({
+            "school_id": school_id,
+            "plan_id": None,
+            "order_id": f"CSH-{npsn}-{datetime.now(timezone.utc).strftime('%y%m%d%H%M%S')}-{secrets.randbelow(9000)+1000}",
+            "gross_amount": 0,
+            "status": "cash",
+            "activation_code": code,
+            "payment_type": "cash",
+        }).execute()
+
+        now = datetime.now(timezone.utc)
+        trial = supabase.table("trial_settings").select("trial_days").limit(1).execute()
+        trial_days = trial.data[0]["trial_days"] if trial.data else 14
+
+        supabase.table("school_subscriptions").insert({
+            "school_id": school_id,
+            "status": "active",
+            "trial_days": trial_days,
+            "trial_start": now.isoformat(),
+            "trial_end": (now + timedelta(days=trial_days)).isoformat(),
+            "subscription_start": now.isoformat(),
+            "activation_code": code,
+        }).execute()
+
+        log_activity("activate_cash", "school", school_id, new_data={"code": code}, user_id=g.user_id)
+        flash(f"✅ Cash aktif! Kode: {code}", "success")
+    except Exception as e:
+        flash(f"Gagal cash aktivasi: {str(e)[:80]}", "error")
+    return redirect("/super-admin/activation-codes")
+
+
 # ─── NPSN Data Reset (Super Admin) ──────────────────────────────────────
 
 @super_bp.route("/reset-school-data", methods=["GET", "POST"])

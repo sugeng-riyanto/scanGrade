@@ -424,3 +424,56 @@ def transaction_status():
         return jsonify(tx)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)[:60]}), 500
+
+
+@api_bp.route("/activation/redeem", methods=["POST"])
+@login_required
+def redeem_activation_code():
+    data = request.get_json()
+    code = (data or {}).get("code", "").strip().upper()
+    if not code:
+        return jsonify({"success": False, "message": "Kode aktivasi tidak boleh kosong"}), 400
+
+    school_id = g.get("user_school_id")
+    if not school_id:
+        return jsonify({"success": False, "message": "Sekolah tidak terdaftar"}), 400
+
+    supabase = get_supabase()
+
+    # Find transaction with this activation code
+    tx = supabase.table("payment_transactions") \
+        .select("*") \
+        .eq("activation_code", code) \
+        .limit(1) \
+        .execute()
+
+    if not tx.data:
+        # Also check school_subscriptions
+        sub = supabase.table("school_subscriptions") \
+            .select("*") \
+            .eq("activation_code", code) \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if sub.data:
+            return jsonify({"success": False, "message": "Kode aktivasi ini sudah digunakan"}), 400
+        return jsonify({"success": False, "message": "Kode aktivasi tidak ditemukan. Periksa kembali kode Anda."}), 404
+
+    tx_data = tx.data[0]
+    if tx_data["school_id"] != school_id:
+        return jsonify({"success": False, "message": "Kode aktivasi bukan untuk sekolah Anda"}), 403
+
+    # Check if already used
+    existing = supabase.table("school_subscriptions") \
+        .select("id") \
+        .eq("activation_code", code) \
+        .limit(1) \
+        .execute()
+    if existing.data:
+        return jsonify({"success": False, "message": "Kode aktivasi sudah digunakan sebelumnya"}), 400
+
+    # Activate
+    from app.services.midtrans_service import _activate_subscription
+    _activate_subscription(school_id, tx_data.get("plan_id") or 1, tx_data["order_id"], supabase)
+
+    return jsonify({"success": True, "message": "Langganan berhasil diaktifkan!"})

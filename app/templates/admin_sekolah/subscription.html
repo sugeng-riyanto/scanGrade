@@ -105,6 +105,64 @@
         {% endif %}
     </div>
 
+    <!-- Redeem Activation Code (Hidden by default, toggle show/hide) -->
+    <div class="card p-4 mb-6 border border-dashed border-slate-300"
+         x-data="{
+             showRedeem: false,
+             code: '',
+             loading: false,
+             msg: '',
+             ok: false,
+             redeemCode() {
+                 if (this.code.length < 14) { this.msg = 'Kode aktivasi tidak lengkap'; this.ok = false; return; }
+                 this.loading = true;
+                 this.msg = '';
+                 fetch('/api/activation/redeem', {
+                     method: 'POST',
+                     headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify({code: this.code})
+                 })
+                 .then(r => r.json())
+                 .then(d => {
+                     this.loading = false;
+                     if (d.success) {
+                         this.ok = true;
+                         this.msg = '✅ Langganan berhasil diaktifkan!';
+                         setTimeout(() => location.reload(), 1500);
+                     } else {
+                         this.ok = false;
+                         this.msg = '❌ ' + (d.message || 'Gagal aktivasi');
+                     }
+                 })
+                 .catch(() => {
+                     this.loading = false;
+                     this.ok = false;
+                     this.msg = '❌ Gagal terhubung ke server';
+                 });
+             }
+         }">
+        <button @click="showRedeem = !showRedeem" class="flex items-center justify-between w-full text-left">
+            <div class="flex items-center gap-2 text-slate-600">
+                <i class="fas fa-key"></i>
+                <span class="font-bold text-sm">Punya kode aktivasi? Klik di sini</span>
+            </div>
+            <i class="fas text-slate-400" :class="showRedeem ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+        </button>
+        <div x-show="showRedeem" x-cloak class="mt-4">
+            <p class="text-xs text-slate-500 mb-3">Masukkan kode aktivasi yang diperoleh dari pembayaran cash atau dari Super Admin.</p>
+            <div class="flex gap-2">
+                <input type="text" x-model="code" class="input flex-1 font-mono uppercase" placeholder="SG-XXXX-XXXX-XXXX"
+                    @input="code = code.toUpperCase()" maxlength="17">
+                <button type="button" @click="redeemCode()" class="btn bg-primary-600 hover:bg-primary-700 text-white font-bold px-4 py-2 rounded-xl"
+                    :disabled="loading || code.length < 14">
+                    <i class="fas" :class="loading ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+                    <span x-text="loading ? 'Memproses...' : 'Aktivasi'"></span>
+                </button>
+            </div>
+            <div x-show="msg" class="mt-2 text-sm font-bold" :class="ok ? 'text-emerald-600' : 'text-red-600'" x-text="msg"></div>
+        </div>
+    </div>
+
     <!-- Plans -->
     <h3 class="font-extrabold text-slate-800 mb-3" x-text="lang==='en'?'Choose a Plan':'Pilih Paket'"></h3>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">

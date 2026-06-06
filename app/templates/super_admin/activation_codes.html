@@ -2,13 +2,37 @@
 {% block title %}Kode Aktivasi - ScanGrade{% endblock %}
 {% block page_title %}Kode Aktivasi Sekolah{% endblock %}
 {% block content %}
-<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', showNpsnForm: false, npsn: '' }">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif msg[0]=='info' %}bg-blue-50 text-blue-700 border border-blue-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}
     </div>
     {% endfor %}
 
+    <!-- Generate by NPSN -->
+    <div class="card p-5 mb-6">
+        <button @click="showNpsnForm = !showNpsnForm" class="flex items-center justify-between w-full text-left">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-key text-primary-500"></i>
+                <span class="font-extrabold text-slate-700">Generate Kode Aktivasi by NPSN / Cash Payment</span>
+            </div>
+            <i class="fas text-slate-400" :class="showNpsnForm ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+        </button>
+        <div x-show="showNpsnForm" x-cloak class="mt-4">
+            <form method="POST" action="/super-admin/activation-codes/generate" class="flex items-end gap-3">
+                <div class="flex-1">
+                    <label class="block text-xs font-bold text-slate-600 mb-1">Cari & Generate by NPSN</label>
+                    <input type="text" name="npsn" x-model="npsn" class="input" placeholder="Masukkan NPSN sekolah..." required>
+                </div>
+                <button type="submit" class="btn bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2.5 rounded-xl">
+                    <i class="fas fa-key mr-1"></i> Generate & Salin
+                </button>
+            </form>
+            <p class="text-xs text-slate-400 mt-2">Generate kode aktivasi manual untuk pembayaran cash (offline). Kode bisa dicopy dan diberikan ke sekolah.</p>
+        </div>
+    </div>
+
+    <!-- Search -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
         <p class="text-sm text-slate-500 font-medium">Kelola kode aktivasi langganan semua sekolah</p>
         <form method="GET" class="flex gap-2">
@@ -17,6 +41,7 @@
         </form>
     </div>
 
+    <!-- Table -->
     <div class="card overflow-hidden border border-slate-200">
         <div class="overflow-x-auto">
             <table class="table-default">
@@ -72,9 +97,10 @@
                                         <i class="fas fa-sync mr-0.5"></i>Regen
                                     </button>
                                 </form>
-                                <form method="POST" action="/super-admin/activation-codes/{{ s.id }}/send-code" class="inline">
-                                    <button type="submit" class="px-2 py-1 text-xs font-bold bg-primary-50 text-primary-700 rounded-lg hover:bg-primary-100 border border-primary-200">
-                                        <i class="fas fa-play mr-0.5"></i>Aktifkan
+                                <form method="POST" action="/super-admin/activation-codes/{{ s.id }}/activate-cash" class="inline">
+                                    <button type="submit" class="px-2 py-1 text-xs font-bold bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 border border-emerald-200"
+                                        onclick="return confirm('Aktifkan cash untuk sekolah ini?')">
+                                        <i class="fas fa-money-bill mr-0.5"></i>Cash
                                     </button>
                                 </form>
                             </div>
