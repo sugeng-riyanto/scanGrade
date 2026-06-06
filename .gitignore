@@ -1,6 +1,7 @@
 # Environment
 .env
 .env.production
+.env.demo
 .env.ngrok
 *.env.local
 
