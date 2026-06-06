@@ -573,15 +573,16 @@ def grade_detail(submission_id):
                 if qtypes.get(str(i), "mcq") != "mcq":
                     exam["question_weights"][str(i)] = e
     student = supabase.table("profiles").select("id,full_name,phone").eq("id", sub["student_id"]).single().execute().data or {}
-    # Parse teacher_feedback if it's a string
-    tf = sub.get("teacher_feedback")
-    if isinstance(tf, str):
-        try:
-            sub["teacher_feedback"] = json.loads(tf)
-        except (json.JSONDecodeError, TypeError):
-            sub["teacher_feedback"] = {}
-    if not isinstance(sub.get("teacher_feedback"), dict):
-        sub["teacher_feedback"] = {}
+    # Parse JSON string fields
+    for field in ("teacher_feedback", "answers"):
+        val = sub.get(field)
+        if isinstance(val, str):
+            try:
+                sub[field] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                sub[field] = {} if field != "answers" else {}
+        if not isinstance(sub.get(field), dict):
+            sub[field] = {} if field != "answers" else {}
     return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
 
 

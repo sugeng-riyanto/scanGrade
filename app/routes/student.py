@@ -314,6 +314,16 @@ def result_detail(submission_id):
     if submission.get("exams"):
         submission["exam"] = submission.pop("exams")
     submission.setdefault("is_hidden", False)
+    # Parse JSON strings
+    for field in ("teacher_feedback", "answers"):
+        val = submission.get(field)
+        if isinstance(val, str):
+            try:
+                submission[field] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                submission[field] = {} if field != "answers" else {}
+        if not isinstance(submission.get(field), dict):
+            submission[field] = {} if field != "answers" else {}
     student_name = g.user_name or g.user_email or ""
     return render_template("student/result_detail.html", submission=submission, student_name=student_name)
 
