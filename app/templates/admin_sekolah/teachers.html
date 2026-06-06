@@ -128,8 +128,7 @@
                                            class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
                                     <input type="text" name="employee_number" value="{{ t.employee_number or '' }}"
                                            class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
-                                    <input type="email" name="email" value="{{ t.email }}"
-                                           class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                                    <span class="px-3 py-2 text-stone-500 text-sm flex items-center" title="Email tidak bisa diubah">{{ t.email }}</span>
                                     <select name="subject_id"
                                             class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium bg-white">
                                         <option value="">- Mapel -</option>

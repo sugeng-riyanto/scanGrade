@@ -582,9 +582,7 @@ def edit_teacher(teacher_id):
     hp = request.form.get("phone", "")
     if hp:
         profile_data["phone"] = hp.strip()
-    email = request.form.get("email", "").strip().lower()
-    if email:
-        profile_data["email_note"] = email  # not updateable via API
+    # Email is stored in auth.users, not profiles table — cannot update via this API
 
     try:
         if data:
