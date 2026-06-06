@@ -62,6 +62,7 @@
 - **NPSN data reset**: Super admin can delete all data for a school by NPSN
 - **Registration requests**: Full CRUD (list, detail, approve, reject, delete)
 - **Trial settings**: Configurable trial duration by super admin
+- **Bugfixes**: Handle None plan_id in cash activation, None subscription_plans join in templates
 
 ### 13 June 2026 — Penalty & PDF Polish
 - **Penalty fix**: `calculate_graduated_penalty` now checks `anti_cheat_enabled is False` (not `not get()`), so `None` (missing column) defaults to enabled
