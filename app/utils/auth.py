@@ -97,7 +97,7 @@ def role_required(*roles):
                 if _wants_json():
                     return jsonify({"error": "Forbidden"}), 403
                 role_redirect = {
-                    "super_admin": "/admin/dashboard",
+                    "super_admin": "/super-admin/dashboard",
                     "admin_sekolah": "/admin/dashboard",
                     "guru": "/teacher/dashboard",
                     "murid": "/student/dashboard",

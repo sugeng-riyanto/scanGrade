@@ -153,7 +153,7 @@ def create_app(env=None):
                     role = profile.data.get("role", "murid")
                 except Exception:
                     role = user.user.user_metadata.get("role", "murid")
-                redirect_map = {"super_admin": "/admin/dashboard", "admin_sekolah": "/admin/dashboard", "guru": "/teacher/dashboard", "murid": "/student/dashboard"}
+                redirect_map = {"super_admin": "/super-admin/dashboard", "admin_sekolah": "/admin/dashboard", "guru": "/teacher/dashboard", "murid": "/student/dashboard"}
                 return redirect(redirect_map.get(role, "/student/dashboard"))
             except Exception:
                 pass
@@ -184,7 +184,9 @@ def _register_blueprints(app):
     from app.routes.webhook import webhook_bp
     from app.routes.admin_sekolah import admin_sekolah_bp
     from app.routes.tools import tools_bp
+    from app.routes.super_admin import super_bp
 
+    app.register_blueprint(super_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(exam_bp, url_prefix="/exam")
     app.register_blueprint(admin_bp, url_prefix="/admin")

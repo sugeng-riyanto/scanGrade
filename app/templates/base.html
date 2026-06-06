@@ -105,17 +105,15 @@
         <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto" style="max-height:calc(100vh - 8rem)">
 
 {% if g.user_role == 'super_admin' %}
-            <div class="nav-section-title">Utama</div>
-            <a href="/admin/dashboard" class="nav-item {% if request.path == '/admin/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
-            <a href="/admin/registration-requests" class="nav-item {% if request.path == '/admin/registration-requests' %}active{% endif %}"><i class="fas fa-school-circle-check"></i><span>Registrasi Sekolah</span></a>
-            <div class="nav-section-title pt-2">Master Data</div>
-            <a href="/admin/users" class="nav-item {% if request.path == '/admin/users' %}active{% endif %}"><i class="fas fa-users-cog"></i><span>Semua User</span></a>
-            <a href="/admin/teachers" class="nav-item {% if request.path == '/admin/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span>Guru</span></a>
-            <a href="/admin/students" class="nav-item {% if request.path == '/admin/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span>Siswa</span></a>
-            <a href="/admin/classes" class="nav-item {% if request.path == '/admin/classes' %}active{% endif %}"><i class="fas fa-school"></i><span>Kelas</span></a>
-            <a href="/admin/exams" class="nav-item {% if request.path == '/admin/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian</span></a>
-            <div class="nav-section-title pt-2">Pengaturan</div>
-            <a href="/admin/school" class="nav-item {% if request.path == '/admin/school' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan</span></a>
+            <div class="nav-section-title">Super Admin</div>
+            <a href="/super-admin/dashboard" class="nav-item {% if request.path == '/super-admin/dashboard' %}active{% endif %}"><i class="fas fa-crown"></i><span>Dashboard Utama</span></a>
+            <div class="nav-section-title pt-2">Sekolah</div>
+            <a href="/super-admin/schools" class="nav-item {% if request.path == '/super-admin/schools' %}active{% endif %}"><i class="fas fa-school"></i><span>Semua Sekolah</span></a>
+            <a href="/admin/registration-requests" class="nav-item {% if request.path == '/admin/registration-requests' %}active{% endif %}"><i class="fas fa-school-circle-check"></i><span>Registrasi</span></a>
+            <div class="nav-section-title pt-2">Data</div>
+            <a href="/super-admin/users" class="nav-item {% if request.path == '/super-admin/users' %}active{% endif %}"><i class="fas fa-users-cog"></i><span>Semua User</span></a>
+            <a href="/super-admin/exams" class="nav-item {% if request.path == '/super-admin/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Semua Ujian</span></a>
+            <a href="/super-admin/logs" class="nav-item {% if request.path == '/super-admin/logs' %}active{% endif %}"><i class="fas fa-history"></i><span>Audit Log</span></a>
             <div class="nav-section-title pt-2">Tools</div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
 
