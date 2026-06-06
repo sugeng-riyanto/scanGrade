@@ -2,112 +2,123 @@
 {% block title %}Kode Aktivasi - ScanGrade{% endblock %}
 {% block page_title %}Kode Aktivasi Sekolah{% endblock %}
 {% block content %}
-<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', showNpsnForm: false, npsn: '' }">
+<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', showForm: false, npsn: '' }">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif msg[0]=='info' %}bg-blue-50 text-blue-700 border border-blue-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}
     </div>
     {% endfor %}
 
-    <!-- Generate by NPSN -->
+    <!-- Generate by NPSN / Cash -->
     <div class="card p-5 mb-6">
-        <button @click="showNpsnForm = !showNpsnForm" class="flex items-center justify-between w-full text-left">
-            <div class="flex items-center gap-2">
-                <i class="fas fa-key text-primary-500"></i>
-                <span class="font-extrabold text-slate-700">Generate Kode Aktivasi by NPSN / Cash Payment</span>
+        <button @click="showForm = !showForm" class="flex items-center justify-between w-full text-left">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600"><i class="fas fa-money-bill-wave"></i></div>
+                <div>
+                    <p class="font-extrabold text-slate-700">Generate Kode Aktivasi Manual</p>
+                    <p class="text-xs text-slate-500">Untuk pembayaran cash / offline. Generate by NPSN.</p>
+                </div>
             </div>
-            <i class="fas text-slate-400" :class="showNpsnForm ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+            <i class="fas text-slate-400 text-lg transition" :class="showForm ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
         </button>
-        <div x-show="showNpsnForm" x-cloak class="mt-4">
+        <div x-show="showForm" x-cloak class="mt-4 pt-4 border-t border-slate-200">
             <form method="POST" action="/super-admin/activation-codes/generate" class="flex items-end gap-3">
                 <div class="flex-1">
-                    <label class="block text-xs font-bold text-slate-600 mb-1">Cari & Generate by NPSN</label>
-                    <input type="text" name="npsn" x-model="npsn" class="input" placeholder="Masukkan NPSN sekolah..." required>
+                    <label class="block text-xs font-bold text-slate-600 mb-1.5">NPSN Sekolah</label>
+                    <input type="text" name="npsn" x-model="npsn" class="input" placeholder="Masukkan NPSN..." required>
                 </div>
-                <button type="submit" class="btn bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2.5 rounded-xl">
-                    <i class="fas fa-key mr-1"></i> Generate & Salin
+                <button type="submit" class="btn bg-amber-600 hover:bg-amber-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-lg shadow-amber-600/20">
+                    <i class="fas fa-key mr-1"></i> Generate Kode
                 </button>
             </form>
-            <p class="text-xs text-slate-400 mt-2">Generate kode aktivasi manual untuk pembayaran cash (offline). Kode bisa dicopy dan diberikan ke sekolah.</p>
+            <p class="text-xs text-slate-400 mt-2">Kode aktivasi akan tergenerate dan bisa langsung dicopy. Berikan kode ini ke sekolah.</p>
         </div>
     </div>
 
     <!-- Search -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
-        <p class="text-sm text-slate-500 font-medium">Kelola kode aktivasi langganan semua sekolah</p>
+        <p class="text-sm text-slate-500 font-medium">Daftar sekolah dan status aktivasi</p>
         <form method="GET" class="flex gap-2">
-            <input type="text" name="q" value="{{ q }}" class="input text-sm w-48" placeholder="Cari NPSN atau nama sekolah...">
+            <input type="text" name="q" value="{{ q }}" class="input text-sm w-48" placeholder="Cari NPSN atau nama...">
             <button type="submit" class="btn btn-primary text-sm"><i class="fas fa-search"></i></button>
         </form>
     </div>
 
     <!-- Table -->
-    <div class="card overflow-hidden border border-slate-200">
+    <div class="card overflow-hidden border border-slate-200 shadow-sm">
         <div class="overflow-x-auto">
-            <table class="table-default">
+            <table class="w-full text-sm">
                 <thead>
-                    <tr>
-                        <th>Sekolah</th>
-                        <th>NPSN</th>
-                        <th>Status</th>
-                        <th>Kode Aktivasi</th>
-                        <th>Transaksi Terakhir</th>
-                        <th>Aksi</th>
+                    <tr class="bg-slate-50 border-b border-slate-200">
+                        <th class="text-left px-4 py-3 font-bold text-slate-600">Sekolah</th>
+                        <th class="text-left px-4 py-3 font-bold text-slate-600">NPSN</th>
+                        <th class="text-left px-4 py-3 font-bold text-slate-600">Status</th>
+                        <th class="text-left px-4 py-3 font-bold text-slate-600">Kode Aktivasi</th>
+                        <th class="text-left px-4 py-3 font-bold text-slate-600">Transaksi</th>
+                        <th class="text-center px-4 py-3 font-bold text-slate-600">Aksi</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody class="divide-y divide-slate-100">
                     {% for s in schools %}
-                    <tr>
-                        <td class="font-bold text-slate-700">{{ s.name }}</td>
-                        <td class="font-mono text-xs text-slate-500">{{ s.npsn }}</td>
-                        <td>
-                            {% set st = s.get('subscription', {}).get('status', '') %}
-                            <span class="badge text-xs {% if st == 'active' %}bg-emerald-50 text-emerald-700{% elif st in ('trial', 'trial_expired') %}bg-amber-50 text-amber-700{% else %}bg-slate-100 text-slate-500{% endif %}">
-                                {{ st or '-' }}
+                    {% set st = s.get('subscription', {}).get('status', '') %}
+                    {% set code = s.get('subscription', {}).get('activation_code') or s.get('last_transaction', {}).get('activation_code', '') %}
+                    {% set tx = s.get('last_transaction', {}) %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="px-4 py-3 font-bold text-slate-700">{{ s.name }}</td>
+                        <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ s.npsn }}</td>
+                        <td class="px-4 py-3">
+                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold
+                                {% if st == 'active' %}bg-emerald-50 text-emerald-700
+                                {% elif st in ('trial', 'trial_expired') %}bg-amber-50 text-amber-700
+                                {% else %}bg-slate-100 text-slate-500{% endif %}">
+                                {{ st or 'belum' }}
                             </span>
                         </td>
-                        <td>
-                            {% set code = s.get('subscription', {}).get('activation_code') or s.get('last_transaction', {}).get('activation_code', '') %}
+                        <td class="px-4 py-3">
                             {% if code %}
-                            <div class="flex items-center gap-1">
-                                <span class="font-mono text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">{{ code }}</span>
-                                <button onclick="navigator.clipboard.writeText('{{ code }}'); this.innerHTML='<i class=\"fas fa-check text-emerald-500\"></i>'; setTimeout(()=>this.innerHTML='<i class=\"fas fa-copy text-slate-400\"></i>',2000)"
-                                    class="text-slate-400 hover:text-slate-600 p-1" title="Salin kode">
-                                    <i class="fas fa-copy"></i>
+                            <div class="flex items-center gap-1.5" x-data="{ copied: false }">
+                                <span class="font-mono text-xs font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded">{{ code }}</span>
+                                <button @click="navigator.clipboard.writeText('{{ code }}'); copied=true; setTimeout(()=>copied=false,2000)"
+                                    class="text-slate-400 hover:text-amber-600 p-1 rounded-lg hover:bg-amber-50 transition">
+                                    <i class="fas text-sm" :class="copied ? 'fa-check text-emerald-500' : 'fa-copy'"></i>
                                 </button>
                             </div>
                             {% else %}
-                            <span class="text-xs text-slate-400">-</span>
+                            <span class="text-slate-300">—</span>
                             {% endif %}
                         </td>
-                        <td class="text-xs">
-                            {% set tx = s.get('last_transaction', {}) %}
+                        <td class="px-4 py-3 text-xs">
                             {% if tx.order_id %}
-                            <span class="font-mono">{{ tx.order_id[:16] }}...</span>
-                            <span class="badge text-xs {% if tx.status == 'success' %}bg-emerald-50 text-emerald-700{% elif tx.status == 'pending' %}bg-amber-50 text-amber-700{% else %}bg-red-50 text-red-600{% endif %}">{{ tx.status }}</span>
+                            <span class="font-mono text-slate-400">{{ tx.order_id[:12] }}...</span>
+                            <span class="ml-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold
+                                {% if tx.status == 'success' or tx.status == 'cash' %}bg-emerald-50 text-emerald-700
+                                {% elif tx.status == 'pending' %}bg-amber-50 text-amber-700
+                                {% else %}bg-red-50 text-red-600{% endif %}">{{ tx.status }}</span>
                             {% else %}
-                            <span class="text-slate-400">-</span>
+                            <span class="text-slate-300">—</span>
                             {% endif %}
                         </td>
-                        <td>
-                            <div class="flex gap-1">
+                        <td class="px-4 py-3">
+                            <div class="flex items-center justify-center gap-1.5">
                                 <form method="POST" action="/super-admin/activation-codes/{{ s.id }}/regenerate" class="inline">
-                                    <button type="submit" class="px-2 py-1 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 border border-amber-200"
-                                        onclick="return confirm('Buat ulang kode aktivasi?')">
+                                    <button type="submit"
+                                        class="px-2.5 py-1.5 text-[11px] font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 border border-amber-200 transition"
+                                        onclick="return confirm('Buat ulang kode?')">
                                         <i class="fas fa-sync mr-0.5"></i>Regen
                                     </button>
                                 </form>
                                 <form method="POST" action="/super-admin/activation-codes/{{ s.id }}/activate-cash" class="inline">
-                                    <button type="submit" class="px-2 py-1 text-xs font-bold bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 border border-emerald-200"
-                                        onclick="return confirm('Aktifkan cash untuk sekolah ini?')">
-                                        <i class="fas fa-money-bill mr-0.5"></i>Cash
+                                    <button type="submit"
+                                        class="px-2.5 py-1.5 text-[11px] font-bold bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 border border-emerald-200 transition"
+                                        onclick="return confirm('Aktivasi cash untuk {{ s.name }}?')">
+                                        <i class="fas fa-money-bill-wave mr-0.5"></i>Cash
                                     </button>
                                 </form>
                             </div>
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="6" class="px-5 py-12 text-center text-slate-400 font-medium">Tidak ada sekolah</td></tr>
+                    <tr><td colspan="6" class="px-4 py-12 text-center text-slate-400 font-medium">Belum ada sekolah</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
