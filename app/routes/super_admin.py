@@ -145,3 +145,49 @@ def logs():
     # Filter out None items
     data = [d for d in data if d is not None]
     return render_template("super_admin/logs.html", logs=data, days=days)
+
+
+@super_bp.route("/demo-settings/data")
+@_sa_required
+def demo_settings_data():
+    supabase = get_supabase()
+    try:
+        data = supabase.table("school_settings").select("demo_settings").eq("id", 1).single().execute().data or {}
+        return jsonify(data.get("demo_settings") or {})
+    except Exception:
+        return jsonify({})
+
+
+@super_bp.route("/demo-settings", methods=["GET", "POST"])
+@_sa_required
+def demo_settings():
+    supabase = get_supabase()
+    if request.method == "POST":
+        settings = {
+            "demo_enabled": request.form.get("demo_enabled", "false") == "true",
+            "demo_super_admin": request.form.get("demo_super_admin", "false") == "true",
+            "demo_admin_sekolah": request.form.get("demo_admin_sekolah", "false") == "true",
+            "demo_guru": request.form.get("demo_guru", "false") == "true",
+            "demo_murid": request.form.get("demo_murid", "false") == "true",
+            "demo_tutorial": request.form.get("demo_tutorial", "false") == "true",
+        }
+        try:
+            supabase.table("school_settings").upsert({"id": 1, "demo_settings": settings}).execute()
+        except Exception:
+            try:
+                existing = supabase.table("school_settings").select("id").eq("id", 1).execute()
+                if existing.data:
+                    supabase.table("school_settings").update({"demo_settings": settings}).eq("id", 1).execute()
+                else:
+                    supabase.table("school_settings").insert({"id": 1, "demo_settings": settings}).execute()
+            except Exception:
+                pass
+        return jsonify({"success": True})
+
+    current = {}
+    try:
+        data = supabase.table("school_settings").select("demo_settings").eq("id", 1).single().execute().data or {}
+        current = data.get("demo_settings") or {}
+    except Exception:
+        pass
+    return render_template("super_admin/demo_settings.html", settings=current)

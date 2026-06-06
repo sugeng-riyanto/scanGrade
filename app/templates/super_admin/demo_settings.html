@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Pengaturan Demo - Super Admin{% endblock %}
+{% block page_title %}Pengaturan Demo{% endblock %}
+{% block content %}
+<div class="max-w-2xl" x-data="demoForm()" x-init="init()">
+    <div class="card p-6">
+        <p class="text-sm text-slate-500 mb-6">Atur visibilitas menu dan akun demo untuk setiap peran. Perubahan akan diterapkan di halaman landing, login, dan sidebar.</p>
+
+        <form @submit.prevent="save" class="space-y-4">
+            <!-- Master toggle -->
+            <div class="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <div>
+                    <p class="font-bold text-slate-800">Demo Mode</p>
+                    <p class="text-xs text-slate-500">Aktifkan/nonaktifkan semua demo sekaligus</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" class="sr-only peer" x-model="allOn" @change="toggleAll()">
+                    <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+            </div>
+
+            <div class="divide-y divide-slate-100">
+                <!-- Per role toggles -->
+                <div class="flex items-center justify-between py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center"><i class="fas fa-crown text-purple-600"></i></div>
+                        <div><p class="font-bold text-slate-800">Super Admin</p><p class="text-xs text-slate-400">superadmin@scan-grade.app</p></div>
+                    </div>
+                    <input type="checkbox" x-model="settings.demo_super_admin" class="w-5 h-5 rounded text-purple-600 focus:ring-purple-500">
+                </div>
+                <div class="flex items-center justify-between py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center"><i class="fas fa-school text-blue-600"></i></div>
+                        <div><p class="font-bold text-slate-800">Admin Sekolah</p><p class="text-xs text-slate-400">admin_smp@scan-grade.app, admin_sma@scan-grade.app</p></div>
+                    </div>
+                    <input type="checkbox" x-model="settings.demo_admin_sekolah" class="w-5 h-5 rounded text-blue-600 focus:ring-blue-500">
+                </div>
+                <div class="flex items-center justify-between py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center"><i class="fas fa-chalkboard-teacher text-emerald-600"></i></div>
+                        <div><p class="font-bold text-slate-800">Guru</p><p class="text-xs text-slate-400">guru_mtk_smp@scan-grade.app, dll</p></div>
+                    </div>
+                    <input type="checkbox" x-model="settings.demo_guru" class="w-5 h-5 rounded text-emerald-600 focus:ring-emerald-500">
+                </div>
+                <div class="flex items-center justify-between py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center"><i class="fas fa-user-graduate text-amber-600"></i></div>
+                        <div><p class="font-bold text-slate-800">Murid</p><p class="text-xs text-slate-400">siswa1_smp@scan-grade.app, dll</p></div>
+                    </div>
+                    <input type="checkbox" x-model="settings.demo_murid" class="w-5 h-5 rounded text-amber-600 focus:ring-amber-500">
+                </div>
+                <div class="flex items-center justify-between py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"><i class="fas fa-book-open text-slate-600"></i></div>
+                        <div><p class="font-bold text-slate-800">Tutorial (tanpa login)</p><p class="text-xs text-slate-400">/tutorial/guru, /tutorial/murid</p></div>
+                    </div>
+                    <input type="checkbox" x-model="settings.demo_tutorial" class="w-5 h-5 rounded text-slate-600 focus:ring-slate-500">
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 pt-4 border-t border-slate-100">
+                <button type="submit" :disabled="saving" class="px-6 py-2.5 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition disabled:opacity-50 flex items-center gap-2">
+                    <i class="fas fa-spinner fa-spin" x-show="saving" x-cloak></i>
+                    <span x-text="saving ? 'Menyimpan...' : 'Simpan Pengaturan'"></span>
+                </button>
+                <span x-show="saved" x-transition class="text-sm font-bold text-emerald-600 flex items-center gap-1"><i class="fas fa-check-circle"></i> Tersimpan</span>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function demoForm() {
+    return {
+        settings: {demo_enabled:false, demo_super_admin:false, demo_admin_sekolah:false, demo_guru:false, demo_murid:false, demo_tutorial:false},
+        allOn: false, saving: false, saved: false,
+        init() {
+            fetch('/super-admin/demo-settings/data').then(r=>r.json()).then(d => { if(d) Object.assign(this.settings, d); this.allOn = this.settings.demo_enabled; }).catch(()=>{});
+        },
+        toggleAll() {
+            const v = this.allOn;
+            Object.keys(this.settings).forEach(k => this.settings[k] = v);
+        },
+        save() {
+            this.saving = true; this.saved = false;
+            const fd = new FormData();
+            this.settings.demo_enabled = this.allOn;
+            Object.entries(this.settings).forEach(([k,v]) => fd.append(k, v ? 'true' : 'false'));
+            fetch('/super-admin/demo-settings', {method:'POST', body: fd})
+                .then(r => r.ok ? (this.saved = true, setTimeout(()=>this.saved=false, 2000)) : alert('Gagal'))
+                .catch(() => alert('Gagal'))
+                .finally(() => this.saving = false);
+        },
+    };
+}
+</script>
+{% endblock %}
