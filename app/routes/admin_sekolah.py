@@ -675,13 +675,13 @@ def create_teacher():
         return redirect("/admin-sekolah/teachers")
 
     try:
-            user_email = email or _generate_email(nama, _get_email_domain(sid))
-            res = supabase.auth.admin.create_user({
-                "email": user_email, "password": password,
-                "user_metadata": {"role": "guru", "full_name": nama},
-                "email_confirm": True,
-            })
-            uid = res.user.id
+        user_email = email or _generate_email(nama, _get_email_domain(sid))
+        res = supabase.auth.admin.create_user({
+            "email": user_email, "password": password,
+            "user_metadata": {"role": "guru", "full_name": nama},
+            "email_confirm": True,
+        })
+        uid = res.user.id
         supabase.table("profiles").upsert({
             "id": uid, "full_name": nama, "phone": hp, "role": "guru",
             "status": "active", "school_id": sid,
