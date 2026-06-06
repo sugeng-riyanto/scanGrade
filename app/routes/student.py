@@ -355,6 +355,22 @@ def download_result_pdf(submission_id):
     submission.setdefault("is_hidden", False)
     student_name = g.user_name or g.user_email or ""
 
+    # Fetch teacher & school info
+    teacher_name = ""
+    school_info = {"name": "", "address": "", "logo_url": ""}
+    try:
+        exam_id = submission.get("exam_id", "")
+        ex = supabase.table("exams").select("teacher_id").eq("id", exam_id).single().execute().data
+        if ex:
+            t = supabase.table("profiles").select("full_name").eq("id", ex["teacher_id"]).single().execute().data
+            if t: teacher_name = t.get("full_name", "")
+        prof = supabase.table("profiles").select("school_id").eq("id", g.user_id).single().execute().data
+        if prof and prof.get("school_id"):
+            sch = supabase.table("schools").select("name, address, logo_url").eq("id", prof["school_id"]).single().execute().data
+            if sch: school_info = sch
+    except:
+        pass
+
     exam = submission.get("exam") or {}
     fb = submission.get("teacher_feedback") or {}
     fb_overlay = fb.get("overlay_pages", {})
@@ -523,6 +539,8 @@ def download_result_pdf(submission_id):
         "student/result_detail_pdf.html",
         submission=submission,
         student_name=student_name,
+        teacher_name=teacher_name,
+        school_info=school_info,
         merged_pages=merged_pages,
     )
     buf = io.BytesIO()

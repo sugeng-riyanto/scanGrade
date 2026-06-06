@@ -7,10 +7,15 @@
 body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10pt; line-height: 1.5; margin: 0; }
 
 .header { border-bottom: 3px solid #2563eb; padding-bottom: 10px; margin-bottom: 16px; }
-.header h1 { font-size: 16pt; color: #1e293b; margin: 0 0 4px; }
+.header .school-row { display: flex; align-items: center; gap: 12px; }
+.header .school-logo { width: 50px; height: 50px; object-fit: contain; }
+.header h1 { font-size: 16pt; color: #1e293b; margin: 0; }
+.header .school-name { font-size: 12pt; font-weight: bold; color: #1e293b; }
+.header .school-addr { font-size: 7pt; color: #64748b; }
 .header .meta { font-size: 8pt; color: #64748b; margin: 2px 0; }
 .header .meta span { margin-right: 16px; }
-.score-box { float: right; text-align: center; border: 3px solid #2563eb; border-radius: 10px; padding: 8px 18px; }
+
+.score-box { float: right; text-align: center; border: 3px solid #2563eb; border-radius: 10px; padding: 8px 18px; margin-left: 12px; }
 .score-box .score-val { font-size: 28pt; font-weight: bold; color: #2563eb; }
 .score-box .score-label { font-size: 7pt; color: #64748b; font-weight: bold; text-transform: uppercase; }
 
@@ -37,7 +42,6 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 .mcq-answer .value.wrong { color: #dc2626; }
 
 .teacher-note { margin-top: 6px; font-size: 8pt; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 4px 8px; color: #065f46; }
-
 .weight-badge { font-size: 7pt; padding: 1px 6px; border-radius: 99px; font-weight: bold; background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; }
 
 .score-row { width: 100%; border-collapse: collapse; margin: 12px 0; }
@@ -52,7 +56,6 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 .score-row td .lbl { font-size: 7pt; font-weight: bold; color: #64748b; }
 
 .footer { margin-top: 20px; padding-top: 8px; border-top: 2px solid #e2e8f0; font-size: 7pt; color: #94a3b8; text-align: center; }
-
 .merged-img { width: 100%; display: block; margin: 4px 0; border: 1px solid #d1d5db; }
 </style>
 </head>
@@ -66,37 +69,52 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 {% set question_types = exam.get('question_types', {}) %}
 {% set question_weights = exam.get('question_weights', {}) %}
 {% set total_q = exam.get('total_questions', 0) %}
-{% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else None) %}
+{% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else 0) %}
 {% set answers = submission.answers or {} %}
 {% set mp = merged_pages or {} %}
+{% set tz = 7 %}{# default WIB #}
 
 <div class="header">
-    <div class="score-box">
-        <div class="score-val">{{ score if score is not none else '-' }}</div>
-        <div class="score-label">Nilai Akhir</div>
-    </div>
-    <h1>{{ exam.get('title', 'Ujian') }}</h1>
-    <div class="meta">
-        <span><strong>Siswa:</strong> {{ student_name }}</span>
-        <span><strong>Mata Pelajaran:</strong> {{ exam.get('subject', '-') }}</span>
-        <span><strong>Soal:</strong> {{ total_q }} butir</span>
-    </div>
-    <div class="meta">
-        <span><strong>Dikumpulkan:</strong> {{ submission.submitted_at if submission.submitted_at else '-' }}</span>
-        <span><strong>MCQ:</strong> {{ submission.score if submission.score is not none else '-' }}</span>
-        <span><strong>Penalti:</strong> {{ submission.penalty if submission.penalty is not none else 0 }}</span>
-        <span><strong>Status:</strong> {{ submission.status }}</span>
+    <div class="school-row">
+        {% if school_info and school_info.get('logo_url') %}
+        <img src="{{ school_info.logo_url }}" class="school-logo">
+        {% endif %}
+        <div>
+            <div class="school-name">{{ school_info.get('name', '') }}</div>
+            <div class="school-addr">{{ school_info.get('address', '') }}</div>
+        </div>
     </div>
     <div style="clear:both;"></div>
+    <div class="meta" style="margin-top:6px;">
+        <span><strong>Siswa:</strong> {{ student_name }}</span>
+        <span><strong>Mata Pelajaran:</strong> {{ exam.get('subject', '-') }}</span>
+        <span><strong>Guru:</strong> {{ teacher_name or '-' }}</span>
+    </div>
+    <div class="meta">
+        <span><strong>Ujian:</strong> {{ exam.get('title', 'Ujian') }}</span>
+        <span><strong>Soal:</strong> {{ total_q }} butir</span>
+        <span><strong>Dikumpulkan:</strong> {{ submission.submitted_at if submission.submitted_at else '-' }}</span>
+    </div>
+</div>
+
+<div class="score-box">
+    <div class="score-val">{{ score }}</div>
+    <div class="score-label">Nilai Akhir</div>
 </div>
 
 <table class="score-row">
     <tr>
         <td class="mcq-cell"><div class="val">{{ submission.score if submission.score is not none else 0 }}</div><div class="lbl">SKOR MCQ</div></td>
         <td class="penalty-cell"><div class="val">{{ submission.penalty if submission.penalty is not none else 0 }}</div><div class="lbl">PENALTI</div></td>
-        <td class="final-cell"><div class="val">{{ score if score is not none else 0 }}</div><div class="lbl">NILAI AKHIR</div></td>
+        <td class="final-cell"><div class="val">{{ score }}</div><div class="lbl">NILAI AKHIR</div></td>
     </tr>
 </table>
+
+<div style="font-size:8pt; color:#64748b; margin-bottom:12px;">
+    <span>MCQ: {{ submission.score if submission.score is not none else 0 }}</span> |
+    <span>Penalti: {{ submission.penalty if submission.penalty is not none else 0 }}</span> |
+    <span>Status: {{ submission.status }}</span>
+</div>
 
 {% if answers is mapping and total_q > 0 %}
 <table class="summary-table">
@@ -111,7 +129,6 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
         {% set correct = answer_key.get(i|string, '') %}
         {% set raw_val = answers.get(i|string, '') %}
         {% set student_ans = raw_val['answer'] if raw_val is mapping and 'answer' in raw_val else raw_val %}
-
         {% set is_bonus = correct == 'bonus' %}
 {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
 {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
@@ -144,33 +161,10 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
                 {% else %}<span style="color:#dc2626; margin-left:8px;">✗</span>{% endif %}
                 {% endif %}
             </div>
-            {% if has_merged %}
-                {% for img_data_url in has_merged %}
-                <img src="{{ img_data_url }}" class="merged-img">
-                {% endfor %}
-            {% endif %}
             {% if teacher_score is defined and teacher_score != '' %}
-            <div class="teacher-note"><strong>Guru:</strong> {{ teacher_score }}{% if teacher_comment %} — {{ teacher_comment }}{% endif %}</div>
+            <div class="teacher-note"><strong>Koreksi Guru:</strong> Skor {{ teacher_score }}{% if teacher_comment %} — {{ teacher_comment }}{% endif %}</div>
             {% endif %}
         {% else %}
-            {% if has_merged %}
-                {% for img_data_url in has_merged %}
-                <img src="{{ img_data_url }}" class="merged-img">
-                {% endfor %}
-            {% elif essay_ans is mapping and essay_ans.get('pages') %}
-                {% if student_ans is string and student_ans %}
-                <p style="font-size:9pt; font-weight:bold; color:#475569;">{{ student_ans }}</p>
-                {% else %}
-                <p style="font-size:8pt; color:#94a3b8; font-style:italic;">Jawaban kosong</p>
-                {% endif %}
-            {% else %}
-                {% if student_ans is string and student_ans %}
-                <p style="font-size:9pt; font-weight:bold; color:#475569;">{{ student_ans }}</p>
-                {% else %}
-                <p style="font-size:8pt; color:#94a3b8; font-style:italic;">Jawaban kosong</p>
-                {% endif %}
-            {% endif %}
-
             {% if teacher_score is defined and teacher_score != '' or teacher_comment %}
             <div class="teacher-note">
                 <strong>Koreksi Guru:</strong>
@@ -179,6 +173,11 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
             </div>
             {% endif %}
         {% endif %}
+        {% if has_merged %}
+            {% for img_data_url in has_merged %}
+            <img src="{{ img_data_url }}" class="merged-img">
+            {% endfor %}
+        {% endif %}
     </div>
 </div>
 {% endfor %}
@@ -186,6 +185,6 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 <p style="text-align:center; color:#94a3b8; padding:20px;">Data jawaban tidak tersedia</p>
 {% endif %}
 
-<div class="footer">ScanGrade — Dicetak pada {{ submission.submitted_at if submission.submitted_at else '-' }}</div>
+<div class="footer">Dicetak dari ScanGrade — {{ submission.submitted_at if submission.submitted_at else '-' }}</div>
 </body>
 </html>
