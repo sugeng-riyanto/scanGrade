@@ -592,9 +592,11 @@ def edit_teacher(teacher_id):
         if profile_data:
             supabase.table("profiles").update(profile_data).eq("id", teacher_id).execute()
         log_activity("update", "teacher", teacher_id, new_data={**data, **profile_data}, user_id=g.user_id)
-        return jsonify({"success": True})
+        flash("Guru berhasil diperbarui", "success")
+        return redirect("/admin-sekolah/teachers")
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        flash(f"Gagal: {e}", "error")
+        return redirect("/admin-sekolah/teachers")
 
 
 @admin_sekolah_bp.route("/teachers/<teacher_id>/delete", methods=["POST"])
@@ -735,9 +737,11 @@ def edit_student(student_id):
         if profile_data:
             supabase.table("profiles").update(profile_data).eq("id", student_id).execute()
         log_activity("update", "student", student_id, new_data={**data, **profile_data}, user_id=g.user_id)
-        return jsonify({"success": True})
+        flash("Murid berhasil diperbarui", "success")
+        return redirect("/admin-sekolah/students")
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        flash(f"Gagal: {e}", "error")
+        return redirect("/admin-sekolah/students")
 
 
 @admin_sekolah_bp.route("/teachers/bulk-reset-password", methods=["POST"])
