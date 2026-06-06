@@ -24,17 +24,19 @@
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-50">
-                {% for log in logs %}
-                <tr class="hover:bg-slate-50">
-                    <td class="px-5 py-2.5 text-xs text-slate-500 whitespace-nowrap">{{ log.created_at[:19] }}</td>
-                    <td class="px-5 py-2.5 text-sm font-medium text-slate-700">{{ log.get('profiles', {}).get('full_name', log.user_id[:8] if log.user_id else '-') }}</td>
-                    <td class="px-5 py-2.5"><span class="badge bg-slate-100 text-slate-700 text-xs">{{ log.action }}</span></td>
-                    <td class="px-5 py-2.5 text-xs text-slate-500">{{ log.entity_type }} <span class="font-mono">{{ log.entity_id[:12] if log.entity_id else '' }}</span></td>
-                    <td class="px-5 py-2.5 text-xs text-slate-400 max-w-[200px] truncate">{{ log.new_data | tojson if log.new_data else '' }}</td>
-                </tr>
-                {% else %}
-                <tr><td colspan="5" class="text-center py-12 text-slate-400">Belum ada log</td></tr>
-                {% endfor %}
+                    {% for log in logs %}
+                    {% if log is mapping %}
+                    <tr class="hover:bg-slate-50">
+                        <td class="px-5 py-2.5 text-xs text-slate-500 whitespace-nowrap">{{ log.created_at[:19] if log.created_at else '-' }}</td>
+                        <td class="px-5 py-2.5 text-sm font-medium text-slate-700">{{ (log.get('profiles') or {}).get('full_name', (log.user_id[:8] if log.user_id else '-')) }}</td>
+                        <td class="px-5 py-2.5"><span class="badge bg-slate-100 text-slate-700 text-xs">{{ log.action or '-' }}</span></td>
+                        <td class="px-5 py-2.5 text-xs text-slate-500">{{ log.entity_type or '-' }} <span class="font-mono">{{ log.entity_id[:12] if log.entity_id else '' }}</span></td>
+                        <td class="px-5 py-2.5 text-xs text-slate-400 max-w-[200px] truncate">{{ log.new_data | tojson if log.new_data else '' }}</td>
+                    </tr>
+                    {% endif %}
+                    {% else %}
+                    <tr><td colspan="5" class="text-center py-12 text-slate-400">Belum ada log</td></tr>
+                    {% endfor %}
             </tbody>
         </table>
     </div>

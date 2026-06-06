@@ -109,7 +109,7 @@
                     {% for log in recent_logs %}
                     <tr class="hover:bg-slate-50">
                         <td class="px-5 py-2 text-xs text-slate-500">{{ log.created_at[:19] }}</td>
-                        <td class="px-5 py-2 text-sm font-medium text-slate-700">{{ log.get('profiles', {}).get('full_name', log.user_id[:8]) }}</td>
+                        <td class="px-5 py-2 text-sm font-medium text-slate-700">{{ (log.get('profiles') or {}).get('full_name', (log.user_id[:8] if log.user_id else '-')) }}</td>
                         <td class="px-5 py-2"><span class="badge bg-slate-100 text-slate-700 text-xs">{{ log.action }}</span></td>
                         <td class="px-5 py-2 text-xs text-slate-400">{{ log.entity_type }} {{ log.entity_id[:8] if log.entity_id else '' }}</td>
                     </tr>
