@@ -7,7 +7,7 @@
 ## Overall Progress
 
 ```
-████████████████████████░░  90%
+█████████████████████████░  95%
 ```
 
 | Area | Progress | Status |
@@ -66,13 +66,26 @@
 - #5 Randomize questions: answers now keyed by `origIdx` so server grading matches answer_key correctly
 - Admin school settings page: Alpine.js form with JSON endpoint + real-time stats
 
-### 6 June 2026
-- Ruler 30cm CIE/IB: transparent, fixed scale, drag/rotate handle di permukaan
-- Protractor 0-180°: 1° accuracy, arc path (bukan full circle), angle display live
-- Set square 10cm: transparent, cm scale di kedua sisi, zoom −/+
-- Scientific calculator teacher: fixed scope bug (gradeApp vs gradeQuestion)
-- Randomize questions/options: implemented Fisher-Yates shuffle
-- Complete Supabase setup SQL with proper RLS policies (public schema)
-- All migrations combined into `_COMPLETE_SETUP.sql`
-- Fixed ruler resize crash (undefined `newCm` variable)
-- Fixed calculator template extra quotes
+### 10 June 2026
+- Auth: NISN login for students + NIP login for teachers
+- Auth: custom email domain per school (`email_domain` di profil sekolah)
+- Auth: auto-generate email from full name (budi.santoso@smp1.sch.id)
+- Auth: NISN/NIP lookup via `get_user_by_id()` (efficient)
+- CRUD: admin sekolah full CRUD for teachers & students with search/sort
+- CRUD: bulk reset password + bulk delete (teachers & students)
+- CRUD: flatten data backend so template field names match
+- CRUD: fix all `profiles.email` references (column doesn't exist)
+- CRUD: fetch auth emails via `list_users()` for display
+- CRUD: edit routes now return redirect (not JSON) so page reloads
+- School: logo upload, email domain setting in profile page
+- Import: download XLSX template with auto-generated emails + passwords
+- Import: informative import page with per-column descriptions
+- Tools: all fixed (ruler, protractor, triangle, compass) — stable
+- Calculator: fixed scope bug (teacher page)
+- Export: XLSX/PDF now includes per-question answers + canvas drawings
+- Docs: RBAC.md — full role permissions table + interaction flows
+- Demos: manage.py for seed/reset demo data, separate `.env.demo`
+- Demo settings: super admin can show/hide per role (toggle in dashboard)
+- Super admin: new `/super-admin/` slug with dedicated dashboard
+- Security: CSRF auto-inject, PDF validation, Redis rate limiter
+- Audit: all critical findings fixed (45 issues total)
