@@ -6,14 +6,13 @@
 @page { margin: 15mm; size: A4; }
 body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10pt; line-height: 1.5; margin: 0; }
 
-.header { border-bottom: 3px solid #2563eb; padding-bottom: 10px; margin-bottom: 16px; }
-.header .school-row { display: flex; align-items: center; gap: 12px; }
-.header .school-logo { width: 50px; height: 50px; object-fit: contain; }
-.header h1 { font-size: 16pt; color: #1e293b; margin: 0; }
-.header .school-name { font-size: 12pt; font-weight: bold; color: #1e293b; }
-.header .school-addr { font-size: 7pt; color: #64748b; }
-.header .meta { font-size: 8pt; color: #64748b; margin: 2px 0; }
-.header .meta span { margin-right: 16px; }
+.header { padding-bottom: 12px; margin-bottom: 16px; }
+.header .school-row { text-align: center; }
+.header .school-logo { width: 70px; height: 70px; object-fit: contain; margin-bottom: 6px; }
+.header .school-name { font-size: 36pt; font-weight: bold; color: #1e293b; text-align: center; line-height: 1.1; }
+.header .school-addr { font-size: 20pt; color: #475569; text-align: center; line-height: 1.2; }
+.header .info-line { font-size: 10pt; color: #1e293b; margin: 1px 0; line-height: 1.4; }
+.header .info-label { font-weight: bold; }
 
 .score-box { float: right; text-align: center; border: 3px solid #2563eb; border-radius: 10px; padding: 8px 18px; margin-left: 12px; }
 .score-box .score-val { font-size: 28pt; font-weight: bold; color: #2563eb; }
@@ -79,22 +78,17 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
         {% if school_info and school_info.get('logo_url') %}
         <img src="{{ school_info.logo_url }}" class="school-logo">
         {% endif %}
-        <div>
-            <div class="school-name">{{ school_info.get('name', '') }}</div>
-            <div class="school-addr">{{ school_info.get('address', '') }}</div>
-        </div>
+        <div class="school-name">{{ school_info.get('name', '') }}</div>
+        <div class="school-addr">{{ school_info.get('address', '') }}</div>
     </div>
-    <div style="clear:both;"></div>
-    <div class="meta" style="margin-top:6px;">
-        <span><strong>Siswa:</strong> {{ student_name }}</span>
-        <span><strong>Mata Pelajaran:</strong> {{ exam.get('subject', '-') }}</span>
-        <span><strong>Guru:</strong> {{ teacher_name or '-' }}</span>
-    </div>
-    <div class="meta">
-        <span><strong>Ujian:</strong> {{ exam.get('title', 'Ujian') }}</span>
-        <span><strong>Soal:</strong> {{ total_q }} butir</span>
-        <span><strong>Dikumpulkan:</strong> {{ submission.submitted_at if submission.submitted_at else '-' }}</span>
-    </div>
+    <div style="clear:both; height:4px;"></div>
+    <div class="info-line"><span class="info-label">Subject:</span> {{ exam.get('subject', '-') }}</div>
+    <div class="info-line"><span class="info-label">Nama Siswa:</span> {{ student_name }}</div>
+    <div class="info-line"><span class="info-label">Mata Pelajaran:</span> {{ exam.get('subject', '-') }}</div>
+    <div class="info-line"><span class="info-label">Nama Guru:</span> {{ teacher_name or '-' }}</div>
+    <div class="info-line"><span class="info-label">Nama Ujian:</span> {{ exam.get('title', 'Ujian') }}</div>
+    <div class="info-line"><span class="info-label">Tgl:</span> {{ (submission.submitted_at[:10] if submission.submitted_at else '-') }}</div>
+    <div class="info-line"><span class="info-label">Jam:</span> {{ (submission.submitted_at[11:19] if submission.submitted_at else '-') }}</div>
 </div>
 
 <div class="score-box">
