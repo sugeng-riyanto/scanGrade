@@ -20,36 +20,58 @@ def _sa_required(f):
     return wrapper
 
 
+def _safe_count(supabase, table, column="id", **filters):
+    """Execute count query with safe error handling."""
+    try:
+        q = supabase.table(table).select(column, count="exact")
+        for k, v in filters.items():
+            if v is not None:
+                q = q.eq(k, v)
+        return q.execute().count or 0
+    except Exception:
+        return 0
+
+
+def _safe_select(supabase, table, columns="*", limit=20, order_col="created_at", desc=True, **filters):
+    """Execute select query with safe error handling."""
+    try:
+        q = supabase.table(table).select(columns)
+        for k, v in filters.items():
+            if v is not None:
+                q = q.eq(k, v)
+        if desc:
+            q = q.order(order_col, desc=True)
+        else:
+            q = q.order(order_col)
+        if limit:
+            q = q.limit(limit)
+        return q.execute().data or []
+    except Exception:
+        return []
+
+
 @super_bp.route("/dashboard")
 @_sa_required
 def dashboard():
     supabase = get_supabase()
 
-    # ── Stats ──
-    total_schools = supabase.table("schools").select("id", count="exact").execute().count or 0
-    total_users = supabase.table("profiles").select("id", count="exact").execute().count or 0
-    total_teachers = supabase.table("profiles").select("id", count="exact").eq("role", "guru").execute().count or 0
-    total_students = supabase.table("profiles").select("id", count="exact").eq("role", "murid").execute().count or 0
-    total_exams = supabase.table("exams").select("id", count="exact").execute().count or 0
-    total_subs = supabase.table("submissions").select("id", count="exact").execute().count or 0
-    pending_requests = supabase.table("school_registration_requests").select("id", count="exact").eq("status", "pending").execute().count or 0
+    total_schools = _safe_count(supabase, "schools")
+    total_users = _safe_count(supabase, "profiles")
+    total_teachers = _safe_count(supabase, "profiles", role="guru")
+    total_students = _safe_count(supabase, "profiles", role="murid")
+    total_exams = _safe_count(supabase, "exams")
+    total_subs = _safe_count(supabase, "submissions")
+    pending_requests = _safe_count(supabase, "school_registration_requests", status="pending")
 
-    # ── Schools ──
-    schools = supabase.table("schools").select("id, name, status, created_at").order("created_at", desc=True).limit(10).execute().data or []
+    schools = _safe_select(supabase, "schools", "id, name, status, created_at", limit=10)
 
-    # ── Recent activity ──
     recent_logs = []
     try:
         recent_logs = supabase.table("audit_logs").select("*, profiles!inner(full_name)").order("created_at", desc=True).limit(20).execute().data or []
     except Exception:
         pass
 
-    # ── Registration requests ──
-    requests = []
-    try:
-        requests = supabase.table("school_registration_requests").select("*").order("created_at", desc=True).limit(20).execute().data or []
-    except Exception:
-        pass
+    requests = _safe_select(supabase, "school_registration_requests", limit=20)
 
     return render_template("super_admin/dashboard.html",
         total_schools=total_schools, total_users=total_users,
@@ -65,13 +87,13 @@ def dashboard():
 def schools():
     supabase = get_supabase()
     q = request.args.get("q", "")
-    data = supabase.table("schools").select("*").order("created_at", desc=True).execute().data or []
+    data = _safe_select(supabase, "schools", limit=200)
     if q:
         data = [s for s in data if q.lower() in (s.get("name", "") + s.get("npsn", "")).lower()]
     for s in data:
-        s["teacher_count"] = supabase.table("profiles").select("id", count="exact").eq("role", "guru").eq("school_id", s["id"]).execute().count or 0
-        s["student_count"] = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", s["id"]).execute().count or 0
-        s["exam_count"] = supabase.table("exams").select("id", count="exact").eq("school_id", s["id"]).execute().count or 0
+        s["teacher_count"] = _safe_count(supabase, "profiles", role="guru", school_id=s["id"])
+        s["student_count"] = _safe_count(supabase, "profiles", role="murid", school_id=s["id"])
+        s["exam_count"] = _safe_count(supabase, "exams", school_id=s["id"])
     return render_template("super_admin/schools.html", schools=data, q=q)
 
 
@@ -81,12 +103,16 @@ def users():
     supabase = get_supabase()
     role = request.args.get("role", "")
     q = request.args.get("q", "")
-    query = supabase.table("profiles").select("*, schools!left(name)").order("created_at", desc=True)
-    if role in ("super_admin", "admin_sekolah", "guru", "murid"):
-        query = query.eq("role", role)
-    data = query.execute().data or []
-    if q:
-        data = [u for u in data if q.lower() in (u.get("full_name", "") + (u.get("schools") or {}).get("name", "")).lower()]
+    data = []
+    try:
+        query = supabase.table("profiles").select("*, schools!left(name)").order("created_at", desc=True)
+        if role in ("super_admin", "admin_sekolah", "guru", "murid"):
+            query = query.eq("role", role)
+        data = query.execute().data or []
+        if q:
+            data = [u for u in data if q.lower() in (u.get("full_name", "") + ((u.get("schools") or {}) or {}).get("name", "")).lower()]
+    except Exception:
+        data = []
     return render_template("super_admin/users.html", users=data, role=role, q=q)
 
 
@@ -94,10 +120,13 @@ def users():
 @_sa_required
 def exams():
     supabase = get_supabase()
-    data = supabase.table("exams").select("*, profiles!inner(full_name)").order("created_at", desc=True).limit(50).execute().data or []
+    data = []
+    try:
+        data = supabase.table("exams").select("*, profiles!inner(full_name)").order("created_at", desc=True).limit(50).execute().data or []
+    except Exception:
+        pass
     for e in data:
-        sub_count = supabase.table("submissions").select("id", count="exact").eq("exam_id", e["id"]).execute().count or 0
-        e["submission_count"] = sub_count
+        e["submission_count"] = _safe_count(supabase, "submissions", exam_id=e["id"])
         e["teacher_name"] = (e.pop("profiles", None) or {}).get("full_name", "-")
     return render_template("super_admin/exams.html", exams=data)
 
@@ -113,4 +142,6 @@ def logs():
         data = supabase.table("audit_logs").select("*, profiles!left(full_name)").gte("created_at", since.isoformat()).order("created_at", desc=True).limit(100).execute().data or []
     except Exception:
         pass
+    # Filter out None items
+    data = [d for d in data if d is not None]
     return render_template("super_admin/logs.html", logs=data, days=days)
