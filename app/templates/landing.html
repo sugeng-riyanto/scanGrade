@@ -34,12 +34,20 @@
                 </a>
             </div>
             <div class="mt-6 flex items-center justify-center gap-3">
+                {% set ds = get_demo_settings() %}
+                {% if not ds or ds.demo_tutorial %}
                 <a href="/tutorial/guru" class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
                     <i class="fas fa-chalkboard-teacher"></i>Tutorial Guru
                 </a>
                 <a href="/tutorial/murid" class="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200">
                     <i class="fas fa-user-graduate"></i>Tutorial Siswa
                 </a>
+                {% endif %}
+                {% if not ds or ds.demo_enabled %}
+                <a href="/demo" class="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-50 text-purple-700 rounded-xl font-bold text-sm hover:bg-purple-100 transition border border-purple-200">
+                    <i class="fas fa-flask"></i>Demo
+                </a>
+                {% endif %}
             </div>
         </div>
 

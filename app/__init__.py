@@ -110,6 +110,23 @@ def create_app(env=None):
     from app.utils.csrf import generate_csrf_token, csrf_required
     app.jinja_env.globals["csrf_token"] = generate_csrf_token
 
+    # Demo settings global — readable from any template
+    _demo_cache = {}
+    def get_demo_settings():
+        """Return demo settings dict, cached per request."""
+        req_key = f"demo_{id(request)}"
+        if req_key in _demo_cache:
+            return _demo_cache[req_key]
+        try:
+            supabase = app.extensions["supabase"]
+            data = supabase.table("school_settings").select("demo_settings").eq("id", 1).single().execute().data or {}
+            result = data.get("demo_settings") or {}
+        except Exception:
+            result = {}
+        _demo_cache[req_key] = result
+        return result
+    app.jinja_env.globals["get_demo_settings"] = get_demo_settings
+
     @app.template_global()
     def greeting():
         offset = getattr(g, "tz_offset", DEFAULT_TZ_OFFSET)
@@ -158,6 +175,10 @@ def create_app(env=None):
             except Exception:
                 pass
         return render_template("landing.html")
+
+    @app.route("/demo")
+    def demo_page():
+        return render_template("demo.html")
 
     @app.route("/tutorial/guru")
     def tutorial_guru():
