@@ -11,6 +11,7 @@
         className: '',
         subject: '',
         date: '',
+        optionsCount: 5,
         previewUrl: null,
         generating: false,
         get previewQuestions() {
@@ -74,6 +75,26 @@
                             </template>
                         </div>
                     </div>
+
+                    <!-- Total Questions -->
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-1">Total Questions</label>
+                        <input type="number" x-model.number="totalQ" min="1" max="200" class="field" placeholder="1-200">
+                    </div>
+
+                    <!-- Options per Question -->
+                    <div>
+                        <label class="block text-xs font-bold text-surface-600 mb-2">Options per Question</label>
+                        <div class="flex gap-2">
+                            <template x-for="n in [2,3,4,5,6,7,8]" :key="n">
+                                <label class="cursor-pointer flex-1">
+                                    <input type="radio" name="optionsCount" :value="n" x-model.number="optionsCount" class="peer sr-only">
+                                    <div class="text-center py-2.5 rounded-xl border-2 border-surface-200 text-sm font-bold text-surface-600 peer-checked:border-primary-500 peer-checked:bg-primary-50 peer-checked:text-primary-700 hover:bg-surface-50 transition"
+                                         x-text="n"></div>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -112,6 +133,8 @@
                     <input type="hidden" name="class_name" :value="className">
                     <input type="hidden" name="subject" :value="subject">
                     <input type="hidden" name="date" :value="date">
+                    <input type="hidden" name="total_questions" :value="totalQ">
+                    <input type="hidden" name="options" :value="optionsCount">
 
                     <button type="submit"
                             :disabled="generating"
@@ -121,7 +144,7 @@
                     </button>
                 </form>
                 <p class="text-[10px] text-surface-400 font-medium text-center mt-2">
-                    A4 Portrait \u2022 Print-ready \u2022 High contrast
+                    A4 Portrait &bull; Print-ready &bull; High contrast &bull; <span x-text="totalQ"></span> questions
                 </p>
             </div>
         </div>
@@ -132,7 +155,9 @@
                 <div class="px-5 py-3 border-b border-surface-100 bg-surface-50 flex items-center justify-between">
                     <h3 class="font-bold text-surface-800 text-sm"><i class="fas fa-eye text-primary-500 mr-2"></i>Preview</h3>
                     <div class="flex items-center gap-2 text-xs text-surface-400 font-medium">
-                        <span>50 Questions</span>
+                        <span x-text="totalQ + ' Questions'"></span>
+                        <span class="w-1 h-1 rounded-full bg-surface-300"></span>
+                        <span x-text="optionsCount + ' Options'"></span>
                         <span class="w-1 h-1 rounded-full bg-surface-300"></span>
                         <span x-text="markType === 'circle' ? 'Circle Marks' : 'Square Marks'"></span>
                         <span class="w-1 h-1 rounded-full bg-surface-300"></span>
@@ -182,17 +207,19 @@
                             <div class="flex gap-1 mb-2">
                                 <div class="flex-1 border border-gray-200 rounded p-1">
                                     <div class="flex items-center gap-1 mb-1">
-                                        <div class="text-[6px] font-bold">Questions 1-50</div>
+                                        <div class="text-[6px] font-bold" x-text="'Questions 1-' + totalQ"></div>
                                         <div class="ml-auto flex gap-1 text-[5px] font-bold text-gray-500">
-                                            <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
+                                            <template x-for="i in optionsCount" :key="i">
+                                                <span x-text="'ABCDE'[i-1]"></span>
+                                            </template>
                                         </div>
                                     </div>
                                     <div class="grid gap-y-[1px]"
                                          :style="{ gridTemplateColumns: 'repeat(' + gridCols + ',1fr)' }">
-                                        <template x-for="q in 25" :key="q">
+                                        <template x-for="q in Math.min(totalQ, 25)" :key="q">
                                             <div class="flex items-center gap-[1px]">
                                                 <span class="text-[4px] text-gray-400 w-[8px] text-right shrink-0" x-text="q"></span>
-                                                <template x-for="opt in 5" :key="opt">
+                                                <template x-for="opt in optionsCount" :key="opt">
                                                     <template x-if="markType === 'circle'">
                                                         <div class="rounded-full border border-black shrink-0" style="width:5px;height:5px"></div>
                                                     </template>
@@ -216,7 +243,7 @@
                             <div class="border-t border-gray-300 pt-1 text-center">
                                 <div class="text-[5px] font-bold text-gray-600">Use 2B pencil &bull; Fill the <span x-text="markType"></span> completely &bull; Do not fold or bend the sheet</div>
                                 <div class="text-[4px] text-gray-400 mt-[1px] flex justify-between">
-                                    <span>ScanGrade Answer Sheet | 50 Questions | Mark: <span x-text="markType === 'circle' ? 'Circle' : 'Square'"></span></span>
+                                    <span>ScanGrade Answer Sheet | <span x-text="totalQ"></span> Questions | Mark: <span x-text="markType === 'circle' ? 'Circle' : 'Square'"></span></span>
                                     <span>scan-grade.app</span>
                                 </div>
                             </div>

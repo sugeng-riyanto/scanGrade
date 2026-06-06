@@ -7,7 +7,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdf_canvas
 
 
-def export_to_xlsx(submissions: list, exam_title: str = "Hasil Ujian") -> io.BytesIO:
+def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Hasil"
@@ -19,7 +19,7 @@ def export_to_xlsx(submissions: list, exam_title: str = "Hasil Ujian") -> io.Byt
         top=Side(style="thin"), bottom=Side(style="thin"),
     )
 
-    headers = ["No", "Siswa", "Skor", "Penalti", "Nilai Final", "Status"]
+    headers = ["No", "Nama Siswa", "NISN / ID", "Skor MCQ", "Penalti", "Nilai Final", "Status", "Waktu Dikerjakan"]
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=h)
         cell.font = header_font
@@ -30,19 +30,23 @@ def export_to_xlsx(submissions: list, exam_title: str = "Hasil Ujian") -> io.Byt
     for i, s in enumerate(submissions, 1):
         row_data = [
             i,
-            s.get("student_id", "")[:12],
+            s.get("student_name", s.get("student_id", "")[:12]),
+            s.get("student_id", ""),
             s.get("score", 0),
             s.get("penalty", 0),
             s.get("final_score", s.get("score", 0)),
             s.get("status", "submitted"),
+            s.get("submitted_at", ""),
         ]
         for col, val in enumerate(row_data, 1):
             cell = ws.cell(row=i + 1, column=col, value=val)
             cell.border = thin_border
             cell.alignment = Alignment(horizontal="center")
 
-    for col in range(1, 7):
-        ws.column_dimensions[chr(64 + col)].width = 18
+    for col in range(1, 9):
+        ws.column_dimensions[chr(64 + col)].width = 22
+    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["C"].width = 32
 
     buf = io.BytesIO()
     wb.save(buf)

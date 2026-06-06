@@ -17,29 +17,29 @@
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-1">Judul Exam</label>
                         <input type="text" name="title" value="{{ exam.title if exam else '' }}" required
-                               class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-bold transition">
+                               class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
                     </div>
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-1">Mata Pelajaran</label>
                         <input type="text" name="subject" value="{{ exam.subject if exam else '' }}"
-                               class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-bold transition">
+                               class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Durasi (menit)</label>
                             <input type="number" name="duration_minutes" value="{{ exam.duration_minutes or 60 }}" min="1"
-                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-bold transition">
+                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Nilai Minimal Lulus</label>
                             <input type="number" name="passing_score" value="{{ exam.passing_score or 70 }}" min="0" max="100"
-                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-bold transition">
+                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
                         </div>
                     </div>
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-1">Deskripsi</label>
                         <textarea name="description" rows="3"
-                                  class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-bold transition">{{ exam.description if exam else '' }}</textarea>
+                                  class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">{{ exam.description if exam else '' }}</textarea>
                     </div>
                 </div>
 
@@ -88,7 +88,7 @@
                              <i class="fas fa-pencil-alt"></i>Tambah Esai
                          </button>
                          <button type="button" @click="normalizeTo100()"
-                                 class="flex items-center gap-2 bg-brand-50 hover:bg-brand-100 text-brand-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-brand-200 transition">
+                                 class="flex items-center gap-2 bg-primary-50 hover:bg-primary-100 text-primary-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-primary-200 transition">
                              <i class="fas fa-balance-scale"></i>Sesuaikan 100%
                          </button>
                      </div>
@@ -116,7 +116,7 @@
                                          <span class="text-xs px-2 py-0.5 rounded-full font-extrabold"
                                                :class="q.type === 'mcq' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'"
                                                x-text="(q.type === 'mcq' ? mcqPerQ : essayPerQ).toFixed(1) + ' poin'"></span>
-                                         <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1 focus:border-brand-500"
+                                         <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1 focus:border-primary-500"
                                                 x-model="q.type" @change="onTypeChange(i)">
                                             <option value="mcq">MCQ</option>
                                             <option value="essay">Esai</option>
@@ -141,7 +141,7 @@
                                         <template x-for="opt in ['A','B','C','D','E']">
                                             <button type="button" @click="toggleAnswer(i, opt)"
                                                     class="text-sm font-extrabold cursor-pointer px-3 py-1.5 rounded-xl border-2 transition"
-                                                    :class="q.bonus ? 'bg-purple-50 border-purple-300 text-purple-700' : (q.answers && q.answers.includes(opt) ? 'bg-brand-50 border-brand-300 text-brand-700' : 'bg-white border-slate-200 text-slate-600')">
+                                                    :class="q.bonus ? 'bg-purple-50 border-purple-300 text-purple-700' : (q.answers && q.answers.includes(opt) ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-600')">
                                                 <span x-text="opt"></span>
                                             </button>
                                         </template>
@@ -160,13 +160,13 @@
                                         <i class="fas fa-music text-xs text-slate-400"></i>
                                         <input type="text" :name="'audio_' + i" placeholder="URL audio (opsional)"
                                                x-model="q.audio"
-                                               class="text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 w-full focus:border-brand-500 transition">
+                                               class="text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 w-full focus:border-primary-500 transition">
                                     </div>
                                     <div class="flex items-center gap-1">
                                         <i class="fab fa-youtube text-xs text-red-500"></i>
                                         <input type="text" :name="'youtube_' + i" placeholder="URL YouTube (opsional)"
                                                x-model="q.youtube"
-                                               class="text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 w-full focus:border-brand-500 transition">
+                                               class="text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 w-full focus:border-primary-500 transition">
                                     </div>
                                 </div>
                             </div>
@@ -174,9 +174,157 @@
                     </div>
 
                     <input type="hidden" name="total_questions" id="total-questions-input" :value="questions.length">
-                    <input type="hidden" name="question_types" id="question-types-input" :value="getTypesJson()">
-                    <input type="hidden" name="answer_key" id="answer-key-input" :value="getAnswerKeyJson()">
-                    <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
+                     <input type="hidden" name="question_types" id="question-types-input" :value="getTypesJson()">
+                     <input type="hidden" name="answer_key" id="answer-key-input" :value="getAnswerKeyJson()">
+                     <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
+                 </div>
+
+                <input type="hidden" name="anti_cheat_enabled" id="anti-cheat-enabled">
+                <input type="hidden" name="fullscreen_required" id="fullscreen-required">
+                <input type="hidden" name="randomize_questions" id="randomize-questions">
+                <input type="hidden" name="randomize_options" id="randomize-options">
+                <input type="hidden" name="watermark_name" id="watermark-name">
+                <input type="hidden" name="block_copy_paste" id="block-copy-paste">
+                <input type="hidden" name="block_right_click" id="block-right-click">
+                <input type="hidden" name="block_screenshot" id="block-screenshot">
+                <input type="hidden" name="auto_submit_on_max" id="auto-submit-on-max">
+                <input type="hidden" name="allow_calculator" id="allow-calculator">
+
+                <div class="card p-6 space-y-4" x-data="antiCheatSettings({
+                    enabled: {{ 'true' if (exam and exam.get('anti_cheat_enabled') is not none) else 'true' }},
+                    penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
+                    max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
+                    auto_submit_on_max: {{ 'true' if (exam and exam.get('auto_submit_on_max') is not none) else 'true' if not exam else 'true' }},
+                    fullscreen_required: {{ 'true' if (exam and exam.get('fullscreen_required') is not none) else 'true' }},
+                    randomize_questions: {{ 'true' if (exam and exam.get('randomize_questions')) else 'false' }},
+                    randomize_options: {{ 'true' if (exam and exam.get('randomize_options')) else 'false' }},
+                    watermark_name: {{ 'true' if (exam and exam.get('watermark_name')) else 'true' }},
+                    block_copy_paste: {{ 'true' if (exam and exam.get('block_copy_paste') is not none) else 'true' }},
+                    block_right_click: {{ 'true' if (exam and exam.get('block_right_click') is not none) else 'true' }},
+                    block_screenshot: {{ 'true' if (exam and exam.get('block_screenshot')) else 'false' }},
+                    allow_calculator: {{ 'true' if (exam and exam.get('allow_calculator')) else 'false' }},
+                })">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
+                            <i class="fas fa-shield-alt text-primary-600"></i>Pengaturan Anti-Cheat
+                        </h2>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" x-model="enabled" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500">
+                            <span class="text-sm font-extrabold" :class="enabled ? 'text-primary-700' : 'text-slate-400'" x-text="enabled ? 'Aktif' : 'Nonaktif'"></span>
+                        </label>
+                    </div>
+
+                    <div x-show="enabled" x-transition class="space-y-4">
+
+                        <div class="p-4 bg-amber-50 rounded-2xl border-2 border-amber-200 space-y-3">
+                            <p class="text-xs font-extrabold text-amber-800 flex items-center gap-1"><i class="fas fa-exclamation-triangle"></i>Skala Penalti Tab Switch</p>
+                            <div class="grid grid-cols-4 gap-2 text-center text-xs">
+                                <div class="bg-white rounded-xl p-2 border border-amber-200">
+                                    <p class="font-extrabold text-amber-700">1x</p>
+                                    <p class="font-bold text-slate-600">WARNING</p>
+                                    <p class="font-bold text-emerald-600">0 poin</p>
+                                </div>
+                                <div class="bg-white rounded-xl p-2 border border-amber-200">
+                                    <p class="font-extrabold text-amber-700">2x</p>
+                                    <p class="font-bold text-slate-600">-<span x-text="penalty_per_violation"></span> poin</p>
+                                </div>
+                                <div class="bg-white rounded-xl p-2 border border-amber-200">
+                                    <p class="font-extrabold text-amber-700">3x</p>
+                                    <p class="font-bold text-slate-600">-<span x-text="penalty_per_violation * 2"></span> poin</p>
+                                </div>
+                                <div class="bg-white rounded-xl p-2 border border-amber-200">
+                                    <p class="font-extrabold text-red-700">4x+</p>
+                                    <p class="font-bold text-slate-600">-<span x-text="penalty_per_violation * 3"></span>/violation</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-xs font-extrabold text-slate-700 mb-1"><i class="fas fa-minus-circle text-red-400 mr-1"></i>Penalti per Violation</label>
+                                <input type="number" x-model.number="penalty_per_violation" name="penalty_per_violation" min="0" max="100" step="1"
+                                       class="w-full px-3 py-2 border-2 border-slate-200 rounded-xl text-center font-extrabold focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                                <p class="text-[10px] font-bold text-slate-400 mt-0.5">Poin dikurangi per tab switch (setelah warning)</p>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-extrabold text-slate-700 mb-1"><i class="fas fa-ban text-red-400 mr-1"></i>Max Violations</label>
+                                <input type="number" x-model.number="max_violations" name="max_violations" min="0" max="50" step="1"
+                                       class="w-full px-3 py-2 border-2 border-slate-200 rounded-xl text-center font-extrabold focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                                <p class="text-[10px] font-bold text-slate-400 mt-0.5">0 = unlimited (hanya penalti poin)</p>
+                            </div>
+                            <div class="flex flex-col justify-center">
+                                <label class="flex items-center gap-2 cursor-pointer p-3 rounded-xl border-2" :class="auto_submit_on_max ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="auto_submit_on_max" name="auto_submit_on_max" class="w-5 h-5 text-red-600 border-slate-300 rounded focus:ring-red-500">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="auto_submit_on_max ? 'text-red-700' : 'text-slate-500'">Auto-Submit</p>
+                                        <p class="text-[10px] font-bold text-slate-400">Ujian otomatis dikumpulkan saat max violation</p>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-slate-100 pt-4">
+                            <p class="text-xs font-extrabold text-slate-700 mb-3"><i class="fas fa-lock text-primary-500 mr-1"></i>Proteksi Tambahan</p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="fullscreen_required ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="fullscreen_required ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-expand mr-1"></i>Wajib Fullscreen</p>
+                                        <p class="text-[10px] font-bold text-slate-400">Keluar fullscreen = tab switch violation</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="randomize_questions ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="randomize_questions" name="randomize_questions" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="randomize_questions ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-random mr-1"></i>Acak Urutan Soal</p>
+                                        <p class="text-[10px] font-bold text-slate-400">Setiap siswa mendapat urutan soal berbeda</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="randomize_options ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="randomize_options" name="randomize_options" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="randomize_options ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-sort-amount-down mr-1"></i>Acak Urutan Opsi MCQ</p>
+                                        <p class="text-[10px] font-bold text-slate-400">A/B/C/D/E diacak per siswa</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="watermark_name ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="watermark_name" name="watermark_name" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="watermark_name ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-user-tag mr-1"></i>Watermark Nama Siswa</p>
+                                        <p class="text-[10px] font-bold text-slate-400">Overlay nama di halaman soal (cegah screenshot sharing)</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="block_copy_paste ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="block_copy_paste" name="block_copy_paste" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="block_copy_paste ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-copy mr-1"></i>Blokir Copy-Paste</p>
+                                        <p class="text-[10px] font-bold text-slate-400">Cegah copy/paste di textarea esai</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="block_right_click ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="block_right_click" name="block_right_click" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="block_right_click ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-mouse mr-1"></i>Blokir Klik Kanan</p>
+                                        <p class="text-[10px] font-bold text-slate-400">Disable context menu selama ujian</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="allow_calculator ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
+                                    <input type="checkbox" x-model="allow_calculator" name="allow_calculator" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
+                                    <div>
+                                        <p class="text-xs font-extrabold" :class="allow_calculator ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-calculator mr-1"></i>Izinkan Kalkulator</p>
+                                        <p class="text-[10px] font-bold text-slate-400">Tampilkan kalkulator ilmiah selama ujian</p>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                            <p class="text-[10px] font-bold text-slate-500"><i class="fas fa-info-circle mr-1"></i>
+                                Total penalti maksimal jika <span x-text="max_violations || '∞'"></span> violation:
+                                <strong class="text-slate-700" x-text="calculatePreviewPenalty()"></strong> poin
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="flex justify-end gap-3">
@@ -185,7 +333,7 @@
                         Simpan Draft
                     </button>
                     <button type="submit" name="action" value="save_active"
-                            class="bg-brand-600 hover:bg-brand-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg shadow-brand-600/20 transition">
+                            class="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg shadow-primary-600/20 transition">
                         <i class="fas fa-save mr-1"></i>Simpan & Aktifkan
                     </button>
                 </div>
@@ -212,26 +360,26 @@
                     <p class="text-xs font-bold text-slate-400 mb-2">Upload PDF soal ujian</p>
                     {% endif %}
                     <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
-                       class="text-sm font-extrabold text-brand-600 hover:text-brand-700 transition">
+                       class="text-sm font-extrabold text-primary-600 hover:text-primary-700 transition">
                         <i class="fas fa-upload mr-1"></i>{{ 'Ganti PDF' if exam.pdf_url else 'Upload PDF' }}
                     </a>
                 </div>
                 <div class="border-t border-slate-100 pt-4 space-y-2">
                     <p class="text-sm font-extrabold text-slate-700 mb-2">Aksi</p>
                     <a href="{{ url_for('teacher.preview_exam', exam_id=exam.id) }}"
-                       class="block text-sm bg-brand-600 text-white px-3 py-2.5 rounded-xl hover:bg-brand-700 font-extrabold text-center shadow-lg shadow-brand-600/20 transition">
+                       class="block text-sm bg-primary-600 text-white px-3 py-2.5 rounded-xl hover:bg-primary-700 font-extrabold text-center shadow-lg shadow-primary-600/20 transition">
                         <i class="fas fa-eye mr-1"></i>{{ 'Lihat Preview' if not exam.is_published else 'Lihat Halaman Siswa' }}
                     </a>
                     <a href="{{ url_for('teacher.bubble_sheet', exam_id=exam.id) }}"
-                       class="block text-sm font-extrabold text-brand-600 hover:text-brand-700 transition px-3 py-2 hover:bg-brand-50 rounded-xl">
+                       class="block text-sm font-extrabold text-primary-600 hover:text-primary-700 transition px-3 py-2 hover:bg-primary-50 rounded-xl">
                         <i class="fas fa-print mr-1"></i>Cetak LJK
                     </a>
                     <a href="{{ url_for('teacher.results', exam_id=exam.id) }}"
-                       class="block text-sm font-extrabold text-brand-600 hover:text-brand-700 transition px-3 py-2 hover:bg-brand-50 rounded-xl">
+                       class="block text-sm font-extrabold text-primary-600 hover:text-primary-700 transition px-3 py-2 hover:bg-primary-50 rounded-xl">
                         <i class="fas fa-chart-bar mr-1"></i>Lihat Hasil
                     </a>
                     <a href="{{ url_for('teacher.scan_page') }}"
-                       class="block text-sm font-extrabold text-brand-600 hover:text-brand-700 transition px-3 py-2 hover:bg-brand-50 rounded-xl">
+                       class="block text-sm font-extrabold text-primary-600 hover:text-primary-700 transition px-3 py-2 hover:bg-primary-50 rounded-xl">
                         <i class="fas fa-camera mr-1"></i>Scan Jawaban
                     </a>
                     <button type="button" onclick="deleteExam('{{ exam.id }}')"
@@ -245,19 +393,19 @@
                 <h3 class="font-extrabold text-slate-800 mb-4">Langkah Selanjutnya</h3>
                 <ol class="space-y-3 text-sm font-bold text-slate-600">
                     <li class="flex items-start gap-2">
-                        <span class="bg-brand-50 text-brand-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">1</span>
+                        <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">1</span>
                         <span>Isi data exam dan klik <strong class="text-slate-800">Simpan</strong></span>
                     </li>
                     <li class="flex items-start gap-2">
-                        <span class="bg-brand-50 text-brand-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">2</span>
+                        <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">2</span>
                         <span><strong class="text-slate-800">Upload PDF</strong> soal ujian</span>
                     </li>
                     <li class="flex items-start gap-2">
-                        <span class="bg-brand-50 text-brand-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">3</span>
+                        <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">3</span>
                         <span><strong class="text-slate-800">Cetak LJK</strong> (bubble sheet) untuk siswa</span>
                     </li>
                     <li class="flex items-start gap-2">
-                        <span class="bg-brand-50 text-brand-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">4</span>
+                        <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">4</span>
                         <span>Siswa kerjakan ujian, guru <strong class="text-slate-800">koreksi & publikasi</strong></span>
                     </li>
                 </ol>
@@ -275,6 +423,33 @@ function deleteExam(id) {
         .then(r => r.json())
         .then(d => { if (d.success) window.location.href = '/teacher/exams'; else alert('Gagal: ' + (d.error || '?')); })
         .catch(e => alert('Gagal: ' + e.message));
+}
+function antiCheatSettings(init) {
+    return {
+        enabled: init.enabled,
+        penalty_per_violation: init.penalty_per_violation,
+        max_violations: init.max_violations,
+        auto_submit_on_max: init.auto_submit_on_max,
+        fullscreen_required: init.fullscreen_required,
+        randomize_questions: init.randomize_questions,
+        randomize_options: init.randomize_options,
+        watermark_name: init.watermark_name,
+        block_copy_paste: init.block_copy_paste,
+        block_right_click: init.block_right_click,
+        block_screenshot: init.block_screenshot,
+        allow_calculator: init.allow_calculator,
+        calculatePreviewPenalty() {
+            var max = this.max_violations || 10;
+            var total = 0;
+            for (var v = 1; v <= max; v++) {
+                if (v === 1) total += 0;
+                else if (v === 2) total += this.penalty_per_violation;
+                else if (v === 3) total += this.penalty_per_violation * 2;
+                else total += this.penalty_per_violation * 3;
+            }
+            return Math.min(total, 100);
+        }
+    };
 }
 function questionManager() {
     const existing = {{ (exam.question_types if exam else {}) | tojson | safe }};
@@ -403,6 +578,20 @@ function questionManager() {
     };
 }
 function prepareSubmit() {
+    var ac = document.querySelector('[x-data*="antiCheatSettings"]');
+    if (ac && ac.__x) {
+        var d = ac.__x.$data;
+        document.getElementById('anti-cheat-enabled').value = d.enabled ? 'true' : 'false';
+        document.getElementById('fullscreen-required').value = d.fullscreen_required ? 'true' : 'false';
+        document.getElementById('randomize-questions').value = d.randomize_questions ? 'true' : 'false';
+        document.getElementById('randomize-options').value = d.randomize_options ? 'true' : 'false';
+        document.getElementById('watermark-name').value = d.watermark_name ? 'true' : 'false';
+        document.getElementById('block-copy-paste').value = d.block_copy_paste ? 'true' : 'false';
+        document.getElementById('block-right-click').value = d.block_right_click ? 'true' : 'false';
+        document.getElementById('block-screenshot').value = d.block_screenshot ? 'true' : 'false';
+        document.getElementById('auto-submit-on-max').value = d.auto_submit_on_max ? 'true' : 'false';
+        document.getElementById('allow-calculator').value = d.allow_calculator ? 'true' : 'false';
+    }
     return true;
 }
 </script>

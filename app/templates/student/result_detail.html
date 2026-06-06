@@ -126,8 +126,8 @@
                 </div>
             </div>
 
-            {% if submission.status == 'graded' or submission.status == 'published' %}
-            <div class="mt-4 grid grid-cols-3 gap-4 text-center text-sm">
+            {% set violation_count = submission.violations or 0 %}
+            <div class="mt-4 grid grid-cols-4 gap-3 text-center text-sm">
                 <div class="bg-emerald-50 p-3 rounded-xl">
                     <p class="text-emerald-700 font-extrabold">{{ submission.score if submission.score is not none else 0 }}</p>
                     <p class="text-emerald-600 font-bold" x-text="lang==='en'?'MCQ Score':'Skor MCQ'"></p>
@@ -136,16 +136,21 @@
                     <p class="text-red-700 font-extrabold">{{ submission.penalty if submission.penalty is not none else 0 }}</p>
                     <p class="text-red-600 font-bold">Penalti</p>
                 </div>
+                <div class="bg-amber-50 p-3 rounded-xl">
+                    <p class="text-amber-700 font-extrabold">{{ violation_count }}</p>
+                    <p class="text-amber-600 font-bold" x-text="lang==='en'?'Violations':'Pelanggaran'"></p>
+                </div>
                 <div class="bg-gradient-to-br from-orange-50 to-amber-50 p-3 rounded-xl border border-amber-100">
-                    <p class="text-orange-700 font-extrabold">{{ score if score is not none else 0 }}</p>
+                    <p class="text-orange-700 font-extrabold">{{ score if score is not none else (submission.final_score if submission.final_score is not none else '-') }}</p>
                     <p class="text-orange-600 font-bold">Final</p>
                 </div>
             </div>
-            {% elif submission.status == 'submitted' %}
-            <div class="mt-4 text-center text-sm font-extrabold text-amber-600 bg-amber-50 p-3 rounded-xl border border-amber-100">
+            {% if submission.status == 'submitted' or submission.status == 'draft' %}
+            <div class="mt-2 text-center text-xs font-bold text-amber-600 bg-amber-50 p-2 rounded-xl border border-amber-100">
                 <i class="fas fa-clock mr-1"></i><span x-text="lang==='en'?'Waiting for teacher grading':'Menunggu koreksi guru'"></span>
             </div>
-            {% elif submission.status == 'retracted' %}
+            {% endif %}
+            {% if submission.status == 'retracted' %}
             <div class="mt-4 text-center text-sm font-extrabold text-red-600 bg-red-50 p-3 rounded-xl border border-red-100">
                 <i class="fas fa-undo mr-1"></i><span x-text="lang==='en'?'Submission retracted':'Jawaban ditarik kembali'"></span>
             </div>
@@ -192,7 +197,8 @@
                     {% set q_idx_str = i|string %}
                     {% set qtype = (question_types or {}).get(i|string, 'mcq') %}
                     {% set correct = answer_key.get(i|string, '') %}
-                    {% set student_ans = answers.get(i|string, '') %}
+                    {% set raw_ans = answers.get(i|string, '') %}
+                    {% set student_ans = raw_ans['answer'] if raw_ans is mapping and 'answer' in raw_ans else raw_ans %}
                     {% set is_bonus = correct == 'bonus' %}
                     {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
                     {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
@@ -227,7 +233,8 @@
             {% set q_idx_str = i|string %}
             {% set qtype = (question_types or {}).get(i|string, 'mcq') %}
             {% set correct = answer_key.get(i|string, '') %}
-            {% set student_ans = answers.get(i|string, '') %}
+            {% set raw_val = answers.get(i|string, '') %}
+            {% set student_ans = raw_val['answer'] if raw_val is mapping and 'answer' in raw_val else raw_val %}
             {% set is_bonus = correct == 'bonus' %}
             {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
             {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
@@ -235,7 +242,7 @@
             {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
             {% set teacher_overlay = fb_overlay.get(q_idx_str, {}) %}
             {% set qweight = question_weights.get(q_idx_str, 0) %}
-            {% set essay_ans = student_ans if student_ans is mapping else (student_ans|from_json if student_ans is string else {}) %}
+            {% set essay_ans = raw_val if raw_val is mapping else (raw_val|from_json if raw_val is string else {}) %}
 
             {% if qtype != 'mcq' and student_ans is mapping and student_ans.get('pages') %}
             <div class="print-break"></div>
@@ -297,12 +304,14 @@
                     <div class="space-y-3">
                         {% if essay_ans is mapping and essay_ans.get('pages') %}
                             {% set s_pages = essay_ans.get('pages', {}) %}
-                            {% for p_idx_str, p_data in s_pages.items() %}
-                            {% set p_idx = p_idx_str|int %}
+                            {% set s_page_keys = s_pages.keys() | list %}
+                            {% set ov_page_keys = teacher_overlay.keys() | list %}
+                            {% for p_key in s_page_keys + ov_page_keys %}
+                            {% set p_idx = p_key|int %}
                             {% set pdf_idx = p_idx if (s_pages and '0' in s_pages) else (p_idx - 1) %}
                             {% set pdf_url = pdf_pages[pdf_idx] if (pdf_idx >= 0 and pdf_idx < (pdf_pages|length)) else '' %}
-                            {% set ov_key = p_idx_str %}
-                            {% set ov_data = teacher_overlay.get(ov_key, {}) %}
+                            {% set p_data = s_pages.get(p_key, {}) %}
+                            {% set ov_data = teacher_overlay.get(p_key, {}) %}
                             {% set canvas_raw = p_data.get('canvas', '') %}
                             {% set is_png = canvas_raw.startswith('data:image/png') %}
                             {% set has_canvas = canvas_raw and canvas_raw|length > (800 if is_png else 3000) %}

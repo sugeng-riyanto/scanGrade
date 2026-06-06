@@ -240,22 +240,19 @@ def _draw_answer_bubbles(
 ):
     """Draw the answer grid with question numbers and bubbles."""
     c.saveState()
-    opt_labels = ["A", "B", "C", "D", "E"][:options]
+    opt_labels = ["A", "B", "C", "D", "E", "F", "G", "H"][:options]
     questions_per_col = 25
     cols = (total_questions + questions_per_col - 1) // questions_per_col
 
     usable_right = pw - MARGIN - 3 * mm
     col_width = (usable_right - x) / cols
 
-    r = CIRCLE_R if mark_type == "circle" else None
-
     remaining = total_questions
     for col_idx in range(cols):
         col_count = min(remaining, questions_per_col)
-        col_x = x + col_idx * col_width + (col_width - 5 * BUBBLE_GAP_X) / 2
+        col_x = x + col_idx * col_width + (col_width - options * BUBBLE_GAP_X) / 2
         col_start = total_questions - remaining
 
-        # Option labels (A B C D E) — left side header
         c.setFont("Helvetica-Bold", 8)
         for j, opt in enumerate(opt_labels):
             ox = col_x + j * BUBBLE_GAP_X
@@ -264,17 +261,14 @@ def _draw_answer_bubbles(
             else:
                 c.drawCentredString(ox + SQUARE_SIZE / 2, y - 2.5 * mm, opt)
 
-        # Question rows
         for i in range(col_count):
             q_num = col_start + i + 1
             row_y = y - (i + 1) * ROW_H - 2 * mm
 
-            # Question number — drawn on the LEFT side of each column
             c.setFont("Helvetica-Bold", 7)
             c.setFillColor(Color(0.2, 0.2, 0.2))
             c.drawRightString(col_x - 2 * mm, row_y + 2.5 * mm, str(q_num))
 
-            # Fillable marks with option letter inside
             for j in range(options):
                 bx = col_x + j * BUBBLE_GAP_X
                 by = row_y
@@ -333,11 +327,12 @@ def generate_answer_sheet(
     date: str = "",
     exam_version: str = "A",
     school_name: str = "",
+    options: int = 5,
 ) -> io.BytesIO:
-    """Generate a print-ready answer sheet PDF (A4 Portrait, 50 questions).
+    """Generate a print-ready answer sheet PDF (A4 Portrait).
 
     Args:
-        total_questions: 50 only
+        total_questions: Number of MCQ questions (supports 1-100+)
         mark_type: 'circle' or 'square'
         student_name: pre-filled student name
         class_name: pre-filled class
@@ -345,10 +340,13 @@ def generate_answer_sheet(
         date: pre-filled date
         exam_version: A, B, C, D, or E
         school_name: school name for branding
+        options: number of options per question (2-8)
 
     Returns:
         BytesIO buffer containing the PDF
     """
+    QUESTIONS_PER_PAGE = 50
+    num_pages = max(1, (total_questions + QUESTIONS_PER_PAGE - 1) // QUESTIONS_PER_PAGE)
     pw, ph = _get_page_size(total_questions)
 
     buf = io.BytesIO()
@@ -357,42 +355,41 @@ def generate_answer_sheet(
     c.setAuthor("ScanGrade")
     c.setSubject(f"{total_questions} Questions, Version {exam_version}")
 
-    # Unique QR data
     qr_seed = f"{total_questions}|{mark_type}|{exam_version}"
     qr_hash = hashlib.sha256(qr_seed.encode()).hexdigest()[:16]
     qr_data = f"SG:{qr_hash}:{total_questions}Q:v{exam_version}"
 
-    # ── LAYER 1: Static elements ─────────────────
-    _draw_corner_markers(c, pw, ph)
-    _draw_school_branding(c, pw, ph, school_name)
-    qr_right_x = _draw_qr_code(c, qr_data, pw, ph)
+    for page_idx in range(num_pages):
+        q_start = page_idx * QUESTIONS_PER_PAGE + 1
+        q_end = min((page_idx + 1) * QUESTIONS_PER_PAGE, total_questions)
+        page_q_count = q_end - q_start + 1
 
-    # ── LAYER 2: Header fields ──────────────────
-    fields = {
-        "student_name": student_name,
-        "class_name": class_name,
-        "subject": subject,
-        "date": date,
-    }
-    header_bottom = _draw_header_fields(c, fields, pw, ph, qr_right_x)
+        _draw_corner_markers(c, pw, ph)
+        _draw_school_branding(c, pw, ph, school_name)
+        qr_right_x = _draw_qr_code(c, qr_data + f"|p{page_idx+1}", pw, ph)
 
-    # ── LAYER 3: NISN (left) + Answer grid (middle + right) ──
-    grid_y = header_bottom - 2 * mm
+        fields = {
+            "student_name": student_name,
+            "class_name": class_name,
+            "subject": subject,
+            "date": date,
+        }
+        header_bottom = _draw_header_fields(c, fields, pw, ph, qr_right_x)
 
-    # NISN on the far left, just below class box, aligned with Q1
-    nisn_x = MARGIN + 3 * mm
-    nisn_y = grid_y - 10 * mm
-    _draw_student_id_grid(c, nisn_x, nisn_y, mark_type)
+        grid_y = header_bottom - 2 * mm
 
-    # Q1-25 in middle, Q26-50 on right — after NISN
-    nisn_right = nisn_x + 10 * (ID_COL_W + ID_GAP_X) + 4 * mm
-    _draw_answer_bubbles(c, nisn_right, grid_y, total_questions, mark_type, pw=pw)
+        nisn_x = MARGIN + 3 * mm
+        nisn_y = grid_y - 10 * mm
+        _draw_student_id_grid(c, nisn_x, nisn_y, mark_type)
 
-    # ── LAYER 4: Version in bottom-left ──────────
-    _draw_exam_version_bottom(c, pw, ph, exam_version)
+        nisn_right = nisn_x + 10 * (ID_COL_W + ID_GAP_X) + 4 * mm
+        _draw_answer_bubbles(c, nisn_right, grid_y, page_q_count, mark_type, options=options, pw=pw)
 
-    # ── LAYER 5: Footer ──────────────────────────
-    _draw_footer(c, pw, ph, total_questions, mark_type)
+        _draw_exam_version_bottom(c, pw, ph, exam_version)
+        _draw_footer(c, pw, ph, total_questions, mark_type)
+
+        if page_idx < num_pages - 1:
+            c.showPage()
 
     c.showPage()
     c.save()

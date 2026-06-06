@@ -2,7 +2,6 @@
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block page_title %}{{ exam.title }}{% endblock %}
 {% block head_extra %}
-<script src="{{ url_for('static', filename='js/anti-cheat.js') }}"></script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
@@ -17,10 +16,10 @@
 .draw-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
 .draw-toolbar button.active { background: #f97316; color: white; border-color: #f97316; }
 .draw-toolbar input[type="color"] { width: 26px; height: 26px; border: none; cursor: pointer; padding: 0; border-radius: 6px; }
-.draw-canvas-wrap { border: 2px dashed #d1d5db; border-radius: 12px; overflow: hidden; touch-action: none; max-height: 140px; }
+.draw-canvas-wrap { border: 2px dashed #d1d5db; border-radius: 12px; overflow: visible; touch-action: none; max-height: 140px; }
 .draw-canvas-wrap.essay-bg { max-height: none; border-style: solid; border-color: #fdba74; }
 .draw-canvas-wrap canvas { display: block; width: 100%; }
-.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: hidden; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
 .text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: 10; touch-action: none; }
 .text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; -webkit-user-select: text; }
@@ -33,11 +32,20 @@
 .text-box .box-font-controls select { max-width: 90px; }
 .text-box .box-font-controls input { width: 40px; text-align: center; }
 .tool-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
-.tool-overlay svg { position: absolute; pointer-events: none; }
-.tool-overlay .tool-handle { pointer-events: none; }
-.tool-overlay .tool-rotate { pointer-events: auto; cursor: grab; }
-.tool-overlay .tool-resize { pointer-events: auto; cursor: nwse-resize; }
+.tool-overlay svg { position: absolute; touch-action: none; }
+.tool-overlay svg * { pointer-events: none; }
+.tool-controlbar { pointer-events: none !important; }
+.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: 10; width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s, background 0.1s; }
+.tool-ctrl-btn:hover { transform: scale(1.15); background: rgba(30,41,59,0.95); }
+.tool-ctrl-btn.drag { cursor: grab; }
+.tool-ctrl-btn.drag:active { cursor: grabbing; }
+.tool-ctrl-btn.close { background: rgba(220,38,38,0.85); }
+.tool-ctrl-btn.close:hover { background: rgba(220,38,38,0.95); }
+.tool-ctrl-btn input[type=range] { position: absolute; top: 0; left: 26px; width: 60px; height: 22px; background: transparent; border-radius: 0; margin: 0; }
+.tool-ctrl-btn .range-wrap { position: absolute; top: 0; left: 26px; width: 60px; height: 22px; background: rgba(30,41,59,0.85); border-radius: 0 4px 4px 0; display: flex; align-items: center; padding: 0 6px; pointer-events: none; }
+.tool-ctrl-btn .range-wrap input { width: 100%; height: 3px; pointer-events: auto; cursor: ew-resize; }
 .essay-canvas-area { position: relative; }
+[x-cloak] { display: none !important; }
 @media (max-width: 768px) {
     .sticky-questions { position: static !important; }
     .draw-canvas-wrap { max-height: 100px; }
@@ -87,10 +95,204 @@
         </div>
     </div>
 
+    <!-- Device Status Bar -->
+    <div x-show="!submitted && !showExamAgreement"
+         class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex items-center gap-3 text-[10px] font-bold text-stone-500 border border-stone-100 shadow-sm pointer-events-none select-none">
+        <div class="flex items-center gap-1.5" title="Battery">
+            <i class="fas" :class="deviceCharging ? 'fa-bolt text-amber-500' : deviceBattery > 50 ? 'fa-battery-three-quarters text-emerald-500' : deviceBattery > 20 ? 'fa-battery-half text-amber-500' : 'fa-battery-quarter text-red-500'"></i>
+            <span x-text="deviceBattery + '%'" :class="deviceBattery < 20 ? 'text-red-500' : ''"></span>
+        </div>
+        <span class="text-stone-200">|</span>
+        <div class="flex items-center gap-1.5" title="Jaringan">
+            <i class="fas" :class="connectionType === 'wifi' ? 'fa-wifi text-primary-500' : connectionType === 'ethernet' ? 'fa-network-wired text-primary-500' : connectionType === 'unknown' || !connectionType ? 'fa-question-circle text-stone-300' : 'fa-signal text-primary-500'"></i>
+            <span x-text="connectionLabel"></span>
+        </div>
+        <span class="text-stone-200">|</span>
+        <div class="flex items-center gap-1.5" title="Audio output (speaker/headset)">
+            <i class="fas fa-volume-up text-stone-400"></i>
+            <span x-text="audioOutputs > 0 ? audioOutputLabel || audioOutputs+' output' : 'Tidak terdeteksi'"></span>
+        </div>
+        <span class="text-stone-200">|</span>
+        <div class="flex items-center gap-1.5" title="Audio input (mikrofon)">
+            <i class="fas fa-microphone text-stone-400"></i>
+            <span x-text="audioInputs > 0 ? audioInputLabel || audioInputs+' input' : 'Tidak terdeteksi'"></span>
+        </div>
+        <span class="ml-auto text-stone-300 text-[8px]">Status perangkat</span>
+    </div>
+
+    <!-- Violation Banner -->
+    <div x-show="showViolationBanner && !submitted" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 -translate-y-4" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-lg w-[90%] rounded-2xl p-4 shadow-2xl border-2"
+         :class="{
+             'bg-red-50 border-red-300': violationType === 'severe',
+             'bg-amber-50 border-amber-300': violationType === 'penalty',
+             'bg-yellow-50 border-yellow-300': violationType === 'warning'
+         }">
+        <div class="flex items-start gap-3">
+            <div class="text-2xl mt-0.5" :class="{
+                'text-red-500': violationType === 'severe',
+                'text-amber-500': violationType === 'penalty',
+                'text-yellow-500': violationType === 'warning'
+            }">
+                <i :class="{
+                    'fas fa-exclamation-triangle': violationType === 'severe',
+                    'fas fa-minus-circle': violationType === 'penalty',
+                    'fas fa-exclamation-circle': violationType === 'warning'
+                }"></i>
+            </div>
+            <div class="flex-1">
+                <p class="font-extrabold text-sm" :class="{
+                    'text-red-800': violationType === 'severe',
+                    'text-amber-800': violationType === 'penalty',
+                    'text-yellow-800': violationType === 'warning'
+                }" x-text="violationMessage"></p>
+                <p x-show="totalPenalty > 0" class="text-xs font-bold mt-1" :class="{
+                    'text-red-600': violationType === 'severe',
+                    'text-amber-600': violationType === 'penalty'
+                }">Total penalti: -<span x-text="totalPenalty"></span> poin (<span x-text="violationCount"></span> pelanggaran)</p>
+            </div>
+            <button @click="showViolationBanner = false" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
+        </div>
+    </div>
+
+    <!-- Penalty indicator in topbar -->
+    <template x-if="totalPenalty > 0 && !submitted">
+        <div class="bg-red-50 border border-red-200 rounded-xl px-3 py-1 text-xs font-extrabold text-red-600 flex items-center gap-1">
+            <i class="fas fa-exclamation-triangle"></i>Penalti: -<span x-text="totalPenalty"></span>
+        </div>
+    </template>
+
+    <!-- Scientific Calculator (standar matematika/fisika) -->
+    <div x-show="showCalculator && !submitted && !showExamAgreement" x-transition x-cloak
+         class="fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
+         @click.outside="showCalculator = false">
+        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
+            <span class="text-[11px] font-extrabold text-slate-200 flex items-center gap-1.5"><i class="fas fa-calculator text-orange-400"></i> Scientific</span>
+            <div class="flex items-center gap-2">
+                <button @click="calcAngleMode = calcAngleMode === 'DEG' ? 'RAD' : 'DEG'"
+                        class="text-[9px] font-extrabold px-1.5 py-0.5 rounded"
+                        :class="calcAngleMode === 'DEG' ? 'bg-orange-500/30 text-orange-300' : 'bg-slate-700 text-slate-300'"
+                        x-text="calcAngleMode"></button>
+                <button @click="showCalculator = false" class="text-slate-400 hover:text-white text-xs">&times;</button>
+            </div>
+        </div>
+        <div class="p-1.5 bg-slate-900">
+            <!-- 2-line display -->
+            <div class="bg-slate-800 rounded-lg px-2.5 py-1.5 text-right mb-1.5 min-h-[52px]">
+                <div class="text-[9px] text-slate-500 font-mono truncate" x-text="calcExpression || ' '"></div>
+                <div class="text-lg font-bold text-white font-mono tracking-wider truncate" x-text="calcInput"></div>
+            </div>
+            <!-- Scientific row 1: trig + log -->
+            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
+                <template x-for="(b, bi) in [
+                    {l:'sin',c:'sci',a:'sin'},{l:'cos',c:'sci',a:'cos'},{l:'tan',c:'sci',a:'tan'},
+                    {l:'log',c:'sci',a:'log'},{l:'ln',c:'sci',a:'ln'},
+                ]" :key="'s1-'+bi">
+                    <button type="button" @click="calcSciFunc(b.a)"
+                            class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition"><span x-text="b.l"></span></button>
+                </template>
+            </div>
+            <!-- Scientific row 2: power + constants -->
+            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
+                <template x-for="(b, bi) in [
+                    {l:'x²',c:'sci',a:'sq'},{l:'x³',c:'sci',a:'cube'},{l:'x^y',c:'sci',a:'pow'},
+                    {l:'π',c:'const',a:'pi'},{l:'e',c:'const',a:'e'},
+                ]" :key="'s2-'+bi">
+                    <button type="button"
+                            @click="b.a === 'sq' ? calcSciFunc('sq') : b.a === 'cube' ? calcSciFunc('cube') : b.a === 'pow' ? calcOp('pow') : calcConstant(b.a)"
+                            class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 transition"
+                            :class="b.c === 'const' ? 'text-amber-400' : 'text-emerald-400'">'<span x-text="b.l"></span>'</button>
+                </template>
+            </div>
+            <!-- Memory row -->
+            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
+                <button type="button" @click="calcMem('MC')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">MC</button>
+                <button type="button" @click="calcMem('MR')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">MR</button>
+                <button type="button" @click="calcMem('M+')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">M+</button>
+                <button type="button" @click="calcMem('M-')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">M-</button>
+                <button type="button" @click="calcParen('(')" class="py-1 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">(</button>
+            </div>
+            <!-- Number pad + operators -->
+            <div class="grid grid-cols-4 gap-[2px]">
+                <button type="button" @click="calcClear(true)" class="py-2 text-xs font-extrabold rounded bg-red-900/40 hover:bg-red-800/60 text-red-300 transition">C</button>
+                <button type="button" @click="calcClear(false)" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">CE</button>
+                <button type="button" @click="calcParen(')')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">)</button>
+                <button type="button" @click="calcOp('÷')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">÷</button>
+                <template x-for="(b, bi) in [
+                    {l:'7',c:'num'},{l:'8',c:'num'},{l:'9',c:'num'},
+                    {l:'4',c:'num'},{l:'5',c:'num'},{l:'6',c:'num'},
+                    {l:'1',c:'num'},{l:'2',c:'num'},{l:'3',c:'num'},
+                ]" :key="'n-'+bi">
+                    <button type="button" @click="calcButton(b.l)"
+                            class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition"><span x-text="b.l"></span></button>
+                </template>
+                <button type="button" @click="calcOp('×')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">×</button>
+                <button type="button" @click="calcButton('0')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">0</button>
+                <button type="button" @click="calcButton('.')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">.</button>
+                <button type="button" @click="calcOp('pm')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">+/−</button>
+                <button type="button" @click="calcOp('+')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">+</button>
+                <button type="button" @click="calcOp('-')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">−</button>
+                <button type="button" @click="calcEquals()" class="py-2 text-xs font-extrabold rounded bg-orange-500 hover:bg-orange-600 text-white transition row-span-2">=</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agreement Modal -->
+    <div x-show="showExamAgreement && !submitted" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div class="text-center mb-4">
+                <div class="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <i class="fas fa-file-contract text-3xl text-orange-600"></i>
+                </div>
+                <h2 class="text-xl font-extrabold text-stone-800">Ketentuan Ujian</h2>
+                <p class="text-xs text-stone-400 font-semibold mt-1">{{ exam.title }}</p>
+            </div>
+            <div class="bg-stone-50 rounded-2xl p-4 mb-4 text-xs leading-relaxed text-stone-700 font-semibold space-y-2">
+                <p><i class="fas fa-hourglass-half text-orange-500 mr-1.5"></i>Durasi: <strong>{{ exam.duration_minutes }}</strong> menit</p>
+                <p><i class="fas fa-list-ol text-orange-500 mr-1.5"></i>Jumlah soal: <strong>{{ exam.total_questions }}</strong></p>
+                <template x-if="antiCheat.penalty_per_violation > 0">
+                    <div>
+                        <p class="font-extrabold text-stone-800 mb-1"><i class="fas fa-exclamation-triangle text-amber-500 mr-1.5"></i>Sistem Anti-Cheat:</p>
+                        <ul class="space-y-0.5 ml-5 list-disc text-stone-500">
+                            <li>Pelanggaran ke-1: <strong class="text-amber-600">Peringatan</strong> (0 poin)</li>
+                            <li>Pelanggaran ke-2: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation"></span> poin</strong></li>
+                            <li>Pelanggaran ke-3: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*2"></span> poin</strong></li>
+                            <li>Pelanggaran ke-4+: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*3"></span> poin</strong> per pelanggaran</li>
+                            <template x-if="antiCheat.max_violations > 0 && antiCheat.auto_submit_on_max">
+                                <li>Maksimal <span x-text="antiCheat.max_violations"></span> pelanggaran → ujian <strong>otomatis dikumpulkan</strong></li>
+                            </template>
+                        </ul>
+                    </div>
+                </template>
+                <template x-if="antiCheat.fullscreen_required">
+                    <p><i class="fas fa-expand text-orange-500 mr-1.5"></i>Disarankan layar penuh (fullscreen) — tekan Esc untuk keluar (tanpa penalti)</p>
+                </template>
+                <template x-if="antiCheat.block_right_click">
+                    <p><i class="fas fa-mouse-pointer text-orange-500 mr-1.5"></i>Klik kanan dinonaktifkan</p>
+                </template>
+                <template x-if="antiCheat.block_copy_paste">
+                    <p><i class="fas fa-copy text-orange-500 mr-1.5"></i>Copy-paste diblokir</p>
+                </template>
+                <template x-if="antiCheat.watermark_name">
+                    <p><i class="fas fa-user-tag text-orange-500 mr-1.5"></i>Nama Anda akan tampil sebagai watermark</p>
+                </template>
+                <div x-show="examRules">
+                    <hr class="my-2 border-stone-200">
+                    <p x-html="examRules.replace(/\n/g, '<br>')" class="font-bold text-stone-800"></p>
+                </div>
+            </div>
+            <button type="button" @click="agreeExam"
+                    class="w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white py-3.5 rounded-xl font-extrabold text-sm hover:from-orange-600 hover:to-amber-600 shadow-lg shadow-orange-200/50 transition">
+                <i class="fas fa-check-circle mr-1.5"></i>Saya Setuju & Mulai Ujian
+            </button>
+            <p class="text-center text-[10px] text-stone-400 font-bold mt-3">Dengan menyetujui, Anda siap mengikuti ujian sesuai ketentuan di atas</p>
+        </div>
+    </div>
+
     <div class="flex gap-3">
         <!-- Left Sidebar: Question Navigation -->
         <div class="shrink-0 transition-all duration-300 ease-out flex flex-col items-center gap-1"
-             :style="sidebarOpen ? 'width:150px' : 'width:44px'">
+             :style="sidebarOpen ? 'width:150px' : 'width:0;overflow:hidden'">
             <!-- Scroll Up -->
             <button type="button" @click="scrollSidebar(-60)"
                     class="w-full flex items-center justify-center py-1 text-stone-400 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition disabled:opacity-20"
@@ -150,99 +352,47 @@
         <!-- Main Content Area -->
         <div class="flex-1 min-w-0">
     <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit">
-            <!-- PDF Viewer (for MCQ) — placed BEFORE soal -->
-            <div x-show="!isEssayBgCurrent()" style="display:none" class="mb-3">
-                <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
-                    <div class="flex items-center justify-end gap-2 px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100">
-                        <button type="button" @click="prevPage" :disabled="page <= 1"
-                                class="px-3 py-1.5 text-sm font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
-                            <i class="fas fa-chevron-left text-[10px]"></i>
-                        </button>
-                        <span class="text-sm font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
-                        <button type="button" @click="nextPage" :disabled="page >= totalPages"
-                                class="px-3 py-1.5 text-sm font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
-                            <i class="fas fa-chevron-right text-[10px]"></i>
-                        </button>
-                    </div>
-                    <div class="pdf-container flex items-center justify-center p-4">
-                        {% if exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
-                        <img :src="pages[page - 1]" class="max-w-full h-auto shadow-xl rounded-xl" alt="Halaman soal">
-                        {% else %}
-                        <div class="flex items-center justify-center text-stone-400 py-20">
-                            <i class="fas fa-file-pdf text-5xl mb-3"></i>
-                            <p class="font-semibold">PDF belum diupload</p>
+            <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
+            <div x-show="!submitted" style="display:none" class="mb-3">
+                <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
+                    <div x-show="currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
+                        <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
+                            <i class="fas fa-pencil-alt"></i>
+                            <span>Soal #<span x-text="i+1"></span> <span x-text="q.type==='mcq'?'— Corat-coret pada halaman PDF':'— Canvas + PDF'"></span></span>
+                            <span class="ml-auto" x-text="totalPages>0 ? 'Hlm '+page+'/'+totalPages : ''"></span>
                         </div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-
-            <!-- Essay: Combined drawing + text on PDF image — placed BEFORE soal -->
-            <div x-show="isEssayTypeCurrent()" style="display:none" class="mb-3">
-                <template x-for="(q, i) in questions" :key="'essay-' + i">
-                    <div x-show="(q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') && currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
-                        <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold"
-                             :class="q.type === 'essay_text' ? 'bg-gradient-to-r from-amber-50 to-orange-50 text-amber-700 border-amber-100' : 'bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700 border-emerald-100'">
-                            <i :class="q.type === 'essay_text' ? 'fas fa-font' : 'fas fa-pen-fancy'"></i>
-                            <span x-text="q.type === 'essay_text' ? 'Corat-coret &amp; teks pada halaman PDF' : 'Gambar &amp; teks pada halaman PDF'"></span>
-                            <span class="ml-auto" x-text="'Soal #' + (i+1) + ' (' + (q.type === 'essay_text' ? 'Teks+Coretan' : 'Canvas') + ')'"></span>
-                        </div>
-                        <div class="draw-toolbar px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100">
-                            <button type="button" @click="setEssayCanvasMode(i, 'pen')" :class="essayCanvasMode[i] === 'pen' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-pencil-alt mr-1"></i> Pena</button>
-                            <button type="button" @click="setEssayCanvasMode(i, 'line')" :class="essayCanvasMode[i] === 'line' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-slash mr-1"></i> Garis</button>
-                            <template x-if="essayCanvasMode[i] === 'line'">
-                                <div class="flex items-center gap-1">
-                                    <select x-model="essayLineWidth[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white w-16">
-                                        <option value="0.5">0.5 px</option>
-                                        <option value="1">1 px</option>
-                                        <option value="1.5">1.5 px</option>
-                                        <option value="2">2 px</option>
-                                        <option value="3">3 px</option>
-                                        <option value="4">4 px</option>
-                                        <option value="6">6 px</option>
-                                        <option value="8">8 px</option>
-                                    </select>
-                                    <select x-model="lineDash[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white">
-                                        <option value="solid">— Solid</option>
-                                        <option value="dashed">--- Dashed</option>
-                                        <option value="dotted">··· Dotted</option>
-                                    </select>
-                                </div>
+                        <div class="draw-toolbar px-3 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100 flex-wrap">
+                            <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1">Gambar:</span>
+                            <button type="button" @click="setEssayCanvasMode(i, 'pen')" :class="essayCanvasMode[i] === 'pen' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Pena bebas"><i class="fas fa-pencil-alt mr-1"></i>Pena</button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'line')" :class="essayCanvasMode[i] === 'line' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Garis lurus"><i class="fas fa-slash mr-1"></i>Garis</button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'eraser')" :class="essayCanvasMode[i] === 'eraser' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Hapus"><i class="fas fa-eraser mr-1"></i>Hapus</button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'text')" :class="essayCanvasMode[i] === 'text' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Teks"><i class="fas fa-font mr-1"></i>Teks</button>
+                            <input type="color" :value="essayCanvasColor[i]" @input="essayCanvasColor[i] = $event.target.value; if(canvasDraw[i]) canvasDraw[i].ctx.strokeStyle = $event.target.value" class="w-6 h-6 border rounded cursor-pointer p-0.5 ml-1" title="Warna">
+                            <select x-model="essayLineWidth[i]" class="text-[9px] font-bold border rounded px-1 py-0.5 bg-white w-14 ml-1" title="Ketebalan">
+                                <template x-for="sz in [1,1.5,2,2.5,3,4,5]"><option :value="sz" x-text="sz"></option></template>
+                            </select>
+                            <span class="w-px h-4 bg-stone-300 mx-1"></span>
+                            <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1">Alat:</span>
+                            <button type="button" @click="toggleRuler(i)" :class="showRuler[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Penggaris — gambar garis lurus"><i class="fas fa-ruler mr-1"></i>Ruler</button>
+                            <button type="button" @click="toggleProtractor(i)" :class="showProtractor[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Busur — ukur sudut"><i class="fas fa-drafting-compass mr-1"></i>Busur</button>
+                            <button type="button" @click="toggleTriangle(i)" :class="showTriangle[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Segitiga — siku 45°"><i class="fas fa-draw-polygon mr-1"></i>Siku</button>
+                            <button type="button" @click="toggleCompass(i)" :class="essayCanvasMode[i] === 'compass' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Jangka — gambar lingkaran"><i class="fas fa-circle mr-1"></i>Jangka</button>
+                            <span class="w-px h-4 bg-stone-300 mx-1"></span>
+                            <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-2.5 py-1.5 text-[11px] font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-25"><i class="fas fa-undo mr-1"></i></button>
+                            <button type="button" @click="clearCanvas(i)" class="px-2.5 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-50"><i class="fas fa-trash-alt mr-1"></i></button>
+                            <template x-if="antiCheat.allow_calculator">
+                                <button type="button" @click="toggleCalculator" :class="showCalculator ? 'bg-orange-100 ring-2 ring-orange-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Kalkulator Ilmiah"><i class="fas fa-calculator mr-1"></i>Kalk</button>
                             </template>
-                            <button type="button" @click="setEssayCanvasMode(i, 'eraser')" :class="essayCanvasMode[i] === 'eraser' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-eraser mr-1"></i> Hapus</button>
-                            <input type="color" :value="essayCanvasColor[i]" @input="essayCanvasColor[i] = $event.target.value; if(canvasDraw[i]) canvasDraw[i].ctx.strokeStyle = $event.target.value" class="w-7 h-7 border-2 rounded-lg cursor-pointer p-0.5">
-                            <button type="button" @click="setEssayCanvasMode(i, 'text')" :class="essayCanvasMode[i] === 'text' ? 'active' : ''" class="px-3 py-1.5 font-bold"><i class="fas fa-font mr-1"></i> Teks</button>
-                            <template x-if="essayCanvasMode[i] === 'text'">
-                                <div class="flex items-center gap-1">
-                                    <select x-model="textFontSize[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white" @change="updateTextBoxFonts(i)">
-                                        <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
-                                    </select>
-                                    <select x-model="textFontFamily[i]" class="text-[10px] font-bold border rounded px-1 py-0.5 bg-white max-w-[90px]" @change="updateTextBoxFonts(i)">
-                                        <option value="Nunito, sans-serif">Nunito</option>
-                                        <option value="Arial, sans-serif">Arial</option>
-                                        <option value="Georgia, serif">Georgia</option>
-                                        <option value="Courier New, monospace">Courier</option>
-                                        <option value="Times New Roman, serif">Times NR</option>
-                                    </select>
-                                </div>
-                            </template>
-                            <span class="w-px h-5 bg-stone-200 mx-0.5"></span>
-                            <button type="button" @click="toggleRuler(i)" :class="showRuler[i] ? 'active' : ''" class="px-3 py-1.5 font-bold" title="Penggaris"><i class="fas fa-ruler mr-1"></i> Penggaris</button>
-                            <button type="button" @click="toggleProtractor(i)" :class="showProtractor[i] ? 'active' : ''" class="px-3 py-1.5 font-bold" title="Busur derajat"><i class="fas fa-drafting-compass mr-1"></i> Busur</button>
-                            <span class="w-px h-5 bg-stone-200 mx-0.5"></span>
-                            <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-3 py-1.5 font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-30"><i class="fas fa-undo mr-1"></i> Undo</button>
-                            <button type="button" @click="clearCanvas(i)" class="px-3 py-1.5 font-bold text-red-500 hover:bg-red-50 border-red-200"><i class="fas fa-trash-alt mr-1"></i> Hapus</button>
-                            <span class="text-xs font-bold text-stone-400 ml-auto" x-text="((textBoxes[i]||{})[page-1]?.length || 0) + ' teks hlm ini' + ((hasDrawn[i]||{})[page-1] ? ', coretan' : '')"></span>
+                            <span class="text-[10px] font-bold text-stone-400 ml-auto" x-text="((hasDrawn[i]||{})[page-1] ? '✏️ ' : '') + ((textBoxes[i]||{})[page-1]?.length || 0) + ' teks'"></span>
                         </div>
-                        <!-- Page navigation for essay section -->
                         <div class="flex items-center justify-end gap-2 px-4 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100" x-show="pages.length > 0">
                             <button type="button" @click="prevPage" :disabled="page <= 1"
-                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-left text-[9px]"></i>
                             </button>
                             <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
                             <button type="button" @click="nextPage" :disabled="page >= totalPages"
-                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 hover:border-orange-300 transition flex items-center gap-1">
+                                    class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-right text-[9px]"></i>
                             </button>
                         </div>
@@ -259,71 +409,114 @@
                                 <canvas :id="'ec-canvas-' + i"
                                         class="absolute inset-0 w-full h-full"
                                         :style="'cursor:' + (essayCanvasMode[i]==='line' ? 'crosshair' : essayCanvasMode[i]==='eraser' ? 'cell' : essayCanvasMode[i]==='text' ? 'text' : 'crosshair') + ';touch-action:none'"></canvas>
-                                 <!-- Ruler overlay -->
-                                <div x-show="showRuler[i]" class="tool-overlay" :id="'ruler-overlay-' + i">
-                                    <svg :id="'ruler-svg-' + i" class="tool-handle" style="overflow:visible;"
-                                         :style="'transform:rotate('+(rulerAngle[i]||0)+'deg);transform-origin:50% 50%;width:'+(rulerWidth[i]||500)+'px;height:'+(rulerWidth[i]||500)*50/400+'px;left:'+(rulerX[i]||50)+'px;top:'+(rulerY[i]||100)+'px;'"
-                                         viewBox="0 0 400 50" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-                                        <rect x="0" y="0" width="400" height="50" fill="rgba(200,220,255,0.28)" stroke="rgba(0,0,150,0.5)" stroke-width="1" rx="2"/>
-                                        <line x1="0" y1="0" x2="400" y2="0" stroke="rgba(0,0,150,0.6)" stroke-width="0.8"/>
-                                        {% for t in range(41) %}
-                                        <line x1="{{ t*10 }}" x2="{{ t*10 }}" y1="0" y2="{{ 16 if t%10==0 else (11 if t%5==0 else 6) }}" stroke="rgba(0,0,150,0.5)" stroke-width="{{ 1 if t%10==0 else 0.4 }}"/>
-                                        {% endfor %}
-                                        {% for cm in range(0,21,2) %}
-                                        <text x="{{ cm*20-3 }}" y="15" font-size="5.5" fill="rgba(0,0,150,0.7)" font-weight="bold">{{ cm }}</text>
-                                        {% endfor %}
-                                        <line x1="0" y1="50" x2="400" y2="50" stroke="rgba(150,0,0,0.6)" stroke-width="0.8"/>
-                                        {% for t in range(33) %}
-                                        <line x1="{{ t*12.5 }}" x2="{{ t*12.5 }}" y1="50" y2="{{ 34 if t%4==0 else (39 if t%2==0 else 45) }}" stroke="rgba(150,0,0,0.5)" stroke-width="{{ 1 if t%4==0 else 0.4 }}"/>
-                                        {% endfor %}
-                                        {% for inch in range(9) %}
-                                        <text x="{{ inch*50-3 }}" y="48" font-size="5.5" fill="rgba(150,0,0,0.7)" font-weight="bold">{{ inch }}″</text>
-                                        {% endfor %}
-                                        <line x1="0" y1="25" x2="400" y2="25" stroke="rgba(255,0,0,0.5)" stroke-width="1.2" stroke-dasharray="6,3"/>
-                                        <text x="2" y="23" font-size="4.5" fill="rgba(0,0,150,0.5)" font-weight="bold">cm</text>
-                                        <text x="2" y="32" font-size="4.5" fill="rgba(150,0,0,0.5)" font-weight="bold">inch</text>
-                                    </svg>
-                                    <div class="absolute flex items-center gap-1.5 bg-slate-800/90 text-white rounded-lg px-2.5 py-1.5 text-[10px] font-bold pointer-events-auto" :style="'left:'+(rulerX[i]||50)+'px;top:'+((rulerY[i]||100)-32)+'px;'">
-                                        <i class="fas fa-grip-lines cursor-move" @mousedown.stop="startToolDrag(i,'ruler',$event)" @touchstart.stop="startToolDrag(i,'ruler',$event)" title="Drag"></i>
-                                        <i class="fas fa-magnet cursor-pointer" :class="snapRuler[i]?'text-emerald-400':'text-slate-400'" @click="snapRuler[i]=!snapRuler[i]" title="Snap to ruler"></i>
-                                        <i class="fas fa-sync-alt cursor-pointer" @mousedown.stop="startToolRotate(i,'ruler',$event)" @touchstart.stop="startToolRotate(i,'ruler',$event)" title="Rotate"></i>
-                                        <input type="range" min="200" max="1200" :value="rulerWidth[i]||500" @input="rulerWidth[i]=+$event.target.value" class="w-20 h-1.5 accent-orange-400" title="Size">
-                                        <i class="fas fa-times cursor-pointer text-red-400" @click="showRuler[i]=false"></i>
-                                    </div>
+                                <!-- Ruler overlay -->
+                                  <div x-show="showRuler[i]" class="tool-overlay" :id="'ruler-overlay-' + i">
+                                     <svg :id="'ruler-svg-' + i" style="overflow:visible;pointer-events:none"
+                                           :style="'transform:rotate('+(rulerAngle[i]||0)+'deg);transform-origin:50% 50%;width:'+(rulerWidth[i]||900)+'px;height:'+((rulerWidth[i]||900)*70/436)+'px;left:'+(rulerX[i]||50)+'px;top:'+(rulerY[i]||100)+'px;'"
+                                           viewBox="-8 0 436 70" preserveAspectRatio="xMidYMid meet">
+                                           <rect x="-8" y="0" width="436" height="68" fill="rgba(245,248,255,0.3)" stroke="rgba(0,0,120,0.4)" stroke-width="1" rx="3"/>
+                                           <g class="tool-marks"></g>
+                                           <text x="4" y="12" font-size="5" fill="rgba(0,0,120,0.55)">cm</text>
+                                           <line x1="0" y1="34" x2="420" y2="34" stroke="rgba(180,180,200,0.25)" stroke-width="0.5"/>
+                                           <text x="4" y="58" font-size="5" fill="rgba(180,80,0,0.55)">in</text>
+                                      </svg>
+                                      <!-- Drag handle on left overhang -->
+                                      <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*4/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                           @mousedown.stop="startToolDrag(i,'ruler',$event)" @touchstart.stop="startToolDrag(i,'ruler',$event)" title="Seret">
+                                         <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                      </div>
+                                      <!-- Rotate handle on right overhang -->
+                                      <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*434/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                           @mousedown.stop="startToolRotate(i,'ruler',$event)" @touchstart.stop="startToolRotate(i,'ruler',$event)" title="Putar">
+                                         <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                      </div>
+                                      <!-- Close + angle below ruler body -->
+                                      <div class="tool-controlbar" :style="'left:'+((rulerX[i]||50)-2)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)+2)+'px;pointer-events:none;'">
+                                         <span class="text-stone-400 text-[8px] font-bold pointer-events-none" x-text="Math.round(rulerAngle[i]||0)+'°'"></span>
+                                         <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:4px" @click="showRuler[i]=false" title="Tutup"></div>
+                                      </div>
+                                   </div>
+                                 <!-- Protractor overlay -->
+                                 <div x-show="showProtractor[i]" class="tool-overlay" :id="'protractor-overlay-' + i">
+                                     <svg :id="'protractor-svg-' + i" style="overflow:visible;pointer-events:none"
+                                          :style="'transform:scale('+((protractorScale[i]||100)/100)+') rotate('+(protractorAngle[i]||0)+'deg);transform-origin:50% 50%;width:'+(protractorSize[i]||350)+'px;height:'+(protractorSize[i]||350)+'px;left:'+(protractorX[i]||80)+'px;top:'+(protractorY[i]||50)+'px;'"
+                                         viewBox="0 0 400 400" preserveAspectRatio="xMidYMid meet">
+                                           <path d="M 10 350 A 190 190 0 0 1 390 350 Z" fill="rgba(200,220,255,0.22)" stroke="rgba(0,0,120,0.5)" stroke-width="1.5"/>
+                                          <line x1="10" y1="350" x2="390" y2="350" stroke="rgba(0,0,120,0.4)" stroke-width="1"/>
+                                          <line x1="200" y1="350" x2="200" y2="155" stroke="rgba(0,0,120,0.2)" stroke-width="0.8"/>
+                                           <g class="tool-marks"></g>
+                                          <circle cx="200" cy="350" r="4" fill="rgba(200,50,0,0.8)" pointer-events="none"/>
+                                          <line x1="194" y1="350" x2="206" y2="350" stroke="rgba(200,50,0,0.5)" stroke-width="1.2" pointer-events="none"/>
+                                          <line x1="200" y1="344" x2="200" y2="356" stroke="rgba(200,50,0,0.5)" stroke-width="1.2" pointer-events="none"/>
+                                         <line x1="10" y1="344" x2="10" y2="356" stroke="rgba(0,0,120,0.6)" stroke-width="1.5"/>
+                                         <line x1="390" y1="344" x2="390" y2="356" stroke="rgba(0,0,120,0.6)" stroke-width="1.5"/>
+                                          <g class="tool-angle-marks"></g>
+                                     </svg>
+                                       <div class="tool-controlbar flex items-center gap-0.5 bg-slate-800/80 text-white rounded-lg px-1.5 py-0.5 text-[9px] font-bold pointer-events-none whitespace-nowrap" :style="'left:'+Math.max(0,(protractorX[i]||80)-2)+'px;top:'+((protractorY[i]||50)-18)+'px;'">
+                                          <i class="tool-ctrl-btn drag fas fa-grip-lines" style="position:static;width:16px;height:16px;font-size:7px;border-radius:3px" @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" title="Seret"></i>
+                                          <span class="text-white font-bold text-[8px]" x-text="(protractorSize[i]||350)+'px'"></span>
+                                          <span class="text-stone-300 mx-0.5">|</span>
+                                          <span class="text-orange-300 text-[8px]" x-text="'∠'+Math.round(protractorAngle[i]||0)+'°'"></span>
+                                          <i class="tool-ctrl-btn close fas fa-times" style="position:static;width:14px;height:14px;font-size:7px;border-radius:3px;margin-left:2px" @click="showProtractor[i]=false" title="Tutup"></i>
+                                       </div>
+                                        <!-- Protractor drag handle (center point) -->
+                                        <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                             @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" title="Seret">
+                                           <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                        </div>
+                                        <!-- Protractor rotate handle (top of arc) -->
+                                        <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*155/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                            @mousedown.stop="startToolRotate(i,'protractor',$event)" @touchstart.stop="startToolRotate(i,'protractor',$event)" title="Putar">
+                                          <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                       </div>
+                                       <!-- Protractor resize handle (right end of baseline) -->
+                                       <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*390/400-8)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-8)+'px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,120,0.7);border:2px solid rgba(255,255,255,0.3);z-index:6;pointer-events:auto;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;'"
+                                            @mousedown.stop="startProtractorResize(i,$event)" @touchstart.stop="startProtractorResize(i,$event)" title="Perbesar/perkecil">
+                                          <i class="fas fa-expand-alt text-white" style="font-size:6px;pointer-events:none"></i>
+                                       </div>
+                                 </div>
+                                 <!-- Compass overlay: tampil saat mode jangka aktif -->
+                                <div x-show="essayCanvasMode[i] === 'compass'" class="tool-overlay" :id="'compass-overlay-' + i">
+                                    <svg :id="'compass-svg-' + i" style="overflow:visible;"
+                                          :style="'transform:scale('+((compassScale[i]||100)/100)+') rotate('+(compassAngle[i]||0)+'deg);transform-origin:50% 50%;width:'+(compassSize[i]||300)+'px;height:'+(compassSize[i]||300)+'px;left:'+(compassX[i]||120)+'px;top:'+(compassY[i]||80)+'px;'"
+                                         viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet"
+                                     </svg>
+                                     <div class="tool-controlbar" :style="'left:'+(compassX[i]||120)+'px;top:'+((compassY[i]||100)-12)+'px;'">
+                                        <i class="tool-ctrl-btn drag fas fa-grip-lines" @mousedown.stop="startToolDrag(i,'compass',$event)" @touchstart.stop="startToolDrag(i,'compass',$event)" title="Seret"></i>
+                                        <i class="tool-ctrl-btn fas fa-sync-alt" style="left:28px;" @mousedown.stop="startToolRotate(i,'compass',$event)" @touchstart.stop="startToolRotate(i,'compass',$event)" title="Putar"></i>
+                                        <i class="tool-ctrl-btn close fas fa-times" style="left:56px;" @click="essayCanvasMode[i]='pen'" title="Tutup"></i>
+                                     </div>
                                 </div>
-                                <!-- Protractor overlay -->
-                                <div x-show="showProtractor[i]" class="tool-overlay" :id="'protractor-overlay-' + i">
-                                    <svg :id="'protractor-svg-' + i" class="tool-handle" style="overflow:visible;"
-                                         :style="'transform:rotate('+(protractorAngle[i]||0)+'deg);transform-origin:50% 92.8%;width:'+(protractorSize[i]||350)+'px;height:'+(protractorSize[i]||350)*140/260+'px;left:'+(protractorX[i]||100)+'px;top:'+(protractorY[i]||80)+'px;'"
-                                         viewBox="0 0 260 140" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M 10 130 A 120 120 0 0 1 250 130 Z" fill="rgba(200,220,255,0.15)" stroke="rgba(0,0,150,0.5)" stroke-width="0.8"/>
-                                        {% for d in range(181) %}
-                                        {% set rad = d * 3.14159265 / 180 %}
-                                        {% set inner_r = 102 if d%10==0 else (111 if d%5==0 else 116) %}
-                                        <line x1="{{ (130 + 120*cos(rad))|round(2) }}" y1="{{ (130 - 120*sin(rad))|round(2) }}" x2="{{ (130 + inner_r*cos(rad))|round(2) }}" y2="{{ (130 - inner_r*sin(rad))|round(2) }}" stroke="rgba(0,0,150,0.5)" stroke-width="{{ 1 if d%10==0 else 0.3 }}"/>
-                                        {% endfor %}
-                                        {% for d in range(0,181,10) %}
-                                        {% set rad = d * 3.14159265 / 180 %}
-                                        <text x="{{ (130 + 94*cos(rad) - 5)|round(2) }}" y="{{ (130 - 94*sin(rad) + 3)|round(2) }}" font-size="5.5" fill="rgba(0,0,150,0.65)" font-weight="bold">{{ d }}</text>
-                                        {% endfor %}
-                                        {% for d in range(0,181,10) %}
-                                        {% set rev_rad = (180 - d) * 3.14159265 / 180 %}
-                                        <line x1="{{ (130 + 102*cos(rev_rad))|round(2) }}" y1="{{ (130 - 102*sin(rev_rad))|round(2) }}" x2="{{ (130 + 94*cos(rev_rad))|round(2) }}" y2="{{ (130 - 94*sin(rev_rad))|round(2) }}" stroke="rgba(150,50,0,0.35)" stroke-width="0.7"/>
-                                        <text x="{{ (130 + 85*cos(rev_rad) - 5)|round(2) }}" y="{{ (130 - 85*sin(rev_rad) + 3)|round(2) }}" font-size="5" fill="rgba(150,50,0,0.45)" font-weight="bold">{{ d }}</text>
-                                        {% endfor %}
-                                        <line x1="10" y1="130" x2="250" y2="130" stroke="rgba(255,0,0,0.4)" stroke-width="0.8" stroke-dasharray="5,3"/>
-                                        <line x1="130" y1="130" x2="130" y2="10" stroke="rgba(255,0,0,0.15)" stroke-width="0.5" stroke-dasharray="2,3"/>
-                                        <circle cx="130" cy="130" r="2.5" fill="rgba(255,0,0,0.6)"/>
-                                        <circle cx="130" cy="130" r="5" fill="none" stroke="rgba(255,0,0,0.4)" stroke-width="0.5"/>
-                                    </svg>
-                                    <div class="absolute flex items-center gap-1.5 bg-slate-800/90 text-white rounded-lg px-2.5 py-1.5 text-[10px] font-bold pointer-events-auto" :style="'left:'+(protractorX[i]||100)+'px;top:'+((protractorY[i]||80)-32)+'px;'">
-                                        <i class="fas fa-grip-lines cursor-move" @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" title="Drag"></i>
-                                        <i class="fas fa-magnet cursor-pointer" :class="snapProtractor[i]?'text-emerald-400':'text-slate-400'" @click="snapProtractor[i]=!snapProtractor[i]" title="Snap to protractor"></i>
-                                        <i class="fas fa-sync-alt cursor-pointer" @mousedown.stop="startToolRotate(i,'protractor',$event)" @touchstart.stop="startToolRotate(i,'protractor',$event)" title="Rotate"></i>
-                                        <input type="range" min="180" max="700" :value="protractorSize[i]||350" @input="protractorSize[i]=+$event.target.value" class="w-20 h-1.5 accent-orange-400" title="Size">
-                                        <i class="fas fa-times cursor-pointer text-red-400" @click="showProtractor[i]=false"></i>
-                                    </div>
-                                </div>
+                                 <!-- Triangle overlay: segitiga siku 45° (seperti ruler) -->
+                                  <div x-show="showTriangle[i]" class="tool-overlay" :id="'triangle-overlay-' + i">
+                                      <svg :id="'triangle-svg-' + i" style="overflow:visible;pointer-events:none"
+                                           :style="'transform:rotate('+(triangleAngle[i]||0)+'deg);transform-origin:50% 50%;width:'+(triangleSize[i]||320)+'px;height:'+(triangleSize[i]||320)+'px;left:'+(triangleX[i]||160)+'px;top:'+(triangleY[i]||120)+'px;'"
+                                          viewBox="-12 0 332 332" preserveAspectRatio="xMidYMid meet">
+                                          <polygon points="15,12 15,310 310,310" fill="rgba(245,248,255,0.3)" stroke="rgba(0,0,120,0.4)" stroke-width="1" stroke-linejoin="round"/>
+                                          <g class="tool-marks"></g>
+                                          <path d="M 21,300 L 21,288 L 33,288" fill="none" stroke="rgba(200,50,0,0.5)" stroke-width="1.2"/>
+                                          <text x="165" y="180" font-size="8" fill="rgba(0,0,120,0.4)" font-weight="bold" transform="rotate(-45,165,180)">45°</text>
+                                      </svg>
+                                       <!-- Drag handle at bottom-right corner -->
+                                       <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*322/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*322/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                           @mousedown.stop="startToolDrag(i,'triangle',$event)" @touchstart.stop="startToolDrag(i,'triangle',$event)" title="Seret">
+                                         <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                      </div>
+                                      <!-- Rotate handle at right-angle corner -->
+                                      <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*27/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*24/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                           @mousedown.stop="startToolRotate(i,'triangle',$event)" @touchstart.stop="startToolRotate(i,'triangle',$event)" title="Putar">
+                                         <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                      </div>
+                                      <div class="tool-controlbar" :style="'left:'+((triangleX[i]||160)-4)+'px;top:'+((triangleY[i]||120)+((triangleSize[i]||320)*310/332)+4)+'px;pointer-events:none;'">
+                                         <span class="text-stone-400 text-[8px] font-bold ml-1 pointer-events-none" x-text="Math.round(triangleAngle[i]||0)+'°'"></span>
+                                         <span class="text-stone-500 mx-0.5 pointer-events-none">|</span>
+                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize[i]=Math.max(200,(triangleSize[i]||320)-30); rebuildTriangle(i)" title="Perkecil">−</div>
+                                         <span class="text-white font-bold text-[7px] pointer-events-none" x-text="(triangleSize[i]||320)+'px'"></span>
+                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize[i]=Math.min(500,(triangleSize[i]||320)+30); rebuildTriangle(i)" title="Perbesar">+</div>
+                                         <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:2px" @click="showTriangle[i]=false" title="Tutup"></div>
+                                      </div>
+                                  </div>
+
                                 <template x-for="(box, bi) in ((textBoxes[i] || {})[page - 1] || [])" :key="'tb-'+bi">
                                     <div class="text-box"
                                          :style="'left:' + (box.x_pct * 100) + '%;top:' + (box.y_pct * 100) + '%;'"
@@ -333,18 +526,24 @@
                                             <select x-model="box.fontSize" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
                                                 <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
                                             </select>
-                                            <select x-model="box.fontFamily" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
-                                                <option value="Nunito, sans-serif">Nunito</option>
-                                                <option value="Arial, sans-serif">Arial</option>
-                                                <option value="Georgia, serif">Georgia</option>
-                                                <option value="Courier New, monospace">Courier</option>
-                                                <option value="Times New Roman, serif">Times NR</option>
-                                            </select>
+                                             <select x-model="box.fontFamily" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
+                                                 <option value="Nunito, sans-serif">Nunito</option>
+                                                 <option value="Arial, sans-serif">Arial</option>
+                                                 <option value="Georgia, serif">Georgia</option>
+                                                 <option value="Courier New, monospace">Courier</option>
+                                                 <option value="Times New Roman, serif">Times NR</option>
+                                             </select>
+                                             <button type="button" @click="box.orient = box.orient === 'vertical' ? 'horizontal' : 'vertical'; textBoxes={...(textBoxes||{})}"
+                                                     class="text-white text-[10px] px-1.5 py-0.5 rounded font-bold"
+                                                     :class="box.orient === 'vertical' ? 'bg-orange-500' : 'bg-slate-600'"
+                                                     title="Orientasi teks">
+                                                 <i class="fas" :class="box.orient === 'vertical' ? 'fa-arrow-down' : 'fa-arrow-right'"></i>
+                                             </button>
                                         </div>
                                         <div class="box-handle"><i class="fas fa-grip-lines text-white text-[8px]"></i></div>
                                         <button type="button" class="box-del" @click="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
-                                        <textarea x-model="box.text"
-                                                  :style="'font-size:' + (box.fontSize || 14) + 'px; font-family:' + (box.fontFamily || 'Nunito, sans-serif')"
+                                         <textarea x-model="box.text"
+                                                  :style="'font-size:' + (box.fontSize || 16) + 'px; font-family:' + (box.fontFamily || 'Times New Roman, serif') + '; writing-mode:' + (box.orient === 'vertical' ? 'vertical-rl' : 'horizontal-tb') + ';'"
                                                   @input="onTextBoxInput(i); textBoxes = {...(textBoxes || {})}"
                                                   @copy.prevent @paste.prevent @cut.prevent @contextmenu.prevent
                                                   placeholder="Ketik..."
@@ -352,6 +551,18 @@
                                     </div>
                                 </template>
                             </div>
+                        </div>
+                        <!-- Bottom page nav for Essay -->
+                        <div class="flex items-center justify-end gap-2 px-4 py-3 bg-gradient-to-r from-orange-50/30 to-stone-50 border-t border-stone-100" x-show="pages.length > 0">
+                            <button type="button" @click="prevPage" :disabled="page <= 1"
+                                    class="px-3 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
+                                <i class="fas fa-chevron-left text-[9px]"></i> Sebelumnya
+                            </button>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                            <button type="button" @click="nextPage" :disabled="page >= totalPages"
+                                    class="px-3 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
+                                Selanjutnya <i class="fas fa-chevron-right text-[9px]"></i>
+                            </button>
                         </div>
                     </div>
                 </template>
@@ -390,7 +601,7 @@
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
                                 <div class="flex gap-2">
-                                    <template x-for="opt in ['A','B','C','D','E']">
+                                    <template x-for="opt in (_shuffledOpts[i] || ['A','B','C','D','E'])">
                                         <button type="button" @click="markAnswered(i, opt)"
                                                 class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
                                                 :class="q.answer === opt ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
@@ -442,6 +653,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script defer src="/static/js/tools.js"></script>
 <script>
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
@@ -449,7 +661,7 @@ const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 function examApp(duration, totalQ) {
     return {
         timeLeft: duration,
-        sidebarOpen: window.innerWidth > 768,
+        sidebarOpen: false,
         submitted: false,
         page: 1,
         totalPages: {{ (exam.pdf_page_urls or []) | length }},
@@ -457,10 +669,14 @@ function examApp(duration, totalQ) {
         currentQ: 0,
         totalQ: totalQ,
         answered: {},
+        _qOrder: null,
+        _shuffledOpts: {},
+        _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
         questions: Array.from({length: totalQ}, (_, i) => {
             const rawMedia = QUESTION_AUDIO[i] || {};
             return {
                 type: ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] || 'mcq',
+                origIdx: i,
                 answer: null,
                 audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
                 youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
@@ -489,18 +705,35 @@ function examApp(duration, totalQ) {
         ecCanvasInited: {},
         textFontSize: {},
         textFontFamily: {},
+        textOrientation: {},
         showRuler: {},
         rulerX: {},
         rulerY: {},
         rulerWidth: {},
         rulerAngle: {},
+        rulerScale: {},
         snapRuler: {},
         showProtractor: {},
         protractorX: {},
         protractorY: {},
         protractorSize: {},
         protractorAngle: {},
+        protractorScale: {},
         snapProtractor: {},
+        showCompass: {},
+        compassX: {},
+        compassY: {},
+        compassSize: {},
+        compassAngle: {},
+        compassScale: {},
+        snapCompass: {},
+        showTriangle: {},
+        triangleX: {},
+        triangleY: {},
+        triangleSize: {},
+        triangleAngle: {},
+        triangleScale: {},
+        snapTriangle: {},
         canScrollUp: false,
         canScrollDown: false,
         syncStatus: navigator.onLine ? 'synced' : 'offline',
@@ -512,6 +745,51 @@ function examApp(duration, totalQ) {
         lastSyncHash: '',
         _syncInFlight: false,
         _canvasSyncInFlight: false,
+        // Anti-cheat state
+        violationCount: 0,
+        totalPenalty: 0,
+        showViolationBanner: false,
+        violationMessage: '',
+        violationType: 'warning',
+        antiCheat: {{ {
+            'enabled': exam.get('anti_cheat_enabled', True),
+            'penalty_per_violation': exam.get('penalty_per_violation', 5),
+            'max_violations': exam.get('max_violations', 5),
+            'auto_submit_on_max': exam.get('auto_submit_on_max', True),
+            'fullscreen_required': exam.get('fullscreen_required', True),
+            'randomize_questions': exam.get('randomize_questions', False),
+            'randomize_options': exam.get('randomize_options', False),
+            'watermark_name': exam.get('watermark_name', True),
+            'block_copy_paste': exam.get('block_copy_paste', True),
+            'block_right_click': exam.get('block_right_click', True),
+            'allow_calculator': exam.get('allow_calculator', False),
+        } | tojson | safe }},
+        // Agreement widget
+        showExamAgreement: (function() { try { return !localStorage.getItem('sg_agreed_' + '{{ exam.id }}'); } catch(e) { return true; } })(),
+        agreed: false,
+        examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
+        // Calculator — Scientific (standar matematika/fisika)
+        showCalculator: false,
+        calcInput: '0',
+        calcResult: 0,
+        calcOp: null,
+        calcPrev: 0,
+        calcNew: true,
+        calcExpression: '',
+        calcAngleMode: 'DEG',
+        calcMemVal: 0,
+        calcHasMem: false,
+        calcParenLevel: 0,
+        // Device status bar
+        deviceBattery: 100,
+        deviceCharging: false,
+        connectionType: 'unknown',
+        connectionSpeed: '',
+        connectionLabel: 'Memeriksa...',
+        audioInputs: 0,
+        audioOutputs: 0,
+        audioInputLabel: '',
+        audioOutputLabel: '',
         init() {
             this.timer = setInterval(() => {
                 if (this.timeLeft <= 0) this.submitExam();
@@ -519,13 +797,12 @@ function examApp(duration, totalQ) {
             }, 1000);
             this.autoSaveTimer = setInterval(() => this.periodicSync(), 20000);
             this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 60000);
-            this.$watch('currentQ', (val) => {
-                if (this.questions[val] && this.questions[val].canvas && this.showCanvas[val] && !this.isEssayWithBg(val)) {
+            this.$watch('currentQ', (val, oldVal) => {
+                if (oldVal !== undefined) this.closeAllTools(oldVal);
+                if (this.questions[val] && this.questions[val].canvas && this.showCanvas[val] && this.questions[val]?.type !== 'essay_text') {
                     this.$nextTick(() => this.initCanvas(val));
                 }
-                if (this.questions[val]?.type !== 'mcq') {
-                    this.$nextTick(() => this.initEcCanvas(val));
-                }
+                this.$nextTick(() => this.initEcCanvas(val));
             });
             window.addEventListener('online', () => this.onGoOnline());
             window.addEventListener('offline', () => this.onGoOffline());
@@ -537,11 +814,32 @@ function examApp(duration, totalQ) {
                         new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data})], {type: 'application/json'}));
                 }
             });
+            // Shuffle questions if enabled
+            if (this.antiCheat.randomize_questions) {
+                this._shuffle(this.questions);
+                // Store shuffled order for answer key mapping
+                this._qOrder = this.questions.map((_, i) => i);
+            } else {
+                this._qOrder = null;
+            }
+            // Generate shuffled option array for each question
+            this._shuffledOpts = {};
+            const baseOpts = ['A','B','C','D','E'];
+            this.questions.forEach((q, i) => {
+                if (q.type === 'mcq' && this.antiCheat.randomize_options) {
+                    const shuffled = [...baseOpts];
+                    this._shuffle(shuffled);
+                    this._shuffledOpts[i] = shuffled;
+                }
+            });
             this.$nextTick(() => {
                 const v = this.currentQ;
-                if (this.questions[v]?.type !== 'mcq') this.initEcCanvas(v);
+                this.initEcCanvas(v);
+                this.initStatusBar();
                 this.updateScrollState();
                 this.loadDraft();
+                this.setupAntiCheat();
+                if (this.antiCheat.watermark_name) this.startWatermark();
             });
         },
         onGoOnline() {
@@ -558,6 +856,181 @@ function examApp(duration, totalQ) {
         },
         markDirty() {
             this.dirty = true;
+        },
+        setupAntiCheat() {
+            if (!this.antiCheat.enabled) {
+                console.log('Anti-cheat disabled for this exam');
+                return;
+            }
+            this._blurTimer = null;
+            // ─── Show active indicator in top bar ───
+            const acBadge = document.createElement('span');
+            acBadge.id = 'anti-cheat-badge';
+            acBadge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-red-50 text-red-600 border border-red-200';
+            acBadge.innerHTML = '<i class="fas fa-shield-alt text-[8px]"></i> Anti-Cheat ON';
+            const topBar = document.querySelector('.sticky-topbar .flex.items-center.gap-3');
+            if (topBar) topBar.prepend(acBadge);
+
+            // ─── Tab switch detection (reliable, no false positives) ───
+            document.addEventListener('visibilitychange', () => {
+                if (this.submitted) return;
+                if (document.hidden) {
+                    console.log('[AntiCheat] Tab hidden, starting 1.5s timer');
+                    this._blurTimer = setTimeout(() => { this.handleViolation(); }, 1500);
+                } else {
+                    console.log('[AntiCheat] Tab visible, clearing timer');
+                    if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
+                }
+            });
+            // ─── Window blur (click outside browser) ───
+            window.addEventListener('blur', () => {
+                if (this.submitted) return;
+                if (this.questions[this.currentQ]?.youtube) return;
+                if (!document.hidden) return; // still visible in another window? don't count
+                console.log('[AntiCheat] Window blurred');
+            });
+            window.addEventListener('focus', () => {
+                console.log('[AntiCheat] Window focused');
+                if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
+            });
+            // Fullscreen: gentle reminder, NO penalty
+            if (this.antiCheat.fullscreen_required) {
+                document.addEventListener('fullscreenchange', () => {
+                    if (this.submitted) return;
+                    if (!document.fullscreenElement) {
+                        this.violationMessage = 'Keluar dari layar penuh. Tekan F11 untuk kembali.';
+                        this.violationType = 'warning';
+                        this.showViolationBanner = true;
+                        setTimeout(() => { this.showViolationBanner = false; }, 4000);
+                    }
+                });
+            }
+            if (this.antiCheat.block_right_click) {
+                document.addEventListener('contextmenu', (e) => e.preventDefault());
+            }
+            if (this.antiCheat.block_copy_paste) {
+                document.addEventListener('copy', (e) => e.preventDefault());
+                document.addEventListener('paste', (e) => e.preventDefault());
+                document.addEventListener('cut', (e) => e.preventDefault());
+            }
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'PrintScreen') {
+                    e.preventDefault();
+                    if (this.antiCheat.block_copy_paste) navigator.clipboard.writeText('').catch(() => {});
+                }
+                if (e.key === 'Escape' && this._blurTimer) {
+                    clearTimeout(this._blurTimer);
+                    this._blurTimer = null;
+                }
+            });
+        },
+        handleViolation() {
+            console.log('[AntiCheat] Violation #' + (this.violationCount + 1));
+            this.violationCount++;
+            const base = this.antiCheat.penalty_per_violation || 5;
+            let currentPenalty = 0;
+            if (this.violationCount === 1) {
+                this.violationMessage = 'PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';
+                this.violationType = 'warning';
+            } else if (this.violationCount === 2) {
+                currentPenalty = base;
+                this.violationMessage = 'PELANGGARAN #' + this.violationCount + '! Penalti: -' + base + ' poin';
+                this.violationType = 'penalty';
+            } else if (this.violationCount === 3) {
+                currentPenalty = base * 2;
+                this.violationMessage = 'PELANGGARAN #' + this.violationCount + '! Penalti: -' + (base * 2) + ' poin';
+                this.violationType = 'penalty';
+            } else {
+                currentPenalty = base * 3;
+                this.violationMessage = 'PELANGGARAN #' + this.violationCount + '! Penalti: -' + (base * 3) + ' poin';
+                this.violationType = 'severe';
+            }
+            this.totalPenalty += currentPenalty;
+            this.showViolationBanner = true;
+            setTimeout(() => { this.showViolationBanner = false; }, 5000);
+            navigator.sendBeacon('/api/violation/log',
+                new Blob([JSON.stringify([{
+                    exam_id: '{{ exam.id }}',
+                    violation_type: 'tab_switch',
+                    timestamp: Date.now() / 1000,
+                    metadata: { violation_count: this.violationCount, penalty: currentPenalty }
+                }])], {type: 'application/json'}));
+            const maxV = this.antiCheat.max_violations || 0;
+            if (maxV > 0 && this.violationCount >= maxV && this.antiCheat.auto_submit_on_max) {
+                this.violationMessage = 'PELANGGARAN MAKSIMAL! Ujian otomatis dikumpulkan.';
+                this.violationType = 'severe';
+                this.showViolationBanner = true;
+                setTimeout(() => { this.submitExam(); }, 3000);
+            }
+        },
+        startWatermark() {
+            const name = '{{ g.user_name or g.user_email or "" }}';
+            if (!name) return;
+            const wm = document.createElement('div');
+            wm.id = 'anti-cheat-watermark';
+            wm.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;';
+            document.body.appendChild(wm);
+            const addStamps = () => {
+                wm.innerHTML = '';
+                for (let i = 0; i < 6; i++) {
+                    for (let j = 0; j < 4; j++) {
+                        const s = document.createElement('div');
+                        s.style.cssText = 'position:absolute;transform:rotate(-25deg);font-size:11px;font-weight:700;color:rgba(37,99,235,0.07);white-space:nowrap;user-select:none;';
+                        s.style.left = (i * 18 + 3) + '%';
+                        s.style.top = (j * 25 + 5) + '%';
+                        s.textContent = name;
+                        wm.appendChild(s);
+                    }
+                }
+            };
+            addStamps();
+        },
+        initStatusBar() {
+            // Battery API — realtime
+            if (navigator.getBattery) {
+                navigator.getBattery().then(bat => {
+                    const update = () => { this.deviceBattery = Math.round(bat.level * 100); this.deviceCharging = bat.charging; };
+                    update();
+                    bat.addEventListener('levelchange', update);
+                    bat.addEventListener('chargingchange', update);
+                }).catch(() => {});
+            }
+            // Network Information API — realtime
+            const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+            if (conn) {
+                const update = () => {
+                    const type = conn.type || conn.effectiveType || 'unknown';
+                    this.connectionType = type;
+                    const speed = conn.downlink ? conn.downlink + ' Mbps' : '';
+                    this.connectionSpeed = speed;
+                    const labels = { 'wifi': 'WiFi', 'ethernet': 'Ethernet', 'cellular': 'Seluler', '4g': '4G', '3g': '3G', '2g': '2G', 'slow-2g': '2G' };
+                    this.connectionLabel = (labels[type] || type) + (speed ? ' ' + speed : '');
+                };
+                update();
+                conn.addEventListener('change', update);
+            } else {
+                this.connectionLabel = navigator.onLine ? 'Online' : 'Offline';
+                this.connectionType = navigator.onLine ? 'wifi' : 'unknown';
+            }
+            // Audio devices — enumerate tanpa permission
+            const updateAudio = () => {
+                navigator.mediaDevices.enumerateDevices().then(devices => {
+                    const inputs = devices.filter(d => d.kind === 'audioinput');
+                    const outputs = devices.filter(d => d.kind === 'audiooutput');
+                    this.audioInputs = inputs.length;
+                    this.audioOutputs = outputs.length;
+                    // Cari label pertama yang tidak kosong
+                    const inLabel = inputs.find(d => d.label)?.label;
+                    const outLabel = outputs.find(d => d.label)?.label;
+                    this.audioInputLabel = inLabel || (inputs.length + ' terdeteksi');
+                    this.audioOutputLabel = outLabel || (outputs.length + ' terdeteksi');
+                }).catch(() => {});
+            };
+            updateAudio();
+            // Update saat perangkat ditambah/dicabut
+            if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+                navigator.mediaDevices.addEventListener('devicechange', updateAudio);
+            }
         },
         periodicSync() {
             this.saveToLocal();
@@ -597,18 +1070,54 @@ function examApp(duration, totalQ) {
             this.essayCanvasMode[i] = mode;
         },
         initEcCanvas(i) {
-            const area = document.getElementById('ec-area-' + i);
-            const canvas = document.getElementById('ec-canvas-' + i);
-            if (!area || !canvas || this.ecCanvasInited[i]) return;
-            const img = area.querySelector('img');
-            if (this.pages && this.pages.length > 0 && (!img || img.naturalWidth === 0)) {
-                setTimeout(() => this.initEcCanvas(i), 200);
+            const areas = document.querySelectorAll('[id^="ec-area-' + i + '"]');
+            let area = null, canvas = null;
+            for (const a of areas) {
+                const c = a.querySelector('canvas');
+                if (a.offsetWidth > 0 && a.offsetHeight > 0 && c) {
+                    area = a; canvas = c; break;
+                }
+            }
+            if (!area || !canvas) {
+                setTimeout(() => this.initEcCanvas(i), 150);
                 return;
             }
-            const ctx = canvas.getContext('2d');
+            const imgEl = area.querySelector('img');
+            if (this.pages && this.pages.length > 0 && imgEl) {
+                // Wait for image to load so canvas matches its natural size
+                if (imgEl.naturalWidth === 0) {
+                    imgEl.onload = () => this._doInitEcCanvas(i, area, canvas);
+                    setTimeout(() => this._doInitEcCanvas(i, area, canvas), 500);
+                    return;
+                }
+            }
+            this._doInitEcCanvas(i, area, canvas);
+        },
+        _doInitEcCanvas(i, area, canvas) {
+            if (this.ecCanvasInited[i]) {
+                const rect = area.getBoundingClientRect();
+                const imgEl = area.querySelector('img');
+                const targetW = imgEl ? imgEl.offsetWidth : rect.width;
+                const targetH = imgEl ? imgEl.offsetHeight : rect.height;
+                if (targetW > 0 && (canvas.width !== Math.round(targetW) || canvas.height !== Math.round(targetH))) {
+                    const oldData = canvas.toDataURL();
+                    canvas.width = targetW;
+                    canvas.height = targetH;
+                    const ctx = canvas.getContext('2d');
+                    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                    const img = new Image();
+                    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); };
+                    img.src = oldData;
+                }
+                return;
+            }
+            const imgEl = area.querySelector('img');
             const rect = area.getBoundingClientRect();
-            canvas.width = rect.width || 700;
-            canvas.height = rect.height || 400;
+            const targetW = imgEl && imgEl.offsetWidth > 0 ? imgEl.offsetWidth : (rect.width || 700);
+            const targetH = imgEl && imgEl.offsetHeight > 0 ? imgEl.offsetHeight : (rect.height || 500);
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext('2d');
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
@@ -617,10 +1126,11 @@ function examApp(duration, totalQ) {
             this.essayCanvasColor[i] = this.essayCanvasColor[i] || '#0000ff';
             this.essayLineWidth[i] = this.essayLineWidth[i] || '1.5';
             this.lineDash[i] = this.lineDash[i] || 'solid';
-            this.textFontSize[i] = this.textFontSize[i] || 14;
-            this.textFontFamily[i] = this.textFontFamily[i] || 'Nunito, sans-serif';
+            this.textFontSize[i] = this.textFontSize[i] || 16;
+            this.textFontFamily[i] = this.textFontFamily[i] || 'Times New Roman, serif';
             let drawing = false, lx = 0, ly = 0;
             let lineDrawing = false, lineStartX = 0, lineStartY = 0, lineSnapshot = null;
+            let circleDrawing = false, circleCenterX = 0, circleCenterY = 0, circleSnapshot = null;
             const getPos = e => {
                 const src = e.touches ? e.touches[0] : e;
                 const r = canvas.getBoundingClientRect();
@@ -635,7 +1145,7 @@ function examApp(duration, totalQ) {
                     const y_pct = p.y / canvas.height;
                     if (!this.textBoxes[i]) this.textBoxes[i] = {};
                     if (!this.textBoxes[i][p_idx]) this.textBoxes[i][p_idx] = [];
-                    this.textBoxes[i][p_idx].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 14, fontFamily: this.textFontFamily[i] || 'Nunito, sans-serif' });
+                    this.textBoxes[i][p_idx].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 16, fontFamily: this.textFontFamily[i] || 'Times New Roman, serif', orient: 'horizontal' });
                     this.onTextBoxInput(i);
             this.$nextTick(() => {
                 const area = document.getElementById('ec-area-' + i);
@@ -657,16 +1167,37 @@ function examApp(duration, totalQ) {
                     this.markAnswered(i, true);
                     return;
                 }
+                if (mode === 'compass') {
+                    circleDrawing = true;
+                    circleCenterX = p.x; circleCenterY = p.y;
+                    circleSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+                    this.hasDrawn[i][p_idx] = true;
+                    this.markAnswered(i, true);
+                    return;
+                }
                 lx = p.x; ly = p.y;
                 drawing = true;
                 if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
                 this.hasDrawn[i][p_idx] = true;
                 this.markAnswered(i, true);
             };
+            // Cursor zone update (even when not drawing)
+            const updateCursor = e2 => {
+                if (drawing || lineDrawing || circleDrawing) return;
+                const cp = getPos(e2);
+                this._updateToolCursor(i, cp.x, cp.y);
+            };
+            canvas.addEventListener('mousemove', updateCursor);
+            canvas.addEventListener('touchmove', updateCursor, {passive:true});
             const onMove = e => {
-                if (!drawing && !lineDrawing) return;
+                if (!drawing && !lineDrawing && !circleDrawing) return;
                 e.preventDefault();
                 let p = getPos(e);
+                // Constrain to tool edge (OpenBoard-style)
+                if (this.essayCanvasMode[i] === 'pen' && (this.showRuler[i] || this.showTriangle[i])) {
+                    p = this._constrainToTool(i, p.x, p.y);
+                }
                 if (this.snapRuler[i] || this.snapProtractor[i]) {
                     p = this._snapPoint(i, p.x, p.y);
                 }
@@ -688,6 +1219,48 @@ function examApp(duration, totalQ) {
                     ctx.restore();
                     return;
                 }
+                if (circleDrawing) {
+                    if (circleSnapshot) ctx.putImageData(circleSnapshot, 0, 0);
+                    const lw = parseFloat(this.essayLineWidth[i]) || 1;
+                    const radius = Math.sqrt(Math.pow(p.x - circleCenterX, 2) + Math.pow(p.y - circleCenterY, 2));
+                    ctx.save();
+                    ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
+                    ctx.lineWidth = lw;
+                    const dash = this.lineDash[i] || 'solid';
+                    if (dash === 'dashed') ctx.setLineDash([lw * 4, lw * 2]);
+                    else if (dash === 'dotted') ctx.setLineDash([lw, lw * 2]);
+                    else ctx.setLineDash([]);
+                    ctx.beginPath();
+                    ctx.arc(circleCenterX, circleCenterY, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    // Draw center crosshair
+                    ctx.setLineDash([]);
+                    ctx.strokeStyle = 'rgba(255,0,0,0.3)';
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(circleCenterX - 6, circleCenterY);
+                    ctx.lineTo(circleCenterX + 6, circleCenterY);
+                    ctx.moveTo(circleCenterX, circleCenterY - 6);
+                    ctx.lineTo(circleCenterX, circleCenterY + 6);
+                    ctx.stroke();
+                    // Draw radius line
+                    ctx.strokeStyle = 'rgba(200,50,0,0.35)';
+                    ctx.lineWidth = 0.5;
+                    ctx.setLineDash([3,3]);
+                    ctx.beginPath();
+                    ctx.moveTo(circleCenterX, circleCenterY);
+                    ctx.lineTo(p.x, p.y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    // Radius label
+                    ctx.fillStyle = 'rgba(200,50,0,0.6)';
+                    ctx.font = '11px sans-serif';
+                    const labelX = (circleCenterX + p.x) / 2 + 6;
+                    const labelY = (circleCenterY + p.y) / 2 - 4;
+                    ctx.fillText('r=' + Math.round(radius) + 'px', labelX, labelY);
+                    ctx.restore();
+                    return;
+                }
                 if (this.essayCanvasMode[i] === 'eraser') {
                     ctx.globalCompositeOperation = 'destination-out';
                     ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
@@ -698,10 +1271,20 @@ function examApp(duration, totalQ) {
                 lx = p.x; ly = p.y;
             };
             const onEnd = e => {
-                if (!drawing && !lineDrawing) return;
+                if (!drawing && !lineDrawing && !circleDrawing) return;
                 if (lineDrawing) {
                     lineDrawing = false;
                     lineSnapshot = null;
+                    e.preventDefault();
+                    this.saveCanvasState(i);
+                    if (!this.canvasDirty[i]) this.canvasDirty[i] = {};
+                    this.canvasDirty[i][this.page - 1] = true;
+                    this.markDirty();
+                    return;
+                }
+                if (circleDrawing) {
+                    circleDrawing = false;
+                    circleSnapshot = null;
                     e.preventDefault();
                     this.saveCanvasState(i);
                     if (!this.canvasDirty[i]) this.canvasDirty[i] = {};
@@ -727,6 +1310,7 @@ function examApp(duration, totalQ) {
             canvas.addEventListener('mouseleave', () => {
                 if (drawing) { drawing = false; this.saveCanvasState(i); }
                 if (lineDrawing) { lineDrawing = false; lineSnapshot = null; this.saveCanvasState(i); }
+                if (circleDrawing) { circleDrawing = false; circleSnapshot = null; this.saveCanvasState(i); }
             });
             canvas.addEventListener('touchstart', onStart, { passive: false });
             canvas.addEventListener('touchmove', onMove, { passive: false });
@@ -734,6 +1318,26 @@ function examApp(duration, totalQ) {
             document.addEventListener('keydown', onKey);
             this.ecCanvasInited[i] = true;
             this.canvasDraw[i] = { el: canvas, ctx };
+            // Observe resize so canvas dimensions stay correct when element becomes visible
+            if (area._ecResizeObserver) area._ecResizeObserver.disconnect();
+            const ro = new ResizeObserver(() => {
+                if (this.ecCanvasInited[i] && document.getElementById('ec-canvas-' + i)) {
+                    const r = area.getBoundingClientRect();
+                    const c = document.getElementById('ec-canvas-' + i);
+                    if (c && (c.width !== Math.round(r.width) || c.height !== Math.round(r.height))) {
+                        const old = c.toDataURL();
+                        c.width = r.width || 700;
+                        c.height = r.height || 400;
+                        const cx = c.getContext('2d');
+                        cx.lineCap = 'round'; cx.lineJoin = 'round';
+                        const img = new Image();
+                        img.onload = () => { cx.drawImage(img, 0, 0, c.width, c.height); };
+                        img.src = old;
+                    }
+                }
+            });
+            ro.observe(area);
+            area._ecResizeObserver = ro;
             // Restore per-page data after init
             setTimeout(() => {
                 this._restorePage(i, this.page - 1);
@@ -747,7 +1351,7 @@ function examApp(duration, totalQ) {
             const p = this.page - 1;
             if (!this.textBoxes[i]) this.textBoxes[i] = {};
             if (!this.textBoxes[i][p]) this.textBoxes[i][p] = [];
-            this.textBoxes[i][p].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 14, fontFamily: this.textFontFamily[i] || 'Nunito, sans-serif' });
+            this.textBoxes[i][p].push({ x_pct, y_pct, text: '', fontSize: this.textFontSize[i] || 16, fontFamily: this.textFontFamily[i] || 'Times New Roman, serif', orient: 'horizontal' });
             this.textBoxes[i] = { ...this.textBoxes[i] }; // trigger reactivity
             this.markAnswered(i, true);
             this.$nextTick(() => {
@@ -815,7 +1419,7 @@ function examApp(duration, totalQ) {
         _saveCurrentPage(i) {
             if (!i && i !== 0) i = this.currentQ;
             const q = this.questions[i];
-            if (!q || q.type === 'mcq') return;
+            if (!q) return;
             const p = this.page - 1;
             if (!this.textBoxes[i]) this.textBoxes[i] = {};
             const allBoxes = [];
@@ -853,7 +1457,7 @@ function examApp(duration, totalQ) {
         _restorePage(i, p) {
             if (!i && i !== 0) i = this.currentQ;
             const q = this.questions[i];
-            if (!q || q.type === 'mcq') return;
+            if (!q) return;
             if (p === undefined) p = this.page - 1;
             // Restore text boxes — Alpine reactivity handles display
             if (this.textBoxes[i] && this.textBoxes[i][p]) {
@@ -877,25 +1481,40 @@ function examApp(duration, totalQ) {
         prevPage() {
             this._saveCurrentPage();
             if (this.page > 1) { this.page--; this.$nextTick(() => this._restorePage()); }
+            this.closeAllTools();
         },
         nextPage() {
             this._saveCurrentPage();
             if (this.page < this.totalPages) { this.page++; this.$nextTick(() => this._restorePage()); }
+            this.closeAllTools();
         },
-        youtubeEmbedUrl(url) {
-            if (!url) return '';
-            let videoId = '';
-            const patterns = [
-                /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
-                /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
-            ];
-            for (const p of patterns) {
-                const m = url.match(p);
-                if (m) { videoId = m[1]; break; }
+        closeAllTools(i) {
+            const idx = (i !== undefined && i !== null) ? i : this.currentQ;
+            this.showRuler[idx] = false;
+            this.showProtractor[idx] = false;
+            this.showCompass[idx] = false;
+            this.showTriangle[idx] = false;
+            this.showCalculator = false;
+            if (this.essayCanvasMode[idx] === 'compass') {
+                // Reset compass to pen when leaving question
+                this.essayCanvasMode[idx] = 'pen';
             }
-            if (!videoId) return url;
-            return 'https://www.youtube.com/embed/' + videoId + '?rel=0&modestbranding=1';
         },
+         youtubeEmbedUrl(url) {
+             if (!url) return '';
+             let videoId = '';
+             const patterns = [
+                 /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+                 /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+                 /youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/,
+             ];
+             for (const p of patterns) {
+                 const m = url.match(p);
+                 if (m) { videoId = m[1]; break; }
+             }
+             if (!videoId) return '';
+             return 'https://www.youtube.com/embed/' + videoId + '?rel=0&modestbranding=1';
+         },
         markAnswered(i, val) {
             this.answered[i] = true;
             this.questions[i].answer = val;
@@ -1065,6 +1684,18 @@ function examApp(duration, totalQ) {
                         if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
                     }
                     data[i] = { type: q.type, pages: pagesData };
+                } else if (q.type === 'mcq') {
+                    const pagesData = {};
+                    const totalP = this.totalPages || 1;
+                    for (let p = 0; p < totalP; p++) {
+                        const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
+                        if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
+                    }
+                    if (Object.keys(pagesData).length > 0) {
+                        data[i] = { answer: q.answer, pages: pagesData };
+                    } else if (q.answer) {
+                        data[i] = q.answer;
+                    }
                 } else if (q.answer) {
                     data[i] = q.answer;
                 }
@@ -1075,13 +1706,15 @@ function examApp(duration, totalQ) {
             this._saveCurrentPage();
             const data = this.getAnswersLight();
             this.questions.forEach((q, i) => {
-                if (q.type !== 'mcq' && data[i] && data[i].pages) {
+                const pagesObj = data[i] && typeof data[i] === 'object' ? data[i].pages : null;
+                if (((q.type !== 'mcq') || (q.type === 'mcq' && pagesObj)) && data[i] && (data[i].pages || pagesObj)) {
+                    const target = data[i].pages || pagesObj;
                     const totalP = this.totalPages || 1;
                     for (let p = 0; p < totalP; p++) {
                         const hasDrawing = !!(this.hasDrawn[i]?.[p]);
                         const canvasUrl = this.canvasData[i]?.[p];
-                        if ((hasDrawing || canvasUrl) && !data[i].pages[p]) data[i].pages[p] = {};
-                        if (hasDrawing && canvasUrl) data[i].pages[p].canvas = canvasUrl;
+                        if ((hasDrawing || canvasUrl) && !target[p]) target[p] = {};
+                        if (hasDrawing && canvasUrl) target[p].canvas = canvasUrl;
                     }
                 }
             });
@@ -1135,27 +1768,35 @@ function examApp(duration, totalQ) {
                 if (!data.answers) return;
                 const answers = data.answers;
                 this.questions.forEach((q, i) => {
-                if (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') {
-                        const qData = answers[i];
-                        if (qData && qData.pages) {
-                            Object.entries(qData.pages).forEach(([p, pageData]) => {
-                                const pIdx = parseInt(p);
-                                if (pageData.textBoxes) {
-                                    if (!this.textBoxes[i]) this.textBoxes[i] = {};
-                                    this.textBoxes[i][pIdx] = pageData.textBoxes;
-                                }
-                                if (pageData.canvas) {
-                                    if (!this.canvasData[i]) this.canvasData[i] = {};
-                                    this.canvasData[i][pIdx] = pageData.canvas;
-                                }
-                                if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
-                                this.hasDrawn[i][pIdx] = !!pageData.canvas;
-                            });
-                            if (Object.keys(qData.pages).length > 0) this.answered[i] = true;
+                    const qData = answers[i];
+                    const restorePages = (pages) => {
+                        if (!pages) return;
+                        Object.entries(pages).forEach(([p, pageData]) => {
+                            const pIdx = parseInt(p);
+                            if (pageData.textBoxes) {
+                                if (!this.textBoxes[i]) this.textBoxes[i] = {};
+                                this.textBoxes[i][pIdx] = pageData.textBoxes;
+                            }
+                            if (pageData.canvas) {
+                                if (!this.canvasData[i]) this.canvasData[i] = {};
+                                this.canvasData[i][pIdx] = pageData.canvas;
+                            }
+                            if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
+                            this.hasDrawn[i][pIdx] = !!pageData.canvas;
+                        });
+                        if (Object.keys(pages).length > 0) this.answered[i] = true;
+                    };
+                    if (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') {
+                        if (qData && qData.pages) restorePages(qData.pages);
+                    } else if (q.type === 'mcq' && qData) {
+                        if (typeof qData === 'object' && qData.answer) {
+                            q.answer = qData.answer;
+                            if (qData.pages) restorePages(qData.pages);
+                            this.answered[i] = true;
+                        } else if (typeof qData === 'string') {
+                            q.answer = qData;
+                            this.answered[i] = true;
                         }
-                    } else if (q.type === 'mcq' && answers[i]) {
-                        q.answer = answers[i];
-                        this.answered[i] = true;
                     }
                 });
             } catch(e) { console.warn('Load draft failed:', e); }
@@ -1279,6 +1920,49 @@ function examApp(duration, totalQ) {
                     }
                 }
             }
+            if (this.snapCompass[i] && this.showCompass[i]) {
+                const svgEl = document.getElementById('compass-svg-' + i);
+                if (svgEl) {
+                    const r = svgEl.getBoundingClientRect();
+                    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+                    const cp = toCanvas(cx, cy);
+                    const d = Math.hypot(cp.x - px, cp.y - py);
+                    if (d < bestDist) { bestDist = d; bestPt = cp; }
+                    const radius = Math.min(r.width, r.height) / 2 * 0.8;
+                    for (let a = 0; a < 360; a += 15) {
+                        const rad = a * Math.PI / 180;
+                        const px2 = cx + radius * Math.cos(rad);
+                        const py2 = cy + radius * Math.sin(rad);
+                        const cp2 = toCanvas(px2, py2);
+                        const d2 = Math.hypot(cp2.x - px, cp2.y - py);
+                        if (d2 < bestDist) { bestDist = d2; bestPt = cp2; }
+                    }
+                }
+            }
+            if (this.snapTriangle[i] && this.showTriangle[i]) {
+                const svgEl = document.getElementById('triangle-svg-' + i);
+                if (svgEl) {
+                    const r = svgEl.getBoundingClientRect();
+                    const pts = [
+                        { x: r.left, y: r.bottom },
+                        { x: r.right, y: r.bottom },
+                        { x: r.left, y: r.top },
+                    ];
+                    for (const pt of pts) {
+                        const cp = toCanvas(pt.x, pt.y);
+                        const d = Math.hypot(cp.x - px, cp.y - py);
+                        if (d < bestDist) { bestDist = d; bestPt = cp; }
+                    }
+                    const edges = [[0,0.5],[0.5,0.5],[0.5,0]];
+                    for (const [tx, ty] of edges) {
+                        const ex = r.left + tx * r.width;
+                        const ey = r.top + ty * r.height;
+                        const cp = toCanvas(ex, ey);
+                        const d = Math.hypot(cp.x - px, cp.y - py);
+                        if (d < bestDist) { bestDist = d; bestPt = cp; }
+                    }
+                }
+            }
             if (this.snapProtractor[i] && this.showProtractor[i]) {
                 const svgEl = document.getElementById('protractor-svg-' + i);
                 if (svgEl) {
@@ -1349,39 +2033,489 @@ function examApp(duration, totalQ) {
             }
             return bestDist <= SNAP_DIST && bestPt ? bestPt : { x: px, y: py };
         },
+        agreeExam() {
+            this.showExamAgreement = false;
+            this.sidebarOpen = false;
+            try { localStorage.setItem('sg_agreed_' + '{{ exam.id }}', '1'); } catch(e) {}
+            // Minta fullscreen (tidak wajib, user bisa Esc keluar tanpa penalti)
+            if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+        },
+        toggleCalculator() { this.showCalculator = !this.showCalculator; },
+        // Scientific calculator functions
+        _degToRad(d) { return d * Math.PI / 180; },
+        _radToDeg(r) { return r * 180 / Math.PI; },
+        _getVal() { return parseFloat(this.calcInput) || 0; },
+        _setVal(v) { this.calcInput = String(v); this.calcResult = v; },
+        calcButton(val) {
+            if (this.calcNew) { this.calcInput = ''; this.calcNew = false; this.calcExpression = ''; }
+            if (val === '.' && this.calcInput.includes('.')) return;
+            this.calcInput += val;
+            this.calcResult = this._getVal();
+        },
+        calcOp(op) {
+            if (op === 'pm') { this._setVal(-this._getVal()); return; }
+            if (op === 'pow') { this.calcPrev = this._getVal(); this.calcOp = 'pow'; this.calcNew = true; this.calcExpression = this.calcPrev + ' ^ '; return; }
+            if (this.calcOp) this.calcEquals();
+            this.calcPrev = this._getVal();
+            this.calcOp = op;
+            this.calcNew = true;
+            const sym = { '+':' + ', '-':' − ', '×':' × ', '÷':' ÷ ' };
+            this.calcExpression = this.calcPrev + (sym[op] || ' ' + op + ' ');
+        },
+        calcEquals() {
+            const cur = this._getVal();
+            let r = 0;
+            const prev = this.calcPrev;
+            this.calcExpression = (this.calcExpression || prev) + ' ' + cur + ' =';
+            if (this.calcOp === '+') r = prev + cur;
+            else if (this.calcOp === '-') r = prev - cur;
+            else if (this.calcOp === '×') r = prev * cur;
+            else if (this.calcOp === '÷') r = cur !== 0 ? prev / cur : 0;
+            else if (this.calcOp === 'pow') r = Math.pow(prev, cur);
+            else r = cur;
+            this._setVal(r);
+            this.calcOp = null;
+            this.calcNew = true;
+        },
+        calcSciFunc(name) {
+            const v = this._getVal();
+            let r = 0;
+            const deg = this.calcAngleMode === 'DEG';
+            if (name === 'sin') r = Math.sin(deg ? this._degToRad(v) : v);
+            else if (name === 'cos') r = Math.cos(deg ? this._degToRad(v) : v);
+            else if (name === 'tan') r = Math.tan(deg ? this._degToRad(v) : v);
+            else if (name === 'log') r = v > 0 ? Math.log10(v) : 0;
+            else if (name === 'ln') r = v > 0 ? Math.log(v) : 0;
+            else if (name === 'sq') r = v * v;
+            else if (name === 'cube') r = v * v * v;
+            else if (name === 'sqrt') r = v >= 0 ? Math.sqrt(v) : 0;
+            this.calcExpression = name + '(' + v + ') =';
+            this._setVal(r);
+            this.calcNew = true;
+        },
+        calcConstant(name) {
+            const val = name === 'pi' ? Math.PI : Math.E;
+            this._setVal(val);
+            this.calcExpression = name === 'pi' ? 'π' : 'e';
+            this.calcNew = true;
+        },
+        calcParen(char) {
+            if (char === '(') { this.calcParenLevel++; this.calcExpression += ' ('; }
+            else if (char === ')' && this.calcParenLevel > 0) { this.calcParenLevel--; this.calcExpression += ') '; }
+        },
+        calcMem(op) {
+            const cur = this._getVal();
+            if (op === 'MC') { this.calcMemVal = 0; this.calcHasMem = false; }
+            else if (op === 'MR') { if (this.calcHasMem) this._setVal(this.calcMemVal); }
+            else if (op === 'M+') { this.calcMemVal += cur; this.calcHasMem = true; }
+            else if (op === 'M-') { this.calcMemVal -= cur; this.calcHasMem = true; }
+        },
+        calcClear(all) {
+            this.calcInput = '0';
+            this.calcResult = 0;
+            if (all) { this.calcOp = null; this.calcPrev = 0; this.calcExpression = ''; this.calcParenLevel = 0; }
+        },
         toggleRuler(i) {
             this.showRuler[i] = !this.showRuler[i];
             if (this.showRuler[i]) {
-                this.rulerX[i] = this.rulerX[i] || 30;
-                this.rulerY[i] = this.rulerY[i] || 80;
-                this.rulerWidth[i] = this.rulerWidth[i] || 500;
+                this.rulerX[i] = this.rulerX[i] || 40;
+                this.rulerY[i] = this.rulerY[i] || 60;
+                this.rulerWidth[i] = this.rulerWidth[i] || 800;
                 this.rulerAngle[i] = this.rulerAngle[i] || 0;
+                this.rulerScale[i] = this.rulerScale[i] || 100;
                 this.snapRuler[i] = this.snapRuler[i] || false;
+                setTimeout(() => this.initToolSvg(i, 'ruler'), 100);
             }
         },
         toggleProtractor(i) {
             this.showProtractor[i] = !this.showProtractor[i];
             if (this.showProtractor[i]) {
-                this.protractorX[i] = this.protractorX[i] || 60;
-                this.protractorY[i] = this.protractorY[i] || 40;
-                this.protractorSize[i] = this.protractorSize[i] || 350;
+                const area = document.getElementById('ec-area-' + i);
+                const rect = area ? area.getBoundingClientRect() : {width:700};
+                const sz = Math.min(rect.width * 0.55, 400);
+                this.protractorX[i] = this.protractorX[i] || Math.max(20, (rect.width - sz) / 2);
+                this.protractorY[i] = this.protractorY[i] || 30;
+                this.protractorSize[i] = this.protractorSize[i] || sz;
                 this.protractorAngle[i] = this.protractorAngle[i] || 0;
+                this.protractorScale[i] = this.protractorScale[i] || 100;
                 this.snapProtractor[i] = this.snapProtractor[i] || false;
+                setTimeout(() => {
+                    this.initToolSvg(i, 'protractor');
+                    this.updateProtractorAngle(i);
+                }, 100);
             }
         },
+        toggleCompass(i) {
+            if (this.essayCanvasMode[i] === 'compass') {
+                this.essayCanvasMode[i] = 'pen';
+                this.showCompass[i] = false;
+            } else {
+                this.showCompass[i] = false;
+                this.essayCanvasMode[i] = 'compass';
+            }
+        },
+        toggleTriangle(i) {
+            this.showTriangle[i] = !this.showTriangle[i];
+            if (this.showTriangle[i]) {
+                const area = document.getElementById('ec-area-' + i);
+                const rect = area ? area.getBoundingClientRect() : {width:700};
+                const sz = Math.min(rect.width * 0.45, 320);
+                this.triangleX[i] = this.triangleX[i] || Math.max(20, (rect.width - sz) / 2 + 20);
+                this.triangleY[i] = this.triangleY[i] || Math.max(20, (rect.height || 400) * 0.15);
+                this.triangleSize[i] = this.triangleSize[i] || sz;
+                this.triangleAngle[i] = this.triangleAngle[i] || 0;
+                this.triangleScale[i] = this.triangleScale[i] || 100;
+                this.snapTriangle[i] = this.snapTriangle[i] || false;
+                setTimeout(() => this.initToolSvg(i, 'triangle'), 100);
+            }
+        },
+        // — SVG Scale generators —
+        // ─── DIRECT DOM API — no innerHTML, no DOMParser, 100% reliable ───
+        _buildRulerMarks(g) {
+          const ns = 'http://www.w3.org/2000/svg';
+          // viewBox 0-420 x 0-70, 30cm => 14 units per cm
+          const ppcm = 14;
+          for (let mm = 0; mm <= 300; mm++) {
+            const x = mm * ppcm / 10;
+            const cm = mm % 10 === 0;
+            const half = mm % 5 === 0;
+            const hi = cm ? 26 : half ? 18 : 10;
+            const el = document.createElementNS(ns, 'line');
+            el.setAttribute('x1', x); el.setAttribute('y1', '2');
+            el.setAttribute('x2', x); el.setAttribute('y2', hi);
+            el.setAttribute('stroke', `rgba(0,0,130,${cm?0.75:half?0.55:0.3})`);
+            el.setAttribute('stroke-width', cm?'1.2':half?'0.8':'0.4');
+            g.appendChild(el);
+            // Inch side (bottom)
+            const inPerMm = 1 / 25.4;
+            const mmPos = mm * inPerMm;
+            const in8 = Math.abs(mmPos % 1) < 0.01;
+            const in4 = Math.abs(mmPos % 0.5) < 0.01;
+            const inH = in8 ? 56 : in4 ? 50 : 44;
+            const el2 = document.createElementNS(ns, 'line');
+            el2.setAttribute('x1', x); el2.setAttribute('y1', '38');
+            el2.setAttribute('x2', x); el2.setAttribute('y2', inH);
+            el2.setAttribute('stroke', `rgba(180,60,0,${in8?0.65:in4?0.45:0.25})`);
+            el2.setAttribute('stroke-width', in8?'1.2':in4?'0.8':'0.4');
+            g.appendChild(el2);
+          }
+          // cm labels
+          for (let cm = 0; cm <= 30; cm++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', cm * ppcm);
+            t.setAttribute('y', '36');
+            t.setAttribute('font-size', '8');
+            t.setAttribute('fill', 'rgba(0,0,130,0.85)');
+            t.setAttribute('font-weight', 'bold');
+            t.setAttribute('text-anchor', 'middle');
+            t.textContent = cm;
+            g.appendChild(t);
+          }
+          // inch labels
+          for (let i = 0; i <= 11; i++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', i * ppcm * 2.54);
+            t.setAttribute('y', '66');
+            t.setAttribute('font-size', '7');
+            t.setAttribute('fill', 'rgba(180,60,0,0.8)');
+            t.setAttribute('font-weight', 'bold');
+            t.setAttribute('text-anchor', 'middle');
+            t.textContent = i + '″';
+            g.appendChild(t);
+          }
+        },
+        _buildTriangleMarks(g) {
+          const ns = 'http://www.w3.org/2000/svg';
+          const ppcm = 29.5; // viewBox units per cm (10cm spans 295 units)
+          const maxCm = 10;
+          for (let mm = 0; mm <= maxCm * 10; mm++) {
+            const y = 310 - mm * ppcm / 10;
+            if (y < 15) break;
+            const cm = mm % 10 === 0, half = mm % 5 === 0;
+            const hi = cm ? 14 : half ? 9 : 5;
+            const el = document.createElementNS(ns, 'line');
+            el.setAttribute('x1', '15'); el.setAttribute('y1', y);
+            el.setAttribute('x2', 15 + hi); el.setAttribute('y2', y);
+            el.setAttribute('stroke', `rgba(0,0,130,${cm?0.75:half?0.55:0.3})`);
+            el.setAttribute('stroke-width', cm?'1.5':half?'1':'0.5');
+            g.appendChild(el);
+          }
+          for (let cm = 0; cm <= maxCm; cm++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', '34'); t.setAttribute('y', 310 - cm * ppcm + 4);
+            t.setAttribute('font-size', '9'); t.setAttribute('fill', 'rgba(0,0,130,0.85)');
+            t.setAttribute('font-weight', 'bold'); t.setAttribute('text-anchor', 'start');
+            t.textContent = cm; g.appendChild(t);
+          }
+          for (let mm = 0; mm <= maxCm * 10; mm++) {
+            const x = 15 + mm * ppcm / 10;
+            if (x > 310) break;
+            const cm = mm % 10 === 0, half = mm % 5 === 0;
+            const hi = cm ? 14 : half ? 9 : 5;
+            const el = document.createElementNS(ns, 'line');
+            el.setAttribute('x1', x); el.setAttribute('y1', '310');
+            el.setAttribute('x2', x); el.setAttribute('y2', 310 - hi);
+            el.setAttribute('stroke', `rgba(0,0,130,${cm?0.75:half?0.55:0.3})`);
+            el.setAttribute('stroke-width', cm?'1.5':half?'1':'0.5');
+            g.appendChild(el);
+          }
+          for (let cm = 0; cm <= maxCm; cm++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', 15 + cm * ppcm); t.setAttribute('y', '290');
+            t.setAttribute('font-size', '9'); t.setAttribute('fill', 'rgba(0,0,130,0.85)');
+            t.setAttribute('font-weight', 'bold'); t.setAttribute('text-anchor', 'middle');
+            t.textContent = cm; g.appendChild(t);
+          }
+        },
+        _buildProtractorMarks(g, cx, cy, r) {
+          const ns = 'http://www.w3.org/2000/svg';
+          // 1° accuracy always. Labels every 10° (every 20° if very small)
+          const labelStep = r < 120 ? 20 : 10;
+          const outFS = Math.max(7, Math.min(11, Math.round(r/18)));
+          const inFS = Math.max(6, Math.min(9, Math.round(r/22)));
+          for (let d = 0; d <= 180; d++) {
+            const rad = -d * Math.PI / 180;
+            const co = Math.cos(rad), si = Math.sin(rad);
+            const tenth = d % 10 === 0, half = d % 5 === 0;
+            // Outer arc line
+            const r2 = tenth ? r-30 : half ? r-22 : r-5;
+            const l1 = document.createElementNS(ns, 'line');
+            l1.setAttribute('x1', cx+co*r); l1.setAttribute('y1', cy+si*r);
+            l1.setAttribute('x2', cx+co*r2); l1.setAttribute('y2', cy+si*r2);
+            l1.setAttribute('stroke', `rgba(0,0,120,${tenth?0.85:half?0.65:0.35})`);
+            l1.setAttribute('stroke-width', tenth?'1.5':half?'1.5':'0.6');
+            g.appendChild(l1);
+            // Inner arc line
+            const ri1 = r*0.52, ri2 = tenth ? r*0.70 : half ? r*0.62 : r*0.54;
+            const l2 = document.createElementNS(ns, 'line');
+            l2.setAttribute('x1', cx+co*ri1); l2.setAttribute('y1', cy+si*ri1);
+            l2.setAttribute('x2', cx+co*ri2); l2.setAttribute('y2', cy+si*ri2);
+            l2.setAttribute('stroke', `rgba(180,50,0,${tenth?0.7:half?0.5:0.3})`);
+            l2.setAttribute('stroke-width', tenth?'1.5':half?'1.5':'0.5');
+            g.appendChild(l2);
+          }
+          // Outer labels
+          for (let t = 0; t <= 180; t += labelStep) {
+            const rad = -t * Math.PI / 180;
+            const co = Math.cos(rad), si = Math.sin(rad);
+            const txt = document.createElementNS(ns, 'text');
+            txt.setAttribute('x', cx+co*(r-32));
+            txt.setAttribute('y', cy+si*(r-32)+7);
+            txt.setAttribute('font-size', outFS);
+            txt.setAttribute('fill', 'rgba(0,0,120,1)');
+            txt.setAttribute('font-weight', 'bold');
+            txt.setAttribute('text-anchor', 'middle');
+            txt.textContent = t + '°';
+            g.appendChild(txt);
+          }
+          // Inner labels (reversed)
+          for (let t = 0; t <= 180; t += labelStep) {
+            const rad = -t * Math.PI / 180;
+            const co = Math.cos(rad), si = Math.sin(rad);
+            const txt = document.createElementNS(ns, 'text');
+            txt.setAttribute('x', cx+co*(r*0.5));
+            txt.setAttribute('y', cy+si*(r*0.5)+6);
+            txt.setAttribute('font-size', inFS);
+            txt.setAttribute('fill', 'rgba(180,50,0,0.85)');
+            txt.setAttribute('font-weight', 'bold');
+            txt.setAttribute('text-anchor', 'middle');
+            txt.textContent = (180-t) + '°';
+            g.appendChild(txt);
+          }
+        },
+        _buildAngleMark(g, cx, cy, r, angle) {
+          const ns = 'http://www.w3.org/2000/svg';
+          g.innerHTML = '';
+          const rad = -angle * Math.PI / 180;
+          const co = Math.cos(rad), si = Math.sin(rad);
+          const ex = cx + r * co, ey = cy + r * si;
+          const line = document.createElementNS(ns, 'line');
+          line.setAttribute('x1', cx); line.setAttribute('y1', cy);
+          line.setAttribute('x2', ex); line.setAttribute('y2', ey);
+          line.setAttribute('stroke', 'rgba(200,50,0,0.8)');
+          line.setAttribute('stroke-width', '2.5');
+          line.setAttribute('stroke-dasharray', '5,3');
+          g.appendChild(line);
+          const txt = document.createElementNS(ns, 'text');
+          txt.setAttribute('x', cx + (r*0.5)*co - 14);
+          txt.setAttribute('y', cy + (r*0.5)*si + 6);
+          txt.setAttribute('font-size', '15');
+          txt.setAttribute('fill', 'rgba(200,50,0,0.95)');
+          txt.setAttribute('font-weight', 'bold');
+          txt.setAttribute('text-anchor', 'middle');
+          txt.textContent = Math.round(Math.abs(angle)) + '°';
+          g.appendChild(txt);
+        },
+        _getToolG(svg) {
+          let g = svg.querySelector('g.tool-marks');
+          if (!g) { g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.setAttribute('class', 'tool-marks'); svg.insertBefore(g, svg.firstChild); }
+          while (g.firstChild) g.removeChild(g.firstChild);
+          return g;
+        },
+        initToolSvg(i, type) {
+          const svg = document.getElementById(type + '-svg-' + i);
+          if (!svg) return;
+          const g = this._getToolG(svg);
+          if (type === 'ruler') this._buildRulerMarks(g);
+          else if (type === 'protractor') this._buildProtractorMarks(g, 200, 350, 175);
+          else if (type === 'triangle') this._buildTriangleMarks(g);
+        },
+        rebuildRuler(i) {
+          const svg = document.getElementById('ruler-svg-' + i);
+          if (!svg) { setTimeout(() => this.rebuildRuler(i), 50); return; }
+          this._buildRulerMarks(this._getToolG(svg));
+        },
+        rebuildTriangle(i) {
+          const svg = document.getElementById('triangle-svg-' + i);
+          if (!svg) { setTimeout(() => this.rebuildTriangle(i), 50); return; }
+          this._buildTriangleMarks(this._getToolG(svg));
+        },
+        rebuildProtractor(i) {
+          const svg = document.getElementById('protractor-svg-' + i);
+          if (!svg) { setTimeout(() => this.rebuildProtractor(i), 50); return; }
+          this._buildProtractorMarks(this._getToolG(svg), 200, 350, 175);
+          this.updateProtractorAngle(i);
+        },
+        startProtractorResize(i, event) {
+          event.preventDefault();
+          const startX = event.touches ? event.touches[0].clientX : event.clientX;
+          const startY = event.touches ? event.touches[0].clientY : event.clientY;
+          const startSz = this.protractorSize[i] || 350;
+          const startDist = Math.sqrt(startX*startX + startY*startY);
+          const onMove = (ev) => {
+            const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+            const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+            const dist = Math.sqrt(x*x + y*y);
+            const scale = dist / Math.max(startDist, 1);
+            const newSz = Math.round(Math.max(180, Math.min(600, startSz * scale)));
+            this.protractorSize[i] = newSz;
+            this.rebuildProtractor(i);
+          };
+          const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); };
+          document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+          document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp);
+        },
+        startRulerResize(i, event) {
+          event.preventDefault();
+          const startX = event.touches ? event.touches[0].clientX : event.clientX;
+          const startW = this.rulerWidth[i] || 500;
+          const startCm = this.rulerCmLen[i] || 30;
+          const onMove = (ev) => {
+            const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+            const dx = x - startX;
+            const newW = Math.max(100, startW + dx);
+            this.rulerWidth[i] = Math.round(newW);
+            this.rulerCmLen[i] = Math.max(5, newW * 30 / 800);
+            this.rebuildRuler(i);
+          };
+          const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); };
+          document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+          document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp);
+        },
+        updateProtractorAngle(i) {
+          const svg = document.getElementById('protractor-svg-' + i);
+          if (!svg) return;
+          let g = svg.querySelector('g.tool-angle-marks');
+          if (!g) { g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.setAttribute('class', 'tool-angle-marks'); svg.appendChild(g); }
+          this._buildAngleMark(g, 200, 350, 175, this.protractorAngle[i] || 0);
+        },
+        triangleSvg45(i) { return ScanGradeTools.triangleSvg45(15,270); },
+        triangleSvgRt(i) {
+            let s = '';
+            for (let t = 1; t <= 17; t++) {
+                s += `<line x1="10" y1="${190-t*10}" x2="${10+t*10}" y2="190" stroke="rgba(0,0,150,0.25)" stroke-width="0.3"/>`;
+            }
+            for (let t = 1; t <= 7; t++) {
+                s += `<text x="${10+t*24-3}" y="186" font-size="5.5" fill="rgba(0,0,150,0.45)" font-weight="bold">${t}</text>`;
+            }
+            for (let t = 1; t <= 7; t++) {
+                s += `<text x="6" y="${190-t*24+4}" font-size="5.5" fill="rgba(0,0,150,0.45)" font-weight="bold">${t}</text>`;
+            }
+            return s;
+        },
+        // ─── OpenBoard-style zone cursor + drawing constraint ───
+        _getToolZone(i, px, py) {
+          const canvas = this.canvasDraw[i]?.el;
+          if (!canvas) return 'none';
+          const r = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / r.width, scaleY = canvas.height / r.height;
+          const lx = (px / scaleX), ly = (py / scaleY);
+          if (this.showRuler[i]) {
+            const rx = (this.rulerX[i]||0), ry = (this.rulerY[i]||0), rw = (this.rulerWidth[i]||800);
+            const rh = rw * 70 / 400;
+            if (lx >= rx && lx <= rx+rw && ly >= ry && ly <= ry+rh) {
+              if (lx > rx+rw-15) return 'resize';
+              if (lx < rx+30 && ly < ry+25) return 'close';
+              if (lx > rx+rw-40 && ly < ry+25) return 'rotate';
+              return 'edge';
+            }
+          }
+          if (this.showProtractor[i]) {
+            const px2 = (this.protractorX[i]||0), py2 = (this.protractorY[i]||0), ps = (this.protractorSize[i]||350);
+            const cx = px2 + ps/2, cy = py2 + ps*0.92, r2 = ps*0.45;
+            const dx = lx - cx, dy = ly - cy, dist = Math.sqrt(dx*dx+dy*dy);
+            if (dist <= r2 + 10) {
+              if (lx < px2+40 && ly < py2+30) return 'close';
+              if (lx > px2+ps-30 && ly < py2+ps*0.5) return 'resize';
+              if (dist > r2 * 0.7) return 'marker';
+              return 'move';
+            }
+          }
+          if (this.showTriangle[i]) {
+            const tx = (this.triangleX[i]||0), ty = (this.triangleY[i]||0), ts = (this.triangleSize[i]||300);
+            if (lx >= tx && lx <= tx+ts && ly >= ty && ly <= ty+ts) return 'move';
+          }
+          return 'none';
+        },
+        _updateToolCursor(i, px, py) {
+          const zone = this._getToolZone(i, px, py);
+          const el = this.canvasDraw[i]?.el;
+          if (!el) return;
+          const cursors = { move:'grab', resize:'ew-resize', rotate:'alias', marker:'crosshair', edge:'crosshair', close:'pointer' };
+          el.style.cursor = cursors[zone] || 'crosshair';
+        },
+        _constrainToTool(i, px, py) {
+          const canvas = this.canvasDraw[i]?.el;
+          if (!canvas) return {x:px, y:py};
+          const r = canvas.getBoundingClientRect();
+          const toCss = (cp, dim) => cp / (canvas[dim] / r[dim]);
+          const toCanvas = (cp, dim) => cp * (canvas[dim] / r[dim]);
+          const lx = toCss(px, 'width'), ly = toCss(py, 'height');
+          if (this.showRuler[i]) {
+            const rx = (this.rulerX[i]||0), ry = (this.rulerY[i]||0), rw = (this.rulerWidth[i]||800);
+            const rh = rw * 70 / 400;
+            if (lx < rx || lx > rx+rw || ly < ry || ly > ry+rh) return {x:px, y:py};
+            const angle = ((this.rulerAngle[i]||0) * Math.PI / 180);
+            const cosA = Math.cos(-angle), sinA = Math.sin(-angle);
+            const cx = rx + rw/2, cy = ry + rh/2;
+            const dx = lx - cx, dy = ly - cy;
+            const localY = dx * sinA + dy * cosA;
+            const edgeY = localY > 0 ? (cy + rh/2 + 1) : (cy - rh/2 - 1);
+            return {x: px, y: toCanvas(edgeY, 'height')};
+          }
+          return {x:px, y:py};
+        },
+
         startToolDrag(i, type, event) {
             event.preventDefault();
             event.stopPropagation();
             const src = event.touches ? event.touches[0] : event;
             const startX = src.clientX, startY = src.clientY;
-            const startLeft = type === 'ruler' ? (this.rulerX[i] || 50) : (this.protractorX[i] || 100);
-            const startTop = type === 'ruler' ? (this.rulerY[i] || 100) : (this.protractorY[i] || 80);
+            let startLeft, startTop;
+            if (type === 'ruler') { startLeft = this.rulerX[i] || 50; startTop = this.rulerY[i] || 100; }
+            else if (type === 'protractor') { startLeft = this.protractorX[i] || 100; startTop = this.protractorY[i] || 80; }
+            else if (type === 'compass') { startLeft = this.compassX[i] || 120; startTop = this.compassY[i] || 100; }
+            else { startLeft = this.triangleX[i] || 160; startTop = this.triangleY[i] || 120; }
             const onMove = (ev) => {
                 ev.preventDefault();
                 const s = ev.touches ? ev.touches[0] : ev;
                 const dx = s.clientX - startX, dy = s.clientY - startY;
                 if (type === 'ruler') { this.rulerX[i] = startLeft + dx; this.rulerY[i] = startTop + dy; }
-                else { this.protractorX[i] = startLeft + dx; this.protractorY[i] = startTop + dy; }
+                else if (type === 'protractor') { this.protractorX[i] = startLeft + dx; this.protractorY[i] = startTop + dy; }
+                else if (type === 'compass') { this.compassX[i] = startLeft + dx; this.compassY[i] = startTop + dy; }
+                else { this.triangleX[i] = startLeft + dx; this.triangleY[i] = startTop + dy; }
             };
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
@@ -1404,7 +2538,11 @@ function examApp(duration, totalQ) {
             const cy = rect.top + rect.height / 2;
             const src = event.touches ? event.touches[0] : event;
             const startAngle = Math.atan2(src.clientY - cy, src.clientX - cx);
-            const origAngle = type === 'ruler' ? (this.rulerAngle[i] || 0) : (this.protractorAngle[i] || 0);
+            let origAngle;
+            if (type === 'ruler') origAngle = this.rulerAngle[i] || 0;
+            else if (type === 'protractor') origAngle = this.protractorAngle[i] || 0;
+            else if (type === 'compass') origAngle = this.compassAngle[i] || 0;
+            else origAngle = this.triangleAngle[i] || 0;
             const origRad = origAngle * Math.PI / 180;
             const onMove = (ev) => {
                 ev.preventDefault();
@@ -1413,7 +2551,12 @@ function examApp(duration, totalQ) {
                 const delta = (curAngle - startAngle) * 180 / Math.PI;
                 const newAngle = origAngle + delta;
                 if (type === 'ruler') this.rulerAngle[i] = newAngle;
-                else this.protractorAngle[i] = newAngle;
+                else if (type === 'protractor') {
+                    this.protractorAngle[i] = newAngle;
+                    this.updateProtractorAngle(i);
+                }
+                else if (type === 'compass') this.compassAngle[i] = newAngle;
+                else this.triangleAngle[i] = newAngle;
             };
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);

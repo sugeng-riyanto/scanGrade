@@ -6,6 +6,7 @@
 {% block title %}Koreksi - ScanGrade{% endblock %}
 {% block page_title %}Koreksi{% endblock %}
 {% block head_extra %}
+<script defer src="/static/js/tools.js"></script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 50vh; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
@@ -17,7 +18,7 @@
 .draw-toolbar button.student-tool { cursor: default; opacity: 0.5; }
 .draw-toolbar button.student-tool:hover { background: white; border-color: #e5e7eb; }
 .draw-toolbar input[type=color] { width: 26px; height: 26px; border: none; cursor: pointer; padding: 0; border-radius: 6px; }
-.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: hidden; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
 .full-canvas-wrap img { display: block; width: 100%; pointer-events: none; }
 .text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: 10; }
@@ -26,6 +27,12 @@
 .text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .teacher-box textarea { border-color: #059669 !important; }
 .teacher-box .box-handle { background: #059669 !important; }
+[x-cloak] { display: none !important; }
+.tool-controlbar { pointer-events: none !important; }
+.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: 10; width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
+.tool-ctrl-btn:hover { transform: scale(1.15); }
+.tool-ctrl-btn.drag { cursor: grab; }
+.tool-ctrl-btn.close { background: rgba(220,38,38,0.85); }
 .sticky-topbar { position: sticky; top: 0; z-index: 20; }
 .sticky-questions { position: sticky; top: 60px; z-index: 10; }
 .student-overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.65; }
@@ -46,6 +53,7 @@
         </div>
         <div class="flex items-center gap-2 no-print">
             <span id="auto-save-status" class="text-[10px] font-bold text-stone-400"><i class="fas fa-circle text-stone-300 mr-1 text-[8px]"></i>Auto-save</span>
+            <button @click="showCalculator=!showCalculator" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition" title="Kalkulator Ilmiah"><i class="fas fa-calculator mr-1"></i></button>
             <button onclick="window.print()" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition"><i class="fas fa-print mr-1"></i>Print</button>
             <button type="button" @click="saveAll()" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-bold shadow-lg shadow-orange-200/50 transition">
                 <i class="fas fa-save mr-1.5"></i>Simpan
@@ -86,9 +94,10 @@
                 {% for i in range(exam.total_questions) %}
                 {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
                 {% set correct = exam.answer_key.get(i|string, '') %}
-                {% set student_ans = submission.answers.get(i|string, '') %}
+                {% set raw_val = submission.answers.get(i|string, '') %}
+                {% set student_ans = raw_val['answer'] if raw_val is mapping and 'answer' in raw_val else raw_val %}
                 {% set is_correct = (qtype == 'mcq' and correct and student_ans == correct) %}
-                {% set ans_obj = student_ans if student_ans is mapping else (student_ans|from_json or {}) %}
+                {% set ans_obj = raw_val if raw_val is mapping else (raw_val|from_json or {}) %}
                 {% set pdf_pages = exam.pdf_page_urls or [] %}
 
                 {% if qtype == 'mcq' %}
@@ -162,6 +171,11 @@
                                     </select>
                                 </div>
                             </template>
+                            <span class="w-px h-5 bg-stone-300 mx-1.5"></span>
+                            <button type="button" @click="showRuler=!showRuler; showRuler && setTimeout(()=>initToolSvg(qIdx,'ruler'),100)" :class="showRuler ? 'active' : ''" title="Penggaris"><i class="fas fa-ruler mr-1"></i></button>
+                            <button type="button" @click="showProtractor=!showProtractor; showProtractor && setTimeout(()=>initToolSvg(qIdx,'protractor'),100)" :class="showProtractor ? 'active' : ''" title="Busur"><i class="fas fa-drafting-compass mr-1"></i></button>
+                            <button type="button" @click="showCompass=!showCompass" :class="showCompass ? 'active' : ''" title="Jangka"><i class="fas fa-circle mr-1"></i></button>
+                            <button type="button" @click="showTriangle=!showTriangle; showTriangle && setTimeout(()=>initToolSvg(qIdx,'triangle'),100)" :class="showTriangle ? 'active' : ''" title="Siku"><i class="fas fa-draw-polygon mr-1"></i></button>
                             <button type="button" @click="undoCanvas()" :disabled="history.length<2" class="text-stone-500 hover:bg-stone-100 disabled:opacity-30 px-2 py-1 text-xs font-bold border rounded-lg bg-white">&#8617;</button>
                             <button type="button" @click="clearTeacherCanvas()" class="text-red-500 hover:bg-red-50 px-2 py-1 text-xs font-bold border border-red-200 rounded-lg bg-white"><i class="fas fa-trash-alt"></i></button>
                         </div>
@@ -189,6 +203,115 @@
                                 <canvas :id="'student-canvas-' + qIdx" class="absolute inset-0 w-full h-full" style="pointer-events:none; opacity:0.65;"></canvas>
                                 <canvas :id="'teacher-canvas-' + qIdx" class="absolute inset-0 w-full h-full"></canvas>
 
+                                <!-- Ruler overlay -->
+                                <div x-show="showRuler" class="tool-overlay absolute" style="pointer-events:none">
+                                    <svg class="tool-handle" style="overflow:visible;pointer-events:none"
+                                         :style="'transform:rotate('+rulerAngle+'deg);transform-origin:50% 50%;width:'+(rulerWidth||900)+'px;height:'+((rulerWidth||900)*70/436)+'px;left:'+rulerX+'px;top:'+rulerY+'px;position:absolute;'"
+                                         viewBox="-8 0 436 70" preserveAspectRatio="xMidYMid meet">
+                                        <rect x="-8" y="0" width="436" height="68" fill="rgba(245,248,255,0.3)" stroke="rgba(0,0,120,0.4)" stroke-width="1" rx="3"/>
+                                        <g class="tool-marks"></g>
+                                        <text x="4" y="12" font-size="5" fill="rgba(0,0,120,0.55)">cm</text>
+                                        <line x1="0" y1="34" x2="420" y2="34" stroke="rgba(180,180,200,0.25)" stroke-width="0.5"/>
+                                        <text x="4" y="58" font-size="5" fill="rgba(180,80,0,0.55)">in</text>
+                                    </svg>
+                                    <!-- Drag handle on left overhang -->
+                                    <div :style="'position:absolute;left:'+(rulerX+(rulerWidth||900)*4/436-10)+'px;top:'+(rulerY+((rulerWidth||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                         @mousedown.stop="startToolDrag('ruler',$event)" @touchstart.stop="startToolDrag('ruler',$event)" title="Seret">
+                                        <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                    </div>
+                                    <!-- Rotate handle on right overhang -->
+                                    <div :style="'position:absolute;left:'+(rulerX+(rulerWidth||900)*434/436-10)+'px;top:'+(rulerY+((rulerWidth||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                         @mousedown.stop="startToolRotate('ruler',$event)" @touchstart.stop="startToolRotate('ruler',$event)" title="Putar">
+                                        <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                    </div>
+                                    <div class="tool-controlbar" :style="'left:'+(rulerX-2)+'px;top:'+(rulerY+((rulerWidth||900)*70/436)+2)+'px;pointer-events:none;'">
+                                        <span class="text-stone-400 text-[8px] font-bold pointer-events-none" x-text="Math.round(rulerAngle)+'°'"></span>
+                                        <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:4px" @click="showRuler=false" title="Tutup"></div>
+                                    </div>
+                                </div>
+                                <!-- Protractor overlay -->
+                                <div x-show="showProtractor" class="tool-overlay absolute" style="pointer-events:none">
+                                    <svg class="tool-handle" style="overflow:visible;pointer-events:none"
+                                         :style="'transform:rotate('+protractorAngle+'deg);transform-origin:50% 92.8%;width:'+protractorSize+'px;height:'+protractorSize*140/260+'px;left:'+protractorX+'px;top:'+protractorY+'px;position:absolute;'"
+                                         viewBox="0 0 260 140" preserveAspectRatio="xMidYMid meet">
+                                        <path d="M 10 130 A 120 120 0 0 1 250 130 Z" fill="rgba(200,220,255,0.2)" stroke="rgba(0,0,150,0.6)" stroke-width="1.5"/>
+                                        <g class="tool-marks"></g>
+                                        <line x1="10" y1="130" x2="250" y2="130" stroke="rgba(255,0,0,0.5)" stroke-width="1.2" stroke-dasharray="5,3"/>
+                                        <line x1="130" y1="130" x2="130" y2="10" stroke="rgba(255,0,0,0.2)" stroke-width="0.8" stroke-dasharray="2,3"/>
+                                        <circle cx="130" cy="130" r="3.5" fill="rgba(255,0,0,0.7)"/>
+                                        <circle cx="130" cy="130" r="6" fill="none" stroke="rgba(255,0,0,0.5)" stroke-width="0.8"/>
+                                    </svg>
+                                    <div class="tool-controlbar flex items-center gap-0.5 bg-slate-800/80 text-white rounded-lg px-1.5 py-0.5 text-[9px] font-bold pointer-events-none whitespace-nowrap" :style="'left:'+Math.max(0,protractorX-2)+'px;top:'+(protractorY-18)+'px;'">
+                                        <span class="text-white font-bold text-[8px]" x-text="protractorSize+'px'"></span>
+                                        <span class="text-stone-300 mx-0.5">|</span>
+                                        <span class="text-orange-300 text-[8px]" x-text="'∠'+Math.round(protractorAngle)+'°'"></span>
+                                        <i class="tool-ctrl-btn close fas fa-times" style="position:static;width:14px;height:14px;font-size:7px;border-radius:3px;margin-left:2px" @click="showProtractor=false" title="Tutup"></i>
+                                    </div>
+                                    <!-- Protractor drag handle (center point) -->
+                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*130/260-10)+'px;top:'+(protractorY+protractorSize*130/260-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                         @mousedown.stop="startToolDrag('protractor',$event)" @touchstart.stop="startToolDrag('protractor',$event)" title="Seret">
+                                        <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                    </div>
+                                    <!-- Protractor rotate handle (top of arc) -->
+                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*250/260-10)+'px;top:'+(protractorY+protractorSize*10/260-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                         @mousedown.stop="startToolRotate('protractor',$event)" @touchstart.stop="startToolRotate('protractor',$event)" title="Putar">
+                                        <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                    </div>
+                                    <!-- Protractor resize handle (right end) -->
+                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*250/260-8)+'px;top:'+(protractorY+protractorSize*130/260-8)+'px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,120,0.7);border:2px solid rgba(255,255,255,0.3);z-index:6;pointer-events:auto;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;'"
+                                         @mousedown.stop="startProtractorResize($event)" @touchstart.stop="startProtractorResize($event)" title="Perbesar/perkecil">
+                                        <i class="fas fa-expand-alt text-white" style="font-size:6px;pointer-events:none"></i>
+                                    </div>
+                                </div>
+                                <!-- Compass overlay -->
+                                <div x-show="showCompass" class="tool-overlay absolute" style="pointer-events:none">
+                                    <svg class="tool-handle" style="overflow:visible;pointer-events:none"
+                                         :style="'transform:rotate('+compassAngle+'deg);transform-origin:50% 50%;width:'+compassSize+'px;height:'+compassSize+'px;left:'+compassX+'px;top:'+compassY+'px;position:absolute;'"
+                                         viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                                        <circle cx="100" cy="100" r="80" fill="rgba(200,220,255,0.18)" stroke="rgba(0,0,150,0.6)" stroke-width="1.5" stroke-dasharray="6,3"/>
+                                        <line x1="100" y1="20" x2="100" y2="180" stroke="rgba(0,0,150,0.4)" stroke-width="0.8"/>
+                                        <line x1="20" y1="100" x2="180" y2="100" stroke="rgba(0,0,150,0.4)" stroke-width="0.8"/>
+                                        <circle cx="100" cy="100" r="4" fill="rgba(0,0,150,0.8)"/>
+                                        <circle cx="100" cy="100" r="8" fill="none" stroke="rgba(0,0,150,0.5)" stroke-width="0.8"/>
+                                        <g x-html="compassSvgRings()"></g>
+                                        <line x1="100" y1="100" x2="180" y2="100" stroke="rgba(200,50,0,0.6)" stroke-width="1.5"/>
+                                        <text x="138" y="94" font-size="8" fill="rgba(200,50,0,0.7)" font-weight="bold">r</text>
+                                    </svg>
+                                    <div class="tool-controlbar" :style="'left:'+compassX+'px;top:'+(compassY-12)+'px;'">
+                                        <i class="tool-ctrl-btn drag fas fa-grip-lines" @mousedown.stop="startToolDrag('compass',$event)" @touchstart.stop="startToolDrag('compass',$event)" title="Seret"></i>
+                                        <i class="tool-ctrl-btn fas fa-sync-alt" style="left:28px;" @mousedown.stop="startToolRotate('compass',$event)" @touchstart.stop="startToolRotate('compass',$event)" title="Putar"></i>
+                                        <i class="tool-ctrl-btn close fas fa-times" style="left:56px;" @click="showCompass=false" title="Tutup"></i>
+                                    </div>
+                                </div>
+                                 <!-- Right Triangle overlay (seperti ruler) -->
+                                 <div x-show="showTriangle" class="tool-overlay absolute" style="pointer-events:none">
+                                     <svg class="tool-handle" style="overflow:visible;pointer-events:none"
+                                          :style="'transform:rotate('+triangleAngle+'deg);transform-origin:50% 50%;width:'+(triangleSize||320)+'px;height:'+(triangleSize||320)+'px;left:'+triangleX+'px;top:'+triangleY+'px;position:absolute;'"
+                                          viewBox="-12 0 332 332" preserveAspectRatio="xMidYMid meet">
+                                         <polygon points="15,12 15,310 310,310" fill="rgba(245,248,255,0.3)" stroke="rgba(0,0,120,0.4)" stroke-width="1" stroke-linejoin="round"/>
+                                         <g class="tool-marks"></g>
+                                         <path d="M 21,300 L 21,288 L 33,288" fill="none" stroke="rgba(200,50,0,0.5)" stroke-width="1.2"/>
+                                         <text x="165" y="180" font-size="8" fill="rgba(0,0,120,0.4)" font-weight="bold" transform="rotate(-45,165,180)">45°</text>
+                                     </svg>
+                                     <!-- Drag handle at bottom-right corner -->
+                                     <div :style="'position:absolute;left:'+(triangleX+(triangleSize||320)*322/332-10)+'px;top:'+(triangleY+(triangleSize||320)*322/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                          @mousedown.stop="startToolDrag('triangle',$event)" @touchstart.stop="startToolDrag('triangle',$event)" title="Seret">
+                                         <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                     </div>
+                                     <!-- Rotate handle at right-angle corner -->
+                                     <div :style="'position:absolute;left:'+(triangleX+(triangleSize||320)*27/332-10)+'px;top:'+(triangleY+(triangleSize||320)*24/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                          @mousedown.stop="startToolRotate('triangle',$event)" @touchstart.stop="startToolRotate('triangle',$event)" title="Putar">
+                                         <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
+                                     </div>
+                                     <div class="tool-controlbar" :style="'left:'+(triangleX-4)+'px;top:'+(triangleY+((triangleSize||320)*310/332)+4)+'px;pointer-events:none;'">
+                                         <span class="text-stone-400 text-[8px] font-bold ml-1 pointer-events-none" x-text="Math.round(triangleAngle)+'°'"></span>
+                                         <span class="text-stone-500 mx-0.5 pointer-events-none">|</span>
+                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize=Math.max(200,(triangleSize||320)-30); rebuildTriangle()" title="Perkecil">−</div>
+                                         <span class="text-white font-bold text-[7px] pointer-events-none" x-text="(triangleSize||320)+'px'"></span>
+                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize=Math.min(500,(triangleSize||320)+30); rebuildTriangle()" title="Perbesar">+</div>
+                                         <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:2px" @click="showTriangle=false" title="Tutup"></div>
+                                     </div>
+                                 </div>
                                 {% set s_pages = ans_obj.get('pages', {}) if ans_obj.get('pages') else {} %}
                                 {% if not s_pages and (ans_obj.get('text_boxes') or ans_obj.get('boxes')) %}
                                     {% set s_pages = {'0': {'textBoxes': ans_obj.get('text_boxes', ans_obj.get('boxes', []))}} %}
@@ -202,17 +325,14 @@
                                 </div>
                                 {% endfor %}{% endfor %}
 
-                                {% set ov = fb_overlay.get(i|string, {}) %}
-                                {% for opk, opv in ov.items() %}{% set opn = opk|int %}
-                                {% for box in opv.get('textBoxes', []) %}
-                                <div class="text-box teacher-box" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:none;"
-                                     :style="'left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:' + (page=={{ opn+1 }}||page=={{ opn }}?'block':'none')">
-                                    <div class="box-handle"><i class="fas fa-grip-lines text-white text-[7px]"></i></div>
-                                    <button type="button" class="box-del" @click="removeTeacherTextBox({{ opk }},{{ loop.index0 }})">&times;</button>
-                                    <textarea x-text="getTeacherBoxText({{ opk }},{{ loop.index0 }})"
-                                              @input="setTeacherBoxText({{ opk }},{{ loop.index0 }}, $event.target.value); scheduleSave()"></textarea>
-                                </div>
-                                {% endfor %}{% endfor %}
+                                <template x-for="(box, bIdx) in (teacherBoxes[page-1] || [])" :key="'tb-'+bIdx">
+                                    <div class="text-box teacher-box"
+                                         :style="'left:'+(box.x_pct*100)+'%; top:'+(box.y_pct*100)+'%'">
+                                        <div class="box-handle"><i class="fas fa-grip-lines text-white text-[7px]"></i></div>
+                                        <button type="button" class="box-del" @click="removeTeacherTextBox(page-1, bIdx)">&times;</button>
+                                        <textarea x-model="box.text" @input="scheduleSave()"></textarea>
+                                    </div>
+                                </template>
                             </div>
                             {% else %}
                             <div class="text-center py-16 text-stone-400 border-2 border-dashed rounded-xl m-4">
@@ -227,11 +347,11 @@
                             <label class="text-xs font-extrabold text-stone-700">Skor #{{ i+1 }} <span class="text-orange-500">({{ qweight }} poin)</span>:</label>
                             <input type="number" x-model="scoreVal" min="0" max="100"
                                    class="w-20 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-center font-extrabold text-lg focus:border-orange-500"
-                                   @input="scheduleSave">
+                                   @input="scheduleSave" @keydown.enter.prevent="">
                             <label class="text-xs font-extrabold text-stone-700 ml-2">Komentar:</label>
                             <input type="text" x-model="commentVal" placeholder="Komentar..."
                                    class="flex-1 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-xs font-bold focus:border-orange-500"
-                                   @input="scheduleSave">
+                                   @input="scheduleSave" @keydown.enter.prevent="">
                         </div>
                     </div>
                 </div>
@@ -240,6 +360,62 @@
             </div>
         </div>
     </form>
+    <!-- Scientific Calculator -->
+    <div x-show="showCalculator" x-transition
+         class="fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
+         @click.outside="showCalculator = false">
+        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
+            <span class="text-[11px] font-extrabold text-slate-200 flex items-center gap-1.5"><i class="fas fa-calculator text-orange-400"></i> Scientific</span>
+            <div class="flex items-center gap-2">
+                <button @click="calcAngleMode = calcAngleMode === 'DEG' ? 'RAD' : 'DEG'"
+                        class="text-[9px] font-extrabold px-1.5 py-0.5 rounded"
+                        :class="calcAngleMode === 'DEG' ? 'bg-orange-500/30 text-orange-300' : 'bg-slate-700 text-slate-300'"
+                        x-text="calcAngleMode"></button>
+                <button @click="showCalculator = false" class="text-slate-400 hover:text-white text-xs">&times;</button>
+            </div>
+        </div>
+        <div class="p-1.5 bg-slate-900">
+            <div class="bg-slate-800 rounded-lg px-2.5 py-1.5 text-right mb-1.5 min-h-[52px]">
+                <div class="text-[9px] text-slate-500 font-mono truncate" x-text="calcExpression || ' '"></div>
+                <div class="text-lg font-bold text-white font-mono tracking-wider truncate" x-text="calcInput"></div>
+            </div>
+            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
+                <template x-for="(b, bi) in [{l:'sin',a:'sin'},{l:'cos',a:'cos'},{l:'tan',a:'tan'},{l:'log',a:'log'},{l:'ln',a:'ln'}]" :key="'s1-'+bi">
+                    <button type="button" @click="calcSciFunc(b.a)" class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition"><span x-text="b.l"></span></button>
+                </template>
+            </div>
+            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
+                <template x-for="(b, bi) in [{l:'x²',a:'sq'},{l:'x³',a:'cube'},{l:'x^y',a:'pow'},{l:'π',a:'pi'},{l:'e',a:'e'}]" :key="'s2-'+bi">
+                    <button type="button" @click="b.a==='pow'?calcOp('pow'):b.a==='pi'||b.a==='e'?calcConstant(b.a):calcSciFunc(b.a)"
+                            class="py-1.5 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 transition"
+                            :class="b.a==='pi'||b.a==='e'?'text-amber-400':'text-emerald-400'"><span x-text="b.l"></span></button>
+                </template>
+            </div>
+            <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
+                <button type="button" @click="calcMem('MC')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">MC</button>
+                <button type="button" @click="calcMem('MR')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">MR</button>
+                <button type="button" @click="calcMem('M+')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">M+</button>
+                <button type="button" @click="calcMem('M-')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">M-</button>
+                <button type="button" @click="calcParen('(')" class="py-1 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">(</button>
+            </div>
+            <div class="grid grid-cols-4 gap-[2px]">
+                <button type="button" @click="calcClear(true)" class="py-2 text-xs font-extrabold rounded bg-red-900/40 hover:bg-red-800/60 text-red-300 transition">C</button>
+                <button type="button" @click="calcClear(false)" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">CE</button>
+                <button type="button" @click="calcParen(')')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">)</button>
+                <button type="button" @click="calcOp('÷')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">÷</button>
+                <template x-for="(b, bi) in [{l:'7'},{l:'8'},{l:'9'},{l:'4'},{l:'5'},{l:'6'},{l:'1'},{l:'2'},{l:'3'}]" :key="'n-'+bi">
+                    <button type="button" @click="calcButton(b.l)" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition"><span x-text="b.l"></span></button>
+                </template>
+                <button type="button" @click="calcOp('×')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">×</button>
+                <button type="button" @click="calcButton('0')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">0</button>
+                <button type="button" @click="calcButton('.')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">.</button>
+                <button type="button" @click="calcOp('pm')" class="py-2 text-xs font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-white transition">+/−</button>
+                <button type="button" @click="calcOp('+')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">+</button>
+                <button type="button" @click="calcOp('-')" class="py-2 text-xs font-extrabold rounded bg-slate-700 hover:bg-slate-600 text-orange-400 transition">−</button>
+                <button type="button" @click="calcEquals()" class="py-2 text-xs font-extrabold rounded bg-orange-500 hover:bg-orange-600 text-white transition row-span-2">=</button>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -270,6 +446,10 @@ function compressCanvas(canvas, maxW) {
 function gradeApp() {
     return {
         currentQ: 0,
+        // Calculator state (shared across all questions)
+        showCalculator: false, calcInput: '0', calcResult: 0, calcOp: null, calcPrev: 0,
+        calcNew: true, calcExpression: '', calcAngleMode: 'DEG', calcMemVal: 0,
+        calcHasMem: false, calcParenLevel: 0,
         init() {
             this.$watch('currentQ', val => {
                 this.$nextTick(() => {
@@ -304,6 +484,18 @@ function gradeApp() {
             .then(r => { if(r.ok) window.location.href = '/teacher/results?exam_id={{ exam_id }}'; else return r.json().then(d => alert(d.error||'Gagal')); })
             .catch(e => alert('Gagal: '+e.message));
         },
+        // Calculator functions
+        _degToRad(d){return d*Math.PI/180;},
+        _getCalcVal(){return parseFloat(this.calcInput)||0;},
+        _setCalcVal(v){this.calcInput=String(v);this.calcResult=v;},
+        calcButton(val){if(this.calcNew){this.calcInput='';this.calcNew=false;this.calcExpression='';}if(val==='.'&&this.calcInput.includes('.'))return;this.calcInput+=val;this.calcResult=this._getCalcVal();},
+        calcOp(op){if(op==='pm'){this._setCalcVal(-this._getCalcVal());return;}if(op==='pow'){this.calcPrev=this._getCalcVal();this.calcOp='pow';this.calcNew=true;this.calcExpression=this.calcPrev+' ^ ';return;}if(this.calcOp)this.calcEquals();this.calcPrev=this._getCalcVal();this.calcOp=op;this.calcNew=true;const sym={'+':' + ','-':' − ','×':' × ','÷':' ÷ '};this.calcExpression=this.calcPrev+(sym[op]||' '+op+' ');},
+        calcEquals(){const cur=this._getCalcVal();let r=0;this.calcExpression=(this.calcExpression||this.calcPrev)+' '+cur+' =';if(this.calcOp==='+')r=this.calcPrev+cur;else if(this.calcOp==='-')r=this.calcPrev-cur;else if(this.calcOp==='×')r=this.calcPrev*cur;else if(this.calcOp==='÷')r=cur!==0?this.calcPrev/cur:0;else if(this.calcOp==='pow')r=Math.pow(this.calcPrev,cur);else r=cur;this._setCalcVal(r);this.calcOp=null;this.calcNew=true;},
+        calcSciFunc(name){const v=this._getCalcVal();let r=0;const deg=this.calcAngleMode==='DEG';if(name==='sin')r=Math.sin(deg?this._degToRad(v):v);else if(name==='cos')r=Math.cos(deg?this._degToRad(v):v);else if(name==='tan')r=Math.tan(deg?this._degToRad(v):v);else if(name==='log')r=v>0?Math.log10(v):0;else if(name==='ln')r=v>0?Math.log(v):0;else if(name==='sq')r=v*v;else if(name==='cube')r=v*v*v;this.calcExpression=name+'('+v+') =';this._setCalcVal(r);this.calcNew=true;},
+        calcConstant(name){const val=name==='pi'?Math.PI:Math.E;this._setCalcVal(val);this.calcExpression=name==='pi'?'π':'e';this.calcNew=true;},
+        calcMem(op){const cur=this._getCalcVal();if(op==='MC'){this.calcMemVal=0;this.calcHasMem=false;}else if(op==='MR'){if(this.calcHasMem)this._setCalcVal(this.calcMemVal);}else if(op==='M+'){this.calcMemVal+=cur;this.calcHasMem=true;}else if(op==='M-'){this.calcMemVal-=cur;this.calcHasMem=true;}},
+        calcParen(char){if(char==='('){this.calcParenLevel++;this.calcExpression+=' (';}else if(char===')'&&this.calcParenLevel>0){this.calcParenLevel--;this.calcExpression+=') ';}},
+        calcClear(all){this.calcInput='0';this.calcResult=0;if(all){this.calcOp=null;this.calcPrev=0;this.calcExpression='';this.calcParenLevel=0;}},
     };
 }
 
@@ -316,8 +508,23 @@ function gradeQuestion(qIdx) {
         ctx: null, canvas: null, drawing: false, lx: 0, ly: 0, history: [],
         scoreVal: SAVED_SCORES[qIdx] || '',
         commentVal: SAVED_COMMENTS[qIdx] || '',
-        teacherBoxes: JSON.parse(JSON.stringify(SAVED_OVERLAY[qIdx] || {})),
+        teacherBoxes: (() => {
+            const raw = SAVED_OVERLAY[qIdx] || {};
+            const boxes = {};
+            for (const k of Object.keys(raw)) {
+                const v = raw[k];
+                if (Array.isArray(v)) { boxes[k] = v; }
+                else if (v && Array.isArray(v.textBoxes)) { boxes[k] = v.textBoxes; }
+                else { boxes[k] = []; }
+            }
+            return boxes;
+        })(),
         canvasInited: false,
+        showRuler: false, rulerX: 30, rulerY: 80, rulerWidth: 900, rulerAngle: 0, snapRuler: false,
+        showProtractor: false, protractorX: 60, protractorY: 40, protractorSize: 350, protractorAngle: 0, snapProtractor: false,
+        showCompass: false, compassX: 120, compassY: 100, compassSize: 320, compassAngle: 0, snapCompass: false,
+        showTriangle: false, triangleX: 160, triangleY: 120, triangleSize: 320, triangleAngle: 0, snapTriangle: false,
+
 
         qInit() {
             QUESTION_INSTANCES[qIdx] = this;
@@ -342,6 +549,7 @@ function gradeQuestion(qIdx) {
             this.drawStudentCanvas();
             this.restoreSavedOverlay();
             this.setupEvents();
+            this.setupToolCursor();
             this.history = [el.toDataURL()];
         },
 
@@ -472,8 +680,57 @@ function gradeQuestion(qIdx) {
         },
         getTeacherBoxText(pIdx, bIdx) { return this.teacherBoxes[pIdx]?.[bIdx]?.text || ''; },
         setTeacherBoxText(pIdx, bIdx, val) { if(this.teacherBoxes[pIdx]?.[bIdx]) this.teacherBoxes[pIdx][bIdx].text = val; },
-        prevPage() { if(this.page>1){ this.saveOverlayForPage(); this.page--; this.$nextTick(()=>{ this.onPageChange(); }); }},
-        nextPage() { if(this.page<this.totalPages){ this.saveOverlayForPage(); this.page++; this.$nextTick(()=>{ this.onPageChange(); }); }},
+        prevPage() { if(this.page>1){ this.saveOverlayForPage(); this.page--; this.$nextTick(()=>{ this.onPageChange(); }); } this.closeAllTools(); },
+        nextPage() { if(this.page<this.totalPages){ this.saveOverlayForPage(); this.page++; this.$nextTick(()=>{ this.onPageChange(); }); } this.closeAllTools(); },
+        closeAllTools() { this.showRuler=false; this.showProtractor=false; this.showCompass=false; this.showTriangle=false; },
+        startToolDrag(type, event) {
+            event.preventDefault(); event.stopPropagation();
+            const src = event.touches ? event.touches[0] : event;
+            const startX = src.clientX, startY = src.clientY;
+            let startLeft, startTop;
+            if (type==='ruler') { startLeft=this.rulerX; startTop=this.rulerY; }
+            else if (type==='protractor') { startLeft=this.protractorX; startTop=this.protractorY; }
+            else if (type==='compass') { startLeft=this.compassX; startTop=this.compassY; }
+            else { startLeft=this.triangleX; startTop=this.triangleY; }
+            const onMove = (ev) => {
+                ev.preventDefault(); const s = ev.touches ? ev.touches[0] : ev;
+                const dx = s.clientX - startX, dy = s.clientY - startY;
+                if (type==='ruler') { this.rulerX=startLeft+dx; this.rulerY=startTop+dy; }
+                else if (type==='protractor') { this.protractorX=startLeft+dx; this.protractorY=startTop+dy; }
+                else if (type==='compass') { this.compassX=startLeft+dx; this.compassY=startTop+dy; }
+                else { this.triangleX=startLeft+dx; this.triangleY=startTop+dy; }
+            };
+            const onUp = () => { document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); document.removeEventListener('touchmove',onMove); document.removeEventListener('touchend',onUp); };
+            document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+            document.addEventListener('touchmove',onMove,{passive:false}); document.addEventListener('touchend',onUp);
+        },
+        startToolRotate(type, event) {
+            event.preventDefault(); event.stopPropagation();
+            const svgEl = document.getElementById(type+'-svg-'+this.qIdx) || document.querySelector('[id^="'+type+'-"]');
+            if (!svgEl) return;
+            const rect = svgEl.getBoundingClientRect();
+            const cx = rect.left+rect.width/2, cy = rect.top+rect.height/2;
+            const src = event.touches ? event.touches[0] : event;
+            const startAngle = Math.atan2(src.clientY-cy, src.clientX-cx);
+            let origAngle;
+            if (type==='ruler') origAngle=this.rulerAngle||0;
+            else if (type==='protractor') origAngle=this.protractorAngle||0;
+            else if (type==='compass') origAngle=this.compassAngle||0;
+            else origAngle=this.triangleAngle||0;
+            const onMove = (ev) => {
+                ev.preventDefault(); const s = ev.touches ? ev.touches[0] : ev;
+                const cur = Math.atan2(s.clientY-cy, s.clientX-cx);
+                const delta = (cur-startAngle)*180/Math.PI;
+                const na = origAngle+delta;
+                if (type==='ruler') this.rulerAngle=na;
+                else if (type==='protractor') { this.protractorAngle=na; this.updateProtractorAngle(); }
+                else if (type==='compass') this.compassAngle=na;
+                else this.triangleAngle=na;
+            };
+            const onUp = () => { document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); document.removeEventListener('touchmove',onMove); document.removeEventListener('touchend',onUp); };
+            document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+            document.addEventListener('touchmove',onMove,{passive:false}); document.addEventListener('touchend',onUp);
+        },
         saveOverlayForPage() {
             if(!this.canvas||!this.ctx)return;
             const p=this.page-1;
@@ -509,10 +766,249 @@ function gradeQuestion(qIdx) {
                 }
             });
         },
+        _getToolZone(lx, ly) {
+          if (this.showRuler) {
+            const rx=this.rulerX, ry=this.rulerY, rw=this.rulerWidth, rh=rw*50/400;
+            if (lx>=rx && lx<=rx+rw && ly>=ry && ly<=ry+rh) {
+              if (lx>rx+rw-15) return 'resize';
+              if (lx<rx+30 && ly<ry+25) return 'close';
+              if (lx>rx+rw-40 && ly<ry+25) return 'rotate';
+              return 'edge';
+            }
+          }
+          if (this.showProtractor) {
+            const px=this.protractorX, py=this.protractorY, ps=this.protractorSize;
+            const cx=px+ps/2, cy=py+ps*0.92, r=ps*0.45;
+            const dx=lx-cx, dy=ly-cy, dist=Math.sqrt(dx*dx+dy*dy);
+            if (dist<=r+10) {
+              if (lx<px+40 && ly<py+30) return 'close';
+              if (lx>px+ps-30 && ly<py+ps*0.5) return 'resize';
+              if (dist>r*0.7) return 'marker';
+              return 'move';
+            }
+          }
+          if (this.showTriangle) {
+            const tx=this.triangleX, ty=this.triangleY, ts=this.triangleSize;
+            if (lx>=tx && lx<=tx+ts && ly>=ty && ly<=ty+ts) return 'move';
+          }
+          if (this.showCompass) return 'move';
+          return 'none';
+        },
+        setupToolCursor() {
+          const el = this.canvas;
+          if (!el || el._toolCursorSet) return;
+          el._toolCursorSet = true;
+          el.addEventListener('mousemove', (e) => {
+            const r = el.getBoundingClientRect();
+            const lx = (e.clientX - r.left) * (el.width / r.width);
+            const ly = (e.clientY - r.top) * (el.height / r.height);
+            const zone = this._getToolZone(lx, ly);
+            const cursors = { move:'grab', resize:'ew-resize', rotate:'alias', marker:'crosshair', edge:'crosshair', close:'pointer' };
+            el.style.cursor = cursors[zone] || 'crosshair';
+          });
+        },
         scheduleSave() {
             if(autoSaveTimer)clearTimeout(autoSaveTimer);
             autoSaveTimer=setTimeout(()=>doAutoSave(),3000);
             this.saveOverlayForPage();
+            setTimeout(() => { try { calcFinal(); } catch(e) {} }, 50);
+        },
+        // SVG content generators (replaces Jinja for-loops)
+        rulerGenSvg() { return ScanGradeTools.rulerSvg(400,50); },
+        protractorGenSvg() { return ScanGradeTools.protractorSvg(130,130,120); },
+        _buildRulerMarks(g) {
+          const ns = 'http://www.w3.org/2000/svg';
+          const ppcm = 14;
+          for (let mm = 0; mm <= 300; mm++) {
+            const x = mm * ppcm / 10;
+            const cm = mm % 10 === 0, half = mm % 5 === 0;
+            const hi = cm ? 26 : half ? 18 : 10;
+            const el = document.createElementNS(ns, 'line');
+            el.setAttribute('x1', x); el.setAttribute('y1', '2');
+            el.setAttribute('x2', x); el.setAttribute('y2', hi);
+            el.setAttribute('stroke', `rgba(0,0,130,${cm?0.75:half?0.55:0.3})`);
+            el.setAttribute('stroke-width', cm?'1.2':half?'0.8':'0.4');
+            g.appendChild(el);
+            const inPerMm = 1 / 25.4; const mmPos = mm * inPerMm;
+            const in8 = Math.abs(mmPos % 1) < 0.01, in4 = Math.abs(mmPos % 0.5) < 0.01;
+            const el2 = document.createElementNS(ns, 'line');
+            el2.setAttribute('x1', x); el2.setAttribute('y1', '38');
+            el2.setAttribute('x2', x); el2.setAttribute('y2', in8 ? 56 : in4 ? 50 : 44);
+            el2.setAttribute('stroke', `rgba(180,60,0,${in8?0.65:in4?0.45:0.25})`);
+            el2.setAttribute('stroke-width', in8?'1.2':in4?'0.8':'0.4');
+            g.appendChild(el2);
+          }
+          for (let cm = 0; cm <= 30; cm++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', cm * ppcm); t.setAttribute('y', '36');
+            t.setAttribute('font-size', '8'); t.setAttribute('fill', 'rgba(0,0,130,0.85)');
+            t.setAttribute('font-weight', 'bold'); t.setAttribute('text-anchor', 'middle');
+            t.textContent = cm; g.appendChild(t);
+          }
+          for (let i = 0; i <= 11; i++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', i * ppcm * 2.54); t.setAttribute('y', '66');
+            t.setAttribute('font-size', '7'); t.setAttribute('fill', 'rgba(180,60,0,0.8)');
+            t.setAttribute('font-weight', 'bold'); t.setAttribute('text-anchor', 'middle');
+            t.textContent = i + '″'; g.appendChild(t);
+          }
+        },
+        _buildTriangleMarks(g) {
+          const ns = 'http://www.w3.org/2000/svg';
+          const ppcm = 29.5;
+          const maxCm = 10;
+          for (let mm = 0; mm <= maxCm * 10; mm++) {
+            const y = 310 - mm * ppcm / 10;
+            if (y < 15) break;
+            const cm = mm % 10 === 0, half = mm % 5 === 0;
+            const hi = cm ? 14 : half ? 9 : 5;
+            const el = document.createElementNS(ns, 'line');
+            el.setAttribute('x1', '15'); el.setAttribute('y1', y);
+            el.setAttribute('x2', 15 + hi); el.setAttribute('y2', y);
+            el.setAttribute('stroke', `rgba(0,0,130,${cm?0.75:half?0.55:0.3})`);
+            el.setAttribute('stroke-width', cm?'1.5':half?'1':'0.5');
+            g.appendChild(el);
+          }
+          for (let cm = 0; cm <= maxCm; cm++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', '34'); t.setAttribute('y', 310 - cm * ppcm + 4);
+            t.setAttribute('font-size', '9'); t.setAttribute('fill', 'rgba(0,0,130,0.85)');
+            t.setAttribute('font-weight', 'bold'); t.setAttribute('text-anchor', 'start');
+            t.textContent = cm; g.appendChild(t);
+          }
+          for (let mm = 0; mm <= maxCm * 10; mm++) {
+            const x = 15 + mm * ppcm / 10;
+            if (x > 310) break;
+            const cm = mm % 10 === 0, half = mm % 5 === 0;
+            const hi = cm ? 14 : half ? 9 : 5;
+            const el = document.createElementNS(ns, 'line');
+            el.setAttribute('x1', x); el.setAttribute('y1', '310');
+            el.setAttribute('x2', x); el.setAttribute('y2', 310 - hi);
+            el.setAttribute('stroke', `rgba(0,0,130,${cm?0.75:half?0.55:0.3})`);
+            el.setAttribute('stroke-width', cm?'1.5':half?'1':'0.5');
+            g.appendChild(el);
+          }
+          for (let cm = 0; cm <= maxCm; cm++) {
+            const t = document.createElementNS(ns, 'text');
+            t.setAttribute('x', 15 + cm * ppcm); t.setAttribute('y', '290');
+            t.setAttribute('font-size', '9'); t.setAttribute('fill', 'rgba(0,0,130,0.85)');
+            t.setAttribute('font-weight', 'bold'); t.setAttribute('text-anchor', 'middle');
+            t.textContent = cm; g.appendChild(t);
+          }
+        },
+        _buildProtractorMarks(g, cx, cy, r) {
+          const ns = 'http://www.w3.org/2000/svg';
+          const labelStep = r < 120 ? 20 : 10;
+          const fs = Math.max(7, Math.min(11, Math.round(r/18)));
+          for (let d = 0; d <= 180; d++) {
+            const rad = -d * Math.PI / 180;
+            const co = Math.cos(rad), si = Math.sin(rad);
+            const tenth = d % 10 === 0, half = d % 5 === 0;
+            const r2 = tenth ? r-30 : half ? r-22 : r-5;
+            const l = document.createElementNS(ns, 'line');
+            l.setAttribute('x1', cx+co*r); l.setAttribute('y1', cy+si*r);
+            l.setAttribute('x2', cx+co*r2); l.setAttribute('y2', cy+si*r2);
+            l.setAttribute('stroke', `rgba(0,0,120,${tenth?0.85:half?0.65:0.35})`);
+            l.setAttribute('stroke-width', tenth?'1.5':half?'1.5':'0.6');
+            g.appendChild(l);
+          }
+          for (let t = 0; t <= 180; t += labelStep) {
+            const rad = -t * Math.PI / 180;
+            const co = Math.cos(rad), si = Math.sin(rad);
+            const txt = document.createElementNS(ns, 'text');
+            txt.setAttribute('x', cx+co*(r-32)); txt.setAttribute('y', cy+si*(r-32)+7);
+            txt.setAttribute('font-size', fs); txt.setAttribute('fill', 'rgba(0,0,120,1)');
+            txt.setAttribute('font-weight', 'bold'); txt.setAttribute('text-anchor', 'middle');
+            txt.textContent = t + '°'; g.appendChild(txt);
+          }
+        },
+        _getToolG(svg) {
+          let g = svg.querySelector('g.tool-marks');
+          if (!g) { g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.setAttribute('class', 'tool-marks'); svg.insertBefore(g, svg.firstChild); }
+          while (g.firstChild) g.removeChild(g.firstChild);
+          return g;
+        },
+        initToolSvg(id, type) {
+          const svg = document.getElementById(type + '-svg-' + id);
+          if (!svg) return;
+          if (type === 'ruler') this._buildRulerMarks(this._getToolG(svg));
+          else if (type === 'protractor') this._buildProtractorMarks(this._getToolG(svg), 130, 130, 120);
+          else if (type === 'triangle') this._buildTriangleMarks(this._getToolG(svg));
+        },
+        rebuildRuler() {
+          const svg = document.getElementById('ruler-svg-' + this.qIdx);
+          if (!svg) { setTimeout(() => this.rebuildRuler(), 50); return; }
+          this._buildRulerMarks(this._getToolG(svg));
+        },
+        rebuildTriangle() {
+          const svg = document.getElementById('triangle-svg-' + this.qIdx);
+          if (!svg) { setTimeout(() => this.rebuildTriangle(), 50); return; }
+          this._buildTriangleMarks(this._getToolG(svg));
+        },
+        rebuildProtractor() {
+          const svg = document.getElementById('protractor-svg-' + this.qIdx);
+          if (!svg) { setTimeout(() => this.rebuildProtractor(), 50); return; }
+          this._buildProtractorMarks(this._getToolG(svg), 130, 130, 120);
+          this.updateProtractorAngle();
+        },
+        compassSvgRings() { let s=''; for(let r=10;r<=80;r+=10) s+=`<circle cx="100" cy="100" r="${r}" fill="none" stroke="rgba(0,0,150,0.2)" stroke-width="0.3" stroke-dasharray="2,3"/>`; return s; },
+        triangleGenSvg() { let s=''; for(let t=1;t<=18;t++){s+=`<line x1="10" y1="${190-t*10}" x2="${10+t*10}" y2="190" stroke="rgba(0,0,150,0.25)" stroke-width="0.3"/>`} for(let t=1;t<=7;t++){s+=`<text x="${10+t*24-3}" y="186" font-size="5.5" fill="rgba(0,0,150,0.45)" font-weight="bold">${t}</text>`} for(let t=1;t<=7;t++){s+=`<text x="6" y="${190-t*24+4}" font-size="5.5" fill="rgba(0,0,150,0.45)" font-weight="bold">${t}</text>`} return s; },
+        startRulerResize(event) {
+          event.preventDefault();
+          const startX = event.touches ? event.touches[0].clientX : event.clientX;
+          const startW = this.rulerWidth || 500;
+          const startCm = this.rulerCmLen || 30;
+          const onMove = (ev) => {
+            const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+            const newW = Math.max(100, startW + x - startX);
+            this.rulerWidth = Math.round(newW);
+            this.rulerCmLen = Math.max(5, newW * 30 / 800);
+            this.rebuildRuler();
+          };
+          const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); };
+          document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+          document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp);
+        },
+        startProtractorResize(event) {
+          event.preventDefault();
+          const startX = event.touches ? event.touches[0].clientX : event.clientX;
+          const startY = event.touches ? event.touches[0].clientY : event.clientY;
+          const startSz = this.protractorSize || 350;
+          const onMove = (ev) => {
+            const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+            const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+            const dist = Math.sqrt(x*x + y*y);
+            const startDist = Math.sqrt(startX*startX + startY*startY);
+            const newSz = Math.round(Math.max(180, Math.min(600, startSz * dist / Math.max(startDist, 1))));
+            this.protractorSize = newSz;
+            this.rebuildProtractor();
+          };
+          const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); };
+          document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+          document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp);
+        },
+        updateProtractorAngle() {
+          const svg = document.getElementById('protractor-svg-' + this.qIdx);
+          if (!svg) return;
+          let g = svg.querySelector('g.tool-angle-marks');
+          if (!g) { g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.setAttribute('class', 'tool-angle-marks'); svg.appendChild(g); }
+          g.innerHTML = '';
+          const ns = 'http://www.w3.org/2000/svg';
+          const cx = 130, cy = 130, r = 120;
+          const rad = -this.protractorAngle * Math.PI / 180;
+          const co = Math.cos(rad), si = Math.sin(rad);
+          const line = document.createElementNS(ns, 'line');
+          line.setAttribute('x1', cx); line.setAttribute('y1', cy);
+          line.setAttribute('x2', cx + r * co); line.setAttribute('y2', cy + r * si);
+          line.setAttribute('stroke', 'rgba(200,50,0,0.8)'); line.setAttribute('stroke-width', '2.5');
+          line.setAttribute('stroke-dasharray', '5,3');
+          g.appendChild(line);
+          const txt = document.createElementNS(ns, 'text');
+          txt.setAttribute('x', cx + (r*0.5)*co - 12); txt.setAttribute('y', cy + (r*0.5)*si + 5);
+          txt.setAttribute('font-size', '13'); txt.setAttribute('fill', 'rgba(200,50,0,0.95)');
+          txt.setAttribute('font-weight', 'bold'); txt.setAttribute('text-anchor', 'middle');
+          txt.textContent = Math.round(Math.abs(this.protractorAngle)) + '°';
+          g.appendChild(txt);
         },
     };
 }

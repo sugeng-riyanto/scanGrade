@@ -3,6 +3,7 @@
 {% block page_title %}Analitik{% endblock %}
 {% block head_extra %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+<script>window.chartJsLoaded = true;</script>
 {% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
@@ -51,8 +52,19 @@
         </div>
     </div>
 
-    <!-- Charts -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Empty state when no data -->
+    <div x-show="{{ stats.total_submissions }} === 0" class="card p-10 text-center">
+        <i class="fas fa-chart-pie text-5xl text-slate-300 mb-4"></i>
+        <h3 class="text-lg font-extrabold text-slate-700 mb-2" x-text="lang==='en'?'No Data Yet':'Belum Ada Data'"></h3>
+        <p class="text-sm font-medium text-slate-500 max-w-md mx-auto" x-text="lang==='en'?'Analytics will appear here after students take your exams. Create and publish an exam, then students can start working on it.':'Analitik akan muncul setelah siswa mengerjakan ujian Anda. Buat dan publikasikan ujian, lalu siswa dapat mulai mengerjakannya.'"></p>
+        <div class="flex justify-center gap-3 mt-6">
+            <a href="/teacher/exams" class="bg-brand-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 hover:bg-brand-700 transition"><i class="fas fa-plus mr-1"></i> <span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span></a>
+            <a href="/teacher/results" class="border-2 border-slate-200 px-5 py-2.5 rounded-xl font-bold text-sm text-slate-600 hover:bg-slate-50 transition"><i class="fas fa-file-alt mr-1"></i> <span x-text="lang==='en'?'View Results':'Lihat Hasil'"></span></a>
+        </div>
+    </div>
+
+    <!-- Charts (hidden when no data) -->
+    <div x-show="{{ stats.total_submissions }} > 0" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="card">
             <div class="px-5 py-4 border-b border-slate-100">
                 <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Score Distribution':'Distribusi Nilai'"></h3>
@@ -72,7 +84,7 @@
     </div>
 
     <!-- Per-Exam Breakdown -->
-    <div class="card">
+    <div class="card" x-show="{{ stats.total_submissions }} > 0">
         <div class="px-5 py-4 border-b border-slate-100">
             <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Per-Exam Breakdown':'Rincian per Ujian'"></h3>
         </div>

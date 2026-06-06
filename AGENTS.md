@@ -1,121 +1,123 @@
 # ScanGrade - AI Agent Context
 
-## Project Overview
-Sistem koreksi ujian digital dengan fitur:
-- Scan lembar jawaban pilihan ganda via kamera (seperti ZipGrade)
-- Koreksi esai dengan AI similarity scoring + teacher override
-- Anti-cheat: deteksi tab switch dengan penalty configurable
-- Analytics dashboard interaktif untuk guru
-- Export hasil ke XLSX/PDF + publish ke siswa via login/WA
+## Goal
+- Build and optimize ScanGrade (Flask+Supabase exam/grading app) for 500 concurrent students with offline-first auto-save, teacher grading, student results, anti-cheat graduated penalties, PDF download with server-side compositing, and professional ZipGrade-style UI with role-based navigation.
 
-## Tech Stack
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Backend | Flask 3.x | App factory pattern, blueprints |
-| Language | Python 3.10+ | Type hints wajib |
-| Database | Supabase PostgreSQL | Row Level Security (RLS) |
-| Auth | Supabase Auth | Email/password + JWT |
-| Storage | Supabase Storage | Bucket: exam-pdfs, student-answers |
-| Frontend | Tailwind CSS + HTMX | Vanilla JS, no React/Vue |
-| Charts | Chart.js 4.x | Untuk analytics dashboard |
-| PDF | ReportLab + pdf.js | Export laporan + viewer soal |
-| Excel | openpyxl | Export hasil ujian |
-| Queue | Celery + Redis | Untuk notifikasi async |
-| Tunnel | ngrok | Development exposure |
+## Constraints & Preferences
+- Supabase project: `roshkbkbzgfedowozfo` (region: ap-southeast-1)
+- Python 3.12.10, Flask 3.1.1, supabase-py 2.12.0, Alpine.js v3.14.8, Tailwind CSS (CDN), Chart.js 4.4.7
+- Two Supabase clients: `get_supabase()` (service key) and `get_auth_client()` (anon key)
+- Must support 500 concurrent students with spotty WiFi (3 floors, uneven coverage)
+- Offline-first: localStorage first, sync to server when online
+- `MAX_CONTENT_LENGTH = 50MB`
+- Canvas data saved as PNG (not JPEG — was causing black overlay bug)
+- Default timezone UTC+7 (WIB), configurable per-user and per-school
+- UI language: Indonesian (default) with English toggle (`localStorage.sg_lang`)
+- Color theme: `primary` (blue) defined in Tailwind config — `brand-*` was previously undefined (invisible buttons/text), now aliased to `primary` palette
+- No direct DB DDL access — migrations must be run manually in Supabase SQL Editor
+- `profiles` table columns: `['id', 'full_name', 'phone', 'role', 'created_at', 'updated_at']` — **no `school_id`, `class_id`, `nisn`, `nis`, `email` columns exist**
+- `schools` table **does NOT exist** in `public` schema
+- MCQ answer keys: single value (`"A"`), multiple (`["A","B"]`), or `"bonus"` (all correct)
+- Weighted scoring: Teacher sets MCQ% + Essay% (total must = 100), distributed equally per question within each group
+- `question_weights` JSONB column does NOT exist in DB — code uses `.get()` + `setdefault` with try/except fallback
+- PDF generation uses `xhtml2pdf` (pure Python) — WeasyPrint requires GTK/Pango not available on Windows
+- Anti-cheat: graduated penalty (1st=warning, 2nd=-base, 3rd=-2×base, 4th+=-3×base), auto-submit on max violations
+- Router / security: 404 catch-all `/tools` for admin functions; CSP `frame-ancestors 'self'` in response headers
 
-## Project Structure
-```
-app/
-├── __init__.py          # Flask app factory
-├── config.py            # Dev/Prod config classes
-├── routes/              # Blueprints
-│   ├── auth.py          # Login/register/me
-│   ├── exam.py          # CRUD ujian + PDF upload
-│   ├── admin.py         # Dashboard admin
-│   ├── teacher.py       # Builder + grader UI
-│   ├── student.py       # Take exam + results
-│   ├── api.py           # Anti-cheat endpoints
-│   ├── publish.py       # Publish scores
-│   └── webhook.py       # Midtrans/Fonnte callbacks
-├── services/            # Business logic
-├── models/              # Supabase query helpers
-├── utils/               # Decorators, security, helpers
-└── templates/           # Jinja2 + Tailwind
-```
+## Progress
+### Done
+- Fixed `submit_exam` route: now saves `final_score = max(0, score - penalty)` and `violations` count to the submission
+- Fixed `_recalculate_scores` to assign weights to ALL questions (not just MCQ) — essay questions had weight=0 because the fallback logic only computed MCQ weights
+- Fixed `grade_detail` route to compute essay weights locally when `question_weights` is empty (same 70/30 default as exam_form)
+- Fixed Publish route: now calls `_recalculate_scores()` before updating status
+- Fixed `result_detail.html` template: score cards now show for ALL submission statuses with 4 columns (Skor MCQ, Penalti, **Jumlah Pelanggaran**, Final); subtle "Menunggu koreksi" note for submitted/draft
+- Added camera toggle to `scan.html`: `enumerateDevices()` lists video inputs; auto-selects back camera on mobile; dropdown + flip button on desktop
+- Added **Compass (Jangka)** and **Right Triangle (Segitiga Siku)** tools to both `take_exam.html` and `grade_detail.html`
+- **Auto-close all tools** on: `prevPage()`, `nextPage()`, question change (`$watch('currentQ')`)
+- Enhanced `analytics.html`: empty state with guide + CTA buttons; charts hidden when `total_submissions===0`
+- Fixed violation `sendBeacon` Blob bracket bug in `take_exam.html`
+- Answer sheet generator at `/tools/generate-answer-sheet` accepts `total_questions` (1-200) and `options` (2-8)
+- Teacher bubble-sheet route fixed: removed `profiles.school_id` join (column doesn't exist)
+- All existing submissions recalculated: `final_score` and `violations` backfilled via script (7 updated)
+- **Fixed `brand-*` color bug**: Tailwind config only defined `primary`/`surface`; `brand` added as alias for `primary` palette — fixes invisible "Simpan & Aktifkan" button, MCQ answer key feedback, "Koreksi" button, and all broken `brand-*` across every template
+- **Fixed YouTube embed**: Videos `ZxcGPnOcDSQ` (Maroon 5) and `LYU-8IFcDPw` (Linkin Park) have embedding disabled by uploader; improved `youtubeEmbedUrl()` regex for `v=` not-first-query-param; changed fallback from `return url` to `return ''` (empty iframe)
+- **Fixed teacher text tool in `grade_detail.html`**: Teacher text boxes rendered via Jinja2 (static) but `addTeacherTextBox()` updated Alpine state — no DOM created. Replaced Jinja2 loop with Alpine `x-for` bound to `teacherBoxes[page-1]`; normalized `teacherBoxes` init to extract `textBoxes` arrays from saved overlay
+- **Added full canvas + drawing tools to MCQ questions in `take_exam.html`**: Pen, line (width + dash style), eraser, text (font size + family), ruler, protractor, compass, triangle, undo, clear — same toolbar as essay section
+- **Updated MCQ answer data format**: From string `"A"` to `{"answer": "A", "pages": {0: {canvas: "...", textBoxes: [...]}}}` when canvas data present (backward compatible — no-drawing answers remain simple strings)
+- **Updated all server/client layers for new MCQ dict format**: `submit_exam`, `_is_mcq_correct`, `_extract_mcq_answer` helper, `grade_detail.html`, `result_detail.html`, `result_detail_pdf.html` — all extract `answer` from dict when present
+- **MCQ result PDF download**: Removed `if qtype == "mcq": continue` in `download_result_pdf()`; added merged page images (`has_merged`) to MCQ section in `result_detail_pdf.html`
+- **Fixed MCQ canvas not initializing**: `$watch('currentQ')` and `$nextTick` initial load both skipped `initEcCanvas` for MCQ questions (`if (this.questions[val]?.type !== 'mcq')`). Removed the check so `initEcCanvas` is called for all question types, enabling ruler/protractor/compass/triangle/pen tools on MCQ canvas
+- **Fixed essay section's broken overlay drag/rotate handles**: Inline SVG handles (`tool-rotate`, `tool-handle`) in essay ruler/protractor/compass/triangle overlays called `startToolRotate('ruler',$event)` (2 args) but functions expect 3 params `(i, type, event)`. Added `i` parameter: `startToolRotate(i,'ruler',$event)`
 
-## Security & Best Practices
-### Environment Variables
-- **WAJIB**: Jangan commit file .env ke GitHub!
-- Copy .env.example ke .env dan isi nilai sebenarnya
+### In Progress
+- `question_weights` + anti-cheat columns not in DB — code uses `.get()` + `setdefault`; try/except removes keys on failure
+- Many exams (Sejarah, Agama, etc.) have `None` answer keys — teacher must set correct answers via UI before scores appear
 
-### Row Level Security (RLS) Rules
-- **profiles**: User hanya bisa baca/update profil sendiri
-- **exams**:
-  - Guru: CRUD exam yang teacher_id = auth.uid()
-  - Siswa: READ only exam dengan status='active' + punya access code
-- **submissions**:
-  - Guru: READ/WRITE submission untuk exam miliknya
-  - Siswa: READ only submission sendiri DAN is_published=true
-- **violation_logs**:
-  - Backend: INSERT via service key
-  - Guru: READ logs untuk exam miliknya
-- **exam_access_codes**:
-  - Guru: CREATE codes untuk exam miliknya
-  - Siswa: READ only code miliknya yang belum used
+### Blocked
+- Cannot run DDL without Supabase SQL Editor — `is_hidden`, `retracted`, `question_weights` JSONB, and 11 anti-cheat columns don't exist in DB yet
+- Exam scoring shows 0 for students when answer keys are `None` (teacher has not set correct answers)
 
-## Anti-Cheat Implementation Rules
-- **Frontend deteksi**: visibilitychange + debounce 1500ms
-- **Logging**: navigator.sendBeacon untuk reliability saat tab ditutup
-- **Server validation**: Cek timestamp ±5 menit, rate limit 1 log/2 detik
-- **Penalty calculation**: SELALU di backend, jangan percaya frontend
-- **False positive mitigation**: Ignore blur <500ms, toleransi iOS +1 violation
+## Key Decisions
+- Two separate Supabase clients to avoid service-key client corruption from auth operations
+- Auto-create profile in register route, not DB trigger
+- Weighted scoring: MCQ% + Essay% (total=100), distributed equally within each group — fallback to 70/30 when `question_weights` is empty
+- Essay types simplified to single "Esai" toggle — canvas drawing + text boxes combined on PDF
+- Anti-cheat graduated penalty: 1st=warning(0), 2nd=-base, 3rd=-2×base, 4th+=-3×base per violation; cap at 100
+- Tool SVGs always `pointer-events: none` — drag/rotate from toolbar control bar only
+- PDF generation: `xhtml2pdf` over WeasyPrint (no GTK/Pango on Windows), over pdfkit (needs wkhtmltopdf)
+- Server-side compositing for PDF: Pillow merges all layers into flat `<img>` — xhtml2pdf doesn't support `position: absolute`
+- NISN: fill from LEFT if < 10 digits (most significant first, trailing cells empty) — standard OMR convention
+- **`brand-*` class fix**: Added `brand` as alias for `primary` in Tailwind config (same blue palette) — fixes all templates system-wide without per-file edits
+- **MCQ answer format**: Use dict `{answer, pages}` only when canvas/text data exists; keep string for backward compatibility
 
-## Code Style
-- Python: Type hints + Google docstring
-- Flask blueprints dengan prefix URL
-- Error handling di tiap endpoint
-- Supabase client via app.extensions
+## Next Steps
+- Execute migrations `003_submission_hidden_retracted.sql` and `011_anti_cheat_settings.sql` in Supabase SQL Editor
+- Teachers need to set answer keys for exams that show score=0 (Sejarah, Agama, PPKN, AD have `None` keys)
+- Implement `randomize_questions` and `randomize_options` in take_exam frontend
+- Test full anti-cheat flow: tab switch → graduated penalty → auto-submit
+- Test PDF download with MCQ canvas overlays
+- Test MCQ drawing tools (ruler, protractor, compass, triangle) now that canvas init works
+- Load test with 500 concurrent simulated connections
 
-## Phase 5: Guru & Murid Dashboard + UI/UX Polish
+## Critical Context
+- Alpine.js v3.14.8 — `el.__x` does NOT exist. Must use `QUESTION_INSTANCES` global map pattern. NOTE: admin templates use `Alpine.raw(root).__x.$data` for import forms.
+- `xhtml2pdf` does NOT support: `display: flex`, `position: absolute/relative`, `border-radius` (limited), `gap` — use tables for layout, floats for positioning
+- PDF page URLs are local paths like `/static/uploads/exams/<uuid>/page_001.png` — load via `os.path.join(app.static_folder, ...)` not HTTP
+- Student answer JSON (MCQ with canvas): `{"0": {"answer": "A", "pages": {"0": {"canvas": "data:image/png;...", "textBoxes": [...]}}}}` — old format `{"0": "A"}` still supported
+- Answer key JSON: `{"0": "A", "1": ["A","B"], "2": "bonus", "3": "essay"}` — `None` keys cause score 0
+- `question_weights` + anti-cheat columns do NOT exist in DB — try/except removes them on failure
+- `submissions.is_hidden` column does NOT exist — use `s.setdefault('is_hidden', False)`
+- `profiles` has NO `email`, `school_id`, `class_id`, `nisn`, or `nis` columns — querying them causes `APIError`
+- `schools` table does NOT exist — any query fails with `PGRST205`
+- Violation `sendBeacon` Blob: `new Blob([JSON.stringify([{...}])], {type: 'application/json'})` — must have correct bracket nesting
+- Grade detail form: pressing Enter in score/comment inputs submits the HTML `<form>` and reloads page — `@keydown.enter.prevent=""` added to both inputs
+- NISN: jika < 10 digit, isi dari kiri (most significant digit pertama), trailing cells kosong
+- `final_score` dihitung sebagai `max(0, score - penalty)` saat submit; untuk submission lama di-backfill via script
+- Jawaban guru untuk komentar: mulai dari huruf besar setelah titik dan spasi — `calcFinal()` panggil 50ms setelah input berubah
+- `_saveCurrentPage()` dan `getAnswersLight()`/`getAnswersWithCanvas()` sudah diupdate untuk MCQ — canvas di `ec-canvas-{i}` di-init melalui `initEcCanvas(i)`
+- Essay section's SVG overlay drag/rotate handles: use `startToolRotate(i,'ruler',$event)` — 3-arg form (was `startToolRotate('ruler',$event)` broken)
 
-### Key Changes
-- **Redesigned `base.html`**: Blue-white theme (`primary` = blue, `surface` = slate), role-based sidebar with section titles per user type (super_admin, admin_sekolah, guru, murid), integrated toast notification system (Alpine.js `$store`-like array, auto-dismiss 4s, 4 types), loading spinner on HTMX requests, smooth transitions (slide-up, fade-in, scale-in animations), mobile-first responsive with sticky topbar + bottom nav, user dropdown menu, timezone dialog, breadcrumb nav, all using `animate-*` custom keyframes.
-- **Migration `010_teacher_assignments.sql`**: `teacher_assignments` junction table (teacher_id, class_id, subject_id, school_id) with UNIQUE constraint, RLS policies for each role, indexes.
-- **Teacher Dashboard** (`/teacher/dashboard`): Welcome card with gradient, stat cards (total exams, active, students, avg), assigned classes & subjects list with HTMX delete, "Tambah" button toggles inline assign form (class + subject dropdowns from school data), quick actions grid, recent exams list, HTMX-powered assignment CRUD.
-- **Teacher Classes Page** (`/teacher/classes`): Full assignment management page with card grid of current assignments, inline assign form, available classes reference tags, HTMX-powered add/delete.
-- **Teacher Routes**: `GET /teacher/classes` (classes management page), `GET/POST /teacher/assignments` (list/create assignments), `DELETE /teacher/assignments/<id>` (delete assignment). Dashboard route updated to fetch assignments + school's classes/subjects.
-- **Student Dashboard** (`/student/dashboard`): Class & subject assignment info cards (from `profiles.class_id` + teacher_assignments count), improved available exams grid, toggleable score visibility, consistent blue-white styling.
-- **Student Routes**: Dashboard updated to pass `student_class` (from `profiles.class_id` → `classes`) and `subject_count` (from teacher_assignments for school).
-- **All Auth Templates**: Redesigned with blue-white gradient backgrounds, `primary-*` and `surface-*` colors (register, login, login_user, activate, forgot_password, reset_password, success pages).
-- **Admin Template Updates**: Dashboard + registration_requests + admin_sekolah pages updated to new theme with gradient welcome cards.
-
-### UI/UX Features
-- Toast notifications via Alpine.js (4 types: success, error, warning, info, auto-dismiss 4s)
-- Loading spinner on HTMX requests (`x-data loading`)
-- Smooth animations: `animate-slide-up`, `animate-fade-in`, `animate-slide-down`, `animate-scale-in`
-- Consistent card padding (p-5/p-6), border-radius (rounded-xl/rounded-2xl), shadows
-- Mobile bottom nav bar with role-specific icons
-- Blue-white theme: `primary-50` through `primary-900` (blue), `surface-50` through `surface-900` (slate)
-- Gradient welcome cards (`from-primary-600 to-primary-700`) on all dashboards
-
-### Relevant Files
-- `supabase/migrations/010_teacher_assignments.sql` — Junction table
-- `app/templates/base.html` — Complete redesign
-- `app/templates/teacher/dashboard.html` — Redesigned with assignments
-- `app/templates/teacher/classes.html` — New full assignment management
-- `app/templates/student/dashboard.html` — Redesigned with class info
-- `app/templates/admin/dashboard.html` — Updated theme
-- `app/templates/admin/registration_requests.html` — Updated theme
-- `app/templates/admin_sekolah/dashboard.html` — Updated theme
-- `app/templates/auth/*.html` — All redesigned blue-white
-- `app/routes/teacher.py` — Added `/classes`, `/assignments`, dashboard updated
-- `app/routes/student.py` — Dashboard fetches class info
-- `app/models/supabase_queries.py` — Added `list_teacher_assignments`, `create_teacher_assignment`, `delete_teacher_assignment`
-
-## Key Rules
-- **Anti-Cheat**: Frontend `visibilitychange` + debounce 1500ms; backend validates timestamps ±5min, rate limit 1 log/2s. Penalty always computed server-side.
-- **RLS**: Service key for backend operations; anon key for public reads only.
-- **CORS**: Allow localhost + ngrok URL (dynamic via env).
-- **No secrets in .env committed** — use `.env.example` for templates.
-- **UI Theme**: Blue-white (`primary` palette) + surface (slate) with Inter font, rounded-2xl cards, gradient headers, toast notifications, mobile-first responsive.
-- **Teacher Assignments**: Use `teacher_assignments` junction table for many-to-many teacher-class-subject. Show in dashboard sidebar + classes page. HTMX for CRUD.
+## Relevant Files
+- `app/__init__.py`: Flask app factory, two supabase clients, `from_json`/`tz`/`tz_short` filters, `greeting()`/`greeting_en()` globals, `cos`/`sin` globals, `DEFAULT_TZ_OFFSET=7`
+- `app/config.py`: Config with `MAX_CONTENT_LENGTH = 50MB`, Supabase credentials
+- `app/utils/auth.py`: `get_supabase()`, `get_auth_client()`, `login_required`, role decorators
+- `app/routes/student.py`: dashboard, exam_list, take_exam, submit_exam (now handles dict MCQ answers), results, result_detail, `download_result_pdf` (now includes MCQ pages)
+- `app/routes/teacher.py`: dashboard, exam_form, `_recalculate_scores()` (now with essay weights), grade_detail (handles dict MCQ answers), results, `_is_mcq_correct`/`_extract_mcq_answer` helpers
+- `app/routes/api.py`: violation log, scan/process, sync-draft, `/api/grade/batch`
+- `app/routes/tools.py`: `/tools/generate-answer-sheet`
+- `app/services/anti_cheat_service.py`: `calculate_graduated_penalty()`, `validate_violation_log()`
+- `app/services/answer_sheet_generator.py`: ReportLab-based LJK generator
+- `app/templates/base.html`: **`brand` color alias added**, `primary`/`surface`/`brand` defined in Tailwind config
+- `app/templates/student/take_exam.html`: **full canvas + drawing tools added to MCQ section** (ec-canvas-{i}); `_saveCurrentPage`, `getAnswersLight`, `getAnswersWithCanvas`, `loadDraft` updated for MCQ pages; MCQ answer format changed to dict; YouTube embed regex improved; **MCQ canvas init fix** (removed `!== 'mcq'` skip); **essay overlay handle fix** (3-arg form)
+- `app/templates/student/result_detail.html`: 4-column score cards; handles dict MCQ answers
+- `app/templates/student/result_detail_pdf.html`: **MCQ section now shows merged page images**; handles dict MCQ answers
+- `app/templates/teacher/grade_detail.html`: compass + triangle tools; **teacher text box fix** (x-for instead of Jinja2); handles dict MCQ answers
+- `app/templates/teacher/exam_form.html`: **brand-* → primary-* fix** for invisible buttons
+- `app/templates/teacher/grading.html`: brand aliased to primary (via base.html) — "Koreksi" button visible now
+- `app/templates/teacher/scan.html`: camera selector with `enumerateDevices()`
+- `app/templates/teacher/analytics.html`: better empty state, charts hidden when 0 submissions
+- `app/templates/teacher/results.html`: export buttons (XLSX, PDF, bubble-sheet)
+- `app/templates/student/results.html`: subject total scores section
+- `supabase/migrations/003_submission_hidden_retracted.sql`: NOT YET EXECUTED
+- `supabase/migrations/011_anti_cheat_settings.sql`: NOT YET EXECUTED
+- `seed.py`: seed script with super_admin + 2 schools (SMP/SMA)

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Permintaan Tarik - ScanGrade{% endblock %}
+{% block page_title %}Permintaan Tarik Jawaban{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <div>
+        <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Retraction Requests':'Permintaan Tarik Jawaban'"></h2>
+        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Students requesting to retract their submissions':'Siswa yang meminta tarik jawaban'"></p>
+    </div>
+
+    {% if requests %}
+    <div class="card overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 border-b border-slate-200">
+                <tr>
+                    <th class="text-left px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Student':'Siswa'"></th>
+                    <th class="text-left px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Exam':'Ujian'"></th>
+                    <th class="text-left px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Requested':'Diminta'"></th>
+                    <th class="text-center px-5 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider" x-text="lang==='en'?'Actions':'Aksi'"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">
+                {% for r in requests %}
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="px-5 py-3 font-bold text-slate-800">{{ r.student_name }}</td>
+                    <td class="px-5 py-3 text-slate-600 font-medium">{{ r.exam_title }}</td>
+                    <td class="px-5 py-3 text-slate-500 text-xs">{{ r.requested_at }}</td>
+                    <td class="px-5 py-3 text-center">
+                        <div class="flex items-center justify-center gap-2">
+                            <form method="POST" action="/teacher/retractions/{{ r.id }}/approve" class="inline" onsubmit="return confirm('Setujui penarikan ini?')">
+                                <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition">
+                                    <i class="fas fa-check mr-1"></i><span x-text="lang==='en'?'Approve':'Setujui'"></span>
+                                </button>
+                            </form>
+                            <form method="POST" action="/teacher/retractions/{{ r.id }}/reject" class="inline" onsubmit="return confirm('Tolak penarikan ini?')">
+                                <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">
+                                    <i class="fas fa-times mr-1"></i><span x-text="lang==='en'?'Reject':'Tolak'"></span>
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card p-12 text-center text-slate-400">
+        <i class="fas fa-inbox text-5xl mb-4"></i>
+        <p class="text-lg font-bold" x-text="lang==='en'?'No pending requests':'Tidak ada permintaan'"></p>
+        <p class="text-sm font-medium mt-1" x-text="lang==='en'?'No retraction requests from students':'Belum ada permintaan tarik dari siswa'"></p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

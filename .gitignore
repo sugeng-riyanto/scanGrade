@@ -58,3 +58,4 @@ flask_*.txt
 improve/
 references/
 .opencode/
+.aider*

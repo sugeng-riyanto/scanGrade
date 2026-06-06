@@ -11,6 +11,7 @@
             extend: {
                 colors: {
                     primary: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' },
+                    brand: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' },
                     surface: { 50:'#f8fafc',100:'#f1f5f9',200:'#e2e8f0',300:'#cbd5e1',400:'#94a3b8',500:'#64748b',600:'#475569',700:'#334155',800:'#1e293b',900:'#0f172a' },
                 },
                 fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
@@ -67,7 +68,7 @@
 </head>
 <body class="h-full antialiased"
       x-data="{
-        sidebarOpen: window.innerWidth >= 1024,
+        sidebarOpen: false,
         lang: localStorage.getItem('sg_lang') || 'id',
         loading: false,
         toasts: [],
@@ -79,7 +80,6 @@
         },
         userMenuOpen: false,
       }"
-      @resize.window="if(window.innerWidth >= 1024) sidebarOpen = true"
       @htmx:before-request.window="loading = true"
       @htmx:after-request.window="loading = false"
       @htmx:response-error.window="notify('Terjadi kesalahan', 'error')">
@@ -89,7 +89,7 @@
     <!-- ===== SIDEBAR ===== -->
     <aside class="fixed inset-y-0 left-0 z-50 w-64 bg-gradient-to-b from-surface-900 via-surface-800 to-surface-900 transform transition-transform duration-250 ease-out lg:translate-x-0 lg:static lg:z-auto shadow-xl"
            :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-           @keydown.escape.window="if(window.innerWidth<1024) sidebarOpen=false">
+           @keydown.escape.window="sidebarOpen=false">
 
         <!-- Logo -->
         <div class="flex items-center gap-2.5 px-5 h-16 border-b border-white/[0.06]">
@@ -97,7 +97,7 @@
                 <i class="fas fa-graduation-cap text-white text-sm"></i>
             </div>
             <span class="text-white font-extrabold text-lg tracking-tight">ScanGrade</span>
-            <button @click="sidebarOpen=false" class="lg:hidden ml-auto text-white/40 hover:text-white transition"><i class="fas fa-times"></i></button>
+            <button @click="sidebarOpen=false" class="ml-auto text-white/40 hover:text-white transition"><i class="fas fa-times"></i></button>
         </div>
 
         <!-- Navigation -->
@@ -144,6 +144,7 @@
             <div class="nav-section-title pt-2">Koreksi</div>
             <a href="/teacher/scan" class="nav-item {% if request.path == '/teacher/scan' %}active{% endif %}"><i class="fas fa-camera"></i><span>Scan OMR</span></a>
             <a href="/teacher/grading" class="nav-item {% if request.path == '/teacher/grading' %}active{% endif %}"><i class="fas fa-pen-alt"></i><span>Koreksi Esai</span></a>
+            <a href="/teacher/retractions" class="nav-item {% if request.path == '/teacher/retractions' %}active{% endif %}"><i class="fas fa-undo-alt"></i><span>Permintaan Tarik</span></a>
             <div class="nav-section-title pt-2">Laporan</div>
             <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Hasil Ujian</span></a>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>
@@ -185,7 +186,7 @@
         <!-- Topbar -->
         <header class="h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-sm">
             <div class="flex items-center gap-3 min-w-0">
-                <button @click="sidebarOpen = !sidebarOpen" class="lg:hidden text-surface-400 hover:text-surface-700 p-2 -ml-2 rounded-lg hover:bg-surface-100 transition">
+                <button @click="sidebarOpen = !sidebarOpen" class="text-surface-400 hover:text-surface-700 p-2 -ml-2 rounded-lg hover:bg-surface-100 transition">
                     <i class="fas fa-bars text-lg"></i>
                 </button>
                 <!-- Breadcrumb -->

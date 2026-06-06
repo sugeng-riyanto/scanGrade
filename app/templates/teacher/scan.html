@@ -57,8 +57,17 @@
             </svg>
         </div>
 
+        <!-- Camera selector (desktop only) -->
+        <div id="camera-selector" class="hidden mb-3 flex items-center gap-2">
+            <label class="text-xs font-bold text-stone-600">Kamera:</label>
+            <select id="camera-select" class="px-3 py-2 border-2 border-stone-200 rounded-xl text-sm font-bold focus:border-orange-500 flex-1"></select>
+        </div>
+
         <!-- Controls -->
         <div class="flex flex-wrap items-center gap-3">
+            <button id="btn-flip-cam" class="bg-stone-100 text-stone-700 px-3 py-2.5 rounded-xl hover:bg-stone-200 text-sm font-bold transition hidden" title="Balik kamera">
+                <i class="fas fa-sync-alt"></i>
+            </button>
             <button id="btn-start-cam" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-5 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-extrabold shadow-lg shadow-orange-200/60 transition">
                 <i class="fas fa-camera mr-1"></i>Buka Kamera
             </button>
@@ -107,39 +116,100 @@
 <script>
 let stream = null;
 let lastAnswers = null;
+let currentFacing = 'environment';
+let videoDevices = [];
+let currentDeviceId = null;
 
 // Exam select toggle
 document.getElementById('exam-select').addEventListener('change', function() {
     document.getElementById('custom-questions').classList.toggle('hidden', this.value !== '__custom__');
 });
 
-// Start camera
-document.getElementById('btn-start-cam').addEventListener('click', async function() {
+// Enumerate cameras on load
+async function enumerateCameras() {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        videoDevices = devices.filter(d => d.kind === 'videoinput');
+        const sel = document.getElementById('camera-select');
+        sel.innerHTML = '';
+        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+        if (!isMobile && videoDevices.length > 1) {
+            document.getElementById('camera-selector').classList.remove('hidden');
+            videoDevices.forEach((d, idx) => {
+                const label = d.label || ('Kamera ' + (idx + 1));
+                const opt = document.createElement('option');
+                opt.value = d.deviceId;
+                opt.textContent = label;
+                sel.appendChild(opt);
+            });
+            sel.addEventListener('change', function() {
+                if (stream) {
+                    stopStream();
+                    startCameraWithDevice(this.value);
+                }
+            });
+        }
+    } catch(e) { console.warn('Enumerate failed:', e); }
+}
+enumerateCameras();
+
+function stopStream() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+}
+
+async function startCameraWithDevice(deviceId) {
     try {
         const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-        stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: isMobile ? { exact: "environment" } : "environment",
-                width: { ideal: 1920 }, height: { ideal: 1080 }
-            }
-        });
+        const constraints = {
+            video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+                          : { facingMode: isMobile ? { exact: 'environment' } : 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
         document.getElementById('camera-preview').srcObject = stream;
-        this.classList.add('hidden');
+        document.getElementById('btn-start-cam').classList.add('hidden');
         document.getElementById('btn-capture').classList.remove('hidden');
         document.getElementById('btn-stop-cam').classList.remove('hidden');
+        document.getElementById('btn-flip-cam').classList.remove('hidden');
         document.getElementById('scan-result').classList.add('hidden');
         document.getElementById('scan-error').classList.add('hidden');
     } catch (err) {
         alert('Kamera tidak tersedia: ' + err.message);
     }
+}
+
+// Flip camera
+document.getElementById('btn-flip-cam').addEventListener('click', async function() {
+    currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
+    stopStream();
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: isMobile ? currentFacing : 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+        });
+        document.getElementById('camera-preview').srcObject = stream;
+    } catch (err) {
+        alert('Gagal balik kamera: ' + err.message);
+        currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
+    }
+});
+
+// Start camera
+document.getElementById('btn-start-cam').addEventListener('click', async function() {
+    const sel = document.getElementById('camera-select');
+    if (sel.value) {
+        await startCameraWithDevice(sel.value);
+    } else {
+        await startCameraWithDevice(null);
+    }
 });
 
 // Stop camera
 document.getElementById('btn-stop-cam').addEventListener('click', function() {
-    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    stopStream();
     document.getElementById('camera-preview').srcObject = null;
     this.classList.add('hidden');
     document.getElementById('btn-capture').classList.add('hidden');
+    document.getElementById('btn-flip-cam').classList.add('hidden');
     document.getElementById('btn-start-cam').classList.remove('hidden');
 });
 

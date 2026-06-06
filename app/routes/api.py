@@ -45,13 +45,18 @@ def log_violation():
             log.get("timestamp", 0),
         )
         if valid["valid"]:
+            exam_id = log.get("exam_id", "")
             supabase.table("violation_logs").insert({
-                "exam_id": log.get("exam_id"),
+                "exam_id": exam_id,
                 "user_id": g.user_id,
                 "violation_type": log.get("violation_type", "unknown"),
                 "metadata": log.get("metadata", {}),
             }).execute()
-            results.append({"logged": True})
+            total_count = supabase.table("violation_logs").select("id", count="exact").eq("user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
+            exam = supabase.table("exams").select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max").eq("id", exam_id).single().execute().data or {}
+            from app.services.anti_cheat_service import calculate_graduated_penalty
+            penalty_info = calculate_graduated_penalty(total_count, exam)
+            results.append({"logged": True, "violation_count": total_count, **penalty_info})
         else:
             results.append({"logged": False, "reason": valid.get("reason")})
 

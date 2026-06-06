@@ -6,7 +6,7 @@ _limits = {}
 
 DEFAULT_LIMITS = {
     "default": (60, 60),        # 60 requests per minute
-    "auth": (10, 60),           # 10 auth requests per minute
+    "auth": (30, 60),           # 30 auth requests per minute
     "api": (30, 60),            # 30 API requests per minute
     "register": (3, 3600),      # 3 registrations per hour
     "upload": (10, 300),        # 10 uploads per 5 minutes

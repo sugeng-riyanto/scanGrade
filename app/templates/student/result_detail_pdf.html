@@ -36,14 +36,6 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 .mcq-answer .value.correct { color: #059669; }
 .mcq-answer .value.wrong { color: #dc2626; }
 
-.essay-page-wrap { position: relative; border: 1px solid #d1d5db; overflow: hidden; background: #fff; margin: 6px 0; }
-.essay-page-wrap .pdf-bg { width: 100%; display: block; }
-.essay-page-wrap .overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-.text-box-overlay { position: absolute; min-width: 40px; }
-.text-box-overlay .box-content { font-size: 9px; padding: 2px 5px; border-radius: 4px; word-break: break-word; white-space: pre-wrap; }
-.text-box-overlay.student .box-content { border: 2px solid #f97316; background: #ffffffee; }
-.text-box-overlay.teacher .box-content { border: 2px dashed #059669; background: #ecfdf5ee; }
-
 .teacher-note { margin-top: 6px; font-size: 8pt; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 4px 8px; color: #065f46; }
 
 .weight-badge { font-size: 7pt; padding: 1px 6px; border-radius: 99px; font-weight: bold; background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; }
@@ -60,6 +52,8 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 .score-row td .lbl { font-size: 7pt; font-weight: bold; color: #64748b; }
 
 .footer { margin-top: 20px; padding-top: 8px; border-top: 2px solid #e2e8f0; font-size: 7pt; color: #94a3b8; text-align: center; }
+
+.merged-img { width: 100%; display: block; margin: 4px 0; border: 1px solid #d1d5db; }
 </style>
 </head>
 <body>
@@ -68,14 +62,13 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 {% set fb = submission.teacher_feedback or {} %}
 {% set fb_scores = fb.get('scores', {}) %}
 {% set fb_comments = fb.get('comments', {}) %}
-{% set fb_overlay = fb.get('overlay_pages', {}) %}
 {% set answer_key = exam.get('answer_key', {}) %}
 {% set question_types = exam.get('question_types', {}) %}
 {% set question_weights = exam.get('question_weights', {}) %}
 {% set total_q = exam.get('total_questions', 0) %}
-{% set pdf_pages = exam.get('pdf_page_urls', []) or [] %}
 {% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else None) %}
 {% set answers = submission.answers or {} %}
+{% set mp = merged_pages or {} %}
 
 <div class="header">
     <div class="score-box">
@@ -116,44 +109,17 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
         {% set q_idx_str = i|string %}
         {% set qtype = (question_types or {}).get(i|string, 'mcq') %}
         {% set correct = answer_key.get(i|string, '') %}
-        {% set student_ans = answers.get(i|string, '') %}
-        {% set is_bonus = correct == 'bonus' %}
-        {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
-        {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
-        {% set qweight = question_weights.get(q_idx_str, '') %}
-        {% set teacher_score = fb_scores.get(q_idx_str, '') %}
-        {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
-        <tr>
-            <td>{{ i + 1 }}</td>
-            <td>{{ 'MCQ' if qtype == 'mcq' else 'Esai' }}</td>
-            <td>{{ student_ans if student_ans is string else '--' }}</td>
-            <td>{{ correct_list | join(', ') if correct_list else ('Bonus' if is_bonus else ('Esai' if qtype != 'mcq' else '--')) }}</td>
-            <td class="{% if is_bonus %}bonus{% elif is_correct %}correct{% elif qtype != 'mcq' %}{% else %}wrong{% endif %}">
-                {% if is_bonus %}★{% elif is_correct %}✓{% elif qtype != 'mcq' %}--{% else %}✗{% endif %}
-            </td>
-            <td>{{ qweight if qweight else '--' }}</td>
-            {% if submission.status in ('graded', 'published') %}
-            <td>{{ teacher_score if teacher_score is defined and teacher_score != '' else '--' }}</td>
-            <td>{{ teacher_comment if teacher_comment else '--' }}</td>
-            {% endif %}
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
+        {% set raw_val = answers.get(i|string, '') %}
+        {% set student_ans = raw_val['answer'] if raw_val is mapping and 'answer' in raw_val else raw_val %}
 
-{% for i in range(total_q) %}
-{% set q_idx_str = i|string %}
-{% set qtype = (question_types or {}).get(i|string, 'mcq') %}
-{% set correct = answer_key.get(i|string, '') %}
-{% set student_ans = answers.get(i|string, '') %}
-{% set is_bonus = correct == 'bonus' %}
+        {% set is_bonus = correct == 'bonus' %}
 {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
 {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
 {% set teacher_score = fb_scores.get(q_idx_str, '') %}
 {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
-{% set teacher_overlay = fb_overlay.get(q_idx_str, {}) %}
 {% set qweight = question_weights.get(q_idx_str, 0) %}
-{% set essay_ans = student_ans if student_ans is mapping else {} %}
+{% set essay_ans = raw_val if raw_val is mapping else {} %}
+{% set has_merged = mp.get(q_idx_str) %}
 
 <div class="q-block {% if qtype == 'mcq' and submission.status in ('graded', 'published') %}{% if is_correct %}correct-border{% else %}wrong-border{% endif %}{% endif %}">
     <div class="q-header">
@@ -178,65 +144,25 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
                 {% else %}<span style="color:#dc2626; margin-left:8px;">✗</span>{% endif %}
                 {% endif %}
             </div>
+            {% if has_merged %}
+                {% for img_data_url in has_merged %}
+                <img src="{{ img_data_url }}" class="merged-img">
+                {% endfor %}
+            {% endif %}
             {% if teacher_score is defined and teacher_score != '' %}
             <div class="teacher-note"><strong>Guru:</strong> {{ teacher_score }}{% if teacher_comment %} — {{ teacher_comment }}{% endif %}</div>
             {% endif %}
         {% else %}
-            {% if essay_ans is mapping and essay_ans.get('pages') %}
-                {% set s_pages = essay_ans.get('pages', {}) %}
-                {% for p_idx_str, p_data in s_pages.items() %}
-                {% set p_idx = p_idx_str|int %}
-                {% set pdf_idx = p_idx if (s_pages and '0' in s_pages) else (p_idx - 1) %}
-                {% set pdf_url = pdf_pages[pdf_idx] if (pdf_idx >= 0 and pdf_idx < (pdf_pages|length)) else '' %}
-                {% set ov_key = p_idx_str %}
-                {% set ov_data = teacher_overlay.get(ov_key, {}) %}
-                {% set canvas_raw = p_data.get('canvas', '') %}
-                {% set is_png = canvas_raw.startswith('data:image/png') %}
-                {% set has_canvas = canvas_raw and canvas_raw|length > (800 if is_png else 3000) %}
-                {% set has_textboxes = p_data.get('textBoxes') and p_data.get('textBoxes')|length > 0 %}
-                {% set ov_canvas_raw = ov_data.get('canvas', '') %}
-                {% set is_ov_png = ov_canvas_raw.startswith('data:image/png') %}
-                {% set has_ov_canvas = ov_canvas_raw and ov_canvas_raw|length > (800 if is_ov_png else 1000) %}
-                {% set has_ov_textboxes = ov_data.get('textBoxes') and ov_data.get('textBoxes')|length > 0 %}
-
-                {% if pdf_url or has_canvas or has_textboxes or has_ov_canvas or has_ov_textboxes %}
-                <div class="essay-page-wrap">
-                    {% if pdf_url %}
-                    <img src="{{ pdf_url }}" class="pdf-bg">
-                    {% elif has_canvas %}
-                    <img src="{{ canvas_raw }}" class="pdf-bg">
-                    {% else %}
-                    <div class="pdf-bg" style="min-height:200px; background:#f5f5f4;">&nbsp;</div>
-                    {% endif %}
-                    {% if has_canvas and pdf_url %}
-                    <img src="{{ canvas_raw }}" class="overlay-img">
-                    {% endif %}
-                    {% for box in (p_data.get('textBoxes') or []) %}
-                    {% if box.text and box.text.strip() %}
-                    <div class="text-box-overlay student" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%;">
-                        <div class="box-content">{{ box.text }}</div>
-                    </div>
-                    {% endif %}
-                    {% endfor %}
-                    {% if has_ov_canvas %}
-                    <img src="{{ ov_canvas_raw }}" class="overlay-img">
-                    {% endif %}
-                    {% for box in (ov_data.get('textBoxes') or []) %}
-                    {% if box.text and box.text.strip() %}
-                    <div class="text-box-overlay teacher" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%;">
-                        <div class="box-content">{{ box.text }}</div>
-                    </div>
-                    {% endif %}
-                    {% endfor %}
-                </div>
-                {% elif canvas_raw and canvas_raw|length > 100 %}
-                <div class="essay-page-wrap">
-                    <img src="{{ canvas_raw }}" class="pdf-bg">
-                </div>
-                {% else %}
-                <div style="font-size:8pt; color:#94a3b8; font-style:italic;">Halaman {{ p_idx + 1 }} — tidak ada jawaban</div>
-                {% endif %}
+            {% if has_merged %}
+                {% for img_data_url in has_merged %}
+                <img src="{{ img_data_url }}" class="merged-img">
                 {% endfor %}
+            {% elif essay_ans is mapping and essay_ans.get('pages') %}
+                {% if student_ans is string and student_ans %}
+                <p style="font-size:9pt; font-weight:bold; color:#475569;">{{ student_ans }}</p>
+                {% else %}
+                <p style="font-size:8pt; color:#94a3b8; font-style:italic;">Jawaban kosong</p>
+                {% endif %}
             {% else %}
                 {% if student_ans is string and student_ans %}
                 <p style="font-size:9pt; font-weight:bold; color:#475569;">{{ student_ans }}</p>

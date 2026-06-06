@@ -20,8 +20,20 @@ def generate_answer_sheet_route():
         if exam_version not in ("A", "B", "C", "D", "E"):
             return jsonify({"error": "Exam version must be A, B, C, D, or E"}), 400
 
+        try:
+            total_questions = int(data.get("total_questions", 50))
+            total_questions = max(1, min(200, total_questions))
+        except (ValueError, TypeError):
+            total_questions = 50
+
+        try:
+            options = int(data.get("options", 5))
+            options = max(2, min(8, options))
+        except (ValueError, TypeError):
+            options = 5
+
         pdf = generate_answer_sheet(
-            total_questions=50,
+            total_questions=total_questions,
             mark_type=mark_type,
             student_name=data.get("student_name", ""),
             class_name=data.get("class_name", ""),
@@ -29,13 +41,14 @@ def generate_answer_sheet_route():
             date=data.get("date", ""),
             exam_version=exam_version,
             school_name=data.get("school_name", ""),
+            options=options,
         )
 
         return send_file(
             pdf,
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"answer_sheet_50Q_v{exam_version}.pdf",
+            download_name=f"answer_sheet_{total_questions}Q_v{exam_version}.pdf",
         )
 
     return render_template("tools/generate_answer_sheet.html")

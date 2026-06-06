@@ -1,22 +1,28 @@
 import json
-from flask import Blueprint, jsonify, render_template, request, redirect, g, send_file
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file
 from app.utils.auth import teacher_or_admin_required, get_supabase
 from app.services.export_service import export_to_xlsx, export_to_pdf
-from app.services.ljk_generator import generate_bubble_sheet_pdf
+from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
 
 teacher_bp = Blueprint("teacher", __name__)
 
 
+def _extract_mcq_answer(student_ans):
+    if isinstance(student_ans, dict):
+        return student_ans.get('answer', '')
+    return student_ans or ''
+
 def _is_mcq_correct(student_ans, key_val):
+    ans = _extract_mcq_answer(student_ans)
     if key_val == "bonus":
-        return bool(student_ans and student_ans.strip())
+        return bool(ans and str(ans).strip())
     if isinstance(key_val, list):
-        if not student_ans:
+        if not ans:
             return False
-        return student_ans in key_val
-    return student_ans == key_val
+        return ans in key_val
+    return ans == key_val
 
 
 def _recalculate_scores(exam_id):
@@ -30,10 +36,24 @@ def _recalculate_scores(exam_id):
     total_q = exam.get("total_questions", 0)
     if not question_weights and total_q > 0:
         mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
+        essay_count = total_q - mcq_count
+        mcq_pct = 70
+        essay_pct = 30
+        if mcq_count > 0 and essay_count > 0:
+            pass
+        elif mcq_count == 0:
+            mcq_pct, essay_pct = 0, 100
+        else:
+            mcq_pct, essay_pct = 100, 0
         if mcq_count > 0:
-            each = round(100 / mcq_count, 2)
+            each = round(mcq_pct / mcq_count, 2)
             for i in range(total_q):
                 if question_types.get(str(i), "mcq") == "mcq":
+                    question_weights[str(i)] = each
+        if essay_count > 0:
+            each = round(essay_pct / essay_count, 2)
+            for i in range(total_q):
+                if question_types.get(str(i), "mcq") != "mcq":
                     question_weights[str(i)] = each
     subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
     for sub in subs:
@@ -152,6 +172,18 @@ def exam_form():
     question_weights = json.loads(request.form.get("question_weights", "{}"))
     question_audio = {}
     question_canvas = {}
+    anti_cheat_enabled = request.form.get("anti_cheat_enabled", "true") == "true"
+    penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
+    max_violations = int(request.form.get("max_violations", 5))
+    auto_submit_on_max = request.form.get("auto_submit_on_max", "true") == "true"
+    fullscreen_required = request.form.get("fullscreen_required", "true") == "true"
+    randomize_questions = request.form.get("randomize_questions", "false") == "true"
+    randomize_options = request.form.get("randomize_options", "false") == "true"
+    watermark_name = request.form.get("watermark_name", "true") == "true"
+    block_copy_paste = request.form.get("block_copy_paste", "true") == "true"
+    block_right_click = request.form.get("block_right_click", "true") == "true"
+    block_screenshot = request.form.get("block_screenshot", "false") == "true"
+    allow_calculator = request.form.get("allow_calculator", "false") == "true"
     for i in range(total_questions):
         qtype = question_types.get(str(i), "mcq")
         if qtype != "mcq":
@@ -180,11 +212,24 @@ def exam_form():
         "question_weights": question_weights,
         "question_audio": question_audio,
         "question_canvas": question_canvas,
+        "anti_cheat_enabled": anti_cheat_enabled,
+        "penalty_per_violation": penalty_per_violation,
+        "max_violations": max_violations,
+        "auto_submit_on_max": auto_submit_on_max,
+        "fullscreen_required": fullscreen_required,
+        "randomize_questions": randomize_questions,
+        "randomize_options": randomize_options,
+        "watermark_name": watermark_name,
+        "block_copy_paste": block_copy_paste,
+        "block_right_click": block_right_click,
+        "block_screenshot": block_screenshot,
+        "allow_calculator": allow_calculator,
     }
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        data.pop("question_weights", None)
+        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator"]:
+            data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
     log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions}, user_id=g.user_id)
@@ -219,6 +264,18 @@ def exam_detail(exam_id):
     question_weights = json.loads(request.form.get("question_weights", "{}"))
     question_audio = {}
     question_canvas = {}
+    anti_cheat_enabled = request.form.get("anti_cheat_enabled", "true") == "true"
+    penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
+    max_violations = int(request.form.get("max_violations", 5))
+    auto_submit_on_max = request.form.get("auto_submit_on_max", "true") == "true"
+    fullscreen_required = request.form.get("fullscreen_required", "true") == "true"
+    randomize_questions = request.form.get("randomize_questions", "false") == "true"
+    randomize_options = request.form.get("randomize_options", "false") == "true"
+    watermark_name = request.form.get("watermark_name", "true") == "true"
+    block_copy_paste = request.form.get("block_copy_paste", "true") == "true"
+    block_right_click = request.form.get("block_right_click", "true") == "true"
+    block_screenshot = request.form.get("block_screenshot", "false") == "true"
+    allow_calculator = request.form.get("allow_calculator", "false") == "true"
     for i in range(total_questions):
         qtype = question_types.get(str(i), "mcq")
         if qtype != "mcq":
@@ -246,11 +303,24 @@ def exam_detail(exam_id):
         "question_weights": question_weights,
         "question_audio": question_audio,
         "question_canvas": question_canvas,
+        "anti_cheat_enabled": anti_cheat_enabled,
+        "penalty_per_violation": penalty_per_violation,
+        "max_violations": max_violations,
+        "auto_submit_on_max": auto_submit_on_max,
+        "fullscreen_required": fullscreen_required,
+        "randomize_questions": randomize_questions,
+        "randomize_options": randomize_options,
+        "watermark_name": watermark_name,
+        "block_copy_paste": block_copy_paste,
+        "block_right_click": block_right_click,
+        "block_screenshot": block_screenshot,
+        "allow_calculator": allow_calculator,
     }
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        data.pop("question_weights", None)
+        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator"]:
+            data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     _recalculate_scores(exam_id)
     log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
@@ -261,7 +331,9 @@ def exam_detail(exam_id):
 @teacher_or_admin_required
 def preview_exam(exam_id):
     supabase = get_supabase()
-    res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
+    res = supabase.table("exams").select("*").eq("id", exam_id).maybe_single().execute()
+    if not res.data:
+        return redirect("/teacher/exams")
     return render_template("teacher/preview_exam.html", exam=res.data)
 
 
@@ -355,6 +427,80 @@ def scan_page():
     return render_template("teacher/scan.html", exams=res.data, students=students.data)
 
 
+@teacher_bp.route("/retractions")
+@teacher_or_admin_required
+def retraction_requests():
+    supabase = get_supabase()
+    exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
+    requests = []
+    if exam_ids:
+        subs = supabase.table("submissions").select("id,student_id,exam_id,answers,submitted_at,exams(title),profiles(full_name)").in_("exam_id", exam_ids).execute().data or []
+        for s in subs:
+            answers = s.get("answers")
+            if isinstance(answers, str):
+                try:
+                    answers = json.loads(answers)
+                except (json.JSONDecodeError, TypeError):
+                    answers = {}
+            if isinstance(answers, dict) and answers.get("_retract_request", {}).get("status") == "pending":
+                s["exam_title"] = (s.get("exams") or {}).get("title", "-")
+                s["student_name"] = (s.get("profiles") or {}).get("full_name", "-")
+                s["requested_at"] = answers["_retract_request"].get("requested_at", "")
+                requests.append(s)
+    return render_template("teacher/retractions.html", requests=requests)
+
+
+@teacher_bp.route("/retractions/<submission_id>/approve", methods=["POST"])
+@teacher_or_admin_required
+def approve_retraction(submission_id):
+    supabase = get_supabase()
+    sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
+    if not sub:
+        flash("Submission tidak ditemukan", "error")
+        return redirect(url_for("teacher.retraction_requests"))
+    answers = sub.get("answers")
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except (json.JSONDecodeError, TypeError):
+            answers = {}
+    if not isinstance(answers, dict) or "_retract_request" not in answers or not isinstance(answers["_retract_request"], dict):
+        flash("Tidak ada permintaan retraction", "error")
+        return redirect(url_for("teacher.retraction_requests"))
+    answers["_retract_request"]["status"] = "approved"
+    try:
+        supabase.table("submissions").update({"answers": json.dumps(answers), "status": "retracted"}).eq("id", submission_id).execute()
+    except Exception:
+        supabase.table("submissions").update({"answers": json.dumps(answers)}).eq("id", submission_id).execute()
+    log_activity("retract_approve", "submission", submission_id, user_id=g.user_id)
+    flash("Retraction berhasil disetujui", "success")
+    return redirect(url_for("teacher.retraction_requests"))
+
+
+@teacher_bp.route("/retractions/<submission_id>/reject", methods=["POST"])
+@teacher_or_admin_required
+def reject_retraction(submission_id):
+    supabase = get_supabase()
+    sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
+    if not sub:
+        flash("Submission tidak ditemukan", "error")
+        return redirect(url_for("teacher.retraction_requests"))
+    answers = sub.get("answers")
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except (json.JSONDecodeError, TypeError):
+            answers = {}
+    if not isinstance(answers, dict) or "_retract_request" not in answers or not isinstance(answers["_retract_request"], dict):
+        flash("Tidak ada permintaan retraction", "error")
+        return redirect(url_for("teacher.retraction_requests"))
+    answers["_retract_request"]["status"] = "rejected"
+    supabase.table("submissions").update({"answers": json.dumps(answers)}).eq("id", submission_id).execute()
+    log_activity("retract_reject", "submission", submission_id, user_id=g.user_id)
+    flash("Retraction ditolak", "success")
+    return redirect(url_for("teacher.retraction_requests"))
+
+
 @teacher_bp.route("/results")
 @teacher_or_admin_required
 def results():
@@ -390,9 +536,30 @@ def results():
 @teacher_or_admin_required
 def grade_detail(submission_id):
     supabase = get_supabase()
-    sub = supabase.table("submissions").select("*").eq("id", submission_id).single().execute().data
+    sub = supabase.table("submissions").select("*").eq("id", submission_id).maybe_single().execute()
+    if not sub.data:
+        return redirect("/teacher/grading")
+    sub = sub.data
     exam = supabase.table("exams").select("*").eq("id", sub["exam_id"]).single().execute().data
     exam.setdefault("question_weights", {})
+    if not exam.get("question_weights") and exam.get("total_questions", 0) > 0:
+        qtypes = exam.get("question_types", {})
+        tq = exam["total_questions"]
+        mcq_n = sum(1 for i in range(tq) if qtypes.get(str(i), "mcq") == "mcq")
+        essay_n = tq - mcq_n
+        mp, ep = (70, 30)
+        if mcq_n == 0: mp, ep = 0, 100
+        elif essay_n == 0: mp, ep = 100, 0
+        if mcq_n:
+            e = round(mp / mcq_n, 2)
+            for i in range(tq):
+                if qtypes.get(str(i), "mcq") == "mcq":
+                    exam["question_weights"][str(i)] = e
+        if essay_n:
+            e = round(ep / essay_n, 2)
+            for i in range(tq):
+                if qtypes.get(str(i), "mcq") != "mcq":
+                    exam["question_weights"][str(i)] = e
     student = supabase.table("profiles").select("id,full_name,phone").eq("id", sub["student_id"]).single().execute().data or {}
     return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
 
@@ -426,6 +593,7 @@ def override_score(submission_id):
 @teacher_or_admin_required
 def publish_scores(exam_id):
     supabase = get_supabase()
+    _recalculate_scores(exam_id)
     supabase.table("submissions") \
         .update({"is_published": True, "status": "published"}) \
         .eq("exam_id", exam_id) \
@@ -451,9 +619,11 @@ def publish_single(submission_id):
 def export_xlsx():
     exam_id = request.args.get("exam_id")
     supabase = get_supabase()
-    exam = supabase.table("exams").select("title").eq("id", exam_id).single().execute().data
-    subs = supabase.table("submissions").select("*").eq("exam_id", exam_id).execute().data or []
-    buf = export_to_xlsx(subs, exam.get("title", "Hasil"))
+    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data or {}
+    subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
+    for s in subs:
+        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
+    buf = export_to_xlsx(subs, exam)
     return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=f"nilai_{exam_id[:8]}.xlsx")
 
@@ -463,8 +633,10 @@ def export_xlsx():
 def export_pdf():
     exam_id = request.args.get("exam_id")
     supabase = get_supabase()
-    exam = supabase.table("exams").select("title").eq("id", exam_id).single().execute().data
-    subs = supabase.table("submissions").select("*").eq("exam_id", exam_id).execute().data or []
+    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data or {}
+    subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
+    for s in subs:
+        s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
     buf = export_to_pdf(subs, exam.get("title", "Hasil"))
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"nilai_{exam_id[:8]}.pdf")
@@ -477,10 +649,13 @@ def bubble_sheet(exam_id):
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
     qtypes = exam.get("question_types") or {}
     mcq_count = sum(1 for i in range(exam["total_questions"]) if qtypes.get(str(i), "mcq") == "mcq")
-    buf = generate_bubble_sheet_pdf(
-        title=exam["title"],
+    if mcq_count == 0:
+        mcq_count = exam["total_questions"]
+
+    buf = generate_answer_sheet(
         total_questions=mcq_count,
         subject=exam.get("subject", ""),
+        school_name="",
     )
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"LJK_{exam_id[:8]}.pdf")

@@ -176,11 +176,15 @@ def run():
             print(f"  Creating school...", end=" ")
             school_id = None
             try:
-                existing = supabase.table("schools").select("id").eq("npsn", npsn).execute()
-                if existing.data:
-                    school_id = existing.data[0]["id"]
-                    print(f"already exists ({school_id[:8]}...)")
-                else:
+                # Attempt to find by npsn if column exists
+                try:
+                    existing = supabase.table("schools").select("id").eq("npsn", npsn).execute()
+                    if existing.data:
+                        school_id = existing.data[0]["id"]
+                        print(f"already exists ({school_id[:8]}...)")
+                except Exception:
+                    school_id = None
+                if not school_id:
                     res = supabase.table("schools").insert({
                         "name": name,
                         "npsn": npsn,
@@ -192,7 +196,18 @@ def run():
                     school_id = res.data[0]["id"]
                     print(f"OK ({school_id[:8]}...)")
             except Exception as e:
-                print(f"SKIP (schools table: {str(e)[:40]})")
+                err_msg = str(e)[:60]
+                # If duplicate key, try to fetch existing
+                if "23505" in err_msg:
+                    try:
+                        existing = supabase.table("schools").select("id").eq("name", name).execute()
+                        if existing.data:
+                            school_id = existing.data[0]["id"]
+                            print(f"recovered existing ({school_id[:8]}...)")
+                    except Exception:
+                        school_id = None
+                if not school_id:
+                    print(f"SKIP (schools: {err_msg})")
 
             # Create classes
             class_ids = {}
