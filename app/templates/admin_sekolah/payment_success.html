@@ -1,16 +1,70 @@
 {% extends "base.html" %}
-{% block title %}Pembayaran Berhasil - ScanGrade{% endblock %}
-{% block page_title %}Pembayaran{% endblock %}
+{% block title %}Status Pembayaran - ScanGrade{% endblock %}
+{% block page_title %}Status Pembayaran{% endblock %}
+{% set status = tx.status|default('pending') %}
 {% block content %}
-<div class="max-w-lg mx-auto text-center" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+<div class="max-w-lg mx-auto text-center" x-data="{
+    lang: localStorage.getItem('sg_lang') || 'id',
+    status: '{{ status }}',
+    checking: false
+}"
+x-init="
+    if (status === 'pending') {
+        setInterval(() => {
+            fetch('/api/transaction/status?order_id={{ tx.order_id }}')
+                .then(r => r.json())
+                .then(d => { if (d.status) status = d.status; })
+                .catch(() => {});
+        }, 5000);
+    }
+">
     <div class="card p-8">
-        <div class="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-4xl mb-4">
-            <i class="fas fa-check-circle"></i>
-        </div>
-        <h3 class="font-extrabold text-2xl text-slate-800 mb-2" x-text="lang==='en'?'Payment Successful!':'Pembayaran Berhasil!'"></h3>
-        <p class="text-slate-500 font-medium mb-6" x-text="lang==='en'?'Your subscription is now active':'Langganan Anda sekarang aktif'"></p>
+        <!-- SUCCESS -->
+        <template x-if="status === 'success'">
+            <div>
+                <div class="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-4xl mb-4">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <h3 class="font-extrabold text-2xl text-emerald-700 mb-2">Pembayaran Berhasil!</h3>
+                <p class="text-slate-500 font-medium mb-6">Langganan Anda sekarang aktif</p>
+            </div>
+        </template>
 
-        <div class="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-6">
+        <!-- PENDING -->
+        <template x-if="status === 'pending'">
+            <div>
+                <div class="w-20 h-20 mx-auto rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-4xl mb-4">
+                    <i class="fas fa-clock"></i>
+                </div>
+                <h3 class="font-extrabold text-2xl text-amber-700 mb-2">Menunggu Pembayaran</h3>
+                <p class="text-slate-500 font-medium mb-4">Pembayaran sedang diproses. Halaman ini akan otomatis memperbarui status.</p>
+                <div class="flex items-center justify-center gap-2 text-amber-600 mb-4">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span class="text-sm font-medium">Memeriksa status...</span>
+                </div>
+                <a href="/admin-sekolah/payment/success?order_id={{ tx.order_id }}"
+                   class="btn bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 font-bold px-4 py-2 rounded-xl text-sm">
+                    <i class="fas fa-sync mr-1"></i> Cek Ulang
+                </a>
+            </div>
+        </template>
+
+        <!-- FAILED / EXPIRED -->
+        <template x-if="status === 'failure' || status === 'expired'">
+            <div>
+                <div class="w-20 h-20 mx-auto rounded-full bg-red-100 flex items-center justify-center text-red-600 text-4xl mb-4">
+                    <i class="fas fa-times-circle"></i>
+                </div>
+                <h3 class="font-extrabold text-2xl text-red-700 mb-2">Pembayaran Gagal</h3>
+                <p class="text-slate-500 font-medium mb-6">Pembayaran tidak berhasil. Silakan coba lagi.</p>
+                <a href="/admin-sekolah/subscription" class="btn btn-primary px-8">
+                    <i class="fas fa-redo mr-1"></i> Coba Lagi
+                </a>
+            </div>
+        </template>
+
+        <!-- Transaction Info -->
+        <div class="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-6 mt-4">
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500 font-medium">Order ID</span>
                 <span class="font-mono font-bold text-slate-700">{{ tx.order_id }}</span>
@@ -31,13 +85,16 @@
             {% endif %}
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500 font-medium">Status</span>
-                <span class="badge bg-emerald-50 text-emerald-700 font-bold">
-                    {% if tx.status == 'success' %}Active{% else %}{{ tx.status }}{% endif %}
+                <span class="badge font-bold
+                    {% if tx.status == 'success' %}bg-emerald-50 text-emerald-700
+                    {% elif tx.status == 'pending' %}bg-amber-50 text-amber-700
+                    {% else %}bg-red-50 text-red-600{% endif %}">
+                    {{ tx.status }}
                 </span>
             </div>
         </div>
 
-        <a href="/admin-sekolah/subscription" class="btn btn-primary px-8">
+        <a href="/admin-sekolah/subscription" class="btn btn-ghost">
             <i class="fas fa-arrow-left mr-1"></i>
             <span x-text="lang==='en'?'Back to Subscription':'Kembali ke Langganan'">Kembali ke Langganan</span>
         </a>
