@@ -15,12 +15,21 @@ def dashboard():
     if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
 
-    available_exams = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").execute().data or []
-    subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
-    submitted_ids = {s["exam_id"] for s in subs}
+    available_exams = []
+    submitted_ids = set()
+    try:
+        available_exams = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").execute().data or []
+        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
+        submitted_ids = {s["exam_id"] for s in subs_ids}
+    except Exception as e:
+        current_app.logger.error(f"Dashboard query error: {e}")
     available_exams = [e for e in available_exams if e["id"] not in submitted_ids]
 
-    subs = supabase.table("submissions").select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, teacher_feedback, exams(id, title, answer_key, question_types, total_questions, pdf_page_urls)").eq("student_id", g.user_id).order("submitted_at", desc=True).execute().data or []
+    subs = []
+    try:
+        subs = supabase.table("submissions").select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, teacher_feedback, exams(id, title, answer_key, question_types, total_questions, pdf_page_urls)").eq("student_id", g.user_id).order("submitted_at", desc=True).execute().data or []
+    except Exception as e:
+        current_app.logger.error(f"Dashboard submissions query error: {e}")
     completed_exams = []
     all_scores = []
     for s in subs:
@@ -114,10 +123,18 @@ def exam_list():
     supabase = get_supabase()
     if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
-    res = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").order("created_at", desc=True).execute()
-    exams = res.data or []
-    subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
-    submitted_ids = {s["exam_id"] for s in subs}
+    exams = []
+    try:
+        res = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").order("created_at", desc=True).execute()
+        exams = res.data or []
+    except Exception as e:
+        current_app.logger.error(f"Exam list query error: {e}")
+    submitted_ids = set()
+    try:
+        subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
+        submitted_ids = {s["exam_id"] for s in subs}
+    except Exception as e:
+        current_app.logger.error(f"Submission query error: {e}")
     exams = [e for e in exams if e["id"] not in submitted_ids]
     return render_template("student/exam_list.html", exams=exams)
 
@@ -126,8 +143,15 @@ def exam_list():
 @login_required
 def take_exam(exam_id):
     supabase = get_supabase()
-    res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
-    return render_template("student/take_exam.html", exam=res.data)
+    try:
+        res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
+        exam = res.data
+    except Exception as e:
+        current_app.logger.error(f"Take exam query error: {e}")
+        return redirect("/student/exams")
+    if not exam:
+        return redirect("/student/exams")
+    return render_template("student/take_exam.html", exam=exam)
 
 
 @student_bp.route("/exams/<exam_id>/submit", methods=["POST"])
