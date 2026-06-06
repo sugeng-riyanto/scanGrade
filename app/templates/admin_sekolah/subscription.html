@@ -119,13 +119,27 @@
                         <th>Paket</th>
                         <th>Jumlah</th>
                         <th>Status</th>
+                        <th>VA / Pembayaran</th>
                         <th>Kode Aktivasi</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for tx in transactions %}
+                    {% set pd_raw = tx.get('payment_details') or '{}' %}
+                    {% if pd_raw is string %}{% set pd = pd_raw|from_json %}{% else %}{% set pd = pd_raw %}{% endif %}
+                    {% set va_list = pd.get('va_numbers') or [] %}
+                    {% set va_number = va_list[0].va_number if va_list|length > 0 else pd.get('permata_va', '') or pd.get('payment_code', '') %}
+                    {% set payment_method = tx.payment_type or '' %}
                     <tr>
-                        <td class="font-mono text-xs">{{ tx.order_id }}</td>
+                        <td class="font-mono text-xs">
+                            <div class="flex items-center gap-1">
+                                <span>{{ tx.order_id[:16] }}...</span>
+                                <button onclick="navigator.clipboard.writeText('{{ tx.order_id }}'); this.innerHTML='<i class=\"fas fa-check text-emerald-500\"></i>'; setTimeout(()=>this.innerHTML='<i class=\"fas fa-copy text-slate-400\"></i>',2000)"
+                                    class="text-slate-400 hover:text-slate-600 p-0.5" title="Salin Order ID">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </td>
                         <td>{{ tx.get('subscription_plans', {}).get('name', '-') }}</td>
                         <td>Rp {{ "{:,.0f}".format(tx.gross_amount).replace(',','.') if tx.gross_amount else '-' }}</td>
                         <td>
@@ -133,7 +147,33 @@
                                 {{ tx.status }}
                             </span>
                         </td>
-                        <td class="font-mono text-xs">{{ tx.activation_code or '-' }}</td>
+                        <td class="text-xs">
+                            {% if va_number %}
+                            <div class="flex items-center gap-1">
+                                <span class="font-mono font-bold text-blue-700">{{ va_number }}</span>
+                                <button onclick="navigator.clipboard.writeText('{{ va_number }}'); this.innerHTML='<i class=\"fas fa-check text-emerald-500\"></i>'; setTimeout(()=>this.innerHTML='<i class=\"fas fa-copy text-slate-400\"></i>',2000)"
+                                    class="text-slate-400 hover:text-slate-600 p-0.5" title="Salin nomor VA">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            {% if payment_method %}<span class="text-[10px] text-slate-400">{{ payment_method }}</span>{% endif %}
+                            {% elif payment_method %}
+                            <span class="text-slate-500">{{ payment_method }}</span>
+                            {% else %}
+                            <span class="text-slate-400">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="font-mono text-xs">
+                            {% if tx.activation_code %}
+                            <div class="flex items-center gap-1">
+                                <span class="text-amber-700">{{ tx.activation_code }}</span>
+                                <button onclick="navigator.clipboard.writeText('{{ tx.activation_code }}'); this.innerHTML='<i class=\"fas fa-check text-emerald-500\"></i>'; setTimeout(()=>this.innerHTML='<i class=\"fas fa-copy text-slate-400\"></i>',2000)"
+                                    class="text-slate-400 hover:text-slate-600 p-0.5" title="Salin kode aktivasi">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            {% else %}-{% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>

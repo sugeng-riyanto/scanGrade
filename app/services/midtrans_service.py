@@ -175,9 +175,29 @@ def handle_payment_notification(notification_dict):
     is_expired = transaction_status == "expire"
     is_failed = transaction_status in ("deny", "cancel", "failure")
 
+    # Store payment details (VA numbers, etc.)
+    details = {}
+    va = status.get("va_numbers")
+    if va:
+        details["va_numbers"] = va
+    permata_va = status.get("permata_va_number")
+    if permata_va:
+        details["permata_va"] = permata_va
+    bill_key = status.get("bill_key")
+    if bill_key:
+        details["bill_key"] = bill_key
+        details["biller_code"] = status.get("biller_code", "")
+    store = status.get("store")
+    if store:
+        details["store"] = store
+    payment_code = status.get("payment_code")
+    if payment_code:
+        details["payment_code"] = payment_code
+
     update_data = {
         "status": "success" if is_success else ("expired" if is_expired else "failure"),
         "payment_type": payment_type,
+        "payment_details": details,
     }
     if transaction_time:
         try:
