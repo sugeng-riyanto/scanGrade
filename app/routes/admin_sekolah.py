@@ -1164,7 +1164,7 @@ def payment_success():
     if not tx:
         flash("Transaksi tidak ditemukan", "error")
         return redirect("/admin-sekolah/subscription")
-    return render_template("admin_sekolah/payment_status.html", tx=tx)
+    return render_template("admin_sekolah/payment_success.html", tx=tx)
 
 
 @admin_sekolah_bp.route("/payment/failure")
