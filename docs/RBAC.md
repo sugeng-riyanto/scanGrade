@@ -1,23 +1,23 @@
-# ScanGuide — Role-Based Access Control (RBAC) & Interaction Flows
+# ScanGrade — Role-Based Access Control (RBAC) & Interaction Flows
 
 ## 1. Role Hierarchy
 
 ```
-super_admin        (Super Admin — antar-sekolah)
+super_admin        (Super Admin — akses semua sekolah)
     │
-    └── admin_sekolah    (Admin Sekolah — 1 sekolah)
+    └── admin_sekolah    (Admin Sekolah — 1 sekolah spesifik)
             │
             ├── guru          (Guru — mengajar)
             │
             └── murid         (Siswa — mengerjakan ujian)
 ```
 
-| Role | Tujuan | Dibuat oleh | Login di |
-|------|--------|-------------|----------|
-| `super_admin` | Mengelola semua sekolah + pengguna sistem | Via Supabase Console | `/auth/login` |
-| `admin_sekolah` | Mengelola 1 sekolah (guru, siswa, kelas, mapel) | Register mandiri (perlu approval) | `/auth/login` |
-| `guru` | Membuat ujian, mengoreksi, melihat hasil | Di-import oleh admin_sekolah | `/auth/login_user` |
-| `murid` | Mengerjakan ujian, melihat nilai | Di-import oleh admin_sekolah | `/auth/login_user` |
+| Role | Tujuan | Dibuat oleh | Dashboard | Login di |
+|------|--------|-------------|-----------|----------|
+| `super_admin` | Mengelola SEMUA sekolah + pengguna + data lintas sekolah | Via Supabase Console | `/super-admin/dashboard` | `/auth/login` |
+| `admin_sekolah` | Mengelola 1 sekolah (guru, siswa, kelas, mapel) | Register mandiri (perlu approval) | `/admin/dashboard` | `/auth/login` |
+| `guru` | Membuat ujian, mengoreksi, melihat hasil | Di-import oleh admin_sekolah | `/teacher/dashboard` | `/auth/login_user` |
+| `murid` | Mengerjakan ujian, melihat nilai | Di-import oleh admin_sekolah | `/student/dashboard` | `/auth/login_user` |
 
 ---
 
@@ -69,27 +69,39 @@ Request → login_required decorator
 
 | Route | super_admin | admin_sekolah | guru | murid |
 |-------|:-----------:|:-------------:|:----:|:-----:|
-| `/admin/dashboard` | ✅ | ✅ | ❌ | ❌ |
-| `/admin/users` | ✅ | ❌ | ❌ | ❌ |
-| `/admin/teachers` | ✅ | ❌ | ❌ | ❌ |
-| `/admin/students` | ✅ | ❌ | ❌ | ❌ |
-| `/admin/classes` | ✅ | ❌ | ❌ | ❌ |
-| `/admin/exams` | ✅ | ❌ | ❌ | ❌ |
-| `/admin/school` | ✅ | ❌ | ❌ | ❌ |
+| **Super Admin (slug: `/super-admin/`)** |
+| `/super-admin/dashboard` | ✅ | ❌ | ❌ | ❌ |
+| `/super-admin/schools` | ✅ | ❌ | ❌ | ❌ |
+| `/super-admin/users` | ✅ | ❌ | ❌ | ❌ |
+| `/super-admin/exams` | ✅ | ❌ | ❌ | ❌ |
+| `/super-admin/logs` | ✅ | ❌ | ❌ | ❌ |
+| **Admin (slug: `/admin/`)** |
+| `/admin/dashboard` | ❌ | ✅ | ❌ | ❌ |
+| `/admin/users` | ❌ | ❌ | ❌ | ❌ |
+| `/admin/teachers` | ❌ | ❌ | ❌ | ❌ |
+| `/admin/students` | ❌ | ❌ | ❌ | ❌ |
+| `/admin/classes` | ❌ | ❌ | ❌ | ❌ |
+| `/admin/exams` | ❌ | ❌ | ❌ | ❌ |
+| `/admin/school` | ❌ | ❌ | ❌ | ❌ |
 | `/admin/registration-requests` | ✅ | ❌ | ❌ | ❌ |
 | `/admin/compliance` | ✅ | ❌ | ❌ | ❌ |
+| **Admin Sekolah (slug: `/admin-sekolah/`)** |
 | `/admin-sekolah/*` | ❌ | ✅ | ❌ | ❌ |
+| **Teacher (slug: `/teacher/`)** |
 | `/teacher/dashboard` | ❌ | ❌ | ✅ | ❌ |
 | `/teacher/exams/*` | ❌ | ❌ | ✅ | ❌ |
 | `/teacher/grade/*` | ❌ | ❌ | ✅ | ❌ |
 | `/teacher/results` | ❌ | ❌ | ✅ | ❌ |
 | `/teacher/analytics` | ❌ | ❌ | ✅ | ❌ |
 | `/teacher/scan` | ❌ | ❌ | ✅ | ❌ |
+| **Student (slug: `/student/`)** |
 | `/student/dashboard` | ❌ | ❌ | ❌ | ✅ |
 | `/student/exams/*` | ❌ | ❌ | ❌ | ✅ |
 | `/student/results` | ❌ | ❌ | ❌ | ✅ |
+| **API & Tools** |
 | `/api/*` | ✅ | ✅ | ✅ | ✅ |
 | `/publish/*` | ❌ | ❌ | ✅ | ❌ |
+| `/tools/*` | ✅ | ✅ | ✅ | ❌ |
 
 ### Decorators (digunakan di routes)
 
@@ -227,6 +239,23 @@ guru → /teacher/results?exam_id={id}
 
 ---
 
+### 6.1. Super Admin (`/super-admin/*`) — Akses Khusus
+
+Super Admin memiliki **dashboard terpisah** di `/super-admin/` yang berbeda dari admin sekolah biasa.
+Fitur yang hanya ada di Super Admin:
+
+| Fitur | Lokasi | Fungsi |
+|-------|--------|--------|
+| Dashboard global | `/super-admin/dashboard` | Stats seluruh sistem + registrasi pending |
+| Semua sekolah | `/super-admin/schools` | Lihat semua sekolah + jumlah guru/siswa/ujian |
+| Semua user | `/super-admin/users` | Filter by role + search lintas sekolah |
+| Semua ujian | `/super-admin/exams` | Lintas sekolah, lihat submission count |
+| Audit log | `/super-admin/logs` | Semua aktivitas sistem (filter 1-90 hari) |
+
+Super Admin juga masih bisa mengakses `/admin/*` untuk approval registrasi dan compliance.
+
+---
+
 ## 7. Security Measures
 
 | Measure | Implementasi |
@@ -257,20 +286,27 @@ guru → /teacher/results?exam_id={id}
        (super_admin,   (guru, murid)     (admin_sekolah)
         admin_sekolah)      │                │
               │              │                ▼
-              ▼              ▼          Pending approval
-         /admin/*       /teacher/*        by super_admin
-                        /student/*             │
-                                               ▼
-                                          /auth/activate
-                                          (activation code)
-                                               │
-                                               ▼
-                                          /admin-sekolah/*
-                                               │
-                                          Import guru/siswa
-                                               │
-                                          ┌────┴────┐
-                                          ▼         ▼
-                                       /teacher/*   /student/*
-                                       (guru)       (murid)
+              │              ▼          Pending approval
+              │         /teacher/*       by super_admin
+              │         /student/*            │
+              │                                ▼
+              │                           /auth/activate
+              │                           (activation code)
+              │                                │
+              │                                ▼
+              │                           /admin-sekolah/*
+              │                                │
+              │                           Import guru/siswa
+              │                                │
+              │                           ┌────┴────┐
+              │                           ▼         ▼
+              │                       /teacher/*   /student/*
+              │                       (guru)       (murid)
+              │
+              ▼
+     /super-admin/dashboard
+     /super-admin/schools
+     /super-admin/users
+     /super-admin/exams
+     /super-admin/logs
 ```

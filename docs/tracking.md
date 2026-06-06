@@ -46,6 +46,11 @@
 ## Changelog
 
 ### 10 June 2026
+- feat: new `/super-admin/` slug with dedicated dashboard
+- feat: schools, users, exams, audit log views (cross-school)
+- docs: RBAC.md updated with super admin routes + flow diagram
+
+### 10 June 2026
 - Fixed critical: missing `render_template` import in `__init__.py` (landing page was broken)
 - Fixed error: added `xhtml2pdf` to requirements.txt
 - Fixed weakness: exam submit now checks is_published+active status + duplicate submission
