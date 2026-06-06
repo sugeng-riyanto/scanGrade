@@ -277,11 +277,16 @@ def _import_students(ws, sid, supabase, results):
         if not row or not row[0]:
             continue
         try:
-            nisn = str(row[0] or "").strip()
-            nama = str(row[1] or "").strip()
-            kelas = str(row[2] or "").strip()
-            level = str(row[3] or "").strip() if len(row) > 3 else ""
-            email = str(row[4] or "").strip().lower() if len(row) > 4 else ""
+            cols = [str(c or "").strip() for c in row]
+            # Support both old format (NISN, Nama, Kelas, Level, Email)
+            # and new template format (NPSN, Thn Ajaran, NISN, Email, Nama, Kelas, Password)
+            if len(cols) >= 7 and cols[2].isdigit() and len(cols[2]) >= 8:
+                # New template: NPSN(0), ThnAjaran(1), NISN(2), Email(3), Nama(4), Kelas(5), Pw(6)
+                nisn = cols[2]; nama = cols[4]; kelas = cols[5]; email = cols[3]
+            else:
+                # Old format: NISN(0), Nama(1), Kelas(2), Level(3), Email(4)
+                nisn = cols[0]; nama = cols[1]; kelas = cols[2] if len(cols) > 2 else ""
+                email = cols[4] if len(cols) > 4 else ""
 
             if not nisn or not nama:
                 continue
@@ -323,22 +328,30 @@ def _import_teachers(ws, sid, supabase, results):
         if not row or not row[0]:
             continue
         try:
-            nip = str(row[0] or "").strip()
-            nama = str(row[1] or "").strip()
-            mapel = str(row[2] or "").strip() if len(row) > 2 else ""
-            email = str(row[3] or "").strip().lower() if len(row) > 3 else ""
-            hp = str(row[4] or "").strip() if len(row) > 4 else ""
+            cols = [str(c or "").strip() for c in row]
+            # Support both old format and new template format
+            if len(cols) >= 9 and cols[2].isdigit() and len(cols[2]) >= 5:
+                # New template: NPSN(0), ThnAjaran(1), NIP(2), Email(3), Nama(4), Mapel1(5), Mapel2(6), Mapel3(7), Pw(8)
+                nip = cols[2]; nama = cols[4]; email = cols[3]
+                mapels = [cols[i] for i in range(5, min(8, len(cols))) if cols[i]]
+                hp = ""
+            else:
+                # Old format: NIP(0), Nama(1), Mapel(2), Email(3), HP(4)
+                nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if len(cols) > 2 and cols[2] else []
+                email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""
 
             if not nip or not nama:
                 continue
 
-            # Resolve subject_id
+            # Resolve subject_id (use first mapel from the list)
             subject_id = None
-            if mapel:
-                if mapel not in subjects_cache:
-                    s = supabase.table("subjects").select("id").eq("school_id", sid).eq("name", mapel).maybe_single().execute()
-                    subjects_cache[mapel] = s.data["id"] if s.data else None
-                subject_id = subjects_cache.get(mapel)
+            for mn in mapels:
+                if mn and mn not in subjects_cache:
+                    s = supabase.table("subjects").select("id").eq("school_id", sid).eq("name", mn).maybe_single().execute()
+                    subjects_cache[mn] = s.data["id"] if s.data else None
+                if mn and subjects_cache.get(mn):
+                    subject_id = subjects_cache[mn]
+                    break
 
             user_email = email or _generate_email(nama, _get_email_domain(sid))
             user_pw = _gen_password()
@@ -387,29 +400,43 @@ def _import_subjects(ws, sid, supabase, results):
 def export_excel():
     sid = _school_id()
     supabase = get_supabase()
+    school = supabase.table("schools").select("npsn, name, email_domain").eq("id", sid).single().execute().data or {}
+    npsn = school.get("npsn", "")
+    years = supabase.table("school_years").select("name").eq("school_id", sid).eq("is_active", True).execute().data or []
+    academic_year = years[0]["name"] if years else "2025/2026"
+    domain = _get_email_domain(sid)
+    _email_map = {}
+    try:
+        for u in supabase.auth.admin.list_users():
+            _email_map[u.id] = u.email
+    except:
+        pass
 
     wb = Workbook()
-    # Students sheet
+    # Students sheet (sama format dengan template download)
     ws1 = wb.active
     ws1.title = "Murid"
-    ws1.append(["NISN", "Nama", "Kelas", "Level"])
-    students = supabase.table("students").select("*, profiles!inner(full_name), classes(name)").eq("school_id", sid).execute().data or []
+    ws1.append(["NPSN", "Tahun Ajaran", "NISN", "Email", "Nama Lengkap", "Kelas"])
+    students = supabase.table("students").select("*, profiles!inner(id, full_name), classes(name)").eq("school_id", sid).execute().data or []
     for s in students:
-        ws1.append([s.get("nisn", ""), (s.get("profiles") or {}).get("full_name", ""),
-                     (s.get("classes") or {}).get("name", ""), ""])
+        prof = s.get("profiles") or {}
+        uid = prof.get("id", "")
+        ws1.append([npsn, academic_year, s.get("nisn", ""), _email_map.get(uid, ""),
+                     prof.get("full_name", ""), (s.get("classes") or {}).get("name", "")])
 
-    # Teachers sheet
+    # Teachers sheet (sama format dengan template download)
     ws2 = wb.create_sheet("Guru")
-    ws2.append(["Nomor Pegawai", "Nama", "Mapel", "No HP"])
-    teachers = supabase.table("teachers").select("*, profiles!inner(full_name, phone), subjects(name)").eq("school_id", sid).execute().data or []
+    ws2.append(["NPSN", "Tahun Ajaran", "NIP", "Email", "Nama Lengkap", "Mapel"])
+    teachers = supabase.table("teachers").select("*, profiles!inner(id, full_name), subjects(name)").eq("school_id", sid).execute().data or []
     for t in teachers:
-        ws2.append([t.get("employee_id", ""), (t.get("profiles") or {}).get("full_name", ""),
-                     (t.get("subjects") or {}).get("name", ""),
-                     (t.get("profiles") or {}).get("phone", "")])
+        prof = t.get("profiles") or {}
+        uid = prof.get("id", "")
+        ws2.append([npsn, academic_year, t.get("employee_id", ""), _email_map.get(uid, ""),
+                     prof.get("full_name", ""), (t.get("subjects") or {}).get("name", "")])
 
     # Subjects sheet
     ws3 = wb.create_sheet("Mata Pelajaran")
-    ws3.append(["Mata Pelajaran", "Kode"])
+    ws3.append(["Nama Mata Pelajaran", "Kode"])
     subjects = supabase.table("subjects").select("*").eq("school_id", sid).execute().data or []
     for s in subjects:
         ws3.append([s.get("name", ""), s.get("code", "")])
