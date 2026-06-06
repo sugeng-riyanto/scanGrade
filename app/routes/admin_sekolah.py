@@ -44,8 +44,11 @@ def _get_email_domain(sid) -> str:
         return "school.local"
 
 
-def _school_id() -> str:
-    return g.get("user_school_id")
+def _school_id() -> str | None:
+    sid = g.get("user_school_id")
+    if not sid or sid == "None":
+        return None
+    return sid
 
 
 
@@ -57,6 +60,10 @@ def _school_id() -> str:
 @admin_sekolah_required
 def dashboard():
     sid = _school_id()
+    if not sid:
+        flash("Sekolah belum terdaftar. Hubungi Super Admin.", "error")
+        return redirect("/auth/login")
+
     supabase = get_supabase()
 
     school = supabase.table("schools").select("*").eq("id", sid).single().execute().data or {}

@@ -4,7 +4,13 @@ import secrets
 import string
 from datetime import datetime, timezone, timedelta
 from flask import current_app
-import midtransclient
+
+try:
+    import midtransclient
+    _HAS_MIDTRANS = True
+except ImportError:
+    _HAS_MIDTRANS = False
+    midtransclient = None
 
 
 def _load_midtrans_config():
@@ -33,6 +39,9 @@ def generate_activation_code():
 
 
 def create_snap_transaction(school_id, plan_id, school_name, school_email):
+    if not _HAS_MIDTRANS:
+        return None, "Paket midtransclient belum terinstall. Jalankan: pip install midtransclient"
+
     cfg = _load_midtrans_config()
     if not cfg or not cfg.get("server_key") or not cfg.get("client_key"):
         return None, "Midtrans belum dikonfigurasi oleh Super Admin"
@@ -102,6 +111,10 @@ def create_snap_transaction(school_id, plan_id, school_name, school_email):
 
 
 def handle_payment_notification(notification_dict):
+    if not _HAS_MIDTRANS:
+        current_app.logger.error("midtransclient not installed")
+        return False
+
     cfg = _load_midtrans_config()
     if not cfg or not cfg.get("server_key"):
         current_app.logger.error("Midtrans not configured for notification handling")
