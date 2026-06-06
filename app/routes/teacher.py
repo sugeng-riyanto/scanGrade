@@ -147,9 +147,17 @@ def dashboard():
             pass
 
     user_name = g.user_name or g.user_email or ""
+    # School info for header
+    school_info = {}
+    if school_id:
+        try:
+            school_info = supabase.table("schools").select("name, npsn, logo_url").eq("id", school_id).single().execute().data or {}
+        except Exception:
+            pass
     return render_template("teacher/dashboard.html", exams=exams, total_students=total_students,
                            avg_score=avg_score, all_scores=all_scores, user_name=user_name,
-                           assignments=assignments, classes=classes, subjects=subjects)
+                           assignments=assignments, classes=classes, subjects=subjects,
+                           school_info=school_info)
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])

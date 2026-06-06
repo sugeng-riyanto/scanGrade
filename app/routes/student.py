@@ -56,10 +56,18 @@ def dashboard():
     except Exception:
         pass
 
+    # School info
+    school_info = {}
+    try:
+        profile = supabase.table("profiles").select("school_id").eq("id", g.user_id).single().execute().data or {}
+        if profile.get("school_id"):
+            school_info = supabase.table("schools").select("name, npsn, logo_url").eq("id", profile["school_id"]).single().execute().data or {}
+    except Exception:
+        pass
     return render_template("student/dashboard.html", available_exams=available_exams,
                            completed_exams=completed_exams[:5], avg_score=avg_score,
                            user_name=user_name, student_class=student_class,
-                           subject_count=subject_count)
+                           subject_count=subject_count, school_info=school_info)
 
 
 @student_bp.route("/exams")

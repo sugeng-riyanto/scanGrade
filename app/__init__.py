@@ -128,6 +128,16 @@ def create_app(env=None):
     app.jinja_env.globals["get_demo_settings"] = get_demo_settings
 
     @app.template_global()
+    def school_favicon(school_info=None):
+        """Generate a simple SVG favicon from school initials or default."""
+        if school_info and school_info.get("logo_url"):
+            return school_info["logo_url"]
+        name = (school_info or {}).get("name", "SG")
+        initials = "".join(w[0] for w in name.split()[:2]).upper()[:2] if len(name.split()) > 1 else name[:2].upper()
+        color = "#4338CA"
+        return f"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='{color}'/><text x='16' y='22' text-anchor='middle' font-size='16' font-weight='bold' fill='white'>{initials}</text></svg>"
+
+    @app.template_global()
     def greeting():
         offset = getattr(g, "tz_offset", DEFAULT_TZ_OFFSET)
         from datetime import timedelta, timezone as _tz

@@ -20,9 +20,7 @@ def _school_id() -> str:
     return g.get("user_school_id")
 
 
-def _gen_password(length=8) -> str:
-    chars = string.ascii_letters + string.digits
-    return "".join(random.choices(chars, k=length))
+
 
 
 # ─── DASHBOARD ───────────────────────────────────────
@@ -262,19 +260,19 @@ def export_excel():
     # Students sheet
     ws1 = wb.active
     ws1.title = "Murid"
-    ws1.append(["NISN", "Nama", "Kelas", "Level", "Email"])
-    students = supabase.table("students").select("*, profiles!inner(full_name, email), classes(name)").eq("school_id", sid).execute().data or []
+    ws1.append(["NISN", "Nama", "Kelas", "Level"])
+    students = supabase.table("students").select("*, profiles!inner(full_name), classes(name)").eq("school_id", sid).execute().data or []
     for s in students:
         ws1.append([s.get("nisn", ""), (s.get("profiles") or {}).get("full_name", ""),
-                     (s.get("classes") or {}).get("name", ""), "", (s.get("profiles") or {}).get("email", "")])
+                     (s.get("classes") or {}).get("name", ""), ""])
 
     # Teachers sheet
     ws2 = wb.create_sheet("Guru")
-    ws2.append(["Nomor Pegawai", "Nama", "Mapel", "Email", "No HP"])
-    teachers = supabase.table("teachers").select("*, profiles!inner(full_name, email, phone), subjects(name)").eq("school_id", sid).execute().data or []
+    ws2.append(["Nomor Pegawai", "Nama", "Mapel", "No HP"])
+    teachers = supabase.table("teachers").select("*, profiles!inner(full_name, phone), subjects(name)").eq("school_id", sid).execute().data or []
     for t in teachers:
         ws2.append([t.get("employee_id", ""), (t.get("profiles") or {}).get("full_name", ""),
-                     (t.get("subjects") or {}).get("name", ""), (t.get("profiles") or {}).get("email", ""),
+                     (t.get("subjects") or {}).get("name", ""),
                      (t.get("profiles") or {}).get("phone", "")])
 
     # Subjects sheet
@@ -356,9 +354,9 @@ def delete_school_year(year_id):
 def classes():
     sid = _school_id()
     supabase = get_supabase()
-    classes_list = supabase.table("classes").select("*, profiles(full_name)").eq("school_id", sid).order("name").execute().data or []
+    classes_list = supabase.table("classes").select("*, profiles!classes_teacher_id_fkey(full_name)").eq("school_id", sid).order("name").execute().data or []
     for c in classes_list:
-        c["wali_kelas"] = (c.get("profiles") or {}).get("full_name") if c.get("profiles") else None
+        c["wali_kelas"] = (c.get("profiles") or {}).get("full_name")
     teachers = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("school_id", sid).execute().data or []
     years = supabase.table("school_years").select("*").eq("school_id", sid).order("name", desc=True).execute().data or []
     return render_template("admin_sekolah/classes.html", classes=classes_list, teachers=teachers, years=years)
@@ -487,7 +485,7 @@ def teachers():
     supabase = get_supabase()
     subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
     teachers_list = supabase.table("teachers").select(
-        "*, profiles!inner(id, full_name, email, phone, status), subjects(name)"
+        "*, profiles!inner(id, full_name, phone, status), subjects(name)"
     ).eq("school_id", sid).order("employee_id").execute().data or []
     return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects)
 
@@ -598,7 +596,7 @@ def students():
     supabase = get_supabase()
     classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
     students_list = supabase.table("students").select(
-        "*, profiles!inner(id, full_name, email, phone, status, nisn), classes(name)"
+        "*, profiles!inner(id, full_name, phone, nisn), classes(name)"
     ).eq("school_id", sid).order("nisn").execute().data or []
     return render_template("admin_sekolah/students.html", students=students_list, classes=classes_list)
 
