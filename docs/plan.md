@@ -88,4 +88,4 @@
 | M5: Teacher grading + calculator | Week 5 | ✅ |
 | M6: Analytics + export | Week 6 | ✅ |
 | M7: Multi-school + RLS | Week 7 | ✅ |
-| M8: Final integration + testing | Week 8 | 🔄 In Progress |
+| M8: Final integration + testing | Week 8 | ✅ Complete |

@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 10 June 2026
+**Last Updated:** 13 June 2026
 
 ---
 
@@ -42,6 +42,12 @@
 ---
 
 ## Changelog
+
+### 13 June 2026 — Penalty & PDF Polish
+- **Penalty fix**: `calculate_graduated_penalty` now checks `anti_cheat_enabled is False` (not `not get()`), so `None` (missing column) defaults to enabled
+- **Timestamp tolerance**: 300s → 900s to handle client clock drift
+- **Logging**: Added warning logs in `validate_violation_log` for rejected violations
+- **PDF header**: Removed blue border line from header/footer, kept `border-radius: 10px`
 
 ### 10 June 2026 — Final Polish
 - **PDF Result**: Logo + nama sekolah (36pt) + alamat (20pt) center, info lines per field
