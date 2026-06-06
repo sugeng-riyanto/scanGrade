@@ -184,8 +184,8 @@ def login():
         }
         redirect_url = redirect_map.get(role, "/admin/dashboard")
         resp = make_response(redirect(redirect_url))
-        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/")
-        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/")
+        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/", max_age=86400)
+        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
     except Exception:
@@ -237,8 +237,8 @@ def login_user():
         }
         redirect_url = redirect_map.get(role, "/student/dashboard")
         resp = make_response(redirect(redirect_url))
-        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/")
-        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/")
+        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/", max_age=86400)
+        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
     except Exception:

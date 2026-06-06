@@ -964,7 +964,7 @@ function examApp(duration, totalQ) {
             }
         },
         startWatermark() {
-            const name = '{{ g.user_name or g.user_email or "" }}';
+            const name = {{ (g.user_name or g.user_email or "") | tojson }};
             if (!name) return;
             const wm = document.createElement('div');
             wm.id = 'anti-cheat-watermark';

@@ -362,7 +362,11 @@ def upload_exam_pdf(exam_id):
         return render_template("teacher/upload_pdf.html", exam=exam, error="Pilih file PDF")
 
     file = request.files["pdf"]
-    result = upload_pdf(file, exam_id)
+    try:
+        result = upload_pdf(file, exam_id)
+    except ValueError as e:
+        exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+        return render_template("teacher/upload_pdf.html", exam=exam, error=str(e))
     supabase.table("exams").update({
         "pdf_url": result["pdf_path"],
         "pdf_page_urls": result["page_urls"],

@@ -471,7 +471,7 @@ def retract_submission(submission_id):
             answers = {}
     if not isinstance(answers, dict):
         answers = {}
-    answers["_retract_request"] = {"status": "pending", "requested_at": datetime.utcnow().isoformat()}
+    answers["_retract_request"] = {"status": "pending", "requested_at": datetime.now(timezone.utc).isoformat()}
     supabase.table("submissions").update({"answers": json.dumps(answers)}).eq("id", submission_id).execute()
     log_activity("retract_request", "submission", submission_id, user_id=g.user_id)
     if request.is_json:

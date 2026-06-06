@@ -64,6 +64,7 @@
         dialog { max-height: 90vh; }
         dialog::backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
     </style>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     {% block head_extra %}{% endblock %}
 </head>
 <body class="h-full antialiased"
@@ -348,6 +349,31 @@
 </dialog>
 
 {% block modals %}{% endblock %}
+<script>
+// Auto-inject CSRF token into all forms + AJAX requests
+document.addEventListener('DOMContentLoaded', function() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    const token = meta ? meta.getAttribute('content') : '';
+    if (!token) return;
+    // Add hidden field to all forms
+    document.querySelectorAll('form[method="POST"]').forEach(f => {
+        const input = document.createElement('input');
+        input.type = 'hidden'; input.name = '_csrf_token'; input.value = token;
+        f.appendChild(input);
+    });
+    // Add CSRF header to all fetch/XHR POST/PUT/DELETE
+    const origFetch = window.fetch;
+    window.fetch = function(url, opts) {
+        opts = opts || {};
+        if (opts.method && opts.method !== 'GET' && opts.method !== 'HEAD') {
+            opts.headers = opts.headers || {};
+            if (opts.headers instanceof Headers) opts.headers.set('X-CSRF-Token', token);
+            else opts.headers['X-CSRF-Token'] = token;
+        }
+        return origFetch.call(this, url, opts);
+    };
+});
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

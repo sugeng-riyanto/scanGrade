@@ -1,6 +1,6 @@
 import io
 import re
-import random
+import secrets
 import string
 from datetime import datetime, timezone, date
 
@@ -8,6 +8,10 @@ from flask import Blueprint, render_template, g, request, jsonify, redirect, fla
 from openpyxl import load_workbook, Workbook
 from app.utils.auth import admin_sekolah_required, get_supabase
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
+
+def _gen_password(length=12) -> str:
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 admin_sekolah_bp = Blueprint("admin_sekolah", __name__)
 
@@ -161,7 +165,7 @@ def _import_students(ws, sid, supabase, results):
                 class_id = classes_cache.get(kelas)
 
             user_email = email or f"siswa.{nisn}@school.local"
-            user_pw = nisn
+            user_pw = _gen_password()
 
             res = supabase.auth.admin.create_user({
                 "email": user_email,
@@ -207,7 +211,7 @@ def _import_teachers(ws, sid, supabase, results):
                 subject_id = subjects_cache.get(mapel)
 
             user_email = email or f"guru.{nip}@school.local"
-            user_pw = "guru123"
+            user_pw = _gen_password()
 
             res = supabase.auth.admin.create_user({
                 "email": user_email,

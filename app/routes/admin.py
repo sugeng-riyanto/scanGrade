@@ -345,7 +345,7 @@ def import_students():
         nis = str(row[2] or "").strip() if len(row) > 2 else ""
         phone = str(row[3] or "").strip() if len(row) > 3 else ""
         default_email = f"siswa.{nisn or nis or row_idx}@school.local"
-        default_pw = nisn or nis or "siswa123"
+        default_pw = _gen_password()
         try:
             res = supabase.auth.admin.create_user({
                 "email": default_email,
@@ -389,7 +389,7 @@ def import_teachers():
         full_name = str(row[0] or "").strip()
         phone = str(row[1] or "").strip() if len(row) > 1 else ""
         default_email = f"guru.{full_name.lower().replace(' ', '.')}@school.local"
-        default_pw = "guru123"
+        default_pw = _gen_password()
         try:
             res = supabase.auth.admin.create_user({
                 "email": default_email,

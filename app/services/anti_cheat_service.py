@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 from flask import current_app
 
 
@@ -98,9 +99,8 @@ def validate_violation_log(user_id: str, exam_id: str, timestamp: float) -> dict
     if recent.data:
         last_time = recent.data[0]["created_at"]
         if isinstance(last_time, str):
-            last_ts = time.mktime(
-                time.strptime(last_time[:19], "%Y-%m-%dT%H:%M:%S")
-            )
+            dt = datetime.fromisoformat(last_time[:19] if "T" in last_time else last_time)
+            last_ts = dt.timestamp()
         else:
             last_ts = last_time.timestamp()
         if now - last_ts < RATE_LIMIT_SECONDS:
