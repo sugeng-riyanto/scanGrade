@@ -221,15 +221,15 @@ def submit_exam(exam_id):
     penalty_info = calculate_graduated_penalty(violation_count, exam)
     penalty = penalty_info["penalty"]
 
-    final_score = max(0, round(score - penalty, 2))
+    final_score = max(0.0, round(score - penalty, 2))
     submission = {
         "exam_id": exam_id,
         "student_id": g.user_id,
         "answers": {k: v for k, v in answers.items() if v is not None},
         "score": score,
-        "max_score": 100,
+        "max_score": 100.0,
         "violations": violation_count,
-        "penalty": penalty,
+        "penalty": round(penalty, 2),
         "final_score": final_score,
         "status": "submitted",
     }

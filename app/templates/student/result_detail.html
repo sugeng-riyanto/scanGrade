@@ -72,7 +72,7 @@
     {% set question_weights = exam.get('question_weights', {}) %}
     {% set total_q = exam.get('total_questions', 0) %}
     {% set pdf_pages = exam.get('pdf_page_urls', []) or [] %}
-    {% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else None) %}
+    {% set score = submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else 0) %}
     {% set is_hidden = submission.get('is_hidden', False) %}
     {% set answers = submission.answers or {} %}
 
