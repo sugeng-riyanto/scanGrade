@@ -250,8 +250,7 @@ def _seed_exams(supabase, school_id, school_conf):
 
 
 def _reset_demo(supabase):
-    """Delete all demo users and data. Keep the default school."""
-    print("\n🧹 Resetting demo data...")
+    """Delete all demo users and data."""
     for email in [u["email"] for u in [DEMO_USERS["super_admin"]]] \
         + [s["admin"]["email"] for s in DEMO_SCHOOLS] \
         + [t["email"] for s in DEMO_SCHOOLS for t in s.get("teachers", [])] \
@@ -260,21 +259,28 @@ def _reset_demo(supabase):
             for u in supabase.auth.admin.list_users():
                 if u.email == email:
                     supabase.auth.admin.delete_user(u.id)
-                    print(f"   🗑️  Deleted: {email}")
                     break
         except:
             pass
-    # Clean profiles
-    for email in [u["email"] for u in [DEMO_USERS["super_admin"]]] \
-        + [s["admin"]["email"] for s in DEMO_SCHOOLS] \
-        + [t["email"] for s in DEMO_SCHOOLS for t in s.get("teachers", [])] \
-        + [st["email"] for s in DEMO_SCHOOLS for st in s.get("students", [])]:
+
+
+def _reset_demo_data(supabase):
+    """Delete all demo data EXCEPT user accounts (keep emails/passwords)."""
+    print("\n🔄 Resetting demo data (keeping user accounts)...")
+    for table in ["submissions", "violation_logs", "exam_access_codes", "analytics_cache",
+                   "teacher_assignments", "exams"]:
         try:
-            prof = supabase.table("profiles").select("id").eq("email" if False else "id", "none").execute()
+            supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print(f"   ✅ Cleared: {table}")
+        except Exception as e:
+            print(f"   ⚠️  {table}: {str(e)[:50]}")
+    # Clear class/subject data (recreated by seed)
+    for table in ["students", "teachers", "subjects", "classes", "school_years"]:
+        try:
+            supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
         except:
             pass
-    # We can't easily delete by email in profiles table, but the auth user deletion
-    # cascades (ON DELETE CASCADE) to profiles. So this should be sufficient.
+    print(f"   ✅ Cleared: schools child data")
 
 
 # ─── COMMANDS ─────────────────────────────────────────
@@ -307,6 +313,13 @@ def cmd_seed(args):
         print("✅ SEED COMPLETE")
         print("=" * 50)
         _print_credentials()
+
+
+def cmd_reset_data(args):
+    with app.app_context():
+        supabase = get_supabase()
+        _reset_demo_data(supabase)
+        print("\n✅ Data reset complete. Run 'python manage.py seed' to recreate fresh data.")
 
 
 def cmd_reset(args):
@@ -365,8 +378,8 @@ def _print_credentials():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ScanGrade Data Management")
-    parser.add_argument("command", choices=["seed", "reset", "list"],
-                        help="seed: create demo data | reset: delete all demo users | list: show demo users")
+    parser.add_argument("command", choices=["seed", "reset", "reset-data", "list"],
+                        help="seed: create demo data | reset: delete ALL (users+data) | reset-data: keep users, reset data | list: show demo users")
     parser.add_argument("--exam", action="store_true", help="Also create sample exams (with seed)")
     parser.add_argument("--demo", action="store_true", help="Use .env.demo instead of .env")
     args = parser.parse_args()
@@ -375,5 +388,7 @@ if __name__ == "__main__":
         cmd_seed(args)
     elif args.command == "reset":
         cmd_reset(args)
+    elif args.command == "reset-data":
+        cmd_reset_data(args)
     elif args.command == "list":
         cmd_list(args)

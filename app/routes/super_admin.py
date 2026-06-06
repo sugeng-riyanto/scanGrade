@@ -199,6 +199,24 @@ def reset_demo_passwords():
     return jsonify({"results": results, "total": len(results), "ok": sum(1 for r in results if r.get("success"))})
 
 
+@super_bp.route("/reset-demo-data", methods=["POST"])
+@_sa_required
+def reset_demo_data():
+    """Delete all demo data (submissions, exams, classes) but KEEP user accounts."""
+    supabase = get_supabase()
+    tables = ["submissions", "violation_logs", "exam_access_codes", "analytics_cache",
+              "teacher_assignments", "exams", "students", "teachers", "classes", "subjects"]
+    cleared = 0
+    errors = []
+    for table in tables:
+        try:
+            supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            cleared += 1
+        except Exception as e:
+            errors.append(f"{table}: {str(e)[:40]}")
+    return jsonify({"success": True, "message": f"{cleared}/{len(tables)} tabel dibersihkan", "errors": errors[:3]})
+
+
 @super_bp.route("/demo-settings/data")
 @_sa_required
 def demo_settings_data():
