@@ -8,29 +8,20 @@
 {% set fi = fee_info|default({}) %}
 {% set fee_total = (fi.get('fee_percent_amount', 0) + fi.get('fee_flat', 0)) %}
 {% block content %}
-<div class="max-w-lg mx-auto text-center"
+<div class="max-w-xl mx-auto"
      x-data="{
          lang: localStorage.getItem('sg_lang') || 'id',
          status: 'pending',
-         snapReady: false,
-         showPopup: false
+         showEmbed: false,
+         snapLoaded: false
      }"
      x-init="
-         // Poll status every 8s
          setInterval(() => {
              fetch('/api/transaction/status?order_id={{ order_id }}')
                  .then(r => r.json())
-                 .then(d => { if (d.status === 'success') { status = 'success'; } })
+                 .then(d => { if (d.status === 'success') window.location.href = '/admin-sekolah/payment/success?order_id={{ order_id }}'; })
                  .catch(() => {});
-         }, 8000);
-         document.addEventListener('visibilitychange', () => {
-             if (!document.hidden) {
-                 fetch('/api/transaction/status?order_id={{ order_id }}')
-                     .then(r => r.json())
-                     .then(d => { if (d.status === 'success') window.location.href = '/admin-sekolah/payment/success?order_id={{ order_id }}'; })
-                     .catch(() => {});
-             }
-         });
+         }, 5000);
      ">
 
     {% for msg in get_flashed_messages(with_categories=true) %}
@@ -39,108 +30,114 @@
     </div>
     {% endfor %}
 
-    <div class="card p-8">
-        <!-- Success State -->
-        <template x-if="status === 'success'">
-            <div>
-                <div class="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-3xl mb-4">
-                    <i class="fas fa-check-circle"></i>
-                </div>
-                <h3 class="font-extrabold text-2xl text-emerald-700 mb-2">Pembayaran Berhasil!</h3>
-                <p class="text-slate-500 font-medium mb-6">Langganan Anda sekarang aktif.</p>
-                <a href="/admin-sekolah/subscription" class="btn btn-primary px-8">
-                    <i class="fas fa-arrow-left mr-1"></i> Kembali ke Langganan
-                </a>
+    <!-- Success State -->
+    <template x-if="status === 'success'">
+        <div class="card p-8 text-center">
+            <div class="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-3xl mb-4">
+                <i class="fas fa-check-circle"></i>
             </div>
-        </template>
+            <h3 class="font-extrabold text-2xl text-emerald-700 mb-2">Pembayaran Berhasil!</h3>
+            <p class="text-slate-500 font-medium mb-6">Langganan Anda sekarang aktif.</p>
+            <a href="/admin-sekolah/subscription" class="btn btn-primary px-8">
+                <i class="fas fa-arrow-left mr-1"></i> Kembali ke Langganan
+            </a>
+        </div>
+    </template>
 
-        <!-- Payment State -->
-        <template x-if="status !== 'success'">
-            <div>
-                <div class="w-20 h-20 mx-auto rounded-full bg-primary-100 flex items-center justify-center text-primary-600 text-3xl mb-4">
-                    <i class="fas fa-credit-card"></i>
+    <!-- Initial State (before embed) -->
+    <template x-if="status !== 'success' && !showEmbed">
+        <div class="card p-8 text-center">
+            <div class="w-20 h-20 mx-auto rounded-full bg-primary-100 flex items-center justify-center text-primary-600 text-3xl mb-4">
+                <i class="fas fa-credit-card"></i>
+            </div>
+            <h3 class="font-extrabold text-xl text-slate-800 mb-2">Pembayaran</h3>
+            <p class="text-slate-500 font-medium mb-2">Order: <span class="font-mono text-sm">{{ order_id }}</span></p>
+
+            <div class="bg-slate-50 rounded-xl p-4 text-left text-sm space-y-1.5 mb-6">
+                <div class="flex justify-between">
+                    <span class="text-slate-500 font-medium">Harga Paket</span>
+                    <span class="font-bold text-slate-700">Rp {{ "{:,.0f}".format(base_price).replace(',','.') }}</span>
                 </div>
-                <h3 class="font-extrabold text-xl text-slate-800 mb-2">Pembayaran</h3>
-                <p class="text-slate-500 font-medium mb-2">Order: <span class="font-mono text-sm">{{ order_id }}</span></p>
-
-                <!-- Rincian Biaya -->
-                <div class="bg-slate-50 rounded-xl p-4 text-left text-sm space-y-1.5 mb-6">
-                    <div class="flex justify-between">
-                        <span class="text-slate-500 font-medium">Harga Paket</span>
-                        <span class="font-bold text-slate-700">Rp {{ "{:,.0f}".format(base_price).replace(',','.') }}</span>
-                    </div>
-                    {% if fee_total > 0 %}
-                    <div class="flex justify-between text-slate-500 font-medium">
-                        <span>Biaya Admin{% if fi.get('note') %} ({{ fi.note }}){% endif %}</span>
-                        <span class="text-slate-600">Rp {{ "{:,.0f}".format(fee_total).replace(',','.') }}</span>
-                    </div>
-                    {% endif %}
-                    <div class="border-t border-slate-200 pt-1.5 flex justify-between font-extrabold text-lg">
-                        <span class="text-slate-700">Total</span>
-                        <span class="text-primary-600">Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}</span>
-                    </div>
-                </div>
-
-                {% if not client_key %}
-                <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-red-700">
-                    Midtrans belum dikonfigurasi. Hubungi Super Admin.
-                </div>
-                <a href="/admin-sekolah/subscription" class="btn btn-ghost mt-4">Kembali</a>
-                {% else %}
-                <!-- Payment Buttons -->
-                <div class="flex flex-col gap-3">
-                    <!-- Snap Pay Button -->
-                    <button type="button" id="pay-button"
-                        class="btn bg-primary-600 hover:bg-primary-700 text-white px-8 py-4 text-lg font-bold rounded-xl inline-flex items-center justify-center gap-2 shadow-lg shadow-primary-600/20">
-                        <i class="fas fa-credit-card"></i>
-                        Bayar Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}
-                    </button>
-
-                    <div class="flex items-center justify-center gap-4 text-xs text-slate-400">
-                        <span><i class="fas fa-shield-alt mr-1"></i>Pembayaran aman via Midtrans</span>
-                        <span><i class="fas fa-lock mr-1"></i>Data terenkripsi</span>
-                    </div>
-
-                    <p class="text-xs text-slate-400 mt-2">Popup pembayaran akan muncul. Selesaikan pembayaran di popup tersebut. Halaman ini akan otomatis mendeteksi status pembayaran.</p>
-
-                    <div class="flex gap-2 justify-center mt-2">
-                        <a href="/admin-sekolah/payment/success?order_id={{ order_id }}"
-                           class="btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-sm font-bold px-4 py-2 rounded-xl">
-                            <i class="fas fa-sync mr-1"></i> Cek Status
-                        </a>
-                        <a href="/admin-sekolah/subscription" class="btn btn-ghost text-sm text-red-400">Batal</a>
-                    </div>
+                {% if fee_total > 0 %}
+                <div class="flex justify-between text-slate-500 font-medium">
+                    <span>Biaya Admin{% if fi.get('note') %} ({{ fi.note }}){% endif %}</span>
+                    <span class="text-slate-600">Rp {{ "{:,.0f}".format(fee_total).replace(',','.') }}</span>
                 </div>
                 {% endif %}
+                <div class="border-t border-slate-200 pt-1.5 flex justify-between font-extrabold text-lg">
+                    <span class="text-slate-700">Total</span>
+                    <span class="text-primary-600">Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}</span>
+                </div>
             </div>
-        </template>
-    </div>
+
+            {% if not client_key %}
+            <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-red-700">
+                Midtrans belum dikonfigurasi. Hubungi Super Admin.
+            </div>
+            <a href="/admin-sekolah/subscription" class="btn btn-ghost mt-4">Kembali</a>
+            {% else %}
+            <button type="button" id="pay-button"
+                class="btn bg-primary-600 hover:bg-primary-700 text-white px-8 py-4 text-lg font-bold rounded-xl shadow-lg shadow-primary-600/20 w-full">
+                <i class="fas fa-credit-card mr-2"></i>
+                Bayar Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}
+            </button>
+
+            <div class="flex items-center justify-center gap-4 text-xs text-slate-400 mt-4">
+                <span><i class="fas fa-shield-alt mr-1"></i>Pembayaran aman via Midtrans</span>
+                <span><i class="fas fa-lock mr-1"></i>Data terenkripsi</span>
+            </div>
+
+            <div class="mt-4">
+                <a href="/admin-sekolah/subscription" class="text-xs text-slate-400 hover:text-slate-600 underline font-medium">Batal</a>
+            </div>
+            {% endif %}
+        </div>
+    </template>
+
+    <!-- Embedded Snap Widget -->
+    <template x-if="showEmbed">
+        <div class="relative">
+            <div class="flex items-center justify-between p-3 bg-white border-b border-slate-200 rounded-t-xl">
+                <span class="font-bold text-sm text-slate-600">Pilih Metode Pembayaran</span>
+                <button @click="showEmbed=false; document.getElementById('snap-container').innerHTML='';"
+                    class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+            <div id="snap-container" class="min-h-[400px] rounded-b-xl border border-slate-200"></div>
+        </div>
+    </template>
 </div>
 
-<!-- Load Snap.js and init pay button -->
+<!-- Load Snap.js -->
 <script src="{{ snap_url }}?client_key={{ client_key }}"
-        data-client-key="{{ client_key }}"
-        onload="
-            document.getElementById('pay-button').onclick = function() {
-                window.snap.pay('{{ token }}', {
+    onload="
+        document.getElementById('pay-button').onclick = function() {
+            if (typeof snap === 'undefined') return alert('Midtrans belum siap, refresh halaman');
+            document.querySelector('[x-data]').__x.$data.showEmbed = true;
+            setTimeout(() => {
+                snap.embed('{{ token }}', {
+                    embedId: 'snap-container',
                     onSuccess: function(r) {
                         window.location.href = '/admin-sekolah/payment/success?order_id=' + r.order_id;
                     },
                     onPending: function(r) {
-                        // Stay on page, status will auto-detect
-                        document.querySelector('[x-data]').__x.$data.status = 'pending';
+                        document.getElementById('snap-container').innerHTML = '<div class=\"p-8 text-center text-amber-600 font-bold\">Menunggu pembayaran...</div>';
                     },
                     onError: function(r) {
-                        // Stay on page, user can retry
-                        alert('Pembayaran gagal. Silakan coba lagi.');
+                        document.getElementById('snap-container').innerHTML = '<div class=\"p-8 text-center text-red-600 font-bold\">Pembayaran gagal. <button class=\"underline\" onclick=\"location.reload()\">Coba lagi</button></div>';
                     },
                     onClose: function() {
-                        // Just close popup, stay on page — user can click Bayar again
+                        document.querySelector('[x-data]').__x.$data.showEmbed = false;
+                        document.getElementById('snap-container').innerHTML = '';
                     }
                 });
-                return false;
-            };
-        "
-        onerror="document.getElementById('pay-button').innerText='Gagal memuat pembayaran. Refresh halaman.'">
+            }, 100);
+        };
+    "
+    onerror="
+        var btn = document.getElementById('pay-button');
+        if (btn) btn.innerText = 'Gagal memuat pembayaran. Refresh halaman.';
+    ">
 </script>
 {% endblock %}
