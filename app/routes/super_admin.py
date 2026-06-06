@@ -1,5 +1,6 @@
 """Super Admin — full access to all schools, teachers, exams, submissions."""
 import json
+import secrets
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash
 from app.utils.auth import login_required, get_supabase
