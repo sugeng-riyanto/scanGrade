@@ -3,83 +3,134 @@
 {% block page_title %}Pembayaran{% endblock %}
 {% set is_production = settings.get('is_production', false) %}
 {% set client_key = settings.get('client_key', '') %}
-{% set snap_url = 'https://app.midtrans.com/snap/snap.js' if is_production else 'https://app.sandbox.midtrans.com/snap/snap.js' %}
 {% set base_price = base_price|default(gross_amount) %}
 {% set fi = fee_info|default({}) %}
 {% set fee_total = (fi.get('fee_percent_amount', 0) + fi.get('fee_flat', 0)) %}
 {% block content %}
-<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', loading: true }"
-     x-init="loading=true;
-     if ('{{ client_key }}') {
-         snapScript = document.createElement('script');
-         snapScript.src = '{{ snap_url }}?client_key={{ client_key }}';
-         snapScript.onload = () => {
-             loading = false;
-             window.snap.pay('{{ token }}', {
-                 onSuccess: (r) => { window.location.href = '/admin-sekolah/payment/success?order_id=' + r.order_id; },
-                 onPending: (r) => { window.location.href = '/admin-sekolah/payment/success?order_id=' + r.order_id; },
-                 onError: (r) => { window.location.href = '/admin-sekolah/payment/failure?order_id=' + (r.order_id || '{{ order_id }}'); },
-                 onClose: () => { window.location.href = '/admin-sekolah/subscription'; }
-             });
-         };
-         snapScript.onerror = () => { loading = false; };
-         document.head.appendChild(snapScript);
-     } else { loading = false; }">
-    <div class="max-w-lg mx-auto text-center">
-        <div class="card p-8">
-            <div class="w-16 h-16 mx-auto rounded-2xl bg-primary-100 flex items-center justify-center text-primary-600 text-2xl mb-4">
-                <i class="fas fa-credit-card"></i>
-            </div>
-            <h3 class="font-extrabold text-xl text-slate-800 mb-2" x-text="lang==='en'?'Payment':'Pembayaran'"></h3>
-            <p class="text-slate-500 font-medium mb-2">
-                <span x-text="lang==='en'?'Order:':'Pesanan:'"></span>
-                <span class="font-mono text-sm">{{ order_id }}</span>
-            </p>
+<div class="max-w-lg mx-auto text-center"
+     x-data="{
+         lang: localStorage.getItem('sg_lang') || 'id',
+         countdown: 5,
+         status: 'pending',
+         checking: false
+     }"
+     x-init="
+         if ('{{ redirect_url }}') {
+             setInterval(() => { if (countdown > 0) countdown--; }, 1000);
+             setTimeout(() => { window.location.href = '{{ redirect_url }}'; }, 5000);
+         }
+         // Poll transaction status every 10s
+         setInterval(() => {
+             fetch('/api/transaction/status?order_id={{ order_id }}')
+                 .then(r => r.json())
+                 .then(d => { if (d.status) status = d.status; })
+                 .catch(() => {});
+         }, 10000);
+     ">
 
-            <!-- Rincian Biaya -->
-            <div class="bg-slate-50 rounded-xl p-4 text-left text-sm space-y-1.5 mb-4">
-                <div class="flex justify-between">
-                    <span class="text-slate-500 font-medium">Harga Paket</span>
-                    <span class="font-bold text-slate-700">Rp {{ "{:,.0f}".format(base_price).replace(',','.') }}</span>
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="card p-8">
+        <template x-if="status === 'success'">
+            <div>
+                <div class="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-3xl mb-4">
+                    <i class="fas fa-check-circle"></i>
                 </div>
-                {% if fee_total > 0 %}
-                <div class="flex justify-between text-slate-500 font-medium">
-                    <span>Biaya Admin{% if fi.get('note') %} ({{ fi.note }}){% endif %}</span>
-                    <span class="text-slate-600">Rp {{ "{:,.0f}".format(fee_total).replace(',','.') }}</span>
+                <h3 class="font-extrabold text-2xl text-emerald-700 mb-2">Pembayaran Berhasil!</h3>
+                <p class="text-slate-500 font-medium mb-6">Langganan Anda sekarang aktif.</p>
+                <a href="/admin-sekolah/subscription" class="btn btn-primary px-8">
+                    <i class="fas fa-arrow-left mr-1"></i> Kembali ke Langganan
+                </a>
+            </div>
+        </template>
+
+        <template x-if="status !== 'success'">
+            <div>
+                <div class="w-20 h-20 mx-auto rounded-full bg-primary-100 flex items-center justify-center text-primary-600 text-3xl mb-4">
+                    <i class="fas fa-credit-card"></i>
                 </div>
-                <div class="border-t border-slate-200 pt-1.5 flex justify-between font-extrabold">
-                    <span class="text-slate-700">Total</span>
-                    <span class="text-primary-600">Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}</span>
+                <h3 class="font-extrabold text-xl text-slate-800 mb-2">Pembayaran</h3>
+                <p class="text-slate-500 font-medium mb-2">Order: <span class="font-mono text-sm">{{ order_id }}</span></p>
+
+                <div class="bg-slate-50 rounded-xl p-4 text-left text-sm space-y-1.5 mb-6">
+                    <div class="flex justify-between">
+                        <span class="text-slate-500 font-medium">Harga Paket</span>
+                        <span class="font-bold text-slate-700">Rp {{ "{:,.0f}".format(base_price).replace(',','.') }}</span>
+                    </div>
+                    {% if fee_total > 0 %}
+                    <div class="flex justify-between text-slate-500 font-medium">
+                        <span>Biaya Admin{% if fi.get('note') %} ({{ fi.note }}){% endif %}</span>
+                        <span class="text-slate-600">Rp {{ "{:,.0f}".format(fee_total).replace(',','.') }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="border-t border-slate-200 pt-1.5 flex justify-between font-extrabold text-lg">
+                        <span class="text-slate-700">Total</span>
+                        <span class="text-primary-600">Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}</span>
+                    </div>
+                </div>
+
+                {% if not client_key or not redirect_url %}
+                <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-red-700">
+                    Pembayaran belum bisa diproses. Hubungi Super Admin.
+                </div>
+                <a href="/admin-sekolah/subscription" class="btn btn-ghost mt-4">Kembali</a>
+                {% else %}
+                <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 mb-4">
+                    <p class="font-bold"><i class="fas fa-info-circle mr-1"></i> Kamu akan diarahkan ke halaman pembayaran Midtrans.</p>
+                    <p>Pilih metode pembayaran dan selesaikan pembayaran di sana.</p>
+                    <p class="text-xs mt-1">Redirect otomatis dalam <span x-text="countdown" class="font-extrabold"></span> detik...</p>
+                </div>
+
+                <div class="flex flex-col gap-3">
+                    <a href="{{ redirect_url }}" target="_blank" rel="noopener"
+                       class="btn bg-primary-600 hover:bg-primary-700 text-white px-8 py-4 text-lg font-bold rounded-xl inline-flex items-center justify-center gap-2 shadow-lg shadow-primary-600/20">
+                        <i class="fas fa-external-link-alt"></i>
+                        Bayar Sekarang — Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}
+                    </a>
+
+                    <div class="flex items-center justify-center gap-4 text-xs text-slate-400">
+                        <span><i class="fas fa-shield-alt mr-1"></i>Pembayaran aman via Midtrans</span>
+                        <span><i class="fas fa-lock mr-1"></i>Data terenkripsi</span>
+                    </div>
+
+                    <p class="text-xs text-slate-400 mt-4">
+                        Setelah pembayaran selesai, halaman ini akan otomatis mendeteksi status.
+                        <br>Atau klik tombol di bawah untuk cek manual:
+                    </p>
+
+                    <div class="flex gap-2 justify-center mt-2">
+                        <a href="/admin-sekolah/payment/success?order_id={{ order_id }}"
+                           class="btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-sm font-bold px-4 py-2 rounded-xl">
+                            <i class="fas fa-sync mr-1"></i> Cek Status Pembayaran
+                        </a>
+                        <a href="/admin-sekolah/subscription" class="btn btn-ghost text-sm text-red-400">
+                            Batal
+                        </a>
+                    </div>
                 </div>
                 {% endif %}
             </div>
-
-            <div x-show="loading" class="flex items-center justify-center gap-2 text-slate-400 py-4">
-                <i class="fas fa-spinner fa-spin"></i>
-                <span class="text-sm font-medium" x-text="lang==='en'?'Loading payment...':'Memuat halaman pembayaran...'"></span>
-            </div>
-
-            {% if not client_key %}
-            <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-red-700">
-                <i class="fas fa-exclamation-triangle mr-1"></i>
-                <span x-text="lang==='en'?'Midtrans not configured. Contact Super Admin.':'Midtrans belum dikonfigurasi. Hubungi Super Admin.'"></span>
-            </div>
-            <div class="mt-4 flex gap-3 justify-center">
-                <a href="/admin-sekolah/subscription" class="btn btn-ghost">Kembali</a>
-            </div>
-            {% else %}
-            <div x-show="!loading" class="mt-4 space-y-3">
-                <p class="text-sm text-slate-500 font-medium">Jika popup tidak muncul, klik tombol di bawah:</p>
-                <a href="{{ redirect_url }}" target="_blank" class="btn btn-primary px-8">
-                    <i class="fas fa-external-link-alt mr-1"></i>
-                    <span x-text="lang==='en'?'Open Payment Page':'Buka Halaman Pembayaran'"></span>
-                </a>
-                <div>
-                    <a href="/admin-sekolah/subscription" class="text-xs text-slate-400 hover:text-slate-600 underline font-medium">Batal</a>
-                </div>
-            </div>
-            {% endif %}
-        </div>
+        </template>
     </div>
 </div>
+
+<script>
+// Also check status when page gets focus (user returns from Midtrans tab)
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+        fetch('/api/transaction/status?order_id={{ order_id }}')
+            .then(r => r.json())
+            .then(d => {
+                if (d.status === 'success') {
+                    window.location.href = '/admin-sekolah/payment/success?order_id={{ order_id }}';
+                }
+            })
+            .catch(() => {});
+    }
+});
+</script>
 {% endblock %}

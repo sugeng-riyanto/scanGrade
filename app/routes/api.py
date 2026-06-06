@@ -351,3 +351,19 @@ def scan_save():
         "total": mcq_count,
         "submission": sub[0] if sub else None,
     })
+
+
+@api_bp.route("/transaction/status", methods=["GET"])
+@login_required
+def transaction_status():
+    order_id = request.args.get("order_id", "")
+    if not order_id:
+        return jsonify({"status": "error", "message": "order_id required"}), 400
+    supabase = get_supabase()
+    try:
+        res = supabase.table("payment_transactions").select("status, gross_amount, activation_code").eq("order_id", order_id).limit(1).execute()
+        if res.data:
+            return jsonify(res.data[0])
+        return jsonify({"status": "not_found"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)[:60]}), 500
