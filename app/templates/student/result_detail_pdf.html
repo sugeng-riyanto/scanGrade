@@ -11,9 +11,9 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 .header .school-logo { width: 70px; height: 70px; object-fit: contain; margin-bottom: 4px; }
 .header .school-name { font-size: 36pt; font-weight: bold; color: #1e293b; text-align: center; line-height: 1.1; }
 .header .school-addr { font-size: 20pt; color: #475569; text-align: center; line-height: 1.2; padding-bottom: 6px; }
-.header .info-table { width: 100%; font-size: 10pt; margin-top: 4px; border-collapse: collapse; }
+.header .info-table { width: 100%; font-size: 10pt; margin-top: 4px; }
 .header .info-table td { padding: 1px 4px; vertical-align: top; }
-.header .info-label { font-weight: bold; white-space: nowrap; width: 1%; padding-right: 8px; color: #475569; }
+.header .info-label { font-weight: bold; color: #475569; }
 
 .score-box { float: right; text-align: center; border: 3px solid #2563eb; border-radius: 10px; padding: 8px 18px; margin-left: 12px; background: #f8fafc; }
 .score-box .score-val { font-size: 28pt; font-weight: bold; color: #2563eb; }
@@ -83,15 +83,15 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
         <div class="school-addr">{{ school_info.get('address', '') }}</div>
     </div>
     <div style="clear:both; height:4px;"></div>
-    <table class="info-table">
-        <tr><td class="info-label">Subject:</td><td>{{ exam.get('subject', '-') }}</td></tr>
-        <tr><td class="info-label">Nama Siswa:</td><td>{{ student_name }}</td></tr>
-        <tr><td class="info-label">Mata Pelajaran:</td><td>{{ exam.get('subject', '-') }}</td></tr>
-        <tr><td class="info-label">Nama Guru:</td><td>{{ teacher_name or '-' }}</td></tr>
-        <tr><td class="info-label">Nama Ujian:</td><td>{{ exam.get('title', 'Ujian') }}</td></tr>
-        <tr><td class="info-label">Tgl:</td><td>{{ (submission.submitted_at[:10] if submission.submitted_at else '-') }}</td></tr>
-        <tr><td class="info-label">Jam:</td><td>{{ (submission.submitted_at[11:19] if submission.submitted_at else '-') }}</td></tr>
-    </table>
+    <div style="font-size:10pt; margin-top:4px;">
+        <div><strong>Subject:</strong> {{ exam.get('subject', '-') }}</div>
+        <div><strong>Nama Siswa:</strong> {{ student_name }}</div>
+        <div><strong>Mata Pelajaran:</strong> {{ exam.get('subject', '-') }}</div>
+        <div><strong>Nama Guru:</strong> {{ teacher_name or '-' }}</div>
+        <div><strong>Nama Ujian:</strong> {{ exam.get('title', 'Ujian') }}</div>
+        <div><strong>Tgl:</strong> {{ (submission.submitted_at[:10] if submission.submitted_at else '-') }}</div>
+        <div><strong>Jam:</strong> {{ (submission.submitted_at[11:19] if submission.submitted_at else '-') }}</div>
+    </div>
 </div>
 
 <div class="score-box">
