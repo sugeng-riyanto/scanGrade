@@ -238,18 +238,10 @@ def login_user():
         try:
             prof = supabase.table("profiles").select("id").eq("nisn", login_input).limit(1).execute()
             if prof.data:
-                # Find auth user by looking up the profile ID
                 user_id = prof.data[0]["id"]
-                # Fetch the auth user's email (we can't query auth.users directly, so find by profile)
-                login_email = f"{user_id[:8]}@student.local"
-                # Try logging in with email: we need the actual email. Use sign-in with ID trick
-                # Actually Supabase sign-in requires email. Let me try to find the email from auth admin
                 try:
-                    auth_users = supabase.auth.admin.list_users()
-                    for u in auth_users:
-                        if u.id == user_id:
-                            email = u.email
-                            break
+                    user_info = supabase.auth.admin.get_user_by_id(user_id)
+                    email = user_info.user.email
                 except:
                     pass
         except:
