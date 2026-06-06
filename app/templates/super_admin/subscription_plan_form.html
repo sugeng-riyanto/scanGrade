@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{% if plan %}Edit Paket{% else %}Tambah Paket{% endif %} - ScanGrade{% endblock %}
+{% block page_title %}{% if plan %}Edit Paket{% else %}Tambah Paket Baru{% endif %}{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <form method="POST" class="card p-6 space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+            <div class="col-span-2">
+                <label class="block text-sm font-bold text-slate-700 mb-1">Nama Paket</label>
+                <input type="text" name="name" value="{{ plan.name if plan else '' }}" class="input" required placeholder="1 Bulan">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Label Durasi</label>
+                <input type="text" name="duration_label" value="{{ plan.duration_label if plan else '' }}" class="input" placeholder="1 Bulan">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Durasi (hari)</label>
+                <input type="number" name="duration_days" value="{{ plan.duration_days if plan else 30 }}" class="input" min="0" placeholder="30">
+                <p class="text-xs text-slate-400 mt-1">0 = selamanya</p>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Harga (Rp)</label>
+                <input type="number" name="price" value="{{ plan.price if plan else 0 }}" class="input" min="0" step="1000" placeholder="50000">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Urutan</label>
+                <input type="number" name="sort_order" value="{{ plan.sort_order if plan else 0 }}" class="input" min="0" placeholder="1">
+            </div>
+        </div>
+        <div>
+            <label class="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" name="is_active" value="true" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500" {% if not plan or plan.is_active %}checked{% endif %}>
+                <span class="font-bold text-slate-700">Aktif</span>
+            </label>
+        </div>
+        <div class="flex items-center gap-3 pt-2">
+            <button type="submit" class="btn btn-primary px-6">{% if plan %}Simpan Perubahan{% else %}Tambah Paket{% endif %}</button>
+            <a href="/super-admin/plans" class="btn btn-ghost">Batal</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

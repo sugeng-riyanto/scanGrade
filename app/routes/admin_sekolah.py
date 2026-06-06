@@ -1025,3 +1025,114 @@ def reset_student_password(student_id):
         return jsonify({"success": True, "password": password})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+# ─── Langganan / Subscription ─────────────────────────────────────────
+
+@admin_sekolah_bp.route("/subscription")
+@admin_sekolah_required
+def subscription():
+    supabase = get_supabase()
+    from app.services.midtrans_service import get_school_subscription
+
+    school_id = g.user_school_id
+    sub = get_school_subscription(school_id) if school_id else None
+
+    plans = []
+    try:
+        plans = supabase.table("subscription_plans").select("*").eq("is_active", True).order("sort_order").execute().data or []
+    except Exception:
+        pass
+
+    transactions = []
+    try:
+        transactions = supabase.table("payment_transactions").select("*, subscription_plans!left(name, duration_label)").eq("school_id", school_id).order("created_at", desc=True).limit(10).execute().data or []
+    except Exception:
+        pass
+
+    trial_days = 14
+    try:
+        tr = supabase.table("trial_settings").select("trial_days").limit(1).execute()
+        if tr.data:
+            trial_days = tr.data[0].get("trial_days", 14)
+    except Exception:
+        pass
+
+    return render_template("admin_sekolah/subscription.html",
+        sub=sub, plans=plans, transactions=transactions, trial_days=trial_days)
+
+
+@admin_sekolah_bp.route("/subscription/subscribe", methods=["POST"])
+@admin_sekolah_required
+def subscribe():
+    supabase = get_supabase()
+    plan_id = request.form.get("plan_id", type=int)
+    if not plan_id:
+        flash("Pilih plan terlebih dahulu", "error")
+        return redirect("/admin-sekolah/subscription")
+
+    school_id = g.user_school_id
+    if not school_id:
+        flash("Sekolah tidak terdaftar", "error")
+        return redirect("/admin-sekolah/subscription")
+
+    # Get school info
+    school_name = ""
+    admin_email = ""
+    try:
+        sch = supabase.table("schools").select("name").eq("id", school_id).single().execute()
+        if sch.data:
+            school_name = sch.data.get("name", "")
+        prof = supabase.table("profiles").select("email").eq("id", g.user_id).single().execute()
+        if prof.data:
+            admin_email = prof.data.get("email", "")
+    except Exception:
+        pass
+
+    from app.services.midtrans_service import create_snap_transaction
+    result, error = create_snap_transaction(school_id, plan_id, school_name, admin_email)
+
+    if error:
+        flash(error, "error")
+        return redirect("/admin-sekolah/subscription")
+
+    settings = {}
+    try:
+        res = supabase.table("midtrans_settings").limit(1).execute()
+        if res.data:
+            settings = res.data[0]
+    except Exception:
+        pass
+
+    return render_template("admin_sekolah/payment.html",
+        token=result["token"],
+        redirect_url=result["redirect_url"],
+        order_id=result["order_id"],
+        gross_amount=result["gross_amount"],
+        settings=settings,
+    )
+
+
+@admin_sekolah_bp.route("/payment/success")
+@admin_sekolah_required
+def payment_success():
+    order_id = request.args.get("order_id", "")
+    supabase = get_supabase()
+    tx = None
+    try:
+        res = supabase.table("payment_transactions").select("*, subscription_plans!left(name)").eq("order_id", order_id).single().execute()
+        tx = res.data
+    except Exception:
+        pass
+    if not tx:
+        flash("Transaksi tidak ditemukan", "error")
+        return redirect("/admin-sekolah/subscription")
+    return render_template("admin_sekolah/payment_success.html", tx=tx)
+
+
+@admin_sekolah_bp.route("/payment/failure")
+@admin_sekolah_required
+def payment_failure():
+    order_id = request.args.get("order_id", "")
+    flash("Pembayaran gagal atau dibatalkan", "error")
+    return redirect("/admin-sekolah/subscription")

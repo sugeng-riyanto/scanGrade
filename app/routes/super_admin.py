@@ -261,3 +261,159 @@ def demo_settings():
     except Exception:
         pass
     return render_template("super_admin/demo_settings.html", settings=current)
+
+
+# ─── Midtrans Settings ────────────────────────────────────────────────
+
+@super_bp.route("/midtrans", methods=["GET", "POST"])
+@_sa_required
+def midtrans_settings():
+    supabase = get_supabase()
+    if request.method == "POST":
+        data = {
+            "merchant_id": request.form.get("merchant_id", "").strip(),
+            "client_key": request.form.get("client_key", "").strip(),
+            "server_key": request.form.get("server_key", "").strip(),
+            "is_production": request.form.get("is_production", "false") == "true",
+            "updated_by": g.user_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            existing = supabase.table("midtrans_settings").select("id").limit(1).execute()
+            if existing.data:
+                supabase.table("midtrans_settings").update(data).eq("id", existing.data[0]["id"]).execute()
+            else:
+                supabase.table("midtrans_settings").insert(data).execute()
+            log_activity("update", "midtrans_settings", "1", new_data={"merchant_id": data["merchant_id"][:6] + "***"}, user_id=g.user_id)
+            flash("Pengaturan Midtrans berhasil disimpan", "success")
+        except Exception as e:
+            flash(f"Gagal menyimpan: {str(e)[:60]}", "error")
+        return redirect("/super-admin/midtrans")
+
+    settings = {}
+    try:
+        res = supabase.table("midtrans_settings").limit(1).execute()
+        if res.data:
+            settings = res.data[0]
+            # Mask keys for display
+            if settings.get("server_key"):
+                settings["server_key_display"] = settings["server_key"][:8] + "***" + settings["server_key"][-4:]
+            if settings.get("client_key"):
+                settings["client_key_display"] = settings["client_key"][:8] + "***" + settings["client_key"][-4:]
+    except Exception:
+        pass
+    return render_template("super_admin/midtrans_settings.html", settings=settings)
+
+
+# ─── Subscription Plans ───────────────────────────────────────────────
+
+@super_bp.route("/plans")
+@_sa_required
+def subscription_plans():
+    supabase = get_supabase()
+    plans = []
+    try:
+        plans = supabase.table("subscription_plans").select("*").order("sort_order").execute().data or []
+    except Exception:
+        pass
+    return render_template("super_admin/subscription_plans.html", plans=plans)
+
+
+@super_bp.route("/plans/new", methods=["GET", "POST"])
+@_sa_required
+def plan_new():
+    supabase = get_supabase()
+    if request.method == "POST":
+        data = {
+            "name": request.form.get("name", "").strip(),
+            "duration_label": request.form.get("duration_label", "").strip(),
+            "duration_days": int(request.form.get("duration_days", 0)),
+            "price": float(request.form.get("price", 0)),
+            "is_active": request.form.get("is_active", "true") == "true",
+            "sort_order": int(request.form.get("sort_order", 0)),
+        }
+        try:
+            supabase.table("subscription_plans").insert(data).execute()
+            log_activity("create", "subscription_plan", data["name"], new_data=data, user_id=g.user_id)
+            flash("Plan berhasil ditambahkan", "success")
+        except Exception as e:
+            flash(f"Gagal: {str(e)[:60]}", "error")
+        return redirect("/super-admin/plans")
+    return render_template("super_admin/subscription_plan_form.html", plan=None)
+
+
+@super_bp.route("/plans/<int:plan_id>/edit", methods=["GET", "POST"])
+@_sa_required
+def plan_edit(plan_id):
+    supabase = get_supabase()
+    if request.method == "POST":
+        data = {
+            "name": request.form.get("name", "").strip(),
+            "duration_label": request.form.get("duration_label", "").strip(),
+            "duration_days": int(request.form.get("duration_days", 0)),
+            "price": float(request.form.get("price", 0)),
+            "is_active": request.form.get("is_active", "true") == "true",
+            "sort_order": int(request.form.get("sort_order", 0)),
+        }
+        try:
+            supabase.table("subscription_plans").update(data).eq("id", plan_id).execute()
+            log_activity("update", "subscription_plan", str(plan_id), new_data=data, user_id=g.user_id)
+            flash("Plan berhasil diperbarui", "success")
+        except Exception as e:
+            flash(f"Gagal: {str(e)[:60]}", "error")
+        return redirect("/super-admin/plans")
+
+    plan = None
+    try:
+        res = supabase.table("subscription_plans").select("*").eq("id", plan_id).single().execute()
+        plan = res.data
+    except Exception:
+        pass
+    if not plan:
+        flash("Plan tidak ditemukan", "error")
+        return redirect("/super-admin/plans")
+    return render_template("super_admin/subscription_plan_form.html", plan=plan)
+
+
+@super_bp.route("/plans/<int:plan_id>/delete", methods=["POST"])
+@_sa_required
+def plan_delete(plan_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("subscription_plans").delete().eq("id", plan_id).execute()
+        log_activity("delete", "subscription_plan", str(plan_id), user_id=g.user_id)
+        flash("Plan berhasil dihapus", "success")
+    except Exception as e:
+        flash(f"Gagal: {str(e)[:60]}", "error")
+    return redirect("/super-admin/plans")
+
+
+# ─── Trial Settings ───────────────────────────────────────────────────
+
+@super_bp.route("/trial-settings", methods=["GET", "POST"])
+@_sa_required
+def trial_settings():
+    supabase = get_supabase()
+    if request.method == "POST":
+        days = int(request.form.get("trial_days", 14))
+        try:
+            existing = supabase.table("trial_settings").select("id").limit(1).execute()
+            data = {"trial_days": days, "updated_by": g.user_id, "updated_at": datetime.now(timezone.utc).isoformat()}
+            if existing.data:
+                supabase.table("trial_settings").update(data).eq("id", existing.data[0]["id"]).execute()
+            else:
+                supabase.table("trial_settings").insert(data).execute()
+            log_activity("update", "trial_settings", "1", new_data={"trial_days": days}, user_id=g.user_id)
+            flash(f"Trial duration diubah ke {days} hari", "success")
+        except Exception as e:
+            flash(f"Gagal: {str(e)[:60]}", "error")
+        return redirect("/super-admin/trial-settings")
+
+    trial = {"trial_days": 14}
+    try:
+        res = supabase.table("trial_settings").limit(1).execute()
+        if res.data:
+            trial = res.data[0]
+    except Exception:
+        pass
+    return render_template("super_admin/trial_settings.html", trial=trial)

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Paket Harga - ScanGrade{% endblock %}
+{% block page_title %}Paket Harga{% endblock %}
+{% block content %}
+<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <div class="flex items-center justify-between mb-6">
+        <p class="text-sm text-slate-500 font-medium" x-text="lang==='en'?'Manage subscription plans and pricing':'Kelola paket langganan dan harga'"></p>
+        <a href="/super-admin/plans/new" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i><span x-text="lang==='en'?'Add Plan':'Tambah Paket'">Tambah Paket</span></a>
+    </div>
+
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for p in plans %}
+        <div class="card p-5 {% if p.is_active %}border-l-4 border-l-primary-500{% else %}opacity-60{% endif %}">
+            <div class="flex items-start justify-between mb-3">
+                <div>
+                    <h4 class="font-extrabold text-slate-800">{{ p.name }}</h4>
+                    <p class="text-xs text-slate-500 font-medium">{{ p.duration_label }}</p>
+                </div>
+                <div class="flex gap-1">
+                    <a href="/super-admin/plans/{{ p.id }}/edit" class="text-xs text-primary-500 hover:text-primary-700 p-1" title="Edit"><i class="fas fa-edit"></i></a>
+                    <form method="POST" action="/super-admin/plans/{{ p.id }}/delete" onsubmit="return confirm('Hapus paket ini?')" class="inline">
+                        <button type="submit" class="text-xs text-red-400 hover:text-red-600 p-1" title="Hapus"><i class="fas fa-trash"></i></button>
+                    </form>
+                </div>
+            </div>
+            <p class="text-2xl font-extrabold text-primary-600">Rp {{ "{:,.0f}".format(p.price).replace(',','.') }}</p>
+            <div class="mt-3 flex items-center gap-2">
+                <span class="text-xs font-bold px-2 py-0.5 rounded-full {% if p.is_active %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-500{% endif %}">
+                    {% if p.is_active %}Aktif{% else %}Nonaktif{% endif %}
+                </span>
+                <span class="text-xs text-slate-400">{{ p.duration_days }} hari</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

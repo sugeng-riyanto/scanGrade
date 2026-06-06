@@ -542,6 +542,40 @@ def reject_request(request_id):
         return redirect("/admin/registration-requests")
 
 
+@admin_bp.route("/registration-requests/<request_id>", methods=["GET"])
+@super_admin_required
+def registration_request_detail(request_id):
+    supabase = get_supabase()
+    req = None
+    try:
+        res = supabase.table("school_registration_requests").select("*").eq("id", request_id).single().execute()
+        req = res.data
+    except Exception:
+        pass
+    if not req:
+        flash("Data tidak ditemukan", "error")
+        return redirect("/admin/registration-requests")
+    return render_template("admin/registration_request_detail.html", req=req)
+
+
+@admin_bp.route("/registration-requests/<request_id>/delete", methods=["POST"])
+@super_admin_required
+def registration_request_delete(request_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("school_registration_requests").delete().eq("id", request_id).execute()
+        log_activity("delete", "registration_request", request_id, user_id=g.user_id)
+        if request.is_json or request.headers.get("HX-Request"):
+            return jsonify({"success": True})
+        flash("Permintaan registrasi berhasil dihapus", "success")
+    except Exception as e:
+        current_app.logger.error(f"Delete registration request error: {e}")
+        if request.is_json or request.headers.get("HX-Request"):
+            return jsonify({"error": str(e)}), 400
+        flash(f"Gagal menghapus: {str(e)[:60]}", "error")
+    return redirect("/admin/registration-requests")
+
+
 @admin_bp.route("/teachers/<teacher_id>/reset-password", methods=["POST"])
 @admin_required
 def admin_reset_teacher_password(teacher_id):

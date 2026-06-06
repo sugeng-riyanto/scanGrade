@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Detail Registrasi - ScanGrade{% endblock %}
+{% block page_title %}Detail Permintaan Registrasi{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <div class="card p-6">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800">{{ req.school_name }}</h3>
+                <p class="text-sm text-slate-500 font-medium">NPSN: {{ req.npsn }}</p>
+            </div>
+            <span class="badge text-sm {% if req.status == 'pending' %}bg-amber-50 text-amber-700 border border-amber-200{% elif req.status == 'approved' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">{{ req.status }}</span>
+        </div>
+
+        <div class="space-y-3 text-sm">
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">Pendaftar</span>
+                <span class="font-bold text-slate-700">{{ req.requester_name }}</span>
+            </div>
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">Jabatan</span>
+                <span class="font-bold text-slate-700">{{ req.requester_position }}</span>
+            </div>
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">Email</span>
+                <span class="font-bold text-slate-700">{{ req.requester_email }}</span>
+            </div>
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">WhatsApp</span>
+                <span class="font-bold text-slate-700">{{ req.requester_phone }}</span>
+            </div>
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">Tanggal Daftar</span>
+                <span class="font-bold text-slate-700">{{ req.created_at[:19] if req.created_at else '-' }}</span>
+            </div>
+            {% if req.status == 'approved' %}
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">Kode Aktivasi</span>
+                <span class="font-mono font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">{{ req.activation_code }}</span>
+            </div>
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">Masa Berlaku</span>
+                <span class="font-bold text-slate-700">{{ req.expires_at[:19] if req.expires_at else 'Tidak terbatas' }}</span>
+            </div>
+            {% elif req.status == 'rejected' and req.review_notes %}
+            <div class="flex justify-between py-2 border-b border-slate-100">
+                <span class="text-slate-500 font-medium">Alasan Ditolak</span>
+                <span class="font-bold text-red-600">{{ req.review_notes }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="flex items-center gap-3 mt-6">
+            <a href="/admin/registration-requests" class="btn btn-ghost"><i class="fas fa-arrow-left mr-1"></i> Kembali</a>
+            {% if req.status == 'pending' %}
+            <form method="POST" action="/admin/registration-requests/{{ req.id }}/approve" class="inline">
+                <button type="submit" class="btn bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-xl"><i class="fas fa-check mr-1"></i> Setujui</button>
+            </form>
+            <form method="POST" action="/admin/registration-requests/{{ req.id }}/reject" class="inline" onsubmit="return confirm('Tolak registrasi ini?')">
+                <button type="submit" class="btn bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-xl"><i class="fas fa-times mr-1"></i> Tolak</button>
+            </form>
+            {% endif %}
+            <form method="POST" action="/admin/registration-requests/{{ req.id }}/delete" class="inline" onsubmit="return confirm('Hapus permanen data ini?')">
+                <button type="submit" class="btn bg-red-50 text-red-600 hover:bg-red-100 font-bold px-4 py-2 rounded-xl border border-red-200"><i class="fas fa-trash mr-1"></i> Hapus</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

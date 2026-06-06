@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Langganan - ScanGrade{% endblock %}
+{% block page_title %}Langganan Saya{% endblock %}
+{% block content %}
+<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', snapToken: '', snapUrl: '' }">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <!-- Subscription Status -->
+    <div class="card p-6 mb-6">
+        <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl
+                {% if sub and sub.status == 'active' %}bg-emerald-100 text-emerald-600
+                {% elif sub and sub.status == 'trial' %}bg-amber-100 text-amber-600
+                {% elif sub and sub.status == 'trial_expired' %}bg-red-100 text-red-600
+                {% elif sub and sub.status == 'expired' %}bg-red-100 text-red-600
+                {% else %}bg-slate-100 text-slate-500{% endif %}">
+                <i class="fas {% if sub and sub.status == 'active' %}fa-check-circle
+                    {% elif sub and sub.status == 'trial' %}fa-hourglass-half
+                    {% elif sub and sub.status == 'expired' or sub.status == 'trial_expired' %}fa-exclamation-circle
+                    {% else %}fa-credit-card{% endif %}"></i>
+            </div>
+            <div class="flex-1">
+                {% if sub and sub.status == 'active' %}
+                <h3 class="font-extrabold text-lg text-emerald-700" x-text="lang==='en'?'Active':'Aktif'"></h3>
+                <p class="text-sm text-slate-600 font-medium">
+                    {% if sub.subscription_end %}
+                    <span x-text="lang==='en'?'Valid until:':'Berlaku sampai:'"></span> {{ sub.subscription_end[:10] }}
+                    {% else %}
+                    <span x-text="lang==='en'?'Lifetime':'Selamanya'"></span>
+                    {% endif %}
+                    {% if sub.plan_name %} &middot; {{ sub.plan_name }}{% endif %}
+                </p>
+                {% elif sub and sub.status == 'trial' %}
+                <h3 class="font-extrabold text-lg text-amber-700" x-text="lang==='en'?'Trial Period':'Masa Trial'"></h3>
+                <p class="text-sm text-slate-600 font-medium">
+                    <span x-text="lang==='en'?'Remaining:':'Sisa:'"></span>
+                    {% if sub.trial_end %}{{ sub.trial_end[:10] }}{% else %}{{ trial_days }} hari{% endif %}
+                </p>
+                {% elif sub and sub.status in ('expired', 'trial_expired') %}
+                <h3 class="font-extrabold text-lg text-red-700" x-text="lang==='en'?'Expired':'Kadaluarsa'"></h3>
+                <p class="text-sm text-slate-600 font-medium" x-text="lang==='en'?'Your subscription has expired. Please renew.':'Langganan Anda telah habis. Silakan perpanjang.'"></p>
+                {% else %}
+                <h3 class="font-extrabold text-lg text-slate-700" x-text="lang==='en'?'No Subscription':'Belum Berlangganan'"></h3>
+                <p class="text-sm text-slate-500 font-medium" x-text="lang==='en'?'Choose a plan to get started':'Pilih paket untuk memulai'"></p>
+                {% endif %}
+            </div>
+            {% if sub and sub.status == 'active' %}
+            <div class="text-right">
+                <p class="text-xs text-slate-400 font-medium">{{ sub.get('subscription_plans', {}).get('name', '') }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Plans -->
+    <h3 class="font-extrabold text-slate-800 mb-3" x-text="lang==='en'?'Choose a Plan':'Pilih Paket'"></h3>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
+        {% for p in plans %}
+        <div class="card p-5 hover:shadow-lg transition cursor-pointer border-2 {% if p.duration_days == 0 %}border-amber-300 bg-amber-50/30{% else %}border-transparent hover:border-primary-200{% endif %}"
+             onclick="document.getElementById('plan-{{ p.id }}').submit()">
+            <form id="plan-{{ p.id }}" method="POST" action="/admin-sekolah/subscription/subscribe">
+                <input type="hidden" name="plan_id" value="{{ p.id }}">
+            </form>
+            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">{{ p.duration_label }}</p>
+            <p class="text-2xl font-extrabold text-slate-800 mt-1">Rp {{ "{:,.0f}".format(p.price).replace(',','.') }}</p>
+            <p class="text-xs text-slate-400 mt-1">
+                {% if p.duration_days == 0 %}Sekali bayar selamanya
+                {% else %}Rp {{ "{:,.0f}".format((p.price / p.duration_days * 30)|round(-2)) if p.duration_days else 0).replace(',','.') }}/bln{% endif %}
+            </p>
+            <ul class="mt-3 space-y-1 text-xs text-slate-600 font-medium">
+                <li><i class="fas fa-check text-emerald-500 mr-1"></i> Semua fitur ScanGrade</li>
+                <li><i class="fas fa-check text-emerald-500 mr-1"></i> Anti-cheat + tools ukur</li>
+                <li><i class="fas fa-check text-emerald-500 mr-1"></i> Download hasil XLSX/PDF</li>
+                {% if p.duration_days >= 365 or p.duration_days == 0 %}
+                <li><i class="fas fa-star text-amber-500 mr-1"></i> Prioritas support</li>
+                {% endif %}
+            </ul>
+            <button type="button" onclick="document.getElementById('plan-{{ p.id }}').submit()" class="btn btn-primary w-full mt-4 text-sm">
+                <span x-text="lang==='en'?'Subscribe':'Langganan'"></span>
+            </button>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Transaction History -->
+    {% if transactions %}
+    <h3 class="font-extrabold text-slate-800 mb-3 mt-8" x-text="lang==='en'?'Transaction History':'Riwayat Transaksi'"></h3>
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="table-default">
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Paket</th>
+                        <th>Jumlah</th>
+                        <th>Status</th>
+                        <th>Kode Aktivasi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tx in transactions %}
+                    <tr>
+                        <td class="font-mono text-xs">{{ tx.order_id }}</td>
+                        <td>{{ tx.get('subscription_plans', {}).get('name', '-') }}</td>
+                        <td>Rp {{ "{:,.0f}".format(tx.gross_amount).replace(',','.') if tx.gross_amount else '-' }}</td>
+                        <td>
+                            <span class="badge {% if tx.status == 'success' %}bg-emerald-50 text-emerald-700{% elif tx.status == 'pending' %}bg-amber-50 text-amber-700{% else %}bg-red-50 text-red-600{% endif %}">
+                                {{ tx.status }}
+                            </span>
+                        </td>
+                        <td class="font-mono text-xs">{{ tx.activation_code or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

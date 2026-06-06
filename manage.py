@@ -364,6 +364,44 @@ def cmd_list(args):
         print()
 
 
+def cmd_migrate(args):
+    """Run pending SQL migrations."""
+    import glob as gb
+    migration_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supabase", "migrations")
+    sql_files = sorted(gb.glob(os.path.join(migration_dir, "*.sql")))
+    if not sql_files:
+        print("No migration files found.")
+        return
+
+    # Try direct DB connection via environment
+    db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DATABASE_URL")
+    if not db_url:
+        print("⚠️  DATABASE_URL not found in .env")
+        print("   Set DATABASE_URL=postgresql://postgres:password@db.xxxxx.supabase.co:5432/postgres")
+        print("   Or run the SQL manually in Supabase SQL Editor.")
+        return
+
+    import psycopg2
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = True
+    cur = conn.cursor()
+
+    for fpath in sql_files:
+        fname = os.path.basename(fpath)
+        print(f"Running {fname}...")
+        with open(fpath, "r", encoding="utf-8") as f:
+            sql = f.read()
+        try:
+            cur.execute(sql)
+            print(f"  ✅ {fname}")
+        except Exception as e:
+            print(f"  ⚠️  {fname}: {e}")
+
+    cur.close()
+    conn.close()
+    print("\nMigration complete.")
+
+
 def _print_credentials():
     print()
     print("🔑 Login Credentials:")
@@ -378,8 +416,8 @@ def _print_credentials():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ScanGrade Data Management")
-    parser.add_argument("command", choices=["seed", "reset", "reset-data", "list"],
-                        help="seed: create demo data | reset: delete ALL (users+data) | reset-data: keep users, reset data | list: show demo users")
+    parser.add_argument("command", choices=["seed", "reset", "reset-data", "list", "migrate"],
+                        help="seed: create demo data | reset: delete ALL (users+data) | reset-data: keep users, reset data | list: show demo users | migrate: run pending SQL migrations")
     parser.add_argument("--exam", action="store_true", help="Also create sample exams (with seed)")
     parser.add_argument("--demo", action="store_true", help="Use .env.demo instead of .env")
     args = parser.parse_args()
@@ -392,3 +430,5 @@ if __name__ == "__main__":
         cmd_reset_data(args)
     elif args.command == "list":
         cmd_list(args)
+    elif args.command == "migrate":
+        cmd_migrate(args)

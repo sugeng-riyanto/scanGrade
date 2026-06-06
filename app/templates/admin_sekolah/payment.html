@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Pembayaran - ScanGrade{% endblock %}
+{% block page_title %}Pembayaran{% endblock %}
+{% block content %}
+{% set is_production = settings.get('is_production', false) %}
+{% set client_key = settings.get('client_key', '') %}
+{% set snap_url = 'https://app.midtrans.com/snap/snap.js' if is_production else 'https://app.sandbox.midtrans.com/snap/snap.js' %}
+<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', loading: true }"
+     x-init="loading=true;
+     if ('{{ client_key }}') {
+         snapScript = document.createElement('script');
+         snapScript.src = '{{ snap_url }}?client_key={{ client_key }}';
+         snapScript.onload = () => {
+             loading = false;
+             window.snap.pay('{{ token }}', {
+                 onSuccess: (r) => { window.location.href = '/admin-sekolah/payment/success?order_id=' + r.order_id; },
+                 onPending: (r) => { window.location.href = '/admin-sekolah/payment/success?order_id=' + r.order_id; },
+                 onError: (r) => { window.location.href = '/admin-sekolah/payment/failure?order_id=' + (r.order_id || '{{ order_id }}'); },
+                 onClose: () => { window.location.href = '/admin-sekolah/subscription'; }
+             });
+         };
+         snapScript.onerror = () => { loading = false; };
+         document.head.appendChild(snapScript);
+     } else { loading = false; }">
+    <div class="max-w-lg mx-auto text-center">
+        <div class="card p-8">
+            <div class="w-16 h-16 mx-auto rounded-2xl bg-primary-100 flex items-center justify-center text-primary-600 text-2xl mb-4">
+                <i class="fas fa-credit-card"></i>
+            </div>
+            <h3 class="font-extrabold text-xl text-slate-800 mb-2" x-text="lang==='en'?'Payment':'Pembayaran'"></h3>
+            <p class="text-slate-500 font-medium mb-2">
+                <span x-text="lang==='en'?'Order:':'Pesanan:'"></span>
+                <span class="font-mono text-sm">{{ order_id }}</span>
+            </p>
+            <p class="text-3xl font-extrabold text-primary-600 mb-6">Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}</p>
+
+            <div x-show="loading" class="flex items-center justify-center gap-2 text-slate-400 py-4">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span class="text-sm font-medium" x-text="lang==='en'?'Loading payment...':'Memuat halaman pembayaran...'"></span>
+            </div>
+
+            {% if not client_key %}
+            <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-red-700">
+                <i class="fas fa-exclamation-triangle mr-1"></i>
+                <span x-text="lang==='en'?'Midtrans not configured. Contact Super Admin.':'Midtrans belum dikonfigurasi. Hubungi Super Admin.'"></span>
+            </div>
+            <div class="mt-4 flex gap-3 justify-center">
+                <a href="/admin-sekolah/subscription" class="btn btn-ghost">Kembali</a>
+            </div>
+            {% else %}
+            <div x-show="!loading" class="mt-4 space-y-3">
+                <p class="text-sm text-slate-500 font-medium">Jika popup tidak muncul, klik tombol di bawah:</p>
+                <a href="{{ redirect_url }}" target="_blank" class="btn btn-primary px-8">
+                    <i class="fas fa-external-link-alt mr-1"></i>
+                    <span x-text="lang==='en'?'Open Payment Page':'Buka Halaman Pembayaran'"></span>
+                </a>
+                <div>
+                    <a href="/admin-sekolah/subscription" class="text-xs text-slate-400 hover:text-slate-600 underline font-medium">Batal</a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

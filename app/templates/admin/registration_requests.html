@@ -34,7 +34,9 @@
                 <tbody class="divide-y divide-surface-50">
                     {% for r in requests %}
                     <tr class="hover:bg-surface-50 transition">
-                        <td class="px-5 py-3 font-semibold text-surface-700">{{ r.school_name }}</td>
+                        <td class="px-5 py-3 font-semibold text-surface-700">
+                            <a href="/admin/registration-requests/{{ r.id }}" class="hover:text-primary-600 transition">{{ r.school_name }}</a>
+                        </td>
                         <td class="px-5 py-3 text-surface-500 font-mono">{{ r.npsn }}</td>
                         <td class="px-5 py-3 text-surface-600">{{ r.requester_name }}<br><span class="text-xs text-surface-400">{{ r.requester_position }}</span></td>
                         <td class="px-5 py-3 text-surface-500">{{ r.requester_phone }}</td>
@@ -45,6 +47,9 @@
                         <td class="px-5 py-3 text-right">
                             {% if r.status == 'pending' %}
                             <div class="flex items-center justify-end gap-1">
+                                <a href="/admin/registration-requests/{{ r.id }}" class="px-3 py-1.5 text-xs font-bold border border-surface-200 text-surface-600 rounded-lg hover:bg-surface-50 transition">
+                                    <i class="fas fa-eye mr-1"></i>Detail
+                                </a>
                                 <button @click="approveId='{{ r.id }}'" class="px-3 py-1.5 text-xs font-bold bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition border border-emerald-200">
                                     <i class="fas fa-check mr-1"></i>Setujui
                                 </button>
@@ -53,9 +58,19 @@
                                 </button>
                             </div>
                             {% elif r.status == 'approved' %}
-                            <span class="text-xs text-surface-400 font-medium"><i class="fas fa-check-circle text-emerald-500 mr-1"></i>{{ r.activation_code or '-' }}</span>
+                            <div class="flex items-center justify-end gap-1">
+                                <a href="/admin/registration-requests/{{ r.id }}" class="px-3 py-1.5 text-xs font-bold border border-surface-200 text-surface-600 rounded-lg hover:bg-surface-50 transition">
+                                    <i class="fas fa-eye mr-1"></i>Detail
+                                </a>
+                                <span class="text-xs text-surface-400 font-medium"><i class="fas fa-check-circle text-emerald-500 mr-1"></i>{{ r.activation_code or '-' }}</span>
+                            </div>
                             {% elif r.review_notes %}
-                            <span class="text-xs text-surface-400 font-medium cursor-help" title="{{ r.review_notes }}">{{ r.review_notes[:30] }}{% if r.review_notes|length > 30 %}...{% endif %}</span>
+                            <div class="flex items-center justify-end gap-1">
+                                <a href="/admin/registration-requests/{{ r.id }}" class="px-3 py-1.5 text-xs font-bold border border-surface-200 text-surface-600 rounded-lg hover:bg-surface-50 transition">
+                                    <i class="fas fa-eye mr-1"></i>Detail
+                                </a>
+                                <span class="text-xs text-surface-400 font-medium cursor-help" title="{{ r.review_notes }}">{{ r.review_notes[:30] }}{% if r.review_notes|length > 30 %}...{% endif %}</span>
+                            </div>
                             {% endif %}
                         </td>
                     </tr>

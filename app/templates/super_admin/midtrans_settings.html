@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Midtrans Settings - ScanGrade{% endblock %}
+{% block page_title %}Pengaturan Midtrans{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    <div class="card p-6">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center text-purple-600 text-xl"><i class="fab fa-cc-visa"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800" x-text="lang==='en'?'Midtrans Configuration':'Konfigurasi Midtrans'"></h3>
+                <p class="text-sm text-slate-500 font-medium" x-text="lang==='en'?'API keys are stored in database, never committed to GitHub':'API key disimpan di database, tidak akan masuk GitHub'"></p>
+            </div>
+        </div>
+
+        <form method="POST" class="space-y-4">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Merchant ID</label>
+                <input type="text" name="merchant_id" value="{{ settings.get('merchant_id', '') }}" class="input" placeholder="G814954132">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Client Key</label>
+                <input type="text" name="client_key" value="{{ settings.get('client_key', '') }}" class="input" placeholder="Mid-client-xxxxx">
+                {% if settings.get('client_key_display') %}
+                <p class="text-xs text-slate-400 mt-1">Current: {{ settings.client_key_display }}</p>
+                {% endif %}
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Server Key</label>
+                <input type="text" name="server_key" value="{{ settings.get('server_key', '') }}" class="input" placeholder="Mid-server-xxxxx">
+                {% if settings.get('server_key_display') %}
+                <p class="text-xs text-slate-400 mt-1">Current: {{ settings.server_key_display }}</p>
+                {% endif %}
+            </div>
+            <div>
+                <label class="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" name="is_production" value="true" class="w-5 h-5 text-purple-600 border-slate-300 rounded focus:ring-purple-500" {% if settings.get('is_production') %}checked{% endif %}>
+                    <div>
+                        <p class="font-bold text-slate-700" x-text="lang==='en'?'Production Mode':'Mode Production'"></p>
+                        <p class="text-xs text-slate-500" x-text="lang==='en'?'Uncheck for sandbox/testing':'Uncheck untuk sandbox/pengujian'"></p>
+                    </div>
+                </label>
+            </div>
+            <div class="flex items-center gap-3 pt-4">
+                <button type="submit" class="btn btn-primary px-6" x-text="lang==='en'?'Save Settings':'Simpan Pengaturan'">
+                    Simpan Pengaturan
+                </button>
+                <a href="/super-admin/dashboard" class="btn btn-ghost" x-text="lang==='en'?'Back':'Kembali'">Kembali</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="card p-6 mt-4">
+        <h4 class="font-extrabold text-slate-700 mb-2" x-text="lang==='en'?'How to Get Midtrans Keys?':'Cara Mendapatkan API Key Midtrans?'">Cara Mendapatkan API Key Midtrans?</h4>
+        <ol class="text-sm text-slate-600 space-y-1 list-decimal list-inside font-medium">
+            <li x-text="lang==='en'?'Login to Midtrans Dashboard':'Login ke Dashboard Midtrans (https://dashboard.midtrans.com)'">Login ke Dashboard Midtrans</li>
+            <li x-text="lang==='en'?'Go to Settings > Access Keys':'Masuk ke Settings > Access Keys'">Masuk ke Settings > Access Keys</li>
+            <li x-text="lang==='en'?'Copy Merchant ID, Client Key, and Server Key':'Salin Merchant ID, Client Key, dan Server Key'">Salin Merchant ID, Client Key, dan Server Key</li>
+            <li x-text="lang==='en'?'For testing, use Sandbox keys (uncheck Production)':'Untuk testing gunakan Sandbox. Untuk live, centang Production'">Untuk testing gunakan Sandbox. Untuk live, centang Production</li>
+        </ol>
+    </div>
+</div>
+{% endblock %}
