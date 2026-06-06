@@ -1136,7 +1136,7 @@ def subscribe():
         pass
 
     from app.services.midtrans_service import get_payment_fee_config, calculate_total_with_fee
-    fee_info = calculate_total_with_fee(result.get("base_amount", result["gross_amount"]))
+    _total, fee_info = calculate_total_with_fee(result.get("base_amount", result["gross_amount"]))
     base_price = result.get("base_amount", result["gross_amount"])
 
     return render_template("admin_sekolah/payment.html",
