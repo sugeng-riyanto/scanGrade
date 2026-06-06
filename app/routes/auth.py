@@ -232,20 +232,32 @@ def login_user():
     supabase_auth = get_auth_client()
     supabase = get_supabase()
 
-    # Support NISN login for students
+    # Support NISN login for students / NIP login for teachers
     email = login_input
     if "@" not in login_input:
-        try:
-            prof = supabase.table("profiles").select("id").eq("nisn", login_input).limit(1).execute()
-            if prof.data:
-                user_id = prof.data[0]["id"]
-                try:
-                    user_info = supabase.auth.admin.get_user_by_id(user_id)
-                    email = user_info.user.email
-                except:
-                    pass
-        except:
-            pass
+        found_id = None
+        # Try NISN (students)
+        if not found_id:
+            try:
+                prof = supabase.table("profiles").select("id").eq("nisn", login_input).limit(1).execute()
+                if prof.data:
+                    found_id = prof.data[0]["id"]
+            except:
+                pass
+        # Try NIP (teachers)
+        if not found_id:
+            try:
+                t = supabase.table("teachers").select("id").eq("employee_id", login_input).limit(1).execute()
+                if t.data:
+                    found_id = t.data[0]["id"]
+            except:
+                pass
+        if found_id:
+            try:
+                user_info = supabase.auth.admin.get_user_by_id(found_id)
+                email = user_info.user.email
+            except:
+                pass
 
     try:
         res = supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
