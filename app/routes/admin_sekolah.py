@@ -491,16 +491,25 @@ def teachers():
     teachers_raw = supabase.table("teachers").select(
         "*, profiles!inner(id, full_name, phone), subjects(name)"
     ).eq("school_id", sid).execute().data or []
-    # Flatten + filter + sort
+
+    # Fetch auth emails once for all users
+    _email_map = {}
+    try:
+        for u in supabase.auth.admin.list_users():
+            _email_map[u.id] = u.email
+    except:
+        pass
+
     teachers_list = []
     for t in teachers_raw:
         prof = t.get("profiles") or {}
         subj = t.get("subjects") or {}
+        uid = t["id"]
         teachers_list.append({
-            "id": t["id"],
+            "id": uid,
             "name": prof.get("full_name", "-"),
             "employee_number": t.get("employee_id", ""),
-            "email": "",
+            "email": _email_map.get(uid, ""),
             "subject_name": subj.get("name", "-"),
             "subject_id": t.get("subject_id"),
             "phone": prof.get("phone", ""),
@@ -630,17 +639,27 @@ def students():
     students_raw = supabase.table("students").select(
         "*, profiles!inner(id, full_name, phone, nisn), classes(name)"
     ).eq("school_id", sid).order("nisn").execute().data or []
+
+    _email_map = {}
+    try:
+        for u in supabase.auth.admin.list_users():
+            _email_map[u.id] = u.email
+    except:
+        pass
+
     students_list = []
     for s in students_raw:
         prof = s.get("profiles") or {}
         cls = s.get("classes") or {}
+        uid = s["id"]
         students_list.append({
-            "id": s["id"],
+            "id": uid,
             "nisn": s.get("nisn", "") or prof.get("nisn", ""),
             "name": prof.get("full_name", "-"),
             "class_name": cls.get("name", "-"),
             "class_id": s.get("class_id"),
             "phone": prof.get("phone", ""),
+            "email": _email_map.get(uid, ""),
         })
     if q:
         ql = q.lower()
@@ -719,6 +738,86 @@ def edit_student(student_id):
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+@admin_sekolah_bp.route("/teachers/bulk-reset-password", methods=["POST"])
+@admin_sekolah_required
+def bulk_reset_teachers_password():
+    sid = _school_id()
+    supabase = get_supabase()
+    data = request.get_json() if request.is_json else request.form
+    user_ids = data.get("user_ids", [])
+    if isinstance(user_ids, str):
+        user_ids = json.loads(user_ids)
+    if not user_ids:
+        return jsonify({"error": "Tidak ada user dipilih"}), 400
+    results = []
+    for uid in user_ids:
+        try:
+            prof = supabase.table("profiles").select("school_id").eq("id", uid).single().execute().data or {}
+            if prof.get("school_id") != sid:
+                results.append({"id": uid, "error": "Not in school"})
+                continue
+            new_pw = _gen_password()
+            supabase.auth.admin.update_user_by_id(uid, {"password": new_pw})
+            log_activity("reset_password", "user", uid, user_id=g.user_id)
+            results.append({"id": uid, "password": new_pw, "success": True})
+        except Exception as e:
+            results.append({"id": uid, "error": str(e)})
+    return jsonify({"results": results, "total": len(results)})
+
+
+@admin_sekolah_bp.route("/teachers/bulk-delete", methods=["POST"])
+@admin_sekolah_required
+def bulk_delete_teachers():
+    sid = _school_id()
+    supabase = get_supabase()
+    data = request.get_json() if request.is_json else request.form
+    user_ids = data.get("user_ids", [])
+    if isinstance(user_ids, str):
+        user_ids = json.loads(user_ids)
+    if not user_ids:
+        return jsonify({"error": "Tidak ada user dipilih"}), 400
+    results = []
+    for uid in user_ids:
+        try:
+            prof = supabase.table("profiles").select("school_id").eq("id", uid).single().execute().data or {}
+            if prof.get("school_id") != sid:
+                continue
+            supabase.table("teachers").delete().eq("id", uid).execute()
+            supabase.table("profiles").delete().eq("id", uid).execute()
+            supabase.auth.admin.delete_user(uid)
+            results.append({"id": uid, "success": True})
+        except:
+            pass
+    return jsonify({"results": results, "total": len(results)})
+
+
+@admin_sekolah_bp.route("/students/bulk-reset-password", methods=["POST"])
+@admin_sekolah_required
+def bulk_reset_students_password():
+    sid = _school_id()
+    supabase = get_supabase()
+    data = request.get_json() if request.is_json else request.form
+    user_ids = data.get("user_ids", [])
+    if isinstance(user_ids, str):
+        user_ids = json.loads(user_ids)
+    if not user_ids:
+        return jsonify({"error": "Tidak ada user dipilih"}), 400
+    results = []
+    for uid in user_ids:
+        try:
+            prof = supabase.table("profiles").select("school_id").eq("id", uid).single().execute().data or {}
+            if prof.get("school_id") != sid:
+                results.append({"id": uid, "error": "Not in school"})
+                continue
+            new_pw = _gen_password()
+            supabase.auth.admin.update_user_by_id(uid, {"password": new_pw})
+            log_activity("reset_password", "user", uid, user_id=g.user_id)
+            results.append({"id": uid, "password": new_pw, "success": True})
+        except Exception as e:
+            results.append({"id": uid, "error": str(e)})
+    return jsonify({"results": results, "total": len(results)})
 
 
 @admin_sekolah_bp.route("/users/<user_id>/reset-password", methods=["POST"])
