@@ -443,3 +443,5 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO trial_settings (trial_days) VALUES (14)
 ON CONFLICT DO NOTHING;
+
+ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS pricing_config JSONB DEFAULT '{"model": "flat", "tiers": []}';

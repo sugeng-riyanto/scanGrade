@@ -417,3 +417,41 @@ def trial_settings():
     except Exception:
         pass
     return render_template("super_admin/trial_settings.html", trial=trial)
+
+
+# ─── Pricing Settings ───────────────────────────────────────────────────
+
+@super_bp.route("/pricing-settings", methods=["GET", "POST"])
+@_sa_required
+def pricing_settings():
+    supabase = get_supabase()
+    if request.method == "POST":
+        model = request.form.get("pricing_model", "flat")
+        tiers_raw = request.form.get("tiers", "[]")
+        try:
+            tiers = json.loads(tiers_raw)
+        except (json.JSONDecodeError, TypeError):
+            tiers = []
+        config = {"model": model, "tiers": tiers}
+        try:
+            existing = supabase.table("school_settings").select("id").eq("id", 1).execute()
+            if existing.data:
+                supabase.table("school_settings").update({"pricing_config": config}).eq("id", 1).execute()
+            else:
+                supabase.table("school_settings").insert({"id": 1, "pricing_config": config}).execute()
+            log_activity("update", "pricing_settings", "1", new_data=config, user_id=g.user_id)
+            flash("Pengaturan pricing berhasil disimpan", "success")
+        except Exception as e:
+            flash(f"Gagal: {str(e)[:60]}", "error")
+        return redirect("/super-admin/pricing-settings")
+
+    config = {"model": "flat", "tiers": []}
+    try:
+        res = supabase.table("school_settings").select("pricing_config").eq("id", 1).single().execute()
+        if res.data and res.data.get("pricing_config"):
+            config = res.data["pricing_config"]
+    except Exception:
+        pass
+    # Get total schools count for reference
+    schools_total = _safe_count(supabase, "schools")
+    return render_template("super_admin/pricing_settings.html", config=config, schools_total=schools_total)

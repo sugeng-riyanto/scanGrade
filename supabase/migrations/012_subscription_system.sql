@@ -83,3 +83,6 @@ ON CONFLICT DO NOTHING;
 -- Seed default trial settings
 INSERT INTO trial_settings (trial_days) VALUES (14)
 ON CONFLICT DO NOTHING;
+
+-- Add pricing_config column to school_settings
+ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS pricing_config JSONB DEFAULT '{"model": "flat", "tiers": []}';

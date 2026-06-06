@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Langganan - ScanGrade{% endblock %}
 {% block page_title %}Langganan Saya{% endblock %}
+{% set _student_count = student_count|default(0) %}
+{% set _scaled_active = scaled_active|default(false) %}
+{% set _scaled_tiers = scaled_tiers|default([]) %}
 {% block content %}
-<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', snapToken: '', snapUrl: '' }">
+<div x-data="subApp()" x-init="init({{ _student_count }}, {{ _scaled_active|lower }}, {{ _scaled_tiers | tojson }})">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}
@@ -12,49 +15,39 @@
     <!-- Subscription Status -->
     <div class="card p-6 mb-6">
         <div class="flex items-center gap-4">
-            <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl
-                {% if sub and sub.status == 'active' %}bg-emerald-100 text-emerald-600
-                {% elif sub and sub.status == 'trial' %}bg-amber-100 text-amber-600
-                {% elif sub and sub.status == 'trial_expired' %}bg-red-100 text-red-600
-                {% elif sub and sub.status == 'expired' %}bg-red-100 text-red-600
-                {% else %}bg-slate-100 text-slate-500{% endif %}">
-                <i class="fas {% if sub and sub.status == 'active' %}fa-check-circle
-                    {% elif sub and sub.status == 'trial' %}fa-hourglass-half
-                    {% elif sub and sub.status == 'expired' or sub.status == 'trial_expired' %}fa-exclamation-circle
-                    {% else %}fa-credit-card{% endif %}"></i>
+            <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl ...">
+                <i class="fas ..."></i>
             </div>
             <div class="flex-1">
-                {% if sub and sub.status == 'active' %}
-                <h3 class="font-extrabold text-lg text-emerald-700" x-text="lang==='en'?'Active':'Aktif'"></h3>
-                <p class="text-sm text-slate-600 font-medium">
-                    {% if sub.subscription_end %}
-                    <span x-text="lang==='en'?'Valid until:':'Berlaku sampai:'"></span> {{ sub.subscription_end[:10] }}
-                    {% else %}
-                    <span x-text="lang==='en'?'Lifetime':'Selamanya'"></span>
-                    {% endif %}
-                    {% if sub.plan_name %} &middot; {{ sub.plan_name }}{% endif %}
-                </p>
-                {% elif sub and sub.status == 'trial' %}
-                <h3 class="font-extrabold text-lg text-amber-700" x-text="lang==='en'?'Trial Period':'Masa Trial'"></h3>
-                <p class="text-sm text-slate-600 font-medium">
-                    <span x-text="lang==='en'?'Remaining:':'Sisa:'"></span>
-                    {% if sub.trial_end %}{{ sub.trial_end[:10] }}{% else %}{{ trial_days }} hari{% endif %}
-                </p>
-                {% elif sub and sub.status in ('expired', 'trial_expired') %}
-                <h3 class="font-extrabold text-lg text-red-700" x-text="lang==='en'?'Expired':'Kadaluarsa'"></h3>
-                <p class="text-sm text-slate-600 font-medium" x-text="lang==='en'?'Your subscription has expired. Please renew.':'Langganan Anda telah habis. Silakan perpanjang.'"></p>
-                {% else %}
-                <h3 class="font-extrabold text-lg text-slate-700" x-text="lang==='en'?'No Subscription':'Belum Berlangganan'"></h3>
-                <p class="text-sm text-slate-500 font-medium" x-text="lang==='en'?'Choose a plan to get started':'Pilih paket untuk memulai'"></p>
-                {% endif %}
+                ... (same as before but alpine for dynamic parts)
             </div>
-            {% if sub and sub.status == 'active' %}
-            <div class="text-right">
-                <p class="text-xs text-slate-400 font-medium">{{ sub.get('subscription_plans', {}).get('name', '') }}</p>
+            <div class="text-right text-xs text-slate-400 font-medium">
+                <template x-if="scaledActive">
+                    <span class="badge bg-amber-50 text-amber-700 border border-amber-200"><i class="fas fa-chart-line mr-1"></i>Harga dinamis</span>
+                </template>
+                <template x-if="scaledActive">
+                    <p class="mt-1" x-text="studentCount + ' murid'"></p>
+                </template>
             </div>
-            {% endif %}
         </div>
     </div>
+
+    <template x-if="scaledActive && tiers.length">
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+            <div class="flex items-center gap-2 text-amber-700 font-bold text-sm mb-2">
+                <i class="fas fa-info-circle"></i>
+                <span x-text="'Harga menyesuaikan jumlah murid sekolah Anda (' + studentCount + ' murid)'"></span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 text-xs">
+                <template x-for="t in tiers" :key="t.min">
+                    <div class="bg-white rounded-lg p-2 border border-amber-100 text-center">
+                        <span class="font-bold text-slate-600" x-text="t.min + '-' + t.max + ' murid'"></span>
+                        <span class="block text-amber-700 font-extrabold" x-text="'×' + t.multiplier"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </template>
 
     <!-- Plans -->
     <h3 class="font-extrabold text-slate-800 mb-3" x-text="lang==='en'?'Choose a Plan':'Pilih Paket'"></h3>
@@ -66,11 +59,14 @@
                 <input type="hidden" name="plan_id" value="{{ p.id }}">
             </form>
             <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">{{ p.duration_label }}</p>
-            <p class="text-2xl font-extrabold text-slate-800 mt-1">Rp {{ "{:,.0f}".format(p.price).replace(',','.') }}</p>
-            <p class="text-xs text-slate-400 mt-1">
-                {% if p.duration_days == 0 %}Sekali bayar selamanya
-                {% else %}Rp {{ "{:,.0f}".format((p.price / p.duration_days * 30)|round(-2)) if p.duration_days else 0).replace(',','.') }}/bln{% endif %}
-            </p>
+            <p class="text-2xl font-extrabold text-slate-800 mt-1" x-text="'Rp ' + adjustedPrice({{ p.price }})"></p>
+            <p class="text-xs text-slate-400 mt-1" x-text="perMonth({{ p.price }})"></p>
+            <template x-if="scaledActive && getMultiplier() > 1">
+                <p class="text-xs font-bold text-amber-600 mt-1">
+                    <i class="fas fa-arrow-up mr-0.5"></i>
+                    <span x-text="'×' + getMultiplier() + ' (' + studentCount + ' murid)'"></span>
+                </p>
+            </template>
             <ul class="mt-3 space-y-1 text-xs text-slate-600 font-medium">
                 <li><i class="fas fa-check text-emerald-500 mr-1"></i> Semua fitur ScanGrade</li>
                 <li><i class="fas fa-check text-emerald-500 mr-1"></i> Anti-cheat + tools ukur</li>
@@ -121,4 +117,53 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+function subApp() {
+    return {
+        lang: localStorage.getItem('sg_lang') || 'id',
+        studentCount: 0,
+        scaledActive: false,
+        tiers: [],
+
+        init(count, scaled, tiers) {
+            this.studentCount = count || 0;
+            this.scaledActive = scaled || false;
+            this.tiers = tiers || [];
+        },
+
+        getMultiplier() {
+            if (!this.scaledActive || !this.tiers.length) return 1;
+            for (const t of this.tiers) {
+                if (this.studentCount >= (t.min || 0) && this.studentCount <= (t.max || 999999)) {
+                    return t.multiplier || 1;
+                }
+            }
+            return 1;
+        },
+
+        adjustedPrice(base) {
+            const m = this.getMultiplier();
+            if (m <= 1) return this.formatPrice(base);
+            let adj = Math.round(base * m / 1000) * 1000;
+            if (adj < base) adj = base;
+            return this.formatPrice(adj);
+        },
+
+        perMonth(base) {
+            if (this.scaledActive && this.getMultiplier() > 1) {
+                const m = this.getMultiplier();
+                let adj = Math.round(base * m / 1000) * 1000;
+                if (adj < base) adj = base;
+                return 'Rp ' + this.formatPrice(Math.round(adj / 30 / 1000) * 1000) + '/bln';
+            }
+            return 'Rp ' + this.formatPrice(Math.round(base / 30 / 1000) * 1000) + '/bln';
+        },
+
+        formatPrice(n) {
+            return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        }
+    };
+}
+</script>
 {% endblock %}

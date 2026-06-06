@@ -1,4 +1,5 @@
 import uuid
+import json
 import secrets
 import string
 from datetime import datetime, timezone, timedelta
@@ -51,7 +52,9 @@ def create_snap_transaction(school_id, plan_id, school_name, school_email):
     )
 
     order_id = generate_order_id(school_id)
-    gross = int(float(plan["price"]))
+    base_price = int(float(plan["price"]))
+    adjusted_price, tier_label = calculate_plan_price(base_price, school_id)
+    gross = adjusted_price
 
     param = {
         "transaction_details": {
@@ -232,3 +235,50 @@ def get_school_subscription(school_id):
                 sub["status"] = "trial_expired"
         return sub
     return None
+
+
+def get_pricing_config():
+    supabase = current_app.extensions["supabase"]
+    try:
+        res = supabase.table("school_settings").select("pricing_config").eq("id", 1).single().execute()
+        if res.data and res.data.get("pricing_config"):
+            return res.data["pricing_config"]
+    except Exception:
+        pass
+    return {"model": "flat", "tiers": []}
+
+
+def get_student_count_for_school(school_id):
+    supabase = current_app.extensions["supabase"]
+    try:
+        res = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", school_id).execute()
+        return res.count or 0
+    except Exception:
+        return 0
+
+
+def calculate_plan_price(plan_base_price, school_id=None):
+    """Adjust plan price based on active pricing model.
+    Returns (adjusted_price, pricing_label)."""
+    config = get_pricing_config()
+    if config.get("model") != "scaled" or not school_id:
+        return plan_base_price, "flat"
+
+    student_count = get_student_count_for_school(school_id)
+    tiers = config.get("tiers", [])
+    if not tiers:
+        return plan_base_price, "flat"
+
+    # Find matching tier
+    multiplier = 1.0
+    tier_name = ""
+    for t in sorted(tiers, key=lambda x: x.get("min", 0)):
+        t_min = t.get("min", 0)
+        t_max = t.get("max", 999999)
+        if t_min <= student_count <= t_max:
+            multiplier = float(t.get("multiplier", 1.0))
+            tier_name = t.get("name", "")
+            break
+
+    adjusted = round(plan_base_price * multiplier, -3)  # round to nearest 1000
+    return max(adjusted, plan_base_price), tier_name
