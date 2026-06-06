@@ -70,6 +70,44 @@ def dashboard():
                            subject_count=subject_count, school_info=school_info)
 
 
+@student_bp.route("/reset-password", methods=["POST"])
+@login_required
+def student_reset_password():
+    if g.get("user_role") not in ("murid",):
+        return jsonify({"error": "Forbidden"}), 403
+    supabase = get_supabase()
+    pw = request.form.get("password", "").strip()
+    if len(pw) < 6:
+        return jsonify({"error": "Password minimal 6 karakter"}), 400
+    try:
+        supabase.auth.admin.update_user_by_id(g.user_id, {"password": pw})
+        log_activity("reset_password", "user", g.user_id, user_id=g.user_id)
+        return jsonify({"success": True, "message": "Password berhasil diubah"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@student_bp.route("/profile/update", methods=["POST"])
+@login_required
+def student_update_profile():
+    if g.get("user_role") not in ("murid",):
+        return jsonify({"error": "Forbidden"}), 403
+    supabase = get_supabase()
+    data = {}
+    for key in ("phone",):
+        val = request.form.get(key)
+        if val is not None:
+            data[key] = val.strip()
+    if not data:
+        return jsonify({"error": "Tidak ada data yang diubah"}), 400
+    try:
+        supabase.table("profiles").update(data).eq("id", g.user_id).execute()
+        log_activity("update", "profile", g.user_id, new_data=data, user_id=g.user_id)
+        return jsonify({"success": True, "message": "Profil berhasil diperbarui"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @student_bp.route("/exams")
 @login_required
 def exam_list():

@@ -669,6 +669,25 @@ def edit_student(student_id):
         return jsonify({"error": str(e)}), 400
 
 
+@admin_sekolah_bp.route("/users/<user_id>/reset-password", methods=["POST"])
+@admin_sekolah_required
+def admin_reset_user_password(user_id):
+    """Admin sekolah reset password untuk guru/murid di sekolahnya."""
+    sid = _school_id()
+    supabase = get_supabase()
+    try:
+        # Verify user belongs to this school
+        prof = supabase.table("profiles").select("school_id, role").eq("id", user_id).single().execute().data or {}
+        if prof.get("school_id") != sid:
+            return jsonify({"error": "User tidak berada di sekolah Anda"}), 403
+        new_pw = _gen_password()
+        supabase.auth.admin.update_user_by_id(user_id, {"password": new_pw})
+        log_activity("reset_password", "user", user_id, user_id=g.user_id)
+        return jsonify({"success": True, "password": new_pw})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @admin_sekolah_bp.route("/students/<student_id>/delete", methods=["POST"])
 @admin_sekolah_required
 def delete_student(student_id):

@@ -223,14 +223,37 @@ def login_user():
         role_hint = request.args.get("role", "")
         return render_template("auth/login_user.html", role_hint=role_hint)
 
-    email = request.form.get("email", "").strip().lower()
+    login_input = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
 
-    if not email or not password:
-        return render_template("auth/login_user.html", error="Email dan password wajib diisi")
+    if not login_input or not password:
+        return render_template("auth/login_user.html", error="Email/NISN dan password wajib diisi")
 
     supabase_auth = get_auth_client()
     supabase = get_supabase()
+
+    # Support NISN login for students
+    email = login_input
+    if "@" not in login_input:
+        try:
+            prof = supabase.table("profiles").select("id").eq("nisn", login_input).limit(1).execute()
+            if prof.data:
+                # Find auth user by looking up the profile ID
+                user_id = prof.data[0]["id"]
+                # Fetch the auth user's email (we can't query auth.users directly, so find by profile)
+                login_email = f"{user_id[:8]}@student.local"
+                # Try logging in with email: we need the actual email. Use sign-in with ID trick
+                # Actually Supabase sign-in requires email. Let me try to find the email from auth admin
+                try:
+                    auth_users = supabase.auth.admin.list_users()
+                    for u in auth_users:
+                        if u.id == user_id:
+                            email = u.email
+                            break
+                except:
+                    pass
+        except:
+            pass
 
     try:
         res = supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
