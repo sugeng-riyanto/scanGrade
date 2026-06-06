@@ -17,6 +17,7 @@ opencv-python==4.11.0.86
 numpy==2.2.4
 PyMuPDF==1.25.5
 requests==2.32.3
+xhtml2pdf==3.0.2
 pytest==8.3.5
 pytest-env==1.1.5
 black==25.1.0

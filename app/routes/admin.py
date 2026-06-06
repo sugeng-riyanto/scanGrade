@@ -9,10 +9,10 @@ from app.services.notification_service import notify_approval
 from app.services.audit_service import log_activity, log_create, log_delete, fetch_audit_logs, count_audit_logs, get_activity_summary
 from app.utils.security import sanitize_input
 
-def _gen_password(length=10) -> str:
-    import random
+def _gen_password(length=12) -> str:
+    import secrets
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 admin_bp = Blueprint("admin", __name__)
 

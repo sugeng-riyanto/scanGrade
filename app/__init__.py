@@ -2,7 +2,7 @@ import logging
 import math as _math
 import time
 from datetime import datetime, timedelta, timezone
-from flask import Flask, g, request, jsonify, redirect
+from flask import Flask, g, request, jsonify, redirect, render_template
 from flask_cors import CORS
 from supabase import create_client, Client
 
@@ -106,6 +106,9 @@ def create_app(env=None):
 
     app.jinja_env.globals["cos"] = _math.cos
     app.jinja_env.globals["sin"] = _math.sin
+
+    from app.utils.csrf import generate_csrf_token, csrf_required
+    app.jinja_env.globals["csrf_token"] = generate_csrf_token
 
     @app.template_global()
     def greeting():

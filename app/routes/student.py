@@ -88,7 +88,18 @@ def take_exam(exam_id):
 @login_required
 def submit_exam(exam_id):
     supabase = get_supabase()
+
+    # Verify exam exists, is published and active
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "Exam not found"}), 404
+    if not exam.get("is_published") or exam.get("status") != "active":
+        return jsonify({"error": "Exam is not available for submission"}), 403
+
+    # Check if student already submitted
+    existing = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute()
+    if existing.data:
+        return jsonify({"error": "Anda sudah mengumpulkan ujian ini"}), 409
 
     answers = {}
     if request.is_json:
