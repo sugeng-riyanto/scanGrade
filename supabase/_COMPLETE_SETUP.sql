@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS school_registration_requests (
     school_name TEXT NOT NULL, npsn TEXT, address TEXT, province TEXT, city TEXT, district TEXT,
     requester_name TEXT NOT NULL, requester_email TEXT NOT NULL, requester_phone TEXT, requester_position TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-    admin_notes TEXT, approved_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    is_activated BOOLEAN DEFAULT FALSE,
+    activation_code TEXT,
+    expires_at TIMESTAMPTZ,
+    profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    admin_notes TEXT, review_notes TEXT,
+    approved_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
     approved_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -90,6 +95,13 @@ CREATE TABLE IF NOT EXISTS teacher_assignments (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(teacher_id, class_id, subject_id)
 );
+
+-- Add missing columns to school_registration_requests (if table already exists)
+ALTER TABLE school_registration_requests ADD COLUMN IF NOT EXISTS is_activated BOOLEAN DEFAULT FALSE;
+ALTER TABLE school_registration_requests ADD COLUMN IF NOT EXISTS activation_code TEXT;
+ALTER TABLE school_registration_requests ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE school_registration_requests ADD COLUMN IF NOT EXISTS profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE school_registration_requests ADD COLUMN IF NOT EXISTS review_notes TEXT;
 
 -- Audit Logs
 CREATE TABLE IF NOT EXISTS audit_logs (
