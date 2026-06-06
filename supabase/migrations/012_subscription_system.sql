@@ -66,18 +66,18 @@ CREATE TABLE IF NOT EXISTS trial_settings (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Seed default subscription plans
+-- Seed default subscription plans (optimized pricing for Indonesian market)
 INSERT INTO subscription_plans (name, duration_label, duration_days, price, sort_order) VALUES
-    ('1 Bulan', '1 Bulan', 30, 49000, 1),
-    ('3 Bulan', '3 Bulan', 90, 119000, 2),
-    ('4 Bulan', '4 Bulan', 120, 149000, 3),
-    ('6 Bulan', '6 Bulan', 180, 199000, 4),
-    ('1 Tahun', '1 Tahun', 365, 349000, 5),
-    ('2 Tahun', '2 Tahun', 730, 599000, 6),
-    ('3 Tahun', '3 Tahun', 1095, 799000, 7),
-    ('5 Tahun', '5 Tahun', 1825, 1199000, 8),
-    ('7 Tahun', '7 Tahun', 2555, 1499000, 9),
-    ('Selamanya', 'Selamanya', 0, 1999000, 10)
+    ('1 Bulan', '1 Bulan', 30, 59000, 1),
+    ('3 Bulan', '3 Bulan', 90, 149000, 2),
+    ('4 Bulan', '4 Bulan', 120, 179000, 3),
+    ('6 Bulan', '6 Bulan', 180, 249000, 4),
+    ('1 Tahun', '1 Tahun', 365, 399000, 5),
+    ('2 Tahun', '2 Tahun', 730, 699000, 6),
+    ('3 Tahun', '3 Tahun', 1095, 949000, 7),
+    ('5 Tahun', '5 Tahun', 1825, 1399000, 8),
+    ('7 Tahun', '7 Tahun', 2555, 1799000, 9),
+    ('Selamanya', 'Selamanya', 0, 2499000, 10)
 ON CONFLICT DO NOTHING;
 
 -- Seed default trial settings
