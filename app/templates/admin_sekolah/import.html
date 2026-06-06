@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Import Excel - ScanGrade{% endblock %}
+{% block title %}Import Data - ScanGrade{% endblock %}
 {% block page_title %}Import Data Sekolah{% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto space-y-6">
+<div class="max-w-4xl mx-auto space-y-6">
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
     {% for cat, msg in messages %}
@@ -12,6 +12,23 @@
     {% endfor %}
     {% endif %}
     {% endwith %}
+
+    <!-- Informasi Panel -->
+    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-6 border border-blue-200">
+        <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0"><i class="fas fa-info-circle text-blue-600 text-xl"></i></div>
+            <div class="flex-1">
+                <h3 class="font-extrabold text-stone-800">Panduan Import Data</h3>
+                <ul class="mt-2 text-sm text-stone-600 space-y-1.5">
+                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong>Murid:</strong> Import menggunakan <strong>NISN</strong> sebagai ID unik. NISN harus 8-12 digit angka.</li>
+                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong>Guru:</strong> Import menggunakan <strong>Nomor Pegawai</strong> sebagai ID unik per sekolah.</li>
+                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong>Email:</strong> Bersifat <strong>read-only</strong> setelah dibuat. Untuk keamanan, email tidak bisa diubah dari dashboard. Hubungi Super Admin jika perlu ganti email.</li>
+                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong>Password:</strong> Password default akan digenerate otomatis (12 karakter). User bisa ganti password setelah login.</li>
+                    <li><i class="fas fa-check text-emerald-500 mr-1.5"></i><strong>Sekolah:</strong> Semua data terikat dengan NPSN sekolah Anda. Data dari sekolah lain tidak akan tercampur.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
 
     <div class="card p-6 lg:p-8">
         <h3 class="font-extrabold text-stone-800 mb-2">Upload File Excel</h3>
@@ -30,20 +47,44 @@
                        @change="file = $event.target.files[0]">
             </div>
 
-            <div class="bg-stone-50 rounded-xl p-4 space-y-2">
-                <p class="font-bold text-sm text-stone-700">Format Sheet:</p>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                    <div class="bg-white rounded-lg p-3 border border-stone-200">
-                        <p class="font-bold text-brand-600 mb-1">Sheet 1: Murid</p>
-                        <p class="text-stone-500">NISN, Nama, Kelas, Level, Email</p>
+            <!-- Format per Sheet -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-white rounded-xl p-4 border border-stone-200">
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center"><i class="fas fa-user-graduate text-amber-600 text-sm"></i></div>
+                        <span class="font-bold text-sm text-stone-800">Sheet: Murid</span>
                     </div>
-                    <div class="bg-white rounded-lg p-3 border border-stone-200">
-                        <p class="font-bold text-emerald-600 mb-1">Sheet 2: Guru</p>
-                        <p class="text-stone-500">Nomor Pegawai, Nama, Mapel, Email, No HP</p>
+                    <div class="space-y-1 text-xs text-stone-500">
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold">NISN</code> — 8-12 digit, unik</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold">Nama</code> — Nama lengkap</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold">Kelas</code> — Contoh: VII-A</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">Level</code> — Opsional</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">Email</code> — Opsional, jika kosong akan digenerate</p>
                     </div>
-                    <div class="bg-white rounded-lg p-3 border border-stone-200">
-                        <p class="font-bold text-violet-600 mb-1">Sheet 3: Mapel</p>
-                        <p class="text-stone-500">Nama Mata Pelajaran, Kode</p>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 border border-stone-200">
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><i class="fas fa-chalkboard-teacher text-emerald-600 text-sm"></i></div>
+                        <span class="font-bold text-sm text-stone-800">Sheet: Guru</span>
+                    </div>
+                    <div class="space-y-1 text-xs text-stone-500">
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold">Nomor Pegawai</code> — Unik per sekolah</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold">Nama</code> — Nama lengkap</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold">Mapel</code> — Nama mata pelajaran</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">Email</code> — Opsional, jika kosong akan digenerate</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">No HP</code> — Opsional</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 border border-stone-200">
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center"><i class="fas fa-book text-violet-600 text-sm"></i></div>
+                        <span class="font-bold text-sm text-stone-800">Sheet: Mapel</span>
+                    </div>
+                    <div class="space-y-1 text-xs text-stone-500">
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 font-bold">Nama Mata Pelajaran</code> — Contoh: Matematika</p>
+                        <p><code class="bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">Kode</code> — Opsional, contoh: MTK</p>
                     </div>
                 </div>
             </div>
@@ -57,13 +98,13 @@
 
     <div class="card p-6">
         <div class="flex items-center justify-between mb-4">
-            <h3 class="font-extrabold text-stone-800">Download Template</h3>
+            <h3 class="font-extrabold text-stone-800">Download Template Excel</h3>
         </div>
+        <p class="text-sm text-stone-500 mb-4">Download data yang sudah ada sebagai template. Hapus data contoh sebelum mengisi data baru.</p>
         <a href="/admin-sekolah/export"
            class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
             <i class="fas fa-download"></i>Download Data Excel
         </a>
-        <p class="text-xs text-stone-400 font-medium mt-2">File akan berisi data yang sudah ada. Hapus data contoh sebelum mengisi data baru.</p>
     </div>
 </div>
 {% endblock %}

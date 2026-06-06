@@ -3,6 +3,16 @@
 {% block page_title %}Data Murid{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '' }">
+    <!-- Info Banner -->
+    <div class="bg-blue-50 rounded-xl p-3 flex items-start gap-3 border border-blue-200">
+        <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
+        <div class="text-xs text-blue-800">
+            <strong>Penting:</strong> NISN adalah ID unik siswa (8-12 digit). Email bersifat <strong>read-only</strong> setelah dibuat.
+            Gunakan NISN untuk login selain email.
+            <button @click="showForm=true" class="ml-1 text-blue-600 font-bold hover:underline">Tambah Murid</button> atau
+            <a href="/admin-sekolah/import" class="text-blue-600 font-bold hover:underline">Import Excel</a>.
+        </div>
+    </div>
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
     {% for cat, msg in messages %}
