@@ -220,7 +220,8 @@ def login():
 @auth_bp.route("/login-user", methods=["GET", "POST"])
 def login_user():
     if request.method == "GET":
-        return render_template("auth/login_user.html")
+        role_hint = request.args.get("role", "")
+        return render_template("auth/login_user.html", role_hint=role_hint)
 
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")

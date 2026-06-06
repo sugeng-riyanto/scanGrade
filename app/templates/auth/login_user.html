@@ -23,7 +23,7 @@
             <p class="mt-1 text-surface-500 font-medium">Gunakan akun yang diberikan sekolah Anda</p>
         </div>
 
-        <div x-data="{ loading: false, showPw: false, role: '' }">
+        <div x-data="{ loading: false, showPw: false, role: {{ (role_hint if role_hint in ('guru','murid') else '') | tojson }} }">
             {% if error %}
             <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm font-semibold text-red-700 flex items-center gap-2" role="alert">
                 <i class="fas fa-exclamation-circle shrink-0"></i><span>{{ error }}</span>
