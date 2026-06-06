@@ -191,18 +191,18 @@
                 <input type="hidden" name="allow_calculator" id="allow-calculator">
 
                 <div class="card p-6 space-y-4" x-data="antiCheatSettings({
-                    enabled: {{ 'true' if (exam and exam.get('anti_cheat_enabled') is not none) else 'true' }},
+                    enabled: {{ 'true' if (exam.get('anti_cheat_enabled') if exam else True) else 'false' }},
                     penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
                     max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
-                    auto_submit_on_max: {{ 'true' if (exam and exam.get('auto_submit_on_max') is not none) else 'true' if not exam else 'true' }},
-                    fullscreen_required: {{ 'true' if (exam and exam.get('fullscreen_required') is not none) else 'true' }},
-                    randomize_questions: {{ 'true' if (exam and exam.get('randomize_questions')) else 'false' }},
-                    randomize_options: {{ 'true' if (exam and exam.get('randomize_options')) else 'false' }},
-                    watermark_name: {{ 'true' if (exam and exam.get('watermark_name')) else 'true' }},
-                    block_copy_paste: {{ 'true' if (exam and exam.get('block_copy_paste') is not none) else 'true' }},
-                    block_right_click: {{ 'true' if (exam and exam.get('block_right_click') is not none) else 'true' }},
-                    block_screenshot: {{ 'true' if (exam and exam.get('block_screenshot')) else 'false' }},
-                    allow_calculator: {{ 'true' if (exam and exam.get('allow_calculator')) else 'false' }},
+                    auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
+                    fullscreen_required: {{ 'true' if (exam.get('fullscreen_required') if exam else True) else 'false' }},
+                    randomize_questions: {{ 'true' if (exam.get('randomize_questions') if exam else False) else 'false' }},
+                    randomize_options: {{ 'true' if (exam.get('randomize_options') if exam else False) else 'false' }},
+                    watermark_name: {{ 'true' if (exam.get('watermark_name') if exam else True) else 'false' }},
+                    block_copy_paste: {{ 'true' if (exam.get('block_copy_paste') if exam else True) else 'false' }},
+                    block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
+                    block_screenshot: {{ 'true' if (exam.get('block_screenshot') if exam else False) else 'false' }},
+                    allow_calculator: {{ 'true' if (exam.get('allow_calculator') if exam else False) else 'false' }},
                 })">
                     <div class="flex items-center justify-between">
                         <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
