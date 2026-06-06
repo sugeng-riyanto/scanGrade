@@ -637,7 +637,7 @@ def export_pdf():
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     for s in subs:
         s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
-    buf = export_to_pdf(subs, exam.get("title", "Hasil"))
+    buf = export_to_pdf(subs, exam.get("title", "Hasil"), exam)
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"nilai_{exam_id[:8]}.pdf")
 
