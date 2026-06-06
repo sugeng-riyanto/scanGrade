@@ -16,6 +16,34 @@ def _gen_password(length=12) -> str:
 admin_sekolah_bp = Blueprint("admin_sekolah", __name__)
 
 
+def _generate_email(full_name: str, domain: str) -> str:
+    """Generate email from full name: Budi Santoso → budi.santoso@domain"""
+    if not full_name or not full_name.strip():
+        return f"user.{_gen_password(6)}@{domain or 'school.local'}"
+    parts = full_name.strip().lower().split()
+    if len(parts) == 1:
+        return f"{parts[0]}@{domain or 'school.local'}"
+    elif len(parts) == 2:
+        return f"{parts[0]}.{parts[1]}@{domain or 'school.local'}"
+    else:
+        # first.middle_initial.last
+        first = parts[0]
+        middle = parts[1][0] if len(parts[1]) > 0 else ""
+        last = parts[-1]
+        return f"{first}.{middle}.{last}@{domain or 'school.local'}"
+
+
+def _get_email_domain(sid) -> str:
+    """Get custom email domain for a school."""
+    try:
+        from flask import current_app
+        supabase = current_app.extensions["supabase"]
+        school = supabase.table("schools").select("email_domain").eq("id", sid).single().execute().data or {}
+        return (school.get("email_domain") or "").strip() or "school.local"
+    except:
+        return "school.local"
+
+
 def _school_id() -> str:
     return g.get("user_school_id")
 
@@ -57,6 +85,19 @@ def profile():
     supabase = get_supabase()
 
     if request.method == "POST":
+        # Handle logo upload
+        logo_file = request.files.get("logo")
+        logo_url = None
+        if logo_file and logo_file.filename:
+            import uuid, os
+            ext = logo_file.filename.rsplit(".", 1)[-1].lower() if "." in logo_file.filename else "png"
+            logo_name = f"logo_{sid[:8]}.{ext}"
+            logo_dir = os.path.join(current_app.root_path, "static", "uploads", "logos")
+            os.makedirs(logo_dir, exist_ok=True)
+            logo_path = os.path.join(logo_dir, logo_name)
+            logo_file.save(logo_path)
+            logo_url = f"/static/uploads/logos/{logo_name}"
+
         data = {
             "name": request.form.get("name", "").strip(),
             "npsn": request.form.get("npsn", "").strip(),
@@ -71,7 +112,10 @@ def profile():
             "principal_name": request.form.get("principal_name", "").strip(),
             "principal_nip": request.form.get("principal_nip", "").strip(),
             "tz_offset": int(request.form.get("tz_offset", 7)),
+            "email_domain": request.form.get("email_domain", "").strip(),
         }
+        if logo_url:
+            data["logo_url"] = logo_url
         try:
             supabase.table("schools").update(data).eq("id", sid).execute()
             log_activity("update", "school", sid, new_data=data, user_id=g.user_id)
@@ -85,6 +129,18 @@ def profile():
 
 
 # ─── IMPORT EXCEL ────────────────────────────────────
+
+@admin_sekolah_bp.route("/generate-email")
+@admin_sekolah_required
+def generate_email_preview():
+    """Preview generated email + password for a given name."""
+    name = request.args.get("name", "").strip()
+    sid = _school_id()
+    domain = _get_email_domain(sid)
+    email = _generate_email(name, domain) if name else ""
+    pw = _gen_password() if name else ""
+    return jsonify({"email": email, "password": pw, "domain": domain})
+
 
 @admin_sekolah_bp.route("/import", methods=["GET", "POST"])
 @admin_sekolah_required
