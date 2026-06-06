@@ -45,6 +45,10 @@
 
 ## Changelog
 
+### 9 June 2026
+- Polish UI login/register: password visibility toggle, loading states, password strength meter, role selector, landing page, remember email
+- Landing page at `/` untuk pengguna yang belum login
+
 ### 8 June 2026
 - #4 Export PDF student_name: already fixed in prior export_service rewrite
 - #5 Randomize questions: answers now keyed by `origIdx` so server grading matches answer_key correctly

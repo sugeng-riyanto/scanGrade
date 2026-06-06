@@ -143,12 +143,18 @@ def create_app(env=None):
         if token:
             try:
                 user = app.extensions["supabase_auth"].auth.get_user(token)
-                role = user.user.user_metadata.get("role", "murid")
-                redirect_map = {"super_admin": "/admin/dashboard", "admin_sekolah": "/admin/dashboard", "guru": "/teacher/dashboard", "murid": "/student/dashboard", "admin": "/admin/dashboard", "teacher": "/teacher/dashboard", "student": "/student/dashboard"}
+                from app.utils.auth import get_supabase
+                db = get_supabase()
+                try:
+                    profile = db.table("profiles").select("role").eq("id", user.user.id).single().execute()
+                    role = profile.data.get("role", "murid")
+                except Exception:
+                    role = user.user.user_metadata.get("role", "murid")
+                redirect_map = {"super_admin": "/admin/dashboard", "admin_sekolah": "/admin/dashboard", "guru": "/teacher/dashboard", "murid": "/student/dashboard"}
                 return redirect(redirect_map.get(role, "/student/dashboard"))
             except Exception:
                 pass
-        return redirect("/auth/login")
+        return render_template("landing.html")
 
     @app.route("/health")
     def health():

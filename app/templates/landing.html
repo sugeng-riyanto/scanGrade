@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}ScanGrade - Koreksi Ujian Digital{% endblock %}
+{% block content_noauth %}
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
+    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
+        <div class="flex items-center gap-2">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/30">
+                <i class="fas fa-graduation-cap text-white text-sm"></i>
+            </div>
+            <span class="font-extrabold text-lg text-surface-800">ScanGrade</span>
+        </div>
+        <div class="flex items-center gap-3">
+            <a href="/auth/login_user" class="px-4 py-2 text-sm font-bold text-surface-600 hover:text-surface-800 transition">Masuk</a>
+            <a href="/auth/register" class="px-5 py-2.5 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 transition">Daftar Sekolah</a>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-6 py-16 lg:py-24">
+        <div class="text-center max-w-3xl mx-auto mb-16">
+            <h1 class="text-4xl lg:text-5xl font-extrabold text-surface-900 leading-tight">
+                Koreksi Ujian Digital<br>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-primary-400">Tanpa Ribet</span>
+            </h1>
+            <p class="mt-4 text-lg text-surface-500 font-medium leading-relaxed">
+                Scan lembar jawaban via kamera, koreksi esai dengan canvas overlay,<br>
+                anti-cheat otomatis, dan analitik real-time.
+            </p>
+            <div class="mt-8 flex items-center justify-center gap-4">
+                <a href="/auth/register" class="px-8 py-3.5 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-extrabold shadow-lg shadow-primary-500/30 hover:from-primary-600 hover:to-primary-700 transition text-sm">
+                    <i class="fas fa-school mr-2"></i>Daftarkan Sekolah
+                </a>
+                <a href="/auth/login_user" class="px-8 py-3.5 border-2 border-surface-200 text-surface-700 rounded-xl font-extrabold hover:border-primary-300 hover:text-primary-700 transition text-sm">
+                    <i class="fas fa-sign-in-alt mr-2"></i>Masuk
+                </a>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center">
+                <div class="w-12 h-12 mx-auto rounded-xl bg-primary-50 flex items-center justify-center">
+                    <i class="fas fa-file-pen text-primary-600 text-xl"></i>
+                </div>
+                <h3 class="mt-4 font-extrabold text-surface-800">Buat Ujian</h3>
+                <p class="mt-2 text-sm text-surface-500 font-medium">Upload PDF, atur bobot soal, aktifkan anti-cheat dalam satu klik</p>
+            </div>
+            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center">
+                <div class="w-12 h-12 mx-auto rounded-xl bg-emerald-50 flex items-center justify-center">
+                    <i class="fas fa-pen-ruler text-emerald-600 text-xl"></i>
+                </div>
+                <h3 class="mt-4 font-extrabold text-surface-800">Koreksi Esai</h3>
+                <p class="mt-2 text-sm text-surface-500 font-medium">Canvas overlay langsung di PDF, penggaris & busur digital, skor + komentar</p>
+            </div>
+            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center">
+                <div class="w-12 h-12 mx-auto rounded-xl bg-amber-50 flex items-center justify-center">
+                    <i class="fas fa-chart-line text-amber-600 text-xl"></i>
+                </div>
+                <h3 class="mt-4 font-extrabold text-surface-800">Analitik</h3>
+                <p class="mt-2 text-sm text-surface-500 font-medium">Distribusi nilai, soal tersulit, export XLSX/PDF — semua real-time</p>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}
