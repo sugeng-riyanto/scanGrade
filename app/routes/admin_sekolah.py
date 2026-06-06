@@ -483,11 +483,15 @@ def promote():
 def teachers():
     sid = _school_id()
     supabase = get_supabase()
+    q = request.args.get("q", "").strip()
+    sort_by = request.args.get("sort", "name")
+    sort_dir = request.args.get("dir", "asc")
+
     subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
     teachers_raw = supabase.table("teachers").select(
         "*, profiles!inner(id, full_name, phone), subjects(name)"
-    ).eq("school_id", sid).order("employee_id").execute().data or []
-    # Flatten nested data for template
+    ).eq("school_id", sid).execute().data or []
+    # Flatten + filter + sort
     teachers_list = []
     for t in teachers_raw:
         prof = t.get("profiles") or {}
@@ -496,13 +500,21 @@ def teachers():
             "id": t["id"],
             "name": prof.get("full_name", "-"),
             "employee_number": t.get("employee_id", ""),
-            "email": "",  # not stored in profiles table
+            "email": "",
             "subject_name": subj.get("name", "-"),
             "subject_id": t.get("subject_id"),
             "phone": prof.get("phone", ""),
             "employee_id": t.get("employee_id", ""),
         })
-    return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects)
+    if q:
+        ql = q.lower()
+        teachers_list = [t for t in teachers_list if ql in t["name"].lower() or ql in t["employee_number"].lower()]
+    reverse = sort_dir == "desc"
+    if sort_by == "name":
+        teachers_list.sort(key=lambda t: t["name"].lower(), reverse=reverse)
+    elif sort_by == "employee_number":
+        teachers_list.sort(key=lambda t: t["employee_number"], reverse=reverse)
+    return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects, q=q, sort_by=sort_by, sort_dir=sort_dir)
 
 
 @admin_sekolah_bp.route("/teachers/create", methods=["POST"])

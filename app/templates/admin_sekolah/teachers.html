@@ -2,7 +2,7 @@
 {% block title %}Guru - ScanGrade{% endblock %}
 {% block page_title %}Data Guru{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '' }">
+<div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '', search: '', sortCol: '', sortDir: 'asc' }">
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
     {% for cat, msg in messages %}
@@ -29,7 +29,19 @@
         </div>
     </div>
 
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+            <form method="GET" class="flex items-center gap-2">
+                <div class="relative">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm"></i>
+                    <input type="text" name="q" value="{{ q or '' }}" placeholder="Cari..." class="pl-9 pr-4 py-2.5 border border-stone-200 rounded-xl text-sm w-48 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition">
+                </div>
+                <button type="submit" class="px-3 py-2.5 bg-orange-100 text-orange-700 rounded-xl text-sm font-bold hover:bg-orange-200 transition"><i class="fas fa-search"></i></button>
+                {% if q or sort_by %}
+                <a href="/admin-sekolah/teachers" class="px-3 py-2.5 text-stone-400 hover:text-stone-600"><i class="fas fa-times"></i></a>
+                {% endif %}
+            </form>
+        </div>
         <p class="text-sm text-stone-500 font-medium">{{ teachers|length }} guru</p>
         <button @click="showForm=!showForm" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-500/25 transition">
             <i class="fas fa-plus mr-1"></i>Tambah Guru
@@ -82,8 +94,12 @@
             <table class="w-full text-sm">
                 <thead class="bg-stone-50 text-xs font-bold text-stone-500 uppercase">
                     <tr>
-                        <th class="text-left px-4 py-3">Nama</th>
-                        <th class="text-left px-4 py-3">No. Pegawai</th>
+                        <th class="text-left px-4 py-3 cursor-pointer select-none hover:text-stone-800" onclick="window.location.href='?sort=name&dir={{ 'desc' if sort_by=='name' and sort_dir=='asc' else 'asc' }}&q={{ q }}'">
+                            Nama <i class="fas fa-sort ml-1 text-stone-300"></i>
+                        </th>
+                        <th class="text-left px-4 py-3 cursor-pointer select-none hover:text-stone-800" onclick="window.location.href='?sort=employee_number&dir={{ 'desc' if sort_by=='employee_number' and sort_dir=='asc' else 'asc' }}&q={{ q }}'">
+                            No. Pegawai <i class="fas fa-sort ml-1 text-stone-300"></i>
+                        </th>
                         <th class="text-left px-4 py-3">Email</th>
                         <th class="text-left px-4 py-3">Mapel</th>
                         <th class="text-right px-4 py-3">Aksi</th>
