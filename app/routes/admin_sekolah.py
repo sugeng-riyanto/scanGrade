@@ -1110,11 +1110,15 @@ def subscribe():
         sch = supabase.table("schools").select("name").eq("id", school_id).single().execute()
         if sch.data:
             school_name = sch.data.get("name", "")
-        prof = supabase.table("profiles").select("email").eq("id", g.user_id).single().execute()
-        if prof.data:
-            admin_email = prof.data.get("email", "")
+        # Email is in Auth, not profiles table
+        user_info = supabase.auth.admin.get_user_by_id(g.user_id)
+        if user_info and user_info.user:
+            admin_email = user_info.user.email or ""
     except Exception:
         pass
+    # Ensure email is valid for Midtrans
+    if not admin_email or "@" not in admin_email:
+        admin_email = "sekolah@scan-grade.app"
 
     from app.services.midtrans_service import create_snap_transaction
     result, error = create_snap_transaction(school_id, plan_id, school_name, admin_email)
