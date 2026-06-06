@@ -600,13 +600,21 @@ def override_score(submission_id):
         except json.JSONDecodeError:
             feedback = {}
     supabase = get_supabase()
+    final_score_val = float(new_score) if new_score is not None and new_score != '' else None
     supabase.table("submissions").update({
-        "final_score": float(new_score) if new_score else None,
+        "final_score": final_score_val,
         "status": "graded",
         "teacher_feedback": feedback,
     }).eq("id", submission_id).execute()
+    # Recalculate after grading
+    try:
+        sub_updated = supabase.table("submissions").select("exam_id").eq("id", submission_id).single().execute().data
+        if sub_updated:
+            _recalculate_scores(sub_updated["exam_id"])
+    except Exception:
+        pass
     if request.is_json:
-        return jsonify({"success": True, "final_score": float(new_score) if new_score else None})
+        return jsonify({"success": True, "final_score": final_score_val})
     return redirect(request.referrer or "/teacher/results")
 
 
