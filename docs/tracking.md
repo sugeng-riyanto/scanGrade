@@ -36,7 +36,7 @@
 | Issue | Priority | Status |
 |-------|----------|--------|
 | Export XLSX/PDF tidak include canvas overlay | Medium | ✅ Done |
-| Student results page timezone pakai local browser | Medium | 🔴 Open |
+| Student results page timezone pakai local browser | Medium | ✅ Done |
 | Admin school settings page non-fungsional | Medium | 🔴 Open |
 | Export PDF gunakan student_id bukan student_name | Low | 🔴 Open |
 | Randomize questions perlu server-side mapping | Low | 🟡 Client-side only |

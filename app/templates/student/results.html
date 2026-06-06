@@ -4,10 +4,13 @@
 {% block content %}
 <div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang')||'id', filter:'all', search:'', showScores: false, sortKey:'', sortDir:'asc',
   submissions: JSON.parse(document.getElementById('submissions-data')?.textContent || '[]'),
+  tzOffset: parseInt(document.cookie.split('; ').find(r=>r.startsWith('tz_offset='))?.split('=')[1] || '7'),
   formatDate(iso) {
     if (!iso) return '-';
     const d = new Date(iso);
-    return d.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const local = new Date(utc + this.tzOffset * 3600000);
+    return local.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
   },
   get sortedSubmissions() {
     let arr = [...this.submissions];
