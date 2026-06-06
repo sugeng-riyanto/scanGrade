@@ -101,9 +101,6 @@ def role_required(*roles):
                     "admin_sekolah": "/admin/dashboard",
                     "guru": "/teacher/dashboard",
                     "murid": "/student/dashboard",
-                    "admin": "/admin/dashboard",
-                    "teacher": "/teacher/dashboard",
-                    "student": "/student/dashboard",
                 }
                 return redirect(
                     role_redirect.get(g.get("user_role"), "/auth/login")
@@ -138,7 +135,7 @@ def teacher_required(f):
 
 
 def admin_required(f):
-    return role_required("admin", "super_admin")(f)
+    return role_required("admin", "super_admin", "admin_sekolah")(f)
 
 
 def teacher_or_admin_required(f):
