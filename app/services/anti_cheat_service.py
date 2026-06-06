@@ -4,7 +4,7 @@ from flask import current_app
 
 
 RATE_LIMIT_SECONDS = 2
-TIMESTAMP_TOLERANCE = 300
+TIMESTAMP_TOLERANCE = 900
 
 
 def calculate_graduated_penalty(
@@ -27,7 +27,7 @@ def calculate_graduated_penalty(
         dict with keys: penalty (float), warning (bool), auto_submit (bool),
                         current_penalty_this_violation (float)
     """
-    if not exam_settings.get("anti_cheat_enabled", True):
+    if exam_settings.get("anti_cheat_enabled") is False:
         return {"penalty": 0, "warning": False, "auto_submit": False, "current_penalty_this_violation": 0}
 
     base = float(exam_settings.get("penalty_per_violation", 5))
@@ -71,18 +71,9 @@ def calculate_graduated_penalty(
 
 
 def validate_violation_log(user_id: str, exam_id: str, timestamp: float) -> dict:
-    """Validate incoming violation before logging.
-
-    Args:
-        user_id: Student UUID.
-        exam_id: Exam UUID.
-        timestamp: Client-reported timestamp (unix epoch).
-
-    Returns:
-        dict with keys: valid (bool), reason (str | None).
-    """
     now = time.time()
     if abs(now - timestamp) > TIMESTAMP_TOLERANCE:
+        current_app.logger.warning(f"Violation rejected for {user_id} exam {exam_id}: timestamp_out_of_range (server={now}, client={timestamp})")
         return {"valid": False, "reason": "timestamp_out_of_range"}
 
     supabase = current_app.extensions["supabase"]
@@ -104,6 +95,7 @@ def validate_violation_log(user_id: str, exam_id: str, timestamp: float) -> dict
         else:
             last_ts = last_time.timestamp()
         if now - last_ts < RATE_LIMIT_SECONDS:
+            current_app.logger.warning(f"Violation rejected for {user_id} exam {exam_id}: rate_limited")
             return {"valid": False, "reason": "rate_limited"}
 
     return {"valid": True}
