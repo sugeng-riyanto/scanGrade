@@ -6,7 +6,7 @@ from datetime import datetime, timezone, date
 
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
-from app.utils.auth import admin_sekolah_required, get_supabase
+from app.utils.auth import admin_sekolah_required, get_supabase, subscription_write_required
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
 
 def _gen_password(length=12) -> str:
@@ -693,6 +693,7 @@ def teachers():
 
 
 @admin_sekolah_bp.route("/teachers/create", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def create_teacher():
     sid = _school_id()
@@ -731,6 +732,7 @@ def create_teacher():
 
 
 @admin_sekolah_bp.route("/teachers/<teacher_id>/edit", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def edit_teacher(teacher_id):
     supabase = get_supabase()
@@ -764,6 +766,7 @@ def edit_teacher(teacher_id):
 
 
 @admin_sekolah_bp.route("/teachers/<teacher_id>/delete", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def delete_teacher(teacher_id):
     supabase = get_supabase()
@@ -841,6 +844,7 @@ def students():
 
 
 @admin_sekolah_bp.route("/students/create", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def create_student():
     sid = _school_id()
@@ -879,6 +883,7 @@ def create_student():
 
 
 @admin_sekolah_bp.route("/students/<student_id>/edit", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def edit_student(student_id):
     supabase = get_supabase()
@@ -909,6 +914,7 @@ def edit_student(student_id):
 
 
 @admin_sekolah_bp.route("/teachers/bulk-reset-password", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def bulk_reset_teachers_password():
     sid = _school_id()
@@ -936,6 +942,7 @@ def bulk_reset_teachers_password():
 
 
 @admin_sekolah_bp.route("/teachers/bulk-delete", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def bulk_delete_teachers():
     sid = _school_id()
@@ -962,6 +969,7 @@ def bulk_delete_teachers():
 
 
 @admin_sekolah_bp.route("/students/bulk-reset-password", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def bulk_reset_students_password():
     sid = _school_id()
@@ -1008,6 +1016,7 @@ def admin_reset_user_password(user_id):
 
 
 @admin_sekolah_bp.route("/students/<student_id>/delete", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def delete_student(student_id):
     supabase = get_supabase()
@@ -1022,6 +1031,7 @@ def delete_student(student_id):
 
 
 @admin_sekolah_bp.route("/students/<student_id>/reset-password", methods=["POST"])
+@subscription_write_required
 @admin_sekolah_required
 def reset_student_password(student_id):
     supabase = get_supabase()

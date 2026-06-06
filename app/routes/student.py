@@ -157,6 +157,12 @@ def take_exam(exam_id):
 @student_bp.route("/exams/<exam_id>/submit", methods=["POST"])
 @login_required
 def submit_exam(exam_id):
+    # Check subscription
+    from app.utils.auth import check_subscription_write
+    allowed, msg = check_subscription_write()
+    if not allowed:
+        return jsonify({"error": msg}), 403
+
     supabase = get_supabase()
 
     # Verify exam exists, is published and active

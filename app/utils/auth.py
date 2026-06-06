@@ -28,6 +28,22 @@ def _wants_json():
     return "application/json" in accept or request.path.startswith("/api/")
 
 
+def check_subscription_write(school_id=None):
+    """Check if school subscription is active. Returns (allowed, error_msg).
+    If not allowed, returns (False, 'message'). If allowed, returns (True, None)."""
+    sid = school_id or g.get("user_school_id")
+    if not sid:
+        return True, None  # No school = super admin, always allowed
+
+    # Import here to avoid circular imports
+    from app.services.midtrans_service import is_school_active
+    if is_school_active(sid):
+        return True, None
+
+    msg = "Masa langganan sekolah Anda telah berakhir. Fitur tulis dinonaktifkan. Hubungi Super Admin untuk perpanjangan."
+    return False, msg
+
+
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -157,3 +173,22 @@ def _extract_token():
     if auth_header.startswith("Bearer "):
         return auth_header[7:]
     return request.cookies.get("access_token")
+
+
+def subscription_write_required(f):
+    """Decorator: blocks write access if school subscription is expired.
+    Teachers/students/admins cannot create/update/delete data when expired.
+    Read-only (GET) is always allowed."""
+    @functools.wraps(f)
+    @login_required
+    def wrapper(*args, **kwargs):
+        allowed, msg = check_subscription_write()
+        if not allowed:
+            if _wants_json():
+                return jsonify({"error": msg}), 403
+            flash(msg, "error")
+            # Redirect back or to dashboard
+            ref = request.referrer or "/"
+            return redirect(ref)
+        return f(*args, **kwargs)
+    return wrapper

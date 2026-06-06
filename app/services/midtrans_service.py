@@ -295,3 +295,14 @@ def calculate_plan_price(plan_base_price, school_id=None):
 
     adjusted = round(plan_base_price * multiplier, -3)  # round to nearest 1000
     return max(adjusted, plan_base_price), tier_name
+
+
+def is_school_active(school_id):
+    """Check if a school has active subscription or is still in trial period."""
+    if not school_id:
+        return False
+    sub = get_school_subscription(school_id)
+    if not sub:
+        # No subscription record yet → assume active (new school, not yet tracked)
+        return True
+    return sub["status"] == "active" or sub["status"] == "trial"

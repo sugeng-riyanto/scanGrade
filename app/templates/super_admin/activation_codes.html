@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Kode Aktivasi - ScanGrade{% endblock %}
+{% block page_title %}Kode Aktivasi Sekolah{% endblock %}
+{% block content %}
+<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif msg[0]=='info' %}bg-blue-50 text-blue-700 border border-blue-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+        <p class="text-sm text-slate-500 font-medium">Kelola kode aktivasi langganan semua sekolah</p>
+        <form method="GET" class="flex gap-2">
+            <input type="text" name="q" value="{{ q }}" class="input text-sm w-48" placeholder="Cari NPSN atau nama sekolah...">
+            <button type="submit" class="btn btn-primary text-sm"><i class="fas fa-search"></i></button>
+        </form>
+    </div>
+
+    <div class="card overflow-hidden border border-slate-200">
+        <div class="overflow-x-auto">
+            <table class="table-default">
+                <thead>
+                    <tr>
+                        <th>Sekolah</th>
+                        <th>NPSN</th>
+                        <th>Status</th>
+                        <th>Kode Aktivasi</th>
+                        <th>Transaksi Terakhir</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in schools %}
+                    <tr>
+                        <td class="font-bold text-slate-700">{{ s.name }}</td>
+                        <td class="font-mono text-xs text-slate-500">{{ s.npsn }}</td>
+                        <td>
+                            {% set st = s.get('subscription', {}).get('status', '') %}
+                            <span class="badge text-xs {% if st == 'active' %}bg-emerald-50 text-emerald-700{% elif st in ('trial', 'trial_expired') %}bg-amber-50 text-amber-700{% else %}bg-slate-100 text-slate-500{% endif %}">
+                                {{ st or '-' }}
+                            </span>
+                        </td>
+                        <td>
+                            {% set code = s.get('subscription', {}).get('activation_code') or s.get('last_transaction', {}).get('activation_code', '') %}
+                            {% if code %}
+                            <div class="flex items-center gap-1">
+                                <span class="font-mono text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">{{ code }}</span>
+                                <button onclick="navigator.clipboard.writeText('{{ code }}'); this.innerHTML='<i class=\"fas fa-check text-emerald-500\"></i>'; setTimeout(()=>this.innerHTML='<i class=\"fas fa-copy text-slate-400\"></i>',2000)"
+                                    class="text-slate-400 hover:text-slate-600 p-1" title="Salin kode">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            {% else %}
+                            <span class="text-xs text-slate-400">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-xs">
+                            {% set tx = s.get('last_transaction', {}) %}
+                            {% if tx.order_id %}
+                            <span class="font-mono">{{ tx.order_id[:16] }}...</span>
+                            <span class="badge text-xs {% if tx.status == 'success' %}bg-emerald-50 text-emerald-700{% elif tx.status == 'pending' %}bg-amber-50 text-amber-700{% else %}bg-red-50 text-red-600{% endif %}">{{ tx.status }}</span>
+                            {% else %}
+                            <span class="text-slate-400">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="flex gap-1">
+                                <form method="POST" action="/super-admin/activation-codes/{{ s.id }}/regenerate" class="inline">
+                                    <button type="submit" class="px-2 py-1 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 border border-amber-200"
+                                        onclick="return confirm('Buat ulang kode aktivasi?')">
+                                        <i class="fas fa-sync mr-0.5"></i>Regen
+                                    </button>
+                                </form>
+                                <form method="POST" action="/super-admin/activation-codes/{{ s.id }}/send-code" class="inline">
+                                    <button type="submit" class="px-2 py-1 text-xs font-bold bg-primary-50 text-primary-700 rounded-lg hover:bg-primary-100 border border-primary-200">
+                                        <i class="fas fa-play mr-0.5"></i>Aktifkan
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="px-5 py-12 text-center text-slate-400 font-medium">Tidak ada sekolah</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

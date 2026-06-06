@@ -1,7 +1,7 @@
 """Super Admin — full access to all schools, teachers, exams, submissions."""
 import json
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, render_template, g, request, jsonify, redirect
+from flask import Blueprint, render_template, g, request, jsonify, redirect, flash
 from app.utils.auth import login_required, get_supabase
 from app.services.audit_service import log_activity
 
@@ -455,3 +455,195 @@ def pricing_settings():
     # Get total schools count for reference
     schools_total = _safe_count(supabase, "schools")
     return render_template("super_admin/pricing_settings.html", config=config, schools_total=schools_total)
+
+
+# ─── Activation Code Management ─────────────────────────────────────────
+
+@super_bp.route("/activation-codes")
+@_sa_required
+def activation_codes():
+    supabase = get_supabase()
+    q = request.args.get("q", "")
+    schools = []
+    try:
+        data = supabase.table("schools").select("id, name, npsn, status").order("name").execute().data or []
+        for s in data:
+            # Get latest subscription
+            sub = supabase.table("school_subscriptions") \
+                .select("status, activation_code, subscription_start, subscription_end, subscription_plans!left(name)") \
+                .eq("school_id", s["id"]) \
+                .order("created_at", desc=True) \
+                .limit(1) \
+                .execute()
+            s["subscription"] = sub.data[0] if sub.data else {}
+            # Get latest payment transaction
+            tx = supabase.table("payment_transactions") \
+                .select("order_id, gross_amount, status, activation_code, created_at") \
+                .eq("school_id", s["id"]) \
+                .order("created_at", desc=True) \
+                .limit(1) \
+                .execute()
+            s["last_transaction"] = tx.data[0] if tx.data else {}
+        if q:
+            data = [s for s in data if q.lower() in (s.get("name", "") + s.get("npsn", "")).lower()]
+        schools = data
+    except Exception as e:
+        current_app.logger.error(f"Activation codes error: {e}")
+    return render_template("super_admin/activation_codes.html", schools=schools, q=q)
+
+
+@super_bp.route("/activation-codes/<school_id>/regenerate", methods=["POST"])
+@_sa_required
+def regenerate_activation_code(school_id):
+    supabase = get_supabase()
+    try:
+        from app.services.midtrans_service import generate_activation_code
+        code = generate_activation_code()
+        supabase.table("school_subscriptions").update({
+            "activation_code": code,
+        }).eq("school_id", school_id).eq("status", "active").execute()
+        log_activity("regenerate_activation_code", "school", school_id, new_data={"code": code}, user_id=g.user_id)
+        flash(f"Kode aktivasi baru: {code}", "success")
+    except Exception as e:
+        flash(f"Gagal: {str(e)[:60]}", "error")
+    return redirect("/super-admin/activation-codes")
+
+
+@super_bp.route("/activation-codes/<school_id>/send-code", methods=["POST"])
+@_sa_required
+def send_activation_code(school_id):
+    """Trigger activation for a school that paid but hasn't activated yet."""
+    supabase = get_supabase()
+    try:
+        # Find latest successful payment without activation
+        tx = supabase.table("payment_transactions") \
+            .select("*") \
+            .eq("school_id", school_id) \
+            .eq("status", "success") \
+            .is_("activation_code", "null") \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if tx.data:
+            tx_data = tx.data[0]
+            from app.services.midtrans_service import _activate_subscription
+            _activate_subscription(school_id, tx_data["plan_id"], tx_data["order_id"], supabase)
+            # Refresh to get the code
+            sub = supabase.table("school_subscriptions") \
+                .select("activation_code") \
+                .eq("school_id", school_id) \
+                .order("created_at", desc=True) \
+                .limit(1) \
+                .execute()
+            code = sub.data[0]["activation_code"] if sub.data else "-"
+            flash(f"Langganan diaktifkan! Kode: {code}", "success")
+        else:
+            # No pending activation - just generate code
+            from app.services.midtrans_service import generate_activation_code
+            code = generate_activation_code()
+            flash(f"Kode aktivasi (cadangan): {code}", "info")
+    except Exception as e:
+        flash(f"Gagal: {str(e)[:60]}", "error")
+    return redirect("/super-admin/activation-codes")
+
+
+# ─── NPSN Data Reset (Super Admin) ──────────────────────────────────────
+
+@super_bp.route("/reset-school-data", methods=["GET", "POST"])
+@_sa_required
+def reset_school_data():
+    supabase = get_supabase()
+    school = None
+    if request.method == "POST":
+        npsn = request.form.get("npsn", "").strip()
+        confirm = request.form.get("confirm", "") == "YA"
+        if not npsn:
+            flash("Masukkan NPSN", "error")
+            return redirect("/super-admin/reset-school-data")
+        if not confirm:
+            flash("Ketik 'YA' untuk konfirmasi", "error")
+            return redirect("/super-admin/reset-school-data")
+
+        try:
+            sch = supabase.table("schools").select("id, name, npsn").eq("npsn", npsn).single().execute()
+            school = sch.data
+        except Exception:
+            flash(f"Sekolah dengan NPSN {npsn} tidak ditemukan", "error")
+            return redirect("/super-admin/reset-school-data")
+
+        school_id = school["id"]
+        deleted = {"submissions": 0, "exams": 0, "students": 0, "teachers": 0, "transactions": 0, "subscriptions": 0}
+
+        try:
+            # 1. Delete submissions for all exams in this school
+            exam_ids = supabase.table("exams").select("id").eq("school_id", school_id).execute().data or []
+            eids = [e["id"] for e in exam_ids]
+            if eids:
+                for eid in eids:
+                    res = supabase.table("submissions").delete().eq("exam_id", eid).execute()
+                    deleted["submissions"] += len(res.data or [])
+                # 2. Delete exams
+                for eid in eids:
+                    for tbl in ["violation_logs", "exam_access_codes", "analytics_cache"]:
+                        supabase.table(tbl).delete().eq("exam_id", eid).execute()
+                    supabase.table("exams").delete().eq("id", eid).execute()
+                    deleted["exams"] += 1
+
+            # 3. Delete teacher_assignments
+            supabase.table("teacher_assignments").delete().eq("school_id", school_id).execute()
+
+            # 4. Get and delete teacher profiles
+            teachers = supabase.table("profiles").select("id").eq("school_id", school_id).eq("role", "guru").execute().data or []
+            for t in teachers:
+                try:
+                    supabase.auth.admin.delete_user(t["id"])
+                except:
+                    pass
+                supabase.table("teachers").delete().eq("id", t["id"]).execute()
+                supabase.table("profiles").delete().eq("id", t["id"]).execute()
+                deleted["teachers"] += 1
+
+            # 5. Get and delete student profiles
+            students = supabase.table("profiles").select("id").eq("school_id", school_id).eq("role", "murid").execute().data or []
+            for st in students:
+                try:
+                    supabase.auth.admin.delete_user(st["id"])
+                except:
+                    pass
+                supabase.table("students").delete().eq("id", st["id"]).execute()
+                supabase.table("profiles").delete().eq("id", st["id"]).execute()
+                deleted["students"] += 1
+
+            # 6. Delete admin sekolah profile
+            admins = supabase.table("profiles").select("id").eq("school_id", school_id).eq("role", "admin_sekolah").execute().data or []
+            for a in admins:
+                try:
+                    supabase.auth.admin.delete_user(a["id"])
+                except:
+                    pass
+                supabase.table("profiles").delete().eq("id", a["id"]).execute()
+
+            # 7. Delete payment transactions and subscriptions
+            res = supabase.table("payment_transactions").delete().eq("school_id", school_id).execute()
+            deleted["transactions"] = len(res.data or [])
+            res = supabase.table("school_subscriptions").delete().eq("school_id", school_id).execute()
+            deleted["subscriptions"] = len(res.data or [])
+
+            # 8. Delete classes, subjects, school_years
+            supabase.table("classes").delete().eq("school_id", school_id).execute()
+            supabase.table("subjects").delete().eq("school_id", school_id).execute()
+            supabase.table("school_years").delete().eq("school_id", school_id).execute()
+
+            # 9. Delete school
+            supabase.table("schools").delete().eq("id", school_id).execute()
+
+            log_activity("reset_school_data", "school", school_id, new_data={"npsn": npsn, "deleted": deleted}, user_id=g.user_id)
+            flash(f"✅ Data sekolah {school['name']} (NPSN: {npsn}) berhasil di-reset. {deleted}", "success")
+            return redirect("/super-admin/reset-school-data")
+
+        except Exception as e:
+            current_app.logger.error(f"Reset school data error: {e}")
+            flash(f"Gagal: {str(e)[:80]}", "error")
+            return redirect("/super-admin/reset-school-data")
+
+    return render_template("super_admin/reset_school_data.html", school=school)

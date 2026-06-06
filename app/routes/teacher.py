@@ -1,6 +1,6 @@
 import json
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file
-from app.utils.auth import teacher_or_admin_required, get_supabase, login_required
+from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
@@ -161,6 +161,7 @@ def dashboard():
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def exam_form():
     supabase = get_supabase()
@@ -245,6 +246,7 @@ def exam_form():
 
 
 @teacher_bp.route("/exams/<exam_id>", methods=["GET", "POST", "DELETE"])
+@subscription_write_required
 @teacher_or_admin_required
 def exam_detail(exam_id):
     supabase = get_supabase()
@@ -346,6 +348,7 @@ def preview_exam(exam_id):
 
 
 @teacher_bp.route("/exams/<exam_id>/publish-exam", methods=["POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def publish_exam(exam_id):
     supabase = get_supabase()
@@ -358,6 +361,7 @@ def publish_exam(exam_id):
 
 
 @teacher_bp.route("/exams/<exam_id>/upload-pdf", methods=["GET", "POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def upload_exam_pdf(exam_id):
     supabase = get_supabase()
@@ -392,6 +396,7 @@ def my_exams():
 
 
 @teacher_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def toggle_exam_status(exam_id):
     supabase = get_supabase()
@@ -404,6 +409,7 @@ def toggle_exam_status(exam_id):
 
 
 @teacher_bp.route("/exams/<exam_id>/toggle-visibility", methods=["POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def toggle_exam_visibility(exam_id):
     supabase = get_supabase()
@@ -416,6 +422,7 @@ def toggle_exam_visibility(exam_id):
 
 
 @teacher_bp.route("/exams/<exam_id>/delete", methods=["POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def delete_exam(exam_id):
     supabase = get_supabase()
@@ -587,6 +594,7 @@ def grade_detail(submission_id):
 
 
 @teacher_bp.route("/grade/<submission_id>/override", methods=["POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def override_score(submission_id):
     if request.is_json:
@@ -620,6 +628,7 @@ def override_score(submission_id):
 
 
 @teacher_bp.route("/publish/<exam_id>", methods=["POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def publish_scores(exam_id):
     supabase = get_supabase()
@@ -632,6 +641,7 @@ def publish_scores(exam_id):
 
 
 @teacher_bp.route("/publish/submission/<submission_id>", methods=["POST"])
+@subscription_write_required
 @teacher_or_admin_required
 def publish_single(submission_id):
     supabase = get_supabase()

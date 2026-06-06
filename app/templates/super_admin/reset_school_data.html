@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Reset Data Sekolah - ScanGrade{% endblock %}
+{% block page_title %}Reset Data Sekolah{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto" x-data="{ lang: localStorage.getItem('sg_lang') || 'id', confirm: '' }">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="card p-6 border-2 border-red-200 bg-red-50/30">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center text-red-600 text-xl"><i class="fas fa-exclamation-triangle"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-red-800">Reset Total Data Sekolah</h3>
+                <p class="text-sm text-red-600 font-medium">Hanya gunakan jika benar-benar diperlukan!</p>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl p-4 mb-6 text-sm text-slate-600 space-y-2">
+            <p class="font-bold text-slate-700">Yang akan dihapus:</p>
+            <ul class="list-disc list-inside space-y-1">
+                <li>Semua <strong>ujian</strong> + submission + nilai</li>
+                <li>Semua data <strong>guru</strong> (akun Auth + profile)</li>
+                <li>Semua data <strong>murid</strong> (akun Auth + profile)</li>
+                <li>Semua <strong>kelas, mapel, tahun ajaran</strong></li>
+                <li>Semua <strong>transaksi & langganan</strong></li>
+                <li>Data <strong>sekolah</strong> itu sendiri</li>
+            </ul>
+            <p class="font-bold text-red-600 mt-2">⚠️ Tindakan ini tidak bisa dibatalkan!</p>
+        </div>
+
+        <form method="POST" class="space-y-4" onsubmit="return confirm('Yakin ingin menghapus SEMUA data sekolah ini?')">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">NPSN Sekolah</label>
+                <input type="text" name="npsn" class="input" placeholder="Contoh: 20623248" required>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">
+                    Ketik <span class="font-mono text-red-600 bg-red-50 px-1">YA</span> untuk konfirmasi
+                </label>
+                <input type="text" name="confirm" x-model="confirm" class="input" placeholder="Ketik YA" required>
+            </div>
+            <button type="submit" class="btn w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl"
+                :disabled="confirm !== 'YA'"
+                :class="confirm === 'YA' ? 'opacity-100' : 'opacity-50 cursor-not-allowed'">
+                <i class="fas fa-trash mr-1"></i> Reset Semua Data Sekolah
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
