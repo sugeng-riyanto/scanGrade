@@ -3,29 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <style>
-@page { margin: 15mm; size: A4; }
+@page { margin: 12mm; size: A4; }
 body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10pt; line-height: 1.5; margin: 0; }
 
-.header { padding-bottom: 12px; margin-bottom: 16px; }
+.header { padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1.5px solid #2563eb; border-radius: 10px; }
 .header .school-row { text-align: center; }
-.header .school-logo { width: 70px; height: 70px; object-fit: contain; margin-bottom: 6px; }
+.header .school-logo { width: 70px; height: 70px; object-fit: contain; margin-bottom: 4px; }
 .header .school-name { font-size: 36pt; font-weight: bold; color: #1e293b; text-align: center; line-height: 1.1; }
-.header .school-addr { font-size: 20pt; color: #475569; text-align: center; line-height: 1.2; }
-.header .info-line { font-size: 10pt; color: #1e293b; margin: 1px 0; line-height: 1.4; }
-.header .info-label { font-weight: bold; }
+.header .school-addr { font-size: 20pt; color: #475569; text-align: center; line-height: 1.2; padding-bottom: 6px; }
+.header .info-table { width: 100%; font-size: 10pt; margin-top: 4px; border-collapse: collapse; }
+.header .info-table td { padding: 1px 4px; vertical-align: top; }
+.header .info-label { font-weight: bold; white-space: nowrap; width: 1%; padding-right: 8px; color: #475569; }
 
-.score-box { float: right; text-align: center; border: 3px solid #2563eb; border-radius: 10px; padding: 8px 18px; margin-left: 12px; }
+.score-box { float: right; text-align: center; border: 3px solid #2563eb; border-radius: 10px; padding: 8px 18px; margin-left: 12px; background: #f8fafc; }
 .score-box .score-val { font-size: 28pt; font-weight: bold; color: #2563eb; }
 .score-box .score-label { font-size: 7pt; color: #64748b; font-weight: bold; text-transform: uppercase; }
 
-.summary-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 12px 0; }
+.summary-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 12px 0; border-radius: 10px; overflow: hidden; }
 .summary-table th { background: #f1f5f9; padding: 5px 8px; text-align: left; font-weight: bold; border: 1px solid #d1d5db; }
 .summary-table td { padding: 5px 8px; border: 1px solid #d1d5db; }
 .summary-table td.correct { color: #059669; font-weight: bold; }
 .summary-table td.wrong { color: #dc2626; font-weight: bold; }
 .summary-table td.bonus { color: #7c3aed; font-weight: bold; }
 
-.q-block { margin-bottom: 14px; border: 1px solid #d1d5db; overflow: hidden; }
+.q-block { margin-bottom: 14px; border: 1px solid #d1d5db; border-radius: 10px; overflow: hidden; }
 .q-block.correct-border { border-color: #86efac; background: #f0fdf4; }
 .q-block.wrong-border { border-color: #fca5a5; background: #fef2f2; }
 .q-header { background: #f1f5f9; padding: 5px 10px; font-weight: bold; font-size: 9pt; border-bottom: 1px solid #d1d5db; }
@@ -40,22 +41,22 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
 .mcq-answer .value.correct { color: #059669; }
 .mcq-answer .value.wrong { color: #dc2626; }
 
-.teacher-note { margin-top: 6px; font-size: 8pt; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 4px 8px; color: #065f46; }
+.teacher-note { margin-top: 6px; font-size: 8pt; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 4px 8px; color: #065f46; }
 .weight-badge { font-size: 7pt; padding: 1px 6px; border-radius: 99px; font-weight: bold; background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; }
 
-.score-row { width: 100%; border-collapse: collapse; margin: 12px 0; }
-.score-row td { text-align: center; padding: 8px; border-radius: 8px; width: 33%; }
-.score-row td.mcq-cell { background: #ecfdf5; }
-.score-row td.penalty-cell { background: #fef2f2; }
+.score-row { width: 100%; border-collapse: separate; border-spacing: 4px; margin: 12px 0; }
+.score-row td { text-align: center; padding: 10px; border-radius: 10px; width: 33%; }
+.score-row td.mcq-cell { background: #ecfdf5; border: 1px solid #a7f3d0; }
+.score-row td.penalty-cell { background: #fef2f2; border: 1px solid #fca5a5; }
 .score-row td.final-cell { background: #fff7ed; border: 1px solid #fed7aa; }
-.score-row td .val { font-size: 14pt; font-weight: bold; }
+.score-row td .val { font-size: 16pt; font-weight: bold; }
 .score-row td.mcq-cell .val { color: #059669; }
 .score-row td.penalty-cell .val { color: #dc2626; }
 .score-row td.final-cell .val { color: #ea580c; }
 .score-row td .lbl { font-size: 7pt; font-weight: bold; color: #64748b; }
 
-.footer { margin-top: 20px; padding-top: 8px; border-top: 2px solid #e2e8f0; font-size: 7pt; color: #94a3b8; text-align: center; }
-.merged-img { width: 100%; display: block; margin: 4px 0; border: 1px solid #d1d5db; }
+.footer { margin-top: 20px; padding-top: 8px; border-top: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 7pt; color: #94a3b8; text-align: center; }
+.merged-img { width: 100%; display: block; margin: 4px 0; border: 1px solid #d1d5db; border-radius: 10px; }
 </style>
 </head>
 <body>
@@ -82,13 +83,15 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
         <div class="school-addr">{{ school_info.get('address', '') }}</div>
     </div>
     <div style="clear:both; height:4px;"></div>
-    <div class="info-line"><span class="info-label">Subject:</span> {{ exam.get('subject', '-') }}</div>
-    <div class="info-line"><span class="info-label">Nama Siswa:</span> {{ student_name }}</div>
-    <div class="info-line"><span class="info-label">Mata Pelajaran:</span> {{ exam.get('subject', '-') }}</div>
-    <div class="info-line"><span class="info-label">Nama Guru:</span> {{ teacher_name or '-' }}</div>
-    <div class="info-line"><span class="info-label">Nama Ujian:</span> {{ exam.get('title', 'Ujian') }}</div>
-    <div class="info-line"><span class="info-label">Tgl:</span> {{ (submission.submitted_at[:10] if submission.submitted_at else '-') }}</div>
-    <div class="info-line"><span class="info-label">Jam:</span> {{ (submission.submitted_at[11:19] if submission.submitted_at else '-') }}</div>
+    <table class="info-table">
+        <tr><td class="info-label">Subject:</td><td>{{ exam.get('subject', '-') }}</td></tr>
+        <tr><td class="info-label">Nama Siswa:</td><td>{{ student_name }}</td></tr>
+        <tr><td class="info-label">Mata Pelajaran:</td><td>{{ exam.get('subject', '-') }}</td></tr>
+        <tr><td class="info-label">Nama Guru:</td><td>{{ teacher_name or '-' }}</td></tr>
+        <tr><td class="info-label">Nama Ujian:</td><td>{{ exam.get('title', 'Ujian') }}</td></tr>
+        <tr><td class="info-label">Tgl:</td><td>{{ (submission.submitted_at[:10] if submission.submitted_at else '-') }}</td></tr>
+        <tr><td class="info-label">Jam:</td><td>{{ (submission.submitted_at[11:19] if submission.submitted_at else '-') }}</td></tr>
+    </table>
 </div>
 
 <div class="score-box">
