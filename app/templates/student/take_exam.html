@@ -479,8 +479,8 @@
                                 <div x-show="essayCanvasMode[i] === 'compass'" class="tool-overlay" :id="'compass-overlay-' + i">
                                     <svg :id="'compass-svg-' + i" style="overflow:visible;"
                                           :style="'transform:scale('+((compassScale[i]||100)/100)+') rotate('+(compassAngle[i]||0)+'deg);transform-origin:50% 50%;width:'+(compassSize[i]||300)+'px;height:'+(compassSize[i]||300)+'px;left:'+(compassX[i]||120)+'px;top:'+(compassY[i]||80)+'px;'"
-                                         viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet"
-                                     </svg>
+                                          viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet">
+                                      </svg>
                                      <div class="tool-controlbar" :style="'left:'+(compassX[i]||120)+'px;top:'+((compassY[i]||100)-12)+'px;'">
                                         <i class="tool-ctrl-btn drag fas fa-grip-lines" @mousedown.stop="startToolDrag(i,'compass',$event)" @touchstart.stop="startToolDrag(i,'compass',$event)" title="Seret"></i>
                                         <i class="tool-ctrl-btn fas fa-sync-alt" style="left:28px;" @mousedown.stop="startToolRotate(i,'compass',$event)" @touchstart.stop="startToolRotate(i,'compass',$event)" title="Putar"></i>
