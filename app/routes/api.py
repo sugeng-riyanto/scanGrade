@@ -474,6 +474,6 @@ def redeem_activation_code():
 
     # Activate
     from app.services.midtrans_service import _activate_subscription
-    _activate_subscription(school_id, tx_data.get("plan_id") or 1, tx_data["order_id"], supabase)
+    _activate_subscription(school_id, tx_data.get("plan_id"), tx_data["order_id"], supabase)
 
     return jsonify({"success": True, "message": "Langganan berhasil diaktifkan!"})

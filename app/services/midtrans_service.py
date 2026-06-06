@@ -221,18 +221,16 @@ def handle_payment_notification(notification_dict):
 
 
 def _activate_subscription(school_id, plan_id, order_id, supabase):
-    plan = _load_plan(plan_id)
-    if not plan:
-        current_app.logger.error(f"Plan {plan_id} not found for activation")
-        return
-
+    plan = _load_plan(plan_id) if plan_id else None
     code = generate_activation_code()
     now = datetime.now(timezone.utc)
 
-    duration_days = plan.get("duration_days", 0)
-    if duration_days == 0:
-        sub_end = None
+    if plan:
+        duration_days = plan.get("duration_days", 0)
+        sub_end = None if duration_days == 0 else now + timedelta(days=duration_days)
     else:
+        # Cash payment or plan not specified: default 1 year
+        duration_days = 365
         sub_end = now + timedelta(days=duration_days)
 
     # Update payment transaction with activation code
