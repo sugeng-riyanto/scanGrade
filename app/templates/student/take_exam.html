@@ -1676,6 +1676,7 @@ function examApp(duration, totalQ) {
         getAnswersLight() {
             const data = {};
             this.questions.forEach((q, i) => {
+                const oi = q.origIdx !== undefined ? q.origIdx : i;
                 if (q.type === 'essay_text' || q.type === 'essay_canvas' || q.type === 'essay') {
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
@@ -1683,7 +1684,7 @@ function examApp(duration, totalQ) {
                         const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
                         if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
                     }
-                    data[i] = { type: q.type, pages: pagesData };
+                    data[oi] = { type: q.type, pages: pagesData };
                 } else if (q.type === 'mcq') {
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
@@ -1692,12 +1693,12 @@ function examApp(duration, totalQ) {
                         if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
                     }
                     if (Object.keys(pagesData).length > 0) {
-                        data[i] = { answer: q.answer, pages: pagesData };
+                        data[oi] = { answer: q.answer, pages: pagesData };
                     } else if (q.answer) {
-                        data[i] = q.answer;
+                        data[oi] = q.answer;
                     }
                 } else if (q.answer) {
-                    data[i] = q.answer;
+                    data[oi] = q.answer;
                 }
             });
             return data;
@@ -1706,9 +1707,10 @@ function examApp(duration, totalQ) {
             this._saveCurrentPage();
             const data = this.getAnswersLight();
             this.questions.forEach((q, i) => {
-                const pagesObj = data[i] && typeof data[i] === 'object' ? data[i].pages : null;
-                if (((q.type !== 'mcq') || (q.type === 'mcq' && pagesObj)) && data[i] && (data[i].pages || pagesObj)) {
-                    const target = data[i].pages || pagesObj;
+                const oi = q.origIdx !== undefined ? q.origIdx : i;
+                const pagesObj = data[oi] && typeof data[oi] === 'object' ? data[oi].pages : null;
+                if (((q.type !== 'mcq') || (q.type === 'mcq' && pagesObj)) && data[oi] && (data[oi].pages || pagesObj)) {
+                    const target = data[oi].pages || pagesObj;
                     const totalP = this.totalPages || 1;
                     for (let p = 0; p < totalP; p++) {
                         const hasDrawing = !!(this.hasDrawn[i]?.[p]);
@@ -1768,7 +1770,8 @@ function examApp(duration, totalQ) {
                 if (!data.answers) return;
                 const answers = data.answers;
                 this.questions.forEach((q, i) => {
-                    const qData = answers[i];
+                    const oi = q.origIdx !== undefined ? q.origIdx : i;
+                const qData = answers[oi];
                     const restorePages = (pages) => {
                         if (!pages) return;
                         Object.entries(pages).forEach(([p, pageData]) => {

@@ -38,12 +38,17 @@
 | Export XLSX/PDF tidak include canvas overlay | Medium | ✅ Done |
 | Student results page timezone pakai local browser | Medium | ✅ Done |
 | Admin school settings page non-fungsional | Medium | ✅ Done |
-| Export PDF gunakan student_id bukan student_name | Low | 🔴 Open |
-| Randomize questions perlu server-side mapping | Low | 🟡 Client-side only |
+| Export PDF gunakan student_id bukan student_name | Low | ✅ Done (already fixed in rewrite) |
+| Randomize questions perlu server-side mapping | Low | ✅ Done — answers keyed by origIdx |
 
 ---
 
 ## Changelog
+
+### 8 June 2026
+- #4 Export PDF student_name: already fixed in prior export_service rewrite
+- #5 Randomize questions: answers now keyed by `origIdx` so server grading matches answer_key correctly
+- Admin school settings page: Alpine.js form with JSON endpoint + real-time stats
 
 ### 6 June 2026
 - Ruler 30cm CIE/IB: transparent, fixed scale, drag/rotate handle di permukaan
