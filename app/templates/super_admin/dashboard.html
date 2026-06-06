@@ -64,6 +64,11 @@
                     <p class="text-sm text-slate-400 text-center py-4">Tidak ada registrasi</p>
                     {% endfor %}
                 </div>
+                <div class="border-t border-slate-100 pt-4 mt-2">
+                    <button onclick="resetDemoPasswords()" class="w-full px-4 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200 flex items-center justify-center gap-2">
+                        <i class="fas fa-key"></i> Reset Semua Password Demo ke Default
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -121,4 +126,18 @@
         </div>
     </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+function resetDemoPasswords() {
+    if (!confirm('Yakin reset SEMUA password demo ke default?\n\nSuper Admin: superadmin123\nGuru/Murid/Admin: demo123')) return;
+    const btn = event.target.closest('button');
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mereset...';
+    fetch('/super-admin/reset-demo-passwords', {method:'POST', headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]')?.content||''}})
+        .then(r => r.json()).then(d => {
+            alert(`✅ ${d.ok} dari ${d.total} password berhasil direset ke default.`);
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-key"></i> Reset Semua Password Demo ke Default';
+        }).catch(() => { alert('Gagal'); btn.disabled = false; });
+}
+</script>
 {% endblock %}

@@ -147,6 +147,58 @@ def logs():
     return render_template("super_admin/logs.html", logs=data, days=days)
 
 
+@super_bp.route("/reset-demo-passwords", methods=["POST"])
+@_sa_required
+def reset_demo_passwords():
+    """Reset all demo users to their default passwords."""
+    supabase = get_supabase()
+    # Import demo config from manage.py
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".."))
+    try:
+        from manage import DEMO_USERS, DEMO_SCHOOLS
+    except ImportError:
+        # Fallback: define inline
+        DEMO_USERS = {"super_admin": {"email": "superadmin@scan-grade.app", "password": "superadmin123"}}
+        DEMO_SCHOOLS = [
+            {"admin": {"email": "admin_smp@scan-grade.app", "password": "demo123"}, "teachers": [
+                {"email": "guru_mtk_smp@scan-grade.app", "password": "demo123"},
+                {"email": "guru_ipa_smp@scan-grade.app", "password": "demo123"},
+            ], "students": [
+                {"email": "siswa1_smp@scan-grade.app", "password": "demo123"},
+                {"email": "siswa2_smp@scan-grade.app", "password": "demo123"},
+            ]},
+            {"admin": {"email": "admin_sma@scan-grade.app", "password": "demo123"}, "teachers": [
+                {"email": "guru_mtk_sma@scan-grade.app", "password": "demo123"},
+                {"email": "guru_fisika_sma@scan-grade.app", "password": "demo123"},
+            ], "students": [
+                {"email": "siswa1_sma@scan-grade.app", "password": "demo123"},
+                {"email": "siswa2_sma@scan-grade.app", "password": "demo123"},
+            ]},
+        ]
+
+    results = []
+    all_users = [DEMO_USERS["super_admin"]]
+    for s in DEMO_SCHOOLS:
+        all_users.append(s["admin"])
+        all_users.extend(s.get("teachers", []))
+        all_users.extend(s.get("students", []))
+
+    for user in all_users:
+        email = user["email"]
+        password = user["password"]
+        try:
+            for u in supabase.auth.admin.list_users():
+                if u.email == email:
+                    supabase.auth.admin.update_user_by_id(u.id, {"password": password})
+                    results.append({"email": email, "password": password, "success": True})
+                    break
+        except Exception as e:
+            results.append({"email": email, "error": str(e)[:60]})
+
+    return jsonify({"results": results, "total": len(results), "ok": sum(1 for r in results if r.get("success"))})
+
+
 @super_bp.route("/demo-settings/data")
 @_sa_required
 def demo_settings_data():
