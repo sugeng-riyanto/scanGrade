@@ -361,9 +361,66 @@ def transaction_status():
         return jsonify({"status": "error", "message": "order_id required"}), 400
     supabase = get_supabase()
     try:
-        res = supabase.table("payment_transactions").select("status, gross_amount, activation_code").eq("order_id", order_id).limit(1).execute()
-        if res.data:
-            return jsonify(res.data[0])
-        return jsonify({"status": "not_found"})
+        res = supabase.table("payment_transactions").select("status, gross_amount, activation_code, payment_type, payment_details").eq("order_id", order_id).limit(1).execute()
+        if not res.data:
+            return jsonify({"status": "not_found"})
+
+        tx = res.data[0]
+        # If pending, also check Midtrans for latest status
+        if tx.get("status") == "pending":
+            try:
+                from app.services.midtrans_service import _load_midtrans_config
+                cfg = _load_midtrans_config()
+                if cfg.get("server_key"):
+                    import midtransclient
+                    snap = midtransclient.Snap(
+                        is_production=cfg.get("is_production", False),
+                        server_key=cfg["server_key"],
+                        client_key=cfg.get("client_key", ""),
+                    )
+                    status_resp = snap.transaction.status(order_id)
+                    trans_status = status_resp.get("transaction_status", "")
+                    fraud_status = status_resp.get("fraud_status", "")
+                    payment_type = status_resp.get("payment_type", "")
+
+                    # Store payment details (VA, etc.)
+                    details = {}
+                    va = status_resp.get("va_numbers")
+                    if va:
+                        details["va_numbers"] = va
+                    permata_va = status_resp.get("permata_va_number")
+                    if permata_va:
+                        details["permata_va"] = permata_va
+                    payment_code = status_resp.get("payment_code")
+                    if payment_code:
+                        details["payment_code"] = payment_code
+
+                    new_status = tx["status"]
+                    if trans_status in ("settlement", "capture") and fraud_status != "deny":
+                        new_status = "success"
+                    elif trans_status == "expire":
+                        new_status = "expired"
+                    elif trans_status in ("deny", "cancel", "failure"):
+                        new_status = "failure"
+
+                    update = {"payment_type": payment_type, "payment_details": details}
+                    if new_status != tx["status"]:
+                        update["status"] = new_status
+                        if new_status == "success":
+                            update["activation_code"] = None  # will be set by _activate_subscription
+
+                    supabase.table("payment_transactions").update(update).eq("id", tx["id"]).execute()
+
+                    if new_status == "success" and tx.get("status") != "success":
+                        from app.services.midtrans_service import _activate_subscription
+                        _activate_subscription(tx["school_id"], tx.get("plan_id"), order_id, supabase)
+
+                    tx["status"] = new_status
+                    tx["payment_type"] = payment_type
+                    tx["payment_details"] = details
+            except Exception as e:
+                current_app.logger.error(f"Midtrans status check error: {e}")
+
+        return jsonify(tx)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)[:60]}), 500
