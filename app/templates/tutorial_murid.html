@@ -92,12 +92,20 @@
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Anti-Cheat &amp; Keamanan</h3>
                     <p class="mt-2 text-surface-500">Sistem akan mendeteksi jika Anda berpindah tab selama ujian. Pelanggaran bertahap:</p>
+                    {% set base = ac.penalty_per_violation|default(5) %}
+                    {% set maxv = ac.max_violations|default(5) %}
                     <div class="mt-4 space-y-2">
                         <div class="flex items-center gap-3 p-3 bg-green-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-green-200 flex items-center justify-center text-sm font-bold text-green-700">1x</span><span class="text-sm text-green-800 font-medium">Peringatan (0 poin)</span></div>
-                        <div class="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-yellow-200 flex items-center justify-center text-sm font-bold text-yellow-700">2x</span><span class="text-sm text-yellow-800 font-medium">-5 poin</span></div>
-                        <div class="flex items-center gap-3 p-3 bg-orange-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center text-sm font-bold text-orange-700">3x</span><span class="text-sm text-orange-800 font-medium">-10 poin</span></div>
-                        <div class="flex items-center gap-3 p-3 bg-red-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-red-200 flex items-center justify-center text-sm font-bold text-red-700">4x+</span><span class="text-sm text-red-800 font-medium">-15 poin per pelanggaran</span></div>
+                        <div class="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-yellow-200 flex items-center justify-center text-sm font-bold text-yellow-700">2x</span><span class="text-sm text-yellow-800 font-medium">-{{ base }} poin</span></div>
+                        <div class="flex items-center gap-3 p-3 bg-orange-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center text-sm font-bold text-orange-700">3x</span><span class="text-sm text-orange-800 font-medium">-{{ base * 2 }} poin</span></div>
+                        <div class="flex items-center gap-3 p-3 bg-red-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-red-200 flex items-center justify-center text-sm font-bold text-red-700">4x+</span><span class="text-sm text-red-800 font-medium">-{{ base * 3 }} poin per pelanggaran</span></div>
                     </div>
+                    {% if ac.auto_submit_on_max and maxv > 0 %}
+                    <div class="mt-3 p-3 bg-red-50/50 rounded-xl flex items-start gap-2">
+                        <i class="fas fa-exclamation-triangle text-red-500 mt-0.5"></i>
+                        <p class="text-sm text-red-700 font-medium">Maksimal {{ maxv }} pelanggaran → ujian otomatis dikumpulkan.</p>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
 

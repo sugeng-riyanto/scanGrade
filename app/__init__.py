@@ -165,7 +165,20 @@ def create_app(env=None):
 
     @app.route("/tutorial/murid")
     def tutorial_murid():
-        return render_template("tutorial_murid.html")
+        # Default anti-cheat values (dapat diubah admin di pengaturan sekolah)
+        ac = {
+            "penalty_per_violation": 5,
+            "max_violations": 5,
+            "auto_submit_on_max": True,
+        }
+        try:
+            supabase = app.extensions["supabase"]
+            exam_sample = supabase.table("exams").select("penalty_per_violation,max_violations,auto_submit_on_max").limit(1).execute()
+            if exam_sample.data:
+                ac.update({k: v for k, v in exam_sample.data[0].items() if v is not None})
+        except Exception:
+            pass
+        return render_template("tutorial_murid.html", ac=ac)
 
     @app.route("/health")
     def health():
