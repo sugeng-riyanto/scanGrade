@@ -9,6 +9,10 @@
 {% set fee_total = (fi.get('fee_percent_amount', 0) + fi.get('fee_flat', 0)) %}
 {% block content %}
 <div class="max-w-xl mx-auto" id="payment-page">
+<style>
+#snap-container iframe, #snap-container > div { margin: 0 auto !important; }
+#snap-container .midtrans-widget { margin: 0 auto !important; }
+</style>
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}
@@ -83,7 +87,7 @@
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        <div id="snap-container" class="border border-t-0 border-slate-200 rounded-b-xl min-h-[450px]"></div>
+        <div id="snap-container" class="border border-t-0 border-slate-200 rounded-b-xl min-h-[450px] flex justify-center"></div>
     </div>
 </div>
 
