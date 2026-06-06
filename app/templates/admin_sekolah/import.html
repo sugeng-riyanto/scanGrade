@@ -97,14 +97,23 @@
     </div>
 
     <div class="card p-6">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="font-extrabold text-stone-800">Download Template Excel</h3>
+        <h3 class="font-extrabold text-stone-800 mb-4">Download Template</h3>
+        <p class="text-sm text-stone-500 mb-4">Template sudah include NPSN, tahun ajaran, email auto-generate, dan password random.</p>
+        <div class="flex flex-wrap gap-3">
+            <a href="/admin-sekolah/download-template/murid"
+               class="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200">
+                <i class="fas fa-download"></i>Template Murid
+            </a>
+            <a href="/admin-sekolah/download-template/guru"
+               class="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
+                <i class="fas fa-download"></i>Template Guru
+            </a>
+            <a href="/admin-sekolah/export"
+               class="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition border border-blue-200">
+                <i class="fas fa-file-excel"></i>Data Excel (existing)
+            </a>
         </div>
-        <p class="text-sm text-stone-500 mb-4">Download data yang sudah ada sebagai template. Hapus data contoh sebelum mengisi data baru.</p>
-        <a href="/admin-sekolah/export"
-           class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
-            <i class="fas fa-download"></i>Download Data Excel
-        </a>
+        <p class="text-xs text-stone-400 mt-4">Template berisi 2 baris contoh. Hapus sebelum upload data asli. Password akan digenerate otomatis saat import.</p>
     </div>
 </div>
 {% endblock %}

@@ -142,6 +142,82 @@ def generate_email_preview():
     return jsonify({"email": email, "password": pw, "domain": domain})
 
 
+@admin_sekolah_bp.route("/download-template/murid")
+@admin_sekolah_required
+def download_template_murid():
+    """Download XLSX template for students with generated passwords."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    sid = _school_id()
+    domain = _get_email_domain(sid)
+    school = get_supabase().table("schools").select("name, npsn").eq("id", sid).single().execute().data or {}
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Murid"
+    # Headers
+    headers = ["NPSN", "Tahun Ajaran", "NISN", "Email", "Nama Lengkap", "Kelas", "Password"]
+    hf = Font(bold=True, color="FFFFFF", size=11)
+    hfill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.font = hf; cell.fill = hfill; cell.alignment = Alignment(horizontal="center")
+    # Example rows with generated emails + passwords
+    for i, (nama, nisn) in enumerate([("Ahmad Budiman", "1234567801"), ("Citra Dewi", "1234567802")], 2):
+        email = _generate_email(nama, domain)
+        pw = _gen_password()
+        ws.cell(row=i, column=1, value=school.get("npsn", ""))
+        ws.cell(row=i, column=2, value="2025/2026")
+        ws.cell(row=i, column=3, value=nisn)
+        ws.cell(row=i, column=4, value=email)
+        ws.cell(row=i, column=5, value=nama)
+        ws.cell(row=i, column=6, value="VII-A")
+        ws.cell(row=i, column=7, value=pw)
+    for col in range(1, 8):
+        ws.column_dimensions[chr(64+col)].width = 22
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="template_murid.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@admin_sekolah_bp.route("/download-template/guru")
+@admin_sekolah_required
+def download_template_guru():
+    """Download XLSX template for teachers with generated passwords."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    sid = _school_id()
+    domain = _get_email_domain(sid)
+    supabase = get_supabase()
+    school = supabase.table("schools").select("name, npsn").eq("id", sid).single().execute().data or {}
+    subjects = supabase.table("subjects").select("name").eq("school_id", sid).execute().data or []
+    subj_names = [s["name"] for s in subjects]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Guru"
+    headers = ["NPSN", "Tahun Ajaran", "NIP", "Email", "Nama Lengkap", "Mapel 1", "Mapel 2", "Mapel 3", "Password"]
+    hf = Font(bold=True, color="FFFFFF", size=11)
+    hfill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.font = hf; cell.fill = hfill; cell.alignment = Alignment(horizontal="center")
+    for i, (nama, nip, mapels) in enumerate([("Budi Santoso", "19870101", subj_names[:2]), ("Siti Rahma", "19900202", subj_names[:1])], 2):
+        email = _generate_email(nama, domain)
+        pw = _gen_password()
+        ws.cell(row=i, column=1, value=school.get("npsn", ""))
+        ws.cell(row=i, column=2, value="2025/2026")
+        ws.cell(row=i, column=3, value=nip)
+        ws.cell(row=i, column=4, value=email)
+        ws.cell(row=i, column=5, value=nama)
+        for j, mn in enumerate(mapels):
+            ws.cell(row=i, column=6+j, value=mn)
+        ws.cell(row=i, column=9, value=pw)
+    for col in range(1, 10):
+        ws.column_dimensions[chr(64+col)].width = 20
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="template_guru.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @admin_sekolah_bp.route("/import", methods=["GET", "POST"])
 @admin_sekolah_required
 def import_excel():
