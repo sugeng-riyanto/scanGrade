@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Tutorial Guru - ScanGrade{% endblock %}
+{% block head_extra %}
+<style>
+.demo-step { animation: slideUp 0.4s ease-out; }
+.demo-card { transition: transform 0.2s, box-shadow 0.2s; }
+.demo-card:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.08); }
+.feature-icon { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+</style>
+{% endblock %}
+{% block content_noauth %}
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50">
+    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
+        <div class="flex items-center gap-2">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                <i class="fas fa-chalkboard-teacher text-white text-sm"></i>
+            </div>
+            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-emerald-600">Guru</span></span>
+        </div>
+        <div class="flex items-center gap-3">
+            <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i>Beranda</a>
+            <a href="/auth/login_user" class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/25 hover:from-emerald-600 hover:to-emerald-700 transition"><i class="fas fa-sign-in-alt mr-1"></i>Masuk sebagai Guru</a>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 py-12">
+        <!-- Hero -->
+        <div class="text-center mb-16">
+            <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-100 rounded-full text-emerald-700 text-xs font-bold mb-4">🎓 Untuk Guru</div>
+            <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900">Buat, Koreksi, dan Analisis Ujian</h1>
+            <p class="mt-3 text-lg text-surface-500 max-w-2xl mx-auto">Semua alat yang Anda butuhkan untuk mengelola ujian — dari pembuatan hingga publikasi nilai.</p>
+        </div>
+
+        <!-- Steps -->
+        <div class="space-y-8 demo-step">
+            <!-- Step 1 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">1</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Buat Ujian Baru</h3>
+                    <p class="mt-2 text-surface-500">Klik "Buat Ujian" dan isi detail: judul, mata pelajaran, durasi, dan nilai kelulusan. Tambahkan soal pilihan ganda (A-E) dan esai — teks atau canvas gambar.</p>
+                    <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-list-ol text-emerald-600 text-lg"></i><p class="text-xs font-bold mt-1">MCQ + Esai</p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-weight text-emerald-600 text-lg"></i><p class="text-xs font-bold mt-1">Bobot Nilai</p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-file-pdf text-emerald-600 text-lg"></i><p class="text-xs font-bold mt-1">Upload PDF</p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-key text-emerald-600 text-lg"></i><p class="text-xs font-bold mt-1">Kunci Jawaban</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">2</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Atur Anti-Cheat &amp; Tools</h3>
+                    <p class="mt-2 text-surface-500">Aktifkan perlindungan ujian: deteksi tab switch, blokir copy-paste, watermark nama siswa, acak soal/opsi, dan tampilkan kalkulator ilmiah.</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-red-50 text-red-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-eye-slash"></i> Anti-Cheat</span>
+                        <span class="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-watermark"></i> Watermark</span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-random"></i> Acak Soal</span>
+                        <span class="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-calculator"></i> Kalkulator</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">3</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Koreksi Esai dengan Canvas</h3>
+                    <p class="mt-2 text-surface-500">Lihat jawaban siswa langsung di atas halaman PDF. Gunakan pena digital, penggaris 30cm, busur 180°, dan segitiga siku untuk mengoreksi. Beri skor dan komentar per soal.</p>
+                    <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-pencil-alt text-emerald-600"></i><p class="text-xs font-bold mt-1">Pena Digital</p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-ruler text-emerald-600"></i><p class="text-xs font-bold mt-1">Ruler 30cm</p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-drafting-compass text-emerald-600"></i><p class="text-xs font-bold mt-1">Busur 180°</p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-draw-polygon text-emerald-600"></i><p class="text-xs font-bold mt-1">Siku 45°</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">4</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Lihat Hasil &amp; Export</h3>
+                    <p class="mt-2 text-surface-500">Dashboard analitik menampilkan distribusi nilai, soal tersulit, dan statistik per-band. Export ke XLSX atau PDF — termasuk gambar canvas siswa.</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"><i class="fas fa-chart-bar mr-1"></i>Chart.js</span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold"><i class="fas fa-file-excel mr-1"></i>XLSX</span>
+                        <span class="px-3 py-1.5 bg-red-50 text-red-700 rounded-lg text-xs font-bold"><i class="fas fa-file-pdf mr-1"></i>PDF</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CTA -->
+        <div class="mt-12 text-center bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl p-8 lg:p-12 shadow-xl">
+            <h2 class="text-2xl font-extrabold text-white">Siap memulai?</h2>
+            <p class="mt-2 text-emerald-100">Masuk dengan akun guru yang diberikan oleh sekolah Anda.</p>
+            <a href="/auth/login_user" class="mt-4 inline-flex items-center gap-2 px-8 py-3.5 bg-white text-emerald-700 rounded-xl font-extrabold hover:bg-emerald-50 transition">Masuk sebagai Guru <i class="fas fa-arrow-right"></i></a>
+        </div>
+    </main>
+</div>
+{% endblock %}

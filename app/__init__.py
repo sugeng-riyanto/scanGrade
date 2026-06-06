@@ -159,6 +159,14 @@ def create_app(env=None):
                 pass
         return render_template("landing.html")
 
+    @app.route("/tutorial/guru")
+    def tutorial_guru():
+        return render_template("tutorial_guru.html")
+
+    @app.route("/tutorial/murid")
+    def tutorial_murid():
+        return render_template("tutorial_murid.html")
+
     @app.route("/health")
     def health():
         return jsonify({
