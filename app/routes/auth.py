@@ -29,17 +29,26 @@ def register():
 
     supabase = get_supabase()
 
+    # ── Step 1: Create Auth user ──
     try:
-        # 1. Create Supabase Auth user
-        res = supabase.auth.admin.create_user({
+        from supabase import Client
+        admin_client: Client = current_app.extensions["supabase"]
+        res = admin_client.auth.admin.create_user({
             "email": email,
             "password": password,
             "user_metadata": {"role": "admin_sekolah", "full_name": position},
             "email_confirm": True,
         })
         uid = res.user.id
+    except Exception as e:
+        err = str(e)
+        if "already exists" in err.lower() or "duplicate" in err.lower():
+            return render_template("auth/register.html", error="Email sudah terdaftar")
+        current_app.logger.error(f"Register step 1 (create_user) failed: {err}")
+        return render_template("auth/register.html", error=f"Gagal membuat akun: {err[:200]}")
 
-        # 2. Create profile (trigger will set default; update status to pending)
+    # ── Step 2: Create/update profile ──
+    try:
         supabase.table("profiles").upsert({
             "id": uid,
             "full_name": position,
@@ -47,29 +56,43 @@ def register():
             "role": "admin_sekolah",
             "status": "pending",
         }).execute()
+    except Exception as e:
+        current_app.logger.error(f"Register step 2 (profile) failed: {e}, cleaning up user {uid}")
+        # Rollback: delete the auth user
+        try:
+            admin_client.auth.admin.delete_user(uid)
+        except Exception:
+            pass
+        return render_template("auth/register.html", error="Gagal menyimpan data profil")
 
-        # 3. Create school registration request (pending — super admin will approve)
-        supabase.table("school_registration_requests").insert({
+    # ── Step 3: Create registration request ──
+    try:
+        # Build payload with only columns we know exist
+        req_data = {
             "school_name": school_name,
             "npsn": npsn,
             "requester_name": position,
             "requester_email": email,
             "requester_phone": wa,
             "requester_position": position,
-            "is_activated": False,
             "status": "pending",
             "profile_id": uid,
-        }).execute()
-
-        log_activity("register", "user", uid, new_data={"email": email, "school_name": school_name, "role": "admin_sekolah", "status": "pending"})
-
-        return render_template("auth/register_success.html", email=email)
-
+        }
+        # Try adding optional columns (they may not exist in older schema)
+        for opt_col in ["is_activated"]:
+            req_data[opt_col] = False
+        supabase.table("school_registration_requests").insert(req_data).execute()
     except Exception as e:
-        err_msg = str(e)
-        if "already exists" in err_msg.lower() or "duplicate" in err_msg.lower():
-            return render_template("auth/register.html", error="Email sudah terdaftar")
-        return render_template("auth/register.html", error=f"Gagal mendaftar: {err_msg}")
+        current_app.logger.error(f"Register step 3 (reg request) failed: {e}")
+        # Don't rollback — profile already created
+        return render_template("auth/register.html", error="Gagal membuat permohonan registrasi. Silakan hubungi admin.")
+
+    try:
+        log_activity("register", "user", uid, new_data={"email": email, "school_name": school_name, "role": "admin_sekolah", "status": "pending"})
+    except Exception:
+        pass
+
+    return render_template("auth/register_success.html", email=email)
 
 
 # ─── ACTIVATE ────────────────────────────────────────
