@@ -88,7 +88,7 @@ def create_snap_transaction(school_id, plan_id, school_name, school_email):
         ],
         "customer_details": {
             "first_name": school_name[:32] if school_name else "Sekolah",
-            "email": (school_email or "").strip() or "pelanggan@scan-grade.app",
+            "email": (school_email or "").strip() or "srphysics04@gmail.com",
         },
     }
 

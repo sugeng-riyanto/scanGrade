@@ -1118,7 +1118,7 @@ def subscribe():
         pass
     # Ensure email is valid for Midtrans
     if not admin_email or "@" not in admin_email:
-        admin_email = "sekolah@scan-grade.app"
+        admin_email = "srphysics04@gmail.com"
 
     from app.services.midtrans_service import create_snap_transaction
     result, error = create_snap_transaction(school_id, plan_id, school_name, admin_email)
