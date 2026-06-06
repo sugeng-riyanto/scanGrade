@@ -76,9 +76,13 @@
                         </td>
                         <td class="px-4 py-3">
                             {% if code %}
-                            <div class="flex items-center gap-1.5" x-data="{ copied: false }">
-                                <span class="font-mono text-xs font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded">{{ code }}</span>
-                                <button @click="navigator.clipboard.writeText('{{ code }}'); copied=true; setTimeout(()=>copied=false,2000)"
+                            <div class="flex items-center gap-1.5" x-data="{ show: false, copied: false }">
+                                <span x-text="show ? '{{ code }}' : '••••••••••••'" class="font-mono text-xs font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded min-w-[100px] inline-block text-center"></span>
+                                <button @click="show = !show"
+                                    class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition" :title="show ? 'Sembunyikan' : 'Tampilkan'">
+                                    <i class="fas text-sm" :class="show ? 'fa-eye' : 'fa-eye-slash'"></i>
+                                </button>
+                                <button x-show="show" @click="navigator.clipboard.writeText('{{ code }}'); copied=true; setTimeout(()=>copied=false,2000)"
                                     class="text-slate-400 hover:text-amber-600 p-1 rounded-lg hover:bg-amber-50 transition">
                                     <i class="fas text-sm" :class="copied ? 'fa-check text-emerald-500' : 'fa-copy'"></i>
                                 </button>

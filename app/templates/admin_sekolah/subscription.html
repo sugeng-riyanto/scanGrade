@@ -81,25 +81,34 @@
 
     <!-- Activation Code -->
     {% set ac = sub.activation_code if sub else '' %}
-    <div class="card p-4 mb-6 border-2 border-dashed border-amber-300 bg-amber-50/30" x-data="{ copied: false }">
+    <div class="card p-4 mb-6 border-2 border-dashed border-amber-300 bg-amber-50/30" x-data="{ show: false, copied: false }">
         <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 text-amber-800">
                 <i class="fas fa-key"></i>
                 <span class="font-bold text-sm">Kode Aktivasi</span>
             </div>
             {% if ac %}
-            <button @click="navigator.clipboard.writeText('{{ ac }}'); copied=true; setTimeout(()=>copied=false,2000)"
-                class="text-xs font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition">
-                <i class="fas" :class="copied ? 'fa-check' : 'fa-copy'"></i>
-                <span x-text="copied ? 'Disalin!' : 'Salin Kode'"></span>
-            </button>
+            <div class="flex items-center gap-1">
+                <button @click="show = !show" class="text-xs font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 px-2.5 py-1.5 rounded-lg transition" :title="show ? 'Sembunyikan' : 'Tampilkan'">
+                    <i class="fas" :class="show ? 'fa-eye-slash' : 'fa-eye'"></i>
+                    <span x-text="show ? 'Sembunyikan' : 'Lihat'"></span>
+                </button>
+                <button x-show="show" @click="navigator.clipboard.writeText('{{ ac }}'); copied=true; setTimeout(()=>copied=false,2000)"
+                    class="text-xs font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-1.5 rounded-lg transition">
+                    <i class="fas" :class="copied ? 'fa-check' : 'fa-copy'"></i>
+                    <span x-text="copied ? 'Disalin!' : 'Salin'"></span>
+                </button>
+            </div>
             {% endif %}
         </div>
         {% if ac %}
-        <p class="mt-2 font-mono text-lg font-extrabold text-amber-800 tracking-widest text-center cursor-pointer select-all"
-           @click="navigator.clipboard.writeText('{{ ac }}'); copied=true; setTimeout(()=>copied=false,2000)"
-           title="Klik untuk salin">{{ ac }}</p>
-        <p class="text-xs text-slate-500 mt-1 text-center">Klik kode untuk salin, atau gunakan tombol di samping</p>
+        <p class="mt-2 font-mono text-lg font-extrabold tracking-widest text-center cursor-pointer select-all"
+           :class="show ? 'text-amber-800' : 'text-slate-300'"
+           @click="show=true; navigator.clipboard.writeText('{{ ac }}'); copied=true; setTimeout(()=>copied=false,2000)"
+           title="Klik untuk lihat & salin">
+           <span x-text="show ? '{{ ac }}' : '••••••••••••'"></span>
+        </p>
+        <p class="text-xs text-slate-500 mt-1 text-center">Klik "Lihat" untuk menampilkan kode</p>
         {% else %}
         <p class="text-sm text-slate-500 font-medium mt-1">Kode aktivasi akan muncul setelah pembayaran berhasil.</p>
         {% endif %}
@@ -253,14 +262,20 @@
                             <span class="text-slate-400">-</span>
                             {% endif %}
                         </td>
-                        <td class="font-mono text-xs" x-data="{ copied: false }">
+                        <td class="font-mono text-xs" x-data="{ show: false, copied: false }">
                             {% if tx.activation_code %}
                             <div class="flex items-center gap-1">
-                                <span class="text-amber-700 cursor-pointer select-all" title="Klik untuk salin"
-                                      @click="navigator.clipboard.writeText('{{ tx.activation_code }}'); copied=true; setTimeout(()=>copied=false,2000)">{{ tx.activation_code }}</span>
-                                <button @click="navigator.clipboard.writeText('{{ tx.activation_code }}'); copied=true; setTimeout(()=>copied=false,2000)"
-                                    class="text-slate-400 hover:text-slate-600 p-0.5" title="Salin kode aktivasi">
-                                    <i class="fas" :class="copied ? 'fa-check text-emerald-500' : 'fa-copy'"></i>
+                                <span class="text-amber-700 cursor-pointer font-bold"
+                                      @click="show = !show"
+                                      x-text="show ? '{{ tx.activation_code }}' : '••••••••••••'"
+                                      :title="show ? 'Sembunyikan' : 'Klik untuk lihat'"></span>
+                                <button @click="show = !show"
+                                    class="text-slate-400 hover:text-slate-600 p-0.5" :title="show ? 'Sembunyikan' : 'Tampilkan'">
+                                    <i class="fas text-xs" :class="show ? 'fa-eye-slash' : 'fa-eye'"></i>
+                                </button>
+                                <button x-show="show" @click="navigator.clipboard.writeText('{{ tx.activation_code }}'); copied=true; setTimeout(()=>copied=false,2000)"
+                                    class="text-slate-400 hover:text-emerald-600 p-0.5" title="Salin">
+                                    <i class="fas text-xs" :class="copied ? 'fa-check text-emerald-500' : 'fa-copy'"></i>
                                 </button>
                             </div>
                             {% else %}-{% endif %}
