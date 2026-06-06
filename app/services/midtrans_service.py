@@ -66,24 +66,41 @@ def create_snap_transaction(school_id, plan_id, school_name, school_email):
     order_id = generate_order_id(school_id)
     base_price = int(float(plan["price"]))
     adjusted_price, tier_label = calculate_plan_price(base_price, school_id)
-    gross = adjusted_price
+    total_with_fee, fee_info = calculate_total_with_fee(adjusted_price)
+    gross = total_with_fee
+
+    item_name = f"ScanGrade - {plan['name']}"
+    if fee_info["fee_flat"] > 0 or fee_info["fee_percent"] > 0:
+        item_name += f" + biaya admin"
 
     param = {
         "transaction_details": {
             "order_id": order_id,
             "gross_amount": gross,
         },
-        "item_details": [{
-            "id": str(plan_id),
-            "price": gross,
-            "quantity": 1,
-            "name": f"ScanGrade - {plan['name']}",
-        }],
+        "item_details": [
+            {
+                "id": str(plan_id),
+                "price": adjusted_price,
+                "quantity": 1,
+                "name": item_name,
+            },
+        ],
         "customer_details": {
             "first_name": school_name[:32] if school_name else "Sekolah",
             "email": school_email or "",
         },
     }
+
+    # Add fee as a separate line item if any
+    fee_total = fee_info["fee_percent_amount"] + fee_info["fee_flat"]
+    if fee_total > 0:
+        param["item_details"].append({
+            "id": "admin_fee",
+            "price": fee_total,
+            "quantity": 1,
+            "name": f"Biaya admin ({fee_info['note']})",
+        })
 
     try:
         response = snap.create_transaction(param)
@@ -110,6 +127,8 @@ def create_snap_transaction(school_id, plan_id, school_name, school_email):
         "redirect_url": redirect_url,
         "order_id": order_id,
         "gross_amount": gross,
+        "base_amount": adjusted_price,
+        "fee_info": fee_info,
     }, None
 
 
@@ -309,3 +328,33 @@ def is_school_active(school_id):
         # No subscription record yet → assume active (new school, not yet tracked)
         return True
     return sub["status"] == "active" or sub["status"] == "trial"
+
+
+def get_payment_fee_config():
+    """Get the admin fee configuration (biaya admin yang dibebankan ke pelanggan)."""
+    supabase = current_app.extensions["supabase"]
+    try:
+        res = supabase.table("school_settings").select("payment_fee_config").eq("id", 1).single().execute()
+        if res.data and res.data.get("payment_fee_config"):
+            return res.data["payment_fee_config"]
+    except Exception:
+        pass
+    return {"fee_percent": 0, "fee_flat": 4000, "fee_note": "Biaya admin Rp 4.000 (transfer bank)"}
+
+
+def calculate_total_with_fee(base_amount):
+    """Calculate total amount including admin fee.
+    Returns (total, fee_breakdown) where fee_breakdown explains the fee."""
+    fee_cfg = get_payment_fee_config()
+    fee_pct = float(fee_cfg.get("fee_percent", 0))
+    fee_flat = float(fee_cfg.get("fee_flat", 0))
+    pct_amount = round(base_amount * fee_pct / 100)
+    total = round(base_amount + pct_amount + fee_flat)
+    return total, {
+        "base": base_amount,
+        "fee_percent": fee_pct,
+        "fee_percent_amount": pct_amount,
+        "fee_flat": fee_flat,
+        "total": total,
+        "note": fee_cfg.get("fee_note", ""),
+    }

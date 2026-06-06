@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Pengaturan Biaya Admin - ScanGrade{% endblock %}
+{% block page_title %}Pengaturan Biaya Admin{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto" x-data="feeApp()" x-init="init({{ fee_config | tojson }})">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="card p-6">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 text-xl"><i class="fas fa-receipt"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800">Biaya Admin Pembayaran</h3>
+                <p class="text-sm text-slate-500 font-medium">Biaya admin ditanggung oleh pelanggan (admin sekolah)</p>
+            </div>
+        </div>
+
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm text-blue-800 space-y-1">
+            <p class="font-bold"><i class="fas fa-info-circle mr-1"></i> Cara kerja:</p>
+            <p>Biaya admin akan <strong>ditambahkan ke total harga</strong> yang dibayar pelanggan.</p>
+            <p>Contoh: Harga paket Rp 399.000 + biaya admin Rp 4.000 = Total Rp 403.000</p>
+            <p class="text-blue-600 text-xs mt-1">Biaya admin muncul sebagai item terpisah di popup Midtrans.</p>
+        </div>
+
+        <form method="POST" class="space-y-4">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Biaya Admin Flat (Rp)</label>
+                <input type="number" name="fee_flat" x-model="fee_flat" class="input" min="0" step="500" placeholder="4000">
+                <p class="text-xs text-slate-400 mt-1">Biaya tetap per transaksi. Contoh: Rp 4.000 untuk transfer bank.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Biaya Admin Persentase (%)</label>
+                <input type="number" name="fee_percent" x-model="fee_percent" class="input" min="0" step="0.1" placeholder="0">
+                <p class="text-xs text-slate-400 mt-1">Persentase dari harga paket. Contoh: 2% untuk e-money/QRIS.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Catatan (tampil ke pelanggan)</label>
+                <input type="text" name="fee_note" x-model="fee_note" class="input" placeholder="Biaya admin Rp 4.000 (transfer bank)">
+                <p class="text-xs text-slate-400 mt-1">Penjelasan singkat tentang biaya admin yang muncul di halaman pembayaran.</p>
+            </div>
+
+            <!-- Preview -->
+            <div class="bg-slate-50 rounded-xl p-4 text-sm">
+                <p class="font-bold text-slate-700 mb-2">Preview untuk pelanggan:</p>
+                <div class="space-y-1">
+                    <div class="flex justify-between text-slate-600">
+                        <span>Harga Paket (contoh 1 tahun)</span>
+                        <span class="font-semibold">Rp 399.000</span>
+                    </div>
+                    <template x-if="parseInt(fee_flat) > 0 || parseFloat(fee_percent) > 0">
+                        <div class="flex justify-between text-slate-500">
+                            <span x-text="'Biaya admin' + (fee_note ? ' (' + fee_note + ')' : '')"></span>
+                            <span x-text="'Rp ' + totalFee().toLocaleString('id-ID')"></span>
+                        </div>
+                    </template>
+                    <div class="border-t border-slate-200 pt-1 flex justify-between font-extrabold text-primary-600">
+                        <span>Total</span>
+                        <span x-text="'Rp ' + totalAll().toLocaleString('id-ID')"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 pt-2">
+                <button type="submit" class="btn btn-primary px-6">Simpan Pengaturan</button>
+                <a href="/super-admin/dashboard" class="btn btn-ghost">Kembali</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function feeApp() {
+    return {
+        lang: localStorage.getItem('sg_lang') || 'id',
+        fee_flat: 4000,
+        fee_percent: 0,
+        fee_note: 'Biaya admin Rp 4.000 (transfer bank)',
+
+        init(cfg) {
+            if (cfg) {
+                this.fee_flat = cfg.fee_flat || 0;
+                this.fee_percent = cfg.fee_percent || 0;
+                this.fee_note = cfg.fee_note || '';
+            }
+        },
+
+        totalFee() {
+            const pct = Math.round(399000 * (parseFloat(this.fee_percent) || 0) / 100);
+            return pct + (parseInt(this.fee_flat) || 0);
+        },
+
+        totalAll() {
+            return 399000 + this.totalFee();
+        }
+    };
+}
+</script>
+{% endblock %}

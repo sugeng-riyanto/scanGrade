@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Pembayaran - ScanGrade{% endblock %}
 {% block page_title %}Pembayaran{% endblock %}
-{% block content %}
 {% set is_production = settings.get('is_production', false) %}
 {% set client_key = settings.get('client_key', '') %}
 {% set snap_url = 'https://app.midtrans.com/snap/snap.js' if is_production else 'https://app.sandbox.midtrans.com/snap/snap.js' %}
+{% set base_price = base_price|default(gross_amount) %}
+{% set fi = fee_info|default({}) %}
+{% set fee_total = (fi.get('fee_percent_amount', 0) + fi.get('fee_flat', 0)) %}
+{% block content %}
 <div x-data="{ lang: localStorage.getItem('sg_lang') || 'id', loading: true }"
      x-init="loading=true;
      if ('{{ client_key }}') {
@@ -32,7 +35,24 @@
                 <span x-text="lang==='en'?'Order:':'Pesanan:'"></span>
                 <span class="font-mono text-sm">{{ order_id }}</span>
             </p>
-            <p class="text-3xl font-extrabold text-primary-600 mb-6">Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}</p>
+
+            <!-- Rincian Biaya -->
+            <div class="bg-slate-50 rounded-xl p-4 text-left text-sm space-y-1.5 mb-4">
+                <div class="flex justify-between">
+                    <span class="text-slate-500 font-medium">Harga Paket</span>
+                    <span class="font-bold text-slate-700">Rp {{ "{:,.0f}".format(base_price).replace(',','.') }}</span>
+                </div>
+                {% if fee_total > 0 %}
+                <div class="flex justify-between text-slate-500 font-medium">
+                    <span>Biaya Admin{% if fi.get('note') %} ({{ fi.note }}){% endif %}</span>
+                    <span class="text-slate-600">Rp {{ "{:,.0f}".format(fee_total).replace(',','.') }}</span>
+                </div>
+                <div class="border-t border-slate-200 pt-1.5 flex justify-between font-extrabold">
+                    <span class="text-slate-700">Total</span>
+                    <span class="text-primary-600">Rp {{ "{:,.0f}".format(gross_amount).replace(',','.') }}</span>
+                </div>
+                {% endif %}
+            </div>
 
             <div x-show="loading" class="flex items-center justify-center gap-2 text-slate-400 py-4">
                 <i class="fas fa-spinner fa-spin"></i>

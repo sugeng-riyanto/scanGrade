@@ -419,6 +419,40 @@ def trial_settings():
     return render_template("super_admin/trial_settings.html", trial=trial)
 
 
+# ─── Payment Fee Settings ───────────────────────────────────────────────
+
+@super_bp.route("/payment-fee-settings", methods=["GET", "POST"])
+@_sa_required
+def payment_fee_settings():
+    supabase = get_supabase()
+    if request.method == "POST":
+        cfg = {
+            "fee_flat": int(request.form.get("fee_flat", 0)),
+            "fee_percent": float(request.form.get("fee_percent", 0)),
+            "fee_note": request.form.get("fee_note", "").strip(),
+        }
+        try:
+            existing = supabase.table("school_settings").select("id").eq("id", 1).execute()
+            if existing.data:
+                supabase.table("school_settings").update({"payment_fee_config": cfg}).eq("id", 1).execute()
+            else:
+                supabase.table("school_settings").insert({"id": 1, "payment_fee_config": cfg}).execute()
+            log_activity("update", "payment_fee_settings", "1", new_data=cfg, user_id=g.user_id)
+            flash("Pengaturan biaya admin berhasil disimpan", "success")
+        except Exception as e:
+            flash(f"Gagal: {str(e)[:60]}", "error")
+        return redirect("/super-admin/payment-fee-settings")
+
+    fee_config = {"fee_flat": 4000, "fee_percent": 0, "fee_note": "Biaya admin Rp 4.000 (transfer bank)"}
+    try:
+        res = supabase.table("school_settings").select("payment_fee_config").eq("id", 1).single().execute()
+        if res.data and res.data.get("payment_fee_config"):
+            fee_config = res.data["payment_fee_config"]
+    except Exception:
+        pass
+    return render_template("super_admin/payment_fee_settings.html", fee_config=fee_config)
+
+
 # ─── Pricing Settings ───────────────────────────────────────────────────
 
 @super_bp.route("/pricing-settings", methods=["GET", "POST"])

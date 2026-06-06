@@ -445,3 +445,5 @@ INSERT INTO trial_settings (trial_days) VALUES (14)
 ON CONFLICT DO NOTHING;
 
 ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS pricing_config JSONB DEFAULT '{"model": "flat", "tiers": []}';
+
+ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS payment_fee_config JSONB DEFAULT '{"fee_percent": 0, "fee_flat": 4000, "fee_note": "Biaya admin Rp 4.000 (transfer bank)"}';

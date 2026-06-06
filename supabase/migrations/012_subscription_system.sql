@@ -86,3 +86,6 @@ ON CONFLICT DO NOTHING;
 
 -- Add pricing_config column to school_settings
 ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS pricing_config JSONB DEFAULT '{"model": "flat", "tiers": []}';
+
+-- Add payment_fee_config column to school_settings
+ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS payment_fee_config JSONB DEFAULT '{"fee_percent": 0, "fee_flat": 4000, "fee_note": "Biaya admin Rp 4.000 (transfer bank)"}';

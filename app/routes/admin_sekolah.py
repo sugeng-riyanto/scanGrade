@@ -1075,16 +1075,18 @@ def subscription():
     except Exception:
         pass
 
-    from app.services.midtrans_service import get_pricing_config, calculate_plan_price, get_student_count_for_school
+    from app.services.midtrans_service import get_pricing_config, calculate_plan_price, get_student_count_for_school, get_payment_fee_config
     pricing_config = get_pricing_config()
     student_count = get_student_count_for_school(school_id) if school_id else 0
     scaled_active = pricing_config.get("model") == "scaled"
     scaled_tiers = pricing_config.get("tiers", [])
+    fee_config = get_payment_fee_config()
 
     return render_template("admin_sekolah/subscription.html",
         sub=sub, plans=plans, transactions=transactions, trial_days=trial_days,
         pricing_config=pricing_config, student_count=student_count,
-        scaled_active=scaled_active, scaled_tiers=scaled_tiers)
+        scaled_active=scaled_active, scaled_tiers=scaled_tiers,
+        fee_config=fee_config)
 
 
 @admin_sekolah_bp.route("/subscription/subscribe", methods=["POST"])
@@ -1123,17 +1125,23 @@ def subscribe():
 
     settings = {}
     try:
-        res = supabase.table("midtrans_settings").limit(1).execute()
+        res = supabase.table("midtrans_settings").select("*").limit(1).execute()
         if res.data:
             settings = res.data[0]
     except Exception:
         pass
+
+    from app.services.midtrans_service import get_payment_fee_config, calculate_total_with_fee
+    fee_info = calculate_total_with_fee(result.get("base_amount", result["gross_amount"]))
+    base_price = result.get("base_amount", result["gross_amount"])
 
     return render_template("admin_sekolah/payment.html",
         token=result["token"],
         redirect_url=result["redirect_url"],
         order_id=result["order_id"],
         gross_amount=result["gross_amount"],
+        base_price=base_price,
+        fee_info=fee_info,
         settings=settings,
     )
 
