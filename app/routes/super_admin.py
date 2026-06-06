@@ -287,12 +287,17 @@ def midtrans_settings():
             log_activity("update", "midtrans_settings", "1", new_data={"merchant_id": data["merchant_id"][:6] + "***"}, user_id=g.user_id)
             flash("Pengaturan Midtrans berhasil disimpan", "success")
         except Exception as e:
-            flash(f"Gagal menyimpan: {str(e)[:60]}", "error")
+            err = str(e)
+            current_app.logger.error(f"Midtrans save error: {err}")
+            if "relation" in err and "does not exist" in err:
+                flash("Tabel midtrans_settings belum ada. Jalankan SQL migration (supabase/_COMPLETE_SETUP.sql) di Supabase SQL Editor.", "error")
+            else:
+                flash(f"Gagal menyimpan: {err[:100]}", "error")
         return redirect("/super-admin/midtrans")
 
     settings = {}
     try:
-        res = supabase.table("midtrans_settings").limit(1).execute()
+        res = supabase.table("midtrans_settings").select("*").limit(1).execute()
         if res.data:
             settings = res.data[0]
             # Mask keys for display
