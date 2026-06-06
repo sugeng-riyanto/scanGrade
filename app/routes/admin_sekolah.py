@@ -622,6 +622,10 @@ def reset_teacher_password(teacher_id):
 def students():
     sid = _school_id()
     supabase = get_supabase()
+    q = request.args.get("q", "").strip()
+    sort_by = request.args.get("sort", "name")
+    sort_dir = request.args.get("dir", "asc")
+
     classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
     students_raw = supabase.table("students").select(
         "*, profiles!inner(id, full_name, phone, nisn), classes(name)"
@@ -638,7 +642,17 @@ def students():
             "class_id": s.get("class_id"),
             "phone": prof.get("phone", ""),
         })
-    return render_template("admin_sekolah/students.html", students=students_list, classes=classes_list)
+    if q:
+        ql = q.lower()
+        students_list = [s for s in students_list if ql in s["name"].lower() or ql in s["nisn"]]
+    reverse = sort_dir == "desc"
+    if sort_by == "name":
+        students_list.sort(key=lambda s: s["name"].lower(), reverse=reverse)
+    elif sort_by == "nisn":
+        students_list.sort(key=lambda s: s["nisn"], reverse=reverse)
+    elif sort_by == "class_name":
+        students_list.sort(key=lambda s: s["class_name"], reverse=reverse)
+    return render_template("admin_sekolah/students.html", students=students_list, classes=classes_list, q=q, sort_by=sort_by, sort_dir=sort_dir)
 
 
 @admin_sekolah_bp.route("/students/create", methods=["POST"])
