@@ -495,8 +495,8 @@ def teachers():
 def create_teacher():
     sid = _school_id()
     supabase = get_supabase()
-    nip = request.form.get("employee_id", "").strip()
-    nama = request.form.get("full_name", "").strip()
+    nip = request.form.get("employee_number", request.form.get("employee_id", "")).strip()
+    nama = request.form.get("name", request.form.get("full_name", "")).strip()
     email = request.form.get("email", "").strip().lower()
     hp = request.form.get("phone", "").strip()
     subject_id = request.form.get("subject_id") or None
@@ -533,18 +533,19 @@ def create_teacher():
 def edit_teacher(teacher_id):
     supabase = get_supabase()
     data = {}
-    for key in ("employee_id",):
-        val = request.form.get(key)
-        if val is not None:
-            data[key] = val.strip()
+    emp_id = request.form.get("employee_number", request.form.get("employee_id", ""))
+    if emp_id:
+        data["employee_id"] = emp_id.strip()
     subj = request.form.get("subject_id")
     data["subject_id"] = subj if subj else None
 
     profile_data = {}
-    for key in ("full_name", "phone"):
-        val = request.form.get(key)
-        if val is not None:
-            profile_data[key] = val.strip()
+    nama = request.form.get("name", request.form.get("full_name", ""))
+    if nama:
+        profile_data["full_name"] = nama.strip()
+    hp = request.form.get("phone", "")
+    if hp:
+        profile_data["phone"] = hp.strip()
     email = request.form.get("email", "").strip().lower()
     if email:
         profile_data["email_note"] = email  # not updateable via API
@@ -607,7 +608,7 @@ def create_student():
     sid = _school_id()
     supabase = get_supabase()
     nisn = request.form.get("nisn", "").strip()
-    nama = request.form.get("full_name", "").strip()
+    nama = request.form.get("name", request.form.get("full_name", "")).strip()
     email = request.form.get("email", "").strip().lower()
     class_id = request.form.get("class_id") or None
     password = request.form.get("password", "").strip() or _gen_password()
@@ -644,18 +645,16 @@ def create_student():
 def edit_student(student_id):
     supabase = get_supabase()
     data = {}
-    for key in ("nisn",):
-        val = request.form.get(key)
-        if val is not None:
-            data[key] = val.strip()
+    nisn = request.form.get("nisn", "")
+    if nisn:
+        data["nisn"] = nisn.strip()
     cls = request.form.get("class_id")
     data["class_id"] = cls if cls else None
 
     profile_data = {}
-    for key in ("full_name",):
-        val = request.form.get(key)
-        if val is not None:
-            profile_data[key] = val.strip()
+    nama = request.form.get("name", request.form.get("full_name", ""))
+    if nama:
+        profile_data["full_name"] = nama.strip()
 
     try:
         if data:
