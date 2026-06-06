@@ -15,9 +15,12 @@ except ImportError:
 
 def _load_midtrans_config():
     supabase = current_app.extensions["supabase"]
-    res = supabase.table("midtrans_settings").limit(1).execute()
-    if res.data:
-        return res.data[0]
+    try:
+        res = supabase.table("midtrans_settings").select("*").limit(1).execute()
+        if res.data:
+            return res.data[0]
+    except Exception:
+        pass
     return {}
 
 
