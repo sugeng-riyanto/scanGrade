@@ -957,10 +957,11 @@ function examApp(duration, totalQ) {
                 }])], {type: 'application/json'}));
             const maxV = this.antiCheat.max_violations || 0;
             if (maxV > 0 && this.violationCount >= maxV && this.antiCheat.auto_submit_on_max) {
+                if (this.submitted) return; // already submitted
                 this.violationMessage = 'PELANGGARAN MAKSIMAL! Ujian otomatis dikumpulkan.';
                 this.violationType = 'severe';
                 this.showViolationBanner = true;
-                setTimeout(() => { this.submitExam(); }, 3000);
+                setTimeout(() => { if (!this.submitted) this.submitExam(); }, 3000);
             }
         },
         startWatermark() {
@@ -1515,9 +1516,14 @@ function examApp(duration, totalQ) {
              if (!videoId) return '';
              return 'https://www.youtube.com/embed/' + videoId + '?rel=0&modestbranding=1';
          },
-        markAnswered(i, val) {
+        markAnswered(i, val, overwrite) {
             this.answered[i] = true;
-            this.questions[i].answer = val;
+            // For MCQ: don't overwrite letter answer (A/B/C/D) with boolean true from canvas drawing
+            if (this.questions[i].type === 'mcq' && val === true && typeof this.questions[i].answer === 'string') {
+                // Keep existing MCQ letter answer
+            } else {
+                this.questions[i].answer = val;
+            }
             this.markDirty();
         },
         selectedAnswer(i) { return this.questions[i]?.answer; },
