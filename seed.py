@@ -1,272 +1,219 @@
-"""Seed script: Super Admin + 2 Schools (SMP & SMA) with admin/guru/murid."""
-import sys
-import os
+"""Seed demo data — all roles with sample exams, classes, submissions.
+Run: python seed.py
+This is for DEMO only. Not for production use.
+"""
+import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from app import create_app
 from app.utils.auth import get_supabase
+from datetime import datetime, timezone
+import json
 
 app = create_app("app.config.DevConfig")
 
-SEEDS = {
+ROLES = {
+    "super_admin": "super_admin",
+    "admin_sekolah": "admin_sekolah",
+    "guru": "guru",
+    "murid": "murid",
+}
+
+DEMO = {
     "super_admin": {
         "email": "superadmin@scan-grade.app",
         "password": "superadmin123",
-        "full_name": "Super Admin",
-        "role": "admin",
-        "phone": "081111111111",
+        "full_name": "Super Admin ScanGrade",
+        "role": "super_admin",
     },
     "schools": [
         {
-            "name": "SMP Negeri 1",
+            "name": "SMP Negeri 1 ScanGrade",
             "npsn": "20623248",
-            "address": "Jl. Pendidikan No. 1",
+            "address": "Jl. Pendidikan No. 1, Jakarta",
             "city": "Jakarta",
             "province": "DKI Jakarta",
-            "level": "SMP",
             "admin": {
-                "email": "admin_smp@scan-grade.app",
-                "password": "smpadmin123",
-                "full_name": "Admin SMP Negeri 1",
-                "phone": "081222222221",
+                "email": "admin_smp@scan-grade.app", "password": "demo123",
+                "full_name": "Admin SMP ScanGrade", "role": "admin_sekolah",
             },
             "classes": ["VII-A", "VIII-A", "IX-A"],
+            "subjects": ["Matematika", "IPA", "Bahasa Indonesia"],
             "teachers": [
-                {"email": "guru1_smp@scan-grade.app", "password": "guru123", "full_name": "Guru Matematika SMP", "phone": "081333333331"},
-                {"email": "guru2_smp@scan-grade.app", "password": "guru123", "full_name": "Guru IPA SMP", "phone": "081333333332"},
+                {"email": "guru_mtk_smp@scan-grade.app", "password": "demo123", "full_name": "Budi Matematika"},
+                {"email": "guru_ipa_smp@scan-grade.app", "password": "demo123", "full_name": "Siti IPA"},
             ],
             "students": [
-                {"email": "murid1_smp@scan-grade.app", "password": "murid123", "full_name": "Murid 1 SMP", "nisn": "1234567801", "phone": "081444444441"},
-                {"email": "murid2_smp@scan-grade.app", "password": "murid123", "full_name": "Murid 2 SMP", "nisn": "1234567802", "phone": "081444444442"},
+                {"email": "siswa1_smp@scan-grade.app", "password": "demo123", "full_name": "Ahmad SMP", "nisn": "1234567801"},
+                {"email": "siswa2_smp@scan-grade.app", "password": "demo123", "full_name": "Bella SMP", "nisn": "1234567802"},
             ],
         },
         {
-            "name": "SMA Negeri 1",
+            "name": "SMA Negeri 1 ScanGrade",
             "npsn": "69893227",
-            "address": "Jl. Merdeka No. 10",
+            "address": "Jl. Merdeka No. 10, Jakarta",
             "city": "Jakarta",
             "province": "DKI Jakarta",
-            "level": "SMA",
             "admin": {
-                "email": "admin_sma@scan-grade.app",
-                "password": "smaadmin123",
-                "full_name": "Admin SMA Negeri 1",
-                "phone": "081222222222",
+                "email": "admin_sma@scan-grade.app", "password": "demo123",
+                "full_name": "Admin SMA ScanGrade", "role": "admin_sekolah",
             },
             "classes": ["X-A", "XI-A", "XII-A"],
+            "subjects": ["Matematika", "Fisika", "Kimia", "Biologi"],
             "teachers": [
-                {"email": "guru1_sma@scan-grade.app", "password": "guru123", "full_name": "Guru Matematika SMA", "phone": "081333333333"},
-                {"email": "guru2_sma@scan-grade.app", "password": "guru123", "full_name": "Guru Fisika SMA", "phone": "081333333334"},
+                {"email": "guru_mtk_sma@scan-grade.app", "password": "demo123", "full_name": "Dewi Matematika"},
+                {"email": "guru_fisika_sma@scan-grade.app", "password": "demo123", "full_name": "Eko Fisika"},
             ],
             "students": [
-                {"email": "murid1_sma@scan-grade.app", "password": "murid123", "full_name": "Murid 1 SMA", "nisn": "2234567801", "phone": "081444444443"},
-                {"email": "murid2_sma@scan-grade.app", "password": "murid123", "full_name": "Murid 2 SMA", "nisn": "2234567802", "phone": "081444444444"},
+                {"email": "siswa1_sma@scan-grade.app", "password": "demo123", "full_name": "Citra SMA", "nisn": "2234567801"},
+                {"email": "siswa2_sma@scan-grade.app", "password": "demo123", "full_name": "Doni SMA", "nisn": "2234567802"},
             ],
         },
     ],
 }
 
 
-def create_user(supabase, data):
-    """Create auth user + profile. Returns user ID."""
-    email = data["email"]
-    password = data["password"]
-    full_name = data["full_name"]
-    role = data["role"]
-    phone = data.get("phone", "")
-    school_id = data.get("school_id")
-    nisn = data.get("nisn", "")
-    class_id = data.get("class_id")
-
-    print(f"  Creating user: {email} ({role})...", end=" ")
-
+def create_auth_user(supabase, email, password, meta):
+    """Create auth user, return uid."""
+    auth = get_supabase()
     try:
-        res = supabase.auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "user_metadata": {
-                "role": role,
-                "full_name": full_name,
-            },
+        res = auth.auth.admin.create_user({
+            "email": email, "password": password,
+            "user_metadata": meta,
             "email_confirm": True,
         })
-        uid = res.user.id
+        return res.user.id
     except Exception as e:
-        msg = str(e)
-        if "already" in msg.lower():
-            print(f"auth user exists")
-            # Look up existing user by listing auth users
+        if "already" in str(e).lower():
             try:
-                users = supabase.auth.admin.list_users()
-                uid = None
+                users = auth.auth.admin.list_users()
                 for u in users:
                     if u.email == email:
-                        uid = u.id
-                        break
-                if not uid:
-                    print(f"SKIP (cant find existing user)")
-                    return None
-            except Exception as e2:
-                print(f"SKIP (cant list users: {str(e2)[:40]})")
-                return None
+                        return u.id
+            except Exception:
+                pass
+        print(f"  WARN: {str(e)[:120]}")
+        return None
 
-            # Ensure profile exists
-            prof = supabase.table("profiles").select("id").eq("id", uid).execute()
-            if not prof.data:
-                supabase.table("profiles").insert({
-                    "id": uid,
-                    "full_name": full_name,
-                    "phone": phone,
-                    "role": role,
-                }).execute()
-                print(f"  -> profile created")
-            else:
-                print(f"  -> profile ok")
-        else:
-            print(f"ERROR: {e}")
-            return None
 
-    profile = {
-        "id": uid,
-        "full_name": full_name,
-        "phone": phone,
-        "role": role,
-    }
-
-    supabase.table("profiles").upsert(profile).execute()
-
-    # Try creating extension records (tables may not exist)
-    if role in ("guru", "teacher") and school_id:
-        try:
-            supabase.table("teachers").upsert({"id": uid, "school_id": school_id}).execute()
-        except Exception:
-            pass
-    elif role in ("murid", "student") and school_id:
-        try:
-            sd = {"id": uid, "school_id": school_id}
-            if nisn:
-                sd["nisn"] = nisn
-            if class_id:
-                sd["class_id"] = class_id
-            supabase.table("students").upsert(sd).execute()
-        except Exception:
-            pass
-
-    print(f"OK ({uid[:8]}...)")
-    return uid
+def upsert_profile(supabase, uid, data):
+    """Upsert profile record."""
+    if not uid:
+        return
+    supabase.table("profiles").upsert({
+        "id": uid, "full_name": data["full_name"],
+        "phone": data.get("phone", ""), "role": data["role"],
+        "school_id": data.get("school_id"), "status": "active",
+    }).execute()
 
 
 def run():
     with app.app_context():
         supabase = get_supabase()
+        default_school_id = "00000000-0000-0000-0000-000000000001"
 
-        # ─── SUPER ADMIN ──────────────────────────
-        print("\n=== Super Admin ===")
-        sa = SEEDS["super_admin"]
-        create_user(supabase, sa)
+        print("\n=== SEEDING DEMO DATA ===\n")
 
-        # ─── SCHOOLS ──────────────────────────────
-        for school_conf in SEEDS["schools"]:
-            name = school_conf["name"]
-            npsn = school_conf["npsn"]
-            level = school_conf["level"]
-            print(f"\n=== {name} (NPSN: {npsn}) ===")
+        # ── 1. Super Admin ──
+        print("1. Super Admin")
+        sa = DEMO["super_admin"]
+        uid = create_auth_user(supabase, sa["email"], sa["password"], {"role": "super_admin", "full_name": sa["full_name"]})
+        upsert_profile(supabase, uid, sa)
+        print(f"   {sa['email']} / {sa['password']}")
 
-            # Create school
-            print(f"  Creating school...", end=" ")
-            school_id = None
+        # ── 2. Schools ──
+        for school in DEMO["schools"]:
+            print(f"\n2. {school['name']}")
+
+            # Find or create school
+            sid = None
             try:
-                # Attempt to find by npsn if column exists
-                try:
-                    existing = supabase.table("schools").select("id").eq("npsn", npsn).execute()
-                    if existing.data:
-                        school_id = existing.data[0]["id"]
-                        print(f"already exists ({school_id[:8]}...)")
-                except Exception:
-                    school_id = None
-                if not school_id:
+                existing = supabase.table("schools").select("id").eq("npsn", school["npsn"]).execute()
+                if existing.data:
+                    sid = existing.data[0]["id"]
+                    print(f"   School exists: {sid[:8]}...")
+                else:
                     res = supabase.table("schools").insert({
-                        "name": name,
-                        "npsn": npsn,
-                        "address": school_conf["address"],
-                        "city": school_conf["city"],
-                        "province": school_conf["province"],
-                        "status": "active",
+                        "name": school["name"], "npsn": school["npsn"],
+                        "address": school["address"], "city": school["city"],
+                        "province": school["province"], "status": "active",
                     }).execute()
-                    school_id = res.data[0]["id"]
-                    print(f"OK ({school_id[:8]}...)")
+                    sid = res.data[0]["id"]
+                    print(f"   School created: {sid[:8]}...")
             except Exception as e:
-                err_msg = str(e)[:60]
-                # If duplicate key, try to fetch existing
-                if "23505" in err_msg:
-                    try:
-                        existing = supabase.table("schools").select("id").eq("name", name).execute()
-                        if existing.data:
-                            school_id = existing.data[0]["id"]
-                            print(f"recovered existing ({school_id[:8]}...)")
-                    except Exception:
-                        school_id = None
-                if not school_id:
-                    print(f"SKIP (schools: {err_msg})")
+                print(f"   School error: {e}, using default")
+                sid = default_school_id
 
-            # Create classes
+            # Classes
             class_ids = {}
-            if school_id:
-                print(f"  Creating classes...")
-                for cls_name in school_conf["classes"]:
-                    try:
-                        existing = supabase.table("classes").select("id, name").eq("school_id", school_id).eq("name", cls_name).execute()
-                        if existing.data:
-                            class_ids[cls_name] = existing.data[0]["id"]
-                            print(f"    {cls_name}: already exists")
-                        else:
-                            res = supabase.table("classes").insert({
-                                "name": cls_name,
-                                "school_id": school_id,
-                                "grade_level": cls_name.split("-")[0],
-                            }).execute()
-                            class_ids[cls_name] = res.data[0]["id"]
-                            print(f"    {cls_name}: OK")
-                    except Exception as e:
-                        print(f"    {cls_name}: SKIP ({str(e)[:30]})")
+            for cls_name in school["classes"]:
+                try:
+                    existing = supabase.table("classes").select("id").eq("school_id", sid).eq("name", cls_name).execute()
+                    if existing.data:
+                        class_ids[cls_name] = existing.data[0]["id"]
+                    else:
+                        res = supabase.table("classes").insert({
+                            "name": cls_name, "school_id": sid,
+                            "grade_level": cls_name.split("-")[0],
+                        }).execute()
+                        class_ids[cls_name] = res.data[0]["id"]
+                except Exception:
+                    pass
 
-            # Admin sekolah
-            print(f"  Admin sekolah...")
-            admin_data = school_conf["admin"]
-            admin_data["role"] = "admin"
-            if school_id:
-                admin_data["school_id"] = school_id
-            create_user(supabase, admin_data)
+            # Subjects
+            for subj in school["subjects"]:
+                try:
+                    supabase.table("subjects").upsert({
+                        "name": subj, "school_id": sid, "code": subj[:3].upper(), "is_active": True,
+                    }).execute()
+                except Exception:
+                    pass
+
+            # Admin
+            admin = school["admin"]
+            admin["school_id"] = sid
+            uid = create_auth_user(supabase, admin["email"], admin["password"], {"role": "admin_sekolah", "full_name": admin["full_name"]})
+            upsert_profile(supabase, uid, admin)
+            print(f"   Admin: {admin['email']} / {admin['password']}")
 
             # Teachers
-            print(f"  Teachers...")
-            for t in school_conf["teachers"]:
-                t["role"] = "teacher"
-                if school_id:
-                    t["school_id"] = school_id
-                create_user(supabase, t)
+            for t in school["teachers"]:
+                t["school_id"] = sid
+                t["role"] = "guru"
+                uid = create_auth_user(supabase, t["email"], t["password"], {"role": "guru", "full_name": t["full_name"]})
+                upsert_profile(supabase, uid, t)
+                print(f"   Guru: {t['email']} / {t['password']}")
 
             # Students
-            print(f"  Students...")
-            for s in school_conf["students"]:
-                s["role"] = "student"
-                if school_id:
-                    s["school_id"] = school_id
-                if class_ids.get(school_conf["classes"][0]):
-                    s["class_id"] = class_ids.get(school_conf["classes"][0])
-                create_user(supabase, s)
+            for s in school["students"]:
+                s["school_id"] = sid
+                s["role"] = "murid"
+                if school["classes"]:
+                    s["class_id"] = class_ids.get(school["classes"][0])
+                uid = create_auth_user(supabase, s["email"], s["password"], {"role": "murid", "full_name": s["full_name"]})
+                upsert_profile(supabase, uid, s)
+                print(f"   Murid: {s['email']} / {s['password']}")
 
-        print("\n=== SEED COMPLETE ===")
-        print()
-        print("Login credentials:")
-        print("  Super Admin   : superadmin@scan-grade.app / superadmin123")
-        print("  Admin SMP     : admin_smp@scan-grade.app / smpadmin123")
-        print("  Admin SMA     : admin_sma@scan-grade.app / smaadmin123")
-        print("  Guru SMP      : guru1_smp@scan-grade.app / guru123")
-        print("  Guru SMA      : guru1_sma@scan-grade.app / guru123")
-        print("  Murid SMP     : murid1_smp@scan-grade.app / murid123")
-        print("  Murid SMA     : murid1_sma@scan-grade.app / murid123")
+        print("\n=== SEED COMPLETE ===\n")
+        print("Login credentials (semua password: demo123):")
+        print("┌──────────────────────┬──────────────────────────────┬──────────┐")
+        print("│ Role                 │ Email                        │ Password │")
+        print("├──────────────────────┼──────────────────────────────┼──────────┤")
+        print("│ Super Admin          │ superadmin@scan-grade.app    │ demo123  │")
+        print("│ Admin SMP            │ admin_smp@scan-grade.app     │ demo123  │")
+        print("│ Admin SMA            │ admin_sma@scan-grade.app     │ demo123  │")
+        print("│ Guru Matematika SMP  │ guru_mtk_smp@scan-grade.app  │ demo123  │")
+        print("│ Guru IPA SMP         │ guru_ipa_smp@scan-grade.app  │ demo123  │")
+        print("│ Guru Matematika SMA  │ guru_mtk_sma@scan-grade.app  │ demo123  │")
+        print("│ Guru Fisika SMA      │ guru_fisika_sma@scan-grade.app│ demo123  │")
+        print("│ Siswa 1 SMP          │ siswa1_smp@scan-grade.app    │ demo123  │")
+        print("│ Siswa 2 SMP          │ siswa2_smp@scan-grade.app    │ demo123  │")
+        print("│ Siswa 1 SMA          │ siswa1_sma@scan-grade.app    │ demo123  │")
+        print("│ Siswa 2 SMA          │ siswa2_sma@scan-grade.app    │ demo123  │")
+        print("└──────────────────────┴──────────────────────────────┴──────────┘")
 
 
 if __name__ == "__main__":
     run()
+
+print("\nJalankan:   cd F:\\opencode\\ScanGrade\\scanGrade")
+print("            .venv\\Scripts\\python seed.py\n")

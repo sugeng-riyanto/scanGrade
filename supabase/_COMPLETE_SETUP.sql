@@ -311,17 +311,33 @@ CREATE POLICY "exam_pdfs_delete" ON storage.objects FOR DELETE TO authenticated 
 
 -- 7. TRIGGERS
 -- ============================================================
-CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER AS $$
+-- Function to auto-create profile on auth signup.
+-- Uses SECURITY DEFINER + explicit search_path to avoid schema issues.
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
-    INSERT INTO profiles (id, full_name, role, school_id, status)
-    VALUES (NEW.id, NEW.raw_user_meta_data->>'full_name', COALESCE(NEW.raw_user_meta_data->>'role', 'murid'), (NEW.raw_user_meta_data->>'school_id')::UUID, 'active');
+    INSERT INTO public.profiles (id, full_name, role, status)
+    VALUES (
+        NEW.id,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
+        COALESCE(NEW.raw_user_meta_data->>'role', 'murid'),
+        'active'
+    )
+    ON CONFLICT (id) DO NOTHING;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
+-- Drop existing trigger if any, then recreate
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_new_user();
 
 -- Profile role change → auto-create teachers/students records
 CREATE OR REPLACE FUNCTION handle_profile_role_change()
