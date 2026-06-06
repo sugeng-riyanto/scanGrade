@@ -9,6 +9,48 @@
     </div>
     {% endfor %}
 
+    <!-- Petunjuk Penggunaan -->
+    <div class="card p-5 mb-6 border-l-4 border-l-primary-500" x-data="{ show: false }">
+        <button @click="show = !show" class="flex items-center justify-between w-full text-left">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-question-circle text-primary-500"></i>
+                <span class="font-extrabold text-slate-700">Petunjuk Penggunaan Halaman Ini</span>
+            </div>
+            <i class="fas text-slate-400" :class="show ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+        </button>
+        <div x-show="show" x-cloak class="mt-4 text-sm text-slate-600 space-y-3 leading-relaxed">
+            <p><strong>Apa itu halaman ini?</strong><br>
+            Di sini kamu bisa milih <strong>cara menghitung harga langganan</strong> untuk sekolah-sekolah pengguna ScanGrade. Ada dua pilihan:</p>
+
+            <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                <p class="font-bold text-blue-800">1. Flat Pricing (Harga Tetap)</p>
+                <p class="text-blue-700">Setiap sekolah bayar harga <strong>sama</strong>, tidak peduli berapa jumlah muridnya. Cocok untuk awal-awal biar sederhana.</p>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <p class="font-bold text-amber-800">2. Scaled Pricing (Harga Bertingkat)</p>
+                <p class="text-amber-700">Harga menyesuaikan <strong>jumlah murid</strong> di sekolah. Semakin banyak murid, semakin tinggi harga. Cocok kalau sekolah besar dan kecil butuh harga yang beda.</p>
+            </div>
+
+            <p><strong>Gimana cara pakenya?</strong></p>
+            <ol class="list-decimal list-inside space-y-1">
+                <li>Pilih salah satu model harga di bawah (tinggal klik).</li>
+                <li>Kalau pilih <strong>Scaled Pricing</strong>, kamu harus bikin <strong>Tier</strong> (tingkatan).<br>
+                    Contoh: <em>Murid 1-100 → harga ×1 (tetap), Murid 301-500 → harga ×2 (dua kali lipat)</em></li>
+                <li>Klik tombol <strong>Simpan Pengaturan</strong>.</li>
+                <li>Selesai. Sekolah-sekolah bakal lihat harga yang sesuai dengan jumlah murid mereka.</li>
+            </ol>
+
+            <p><strong>Catatan penting:</strong></p>
+            <ul class="list-disc list-inside space-y-1 text-slate-500">
+                <li>Kamu bisa ganti model harga <strong>kapan saja</strong>. Begitu disimpan, semua sekolah langsung lihat perubahan harganya.</li>
+                <li>Scaled Pricing hanya <strong>menyesuaikan harga</strong>, tidak memblokir sekolah. Sekolah tetap bisa langganan berapapun harga yang muncul.</li>
+                <li>Kolom <strong>Multiplier</strong> adalah faktor pengali. Contoh: Harga dasar paket Rp 399.000 × 2 = Rp 798.000.</li>
+                <li>Harga otomatis dibulatkan ke Rp 1.000 terdekat.</li>
+            </ul>
+        </div>
+    </div>
+
     <div class="card p-6 mb-6">
         <div class="flex items-center gap-3 mb-6">
             <div class="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600 text-xl"><i class="fas fa-tags"></i></div>
