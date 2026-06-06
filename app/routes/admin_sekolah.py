@@ -294,7 +294,7 @@ def _import_students(ws, sid, supabase, results):
                     classes_cache[kelas] = c.data["id"] if c.data else None
                 class_id = classes_cache.get(kelas)
 
-            user_email = email or f"siswa.{nisn}@school.local"
+            user_email = email or _generate_email(nama, _get_email_domain(sid))
             user_pw = _gen_password()
 
             res = supabase.auth.admin.create_user({
@@ -340,7 +340,7 @@ def _import_teachers(ws, sid, supabase, results):
                     subjects_cache[mapel] = s.data["id"] if s.data else None
                 subject_id = subjects_cache.get(mapel)
 
-            user_email = email or f"guru.{nip}@school.local"
+            user_email = email or _generate_email(nama, _get_email_domain(sid))
             user_pw = _gen_password()
 
             res = supabase.auth.admin.create_user({
@@ -675,9 +675,9 @@ def create_teacher():
         return redirect("/admin-sekolah/teachers")
 
     try:
-        user_email = email or f"guru.{_gen_password(6)}@school.local"
-        res = supabase.auth.admin.create_user({
-            "email": user_email, "password": password,
+            user_email = email or _generate_email(nama, _get_email_domain(sid))
+            res = supabase.auth.admin.create_user({
+                "email": user_email, "password": password,
             "user_metadata": {"role": "guru", "full_name": nama},
             "email_confirm": True,
         })
@@ -822,7 +822,7 @@ def create_student():
         return redirect("/admin-sekolah/students")
 
     try:
-        user_email = email or f"siswa.{nisn or _gen_password(6)}@school.local"
+        user_email = email or _generate_email(nama, _get_email_domain(sid))
         res = supabase.auth.admin.create_user({
             "email": user_email, "password": password,
             "user_metadata": {"role": "murid", "full_name": nama},
