@@ -227,6 +227,35 @@ def delete_class(class_id):
     return redirect("/admin/classes")
 
 
+@admin_bp.route("/school/data")
+@admin_required
+def school_data():
+    supabase = get_supabase()
+    settings = {}
+    try:
+        settings = supabase.table("school_settings").select("*").eq("id", 1).single().execute().data or {}
+    except Exception:
+        pass
+    stats = {"teachers": 0, "students": 0, "classes": 0, "exams": 0}
+    try:
+        stats["teachers"] = supabase.table("profiles").select("id", count="exact").eq("role", "guru").execute().count or 0
+    except Exception:
+        pass
+    try:
+        stats["students"] = supabase.table("profiles").select("id", count="exact").eq("role", "murid").execute().count or 0
+    except Exception:
+        pass
+    try:
+        stats["classes"] = supabase.table("classes").select("id", count="exact").execute().count or 0
+    except Exception:
+        pass
+    try:
+        stats["exams"] = supabase.table("exams").select("id", count="exact").execute().count or 0
+    except Exception:
+        pass
+    return jsonify({"settings": settings, "stats": stats})
+
+
 @admin_bp.route("/school", methods=["GET", "POST"])
 @admin_required
 def school():
@@ -240,19 +269,19 @@ def school():
     data = {
         "school_name": request.form.get("school_name", ""),
         "npsn": request.form.get("npsn", ""),
+        "principal_name": request.form.get("principal_name", ""),
         "address": request.form.get("address", ""),
         "province": request.form.get("province", ""),
         "city": request.form.get("city", ""),
         "district": request.form.get("district", ""),
         "academic_year": request.form.get("academic_year", "2025/2026"),
-        "principal_name": request.form.get("principal_name", ""),
         "tz_offset": int(request.form.get("tz_offset", 7)),
     }
     try:
         supabase.table("school_settings").update(data).eq("id", 1).execute()
     except Exception:
         supabase.table("school_settings").insert({**data, "id": 1}).execute()
-    return redirect("/admin/school")
+    return jsonify({"success": True})
 
 
 @admin_bp.route("/students/export")

@@ -2,12 +2,20 @@
 {% block title %}Pengaturan Sekolah - ScanGrade{% endblock %}
 {% block page_title %}Pengaturan Sekolah{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
-    <div>
-        <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'School Settings':'Pengaturan Sekolah'"></h2>
-        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Configure your school information':'Konfigurasi informasi sekolah Anda'"></p>
+<div class="space-y-6" x-data="schoolSettings()" x-init="init()">
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'School Settings':'Pengaturan Sekolah'"></h2>
+            <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Configure your school information':'Konfigurasi informasi sekolah Anda'"></p>
+        </div>
+        <template x-if="saved">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <i class="fas fa-check-circle"></i> <span x-text="saved"></span>
+            </span>
+        </template>
     </div>
 
+    <form method="POST" action="/admin/school" @submit="submitForm($event)">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- School Info -->
         <div class="card">
@@ -17,63 +25,135 @@
             <div class="p-5 space-y-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">NPSN</label>
-                    <input type="text" placeholder="Nomor Pokok Sekolah Nasional" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                    <input type="text" name="npsn" x-model="form.npsn" placeholder="Nomor Pokok Sekolah Nasional" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'School Name':'Nama Sekolah'"></label>
-                    <input type="text" placeholder="SMA Negeri 1 Contoh" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                    <input type="text" name="school_name" x-model="form.school_name" placeholder="SMA Negeri 1 Contoh" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'Principal':'Kepala Sekolah'"></label>
+                    <input type="text" name="principal_name" x-model="form.principal_name" placeholder="Nama Kepala Sekolah" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'Academic Year':'Tahun Ajaran'"></label>
-                    <input type="text" placeholder="2025/2026" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                    <input type="text" name="academic_year" x-model="form.academic_year" placeholder="2025/2026" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'Province':'Provinsi'"></label>
+                    <input type="text" name="province" x-model="form.province" placeholder="Provinsi" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'City / Regency':'Kota / Kabupaten'"></label>
+                    <input type="text" name="city" x-model="form.city" placeholder="Kota" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'District':'Kecamatan'"></label>
+                    <input type="text" name="district" x-model="form.district" placeholder="Kecamatan" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'Address':'Alamat'"></label>
-                    <textarea rows="2" placeholder="Alamat sekolah" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition resize-none"></textarea>
+                    <textarea rows="2" name="address" x-model="form.address" placeholder="Alamat sekolah" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition resize-none"></textarea>
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5" x-text="lang==='en'?'Timezone (UTC Offset)':'Zona Waktu (Offset UTC)'"></label>
-                    <select id="school-tz" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition bg-white">
+                    <select name="tz_offset" x-model="form.tz_offset" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition bg-white">
                         {% for h in range(-12, 15) %}
-                        <option value="{{ h }}" {% if h == g.tz_offset %}selected{% endif %}>UTC{{ "+%d"|format(h) if h >= 0 else h }} — {{ ["Baker Island","American Samoa","Hawaii","Alaska","Pacific Time","Mountain Time","Central Time","Eastern Time","Atlantic Time","Newfoundland","Brasilia","Fernando de Noronha","Azores","UTC","WIB Jakarta/Bangkok","WIB+1 Taipei/Perth","WIB+2 Tokyo/Seoul","WIB+3 Sydney","WIB+4 Brisbane","WIB+5 Adelaide","WIB+6 Auckland","WIB+7 Nuku'alofa","WIB+8","WIB+9","WIB+10","WIB+11","WIB+12"][h+12] if h+12 < 27 else "" }}</option>
+                        <option value="{{ h }}">UTC{{ "+%d"|format(h) if h >= 0 else h }}</option>
                         {% endfor %}
                     </select>
-                    <p class="text-xs text-slate-400 mt-1" x-text="lang==='en'?'Default for all users. Each user can override in top bar.':'Default untuk semua pengguna. Setiap pengguna bisa ubah di top bar.'"></p>
+                    <p class="text-xs text-slate-400 mt-1" x-text="lang==='en'?'Default timezone for all users in this school':'Zona waktu default untuk semua pengguna di sekolah ini'"></p>
                 </div>
-                <button class="bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 transition" x-text="lang==='en'?'Save Changes':'Simpan Perubahan'"></button>
+                <div class="flex items-center gap-3 pt-2">
+                    <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 transition flex items-center gap-2">
+                        <i class="fas fa-spinner fa-spin" x-show="saving" x-cloak></i>
+                        <span x-text="lang==='en'?'Save Changes':'Simpan Perubahan'"></span>
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Import Data -->
+        <!-- Quick Stats -->
         <div class="space-y-6">
             <div class="card">
                 <div class="px-5 py-4 border-b border-slate-100">
-                    <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Import Classes':'Impor Kelas'"></h3>
+                    <h3 class="font-bold text-slate-800" x-text="lang==='en'?'School Stats':'Statistik Sekolah'"></h3>
                 </div>
-                <div class="p-5">
-                    <p class="text-sm text-slate-500 font-medium mb-3" x-text="lang==='en'?'Upload a CSV file with class data':'Upload file CSV dengan data kelas'"></p>
-                    <div class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center hover:border-brand-400 transition cursor-pointer">
-                        <i class="fas fa-cloud-upload-alt text-3xl text-slate-300 mb-2"></i>
-                        <p class="text-sm font-semibold text-slate-500" x-text="lang==='en'?'Drop CSV here or click to upload':'Drop CSV di sini atau klik untuk upload'"></p>
-                        <p class="text-xs text-slate-400 mt-1">Format: kelas, wali_kelas</p>
+                <div class="p-5 grid grid-cols-2 gap-4">
+                    <div class="bg-gradient-to-br from-brand-50 to-brand-100/30 rounded-xl p-4 text-center">
+                        <p class="text-2xl font-extrabold text-brand-700" x-text="stats.teachers"></p>
+                        <p class="text-xs font-bold text-brand-500 mt-1" x-text="lang==='en'?'Teachers':'Guru'"></p>
+                    </div>
+                    <div class="bg-gradient-to-br from-emerald-50 to-emerald-100/30 rounded-xl p-4 text-center">
+                        <p class="text-2xl font-extrabold text-emerald-700" x-text="stats.students"></p>
+                        <p class="text-xs font-bold text-emerald-500 mt-1" x-text="lang==='en'?'Students':'Siswa'"></p>
+                    </div>
+                    <div class="bg-gradient-to-br from-amber-50 to-amber-100/30 rounded-xl p-4 text-center">
+                        <p class="text-2xl font-extrabold text-amber-700" x-text="stats.classes"></p>
+                        <p class="text-xs font-bold text-amber-500 mt-1" x-text="lang==='en'?'Classes':'Kelas'"></p>
+                    </div>
+                    <div class="bg-gradient-to-br from-orange-50 to-orange-100/30 rounded-xl p-4 text-center">
+                        <p class="text-2xl font-extrabold text-orange-700" x-text="stats.exams"></p>
+                        <p class="text-xs font-bold text-orange-500 mt-1" x-text="lang==='en'?'Exams':'Ujian'"></p>
                     </div>
                 </div>
             </div>
 
+            <!-- Import Data -->
             <div class="card">
                 <div class="px-5 py-4 border-b border-slate-100">
-                    <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Import Students':'Impor Siswa'"></h3>
+                    <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Import Data':'Impor Data'"></h3>
                 </div>
-                <div class="p-5">
-                    <p class="text-sm text-slate-500 font-medium mb-3" x-text="lang==='en'?'Upload a CSV file with student data (NISN)':'Upload file CSV dengan data siswa (NISN)'"></p>
-                    <div class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center hover:border-brand-400 transition cursor-pointer">
-                        <i class="fas fa-cloud-upload-alt text-3xl text-slate-300 mb-2"></i>
-                        <p class="text-sm font-semibold text-slate-500" x-text="lang==='en'?'Drop CSV here or click to upload':'Drop CSV di sini atau klik untuk upload'"></p>
-                        <p class="text-xs text-slate-400 mt-1">Format: nisn, nama, kelas</p>
+                <div class="p-5 space-y-4">
+                    <p class="text-sm text-slate-500 font-medium" x-text="lang==='en'?'Import teachers and students from Excel files':'Import guru dan siswa dari file Excel'"></p>
+                    <div class="flex gap-3">
+                        <a href="/admin/teachers/export" class="flex-1 text-center px-4 py-3 rounded-xl border-2 border-dashed border-slate-200 hover:border-brand-400 transition text-sm font-bold text-slate-500 hover:text-brand-600">
+                            <i class="fas fa-file-export mr-1"></i> <span x-text="lang==='en'?'Export Teachers':'Export Guru'"></span>
+                        </a>
+                        <a href="/admin/students/export" class="flex-1 text-center px-4 py-3 rounded-xl border-2 border-dashed border-slate-200 hover:border-brand-400 transition text-sm font-bold text-slate-500 hover:text-brand-600">
+                            <i class="fas fa-file-export mr-1"></i> <span x-text="lang==='en'?'Export Students':'Export Siswa'"></span>
+                        </a>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+    </form>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+function schoolSettings() {
+    return {
+        lang: localStorage.getItem('sg_lang') || 'id',
+        form: {
+            npsn: '', school_name: '', principal_name: '', academic_year: '2025/2026',
+            province: '', city: '', district: '', address: '', tz_offset: 7,
+        },
+        stats: { teachers: 0, students: 0, classes: 0, exams: 0 },
+        saved: '', saving: false,
+        init() {
+            fetch('/admin/school/data')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.settings) Object.assign(this.form, d.settings);
+                    if (d.stats) Object.assign(this.stats, d.stats);
+                })
+                .catch(() => {});
+        },
+        submitForm(e) {
+            this.saving = true; this.saved = '';
+            fetch('/admin/school', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: new URLSearchParams(this.form)
+            })
+            .then(r => { if (r.ok) { this.saved = new Date().toLocaleTimeString('id-ID'); } })
+            .catch(() => { alert('Gagal menyimpan'); })
+            .finally(() => { this.saving = false; });
+            e.preventDefault();
+        },
+    };
+}
+</script>
 {% endblock %}
