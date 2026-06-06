@@ -484,9 +484,24 @@ def teachers():
     sid = _school_id()
     supabase = get_supabase()
     subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-    teachers_list = supabase.table("teachers").select(
-        "*, profiles!inner(id, full_name, phone, status), subjects(name)"
+    teachers_raw = supabase.table("teachers").select(
+        "*, profiles!inner(id, full_name, phone), subjects(name)"
     ).eq("school_id", sid).order("employee_id").execute().data or []
+    # Flatten nested data for template
+    teachers_list = []
+    for t in teachers_raw:
+        prof = t.get("profiles") or {}
+        subj = t.get("subjects") or {}
+        teachers_list.append({
+            "id": t["id"],
+            "name": prof.get("full_name", "-"),
+            "employee_number": t.get("employee_id", ""),
+            "email": "",  # not stored in profiles table
+            "subject_name": subj.get("name", "-"),
+            "subject_id": t.get("subject_id"),
+            "phone": prof.get("phone", ""),
+            "employee_id": t.get("employee_id", ""),
+        })
     return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects)
 
 
@@ -596,9 +611,21 @@ def students():
     sid = _school_id()
     supabase = get_supabase()
     classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
-    students_list = supabase.table("students").select(
+    students_raw = supabase.table("students").select(
         "*, profiles!inner(id, full_name, phone, nisn), classes(name)"
     ).eq("school_id", sid).order("nisn").execute().data or []
+    students_list = []
+    for s in students_raw:
+        prof = s.get("profiles") or {}
+        cls = s.get("classes") or {}
+        students_list.append({
+            "id": s["id"],
+            "nisn": s.get("nisn", "") or prof.get("nisn", ""),
+            "name": prof.get("full_name", "-"),
+            "class_name": cls.get("name", "-"),
+            "class_id": s.get("class_id"),
+            "phone": prof.get("phone", ""),
+        })
     return render_template("admin_sekolah/students.html", students=students_list, classes=classes_list)
 
 
