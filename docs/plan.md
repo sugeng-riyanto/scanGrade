@@ -75,6 +75,23 @@
 | Storage buckets | ✅ | exam-pdfs, student-answers |
 | Triggers (auto-profile, role change) | ✅ | |
 
+## Fase 8: Subscription & Payment ✅ (Selesai)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Midtrans integration (Snap API) | ✅ | Sandbox/production toggle |
+| Subscription plans CRUD | ✅ | Super admin manages 10 plans |
+| Pricing model toggle (flat/scaled) | ✅ | By student count with tiers |
+| Activation codes (auto + manual) | ✅ | Generated on payment success or cash |
+| Super admin code management | ✅ | Generate by NPSN, regenerate, activate cash |
+| Admin sekolah redeem code | ✅ | Hidden toggle, input + validate |
+| Read-only mode on expiry | ✅ | `@subscription_write_required` decorator |
+| Midtrans webhook handler | ✅ | Stores VA numbers, payment details |
+| Transaction status API | ✅ | Real-time check from Midtrans |
+| Admin fee passed to customer | ✅ | Configurable flat + percentage |
+| Payment status page (3 states) | ✅ | Pending/success/failure with auto-poll |
+| NPSN data reset | ✅ | Super admin deletes all school data by NPSN |
+
 ---
 
 ## Milestones
@@ -89,3 +106,4 @@
 | M6: Analytics + export | Week 6 | ✅ |
 | M7: Multi-school + RLS | Week 7 | ✅ |
 | M8: Final integration + testing | Week 8 | ✅ Complete |
+| M9: Subscription & Payment (Midtrans) | Week 9 | ✅ Complete |

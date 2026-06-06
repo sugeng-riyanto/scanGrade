@@ -1,13 +1,13 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 13 June 2026
+**Last Updated:** 15 June 2026
 
 ---
 
 ## Overall Progress
 
 ```
-██████████████████████████  97%
+██████████████████████████  98%
 ```
 
 | Area | Progress | Status |
@@ -26,6 +26,7 @@
 | Analytics | 90% | ✅ Working |
 | Export | 95% | ✅ Stable |
 | Anti-Cheat | 95% | ✅ Stable |
+| **Subscription & Payment** | **90%** | **✅ Working** |
 | Multi-School | 85% | ⚠️ Needs routes |
 | OMR Scanning | 70% | ⚠️ Camera works |
 
@@ -42,6 +43,25 @@
 ---
 
 ## Changelog
+
+### 15 June 2026 — Subscription & Payment System
+- **Midtrans integration**: Snap API for payment processing, sandbox/production toggle
+- **Subscription plans**: 10 configurable plans (1mo–lifetime) with CRUD by super admin
+- **Pricing models**: Flat (fixed per school) or Scaled (based on student count) toggleable by super admin
+- **Activation codes**: Auto-generated on successful Midtrans payment or manual cash activation
+- **Activation code management**: Super admin can generate by NPSN, regenerate, activate cash
+- **Admin sekolah redeem**: Hidden toggle section to enter activation code → activate subscription
+- **Activation code hidden by default**: Show/hide toggle with eye icon, copy on reveal
+- **Read-only mode on expiry**: Teachers/students can login & view history but cannot create/update/delete
+- **Subscription decorator**: `@subscription_write_required` blocks write routes when expired
+- **Midtrans webhook**: Payment notification handler stores VA numbers, payment details
+- **Transaction status API**: `/api/transaction/status` checks Midtrans directly for real-time status
+- **Admin fee**: Configurable flat fee + percentage passed to customer (itemized in Snap)
+- **Embedded Snap widget**: `snap.embed()` renders payment directly on page, no popup/new tab
+- **Payment status page**: 3 states (pending/success/failure) with auto-polling
+- **NPSN data reset**: Super admin can delete all data for a school by NPSN
+- **Registration requests**: Full CRUD (list, detail, approve, reject, delete)
+- **Trial settings**: Configurable trial duration by super admin
 
 ### 13 June 2026 — Penalty & PDF Polish
 - **Penalty fix**: `calculate_graduated_penalty` now checks `anti_cheat_enabled is False` (not `not get()`), so `None` (missing column) defaults to enabled
