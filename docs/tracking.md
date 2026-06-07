@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 25 June 2026
+**Last Updated:** 28 June 2026
 
 ---
 
@@ -44,6 +44,13 @@
 ---
 
 ## Changelog
+
+### 28 June 2026 — Custom Provider & Subject Prompts
+- **Custom AI provider**: Any OpenAI-compatible API with custom base URL and model name
+- **11 subject-specific prompts**: IPA/Sains, Matematika, Bahasa, IPS, ICT, Agama, PJOK, IoT + Default/Ketat/Ringan
+- **Multiple prompt tabs**: Tab UI with add/remove, radio selector for active prompt
+- **Auto-upgrade legacy data**: Old teacher settings auto-upgraded to 11 prompts
+- **API isolation**: AI keys per-teacher account, never shared across accounts
 
 ### 25 June 2026 — AI Essay Grading System
 - **AI service**: 4 provider support (Gemini, OpenAI, DeepSeek, Groq) + custom provider with base URL
