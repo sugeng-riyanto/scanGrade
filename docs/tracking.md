@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 4 July 2026
+**Last Updated:** 6 July 2026
 
 ---
 
@@ -44,6 +44,17 @@
 ---
 
 ## Changelog
+
+### 6 July 2026 — Critical Bugfixes & UI Modernization
+- **MCQ answer "True" fix**: Canvas drawing no longer overwrites MCQ answer with boolean `true` — only letter answers (A/B/C/D/E) are stored for MCQ
+- **Essay text auto-save**: Added `onAnswerInput()` function so textarea content triggers draft save
+- **Draft restore fix**: `loadDraft()` now restores `answersText` for essay_text questions
+- **Violation count safety**: Query wrapped in try/except to prevent submit crash
+- **Exam page UI**: Updated top bar, agreement modal, sidebar — primary color scheme, gradient buttons
+- **Student dashboard UI**: Gradient stat cards, hover animations, modern table
+- **Student exam list UI**: Card hover + shadow + gradient buttons
+- **Student results UI**: Status icons, filter toggle, modern table
+- **Progress**: 99% complete, all core features stable and verified
 
 ### 4 July 2026 — UI/UX Modernization & Landing Page Refresh
 - **Landing page refresh**: 8 feature cards (3 tipe soal, AI grading, anti-cheat, alat ukur, analitik, multi-sekolah, pembayaran, kalkulator), modern CTA section
