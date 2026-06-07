@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 8 July 2026
+**Last Updated:** 10 July 2026
 
 ---
 
@@ -52,6 +52,14 @@
 - **Blueprint verification**: All 10 blueprints registered (auth, teacher, student, admin, super_admin, etc.)
 - **Anti-cheat**: Graduated penalty, auto-submit, rate limiting verified intact
 - **Class/subject CRUD**: Admin sekolah — full CRUD. Teacher — read-only. Student — exam only.
+
+### 10 July 2026 — Demo Data Refresh & Relationship Audit
+- **Demo data refreshed**: 3 schools (SMP/SMA/SMK), all synchronized — classes, subjects, teachers, students, assignments, school years, subscriptions
+- **School_id on exams**: Exam creation now includes `school_id` for proper multi-school isolation
+- **Admin sekolah access**: Grading center & results now support admin_sekolah (by school_id fallback)
+- **Student exam filter**: Dashboard & exam list now filter by school_id (security fix)
+- **Teacher students filter**: Student list now filtered by school_id (security fix)
+- **Demo page**: Updated with complete user list per school, copy-to-clipboard on emails
 
 ### 8 July 2026 — Role Simulation & Bugfix Audit
 - **Admin sekolah bugs fixed**:
