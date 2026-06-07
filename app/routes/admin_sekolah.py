@@ -524,6 +524,12 @@ def classes():
     classes_list = supabase.table("classes").select("*, profiles!classes_teacher_id_fkey(full_name)").eq("school_id", sid).order("name").execute().data or []
     for c in classes_list:
         c["wali_kelas"] = (c.get("profiles") or {}).get("full_name")
+        c["wali_kelas_id"] = c.get("teacher_id")
+        try:
+            sc = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", sid).eq("class_id", c["id"]).execute()
+            c["student_count"] = sc.count or 0
+        except Exception:
+            c["student_count"] = 0
     teachers = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("school_id", sid).execute().data or []
     years = supabase.table("school_years").select("*").eq("school_id", sid).order("name", desc=True).execute().data or []
     return render_template("admin_sekolah/classes.html", classes=classes_list, teachers=teachers, years=years)
@@ -693,7 +699,14 @@ def promote():
         flash(f"{moved} murid berhasil dipindahkan ke kelas tujuan", "success")
         return redirect("/admin-sekolah/promote")
 
-    classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+    classes_list = supabase.table("classes").select("*, school_years!left(name)").eq("school_id", sid).order("name").execute().data or []
+    for c in classes_list:
+        try:
+            sc = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", sid).eq("class_id", c["id"]).execute()
+            c["student_count"] = sc.count or 0
+        except Exception:
+            c["student_count"] = 0
+        c["school_year_name"] = (c.get("school_years") or {}).get("name", "")
     teachers = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("school_id", sid).execute().data or []
     years = supabase.table("school_years").select("*").eq("school_id", sid).order("name", desc=True).execute().data or []
     return render_template("admin_sekolah/promote.html", classes=classes_list, teachers=teachers, years=years)
