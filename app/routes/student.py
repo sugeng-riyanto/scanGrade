@@ -17,8 +17,25 @@ def dashboard():
 
     available_exams = []
     submitted_ids = set()
+    student_class_id = None
+    student_school_id = None
     try:
-        available_exams = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").execute().data or []
+        prof = supabase.table("profiles").select("class_id, school_id").eq("id", g.user_id).single().execute()
+        if prof.data:
+            student_class_id = prof.data.get("class_id")
+            student_school_id = prof.data.get("school_id")
+    except Exception:
+        pass
+    try:
+        query = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active")
+        if student_school_id:
+            query = query.eq("school_id", student_school_id)
+        all_exams = query.execute().data or []
+        # Filter by class_id if student has one
+        if student_class_id:
+            available_exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0 or student_class_id in e.get("class_ids", [])]
+        else:
+            available_exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0]
         subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
         submitted_ids = {s["exam_id"] for s in subs_ids}
     except Exception as e:

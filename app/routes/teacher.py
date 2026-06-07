@@ -224,6 +224,7 @@ def exam_form():
 
     data = {
         "teacher_id": g.user_id,
+        "school_id": g.get("user_school_id"),
         "title": title,
         "subject": subject,
         "subject_id": subject_id,
@@ -595,14 +596,22 @@ def reject_retraction(submission_id):
 @teacher_or_admin_required
 def results():
     exam_id = request.args.get("exam_id")
+    supabase = get_supabase()
+    user_role = g.get("user_role")
+    school_id = g.get("user_school_id")
+
     if not exam_id:
-        supabase = get_supabase()
-        exams = supabase.table("exams").select("id,title").eq("teacher_id", g.user_id).execute().data
+        query = supabase.table("exams").select("id,title").eq("teacher_id", g.user_id)
+        if user_role == "admin_sekolah" and school_id:
+            query = supabase.table("exams").select("id,title").eq("school_id", school_id)
+        exams = query.execute().data or []
         return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams)
 
-    supabase = get_supabase()
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
-    exams = supabase.table("exams").select("id,title").eq("teacher_id", g.user_id).execute().data or []
+    query = supabase.table("exams").select("id,title").eq("teacher_id", g.user_id)
+    if user_role == "admin_sekolah" and school_id:
+        query = supabase.table("exams").select("id,title").eq("school_id", school_id)
+    exams = query.execute().data or []
 
     for s in subs:
         if s.get("profiles"):
@@ -776,7 +785,12 @@ def bubble_sheet(exam_id):
 @teacher_or_admin_required
 def grading_center():
     supabase = get_supabase()
+    user_role = g.get("user_role")
+    school_id = g.get("user_school_id")
     exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
+    # For admin_sekolah, also get exams from their school
+    if not exam_ids and user_role == "admin_sekolah" and school_id:
+        exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("school_id", school_id).execute().data or []]
     pending_subs = []
     graded_subs = []
     if exam_ids:
