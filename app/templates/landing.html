@@ -35,19 +35,27 @@
             </div>
             <div class="mt-6 flex items-center justify-center gap-3">
                 {% set ds = get_demo_settings() %}
-                {% set show_tutorial = not ds or ds.demo_tutorial %}
-                {% set show_tg = ds.demo_tutorial_guru is defined if ds is mapping else true %}
-                {% if (show_tutorial or not ds) or (ds is mapping and (ds.get('demo_tutorial_guru', show_tutorial) or show_tutorial)) %}
+                {% if ds is mapping %}
+                    {% set show_tutorial = ds.get('demo_tutorial', true) %}
+                    {% set show_tg = ds.get('demo_tutorial_guru', show_tutorial) %}
+                    {% set show_ts = ds.get('demo_tutorial_siswa', show_tutorial) %}
+                    {% set show_ta = ds.get('demo_tutorial_admin', show_tutorial) %}
+                {% else %}
+                    {% set show_tg = true %}
+                    {% set show_ts = true %}
+                    {% set show_ta = true %}
+                {% endif %}
+                {% if show_tg %}
                 <a href="/tutorial/guru" class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
                     <i class="fas fa-chalkboard-teacher"></i>Tutorial Guru
                 </a>
                 {% endif %}
-                {% if (show_tutorial or not ds) or (ds is mapping and (ds.get('demo_tutorial_siswa', show_tutorial) or show_tutorial)) %}
+                {% if show_ts %}
                 <a href="/tutorial/murid" class="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200">
                     <i class="fas fa-user-graduate"></i>Tutorial Siswa
                 </a>
                 {% endif %}
-                {% if (show_tutorial or not ds) or (ds is mapping and (ds.get('demo_tutorial_admin', show_tutorial) or show_tutorial)) %}
+                {% if show_ta %}
                 <a href="/tutorial/admin-sekolah" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition border border-blue-200">
                     <i class="fas fa-school"></i>Tutorial Admin
                 </a>
