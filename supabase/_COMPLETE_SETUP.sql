@@ -488,6 +488,10 @@ CREATE TABLE IF NOT EXISTS teacher_ai_settings (
 ALTER TABLE teacher_ai_keys ADD COLUMN IF NOT EXISTS base_url TEXT DEFAULT '';
 ALTER TABLE teacher_ai_keys ADD COLUMN IF NOT EXISTS model_name TEXT DEFAULT '';
 
+-- Add columns to teacher_ai_settings (for existing tables)
+ALTER TABLE teacher_ai_settings ADD COLUMN IF NOT EXISTS prompts JSONB DEFAULT '[{"id": "default", "label": "Default", "template": "Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: \"{answer}\"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"}]';
+ALTER TABLE teacher_ai_settings ADD COLUMN IF NOT EXISTS active_prompt_id TEXT DEFAULT 'default';
+
 CREATE TABLE IF NOT EXISTS ai_grading_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     teacher_id UUID NOT NULL,
