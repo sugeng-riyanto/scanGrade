@@ -940,6 +940,90 @@ def delete_assignment(assignment_id):
         return jsonify({"error": str(e)}), 400
 
 
+@teacher_bp.route("/ai-settings")
+@teacher_or_admin_required
+def ai_settings():
+    supabase = get_supabase()
+    keys = supabase.table("teacher_ai_keys").select("*").eq("teacher_id", g.user_id).order("created_at", desc=True).execute().data or []
+    settings_res = supabase.table("teacher_ai_settings").select("*").eq("teacher_id", g.user_id).limit(1).execute()
+    if not settings_res.data:
+        default_prompt = 'Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: "{answer}"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {"score": <number>, "feedback": "<string>"}'
+        supabase.table("teacher_ai_settings").insert({"teacher_id": g.user_id, "prompt_template": default_prompt}).execute()
+        settings = {"teacher_id": g.user_id, "prompt_template": default_prompt}
+    else:
+        settings = settings_res.data[0]
+    return render_template("teacher/ai_settings.html", keys=keys, settings=settings)
+
+
+@teacher_bp.route("/ai-settings/add-key", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def ai_add_key():
+    supabase = get_supabase()
+    provider = request.form.get("provider", "gemini")
+    api_key = request.form.get("api_key", "").strip()
+    label = request.form.get("label", "").strip()
+    if not api_key:
+        flash("API Key wajib diisi", "error")
+        return redirect("/teacher/ai-settings")
+    supabase.table("teacher_ai_keys").update({"is_active": False}).eq("teacher_id", g.user_id).execute()
+    supabase.table("teacher_ai_keys").insert({
+        "teacher_id": g.user_id, "provider": provider,
+        "api_key": api_key, "label": label or provider,
+        "is_active": True,
+    }).execute()
+    flash("API Key berhasil ditambahkan dan diaktifkan", "success")
+    return redirect("/teacher/ai-settings")
+
+
+@teacher_bp.route("/ai-settings/<key_id>/toggle", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def ai_toggle_key(key_id):
+    supabase = get_supabase()
+    key = supabase.table("teacher_ai_keys").select("is_active").eq("id", key_id).eq("teacher_id", g.user_id).single().execute()
+    if key.data:
+        if key.data.get("is_active"):
+            supabase.table("teacher_ai_keys").update({"is_active": False}).eq("id", key_id).execute()
+        else:
+            supabase.table("teacher_ai_keys").update({"is_active": False}).eq("teacher_id", g.user_id).execute()
+            supabase.table("teacher_ai_keys").update({"is_active": True}).eq("id", key_id).execute()
+    return redirect("/teacher/ai-settings")
+
+
+@teacher_bp.route("/ai-settings/<key_id>/delete", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def ai_delete_key(key_id):
+    supabase = get_supabase()
+    supabase.table("teacher_ai_keys").delete().eq("id", key_id).eq("teacher_id", g.user_id).execute()
+    flash("API Key berhasil dihapus", "success")
+    return redirect("/teacher/ai-settings")
+
+
+@teacher_bp.route("/ai-settings/save-prompt", methods=["POST"])
+@teacher_or_admin_required
+def ai_save_prompt():
+    supabase = get_supabase()
+    prompt = request.form.get("prompt_template", "").strip()
+    if not prompt:
+        flash("Prompt tidak boleh kosong", "error")
+        return redirect("/teacher/ai-settings")
+    supabase.table("teacher_ai_settings").upsert({"teacher_id": g.user_id, "prompt_template": prompt}).execute()
+    flash("Prompt berhasil disimpan", "success")
+    return redirect("/teacher/ai-settings")
+
+
+@teacher_bp.route("/ai-settings/reset-prompt", methods=["POST"])
+@teacher_or_admin_required
+def ai_reset_prompt():
+    default_prompt = 'Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: "{answer}"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {"score": <number>, "feedback": "<string>"}'
+    supabase = get_supabase()
+    supabase.table("teacher_ai_settings").upsert({"teacher_id": g.user_id, "prompt_template": default_prompt}).execute()
+    flash("Prompt dikembalikan ke default", "success")
+    return redirect("/teacher/ai-settings")
+
+
 @teacher_bp.route("/students")
 @teacher_or_admin_required
 def students():

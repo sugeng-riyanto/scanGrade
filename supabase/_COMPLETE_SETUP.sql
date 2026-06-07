@@ -463,3 +463,37 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS publish_mode TEXT DEFAULT 'manual';
 -- Prevent duplicate class/subject names per school
 ALTER TABLE classes ADD COLUMN IF NOT EXISTS created_by UUID;
 ALTER TABLE subjects ADD COLUMN IF NOT EXISTS created_by UUID;
+
+-- AI-powered essay grading
+CREATE TABLE IF NOT EXISTS teacher_ai_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    teacher_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL DEFAULT 'gemini',
+    api_key TEXT NOT NULL DEFAULT '',
+    label TEXT DEFAULT '',
+    is_active BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS teacher_ai_settings (
+    teacher_id UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    prompt_template TEXT NOT NULL DEFAULT 'Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: "{answer}"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {"score": <number>, "feedback": "<string>"}',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS ai_grading_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    teacher_id UUID NOT NULL,
+    submission_id UUID NOT NULL,
+    question_index INT NOT NULL,
+    ai_provider TEXT NOT NULL,
+    ai_score DECIMAL(5,2),
+    final_score DECIMAL(5,2),
+    ai_feedback TEXT,
+    prompt_sent TEXT,
+    raw_response TEXT,
+    tokens_used INT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);

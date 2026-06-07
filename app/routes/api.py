@@ -477,3 +477,32 @@ def redeem_activation_code():
     _activate_subscription(school_id, tx_data.get("plan_id"), tx_data["order_id"], supabase)
 
     return jsonify({"success": True, "message": "Langganan berhasil diaktifkan!"})
+
+
+@api_bp.route("/ai/test-key", methods=["POST"])
+@login_required
+def ai_test_key():
+    data = request.get_json()
+    key_id = (data or {}).get("key_id", "")
+    if not key_id:
+        return jsonify({"success": False, "message": "key_id required"}), 400
+    from app.services.ai_service import test_api_key
+    result = test_api_key(g.user_id, key_id)
+    return jsonify(result)
+
+
+@api_bp.route("/grade/ai-suggest", methods=["POST"])
+@login_required
+def ai_suggest():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+    question = data.get("question", "")
+    answer = data.get("answer", "")
+    max_score = data.get("max_score", 100)
+    rubric = data.get("rubric", "")
+    if not answer:
+        return jsonify({"error": "Jawaban siswa kosong"}), 400
+    from app.services.ai_service import suggest_grade
+    result = suggest_grade(g.user_id, question, answer, max_score, rubric)
+    return jsonify(result)
