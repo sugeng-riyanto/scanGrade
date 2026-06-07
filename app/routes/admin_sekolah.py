@@ -1134,7 +1134,7 @@ def subscription():
 
     plans = []
     try:
-        plans = supabase.table("subscription_plans").select("*").eq("is_active", True).order("sort_order").execute().data or []
+        plans = supabase.table("subscription_plans").select("*").eq("is_active", True).order("sort_order").limit(10).execute().data or []
     except Exception:
         pass
 

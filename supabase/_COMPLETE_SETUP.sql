@@ -428,6 +428,9 @@ CREATE TABLE IF NOT EXISTS trial_settings (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Prevent duplicate plan names
+ALTER TABLE subscription_plans ADD CONSTRAINT IF NOT EXISTS subscription_plans_name_key UNIQUE (name);
+
 INSERT INTO subscription_plans (name, duration_label, duration_days, price, sort_order) VALUES
     ('1 Bulan', '1 Bulan', 30, 59000, 1),
     ('3 Bulan', '3 Bulan', 90, 149000, 2),
