@@ -1307,11 +1307,10 @@ def download_invoice_pdf(invoice_id):
 <html><head><meta charset="utf-8">
 <style>
 @page {{ size: A4; margin: 2cm; }}
-body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b; position: relative; }}
-.watermark {{ position: fixed; top: 40%; left: 10%; width: 80%; height: 20%; z-index: -1;
-  display: flex; align-items: center; justify-content: center; pointer-events: none; }}
-.watermark span {{ font-size: 80pt; font-weight: 900; color: rgba(5, 150, 105, 0.08);
-  transform: rotate(-35deg); letter-spacing: 15px; white-space: nowrap; }}
+body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b; }}
+.watermark {{ position: absolute; left: 50%; top: 45%; margin-left: -250px; margin-top: -50px;
+  z-index: -1; font-size: 90pt; font-weight: 900; color: #d1fae5;
+  -pdf-rotate: 55; letter-spacing: 18px; white-space: nowrap; }}
 .invoice {{ max-width: 100%; }}
 .header {{ text-align: center; padding-bottom: 10px; margin-bottom: 18px; }}
 .header h1 {{ font-size: 22pt; color: #1e293b; margin: 0 0 2px; }}
@@ -1328,7 +1327,7 @@ body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b;
 .status-badge {{ display: inline-block; padding: 2px 10px; background: #059669; color: white; font-weight: bold; font-size: 8pt; border-radius: 3px; }}
 </style></head><body>
 
-<div class="watermark"><span>LUNAS</span></div>
+<div class="watermark">LUNAS</div>
 
 <div class="invoice">
 <div class="header">
