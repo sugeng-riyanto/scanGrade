@@ -3,7 +3,7 @@
 {% block content_noauth %}
 {% set ds = get_demo_settings() %}
 <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50">
-    <header class="px-6 py-4 flex items-center justify-between max-w-5xl mx-auto">
+    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
         <div class="flex items-center gap-2">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg">
                 <i class="fas fa-flask text-white text-sm"></i>
@@ -13,73 +13,185 @@
         <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i>Beranda</a>
     </header>
 
-    <main class="max-w-4xl mx-auto px-6 py-12">
+    <main class="max-6xl mx-auto px-6 py-12">
         <div class="text-center mb-12">
             <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-100 rounded-full text-purple-700 text-xs font-bold mb-4">🧪 Demo Mode</div>
             <h1 class="text-3xl font-extrabold text-surface-900">Coba ScanGrade Sekarang</h1>
-            <p class="mt-2 text-surface-500">Gunakan akun demo di bawah untuk mencoba semua fitur. Semua password: <strong>demo123</strong></p>
+            <p class="mt-2 text-surface-500">Gunakan akun demo di bawah. Semua password: <strong class="text-purple-600">demo123</strong> (kecuali Super Admin: <strong class="text-purple-600">superadmin123</strong>)</p>
         </div>
 
-        <div class="grid gap-6">
+        <div class="space-y-6">
+            <!-- SUPER ADMIN -->
             {% if not ds or ds.demo_super_admin %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-purple-100 flex items-start gap-5">
-                <div class="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0"><i class="fas fa-crown text-purple-600 text-2xl"></i></div>
-                <div class="flex-1">
-                    <h3 class="font-extrabold text-surface-800">Super Admin</h3>
-                    <p class="text-sm text-surface-500">Akses penuh ke semua sekolah, pengguna, dan pengaturan sistem.</p>
-                    <div class="mt-3 flex items-center gap-3 text-sm">
-                        <code class="px-3 py-1.5 bg-purple-50 rounded-lg text-purple-700 font-mono text-xs">superadmin@scan-grade.app</code>
-                        <code class="px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 font-mono text-xs">superadmin123</code>
-                        <a href="/auth/login" class="px-4 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 transition">Login</a>
+            <div class="bg-white rounded-2xl p-6 shadow-lg border border-purple-100">
+                <div class="flex items-start gap-5">
+                    <div class="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0"><i class="fas fa-crown text-purple-600 text-2xl"></i></div>
+                    <div class="flex-1">
+                        <h3 class="font-extrabold text-surface-800">Super Admin</h3>
+                        <p class="text-sm text-surface-500">Akses penuh ke semua sekolah, pengguna, dan pengaturan sistem.</p>
                     </div>
+                </div>
+                <div class="mt-3 flex items-center gap-3 text-sm">
+                    <code class="px-3 py-1.5 bg-purple-50 rounded-lg text-purple-700 font-mono text-xs">superadmin@scan-grade.app</code>
+                    <code class="px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 font-mono text-xs">superadmin123</code>
+                    <a href="/auth/login" class="px-4 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 transition">Login</a>
                 </div>
             </div>
             {% endif %}
 
+            <!-- ADMIN SEKOLAH -->
             {% if not ds or ds.demo_admin_sekolah %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-blue-100 flex items-start gap-5">
-                <div class="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center shrink-0"><i class="fas fa-school text-blue-600 text-2xl"></i></div>
-                <div class="flex-1">
-                    <h3 class="font-extrabold text-surface-800">Admin Sekolah</h3>
-                    <p class="text-sm text-surface-500">Kelola guru, siswa, kelas, dan mata pelajaran.</p>
-                    <div class="mt-3 flex flex-wrap gap-2">
-                        <span class="px-3 py-1.5 bg-blue-50 rounded-lg text-blue-700 font-mono text-xs">admin_smp@scan-grade.app</span>
-                        <span class="px-3 py-1.5 bg-blue-50 rounded-lg text-blue-700 font-mono text-xs">admin_sma@scan-grade.app</span>
-                        <span class="px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 font-mono text-xs">demo123</span>
-                        <a href="/auth/login" class="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition">Login</a>
+            <div class="bg-white rounded-2xl p-6 shadow-lg border border-blue-100">
+                <div class="flex items-start gap-5">
+                    <div class="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center shrink-0"><i class="fas fa-school text-blue-600 text-2xl"></i></div>
+                    <div class="flex-1">
+                        <h3 class="font-extrabold text-surface-800">Admin Sekolah</h3>
+                        <p class="text-sm text-surface-500">Kelola guru, siswa, kelas, dan mata pelajaran.</p>
+                    </div>
+                </div>
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                        <p class="text-xs font-bold text-blue-800">SMP N 1 ScanGrade</p>
+                        <p class="text-xs text-blue-600">NPSN: 20623248</p>
+                        <code class="block mt-1 text-xs font-mono">admin_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                        <a href="/auth/login" class="mt-1 inline-block px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700">Login</a>
+                    </div>
+                    <div class="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                        <p class="text-xs font-bold text-blue-800">SMA N 1 ScanGrade</p>
+                        <p class="text-xs text-blue-600">NPSN: 69893227</p>
+                        <code class="block mt-1 text-xs font-mono">admin_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                        <a href="/auth/login" class="mt-1 inline-block px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700">Login</a>
+                    </div>
+                    <div class="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                        <p class="text-xs font-bold text-blue-800">SMK Teknologi ScanGrade</p>
+                        <p class="text-xs text-blue-600">NPSN: 34567890</p>
+                        <code class="block mt-1 text-xs font-mono">admin_smk@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                        <a href="/auth/login" class="mt-1 inline-block px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700">Login</a>
                     </div>
                 </div>
             </div>
             {% endif %}
 
+            <!-- GURU -->
             {% if not ds or ds.demo_guru %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-emerald-100 flex items-start gap-5">
-                <div class="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center shrink-0"><i class="fas fa-chalkboard-teacher text-emerald-600 text-2xl"></i></div>
-                <div class="flex-1">
-                    <h3 class="font-extrabold text-surface-800">Guru</h3>
-                    <p class="text-sm text-surface-500">Buat ujian, koreksi esai dengan canvas, lihat hasil dan analitik.</p>
-                    <div class="mt-3 flex flex-wrap gap-2">
-                        <span class="px-3 py-1.5 bg-emerald-50 rounded-lg text-emerald-700 font-mono text-xs">guru_mtk_smp@scan-grade.app</span>
-                        <span class="px-3 py-1.5 bg-emerald-50 rounded-lg text-emerald-700 font-mono text-xs">guru_fisika_sma@scan-grade.app</span>
-                        <span class="px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 font-mono text-xs">demo123</span>
-                        <a href="/auth/login-user?role=guru" class="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition">Login</a>
+            <div class="bg-white rounded-2xl p-6 shadow-lg border border-emerald-100">
+                <div class="flex items-start gap-5">
+                    <div class="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center shrink-0"><i class="fas fa-chalkboard-teacher text-emerald-600 text-2xl"></i></div>
+                    <div class="flex-1">
+                        <h3 class="font-extrabold text-surface-800">Guru</h3>
+                        <p class="text-sm text-surface-500">Buat ujian, koreksi esai, AI grading, lihat hasil dan analitik.</p>
                     </div>
+                </div>
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMP — Matematika</p>
+                        <code class="block mt-1 text-xs font-mono">guru_mtk_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMP — IPA</p>
+                        <code class="block mt-1 text-xs font-mono">guru_ipa_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMP — Bahasa Inggris</p>
+                        <code class="block mt-1 text-xs font-mono">guru_bing_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMA — Matematika</p>
+                        <code class="block mt-1 text-xs font-mono">guru_mtk_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMA — Fisika</p>
+                        <code class="block mt-1 text-xs font-mono">guru_fisika_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMA — Kimia</p>
+                        <code class="block mt-1 text-xs font-mono">guru_kimia_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMK — Pemrograman</p>
+                        <code class="block mt-1 text-xs font-mono">guru_prog_smk@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <p class="text-xs font-bold text-emerald-800">SMK — Jaringan</p>
+                        <code class="block mt-1 text-xs font-mono">guru_jaring_smk@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                </div>
+                <div class="mt-3 text-center">
+                    <a href="/auth/login-user?role=guru" class="inline-flex items-center gap-1 px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition"><i class="fas fa-sign-in-alt"></i> Masuk sebagai Guru</a>
                 </div>
             </div>
             {% endif %}
 
+            <!-- MURID -->
             {% if not ds or ds.demo_murid %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-amber-100 flex items-start gap-5">
-                <div class="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0"><i class="fas fa-user-graduate text-amber-600 text-2xl"></i></div>
-                <div class="flex-1">
-                    <h3 class="font-extrabold text-surface-800">Siswa / Murid</h3>
-                    <p class="text-sm text-surface-500">Kerjakan ujian dengan tools menggambar, penggaris digital, dan anti-cheat.</p>
-                    <div class="mt-3 flex flex-wrap gap-2">
-                        <span class="px-3 py-1.5 bg-amber-50 rounded-lg text-amber-700 font-mono text-xs">siswa1_smp@scan-grade.app</span>
-                        <span class="px-3 py-1.5 bg-amber-50 rounded-lg text-amber-700 font-mono text-xs">siswa1_sma@scan-grade.app</span>
-                        <span class="px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 font-mono text-xs">demo123</span>
-                        <a href="/auth/login-user?role=murid" class="px-4 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold hover:bg-amber-700 transition">Login</a>
+            <div class="bg-white rounded-2xl p-6 shadow-lg border border-amber-100">
+                <div class="flex items-start gap-5">
+                    <div class="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0"><i class="fas fa-user-graduate text-amber-600 text-2xl"></i></div>
+                    <div class="flex-1">
+                        <h3 class="font-extrabold text-surface-800">Siswa / Murid</h3>
+                        <p class="text-sm text-surface-500">Kerjakan ujian dengan tools menggambar, penggaris digital, anti-cheat, dan AI.</p>
                     </div>
+                </div>
+                <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMP — Ahmad</p>
+                        <code class="block mt-1 text-xs font-mono">siswa1_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMP — Bella</p>
+                        <code class="block mt-1 text-xs font-mono">siswa2_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMP — Candra</p>
+                        <code class="block mt-1 text-xs font-mono">siswa3_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMA — Citra</p>
+                        <code class="block mt-1 text-xs font-mono">siswa1_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMA — Doni</p>
+                        <code class="block mt-1 text-xs font-mono">siswa2_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMA — Eka</p>
+                        <code class="block mt-1 text-xs font-mono">siswa3_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMA — Fani</p>
+                        <code class="block mt-1 text-xs font-mono">siswa4_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMK — Galih</p>
+                        <code class="block mt-1 text-xs font-mono">siswa1_smk@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <p class="text-xs font-bold text-amber-800">SMK — Hesti</p>
+                        <code class="block mt-1 text-xs font-mono">siswa2_smk@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    </div>
+                </div>
+                <div class="mt-3 text-center">
+                    <a href="/auth/login-user?role=murid" class="inline-flex items-center gap-1 px-5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition"><i class="fas fa-sign-in-alt"></i> Masuk sebagai Siswa</a>
                 </div>
             </div>
             {% endif %}
