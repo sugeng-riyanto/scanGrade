@@ -947,11 +947,19 @@ def ai_settings():
     keys = supabase.table("teacher_ai_keys").select("*").eq("teacher_id", g.user_id).order("created_at", desc=True).execute().data or []
     settings_res = supabase.table("teacher_ai_settings").select("*").eq("teacher_id", g.user_id).limit(1).execute()
     if not settings_res.data:
-        default_prompt = 'Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: "{answer}"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {"score": <number>, "feedback": "<string>"}'
-        supabase.table("teacher_ai_settings").insert({"teacher_id": g.user_id, "prompt_template": default_prompt}).execute()
-        settings = {"teacher_id": g.user_id, "prompt_template": default_prompt}
+        default_prompts = json.dumps([
+            {"id": "default", "label": "Default", "template": "Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: \"{answer}\"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
+            {"id": "ketat", "label": "Ketat", "template": "Kamu adalah pemeriksa ujian yang sangat ketat. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Jangan mudah memberi nilai tinggi. Feedback harus menyebutkan kekurangan.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
+            {"id": "ringan", "label": "Ringan / Santai", "template": "Kamu adalah guru yang baik hati. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Beri nilai maksimal jika jawaban mendekati benar. Feedback yang membangun.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
+        ])
+        supabase.table("teacher_ai_settings").insert({
+            "teacher_id": g.user_id, "prompts": default_prompts, "active_prompt_id": "default"
+        }).execute()
+        settings = {"teacher_id": g.user_id, "prompts": json.loads(default_prompts), "active_prompt_id": "default"}
     else:
         settings = settings_res.data[0]
+        if isinstance(settings.get("prompts"), str):
+            settings["prompts"] = json.loads(settings["prompts"])
     return render_template("teacher/ai_settings.html", keys=keys, settings=settings)
 
 
@@ -963,15 +971,21 @@ def ai_add_key():
     provider = request.form.get("provider", "gemini")
     api_key = request.form.get("api_key", "").strip()
     label = request.form.get("label", "").strip()
+    base_url = request.form.get("base_url", "").strip()
+    model_name = request.form.get("model_name", "").strip()
     if not api_key:
         flash("API Key wajib diisi", "error")
         return redirect("/teacher/ai-settings")
     supabase.table("teacher_ai_keys").update({"is_active": False}).eq("teacher_id", g.user_id).execute()
-    supabase.table("teacher_ai_keys").insert({
+    data = {
         "teacher_id": g.user_id, "provider": provider,
         "api_key": api_key, "label": label or provider,
         "is_active": True,
-    }).execute()
+    }
+    if provider == "custom":
+        data["base_url"] = base_url
+        data["model_name"] = model_name or "gpt-4o-mini"
+    supabase.table("teacher_ai_keys").insert(data).execute()
     flash("API Key berhasil ditambahkan dan diaktifkan", "success")
     return redirect("/teacher/ai-settings")
 
@@ -1005,11 +1019,16 @@ def ai_delete_key(key_id):
 @teacher_or_admin_required
 def ai_save_prompt():
     supabase = get_supabase()
-    prompt = request.form.get("prompt_template", "").strip()
-    if not prompt:
-        flash("Prompt tidak boleh kosong", "error")
+    prompts_raw = request.form.get("prompts", "[]").strip()
+    active_id = request.form.get("active_prompt_id", "default").strip()
+    try:
+        prompts = json.loads(prompts_raw)
+    except json.JSONDecodeError:
+        flash("Data prompts tidak valid", "error")
         return redirect("/teacher/ai-settings")
-    supabase.table("teacher_ai_settings").upsert({"teacher_id": g.user_id, "prompt_template": prompt}).execute()
+    supabase.table("teacher_ai_settings").upsert({
+        "teacher_id": g.user_id, "prompts": prompts, "active_prompt_id": active_id
+    }).execute()
     flash("Prompt berhasil disimpan", "success")
     return redirect("/teacher/ai-settings")
 
@@ -1017,9 +1036,15 @@ def ai_save_prompt():
 @teacher_bp.route("/ai-settings/reset-prompt", methods=["POST"])
 @teacher_or_admin_required
 def ai_reset_prompt():
-    default_prompt = 'Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: "{answer}"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {"score": <number>, "feedback": "<string>"}'
+    default_prompts = [
+        {"id": "default", "label": "Default", "template": "Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: \"{answer}\"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
+        {"id": "ketat", "label": "Ketat", "template": "Kamu adalah pemeriksa ujian yang sangat ketat. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Jangan mudah memberi nilai tinggi. Feedback harus menyebutkan kekurangan.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
+        {"id": "ringan", "label": "Ringan / Santai", "template": "Kamu adalah guru yang baik hati. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Beri nilai maksimal jika jawaban mendekati benar. Feedback yang membangun.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
+    ]
     supabase = get_supabase()
-    supabase.table("teacher_ai_settings").upsert({"teacher_id": g.user_id, "prompt_template": default_prompt}).execute()
+    supabase.table("teacher_ai_settings").upsert({
+        "teacher_id": g.user_id, "prompts": default_prompts, "active_prompt_id": "default"
+    }).execute()
     flash("Prompt dikembalikan ke default", "success")
     return redirect("/teacher/ai-settings")
 

@@ -479,9 +479,14 @@ CREATE TABLE IF NOT EXISTS teacher_ai_keys (
 CREATE TABLE IF NOT EXISTS teacher_ai_settings (
     teacher_id UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
     prompt_template TEXT NOT NULL DEFAULT 'Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: "{answer}"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {"score": <number>, "feedback": "<string>"}',
+    prompts JSONB DEFAULT '[{"id": "default", "label": "Default", "template": "Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: \"{answer}\"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"}, {"id": "ketat", "label": "Ketat", "template": "Kamu adalah pemeriksa ujian yang sangat ketat. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Jangan mudah memberi nilai tinggi. Feedback harus menyebutkan kekurangan.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"}, {"id": "ringan", "label": "Ringan / Santai", "template": "Kamu adalah guru yang baik hati. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Beri nilai maksimal jika jawaban mendekati benar. Feedback yang membangun.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"}]',
+    active_prompt_id TEXT DEFAULT 'default',
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE teacher_ai_keys ADD COLUMN IF NOT EXISTS base_url TEXT DEFAULT '';
+ALTER TABLE teacher_ai_keys ADD COLUMN IF NOT EXISTS model_name TEXT DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS ai_grading_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -3,12 +3,40 @@
 {% block page_title %}Pengaturan Koreksi AI{% endblock %}
 {% block content %}
 {% set sk = settings or {} %}
-{% set pt = sk.get('prompt_template', '') %}
+{% set prompts = sk.get('prompts') or [] %}
+{% set active_prompt_id = sk.get('active_prompt_id') or 'default' %}
+{% if prompts is string %}{% set prompts = prompts|from_json %}{% endif %}
 <div class="max-w-4xl mx-auto space-y-6" x-data="{
     showTutorial: false, showForm: false,
-    newProvider: 'gemini', newLabel: '', newKey: '',
+    newProvider: 'gemini', newLabel: '', newKey: '', newBaseUrl: '', newModel: '',
+    prompts: {{ prompts | tojson }},
+    activePromptId: '{{ active_prompt_id }}',
     testResult: '', testLoading: false,
-    testKeyId: null
+    get activePrompt() { return this.prompts.find(p => p.id === this.activePromptId) || this.prompts[0] || {template: ''}; },
+    switchPrompt(id) { this.activePromptId = id; },
+    savePrompts() {
+        fetch('/teacher/ai-settings/save-prompt', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'prompts=' + encodeURIComponent(JSON.stringify(this.prompts)) + '&active_prompt_id=' + encodeURIComponent(this.activePromptId)
+        }).then(r => {
+            if (r.ok) { location.reload(); }
+            else { alert('Gagal menyimpan'); }
+        });
+    },
+    addPrompt() {
+        const id = 'p' + Date.now();
+        this.prompts.push({id: id, label: 'Prompt Baru', template: 'Koreksi jawaban esai berikut.\nSoal: {question}\nBobot: {max_score}\nJawaban: {answer}\nBerikan skor (0-{max_score}) dan feedback.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}'});
+        this.activePromptId = id;
+    },
+    removePrompt(id) {
+        if (this.prompts.length <= 1) { alert('Minimal 1 prompt'); return; }
+        this.prompts = this.prompts.filter(p => p.id !== id);
+        if (this.activePromptId === id) this.activePromptId = this.prompts[0].id;
+    },
+    providerChanged() {
+        if (this.newProvider !== 'custom') { this.newBaseUrl = ''; this.newModel = ''; }
+    }
 }">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
@@ -24,15 +52,15 @@
         </button>
         <div x-show="showTutorial" x-cloak class="mt-4 space-y-4 text-sm text-slate-600">
             <p><strong>Apa itu API Key?</strong> Seperti kunci untuk menghubungkan ScanGrade ke AI. Dengan kunci ini, AI bisa membantu mengoreksi jawaban esai siswa.</p>
-            <p><strong>Kamu cukup punya SATU kunci</strong> dari provider mana pun di bawah ini. Pilih yang paling mudah.</p>
+            <p><strong>Kamu cukup punya SATU kunci</strong> dari provider mana pun di bawah ini.</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div class="p-4 rounded-xl border border-emerald-200 bg-emerald-50">
                     <p class="font-extrabold text-emerald-800">⭐ Gemini (Paling Mudah)</p>
-                    <p class="text-xs text-emerald-700 mt-1">Gratis, tanpa kartu kredit. <strong>Cocok untuk pemula.</strong></p>
+                    <p class="text-xs text-emerald-700 mt-1">Gratis, tanpa kartu kredit.</p>
                     <ol class="text-xs mt-2 space-y-1 list-decimal list-inside text-emerald-700">
                         <li>Buka <a href="https://aistudio.google.com/apikey" target="_blank" class="underline font-bold">aistudio.google.com/apikey</a></li>
                         <li>Klik "Create API Key"</li>
-                        <li>Copy key-nya, paste di form di bawah</li>
+                        <li>Copy key-nya, paste di form</li>
                     </ol>
                 </div>
                 <div class="p-4 rounded-xl border border-blue-200 bg-blue-50">
@@ -41,7 +69,7 @@
                     <ol class="text-xs mt-2 space-y-1 list-decimal list-inside text-blue-700">
                         <li>Buka <a href="https://platform.openai.com/api-keys" target="_blank" class="underline font-bold">platform.openai.com/api-keys</a></li>
                         <li>Login, klik "Create new secret key"</li>
-                        <li>Copy key-nya (sk-...)</li>
+                        <li>Copy key (sk-...)</li>
                     </ol>
                 </div>
                 <div class="p-4 rounded-xl border border-purple-200 bg-purple-50">
@@ -50,19 +78,20 @@
                     <ol class="text-xs mt-2 space-y-1 list-decimal list-inside text-purple-700">
                         <li>Buka <a href="https://platform.deepseek.com/api_keys" target="_blank" class="underline font-bold">platform.deepseek.com</a></li>
                         <li>Daftar, buat API Key</li>
-                        <li>Copy key-nya</li>
+                        <li>Copy key</li>
                     </ol>
                 </div>
                 <div class="p-4 rounded-xl border border-orange-200 bg-orange-50">
                     <p class="font-extrabold text-orange-800">⚡ Groq</p>
-                    <p class="text-xs text-orange-700 mt-1">Gratis 30 request/menit, sangat cepat.</p>
+                    <p class="text-xs text-orange-700 mt-1">Gratis 30 req/menit.</p>
                     <ol class="text-xs mt-2 space-y-1 list-decimal list-inside text-orange-700">
                         <li>Buka <a href="https://console.groq.com/keys" target="_blank" class="underline font-bold">console.groq.com/keys</a></li>
                         <li>Daftar, buat API Key</li>
-                        <li>Copy key-nya (gsk-...)</li>
+                        <li>Copy key (gsk-...)</li>
                     </ol>
                 </div>
             </div>
+            <p class="text-xs text-slate-500 mt-2">Atau gunakan <strong>Custom</strong> untuk provider lain (Claude, Mistral, Together, dll) — isi Base URL + Model Name.</p>
         </div>
     </div>
 
@@ -74,16 +103,23 @@
                 <i class="fas" :class="showForm ? 'fa-minus' : 'fa-plus'"></i><span x-text="showForm ? ' Tutup' : ' Tambah'"></span>
             </button>
         </div>
-        <form x-show="showForm" x-cloak method="POST" action="/teacher/ai-settings/add-key" class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <select name="provider" x-model="newProvider" class="input text-sm">
-                <option value="gemini">Gemini</option>
-                <option value="openai">OpenAI</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="groq">Groq</option>
-            </select>
-            <input type="text" name="label" x-model="newLabel" class="input text-sm" placeholder="Label (contoh: Key Pribadi)">
-            <input type="password" name="api_key" x-model="newKey" class="input text-sm font-mono" placeholder="Paste API Key di sini..." required>
-            <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm px-4 py-2.5 transition">Simpan & Aktifkan</button>
+        <form x-show="showForm" x-cloak method="POST" action="/teacher/ai-settings/add-key" class="space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <select name="provider" x-model="newProvider" @change="providerChanged()" class="input text-sm">
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="groq">Groq</option>
+                    <option value="custom">Custom (Lainnya)</option>
+                </select>
+                <input type="text" name="label" x-model="newLabel" class="input text-sm" placeholder="Label (contoh: Key Pribadi)">
+                <input type="password" name="api_key" x-model="newKey" class="input text-sm font-mono" placeholder="Paste API Key di sini..." required>
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm px-4 py-2.5 transition">Simpan & Aktifkan</button>
+            </div>
+            <div x-show="newProvider === 'custom'" x-cloak class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label class="block text-xs font-bold text-slate-600 mb-1">Base URL</label><input type="text" name="base_url" x-model="newBaseUrl" class="input text-sm font-mono" placeholder="https://api.example.com/v1"></div>
+                <div><label class="block text-xs font-bold text-slate-600 mb-1">Model Name</label><input type="text" name="model_name" x-model="newModel" class="input text-sm" placeholder="gpt-4o-mini / claude-3 / dll"></div>
+            </div>
         </form>
     </div>
 
@@ -139,23 +175,50 @@
 
     <!-- PROMPT EDITOR -->
     <div class="card p-5">
-        <h3 class="font-extrabold text-slate-700 mb-1"><i class="fas fa-edit mr-2 text-amber-500"></i>Prompt / Panduan Grading AI</h3>
-        <p class="text-xs text-slate-500 mb-3">Prompt ini dikirim ke AI setiap kali koreksi. Edit sesuai gaya mengajar kamu.</p>
-        <form method="POST" action="/teacher/ai-settings/save-prompt">
-            <textarea name="prompt_template" rows="10" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500">{{ pt }}</textarea>
-            <div class="flex items-center justify-between mt-2">
-                <div class="text-xs text-slate-400 space-x-3">
-                    <code class="bg-slate-100 px-1 rounded">{question}</code> soal
-                    <code class="bg-slate-100 px-1 rounded">{rubric}</code> pedoman
-                    <code class="bg-slate-100 px-1 rounded">{max_score}</code> bobot
-                    <code class="bg-slate-100 px-1 rounded">{answer}</code> jawaban siswa
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-extrabold text-slate-700"><i class="fas fa-edit mr-2 text-amber-500"></i>Prompt / Panduan Grading AI</h3>
+            <button @click="addPrompt()" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"><i class="fas fa-plus mr-1"></i>Tambah Prompt</button>
+        </div>
+
+        <!-- Prompt Tabs -->
+        <div class="flex flex-wrap gap-1 mb-3 border-b border-slate-200 pb-2">
+            <template x-for="(p, pi) in prompts" :key="p.id">
+                <div class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition border"
+                     :class="activePromptId === p.id ? 'bg-primary-50 text-primary-700 border-primary-200' : 'bg-white text-slate-500 border-transparent hover:border-slate-200'"
+                     @click="activePromptId = p.id">
+                    <span x-text="p.label"></span>
+                    <button @click.stop="removePrompt(p.id)" class="text-slate-400 hover:text-red-500 ml-1">&times;</button>
                 </div>
-                <div class="flex gap-2">
-                    <button type="submit" class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">Simpan Prompt</button>
-                    <button type="submit" formaction="/teacher/ai-settings/reset-prompt" class="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition">↺ Reset Default</button>
+            </template>
+        </div>
+
+        <!-- Active Prompt Editor -->
+        <template x-for="(p, pi) in prompts" :key="p.id">
+            <div x-show="activePromptId === p.id" x-cloak>
+                <div class="flex items-center gap-2 mb-2">
+                    <input type="text" x-model="p.label" class="input text-sm font-bold flex-1" placeholder="Nama prompt...">
+                    <span class="text-xs text-slate-400">Aktif</span>
+                    <input type="radio" name="active_radio" :checked="activePromptId === p.id" @change="activePromptId = p.id" class="w-4 h-4 text-primary-600">
                 </div>
+                <textarea x-model="p.template" rows="8"
+                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm font-mono leading-relaxed focus:ring-2 focus:ring-primary-500 focus:border-primary-500"></textarea>
             </div>
-        </form>
+        </template>
+
+        <div class="flex items-center justify-between mt-3">
+            <div class="text-xs text-slate-400 space-x-3">
+                <code class="bg-slate-100 px-1 rounded">{question}</code>
+                <code class="bg-slate-100 px-1 rounded">{rubric}</code>
+                <code class="bg-slate-100 px-1 rounded">{max_score}</code>
+                <code class="bg-slate-100 px-1 rounded">{answer}</code>
+            </div>
+            <div class="flex gap-2">
+                <button @click="savePrompts()" class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">Simpan Semua Prompt</button>
+                <form method="POST" action="/teacher/ai-settings/reset-prompt" class="inline">
+                    <button type="submit" class="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition">↺ Reset Default</button>
+                </form>
+            </div>
+        </div>
     </div>
 
     <!-- TEST RESULT MODAL -->
@@ -163,8 +226,8 @@
         <dialog x-show="testResult" x-cloak class="rounded-2xl p-6 shadow-2xl border border-slate-200 w-full max-w-md backdrop:bg-black/40" :open="testResult !== ''">
             <div class="text-center">
                 <div class="w-16 h-16 mx-auto rounded-full mb-3 flex items-center justify-center text-2xl"
-                     :class="testResult.includes('✅') || testResult.includes('sukses') || testResult.includes('berhasil') ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'">
-                    <i class="fas" :class="testResult.includes('✅') || testResult.includes('sukses') || testResult.includes('berhasil') ? 'fa-check-circle' : 'fa-times-circle'"></i>
+                     :class="testResult.includes('✅') ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'">
+                    <i class="fas" :class="testResult.includes('✅') ? 'fa-check-circle' : 'fa-times-circle'"></i>
                 </div>
                 <p class="text-sm font-bold text-slate-700" x-text="testResult"></p>
                 <button @click="testResult=''" class="btn btn-primary mt-4">Tutup</button>
@@ -182,11 +245,15 @@ function testKey(keyId) {
     })
     .then(r => r.json())
     .then(d => {
-        if (d.success) document.querySelector('[x-data]').__x.$data.testResult = '✅ ' + (d.message || 'Koneksi berhasil');
-        else document.querySelector('[x-data]').__x.$data.testResult = '❌ ' + (d.error || 'Gagal');
+        const el = document.querySelector('[x-data]').__x;
+        if (el) {
+            if (d.success) el.$data.testResult = '✅ ' + (d.message || 'Koneksi berhasil');
+            else el.$data.testResult = '❌ ' + (d.error || 'Gagal');
+        }
     })
     .catch(() => {
-        document.querySelector('[x-data]').__x.$data.testResult = '❌ Gagal terhubung ke server';
+        const el = document.querySelector('[x-data]').__x;
+        if (el) el.$data.testResult = '❌ Gagal terhubung ke server';
     });
 }
 </script>

@@ -3,14 +3,6 @@ import re
 from flask import current_app
 
 
-PROVIDERS = {
-    "gemini": {"name": "Google Gemini", "env_key": None},
-    "openai": {"name": "OpenAI", "env_key": None},
-    "deepseek": {"name": "DeepSeek", "env_key": None},
-    "groq": {"name": "Groq", "env_key": None},
-}
-
-
 def _get_active_key(teacher_id):
     supabase = current_app.extensions["supabase"]
     res = supabase.table("teacher_ai_keys") \
@@ -31,17 +23,20 @@ def _get_ai_settings(teacher_id):
         .execute()
     if res.data:
         return res.data[0]
-    default_prompt = (
-        'Kamu adalah asisten koreksi ujian. '
-        'Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\n'
-        'Soal: {question}\n'
-        'Pedoman Penskoran: {rubric}\n'
-        'Bobot Maksimal: {max_score} poin\n'
-        'Jawaban Siswa: "{answer}"\n\n'
-        'Berikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\n'
-        'Format JSON: {"score": <number>, "feedback": "<string>"}'
-    )
-    return {"teacher_id": teacher_id, "prompt_template": default_prompt}
+    return {"teacher_id": teacher_id, "prompt_template": "", "prompts": [], "active_prompt_id": None}
+
+
+def _get_active_prompt(settings):
+    prompts = settings.get("prompts")
+    if isinstance(prompts, str):
+        prompts = json.loads(prompts)
+    if not prompts:
+        return "Koreksi jawaban esai berikut.\nSoal: {question}\nBobot: {max_score}\nJawaban: {answer}\nBerikan skor (0-{max_score}) dan feedback.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"
+    active_id = settings.get("active_prompt_id")
+    for p in prompts:
+        if p.get("id") == active_id:
+            return p.get("template", "")
+    return prompts[0].get("template", "")
 
 
 def _fill_prompt(template, question, answer, max_score, rubric=""):
@@ -76,45 +71,37 @@ def _call_gemini(api_key, prompt):
     return resp.text
 
 
-def _call_openai(api_key, prompt):
+def _call_openai_like(api_key, prompt, base_url=None, model=None):
     from openai import OpenAI
-    client = OpenAI(api_key=api_key)
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    client = OpenAI(**kwargs)
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model or "gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
     return resp.choices[0].message.content or ""
 
 
-def _call_deepseek(api_key, prompt):
-    from openai import OpenAI
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-    resp = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
-    return resp.choices[0].message.content or ""
-
-
-def _call_groq(api_key, prompt):
-    from openai import OpenAI
-    client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
-    resp = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
-    return resp.choices[0].message.content or ""
-
-
-_PROVIDER_CALLERS = {
-    "gemini": _call_gemini,
-    "openai": _call_openai,
-    "deepseek": _call_deepseek,
-    "groq": _call_groq,
+_PROVIDER_MAP = {
+    "gemini": {"caller": _call_gemini},
+    "openai": {"caller": lambda k, p: _call_openai_like(k, p, None, "gpt-4o-mini")},
+    "deepseek": {"caller": lambda k, p: _call_openai_like(k, p, "https://api.deepseek.com", "deepseek-chat")},
+    "groq": {"caller": lambda k, p: _call_openai_like(k, p, "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile")},
 }
+
+
+def _call_ai(key, prompt):
+    provider = key.get("provider", "")
+    caller_entry = _PROVIDER_MAP.get(provider)
+    if caller_entry:
+        return caller_entry["caller"](key["api_key"], prompt)
+    # Custom provider — use OpenAI client with custom base_url and model
+    base_url = key.get("base_url") or None
+    model = key.get("model_name") or "gpt-4o-mini"
+    return _call_openai_like(key["api_key"], prompt, base_url, model)
 
 
 def suggest_grade(teacher_id, question_text, student_answer, max_score, rubric=""):
@@ -123,26 +110,14 @@ def suggest_grade(teacher_id, question_text, student_answer, max_score, rubric="
         return {"error": "Belum ada API key aktif. Atur di Pengaturan AI."}
 
     settings = _get_ai_settings(teacher_id)
-    prompt = _fill_prompt(
-        settings.get("prompt_template", ""),
-        question_text, student_answer, max_score, rubric
-    )
-
-    provider = key["provider"]
-    caller = _PROVIDER_CALLERS.get(provider)
-    if not caller:
-        return {"error": f"Provider {provider} tidak dikenal"}
+    prompt_template = _get_active_prompt(settings)
+    prompt = _fill_prompt(prompt_template, question_text, student_answer, max_score, rubric)
 
     try:
-        raw = caller(key["api_key"], prompt)
+        raw = _call_ai(key, prompt)
         score, feedback = _parse_ai_response(raw)
-        _save_log(teacher_id, None, 0, provider, score, feedback, prompt, raw, 0)
-        return {
-            "score": round(score, 1),
-            "feedback": feedback,
-            "provider": provider,
-            "prompt": prompt,
-        }
+        _save_log(teacher_id, None, 0, key["provider"], score, feedback, prompt, raw, 0)
+        return {"score": round(score, 1), "feedback": feedback, "provider": key["provider"], "prompt": prompt}
     except Exception as e:
         current_app.logger.error(f"AI suggest_grade error: {e}")
         return {"error": f"Gagal: {str(e)[:120]}"}
@@ -154,12 +129,9 @@ def test_api_key(teacher_id, key_id):
     if not res.data:
         return {"error": "Key tidak ditemukan"}
     key = res.data[0]
-    caller = _PROVIDER_CALLERS.get(key["provider"])
-    if not caller:
-        return {"error": "Provider tidak dikenal"}
     sample_prompt = 'Jawab dalam satu kata: Berapa 2+2? Format JSON: {"answer": <number>}'
     try:
-        raw = caller(key["api_key"], sample_prompt)
+        raw = _call_ai(key, sample_prompt)
         data = json.loads(raw.strip().replace("```json", "").replace("```", "").strip())
         if data.get("answer") == 4:
             return {"success": True, "message": "✅ API Key aktif! Koneksi berhasil."}
