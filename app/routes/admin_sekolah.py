@@ -1307,22 +1307,29 @@ def download_invoice_pdf(invoice_id):
 <html><head><meta charset="utf-8">
 <style>
 @page {{ size: A4; margin: 2cm; }}
-body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b; }}
+body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b; position: relative; }}
+.watermark {{ position: fixed; top: 40%; left: 10%; width: 80%; height: 20%; z-index: -1;
+  display: flex; align-items: center; justify-content: center; pointer-events: none; }}
+.watermark span {{ font-size: 80pt; font-weight: 900; color: rgba(5, 150, 105, 0.08);
+  transform: rotate(-35deg); letter-spacing: 15px; white-space: nowrap; }}
 .invoice {{ max-width: 100%; }}
-.header {{ text-align: center; border-bottom: 3px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px; }}
+.header {{ text-align: center; padding-bottom: 10px; margin-bottom: 18px; }}
 .header h1 {{ font-size: 22pt; color: #1e293b; margin: 0 0 2px; }}
-.header .inv-num {{ font-size: 13pt; color: #2563eb; font-weight: bold; letter-spacing: 1px; }}
-.info-table {{ width: 100%; margin-bottom: 15px; }}
-.info-table td {{ padding: 3px 5px; vertical-align: top; }}
-.info-table .label {{ color: #64748b; font-weight: bold; width: 120px; }}
+.header .inv-num {{ font-size: 12pt; color: #64748b; font-weight: bold; letter-spacing: 0.5px; }}
+.info-table {{ width: 100%; margin-bottom: 12px; }}
+.info-table td {{ padding: 2px 4px; vertical-align: top; font-size: 9pt; }}
+.info-table .label {{ color: #64748b; font-weight: bold; width: 100px; }}
 .info-table .value {{ font-weight: bold; color: #1e293b; }}
-.detail-table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
-.detail-table th {{ background: #2563eb; color: white; padding: 8px 10px; text-align: left; font-size: 9pt; }}
-.detail-table td {{ padding: 8px 10px; border: 1px solid #e2e8f0; }}
-.total-row {{ text-align: right; font-size: 14pt; font-weight: 900; color: #2563eb; padding: 8px 10px; }}
-.footer {{ margin-top: 25px; padding-top: 10px; border-top: 2px solid #e2e8f0; font-size: 7.5pt; color: #94a3b8; text-align: center; }}
-.status-badge {{ display: inline-block; padding: 3px 12px; background: #059669; color: white; font-weight: bold; font-size: 9pt; border-radius: 4px; }}
+.detail-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
+.detail-table th {{ background: #f1f5f9; padding: 7px 10px; text-align: left; font-size: 9pt; font-weight: 800; color: #475569; }}
+.detail-table td {{ padding: 7px 10px; font-size: 9pt; }}
+.total-row {{ text-align: right; font-size: 13pt; font-weight: 900; color: #059669; padding: 6px 0; }}
+.footer {{ margin-top: 20px; padding-top: 8px; font-size: 7pt; color: #94a3b8; text-align: center; }}
+.status-badge {{ display: inline-block; padding: 2px 10px; background: #059669; color: white; font-weight: bold; font-size: 8pt; border-radius: 3px; }}
 </style></head><body>
+
+<div class="watermark"><span>LUNAS</span></div>
+
 <div class="invoice">
 <div class="header">
 <h1>INVOICE</h1>
@@ -1355,8 +1362,7 @@ body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b;
 </table>
 
 <div class="footer">
-Invoice ini sah dan diterbitkan oleh ScanGrade. Data disimpan di database dan dapat diverifikasi kapan saja.<br>
-Dicetak: {paid_at} &mdash; Terima kasih telah menggunakan ScanGrade.
+Dicetak dari ScanGrade &mdash; Invoice #{inv.get('invoice_number', '-')}
 </div>
 </div></body></html>"""
     result = io.BytesIO()

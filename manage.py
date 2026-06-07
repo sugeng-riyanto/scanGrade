@@ -360,7 +360,7 @@ def _seed_invoices(supabase, school_id, school_conf):
                 "paid_at": now.isoformat(),
                 "due_at": (now + timedelta(days=7)).isoformat(),
                 "notes": f"Langganan {p['name']}",
-                "activation_code": f"SG-DEMO-{i+1:04d}",
+                "activation_code": f"SG-{i+1:04d}-{i+2:04d}-{i+3:04d}",
             }).execute()
             print(f"   📄 Invoice: {inv_num} - {p['name']}")
         except Exception as e:
