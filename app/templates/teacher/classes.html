@@ -1,177 +1,71 @@
 {% extends "base.html" %}
-{% block title %}Kelas & Mapel - ScanGrade{% endblock %}
-{% block page_title %}Kelas &amp; Mata Pelajaran{% endblock %}
+{% block title %}Kelas & Mapel Saya - ScanGrade{% endblock %}
+{% block page_title %}Kelas &amp; Mata Pelajaran Saya{% endblock %}
 {% block content %}
-{% set sort = sort|default('asc') %}
-{% set q = q|default('') %}
 {% set npsn = school_info.get('npsn', '-') if school_info else '-' %}
 {% set school_name = school_info.get('name', '-') if school_info else '-' %}
 
 <!-- School Info Bar -->
-<div class="bg-gradient-to-r from-primary-600 to-primary-700 rounded-2xl p-5 mb-6 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-    <div>
-        <h2 class="font-extrabold text-lg">{{ school_name }}</h2>
-        <p class="text-primary-200 text-sm font-medium">NPSN: {{ npsn }} {% if active_year %} · Tahun Ajaran: <strong>{{ active_year.name }}</strong>{% endif %}</p>
-    </div>
+<div class="bg-gradient-to-r from-primary-600 to-primary-700 rounded-2xl p-5 mb-6 text-white">
+    <h2 class="font-extrabold text-lg">{{ school_name }}</h2>
+    <p class="text-primary-200 text-sm font-medium">NPSN: {{ npsn }} {% if active_year %} · Tahun Ajaran: <strong>{{ active_year.name }}</strong>{% endif %}</p>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- LEFT: Classes Table -->
-    <div class="card p-5" x-data="{
-        showForm: false, name: '',
-        editId: null, editName: '',
-        startEdit(id, name) { this.editId = id; this.editName = name; },
-        saveEdit() {
-            if (!this.editName.trim()) return;
-            fetch('/teacher/classes/' + this.editId + '/edit', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'name=' + encodeURIComponent(this.editName.trim())
-            }).then(r => r.json()).then(d => { if (d.success) location.reload(); else alert(d.error); });
-        }
-    }">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="font-extrabold text-slate-700 flex items-center gap-2"><i class="fas fa-school text-amber-500"></i>Kelas</h3>
-            <div class="flex items-center gap-2">
-                <form method="GET" class="flex gap-1">
-                    <input type="text" name="q" value="{{ q }}" class="input text-xs w-24" placeholder="Cari...">
-                    <button type="submit" class="btn btn-primary text-xs px-2"><i class="fas fa-search"></i></button>
-                </form>
-                <a href="?sort={% if sort == 'asc' %}desc{% else %}asc{% endif %}&q={{ q }}"
-                   class="text-xs px-2 py-1.5 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition">
-                    <i class="fas fa-sort-alpha-{% if sort == 'asc' %}down{% else %}up{% endif %}"></i>
-                </a>
-                <button @click="showForm = !showForm" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200">
-                    <i class="fas fa-plus mr-0.5"></i>Tambah
-                </button>
+    <!-- LEFT: My Classes -->
+    <div class="card p-5">
+        <h3 class="font-extrabold text-slate-700 flex items-center gap-2 mb-4"><i class="fas fa-school text-amber-500"></i>Kelas Saya</h3>
+        {% if assignments %}
+        <div class="space-y-2">
+            {% set seen_classes = [] %}
+            {% for a in assignments %}
+            {% if a.classes.id not in seen_classes %}
+            {% set _ = seen_classes.append(a.classes.id) %}
+            <div class="flex items-center gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600"><i class="fas fa-school"></i></div>
+                <div>
+                    <p class="font-bold text-slate-700">{{ a.classes.name }}</p>
+                    <p class="text-xs text-slate-500">Ditetapkan oleh Admin Sekolah</p>
+                </div>
             </div>
+            {% endif %}
+            {% endfor %}
         </div>
-
-        <form x-show="showForm" x-cloak method="POST" action="/teacher/classes/new"
-              class="flex gap-2 mb-3 p-3 bg-amber-50 rounded-xl border border-amber-200">
-            <input type="text" name="name" required class="flex-1 px-3 py-1.5 border border-amber-200 rounded-lg text-sm font-bold" placeholder="Nama kelas...">
-            <button type="submit" class="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold hover:bg-amber-700">Simpan</button>
-            <button type="button" @click="showForm = false" class="px-3 py-1.5 border border-amber-200 rounded-lg text-xs font-bold text-slate-500 hover:bg-white">Batal</button>
-        </form>
-
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="bg-slate-50 border-b border-slate-200">
-                        <th class="text-left px-3 py-2 font-bold text-slate-600">Nama Kelas</th>
-                        <th class="text-center px-3 py-2 font-bold text-slate-600">Murid</th>
-                        <th class="text-center px-3 py-2 font-bold text-slate-600">Guru</th>
-                        <th class="text-center px-3 py-2 font-bold text-slate-600">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    {% for c in classes %}
-                    <tr class="hover:bg-slate-50 transition" x-data="{ editing: false }">
-                        <td class="px-3 py-2.5">
-                            <template x-if="!editing">
-                                <span class="font-bold text-slate-700">{{ c.name }}</span>
-                            </template>
-                            <template x-if="editing">
-                                <div class="flex gap-1">
-                                    <input type="text" x-model="$root.closest('tr').querySelector('[data-edit-name]').dataset.val"
-                                           data-edit-name :data-val="'{{ c.name }}'"
-                                           class="flex-1 px-2 py-1 border border-amber-200 rounded text-sm font-bold w-24">
-                                    <button @click="fetch('/teacher/classes/{{ c.id }}/edit', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'name='+encodeURIComponent($root.closest('tr').querySelector('[data-edit-name]').dataset.val)}).then(r=>r.json()).then(d=>{if(d.success)location.reload();else alert(d.error)})"
-                                        class="text-xs px-2 py-1 bg-emerald-500 text-white rounded hover:bg-emerald-600"><i class="fas fa-check"></i></button>
-                                    <button @click="editing=false" class="text-xs px-2 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50"><i class="fas fa-times"></i></button>
-                                </div>
-                            </template>
-                        </td>
-                        <td class="px-3 py-2.5 text-center text-slate-600">{{ student_counts.get(c.id, 0) }}</td>
-                        <td class="px-3 py-2.5 text-center text-slate-600">{{ teacher_counts.get(c.id, 0) }}</td>
-                        <td class="px-3 py-2.5 text-center">
-                            <div class="flex items-center justify-center gap-1">
-                                <button @click="editing = !editing" class="text-slate-400 hover:text-primary-500 p-1 transition" title="Edit"><i class="fas fa-edit text-xs"></i></button>
-                                <form method="POST" action="/teacher/classes/{{ c.id }}/delete" class="inline"
-                                      onsubmit="return confirm('Hapus kelas {{ c.name }}?')">
-                                    <button type="submit" class="text-slate-400 hover:text-red-500 p-1 transition" title="Hapus"><i class="fas fa-trash-alt text-xs"></i></button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="4" class="px-3 py-8 text-center text-slate-400 font-medium">Belum ada kelas</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        {% else %}
+        <div class="text-center py-10 text-slate-400">
+            <div class="w-14 h-14 mx-auto rounded-full bg-slate-100 flex items-center justify-center mb-3"><i class="fas fa-school text-slate-300 text-lg"></i></div>
+            <p class="font-bold">Belum ada kelas</p>
+            <p class="text-sm mt-1">Admin sekolah akan menetapkan kelas dan mata pelajaran yang Anda ajar.</p>
         </div>
+        {% endif %}
     </div>
 
-    <!-- RIGHT: Subjects Table -->
-    <div class="card p-5" x-data="{ showForm: false, name: '' }">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="font-extrabold text-slate-700 flex items-center gap-2"><i class="fas fa-book text-primary-500"></i>Mata Pelajaran</h3>
-            <div class="flex items-center gap-2">
-                <form method="GET" class="flex gap-1">
-                    <input type="text" name="q" value="{{ q }}" class="input text-xs w-24" placeholder="Cari...">
-                    <button type="submit" class="btn btn-primary text-xs px-2"><i class="fas fa-search"></i></button>
-                </form>
-                <a href="?sort={% if sort == 'asc' %}desc{% else %}asc{% endif %}&q={{ q }}"
-                   class="text-xs px-2 py-1.5 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition">
-                    <i class="fas fa-sort-alpha-{% if sort == 'asc' %}down{% else %}up{% endif %}"></i>
-                </a>
-                <button @click="showForm = !showForm" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 border border-primary-200">
-                    <i class="fas fa-plus mr-0.5"></i>Tambah
-                </button>
+    <!-- RIGHT: My Subjects -->
+    <div class="card p-5">
+        <h3 class="font-extrabold text-slate-700 flex items-center gap-2 mb-4"><i class="fas fa-book text-primary-500"></i>Mata Pelajaran Saya</h3>
+        {% if assignments %}
+        <div class="space-y-2">
+            {% set seen_subjects = [] %}
+            {% for a in assignments %}
+            {% if a.subjects.id not in seen_subjects %}
+            {% set _ = seen_subjects.append(a.subjects.id) %}
+            <div class="flex items-center gap-3 p-3 rounded-xl bg-primary-50 border border-primary-200">
+                <div class="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600"><i class="fas fa-book"></i></div>
+                <div>
+                    <p class="font-bold text-slate-700">{{ a.subjects.name }}</p>
+                    <p class="text-xs text-slate-500">Ditetapkan oleh Admin Sekolah</p>
+                </div>
             </div>
+            {% endif %}
+            {% endfor %}
         </div>
-
-        <form x-show="showForm" x-cloak method="POST" action="/teacher/subjects/new"
-              class="flex gap-2 mb-3 p-3 bg-primary-50 rounded-xl border border-primary-200">
-            <input type="text" name="name" required class="flex-1 px-3 py-1.5 border border-primary-200 rounded-lg text-sm font-bold" placeholder="Nama mapel...">
-            <button type="submit" class="px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-bold hover:bg-primary-700">Simpan</button>
-            <button type="button" @click="showForm = false" class="px-3 py-1.5 border border-primary-200 rounded-lg text-xs font-bold text-slate-500 hover:bg-white">Batal</button>
-        </form>
-
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="bg-slate-50 border-b border-slate-200">
-                        <th class="text-left px-3 py-2 font-bold text-slate-600">Nama Mapel</th>
-                        <th class="text-center px-3 py-2 font-bold text-slate-600">Kode</th>
-                        <th class="text-center px-3 py-2 font-bold text-slate-600">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    {% for s in subjects %}
-                    <tr class="hover:bg-slate-50 transition" x-data="{ editing: false }">
-                        <td class="px-3 py-2.5">
-                            <template x-if="!editing">
-                                <span class="font-bold text-slate-700">{{ s.name }}</span>
-                            </template>
-                            <template x-if="editing">
-                                <div class="flex gap-1">
-                                    <input type="text" x-model="$root.closest('tr').querySelector('[data-edit-name]').dataset.val"
-                                           data-edit-name :data-val="'{{ s.name }}'"
-                                           class="flex-1 px-2 py-1 border border-primary-200 rounded text-sm font-bold w-24">
-                                    <button @click="fetch('/teacher/subjects/{{ s.id }}/edit', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'name='+encodeURIComponent($root.closest('tr').querySelector('[data-edit-name]').dataset.val)}).then(r=>r.json()).then(d=>{if(d.success)location.reload();else alert(d.error)})"
-                                        class="text-xs px-2 py-1 bg-emerald-500 text-white rounded hover:bg-emerald-600"><i class="fas fa-check"></i></button>
-                                    <button @click="editing=false" class="text-xs px-2 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50"><i class="fas fa-times"></i></button>
-                                </div>
-                            </template>
-                        </td>
-                        <td class="px-3 py-2.5 text-center text-slate-500 font-mono text-xs">{{ s.code or '-' }}</td>
-                        <td class="px-3 py-2.5 text-center">
-                            <div class="flex items-center justify-center gap-1">
-                                <button @click="editing = !editing" class="text-slate-400 hover:text-primary-500 p-1 transition" title="Edit"><i class="fas fa-edit text-xs"></i></button>
-                                <form method="POST" action="/teacher/subjects/{{ s.id }}/delete" class="inline"
-                                      onsubmit="return confirm('Hapus {{ s.name }}?')">
-                                    <button type="submit" class="text-slate-400 hover:text-red-500 p-1 transition" title="Hapus"><i class="fas fa-trash-alt text-xs"></i></button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="3" class="px-3 py-8 text-center text-slate-400 font-medium">Belum ada mapel</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        {% else %}
+        <div class="text-center py-10 text-slate-400">
+            <div class="w-14 h-14 mx-auto rounded-full bg-slate-100 flex items-center justify-center mb-3"><i class="fas fa-book text-slate-300 text-lg"></i></div>
+            <p class="font-bold">Belum ada mapel</p>
+            <p class="text-sm mt-1">Admin sekolah akan menetapkan kelas dan mata pelajaran yang Anda ajar.</p>
         </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

@@ -123,12 +123,28 @@ def exam_list():
     supabase = get_supabase()
     if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
+
+    # Get student's class_id
+    student_class_id = None
+    try:
+        prof = supabase.table("profiles").select("class_id").eq("id", g.user_id).single().execute()
+        if prof.data:
+            student_class_id = prof.data.get("class_id")
+    except Exception:
+        pass
+
     exams = []
     try:
         res = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").order("created_at", desc=True).execute()
-        exams = res.data or []
+        all_exams = res.data or []
+        # Filter by class_id if student has one
+        if student_class_id:
+            exams = [e for e in all_exams if not e.get("class_ids") or student_class_id in e.get("class_ids", [])]
+        else:
+            exams = all_exams
     except Exception as e:
         current_app.logger.error(f"Exam list query error: {e}")
+
     submitted_ids = set()
     try:
         subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []

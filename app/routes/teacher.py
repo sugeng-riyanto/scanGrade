@@ -960,181 +960,30 @@ def students():
     return render_template("teacher/students.html", students=students)
 
 
-@teacher_bp.route("/subjects")
-@teacher_or_admin_required
-def teacher_subjects():
-    supabase = get_supabase()
-    sid = g.get("user_school_id")
-    subjects = []
-    if sid:
-        sort = request.args.get("sort", "asc")
-        q = request.args.get("q", "")
-        data = supabase.table("subjects").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
-        if q:
-            data = [s for s in data if q.lower() in s.get("name", "").lower()]
-        subjects = data
-    return render_template("teacher/subjects.html", subjects=subjects, sort=sort, q=q)
-
-
-@teacher_bp.route("/subjects/new", methods=["POST"])
-@subscription_write_required
-@teacher_or_admin_required
-def teacher_subject_new():
-    supabase = get_supabase()
-    sid = g.get("user_school_id")
-    if not sid:
-        return jsonify({"error": "Sekolah tidak terdaftar"}), 400
-    name = request.form.get("name", "").strip()
-    if not name:
-        return jsonify({"error": "Nama mapel wajib diisi"}), 400
-    # Check duplicate
-    dup = supabase.table("subjects").select("id, name").eq("school_id", sid).eq("name", name).limit(1).execute()
-    if dup.data:
-        return jsonify({"error": f"Mapel '{name}' sudah ada"}), 409
-    try:
-        supabase.table("subjects").insert({"school_id": sid, "name": name, "is_active": True, "created_by": g.user_id}).execute()
-        log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)[:60]}), 400
-
-
-@teacher_bp.route("/subjects/<subject_id>/delete", methods=["POST"])
-@subscription_write_required
-@teacher_or_admin_required
-def teacher_subject_delete(subject_id):
-    supabase = get_supabase()
-    try:
-        # Check ownership: warn if created by someone else
-        item = supabase.table("subjects").select("created_by").eq("id", subject_id).single().execute()
-        if item.data and item.data.get("created_by") and item.data["created_by"] != g.user_id:
-            # Allow delete but with extra cleanup of teacher_assignments
-            supabase.table("teacher_assignments").delete().eq("subject_id", subject_id).execute()
-        supabase.table("subjects").delete().eq("id", subject_id).execute()
-        log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
-        return jsonify({"success": True, "note": "Data terkait sudah dibersihkan"})
-    except Exception as e:
-        return jsonify({"error": str(e)[:60]}), 400
-
-
-@teacher_bp.route("/classes/new", methods=["POST"])
-@subscription_write_required
-@teacher_or_admin_required
-def teacher_class_new():
-    supabase = get_supabase()
-    sid = g.get("user_school_id")
-    if not sid:
-        return jsonify({"error": "Sekolah tidak terdaftar"}), 400
-    name = request.form.get("name", "").strip()
-    if not name:
-        return jsonify({"error": "Nama kelas wajib diisi"}), 400
-    # Check duplicate
-    dup = supabase.table("classes").select("id, name").eq("school_id", sid).eq("name", name).limit(1).execute()
-    if dup.data:
-        return jsonify({"error": f"Kelas '{name}' sudah ada"}), 409
-    try:
-        supabase.table("classes").insert({"school_id": sid, "name": name, "created_by": g.user_id}).execute()
-        log_activity("create", "class", name, new_data={"name": name}, user_id=g.user_id)
-        if request.headers.get("HX-Request") or request.is_json:
-            return jsonify({"success": True})
-        flash(f"Kelas {name} berhasil ditambahkan", "success")
-        return redirect("/teacher/classes")
-    except Exception as e:
-        return jsonify({"error": str(e)[:60]}), 400
-
-
 @teacher_bp.route("/classes")
 @teacher_or_admin_required
 def teacher_classes():
     supabase = get_supabase()
     sid = g.get("user_school_id")
-    classes = []
-    subjects = []
+    assignments = []
     school_info = {}
     active_year = None
-    student_counts = {}
-    teacher_counts = {}
     if sid:
-        sort = request.args.get("sort", "asc")
-        q = request.args.get("q", "")
-        data = supabase.table("classes").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
-        if q:
-            data = [c for c in data if q.lower() in c.get("name", "").lower()]
-        classes = data
-        subj_data = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-        subjects = subj_data
+        try:
+            assignments = supabase.table("teacher_assignments") \
+                .select("*, classes!inner(id, name), subjects!inner(id, name)") \
+                .eq("teacher_id", g.user_id) \
+                .eq("school_id", sid) \
+                .execute().data or []
+        except Exception:
+            assignments = []
         try:
             sch = supabase.table("schools").select("name, npsn").eq("id", sid).single().execute()
-            if sch.data:
-                school_info = sch.data
-        except:
-            pass
+            if sch.data: school_info = sch.data
+        except: pass
         try:
             years = supabase.table("school_years").select("*").eq("school_id", sid).eq("is_active", True).limit(1).execute()
-            if years.data:
-                active_year = years.data[0]
-        except:
-            pass
-        for c in classes:
-            try:
-                sc = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", sid).eq("class_id", c["id"]).execute()
-                student_counts[c["id"]] = sc.count or 0
-            except:
-                student_counts[c["id"]] = 0
-            try:
-                tc = supabase.table("teacher_assignments").select("teacher_id", count="exact").eq("class_id", c["id"]).execute()
-                teacher_counts[c["id"]] = tc.count or 0
-            except:
-                teacher_counts[c["id"]] = 0
-    return render_template("teacher/classes.html", classes=classes, subjects=subjects,
-                           school_info=school_info, active_year=active_year,
-                           student_counts=student_counts, teacher_counts=teacher_counts,
-                           sort=sort, q=q)
-
-
-@teacher_bp.route("/classes/<class_id>/delete", methods=["POST"])
-@subscription_write_required
-@teacher_or_admin_required
-def teacher_class_delete(class_id):
-    supabase = get_supabase()
-    try:
-        supabase.table("classes").delete().eq("id", class_id).execute()
-        log_activity("delete", "class", str(class_id), user_id=g.user_id)
-        if request.headers.get("HX-Request") or request.is_json:
-            return jsonify({"success": True})
-        flash("Kelas berhasil dihapus", "success")
-        return redirect("/teacher/classes")
-    except Exception as e:
-        return jsonify({"error": str(e)[:60]}), 400
-
-
-@teacher_bp.route("/classes/<class_id>/edit", methods=["POST"])
-@subscription_write_required
-@teacher_or_admin_required
-def teacher_class_edit(class_id):
-    supabase = get_supabase()
-    name = request.form.get("name", "").strip()
-    if not name:
-        return jsonify({"error": "Nama kelas wajib diisi"}), 400
-    try:
-        supabase.table("classes").update({"name": name}).eq("id", class_id).execute()
-        log_activity("update", "class", str(class_id), new_data={"name": name}, user_id=g.user_id)
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)[:60]}), 400
-
-
-@teacher_bp.route("/subjects/<subject_id>/edit", methods=["POST"])
-@subscription_write_required
-@teacher_or_admin_required
-def teacher_subject_edit(subject_id):
-    supabase = get_supabase()
-    name = request.form.get("name", "").strip()
-    if not name:
-        return jsonify({"error": "Nama mapel wajib diisi"}), 400
-    try:
-        supabase.table("subjects").update({"name": name}).eq("id", subject_id).execute()
-        log_activity("update", "subject", str(subject_id), new_data={"name": name}, user_id=g.user_id)
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)[:60]}), 400
+            if years.data: active_year = years.data[0]
+        except: pass
+    return render_template("teacher/classes.html", assignments=assignments,
+                           school_info=school_info, active_year=active_year)
