@@ -5,7 +5,8 @@
 .demo-step { animation: slideUp 0.4s ease-out; }
 .demo-card { transition: transform 0.2s, box-shadow 0.2s; }
 .demo-card:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.08); }
-.feature-icon { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.feature-icon { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.step-num { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
 </style>
 {% endblock %}
 {% block content_noauth %}
@@ -35,15 +36,15 @@
         <div class="space-y-8 demo-step">
             <!-- Step 1 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">1</span></div>
+                <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>1</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Buat Ujian — 3 Tipe Soal</h3>
                     <p class="mt-2 text-surface-500">Klik "Buat Ujian" dan isi detail. Tersedia 3 tipe soal: <strong>MCQ</strong> (A-E), <strong>Esai Teks</strong> (siswa menulis paragraf), dan <strong>Esai Canvas</strong> (siswa menggambar di PDF). Atur durasi, kelas tujuan, jadwal mulai, dan bobot nilai per soal.</p>
                     <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-list-ol text-amber-600 text-lg"></i><p class="text-xs font-bold mt-1">MCQ</p></div>
-                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-align-left text-blue-600 text-lg"></i><p class="text-xs font-bold mt-1">Esai Teks</p></div>
-                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-paint-brush text-emerald-600 text-lg"></i><p class="text-xs font-bold mt-1">Esai Canvas</p></div>
-                        <div class="p-3 bg-purple-50 rounded-xl text-center"><i class="fas fa-robot text-purple-600 text-lg"></i><p class="text-xs font-bold mt-1">Koreksi AI*</p></div>
+                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-list-ol text-amber-600 text-xl"></i><p class="text-xs font-bold mt-1">MCQ</p></div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-align-left text-blue-600 text-xl"></i><p class="text-xs font-bold mt-1">Esai Teks</p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-paint-brush text-emerald-600 text-xl"></i><p class="text-xs font-bold mt-1">Esai Canvas</p></div>
+                        <div class="p-3 bg-purple-50 rounded-xl text-center"><i class="fas fa-robot text-purple-600 text-xl"></i><p class="text-xs font-bold mt-1">Koreksi AI*</p></div>
                     </div>
                     <p class="mt-2 text-xs text-surface-400">*AI correction untuk Esai Teks. Sediakan API key sendiri di Pengaturan AI.</p>
                 </div>
@@ -51,7 +52,7 @@
 
             <!-- Step 2 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">2</span></div>
+                <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>2</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Atur Anti-Cheat &amp; Jadwal</h3>
                     <p class="mt-2 text-surface-500">Aktifkan anti-cheat: deteksi tab switch, blokir copy-paste, watermark, fullscreen wajib. Atur juga jadwal kapan ujian dimulai dan durasi pengerjaan.</p>
@@ -66,7 +67,7 @@
 
             <!-- Step 3 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">3</span></div>
+                <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>3</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Koreksi dengan AI + Tools Canvas</h3>
                     <p class="mt-2 text-surface-500">Untuk Esai Teks, klik <strong>"Koreksi AI"</strong> — AI baca soal & jawaban, beri saran skor + feedback. Guru tinggal review dan edit. Untuk Esai Canvas, gunakan pena digital, ruler 30cm, busur 180°, dan segitiga siku untuk koreksi manual.</p>
@@ -81,7 +82,7 @@
 
             <!-- Step 4 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><span class="text-emerald-700 font-extrabold text-lg">4</span></div>
+                <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>4</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Lihat Hasil &amp; Export</h3>
                     <p class="mt-2 text-surface-500">Dashboard analitik: distribusi nilai, soal tersulit, statistik per-band. Export ke XLSX atau PDF — termasuk gambar canvas siswa dan jawaban teks.</p>
@@ -95,7 +96,7 @@
 
             <!-- Step 5 — AI Settings -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center shrink-0"><span class="text-purple-700 font-extrabold text-lg">5</span></div>
+                <div class="step-num bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-lg shadow-purple-500/20 shrink-0"><span>5</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Pengaturan AI Grading</h3>
                     <p class="mt-2 text-surface-500">Di menu <strong>Koreksi AI</strong>, kamu bisa menambahkan API Key dari Gemini, OpenAI, DeepSeek, Groq, atau custom provider. Pilih prompt grading yang sesuai mapel (IPA, Matematika, Bahasa, dll) atau buat prompt sendiri. Semua tersimpan per akun guru.</p>

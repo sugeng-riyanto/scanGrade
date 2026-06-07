@@ -2,7 +2,7 @@
 {% block title %}Tutorial Siswa - ScanGrade{% endblock %}
 {% block head_extra %}
 <style>
-.demo-step { animation: slideUp 0.4s ease-out; }
+.step-num { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; box-shadow: 0 8px 24px rgba(0,0,0,0.08); } .demo-step { animation: slideUp 0.4s ease-out; }
 .demo-card { transition: transform 0.2s, box-shadow 0.2s; }
 .demo-card:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.08); }
 .tool-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 700; }
@@ -35,7 +35,7 @@
         <div class="space-y-8 demo-step">
             <!-- Step 1 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0"><span class="text-amber-700 font-extrabold text-lg">1</span></div>
+                <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>1</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Login &amp; Pilih Ujian</h3>
                     <p class="mt-2 text-surface-500">Masuk dengan akun dari sekolah. Di dashboard, klik ujian yang tersedia. Kamu hanya akan melihat ujian untuk kelasmu.</p>
@@ -48,7 +48,7 @@
 
             <!-- Step 2 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0"><span class="text-amber-700 font-extrabold text-lg">2</span></div>
+                <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>2</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Jenis Soal &amp; Cara Jawab</h3>
                     <p class="mt-2 text-surface-500">Ada 3 tipe soal:</p>
@@ -71,7 +71,7 @@
 
             <!-- Step 3 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0"><span class="text-amber-700 font-extrabold text-lg">3</span></div>
+                <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>3</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Tools Menggambar &amp; Mengukur</h3>
                     <p class="mt-2 text-surface-500">Untuk soal Esai Canvas, gunakan alat-alat ini:</p>
@@ -93,7 +93,7 @@
 
             <!-- Step 4 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0"><span class="text-amber-700 font-extrabold text-lg">4</span></div>
+                <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>4</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Anti-Cheat</h3>
                     <p class="mt-2 text-surface-500">Jangan berpindah tab selama ujian. Sistem mendeteksi dan memberi sanksi bertahap:</p>
@@ -114,7 +114,7 @@
 
             <!-- Step 5 -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0"><span class="text-amber-700 font-extrabold text-lg">5</span></div>
+                <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>5</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Kumpulkan &amp; Lihat Nilai</h3>
                     <p class="mt-2 text-surface-500">Klik "Kumpulkan" setelah selesai. Jika guru mengatur publikasi otomatis, nilai langsung muncul. Jika manual, tunggu guru mengoreksi. Download PDF hasil ujianmu kapan saja.</p>
