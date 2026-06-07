@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 6 July 2026
+**Last Updated:** 7 July 2026
 
 ---
 
@@ -44,6 +44,14 @@
 ---
 
 ## Changelog
+
+### 7 July 2026 — Essay Text Display & Final Verification
+- **Essay text answer display**: Student's paragraph answer now visible in result detail page and PDF download
+- **DB verification**: 17 tables confirmed (`schools` to `ai_grading_logs`)
+- **API verification**: 12 endpoints confirmed (violation, scan, sync, grade, payment, AI)
+- **Blueprint verification**: All 10 blueprints registered (auth, teacher, student, admin, super_admin, etc.)
+- **Anti-cheat**: Graduated penalty, auto-submit, rate limiting verified intact
+- **Class/subject CRUD**: Admin sekolah — full CRUD. Teacher — read-only. Student — exam only.
 
 ### 6 July 2026 — Critical Bugfixes & UI Modernization
 - **MCQ answer "True" fix**: Canvas drawing no longer overwrites MCQ answer with boolean `true` — only letter answers (A/B/C/D/E) are stored for MCQ
