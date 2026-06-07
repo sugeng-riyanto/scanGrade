@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 3 July 2026
+**Last Updated:** 4 July 2026
 
 ---
 
@@ -44,6 +44,14 @@
 ---
 
 ## Changelog
+
+### 4 July 2026 — UI/UX Modernization & Landing Page Refresh
+- **Landing page refresh**: 8 feature cards (3 tipe soal, AI grading, anti-cheat, alat ukur, analitik, multi-sekolah, pembayaran, kalkulator), modern CTA section
+- **Auth pages UI**: Decorative background blur elements, deeper card shadows, hover animation on buttons, smoother transitions
+- **Tutorial pages UI**: Added decorative gradient circles, consistent styling across guru/murid/admin tutorials
+- **Copy-to-clipboard**: Click-to-copy icon on all demo emails with toast notification "✅ Tersalin!"
+- **Fake NPSN**: All demo NPSN replaced with dummy numbers (99887711/22/33)
+- **Progress**: 99% complete, core features stable
 
 ### 3 July 2026 — Demo Page Redesign & Final Polish
 - **Demo page redesign**: Modern card UI with gradient icons, hover effects, shadow animations
