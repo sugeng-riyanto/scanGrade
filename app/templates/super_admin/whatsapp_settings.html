@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}WhatsApp - ScanGrade{% endblock %}
+{% block page_title %}Pengaturan WhatsApp{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="card p-6">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 text-xl"><i class="fab fa-whatsapp"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800">Nomor WhatsApp Kontak</h3>
+                <p class="text-sm text-slate-500 font-medium">Nomor ini akan muncul sebagai badge WA di halaman registrasi</p>
+            </div>
+        </div>
+
+        <form method="POST" class="space-y-4">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Nomor WhatsApp (dengan kode negara)</label>
+                <input type="text" name="whatsapp_number" value="{{ number }}" class="input" placeholder="6281225468054">
+                <p class="text-xs text-slate-400 mt-1">Format: kode negara + nomor, tanpa + atau spasi. Contoh: 6281225468054</p>
+            </div>
+            {% if number %}
+            <div class="p-3 bg-emerald-50 rounded-xl flex items-center gap-2 text-sm text-emerald-700 font-medium">
+                <i class="fab fa-whatsapp text-lg"></i>
+                <span>Link: <a href="https://api.whatsapp.com/send?phone={{ number }}" target="_blank" class="underline font-bold">api.whatsapp.com/send?phone={{ number }}</a></span>
+            </div>
+            {% endif %}
+            <div class="flex items-center gap-3 pt-2">
+                <button type="submit" class="btn btn-primary px-6">Simpan</button>
+                <a href="/super-admin/dashboard" class="btn btn-ghost">Kembali</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

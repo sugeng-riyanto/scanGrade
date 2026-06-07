@@ -769,3 +769,31 @@ def reset_school_data():
             return redirect("/super-admin/reset-school-data")
 
     return render_template("super_admin/reset_school_data.html", school=school)
+
+
+@super_bp.route("/whatsapp-settings", methods=["GET", "POST"])
+@_sa_required
+def whatsapp_settings():
+    supabase = get_supabase()
+    if request.method == "POST":
+        number = request.form.get("whatsapp_number", "").strip()
+        try:
+            existing = supabase.table("school_settings").select("id").eq("id", 1).execute()
+            if existing.data:
+                supabase.table("school_settings").update({"whatsapp_number": number}).eq("id", 1).execute()
+            else:
+                supabase.table("school_settings").insert({"id": 1, "whatsapp_number": number}).execute()
+            log_activity("update", "whatsapp_settings", "1", new_data={"number": number}, user_id=g.user_id)
+            flash("Nomor WhatsApp berhasil disimpan", "success")
+        except Exception as e:
+            flash(f"Gagal: {str(e)[:60]}", "error")
+        return redirect("/super-admin/whatsapp-settings")
+
+    number = ""
+    try:
+        res = supabase.table("school_settings").select("whatsapp_number").eq("id", 1).single().execute()
+        if res.data:
+            number = res.data.get("whatsapp_number", "")
+    except Exception:
+        pass
+    return render_template("super_admin/whatsapp_settings.html", number=number)

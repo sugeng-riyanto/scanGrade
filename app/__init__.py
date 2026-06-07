@@ -127,6 +127,15 @@ def create_app(env=None):
         return result
     app.jinja_env.globals["get_demo_settings"] = get_demo_settings
 
+    def get_whatsapp_number():
+        try:
+            supabase = app.extensions["supabase"]
+            data = supabase.table("school_settings").select("whatsapp_number").eq("id", 1).single().execute().data or {}
+            return data.get("whatsapp_number", "")
+        except Exception:
+            return ""
+    app.jinja_env.globals["get_whatsapp_number"] = get_whatsapp_number
+
     @app.template_global()
     def school_favicon(school_info=None):
         """Generate a simple SVG favicon from school initials or default."""

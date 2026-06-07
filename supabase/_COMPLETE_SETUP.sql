@@ -456,6 +456,9 @@ ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS payment_fee_config JSONB DE
 
 ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS payment_details JSONB DEFAULT '{}';
 
+-- WhatsApp contact number for registration page
+ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS whatsapp_number TEXT DEFAULT '';
+
 -- Exam scheduling & class/subject improvements
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ;
