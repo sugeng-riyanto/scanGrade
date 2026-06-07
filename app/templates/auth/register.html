@@ -116,19 +116,12 @@
 </div>
 {% set wa = get_whatsapp_number() %}
 {% if wa %}
-<div x-data="{
-    showBadge: true,
-    init() {
-        const h = localStorage.getItem('wa_badge_hide');
-        if (h && Date.now() < parseInt(h)) { this.showBadge = false; return; }
-        if (sessionStorage.getItem('wa_badge_session') === 'hidden') { this.showBadge = false; }
-    }
-}" x-show="showBadge" x-cloak class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-1.5">
+<div id="wa-badge" class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-1.5">
     <div class="flex items-center gap-1 bg-white/90 backdrop-blur-sm rounded-full px-2 py-0.5 shadow border border-slate-200">
-        <button @click="showBadge=false; sessionStorage.setItem('wa_badge_session','hidden')"
+        <button onclick="document.getElementById('wa-badge').remove()"
             class="text-[10px] text-slate-400 hover:text-slate-600 px-1 transition">Sembunyikan</button>
         <span class="text-slate-200">|</span>
-        <button @click="showBadge=false; localStorage.setItem('wa_badge_hide', Date.now() + 86400000)"
+        <button onclick="localStorage.setItem('wa_badge_hide','1'); document.getElementById('wa-badge').remove()"
             class="text-[10px] text-red-400 hover:text-red-600 px-1 transition">Tutup</button>
     </div>
     <a href="https://api.whatsapp.com/send?phone={{ wa }}" target="_blank" rel="noopener"
@@ -137,5 +130,10 @@
         <span class="font-bold text-sm">Butuh bantuan? Chat WA</span>
     </a>
 </div>
+<script>
+if (localStorage.getItem('wa_badge_hide') || sessionStorage.getItem('wa_badge_session') === 'hidden') {
+    document.getElementById('wa-badge')?.remove();
+}
+</script>
 {% endif %}
 {% endblock %}
