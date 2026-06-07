@@ -1250,3 +1250,94 @@ def payment_failure():
     order_id = request.args.get("order_id", "")
     flash("Pembayaran gagal atau dibatalkan", "error")
     return redirect("/admin-sekolah/subscription")
+
+
+@admin_sekolah_bp.route("/invoices")
+@admin_sekolah_required
+def invoices():
+    supabase = get_supabase()
+    sid = _school_id()
+    invs = []
+    school_info = {}
+    if sid:
+        invs = supabase.table("invoices").select("*, subscription_plans!left(name)").eq("school_id", sid).order("created_at", desc=True).execute().data or []
+        for inv in invs:
+            if isinstance(inv.get("created_at"), str):
+                inv["created_at"] = inv["created_at"][:19].replace("T", " ")
+            if isinstance(inv.get("paid_at"), str):
+                inv["paid_at"] = inv["paid_at"][:19].replace("T", " ")
+        try:
+            sch = supabase.table("schools").select("name, address, npsn").eq("id", sid).single().execute()
+            school_info = sch.data or {}
+        except:
+            pass
+    return render_template("admin_sekolah/invoices.html", invoices=invs, school_info=school_info)
+
+
+@admin_sekolah_bp.route("/invoices/<invoice_id>/download-pdf")
+@admin_sekolah_required
+def download_invoice_pdf(invoice_id):
+    supabase = get_supabase()
+    sid = _school_id()
+    inv = supabase.table("invoices").select("*, subscription_plans!left(name, duration_label)") \
+        .eq("id", invoice_id).eq("school_id", sid).single().execute()
+    if not inv.data:
+        flash("Invoice tidak ditemukan", "error")
+        return redirect("/admin-sekolah/invoices")
+    inv = inv.data
+
+    school = supabase.table("schools").select("name, address, npsn").eq("id", sid).single().execute().data or {}
+    plan = inv.get("subscription_plans") or {}
+
+    from xhtml2pdf import pisa
+    import io
+    from flask import make_response
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 11pt; color: #1e293b; padding: 20px; }}
+.invoice-box {{ max-width: 700px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 30px; }}
+.header {{ text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 15px; margin-bottom: 20px; }}
+.header h1 {{ font-size: 22pt; color: #1e293b; margin: 0; }}
+.header h2 {{ font-size: 14pt; color: #2563eb; margin: 5px 0 0; }}
+.row {{ display: flex; justify-content: space-between; padding: 4px 0; }}
+.label {{ color: #64748b; font-weight: bold; }}
+.value {{ font-weight: bold; color: #1e293b; }}
+.table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
+.table th {{ background: #f1f5f9; padding: 8px 10px; text-align: left; font-size: 9pt; border: 1px solid #e2e8f0; }}
+.table td {{ padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 10pt; }}
+.total {{ font-size: 14pt; font-weight: 900; color: #2563eb; text-align: right; margin-top: 10px; }}
+.footer {{ margin-top: 25px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8; text-align: center; }}
+</style></head><body>
+<div class="invoice-box">
+<div class="header">
+<h1>INVOICE</h1>
+<h2>{inv.get('invoice_number', '-')}</h2>
+</div>
+<div class="row"><span class="label">Sekolah:</span><span class="value">{school.get('name', '-')}</span></div>
+<div class="row"><span class="label">NPSN:</span><span class="value">{school.get('npsn', '-')}</span></div>
+<div class="row"><span class="label">Alamat:</span><span class="value">{school.get('address', '-')}</span></div>
+<div class="row"><span class="label">Tanggal:</span><span class="value">{str(inv.get('paid_at') or inv.get('created_at', ''))[:19]}</span></div>
+<div class="row"><span class="label">Status:</span><span class="value" style="color:#059669;">LUNAS</span></div>
+<table class="table">
+<tr><th>Deskripsi</th><th>Periode</th><th>Jumlah</th></tr>
+<tr>
+<td>Langganan ScanGrade - {plan.get('name', '-')}</td>
+<td>{str(inv.get('period_start', ''))[:10] or '-'} s/d {str(inv.get('period_end', ''))[:10] or 'Selamanya'}</td>
+<td style="text-align:right;">Rp {int(inv.get('amount', 0)):,}</td>
+</tr>
+</table>
+<div class="total">Total: Rp {int(inv.get('amount', 0)):,}</div>
+<div class="row" style="margin-top:10px;"><span class="label">Pembayaran:</span><span class="value">{inv.get('payment_method', '-')}</span></div>
+<div class="row"><span class="label">Kode Aktivasi:</span><span class="value" style="font-family:monospace;">{inv.get('activation_code', '-') if inv.get('activation_code') else '-'}</span></div>
+<div class="footer">Dicetak dari ScanGrade &mdash; Invoice #{inv.get('invoice_number', '-')}</div>
+</div></body></html>"""
+    result = io.BytesIO()
+    pisa_status = pisa.CreatePDF(html, dest=result)
+    if pisa_status.err:
+        flash("Gagal generate PDF", "error")
+        return redirect("/admin-sekolah/invoices")
+    resp = make_response(result.getvalue())
+    resp.headers['Content-Type'] = 'application/pdf'
+    resp.headers['Content-Disposition'] = f'attachment; filename=invoice-{inv.get("invoice_number", "unknown")}.pdf'
+    return resp

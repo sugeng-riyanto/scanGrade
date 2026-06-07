@@ -509,3 +509,24 @@ CREATE TABLE IF NOT EXISTS ai_grading_logs (
     tokens_used INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Invoices for billing and payment proof
+CREATE TABLE IF NOT EXISTS invoices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_number TEXT NOT NULL UNIQUE,
+    school_id UUID NOT NULL,
+    transaction_id UUID REFERENCES payment_transactions(id),
+    plan_id INTEGER REFERENCES subscription_plans(id),
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'paid',
+    payment_method TEXT DEFAULT '',
+    period_start TIMESTAMPTZ,
+    period_end TIMESTAMPTZ,
+    paid_at TIMESTAMPTZ DEFAULT now(),
+    due_at TIMESTAMPTZ,
+    notes TEXT DEFAULT '',
+    activation_code TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE SEQUENCE IF NOT EXISTS invoice_number_seq START 1;

@@ -244,7 +244,7 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
     }).eq("school_id", school_id).eq("status", "active").execute()
 
     # Insert new subscription
-    supabase.table("school_subscriptions").insert({
+    sub_res = supabase.table("school_subscriptions").insert({
         "school_id": school_id,
         "plan_id": plan_id,
         "status": "active",
@@ -253,7 +253,51 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
         "activation_code": code,
     }).execute()
 
+    # Generate invoice
+    try:
+        _generate_invoice(supabase, school_id, plan_id, order_id, now, duration_days)
+    except Exception as e:
+        current_app.logger.error(f"Invoice creation error: {e}")
+
     current_app.logger.info(f"Subscription activated for school {school_id}, plan={plan_id}, code={code}")
+
+
+def _generate_invoice(supabase, school_id, plan_id, order_id, now, duration_days):
+    """Generate an invoice for a successful payment or cash activation."""
+    import random
+    ts = now.strftime("%y%m%d%H%M%S")
+    inv_num = f"INV-{now.year}-{ts}-{random.randint(100,999)}"
+
+    tx = supabase.table("payment_transactions").select("gross_amount, payment_type, status, activation_code").eq("order_id", order_id).single().execute()
+    tx_data = tx.data or {}
+    amount = tx_data.get("gross_amount") or 0
+    payment_method = tx_data.get("payment_type") or "cash"
+    activation_code = tx_data.get("activation_code") or ""
+
+    plan_name = ""
+    if plan_id:
+        p = supabase.table("subscription_plans").select("name, duration_days").eq("id", plan_id).single().execute()
+        if p.data:
+            plan_name = p.data.get("name", "")
+            duration_days = p.data.get("duration_days", duration_days)
+
+    period_end = now + timedelta(days=duration_days) if duration_days > 0 else None
+
+    supabase.table("invoices").insert({
+        "invoice_number": inv_num,
+        "school_id": school_id,
+        "transaction_id": order_id,
+        "plan_id": plan_id,
+        "amount": amount,
+        "status": "paid",
+        "payment_method": payment_method,
+        "period_start": now.isoformat(),
+        "period_end": period_end.isoformat() if period_end else None,
+        "paid_at": now.isoformat(),
+        "due_at": (now + timedelta(days=7)).isoformat(),
+        "notes": f"Langganan {plan_name}" if plan_name else "Aktivasi akun",
+        "activation_code": activation_code,
+    }).execute()
 
 
 def get_school_subscription(school_id):

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Invoice - ScanGrade{% endblock %}
+{% block page_title %}Invoice &amp; Bukti Pembayaran{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <!-- School Info + Stats -->
+    <div class="bg-gradient-to-r from-primary-600 to-primary-700 rounded-2xl p-5 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+            <h2 class="font-extrabold text-lg">{{ school_info.get('name', '-') }}</h2>
+            <p class="text-primary-200 text-sm font-medium">NPSN: {{ school_info.get('npsn', '-') }} · {{ invoices|length }} invoice</p>
+        </div>
+    </div>
+
+    {% if invoices %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-surface-50 border-b border-surface-200">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold text-surface-600">Invoice</th>
+                        <th class="text-left px-4 py-3 font-bold text-surface-600">Paket</th>
+                        <th class="text-center px-4 py-3 font-bold text-surface-600">Jumlah</th>
+                        <th class="text-center px-4 py-3 font-bold text-surface-600">Status</th>
+                        <th class="text-left px-4 py-3 font-bold text-surface-600">Pembayaran</th>
+                        <th class="text-left px-4 py-3 font-bold text-surface-600">Tanggal</th>
+                        <th class="text-center px-4 py-3 font-bold text-surface-600">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-50">
+                    {% for inv in invoices %}
+                    <tr class="hover:bg-surface-50 transition">
+                        <td class="px-4 py-3 font-mono text-xs font-bold text-surface-700">{{ inv.invoice_number }}</td>
+                        <td class="px-4 py-3 text-surface-600">{{ inv.get('subscription_plans', {}).get('name', '-') }}</td>
+                        <td class="px-4 py-3 text-center font-extrabold text-primary-600">Rp {{ "{:,.0f}".format(inv.amount).replace(',','.') }}</td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <i class="fas fa-check-circle"></i> {{ inv.status }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-surface-500">{{ inv.payment_method or '-' }}</td>
+                        <td class="px-4 py-3 text-surface-400 text-xs">{{ inv.paid_at[:19] if inv.paid_at else inv.created_at[:19] }}</td>
+                        <td class="px-4 py-3 text-center">
+                            <a href="/admin-sekolah/invoices/{{ inv.id }}/download-pdf"
+                               class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-50 text-primary-700 hover:bg-primary-100 transition">
+                                <i class="fas fa-download"></i> PDF
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-12 text-center text-surface-400">
+        <div class="w-16 h-16 mx-auto rounded-full bg-surface-100 flex items-center justify-center mb-4">
+            <i class="fas fa-file-invoice text-surface-300 text-2xl"></i>
+        </div>
+        <p class="text-lg font-bold text-surface-500">Belum ada invoice</p>
+        <p class="text-sm mt-1">Invoice akan muncul setelah pembayaran berhasil</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
