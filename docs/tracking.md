@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 7 July 2026
+**Last Updated:** 8 July 2026
 
 ---
 
@@ -52,6 +52,17 @@
 - **Blueprint verification**: All 10 blueprints registered (auth, teacher, student, admin, super_admin, etc.)
 - **Anti-cheat**: Graduated penalty, auto-submit, rate limiting verified intact
 - **Class/subject CRUD**: Admin sekolah — full CRUD. Teacher — read-only. Student — exam only.
+
+### 8 July 2026 — Role Simulation & Bugfix Audit
+- **Admin sekolah bugs fixed**:
+  - `classes.html`: `t.name` → `t.full_name` (profiles table uses `full_name`)
+  - `classes.html`: `school_years` → `years` variable mismatch
+  - `promote route`: Added `student_count` and `school_year_name` to class objects
+  - `classes route`: Added `wali_kelas_id` and `student_count` to class dicts
+- **Teacher audit**: All 15 templates verified, 0 syntax errors, 0 variable mismatches
+- **Student audit**: All 6 templates verified, routes pass all required variables
+- **Flask verification**: 173 routes registered, app starts without errors
+- **Overall**: Core features stable, all role-based CRUD verified
 
 ### 6 July 2026 — Critical Bugfixes & UI Modernization
 - **MCQ answer "True" fix**: Canvas drawing no longer overwrites MCQ answer with boolean `true` — only letter answers (A/B/C/D/E) are stored for MCQ
