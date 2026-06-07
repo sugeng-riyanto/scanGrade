@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 10 July 2026
+**Last Updated:** 12 July 2026
 
 ---
 
@@ -52,6 +52,15 @@
 - **Blueprint verification**: All 10 blueprints registered (auth, teacher, student, admin, super_admin, etc.)
 - **Anti-cheat**: Graduated penalty, auto-submit, rate limiting verified intact
 - **Class/subject CRUD**: Admin sekolah — full CRUD. Teacher — read-only. Student — exam only.
+
+### 12 July 2026 — Invoice System & Final Polish
+- **Invoice system**: Auto-generate invoices on payment/cash activation, invoice page with PDF download
+- **Invoice PDF**: Professional format with school info, plan details, payment method, activation code
+- **Invoice watermark**: "ScanGrade" centered light watermark (xhtml2pdf compatible)
+- **Invoice footer**: Verification message + print date
+- **Activation code format**: `SG-XXXX-XXXX-XXXX` (12 chars in 3 groups)
+- **Admin tutorial**: Updated with Invoice & Billing step
+- **Bug fix**: `_create_user()` not setting `school_id` on profiles (parameter vs dict mismatch)
 
 ### 10 July 2026 — Demo Data Refresh & Relationship Audit
 - **Demo data refreshed**: 3 schools (SMP/SMA/SMK), all synchronized — classes, subjects, teachers, students, assignments, school years, subscriptions
