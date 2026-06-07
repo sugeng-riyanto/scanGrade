@@ -105,6 +105,21 @@
 | Fixed missing imports | ✅ | `json`, `current_app`, `max_attempts` |
 | Embedded Snap payment widget | ✅ | `snap.embed()` no popup |
 
+## Fase 10: AI Essay Grading ✅ (Selesai)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| AI service with 4 providers | ✅ | Gemini, OpenAI, DeepSeek, Groq |
+| Teacher API key CRUD | ✅ | Add, activate, test, delete keys |
+| Tutorial for getting free API keys | ✅ | Step-by-step for each provider |
+| Editable prompt template | ✅ | Variables: question, answer, max_score, rubric |
+| Esai Teks question type | ✅ | New type in exam builder dropdown |
+| Student textarea for essay answers | ✅ | Large textarea with char counter |
+| AI grading button in teacher UI | ✅ | Auto-fills score + feedback per essay |
+| API endpoint ai-suggest | ✅ | Returns score + feedback |
+| API endpoint test-key | ✅ | Validates key connection |
+| Database tables | ✅ | teacher_ai_keys, teacher_ai_settings, ai_grading_logs |
+
 ---
 
 ## Milestones
@@ -121,3 +136,4 @@
 | M8: Final integration + testing | Week 8 | ✅ Complete |
 | M9: Subscription & Payment (Midtrans) | Week 9 | ✅ Complete |
 | M10: Role refactor & audit fixes | Week 10 | ✅ Complete |
+| M11: AI Essay Grading | Week 11 | ✅ Complete |

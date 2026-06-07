@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 20 June 2026
+**Last Updated:** 25 June 2026
 
 ---
 
@@ -26,7 +26,8 @@
 | Analytics | 90% | ✅ Working |
 | Export | 95% | ✅ Stable |
 | Anti-Cheat | 95% | ✅ Stable |
-| **Subscription & Payment** | **90%** | **✅ Working** |
+| Subscription & Payment | 95% | ✅ Working |
+| AI Essay Grading (NEW) | 85% | ✅ Service + UI |
 | Multi-School | 85% | ⚠️ Needs routes |
 | OMR Scanning | 70% | ⚠️ Camera works |
 
@@ -43,6 +44,17 @@
 ---
 
 ## Changelog
+
+### 25 June 2026 — AI Essay Grading System
+- **AI service**: 4 provider support (Gemini, OpenAI, DeepSeek, Groq) with pluggable architecture
+- **Teacher AI Settings**: `/teacher/ai-settings` — CRUD API keys, test button, tutorial for getting free keys
+- **Prompt editor**: Editable grading prompt with variables `{question}`, `{answer}`, `{max_score}`, `{rubric}`
+- **Esai Teks (Paragraph)**: New question type in exam builder — essay with textarea answer
+- **Student textarea**: Large textarea for paragraph answers with character counter
+- **AI grading button**: "Koreksi AI" per soal in teacher grading page — auto-fills score + feedback
+- **API endpoints**: `/api/grade/ai-suggest`, `/api/ai/test-key`
+- **Database**: `teacher_ai_keys`, `teacher_ai_settings`, `ai_grading_logs` tables
+- **Anti-cheat**: Verified intact — graduated penalty, auto-submit, rate limiting all working
 
 ### 20 June 2026 — Role Refactor & Audit Fixes
 - **Centralized CRUD**: Only admin_sekolah manages classes & subjects. Teachers view their assigned classes/subjects only.
