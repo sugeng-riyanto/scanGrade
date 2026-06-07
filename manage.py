@@ -41,7 +41,7 @@ DEMO_USERS = {
 DEMO_SCHOOLS = [
     {
         "name": "SMP Negeri 1 ScanGrade",
-        "npsn": "20623248", "address": "Jl. Pendidikan No. 1, Jakarta",
+        "npsn": "99887711", "address": "Jl. Pendidikan No. 1, Jakarta",
         "city": "Jakarta", "province": "DKI Jakarta", "level": "SMP",
         "admin": {"email": "admin_smp@scan-grade.app", "password": "demo123", "full_name": "Admin SMP ScanGrade", "role": "admin_sekolah", "phone": "081222222221"},
         "classes": ["VII-A", "VII-B", "VIII-A", "VIII-B", "IX-A"],
@@ -59,7 +59,7 @@ DEMO_SCHOOLS = [
     },
     {
         "name": "SMA Negeri 1 ScanGrade",
-        "npsn": "69893227", "address": "Jl. Merdeka No. 10, Jakarta",
+        "npsn": "99887722", "address": "Jl. Merdeka No. 10, Jakarta",
         "city": "Jakarta", "province": "DKI Jakarta", "level": "SMA",
         "admin": {"email": "admin_sma@scan-grade.app", "password": "demo123", "full_name": "Admin SMA ScanGrade", "role": "admin_sekolah", "phone": "081222222222"},
         "classes": ["X-A", "X-B", "XI-A", "XI-B", "XII-A"],
@@ -78,7 +78,7 @@ DEMO_SCHOOLS = [
     },
     {
         "name": "SMK Teknologi ScanGrade",
-        "npsn": "34567890", "address": "Jl. Industri No. 5, Bandung",
+        "npsn": "99887733", "address": "Jl. Industri No. 5, Bandung",
         "city": "Bandung", "province": "Jawa Barat", "level": "SMK",
         "admin": {"email": "admin_smk@scan-grade.app", "password": "demo123", "full_name": "Admin SMK ScanGrade", "role": "admin_sekolah", "phone": "081222222223"},
         "classes": ["X-RPL", "XI-RPL", "XII-RPL", "X-TKJ", "XI-TKJ"],
