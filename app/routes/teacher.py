@@ -1093,3 +1093,35 @@ def teacher_class_delete(class_id):
         return redirect("/teacher/classes")
     except Exception as e:
         return jsonify({"error": str(e)[:60]}), 400
+
+
+@teacher_bp.route("/classes/<int:class_id>/edit", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def teacher_class_edit(class_id):
+    supabase = get_supabase()
+    name = request.form.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Nama kelas wajib diisi"}), 400
+    try:
+        supabase.table("classes").update({"name": name}).eq("id", class_id).execute()
+        log_activity("update", "class", str(class_id), new_data={"name": name}, user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:60]}), 400
+
+
+@teacher_bp.route("/subjects/<int:subject_id>/edit", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def teacher_subject_edit(subject_id):
+    supabase = get_supabase()
+    name = request.form.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Nama mapel wajib diisi"}), 400
+    try:
+        supabase.table("subjects").update({"name": name}).eq("id", subject_id).execute()
+        log_activity("update", "subject", str(subject_id), new_data={"name": name}, user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:60]}), 400
