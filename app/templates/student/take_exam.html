@@ -61,23 +61,22 @@
 {% block content %}
 <div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
     <!-- Top Bar -->
-    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky-topbar flex items-center justify-between border border-stone-100">
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex items-center justify-between border border-surface-100">
         <div class="flex items-center gap-3">
-            <button type="button" @click="sidebarOpen = !sidebarOpen" class="text-stone-400 hover:text-orange-500 text-lg p-1.5 hover:bg-orange-50 rounded-xl transition">
+            <button type="button" @click="sidebarOpen = !sidebarOpen" class="text-surface-400 hover:text-primary-500 text-lg p-1.5 hover:bg-primary-50 rounded-xl transition">
                 <i class="fas" :class="sidebarOpen ? 'fa-chevron-left' : 'fa-bars'"></i>
             </button>
             <div>
-                <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-stone-800">{{ exam.title }}</h1>
-                <span class="text-[10px] text-stone-400 font-semibold">{{ exam.subject }} &middot; {{ exam.total_questions }} soal</span>
+                <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-surface-800">{{ exam.title }}</h1>
+                <span class="text-[10px] text-surface-400 font-semibold">{{ exam.subject }} &middot; {{ exam.total_questions }} soal</span>
             </div>
         </div>
         <div class="flex items-center gap-3">
-            <!-- Connection Status Indicator -->
             <div x-show="!submitted" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold transition-all"
                  :class="{
                      'bg-emerald-50 text-emerald-600 border border-emerald-200': syncStatus === 'synced',
                      'bg-amber-50 text-amber-600 border border-amber-200': syncStatus === 'saving',
-                     'bg-stone-100 text-stone-400 border border-stone-200': syncStatus === 'offline',
+                     'bg-surface-100 text-surface-400 border border-surface-200': syncStatus === 'offline',
                      'bg-red-50 text-red-500 border border-red-200': syncStatus === 'error'
                  }">
                 <i :class="{
@@ -88,8 +87,8 @@
                 }"></i>
                 <span x-text="syncLabel"></span>
             </div>
-            <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="formatTime(timeLeft)" :class="timeLeft < 60 ? 'text-red-500' : 'text-orange-500'"></div>
-            <button x-show="!submitted" @click="submitExam()" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-5 py-2.5 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-bold shadow-lg shadow-orange-200/50 transition">
+            <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="formatTime(timeLeft)" :class="timeLeft < 60 ? 'text-red-500' : 'text-primary-600'"></div>
+            <button x-show="!submitted" @click="submitExam()" class="bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition">
                 <i class="fas fa-check mr-1.5"></i>Kumpulkan
             </button>
         </div>
@@ -97,27 +96,27 @@
 
     <!-- Device Status Bar -->
     <div x-show="!submitted && !showExamAgreement"
-         class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex items-center gap-3 text-[10px] font-bold text-stone-500 border border-stone-100 shadow-sm pointer-events-none select-none">
+         class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex items-center gap-3 text-[10px] font-bold text-surface-500 border border-surface-100 shadow-sm pointer-events-none select-none">
         <div class="flex items-center gap-1.5" title="Battery">
             <i class="fas" :class="deviceCharging ? 'fa-bolt text-amber-500' : deviceBattery > 50 ? 'fa-battery-three-quarters text-emerald-500' : deviceBattery > 20 ? 'fa-battery-half text-amber-500' : 'fa-battery-quarter text-red-500'"></i>
             <span x-text="deviceBattery + '%'" :class="deviceBattery < 20 ? 'text-red-500' : ''"></span>
         </div>
-        <span class="text-stone-200">|</span>
+        <span class="text-surface-200">|</span>
         <div class="flex items-center gap-1.5" title="Jaringan">
-            <i class="fas" :class="connectionType === 'wifi' ? 'fa-wifi text-primary-500' : connectionType === 'ethernet' ? 'fa-network-wired text-primary-500' : connectionType === 'unknown' || !connectionType ? 'fa-question-circle text-stone-300' : 'fa-signal text-primary-500'"></i>
+            <i class="fas" :class="connectionType === 'wifi' ? 'fa-wifi text-primary-500' : connectionType === 'ethernet' ? 'fa-network-wired text-primary-500' : connectionType === 'unknown' || !connectionType ? 'fa-question-circle text-surface-300' : 'fa-signal text-primary-500'"></i>
             <span x-text="connectionLabel"></span>
         </div>
-        <span class="text-stone-200">|</span>
-        <div class="flex items-center gap-1.5" title="Audio output (speaker/headset)">
-            <i class="fas fa-volume-up text-stone-400"></i>
+        <span class="text-surface-200">|</span>
+        <div class="flex items-center gap-1.5" title="Audio">
+            <i class="fas fa-volume-up text-surface-400"></i>
             <span x-text="audioOutputs > 0 ? audioOutputLabel || audioOutputs+' output' : 'Tidak terdeteksi'"></span>
         </div>
-        <span class="text-stone-200">|</span>
-        <div class="flex items-center gap-1.5" title="Audio input (mikrofon)">
-            <i class="fas fa-microphone text-stone-400"></i>
+        <span class="text-surface-200">|</span>
+        <div class="flex items-center gap-1.5" title="Mikrofon">
+            <i class="fas fa-microphone text-surface-400"></i>
             <span x-text="audioInputs > 0 ? audioInputLabel || audioInputs+' input' : 'Tidak terdeteksi'"></span>
         </div>
-        <span class="ml-auto text-stone-300 text-[8px]">Status perangkat</span>
+        <span class="ml-auto text-surface-300 text-[8px]">Status perangkat</span>
     </div>
 
     <!-- Violation Banner -->
@@ -241,19 +240,19 @@
     <div x-show="showExamAgreement && !submitted" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <div class="text-center mb-4">
-                <div class="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <i class="fas fa-file-contract text-3xl text-orange-600"></i>
+                <div class="w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg shadow-primary-500/20">
+                    <i class="fas fa-file-contract text-3xl text-white"></i>
                 </div>
-                <h2 class="text-xl font-extrabold text-stone-800">Ketentuan Ujian</h2>
-                <p class="text-xs text-stone-400 font-semibold mt-1">{{ exam.title }}</p>
+                <h2 class="text-xl font-extrabold text-surface-800">Ketentuan Ujian</h2>
+                <p class="text-xs text-surface-400 font-semibold mt-1">{{ exam.title }}</p>
             </div>
-            <div class="bg-stone-50 rounded-2xl p-4 mb-4 text-xs leading-relaxed text-stone-700 font-semibold space-y-2">
-                <p><i class="fas fa-hourglass-half text-orange-500 mr-1.5"></i>Durasi: <strong>{{ exam.duration_minutes }}</strong> menit</p>
-                <p><i class="fas fa-list-ol text-orange-500 mr-1.5"></i>Jumlah soal: <strong>{{ exam.total_questions }}</strong></p>
+            <div class="bg-surface-50 rounded-2xl p-4 mb-4 text-xs leading-relaxed text-surface-700 font-semibold space-y-2">
+                <p><i class="fas fa-hourglass-half text-primary-500 mr-1.5"></i>Durasi: <strong>{{ exam.duration_minutes }}</strong> menit</p>
+                <p><i class="fas fa-list-ol text-primary-500 mr-1.5"></i>Jumlah soal: <strong>{{ exam.total_questions }}</strong></p>
                 <template x-if="antiCheat.penalty_per_violation > 0">
                     <div>
-                        <p class="font-extrabold text-stone-800 mb-1"><i class="fas fa-exclamation-triangle text-amber-500 mr-1.5"></i>Sistem Anti-Cheat:</p>
-                        <ul class="space-y-0.5 ml-5 list-disc text-stone-500">
+                        <p class="font-extrabold text-surface-800 mb-1"><i class="fas fa-exclamation-triangle text-amber-500 mr-1.5"></i>Sistem Anti-Cheat:</p>
+                        <ul class="space-y-0.5 ml-5 list-disc text-surface-500">
                             <li>Pelanggaran ke-1: <strong class="text-amber-600">Peringatan</strong> (0 poin)</li>
                             <li>Pelanggaran ke-2: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation"></span> poin</strong></li>
                             <li>Pelanggaran ke-3: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*2"></span> poin</strong></li>
@@ -265,27 +264,27 @@
                     </div>
                 </template>
                 <template x-if="antiCheat.fullscreen_required">
-                    <p><i class="fas fa-expand text-orange-500 mr-1.5"></i>Disarankan layar penuh (fullscreen) — tekan Esc untuk keluar (tanpa penalti)</p>
+                    <p><i class="fas fa-expand text-primary-500 mr-1.5"></i>Disarankan layar penuh (fullscreen)</p>
                 </template>
                 <template x-if="antiCheat.block_right_click">
-                    <p><i class="fas fa-mouse-pointer text-orange-500 mr-1.5"></i>Klik kanan dinonaktifkan</p>
+                    <p><i class="fas fa-mouse-pointer text-primary-500 mr-1.5"></i>Klik kanan dinonaktifkan</p>
                 </template>
                 <template x-if="antiCheat.block_copy_paste">
-                    <p><i class="fas fa-copy text-orange-500 mr-1.5"></i>Copy-paste diblokir</p>
+                    <p><i class="fas fa-copy text-primary-500 mr-1.5"></i>Copy-paste diblokir</p>
                 </template>
                 <template x-if="antiCheat.watermark_name">
-                    <p><i class="fas fa-user-tag text-orange-500 mr-1.5"></i>Nama Anda akan tampil sebagai watermark</p>
+                    <p><i class="fas fa-user-tag text-primary-500 mr-1.5"></i>Nama Anda akan tampil sebagai watermark</p>
                 </template>
                 <div x-show="examRules">
-                    <hr class="my-2 border-stone-200">
-                    <p x-html="examRules.replace(/\n/g, '<br>')" class="font-bold text-stone-800"></p>
+                    <hr class="my-2 border-surface-200">
+                    <p x-html="examRules.replace(/\n/g, '<br>')" class="font-bold text-surface-800"></p>
                 </div>
             </div>
             <button type="button" @click="agreeExam"
-                    class="w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white py-3.5 rounded-xl font-extrabold text-sm hover:from-orange-600 hover:to-amber-600 shadow-lg shadow-orange-200/50 transition">
+                    class="w-full bg-gradient-to-r from-primary-500 to-primary-600 text-white py-3.5 rounded-xl font-extrabold text-sm hover:from-primary-600 hover:to-primary-700 shadow-lg shadow-primary-500/25 transition">
                 <i class="fas fa-check-circle mr-1.5"></i>Saya Setuju & Mulai Ujian
             </button>
-            <p class="text-center text-[10px] text-stone-400 font-bold mt-3">Dengan menyetujui, Anda siap mengikuti ujian sesuai ketentuan di atas</p>
+            <p class="text-center text-[10px] text-surface-400 font-bold mt-3">Dengan menyetujui, Anda siap mengikuti ujian sesuai ketentuan di atas</p>
         </div>
     </div>
 
@@ -299,15 +298,15 @@
                     :disabled="!canScrollUp">
                 <i class="fas fa-chevron-up text-xs"></i>
             </button>
-            <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-2.5 sticky-questions overflow-y-auto border border-stone-100 scroll-smooth flex-1" style="max-height:calc(100vh - 170px)" x-ref="sidebarScroll">
+            <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-2.5 sticky-questions overflow-y-auto border border-surface-100 scroll-smooth flex-1" style="max-height:calc(100vh - 170px)" x-ref="sidebarScroll">
                 <div x-show="!sidebarOpen" class="flex flex-col items-center gap-1.5 py-2">
                     <template x-for="(q, i) in questions" :key="i">
                         <button type="button" @click="currentQ = i"
                                 class="q-btn w-8 h-8 text-xs rounded-xl font-bold border shrink-0 relative"
                                 :class="{
-                                    'bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-200': answered[i],
-                                    'bg-white text-stone-500 border-stone-200 hover:border-orange-300': !answered[i] && currentQ !== i,
-                                    'ring-2 ring-orange-400 ring-offset-1': currentQ === i
+                                     'bg-primary-500 text-white border-primary-500 shadow-md shadow-primary-200': answered[i],
+                                     'bg-white text-surface-500 border-surface-200 hover:border-primary-300': !answered[i] && currentQ !== i,
+                                     'ring-2 ring-primary-400 ring-offset-1': currentQ === i
                                 }"
                                 x-text="i + 1">
                         </button>
