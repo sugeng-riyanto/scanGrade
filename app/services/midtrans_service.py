@@ -286,7 +286,7 @@ def _generate_invoice(supabase, school_id, plan_id, order_id, now, duration_days
     supabase.table("invoices").insert({
         "invoice_number": inv_num,
         "school_id": school_id,
-        "transaction_id": order_id,
+        "order_id": order_id,
         "plan_id": plan_id,
         "amount": amount,
         "status": "paid",
