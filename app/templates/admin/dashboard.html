@@ -1,100 +1,172 @@
 {% extends "base.html" %}
 {% block title %}Admin Dashboard - ScanGrade{% endblock %}
-{% block page_title %}Admin{% endblock %}
+{% block page_title %}Dashboard Admin{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
-    <!-- Welcome -->
-    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
-        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+    <!-- Welcome Banner -->
+    <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-primary-700 p-6 lg:p-8">
+        <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2"></div>
         <div class="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-                <h2 class="text-2xl font-extrabold">
-                    <span x-show="lang==='id'">Selamat {{ greeting() }}, Admin</span>
-                    <span x-show="lang==='en'">Good {{ greeting_en() }}, Admin</span>
+                <div class="flex items-center gap-2 text-primary-200/80 text-sm font-medium mb-1">
+                    <i class="fas fa-crown text-amber-300"></i>
+                    <span x-text="lang==='en'?'Super Admin Panel':'Panel Super Admin'"></span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-extrabold text-white">
+                    <span x-text="lang==='en'?'Good ':'Selamat '"></span>{{ greeting() }}<span x-show="lang==='en'">{{ greeting_en() }}</span>,
+                    <span class="text-primary-200">Admin</span>
                 </h2>
-                <p class="text-primary-200 font-medium mt-1" x-text="lang==='en'?'Platform overview':'Ringkasan platform'"></p>
+                <p class="text-primary-200/80 font-medium mt-1" x-text="lang==='en'?'Here is your platform overview':'Ringkasan platform Anda'"></p>
             </div>
-            {% if g.user_role == 'super_admin' and pending_requests > 0 %}
-            <a href="/admin/registration-requests?status=pending"
-               class="inline-flex items-center gap-2 px-4 py-2 bg-amber-100/80 border border-white/20 rounded-xl text-amber-100 font-bold text-sm hover:bg-amber-100/60 transition backdrop-blur-sm shrink-0">
-                <i class="fas fa-clock"></i>
-                <span>{{ pending_requests }} menunggu</span>
-            </a>
-            {% endif %}
+            <div class="flex items-center gap-3">
+                {% if g.user_role == 'super_admin' and pending_requests > 0 %}
+                <a href="/admin/registration-requests?status=pending"
+                   class="inline-flex items-center gap-2 px-4 py-2.5 bg-white/15 backdrop-blur-sm border border-white/20 rounded-xl text-white font-bold text-sm hover:bg-white/25 transition shadow-lg">
+                    <i class="fas fa-clock text-amber-300"></i>
+                    <span>{{ pending_requests }} permintaan</span>
+                    <span class="inline-flex w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                </a>
+                {% endif %}
+                <a href="/super-admin/dashboard" class="inline-flex items-center gap-2 px-4 py-2.5 bg-white/15 backdrop-blur-sm border border-white/20 rounded-xl text-white font-bold text-sm hover:bg-white/25 transition">
+                    <i class="fas fa-external-link-alt"></i>
+                    <span>Super Admin</span>
+                </a>
+            </div>
         </div>
     </div>
 
-    <!-- Stats -->
+    <!-- Stats Grid -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="card stat-card animate-slide-up">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-primary-50 text-primary-600"><i class="fas fa-users"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20">
+                    <i class="fas fa-users text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Total Users':'Total User'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ total_users }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Total Users':'Total User'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ total_users }}</p>
+                    <p class="text-[10px] text-surface-400 font-medium">{{ total_teachers }} guru · {{ total_students }} murid</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card animate-slide-up" style="animation-delay:50ms">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-chalkboard-teacher"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                    <i class="fas fa-chalkboard-teacher text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Teachers':'Guru'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ total_teachers }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Teachers':'Guru'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ total_teachers }}</p>
+                    <p class="text-[10px] text-surface-400 font-medium">Tenaga pendidik</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card animate-slide-up" style="animation-delay:100ms">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-user-graduate"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+                    <i class="fas fa-user-graduate text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ total_students }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ total_students }}</p>
+                    <p class="text-[10px] text-surface-400 font-medium">Peserta didik</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card animate-slide-up" style="animation-delay:150ms">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-file-alt"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                    <i class="fas fa-file-alt text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Exams':'Ujian'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ total_exams }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Exams':'Ujian'"></p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ total_exams }}</p>
+                    <p class="text-[10px] text-surface-400 font-medium">{{ active_exams }} aktif</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Exam List -->
-    <div class="card animate-slide-up" style="animation-delay:100ms">
-        <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
-            <h3 class="font-bold text-surface-800" x-text="lang==='en'?'All Exams':'Semua Ujian'"></h3>
-            <span class="text-xs text-surface-400 font-medium">{{ total_exams }} total, {{ active_exams }} aktif</span>
+    <!-- Quick Actions + Recent Items -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Quick Actions -->
+        <div class="lg:col-span-1 space-y-3">
+            <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+                <h3 class="font-extrabold text-surface-800 mb-4 flex items-center gap-2"><i class="fas fa-bolt text-primary-500"></i>Aksi Cepat</h3>
+                <div class="space-y-2">
+                    <a href="/admin/registration-requests" class="flex items-center gap-3 p-3 rounded-xl hover:bg-surface-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center text-primary-600 group-hover:scale-110 transition-transform"><i class="fas fa-school"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700">Registrasi Sekolah</p><p class="text-xs text-surface-400">Kelola permintaan daftar</p></div>
+                    </a>
+                    <a href="/admin/users" class="flex items-center gap-3 p-3 rounded-xl hover:bg-surface-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform"><i class="fas fa-users-cog"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700">Semua User</p><p class="text-xs text-surface-400">Lihat & kelola akun</p></div>
+                    </a>
+                    <a href="/super-admin/schools" class="flex items-center gap-3 p-3 rounded-xl hover:bg-surface-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 group-hover:scale-110 transition-transform"><i class="fas fa-building"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700">Sekolah</p><p class="text-xs text-surface-400">{{ total_schools }} sekolah terdaftar</p></div>
+                    </a>
+                </div>
+            </div>
+            <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+                <h3 class="font-extrabold text-surface-800 mb-3 flex items-center gap-2"><i class="fas fa-info-circle text-sky-500"></i>Sistem</h3>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between"><span class="text-surface-500">Total Submission</span><span class="font-bold text-surface-700">{{ total_submissions }}</span></div>
+                    <div class="flex justify-between"><span class="text-surface-500">Ujian Aktif</span><span class="font-bold text-surface-700">{{ active_exams }}</span></div>
+                    <div class="flex justify-between"><span class="text-surface-500">Sekolah</span><span class="font-bold text-surface-700">{{ total_schools }}</span></div>
+                </div>
+            </div>
         </div>
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
-                        <th class="px-5 py-3 font-semibold">Judul</th>
-                        <th class="px-5 py-3 font-semibold">Guru</th>
-                        <th class="px-5 py-3 font-semibold">Soal</th>
-                        <th class="px-5 py-3 font-semibold">Status</th>
-                        <th class="px-5 py-3 font-semibold">Dibuat</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-surface-50">
-                    {% for e in exams %}
-                    <tr class="hover:bg-surface-50 transition">
-                        <td class="px-5 py-3 font-semibold text-surface-700">{{ e.title }}</td>
-                        <td class="px-5 py-3 text-surface-500">{{ e.teacher_name }}</td>
-                        <td class="px-5 py-3 text-surface-500">{{ e.total_questions or '-' }}</td>
-                        <td class="px-5 py-3"><span class="badge {% if e.status == 'active' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-surface-100 text-surface-500{% endif %}">{{ e.status }}</span></td>
-                        <td class="px-5 py-3 text-surface-400 text-xs">{{ e.created_at[:10] if e.created_at else '-' }}</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="5" class="px-5 py-8 text-center text-surface-400 font-medium">Belum ada ujian</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+
+        <!-- Exams Table -->
+        <div class="lg:col-span-2">
+            <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-hidden">
+                <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+                    <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-file-alt text-primary-500"></i>Semua Ujian</h3>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full font-bold">{{ active_exams }} aktif</span>
+                        <span class="text-xs text-surface-400 font-medium">{{ total_exams }} total</span>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
+                                <th class="px-5 py-3 font-bold">Judul</th>
+                                <th class="px-5 py-3 font-bold">Guru</th>
+                                <th class="px-5 py-3 font-bold text-center">Soal</th>
+                                <th class="px-5 py-3 font-bold text-center">Status</th>
+                                <th class="px-5 py-3 font-bold text-right">Tanggal</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-surface-50">
+                            {% for e in exams[:10] %}
+                            <tr class="hover:bg-surface-50 transition">
+                                <td class="px-5 py-3.5 font-bold text-surface-700">{{ e.title[:40] }}{% if e.title|length > 40 %}...{% endif %}</td>
+                                <td class="px-5 py-3.5 text-surface-500">{{ e.teacher_name }}</td>
+                                <td class="px-5 py-3.5 text-center font-bold text-surface-600">{{ e.total_questions or '-' }}</td>
+                                <td class="px-5 py-3.5 text-center">
+                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold
+                                        {% if e.status == 'active' and e.is_published %}bg-emerald-50 text-emerald-700 border border-emerald-200
+                                        {% elif e.status == 'active' %}bg-amber-50 text-amber-700 border border-amber-200
+                                        {% else %}bg-surface-100 text-surface-500 border border-surface-200{% endif %}">
+                                        <span class="w-1.5 h-1.5 rounded-full {% if e.status == 'active' and e.is_published %}bg-emerald-500{% elif e.status == 'active' %}bg-amber-500{% else %}bg-surface-400{% endif %}"></span>
+                                        {% if e.is_published %}Published{% else %}Draft{% endif %}
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3.5 text-surface-400 text-xs text-right">{{ e.created_at[:10] if e.created_at else '-' }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="5" class="px-5 py-12 text-center"><div class="text-surface-400"><i class="fas fa-inbox text-3xl mb-2"></i><p class="font-medium">Belum ada ujian</p></div></td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="px-5 py-3 bg-surface-50 border-t border-surface-100 text-right">
+                    <a href="/admin/exams" class="text-xs font-bold text-primary-600 hover:text-primary-700 transition">Lihat semua ujian <i class="fas fa-arrow-right ml-1"></i></a>
+                </div>
+            </div>
         </div>
     </div>
 </div>

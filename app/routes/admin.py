@@ -38,6 +38,12 @@ def dashboard():
     total_students = sum(1 for p in profiles if p.get("role") == "murid")
     total_submissions = len(submissions)
     active_exams = sum(1 for e in exams if e.get("status") == "active" and e.get("is_published"))
+    total_schools = 0
+    try:
+        sch = supabase.table("schools").select("id", count="exact").execute()
+        total_schools = sch.count or 0
+    except Exception:
+        pass
 
     for e in exams:
         teacher = next((p for p in profiles if p["id"] == e.get("teacher_id")), None)
@@ -59,6 +65,7 @@ def dashboard():
         total_submissions=total_submissions,
         active_exams=active_exams,
         pending_requests=pending_requests,
+        total_schools=total_schools,
         users=profiles,
         exams=exams,
     )
