@@ -151,8 +151,7 @@
 {% elif g.user_role == 'guru' %}
             <div class="nav-section-title">Utama</div>
             <a href="/teacher/dashboard" class="nav-item {% if request.path == '/teacher/dashboard' %}active{% endif %}"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
-            <a href="/teacher/classes" class="nav-item {% if request.path == '/teacher/classes' %}active{% endif %}"><i class="fas fa-school"></i><span>Kelas</span></a>
-            <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span>Mata Pelajaran</span></a>
+            <a href="/teacher/classes" class="nav-item {% if request.path == '/teacher/classes' %}active{% endif %}"><i class="fas fa-school"></i><span>Kelas &amp; Mapel</span></a>
             <div class="nav-section-title pt-2">Ujian</div>
             <a href="/teacher/exams" class="nav-item {% if request.path == '/teacher/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian Saya</span></a>
             <a href="/teacher/exams/new" class="nav-item {% if request.path == '/teacher/exams/new' %}active{% endif %}"><i class="fas fa-plus-circle"></i><span>Buat Ujian</span></a>

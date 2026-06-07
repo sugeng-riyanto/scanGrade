@@ -1036,15 +1036,17 @@ def teacher_classes():
     supabase = get_supabase()
     sid = g.get("user_school_id")
     classes = []
+    subjects = []
     if sid:
         sort = request.args.get("sort", "asc")
         q = request.args.get("q", "")
-        order_col = "name"
-        data = supabase.table("classes").select("*").eq("school_id", sid).order(order_col, desc=(sort == "desc")).execute().data or []
+        data = supabase.table("classes").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
         if q:
             data = [c for c in data if q.lower() in c.get("name", "").lower()]
         classes = data
-    return render_template("teacher/classes.html", classes=classes, sort=sort, q=q)
+        subj_data = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+        subjects = subj_data
+    return render_template("teacher/classes.html", classes=classes, subjects=subjects, sort=sort, q=q)
 
 
 @teacher_bp.route("/classes/<int:class_id>/delete", methods=["POST"])
