@@ -241,6 +241,9 @@ def demo_settings():
             "demo_guru": request.form.get("demo_guru", "false") == "true",
             "demo_murid": request.form.get("demo_murid", "false") == "true",
             "demo_tutorial": request.form.get("demo_tutorial", "false") == "true",
+            "demo_tutorial_guru": request.form.get("demo_tutorial_guru", "false") == "true",
+            "demo_tutorial_siswa": request.form.get("demo_tutorial_siswa", "false") == "true",
+            "demo_tutorial_admin": request.form.get("demo_tutorial_admin", "false") == "true",
         }
         try:
             supabase.table("school_settings").upsert({"id": 1, "demo_settings": settings}).execute()

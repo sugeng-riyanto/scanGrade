@@ -52,9 +52,23 @@
                 <div class="flex items-center justify-between py-4">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"><i class="fas fa-book-open text-slate-600"></i></div>
-                        <div><p class="font-bold text-slate-800">Tutorial (tanpa login)</p><p class="text-xs text-slate-400">/tutorial/guru, /tutorial/murid</p></div>
+                        <div><p class="font-bold text-slate-800">Tutorial (tanpa login)</p><p class="text-xs text-slate-400">Tampilkan/sembunyikan tombol tutorial di landing page</p></div>
                     </div>
-                    <input type="checkbox" x-model="settings.demo_tutorial" class="w-5 h-5 rounded text-slate-600 focus:ring-slate-500">
+                    <input type="checkbox" x-model="settings.demo_tutorial" class="w-5 h-5 rounded text-slate-600 focus:ring-slate-500" @change="if(!settings.demo_tutorial){settings.demo_tutorial_guru=false;settings.demo_tutorial_siswa=false;settings.demo_tutorial_admin=false}else{settings.demo_tutorial_guru=true;settings.demo_tutorial_siswa=true;settings.demo_tutorial_admin=true}">
+                </div>
+                <div x-show="settings.demo_tutorial" x-cloak class="ml-14 space-y-3 pb-2">
+                    <div class="flex items-center justify-between py-2">
+                        <div><p class="font-bold text-sm text-slate-700"><i class="fas fa-chalkboard-teacher text-emerald-600 mr-1"></i>Tutorial Guru</p></div>
+                        <input type="checkbox" x-model="settings.demo_tutorial_guru" class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500">
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <div><p class="font-bold text-sm text-slate-700"><i class="fas fa-user-graduate text-amber-600 mr-1"></i>Tutorial Siswa</p></div>
+                        <input type="checkbox" x-model="settings.demo_tutorial_siswa" class="w-4 h-4 rounded text-amber-600 focus:ring-amber-500">
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <div><p class="font-bold text-sm text-slate-700"><i class="fas fa-school text-blue-600 mr-1"></i>Tutorial Admin</p></div>
+                        <input type="checkbox" x-model="settings.demo_tutorial_admin" class="w-4 h-4 rounded text-blue-600 focus:ring-blue-500">
+                    </div>
                 </div>
             </div>
 
@@ -73,7 +87,7 @@
 <script>
 function demoForm() {
     return {
-        settings: {demo_enabled:false, demo_super_admin:false, demo_admin_sekolah:false, demo_guru:false, demo_murid:false, demo_tutorial:false},
+        settings: {demo_enabled:false, demo_super_admin:false, demo_admin_sekolah:false, demo_guru:false, demo_murid:false, demo_tutorial:false, demo_tutorial_guru:true, demo_tutorial_siswa:true, demo_tutorial_admin:true},
         allOn: false, saving: false, saved: false,
         init() {
             fetch('/super-admin/demo-settings/data').then(r=>r.json()).then(d => { if(d) Object.assign(this.settings, d); this.allOn = this.settings.demo_enabled; }).catch(()=>{});
