@@ -498,9 +498,14 @@ def school_years():
 def toggle_school_year(year_id):
     sid = _school_id()
     supabase = get_supabase()
-    supabase.table("school_years").update({"is_active": False}).eq("school_id", sid).execute()
-    supabase.table("school_years").update({"is_active": True}).eq("id", year_id).execute()
-    return jsonify({"success": True})
+    try:
+        supabase.table("school_years").update({"is_active": False}).eq("school_id", sid).execute()
+        supabase.table("school_years").update({"is_active": True}).eq("id", year_id).execute()
+        log_activity("update", "school_year", year_id, new_data={"is_active": True}, user_id=g.user_id)
+        flash("Tahun ajaran berhasil diaktifkan", "success")
+    except Exception as e:
+        flash(f"Gagal: {e}", "error")
+    return redirect("/admin-sekolah/school-years")
 
 
 @admin_sekolah_bp.route("/school-years/<year_id>/delete", methods=["POST"])
@@ -509,9 +514,11 @@ def delete_school_year(year_id):
     supabase = get_supabase()
     try:
         supabase.table("school_years").delete().eq("id", year_id).execute()
-        return jsonify({"success": True})
+        log_activity("delete", "school_year", year_id, user_id=g.user_id)
+        flash("Tahun ajaran berhasil dihapus", "success")
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        flash(f"Gagal: {e}", "error")
+    return redirect("/admin-sekolah/school-years")
 
 
 # ─── CLASSES ─────────────────────────────────────────

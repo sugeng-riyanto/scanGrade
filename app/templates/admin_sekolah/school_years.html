@@ -68,14 +68,16 @@
                 </div>
                 <div class="flex items-center gap-2">
                     {% if not y.is_active %}
-                    <button hx-post="/admin-sekolah/school-years/{{ y.id }}/toggle" hx-target="body"
-                            class="text-xs font-bold px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition border border-emerald-200">
-                        Aktifkan
-                    </button>
-                    <button hx-post="/admin-sekolah/school-years/{{ y.id }}/delete" hx-target="body" hx-confirm="Hapus tahun ajaran ini?"
-                            class="text-xs font-bold px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200">
-                        Hapus
-                    </button>
+                    <form method="POST" action="/admin-sekolah/school-years/{{ y.id }}/toggle" class="inline">
+                        <button type="submit" class="text-xs font-bold px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition border border-emerald-200">
+                            Aktifkan
+                        </button>
+                    </form>
+                    <form method="POST" action="/admin-sekolah/school-years/{{ y.id }}/delete" class="inline" onsubmit="return confirm('Hapus tahun ajaran ini?')">
+                        <button type="submit" class="text-xs font-bold px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200">
+                            Hapus
+                        </button>
+                    </form>
                     {% endif %}
                 </div>
             </div>
