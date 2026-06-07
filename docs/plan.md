@@ -92,6 +92,19 @@
 | Payment status page (3 states) | ✅ | Pending/success/failure with auto-poll |
 | NPSN data reset | ✅ | Super admin deletes all school data by NPSN |
 
+## Fase 9: Role Refactor & Audit ✅ (Selesai)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Classes/subjects CRUD centralized to admin_sekolah | ✅ | Teachers view-only assigned data |
+| Student exam filter by class_id | ✅ | Exams filtered by student's class |
+| Duplicate protection on create | ✅ | Same name check within school |
+| Created_by tracking | ✅ | Records who created each class/subject |
+| GET exemption in subscription decorator | ✅ | Read-only mode allows GET |
+| Fixed admin_sekolah redirect URL | ✅ | `/admin/dashboard` → `/admin-sekolah/dashboard` |
+| Fixed missing imports | ✅ | `json`, `current_app`, `max_attempts` |
+| Embedded Snap payment widget | ✅ | `snap.embed()` no popup |
+
 ---
 
 ## Milestones
@@ -107,3 +120,4 @@
 | M7: Multi-school + RLS | Week 7 | ✅ |
 | M8: Final integration + testing | Week 8 | ✅ Complete |
 | M9: Subscription & Payment (Midtrans) | Week 9 | ✅ Complete |
+| M10: Role refactor & audit fixes | Week 10 | ✅ Complete |

@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 15 June 2026
+**Last Updated:** 20 June 2026
 
 ---
 
@@ -43,6 +43,16 @@
 ---
 
 ## Changelog
+
+### 20 June 2026 — Role Refactor & Audit Fixes
+- **Centralized CRUD**: Only admin_sekolah manages classes & subjects. Teachers view their assigned classes/subjects only.
+- **Student exam filter**: Exam list & submission now filtered by student's `class_id` matching exam's `class_ids`.
+- **Duplicate protection**: Classes/subjects checked for duplicate names within same school before insert.
+- **Created by tracking**: `created_by` column on classes & subjects tracks who created the record.
+- **GET exemption**: `@subscription_write_required` now allows GET requests (read-only when expired).
+- **Admin sekolah redirect**: Fixed from `/admin/dashboard` → `/admin-sekolah/dashboard`.
+- **Critical bugfixes**: Missing `import json`, `import current_app`, `max_attempts` undefined in exam edit.
+- **Embedded Snap widget**: Payment page uses `snap.embed()` instead of popup, close button manual.
 
 ### 15 June 2026 — Subscription & Payment System
 - **Midtrans integration**: Snap API for payment processing, sandbox/production toggle
