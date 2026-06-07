@@ -1009,3 +1009,67 @@ def teacher_subjects():
     if sid:
         subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
     return render_template("teacher/subjects.html", subjects=subjects)
+
+
+@teacher_bp.route("/subjects/new", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def teacher_subject_new():
+    supabase = get_supabase()
+    sid = g.get("user_school_id")
+    if not sid:
+        return jsonify({"error": "Sekolah tidak terdaftar"}), 400
+    name = request.form.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Nama mapel wajib diisi"}), 400
+    try:
+        supabase.table("subjects").insert({"school_id": sid, "name": name, "is_active": True}).execute()
+        log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:60]}), 400
+
+
+@teacher_bp.route("/subjects/<int:subject_id>/delete", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def teacher_subject_delete(subject_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("subjects").delete().eq("id", subject_id).execute()
+        log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:60]}), 400
+
+
+@teacher_bp.route("/classes/new", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def teacher_class_new():
+    supabase = get_supabase()
+    sid = g.get("user_school_id")
+    if not sid:
+        return jsonify({"error": "Sekolah tidak terdaftar"}), 400
+    name = request.form.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Nama kelas wajib diisi"}), 400
+    try:
+        supabase.table("classes").insert({"school_id": sid, "name": name}).execute()
+        log_activity("create", "class", name, new_data={"name": name}, user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:60]}), 400
+
+
+@teacher_bp.route("/classes/<int:class_id>/delete", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def teacher_class_delete(class_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("classes").delete().eq("id", class_id).execute()
+        log_activity("delete", "class", str(class_id), user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:60]}), 400

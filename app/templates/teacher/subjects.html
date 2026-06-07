@@ -2,19 +2,42 @@
 {% block title %}Mata Pelajaran - ScanGrade{% endblock %}
 {% block page_title %}Mata Pelajaran{% endblock %}
 {% block content %}
-<div class="card p-6">
-    <p class="text-sm text-slate-500 font-medium mb-4">Daftar mata pelajaran yang tersedia di sekolah Anda. Dikelola oleh Admin Sekolah.</p>
+<div x-data="{ showForm: false, name: '' }">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="flex items-center justify-between mb-4">
+        <p class="text-sm text-slate-500 font-medium">Daftar mata pelajaran di sekolah Anda</p>
+        <button @click="showForm = !showForm" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
+            <i class="fas fa-plus mr-1"></i>Tambah Mapel
+        </button>
+    </div>
+
+    <!-- Add Form -->
+    <form x-show="showForm" x-cloak method="POST" action="/teacher/subjects/new" class="flex gap-2 mb-4 p-4 bg-primary-50 rounded-xl border border-primary-200">
+        <input type="text" name="name" required class="flex-1 px-4 py-2 border border-primary-200 rounded-xl text-sm font-bold" placeholder="Nama mata pelajaran...">
+        <button type="submit" class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">Simpan</button>
+        <button type="button" @click="showForm = false" class="px-4 py-2 border border-primary-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-white transition">Batal</button>
+    </form>
+
     {% if subjects %}
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {% for s in subjects %}
-        <div class="p-4 bg-white rounded-xl border border-slate-200 text-center">
+        <div class="group relative p-4 bg-white rounded-xl border border-slate-200 text-center hover:shadow-md transition">
+            <form method="POST" action="/teacher/subjects/{{ s.id }}/delete" class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition"
+                  onsubmit="return confirm('Hapus {{ s.name }}?')">
+                <button type="submit" class="text-red-300 hover:text-red-500 p-1"><i class="fas fa-times text-xs"></i></button>
+            </form>
             <div class="w-10 h-10 mx-auto rounded-xl bg-primary-100 flex items-center justify-center text-primary-600 mb-2"><i class="fas fa-book"></i></div>
             <p class="font-extrabold text-slate-700">{{ s.name }}</p>
         </div>
         {% endfor %}
     </div>
     {% else %}
-    <div class="text-center py-12 text-slate-400 font-medium">Belum ada mata pelajaran. Hubungi Admin Sekolah.</div>
+    <div class="text-center py-12 text-slate-400 font-medium">Belum ada mata pelajaran. Klik "Tambah Mapel" untuk memulai.</div>
     {% endif %}
 </div>
 {% endblock %}
