@@ -177,7 +177,7 @@ def exam_form():
 
     title = request.form.get("title")
     subject = request.form.get("subject")
-    subject_id = request.form.get("subject_id", type=int) or None
+    subject_id = request.form.get("subject_id") or None
     class_ids = json.loads(request.form.get("class_ids", "[]"))
     start_at_str = request.form.get("start_at", "").strip()
     start_at = start_at_str if start_at_str else None
@@ -292,7 +292,7 @@ def exam_detail(exam_id):
 
     title = request.form.get("title")
     subject = request.form.get("subject")
-    subject_id = request.form.get("subject_id", type=int) or None
+    subject_id = request.form.get("subject_id") or None
     class_ids = json.loads(request.form.get("class_ids", "[]"))
     start_at_str = request.form.get("start_at", "").strip()
     start_at = start_at_str if start_at_str else None
@@ -999,7 +999,7 @@ def teacher_subject_new():
         return jsonify({"error": str(e)[:60]}), 400
 
 
-@teacher_bp.route("/subjects/<int:subject_id>/delete", methods=["POST"])
+@teacher_bp.route("/subjects/<subject_id>/delete", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
 def teacher_subject_delete(subject_id):
@@ -1092,7 +1092,7 @@ def teacher_classes():
                            sort=sort, q=q)
 
 
-@teacher_bp.route("/classes/<int:class_id>/delete", methods=["POST"])
+@teacher_bp.route("/classes/<class_id>/delete", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
 def teacher_class_delete(class_id):
@@ -1108,7 +1108,7 @@ def teacher_class_delete(class_id):
         return jsonify({"error": str(e)[:60]}), 400
 
 
-@teacher_bp.route("/classes/<int:class_id>/edit", methods=["POST"])
+@teacher_bp.route("/classes/<class_id>/edit", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
 def teacher_class_edit(class_id):
@@ -1124,7 +1124,7 @@ def teacher_class_edit(class_id):
         return jsonify({"error": str(e)[:60]}), 400
 
 
-@teacher_bp.route("/subjects/<int:subject_id>/edit", methods=["POST"])
+@teacher_bp.route("/subjects/<subject_id>/edit", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
 def teacher_subject_edit(subject_id):

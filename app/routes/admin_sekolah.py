@@ -628,7 +628,7 @@ def admin_subject_create():
     return redirect("/admin-sekolah/subjects")
 
 
-@admin_sekolah_bp.route("/subjects/<int:subject_id>/delete", methods=["POST"])
+@admin_sekolah_bp.route("/subjects/<subject_id>/delete", methods=["POST"])
 @admin_sekolah_required
 def admin_subject_delete(subject_id):
     supabase = get_supabase()
