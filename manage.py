@@ -44,15 +44,17 @@ DEMO_SCHOOLS = [
         "npsn": "20623248", "address": "Jl. Pendidikan No. 1, Jakarta",
         "city": "Jakarta", "province": "DKI Jakarta", "level": "SMP",
         "admin": {"email": "admin_smp@scan-grade.app", "password": "demo123", "full_name": "Admin SMP ScanGrade", "role": "admin_sekolah", "phone": "081222222221"},
-        "classes": ["VII-A", "VIII-A", "IX-A"],
-        "subjects": ["Matematika", "IPA", "Bahasa Indonesia"],
+        "classes": ["VII-A", "VII-B", "VIII-A", "VIII-B", "IX-A"],
+        "subjects": ["Matematika", "IPA", "Bahasa Indonesia", "Bahasa Inggris", "IPS"],
         "teachers": [
             {"email": "guru_mtk_smp@scan-grade.app", "password": "demo123", "full_name": "Budi Matematika", "phone": "081333333331"},
             {"email": "guru_ipa_smp@scan-grade.app", "password": "demo123", "full_name": "Siti IPA", "phone": "081333333332"},
+            {"email": "guru_bing_smp@scan-grade.app", "password": "demo123", "full_name": "Agus Inggris", "phone": "081333333336"},
         ],
         "students": [
             {"email": "siswa1_smp@scan-grade.app", "password": "demo123", "full_name": "Ahmad SMP", "nisn": "1234567801", "phone": "081444444441"},
             {"email": "siswa2_smp@scan-grade.app", "password": "demo123", "full_name": "Bella SMP", "nisn": "1234567802", "phone": "081444444442"},
+            {"email": "siswa3_smp@scan-grade.app", "password": "demo123", "full_name": "Candra SMP", "nisn": "1234567803", "phone": "081444444445"},
         ],
     },
     {
@@ -60,47 +62,77 @@ DEMO_SCHOOLS = [
         "npsn": "69893227", "address": "Jl. Merdeka No. 10, Jakarta",
         "city": "Jakarta", "province": "DKI Jakarta", "level": "SMA",
         "admin": {"email": "admin_sma@scan-grade.app", "password": "demo123", "full_name": "Admin SMA ScanGrade", "role": "admin_sekolah", "phone": "081222222222"},
-        "classes": ["X-A", "XI-A", "XII-A"],
-        "subjects": ["Matematika", "Fisika", "Kimia", "Biologi"],
+        "classes": ["X-A", "X-B", "XI-A", "XI-B", "XII-A"],
+        "subjects": ["Matematika", "Fisika", "Kimia", "Biologi", "Bahasa Indonesia", "Sejarah"],
         "teachers": [
             {"email": "guru_mtk_sma@scan-grade.app", "password": "demo123", "full_name": "Dewi Matematika", "phone": "081333333333"},
             {"email": "guru_fisika_sma@scan-grade.app", "password": "demo123", "full_name": "Eko Fisika", "phone": "081333333334"},
+            {"email": "guru_kimia_sma@scan-grade.app", "password": "demo123", "full_name": "Fitri Kimia", "phone": "081333333335"},
         ],
         "students": [
             {"email": "siswa1_sma@scan-grade.app", "password": "demo123", "full_name": "Citra SMA", "nisn": "2234567801", "phone": "081444444443"},
             {"email": "siswa2_sma@scan-grade.app", "password": "demo123", "full_name": "Doni SMA", "nisn": "2234567802", "phone": "081444444444"},
+            {"email": "siswa3_sma@scan-grade.app", "password": "demo123", "full_name": "Eka SMA", "nisn": "2234567803", "phone": "081444444446"},
+            {"email": "siswa4_sma@scan-grade.app", "password": "demo123", "full_name": "Fani SMA", "nisn": "2234567804", "phone": "081444444447"},
+        ],
+    },
+    {
+        "name": "SMK Teknologi ScanGrade",
+        "npsn": "34567890", "address": "Jl. Industri No. 5, Bandung",
+        "city": "Bandung", "province": "Jawa Barat", "level": "SMK",
+        "admin": {"email": "admin_smk@scan-grade.app", "password": "demo123", "full_name": "Admin SMK ScanGrade", "role": "admin_sekolah", "phone": "081222222223"},
+        "classes": ["X-RPL", "XI-RPL", "XII-RPL", "X-TKJ", "XI-TKJ"],
+        "subjects": ["Pemrograman Dasar", "Komputer Jaringan", "Basis Data", "Matematika", "Bahasa Inggris"],
+        "teachers": [
+            {"email": "guru_prog_smk@scan-grade.app", "password": "demo123", "full_name": "Gunawan Programming", "phone": "081333333337"},
+            {"email": "guru_jaring_smk@scan-grade.app", "password": "demo123", "full_name": "Hani Jaringan", "phone": "081333333338"},
+        ],
+        "students": [
+            {"email": "siswa1_smk@scan-grade.app", "password": "demo123", "full_name": "Galih SMK", "nisn": "3234567801", "phone": "081444444448"},
+            {"email": "siswa2_smk@scan-grade.app", "password": "demo123", "full_name": "Hesti SMK", "nisn": "3234567802", "phone": "081444444449"},
         ],
     },
 ]
 
 SAMPLE_EXAMS = [
     {
-        "title": "Ulangan Harian Matematika - Bab Persamaan Linear",
+        "title": "Ulangan Harian Matematika - Persamaan Linear",
         "subject": "Matematika",
         "duration_minutes": 60,
         "total_questions": 5,
         "passing_score": 70,
-        "status": "active",
-        "is_published": True,
+        "status": "active", "is_published": True,
         "question_types": {"0": "mcq", "1": "mcq", "2": "mcq", "3": "mcq", "4": "essay_text"},
         "answer_key": {"0": "B", "1": "A", "2": "D", "3": "C", "4": "essay"},
         "question_weights": {"0": 20, "1": 20, "2": 20, "3": 20, "4": 20},
-        "anti_cheat_enabled": True,
-        "penalty_per_violation": 5,
+        "anti_cheat_enabled": True, "penalty_per_violation": 5,
+        "class_ids": [], "max_attempts": 1, "publish_mode": "auto",
     },
     {
-        "title": "Tryout Fisika - Mekanika",
+        "title": "Tryout Fisika - Mekanika Dasar",
         "subject": "Fisika",
         "duration_minutes": 90,
         "total_questions": 5,
         "passing_score": 65,
-        "status": "active",
-        "is_published": True,
-        "question_types": {"0": "mcq", "1": "mcq", "2": "mcq", "3": "essay_canvas", "4": "mcq"},
-        "answer_key": {"0": "C", "1": "B", "2": "A", "3": "essay", "4": "D"},
+        "status": "active", "is_published": True,
+        "question_types": {"0": "mcq", "1": "mcq", "2": "mcq", "3": "essay_canvas", "4": "essay_text"},
+        "answer_key": {"0": "C", "1": "B", "2": "A", "3": "essay", "4": "essay"},
         "question_weights": {"0": 20, "1": 20, "2": 20, "3": 20, "4": 20},
-        "anti_cheat_enabled": True,
-        "penalty_per_violation": 5,
+        "anti_cheat_enabled": True, "penalty_per_violation": 5,
+        "class_ids": [], "max_attempts": 1, "publish_mode": "manual",
+    },
+    {
+        "title": "Pemrograman Dasar - Logika Algoritma",
+        "subject": "Pemrograman Dasar",
+        "duration_minutes": 120,
+        "total_questions": 4,
+        "passing_score": 70,
+        "status": "active", "is_published": True,
+        "question_types": {"0": "mcq", "1": "essay_text", "2": "mcq", "3": "essay_text"},
+        "answer_key": {"0": "D", "1": "essay", "2": "A", "3": "essay"},
+        "question_weights": {"0": 25, "1": 25, "2": 25, "3": 25},
+        "anti_cheat_enabled": True, "penalty_per_violation": 5,
+        "class_ids": [], "max_attempts": 2, "publish_mode": "auto",
     },
 ]
 
@@ -198,17 +230,74 @@ def _seed_school(supabase, school_conf):
     print(f"   👤 Admin: {admin['email']} / {admin['password']}")
 
     # Teachers
+    teacher_ids = []
     for t in school_conf.get("teachers", []):
         uid = _create_user(supabase, {**t, "role": "guru", "school_id": sid})
+        if uid: teacher_ids.append(uid)
         print(f"   👨‍🏫 Guru: {t['email']} / {t['password']}")
 
-    # Students
-    first_class_id = class_ids.get(school_conf["classes"][0]) if school_conf.get("classes") else None
-    for s in school_conf.get("students", []):
-        uid = _create_user(supabase, {**s, "role": "murid", "school_id": sid, "class_id": first_class_id})
+    # Students with class assignment
+    for i, s in enumerate(school_conf.get("students", [])):
+        class_list = list(class_ids.values())
+        cid = class_list[i % len(class_list)] if class_list else None
+        uid = _create_user(supabase, {**s, "role": "murid", "school_id": sid, "class_id": cid})
         print(f"   🧑‍🎓 Murid: {s['email']} / {s['password']}")
 
+    # Create school relations (assignments, year, subscription)
+    _seed_school_relations(supabase, sid, school_conf, class_ids, teacher_ids)
+
     return sid
+
+
+def _seed_school_relations(supabase, sid, school_conf, class_ids, teacher_ids):
+    """Create teacher assignments, school year, and subscription for a school."""
+    now = datetime.now(timezone.utc)
+
+    # School year
+    try:
+        year_name = f"{now.year}/{now.year+1}"
+        existing = supabase.table("school_years").select("id").eq("school_id", sid).eq("name", year_name).execute()
+        if not existing.data:
+            supabase.table("school_years").insert({
+                "school_id": sid, "name": year_name,
+                "start_date": now.isoformat(),
+                "end_date": (now + timedelta(days=365)).isoformat(),
+                "is_active": True,
+            }).execute()
+    except: pass
+
+    # Trial subscription
+    try:
+        existing = supabase.table("school_subscriptions").select("id").eq("school_id", sid).execute()
+        if not existing.data:
+            trial_days = 14
+            supabase.table("school_subscriptions").insert({
+                "school_id": sid, "status": "trial",
+                "trial_days": trial_days,
+                "trial_start": now.isoformat(),
+                "trial_end": (now + timedelta(days=trial_days)).isoformat(),
+            }).execute()
+    except: pass
+
+    # Teacher assignments: map teachers to classes & subjects
+    subjects = []
+    try:
+        subjects = supabase.table("subjects").select("id, name").eq("school_id", sid).execute().data or []
+    except: pass
+    subject_map = {s["name"]: s["id"] for s in subjects}
+    class_list = list(class_ids.values())
+
+    for i, tid in enumerate(teacher_ids):
+        cid = class_list[i % len(class_list)] if class_list else None
+        subj_name = school_conf.get("subjects", [])[i % len(school_conf.get("subjects", [1]))] if school_conf.get("subjects") else None
+        sid_val = subject_map.get(subj_name) if subj_name else None
+        if cid and sid_val:
+            try:
+                supabase.table("teacher_assignments").upsert({
+                    "teacher_id": tid, "class_id": cid,
+                    "subject_id": sid_val, "school_id": sid,
+                }).execute()
+            except: pass
 
 
 def _seed_exams(supabase, school_id, school_conf):
@@ -241,6 +330,9 @@ def _seed_exams(supabase, school_id, school_conf):
                 "question_weights": json.dumps(exam_spec["question_weights"]),
                 "anti_cheat_enabled": exam_spec["anti_cheat_enabled"],
                 "penalty_per_violation": exam_spec["penalty_per_violation"],
+                "class_ids": json.dumps(exam_spec.get("class_ids", [])),
+                "max_attempts": exam_spec.get("max_attempts", 1),
+                "publish_mode": exam_spec.get("publish_mode", "manual"),
             }
             supabase.table("exams").insert(exam_data).execute()
             print(f"   📝 Exam created: {exam_spec['title']}")
@@ -268,14 +360,16 @@ def _reset_demo_data(supabase):
     """Delete all demo data EXCEPT user accounts (keep emails/passwords)."""
     print("\n🔄 Resetting demo data (keeping user accounts)...")
     for table in ["submissions", "violation_logs", "exam_access_codes", "analytics_cache",
-                   "teacher_assignments", "exams"]:
+                   "teacher_assignments", "exams", "payment_transactions",
+                   "school_subscriptions", "ai_grading_logs"]:
         try:
             supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
             print(f"   ✅ Cleared: {table}")
         except Exception as e:
             print(f"   ⚠️  {table}: {str(e)[:50]}")
-    # Clear class/subject data (recreated by seed)
-    for table in ["students", "teachers", "subjects", "classes", "school_years"]:
+    # Clear class/subject/school data (recreated by seed)
+    for table in ["students", "teachers", "subjects", "classes", "school_years",
+                   "teacher_ai_keys", "teacher_ai_settings"]:
         try:
             supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
         except:
