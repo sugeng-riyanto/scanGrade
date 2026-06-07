@@ -2,202 +2,243 @@
 {% block title %}Demo - ScanGrade{% endblock %}
 {% block content_noauth %}
 {% set ds = get_demo_settings() %}
+<style>
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+@keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(168,85,247,0.15)} 50%{box-shadow:0 0 40px rgba(168,85,247,0.3)} }
+.demo-header { animation: float 4s ease-in-out infinite; }
+.demo-card-hover { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
+.demo-card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(0,0,0,0.08); }
+.cred-cell { transition: all 0.2s; }
+.cred-cell:hover { background: #f8fafc; transform: scale(1.02); }
+</style>
+
 <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50">
     <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
-        <div class="flex items-center gap-2">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg">
+        <a href="/" class="flex items-center gap-2 group">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:shadow-purple-500/40 transition">
                 <i class="fas fa-flask text-white text-sm"></i>
             </div>
             <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-purple-600">Demo</span></span>
-        </div>
-        <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i>Beranda</a>
+        </a>
+        <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition flex items-center gap-1.5"><i class="fas fa-arrow-left"></i>Kembali</a>
     </header>
 
-    <main class="max-6xl mx-auto px-6 py-12">
-        <div class="text-center mb-12">
-            <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-100 rounded-full text-purple-700 text-xs font-bold mb-4">🧪 Demo Mode</div>
-            <h1 class="text-3xl font-extrabold text-surface-900">Coba ScanGrade Sekarang</h1>
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+        <!-- Hero -->
+        <div class="text-center mb-12 demo-header">
+            <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-100 rounded-full text-purple-700 text-xs font-bold mb-4 shadow-sm">
+                <i class="fas fa-flask"></i> Mode Demo
+            </div>
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-surface-900 leading-tight">
+                Coba ScanGrade<br>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-purple-400">Tanpa Daftar</span>
+            </h1>
+            <p class="mt-3 text-surface-500 max-w-xl mx-auto">Gunakan akun demo di bawah untuk menjelajahi semua fitur. Password semua akun: <code class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded font-mono text-sm font-bold">demo123</code></p>
         </div>
 
-        <div class="space-y-6">
-            <!-- SUPER ADMIN -->
+        <div class="space-y-8">
+            <!-- ===== SUPER ADMIN ===== -->
             {% if not ds or ds.demo_super_admin %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-purple-100">
-                <div class="flex items-start gap-5">
-                    <div class="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0"><i class="fas fa-crown text-purple-600 text-2xl"></i></div>
-                    <div class="flex-1">
-                        <h3 class="font-extrabold text-surface-800">Super Admin</h3>
-                        <p class="text-sm text-surface-500">Akses penuh ke semua sekolah, pengguna, dan pengaturan sistem.</p>
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-purple-500/5 border border-purple-100 demo-card-hover">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-purple-500/20">
+                        <i class="fas fa-crown text-white text-2xl"></i>
                     </div>
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-xl font-extrabold text-surface-800">Super Admin</h3>
+                        <p class="text-sm text-surface-500 mt-0.5">Akses penuh ke semua sekolah, pengaturan sistem, dan manajemen pengguna.</p>
+                    </div>
+                    <a href="/auth/login" class="shrink-0 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:from-purple-700 hover:to-purple-600 transition flex items-center gap-2">
+                        <i class="fas fa-sign-in-alt"></i>Login
+                    </a>
                 </div>
-                <div class="mt-3 flex items-center gap-3 text-sm">
-                    <code class="px-3 py-1.5 bg-purple-50 rounded-lg text-purple-700 font-mono text-xs">superadmin@scan-grade.app</code>
-                    <code class="px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 font-mono text-xs">superadmin123</code>
-                    <a href="/auth/login" class="px-4 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 transition">Login</a>
+                <div class="mt-4 flex flex-wrap items-center gap-2 p-3 sm:p-4 bg-purple-50/50 rounded-2xl border border-purple-100/50">
+                    <span class="text-xs font-bold text-purple-600">Akun:</span>
+                    <code class="px-3 py-1 bg-white rounded-lg text-purple-700 font-mono text-xs border border-purple-100">superadmin@scan-grade.app</code>
+                    <span class="text-xs text-slate-400 mx-1">/</span>
+                    <code class="px-3 py-1 bg-white rounded-lg text-slate-600 font-mono text-xs border border-slate-200">superadmin123</code>
                 </div>
             </div>
             {% endif %}
 
-            <!-- ADMIN SEKOLAH -->
+            <!-- ===== ADMIN SEKOLAH ===== -->
             {% if not ds or ds.demo_admin_sekolah %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-blue-100">
-                <div class="flex items-start gap-5">
-                    <div class="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center shrink-0"><i class="fas fa-school text-blue-600 text-2xl"></i></div>
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-blue-500/5 border border-blue-100 demo-card-hover">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
+                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/20">
+                        <i class="fas fa-school text-white text-2xl"></i>
+                    </div>
                     <div class="flex-1">
-                        <h3 class="font-extrabold text-surface-800">Admin Sekolah</h3>
-                        <p class="text-sm text-surface-500">Kelola guru, siswa, kelas, dan mata pelajaran.</p>
+                        <h3 class="text-xl font-extrabold text-surface-800">Admin Sekolah</h3>
+                        <p class="text-sm text-surface-500 mt-0.5">Kelola guru, siswa, kelas, mata pelajaran, dan langganan sekolah.</p>
                     </div>
                 </div>
-                <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div class="p-3 rounded-xl bg-blue-50 border border-blue-100">
-                        <p class="text-xs font-bold text-blue-800">SMP N 1 ScanGrade</p>
-                        <p class="text-xs text-blue-600">NPSN: 20623248</p>
-                        <code class="block mt-1 text-xs font-mono">admin_smp@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
-                        <a href="/auth/login" class="mt-1 inline-block px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700">Login</a>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="relative group cred-cell rounded-2xl p-4 border border-blue-100 bg-gradient-to-br from-blue-50/50 to-white transition">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-extrabold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full">SMP</span>
+                            <span class="text-[10px] text-blue-400 font-mono">NPSN: 20623248</span>
+                        </div>
+                        <p class="text-sm font-bold text-surface-800">SMP N 1 ScanGrade</p>
+                        <code class="block mt-1.5 text-xs font-mono text-blue-700">admin_smp@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-400">demo123</code>
+                        <a href="/auth/login" class="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-xl text-[11px] font-bold hover:bg-blue-700 transition shadow-sm"><i class="fas fa-sign-in-alt"></i>Login</a>
                     </div>
-                    <div class="p-3 rounded-xl bg-blue-50 border border-blue-100">
-                        <p class="text-xs font-bold text-blue-800">SMA N 1 ScanGrade</p>
-                        <p class="text-xs text-blue-600">NPSN: 69893227</p>
-                        <code class="block mt-1 text-xs font-mono">admin_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
-                        <a href="/auth/login" class="mt-1 inline-block px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700">Login</a>
+                    <div class="relative group cred-cell rounded-2xl p-4 border border-blue-100 bg-gradient-to-br from-blue-50/50 to-white transition">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-extrabold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full">SMA</span>
+                            <span class="text-[10px] text-blue-400 font-mono">NPSN: 69893227</span>
+                        </div>
+                        <p class="text-sm font-bold text-surface-800">SMA N 1 ScanGrade</p>
+                        <code class="block mt-1.5 text-xs font-mono text-blue-700">admin_sma@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-400">demo123</code>
+                        <a href="/auth/login" class="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-xl text-[11px] font-bold hover:bg-blue-700 transition shadow-sm"><i class="fas fa-sign-in-alt"></i>Login</a>
                     </div>
-                    <div class="p-3 rounded-xl bg-blue-50 border border-blue-100">
-                        <p class="text-xs font-bold text-blue-800">SMK Teknologi ScanGrade</p>
-                        <p class="text-xs text-blue-600">NPSN: 34567890</p>
-                        <code class="block mt-1 text-xs font-mono">admin_smk@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
-                        <a href="/auth/login" class="mt-1 inline-block px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700">Login</a>
+                    <div class="relative group cred-cell rounded-2xl p-4 border border-blue-100 bg-gradient-to-br from-blue-50/50 to-white transition">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-extrabold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full">SMK</span>
+                            <span class="text-[10px] text-blue-400 font-mono">NPSN: 34567890</span>
+                        </div>
+                        <p class="text-sm font-bold text-surface-800">SMK Teknologi ScanGrade</p>
+                        <code class="block mt-1.5 text-xs font-mono text-blue-700">admin_smk@scan-grade.app</code>
+                        <code class="block text-xs font-mono text-slate-400">demo123</code>
+                        <a href="/auth/login" class="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-xl text-[11px] font-bold hover:bg-blue-700 transition shadow-sm"><i class="fas fa-sign-in-alt"></i>Login</a>
                     </div>
                 </div>
             </div>
             {% endif %}
 
-            <!-- GURU -->
+            <!-- ===== GURU ===== -->
             {% if not ds or ds.demo_guru %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-emerald-100">
-                <div class="flex items-start gap-5">
-                    <div class="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center shrink-0"><i class="fas fa-chalkboard-teacher text-emerald-600 text-2xl"></i></div>
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-emerald-500/5 border border-emerald-100 demo-card-hover">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
+                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
+                        <i class="fas fa-chalkboard-teacher text-white text-2xl"></i>
+                    </div>
                     <div class="flex-1">
-                        <h3 class="font-extrabold text-surface-800">Guru</h3>
-                        <p class="text-sm text-surface-500">Buat ujian, koreksi esai, AI grading, lihat hasil dan analitik.</p>
+                        <h3 class="text-xl font-extrabold text-surface-800">Guru</h3>
+                        <p class="text-sm text-surface-500 mt-0.5">Buat ujian, koreksi esai dengan AI, dan lihat analitik hasil belajar.</p>
                     </div>
+                    <a href="/auth/login-user?role=guru" class="shrink-0 px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition flex items-center gap-2">
+                        <i class="fas fa-sign-in-alt"></i>Login Semua Guru
+                    </a>
                 </div>
-                <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMP — Matematika</p>
-                        <code class="block mt-1 text-xs font-mono">guru_mtk_smp@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMP</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Matematika</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_mtk_smp@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMP — IPA</p>
-                        <code class="block mt-1 text-xs font-mono">guru_ipa_smp@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMP</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">IPA</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_ipa_smp@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMP — Bahasa Inggris</p>
-                        <code class="block mt-1 text-xs font-mono">guru_bing_smp@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMP</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">B. Inggris</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_bing_smp@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMA — Matematika</p>
-                        <code class="block mt-1 text-xs font-mono">guru_mtk_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMA</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Matematika</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_mtk_sma@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMA — Fisika</p>
-                        <code class="block mt-1 text-xs font-mono">guru_fisika_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMA</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Fisika</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_fisika_sma@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMA — Kimia</p>
-                        <code class="block mt-1 text-xs font-mono">guru_kimia_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMA</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Kimia</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_kimia_sma@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMK — Pemrograman</p>
-                        <code class="block mt-1 text-xs font-mono">guru_prog_smk@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMK</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Pemrograman</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_prog_smk@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-800">SMK — Jaringan</p>
-                        <code class="block mt-1 text-xs font-mono">guru_jaring_smk@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMK</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Jaringan</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">guru_jaring_smk@...</code>
                     </div>
-                </div>
-                <div class="mt-3 text-center">
-                    <a href="/auth/login-user?role=guru" class="inline-flex items-center gap-1 px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition"><i class="fas fa-sign-in-alt"></i> Masuk sebagai Guru</a>
                 </div>
             </div>
             {% endif %}
 
-            <!-- MURID -->
+            <!-- ===== MURID ===== -->
             {% if not ds or ds.demo_murid %}
-            <div class="bg-white rounded-2xl p-6 shadow-lg border border-amber-100">
-                <div class="flex items-start gap-5">
-                    <div class="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0"><i class="fas fa-user-graduate text-amber-600 text-2xl"></i></div>
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-amber-500/5 border border-amber-100 demo-card-hover">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
+                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">
+                        <i class="fas fa-user-graduate text-white text-2xl"></i>
+                    </div>
                     <div class="flex-1">
-                        <h3 class="font-extrabold text-surface-800">Siswa / Murid</h3>
-                        <p class="text-sm text-surface-500">Kerjakan ujian dengan tools menggambar, penggaris digital, anti-cheat, dan AI.</p>
+                        <h3 class="text-xl font-extrabold text-surface-800">Siswa</h3>
+                        <p class="text-sm text-surface-500 mt-0.5">Kerjakan ujian dengan alat gambar, penggaris digital, dan kalkulator ilmiah.</p>
                     </div>
+                    <a href="/auth/login-user?role=murid" class="shrink-0 px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-amber-500/25 hover:shadow-amber-500/40 transition flex items-center gap-2">
+                        <i class="fas fa-sign-in-alt"></i>Login Semua Siswa
+                    </a>
                 </div>
-                <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMP — Ahmad</p>
-                        <code class="block mt-1 text-xs font-mono">siswa1_smp@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMP</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Ahmad</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa1_smp@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMP — Bella</p>
-                        <code class="block mt-1 text-xs font-mono">siswa2_smp@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMP</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Bella</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa2_smp@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMP — Candra</p>
-                        <code class="block mt-1 text-xs font-mono">siswa3_smp@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMP</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Candra</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa3_smp@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMA — Citra</p>
-                        <code class="block mt-1 text-xs font-mono">siswa1_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMA</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Citra</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa1_sma@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMA — Doni</p>
-                        <code class="block mt-1 text-xs font-mono">siswa2_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMA</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Doni</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa2_sma@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMA — Eka</p>
-                        <code class="block mt-1 text-xs font-mono">siswa3_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMA</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Eka</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa3_sma@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMA — Fani</p>
-                        <code class="block mt-1 text-xs font-mono">siswa4_sma@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMA</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Fani</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa4_sma@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMK — Galih</p>
-                        <code class="block mt-1 text-xs font-mono">siswa1_smk@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMK</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Galih</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa1_smk@...</code>
                     </div>
-                    <div class="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                        <p class="text-xs font-bold text-amber-800">SMK — Hesti</p>
-                        <code class="block mt-1 text-xs font-mono">siswa2_smk@scan-grade.app</code>
-                        <code class="block text-xs font-mono text-slate-500">demo123</code>
+                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
+                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMK</span>
+                        <p class="text-xs font-bold text-surface-700 mt-1">Hesti</p>
+                        <code class="block text-[10px] font-mono text-slate-500 truncate mt-0.5">siswa2_smk@...</code>
                     </div>
-                </div>
-                <div class="mt-3 text-center">
-                    <a href="/auth/login-user?role=murid" class="inline-flex items-center gap-1 px-5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition"><i class="fas fa-sign-in-alt"></i> Masuk sebagai Siswa</a>
                 </div>
             </div>
             {% endif %}
         </div>
 
-        <div class="mt-10 text-center text-sm text-surface-400">
-            <i class="fas fa-info-circle mr-1"></i> Data demo di-reset secara berkala. Jangan gunakan data sensitif.
+        <!-- Footer -->
+        <div class="mt-12 text-center">
+            <div class="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-full text-xs text-slate-500">
+                <i class="fas fa-info-circle"></i> Data demo di-reset secara berkala. Jangan gunakan data sensitif.
+            </div>
         </div>
     </main>
 </div>
