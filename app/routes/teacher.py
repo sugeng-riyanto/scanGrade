@@ -1037,6 +1037,10 @@ def teacher_classes():
     sid = g.get("user_school_id")
     classes = []
     subjects = []
+    school_info = {}
+    active_year = None
+    student_counts = {}
+    teacher_counts = {}
     if sid:
         sort = request.args.get("sort", "asc")
         q = request.args.get("q", "")
@@ -1046,7 +1050,33 @@ def teacher_classes():
         classes = data
         subj_data = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
         subjects = subj_data
-    return render_template("teacher/classes.html", classes=classes, subjects=subjects, sort=sort, q=q)
+        try:
+            sch = supabase.table("schools").select("name, npsn").eq("id", sid).single().execute()
+            if sch.data:
+                school_info = sch.data
+        except:
+            pass
+        try:
+            years = supabase.table("school_years").select("*").eq("school_id", sid).eq("is_active", True).limit(1).execute()
+            if years.data:
+                active_year = years.data[0]
+        except:
+            pass
+        for c in classes:
+            try:
+                sc = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", sid).eq("class_id", c["id"]).execute()
+                student_counts[c["id"]] = sc.count or 0
+            except:
+                student_counts[c["id"]] = 0
+            try:
+                tc = supabase.table("teacher_assignments").select("teacher_id", count="exact").eq("class_id", c["id"]).execute()
+                teacher_counts[c["id"]] = tc.count or 0
+            except:
+                teacher_counts[c["id"]] = 0
+    return render_template("teacher/classes.html", classes=classes, subjects=subjects,
+                           school_info=school_info, active_year=active_year,
+                           student_counts=student_counts, teacher_counts=teacher_counts,
+                           sort=sort, q=q)
 
 
 @teacher_bp.route("/classes/<int:class_id>/delete", methods=["POST"])

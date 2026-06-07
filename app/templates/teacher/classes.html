@@ -1,55 +1,74 @@
 {% extends "base.html" %}
 {% block title %}Kelas & Mapel - ScanGrade{% endblock %}
-{% block page_title %}Kelas & Mata Pelajaran{% endblock %}
+{% block page_title %}Kelas &amp; Mata Pelajaran{% endblock %}
 {% block content %}
 {% set sort = sort|default('asc') %}
 {% set q = q|default('') %}
+{% set npsn = school_info.get('npsn', '-') if school_info else '-' %}
+{% set school_name = school_info.get('name', '-') if school_info else '-' %}
+
+<!-- School Info Bar -->
+<div class="bg-gradient-to-r from-primary-600 to-primary-700 rounded-2xl p-5 mb-6 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div>
+        <h2 class="font-extrabold text-lg">{{ school_name }}</h2>
+        <p class="text-primary-200 text-sm font-medium">NPSN: {{ npsn }} {% if active_year %} · Tahun Ajaran: <strong>{{ active_year.name }}</strong>{% endif %}</p>
+    </div>
+</div>
+
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- LEFT: Classes -->
+    <!-- LEFT: Classes Table -->
     <div class="card p-5" x-data="{ showForm: false, name: '' }">
         <div class="flex items-center justify-between mb-4">
             <h3 class="font-extrabold text-slate-700 flex items-center gap-2"><i class="fas fa-school text-amber-500"></i>Kelas</h3>
             <button @click="showForm = !showForm" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition border border-amber-200">
-                <i class="fas fa-plus mr-1"></i>Tambah
+                <i class="fas fa-plus mr-1"></i>Tambah Kelas
             </button>
         </div>
 
         <form x-show="showForm" x-cloak method="POST" action="/teacher/classes/new"
               class="flex gap-2 mb-3 p-3 bg-amber-50 rounded-xl border border-amber-200">
-            <input type="text" name="name" required class="flex-1 px-3 py-1.5 border border-amber-200 rounded-lg text-sm font-bold" placeholder="Nama kelas...">
+            <input type="text" name="name" required class="flex-1 px-3 py-1.5 border border-amber-200 rounded-lg text-sm font-bold" placeholder="Nama kelas (VII-A)...">
             <button type="submit" class="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold hover:bg-amber-700 transition">Simpan</button>
             <button type="button" @click="showForm = false" class="px-3 py-1.5 border border-amber-200 rounded-lg text-xs font-bold text-slate-500 hover:bg-white transition">Batal</button>
         </form>
 
-        {% if classes %}
-        <div class="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
-            {% for c in classes %}
-            <div class="group flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 transition border border-transparent hover:border-slate-200">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center text-amber-600 text-xs"><i class="fas fa-school"></i></div>
-                    <div>
-                        <p class="font-bold text-sm text-slate-700">{{ c.name }}</p>
-                        {% if c.grade_level %}<p class="text-[10px] text-slate-400">Kelas {{ c.grade_level }}</p>{% endif %}
-                    </div>
-                </div>
-                <form method="POST" action="/teacher/classes/{{ c.id }}/delete" class="opacity-0 group-hover:opacity-100 transition"
-                      onsubmit="return confirm('Hapus kelas {{ c.name }}?')">
-                    <button type="submit" class="text-red-300 hover:text-red-500 p-1"><i class="fas fa-times text-xs"></i></button>
-                </form>
-            </div>
-            {% endfor %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200">
+                        <th class="text-left px-3 py-2 font-bold text-slate-600">Nama Kelas</th>
+                        <th class="text-center px-3 py-2 font-bold text-slate-600">Murid</th>
+                        <th class="text-center px-3 py-2 font-bold text-slate-600">Guru</th>
+                        <th class="text-center px-3 py-2 font-bold text-slate-600">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for c in classes %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="px-3 py-2.5 font-bold text-slate-700">{{ c.name }}</td>
+                        <td class="px-3 py-2.5 text-center text-slate-600">{{ student_counts.get(c.id, 0) }}</td>
+                        <td class="px-3 py-2.5 text-center text-slate-600">{{ teacher_counts.get(c.id, 0) }}</td>
+                        <td class="px-3 py-2.5 text-center">
+                            <form method="POST" action="/teacher/classes/{{ c.id }}/delete" class="inline"
+                                  onsubmit="return confirm('Hapus kelas {{ c.name }}? Semua murid di kelas ini akan kehilangan kelas.')">
+                                <button type="submit" class="text-red-300 hover:text-red-500 p-1 transition" title="Hapus"><i class="fas fa-trash-alt text-xs"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="px-3 py-8 text-center text-slate-400 font-medium">Belum ada kelas</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-        {% else %}
-        <div class="text-center py-8 text-slate-400 font-medium text-sm">Belum ada kelas</div>
-        {% endif %}
     </div>
 
-    <!-- RIGHT: Subjects -->
+    <!-- RIGHT: Subjects Table -->
     <div class="card p-5" x-data="{ showForm: false, name: '' }">
         <div class="flex items-center justify-between mb-4">
             <h3 class="font-extrabold text-slate-700 flex items-center gap-2"><i class="fas fa-book text-primary-500"></i>Mata Pelajaran</h3>
             <button @click="showForm = !showForm" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
-                <i class="fas fa-plus mr-1"></i>Tambah
+                <i class="fas fa-plus mr-1"></i>Tambah Mapel
             </button>
         </div>
 
@@ -60,27 +79,33 @@
             <button type="button" @click="showForm = false" class="px-3 py-1.5 border border-primary-200 rounded-lg text-xs font-bold text-slate-500 hover:bg-white transition">Batal</button>
         </form>
 
-        {% if subjects %}
-        <div class="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
-            {% for s in subjects %}
-            <div class="group flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 transition border border-transparent hover:border-slate-200">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-8 h-8 rounded-lg bg-primary-100 flex items-center justify-center text-primary-600 text-xs"><i class="fas fa-book"></i></div>
-                    <div>
-                        <p class="font-bold text-sm text-slate-700">{{ s.name }}</p>
-                        {% if s.code %}<p class="text-[10px] text-slate-400">{{ s.code }}</p>{% endif %}
-                    </div>
-                </div>
-                <form method="POST" action="/teacher/subjects/{{ s.id }}/delete" class="opacity-0 group-hover:opacity-100 transition"
-                      onsubmit="return confirm('Hapus {{ s.name }}?')">
-                    <button type="submit" class="text-red-300 hover:text-red-500 p-1"><i class="fas fa-times text-xs"></i></button>
-                </form>
-            </div>
-            {% endfor %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200">
+                        <th class="text-left px-3 py-2 font-bold text-slate-600">Nama Mapel</th>
+                        <th class="text-center px-3 py-2 font-bold text-slate-600">Kode</th>
+                        <th class="text-center px-3 py-2 font-bold text-slate-600">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for s in subjects %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="px-3 py-2.5 font-bold text-slate-700">{{ s.name }}</td>
+                        <td class="px-3 py-2.5 text-center text-slate-500 font-mono text-xs">{{ s.code or '-' }}</td>
+                        <td class="px-3 py-2.5 text-center">
+                            <form method="POST" action="/teacher/subjects/{{ s.id }}/delete" class="inline"
+                                  onsubmit="return confirm('Hapus {{ s.name }}?')">
+                                <button type="submit" class="text-red-300 hover:text-red-500 p-1 transition" title="Hapus"><i class="fas fa-trash-alt text-xs"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3" class="px-3 py-8 text-center text-slate-400 font-medium">Belum ada mapel</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-        {% else %}
-        <div class="text-center py-8 text-slate-400 font-medium text-sm">Belum ada mapel</div>
-        {% endif %}
     </div>
 </div>
 {% endblock %}
