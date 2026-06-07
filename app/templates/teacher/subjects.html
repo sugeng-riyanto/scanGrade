@@ -2,6 +2,8 @@
 {% block title %}Mata Pelajaran - ScanGrade{% endblock %}
 {% block page_title %}Mata Pelajaran{% endblock %}
 {% block content %}
+{% set sort = sort|default('asc') %}
+{% set q = q|default('') %}
 <div x-data="{ showForm: false, name: '' }">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
@@ -9,16 +11,29 @@
     </div>
     {% endfor %}
 
-    <div class="flex items-center justify-between mb-4">
+    <!-- Header + Search + Sort -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
         <p class="text-sm text-slate-500 font-medium">Daftar mata pelajaran di sekolah Anda</p>
-        <button @click="showForm = !showForm" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
-            <i class="fas fa-plus mr-1"></i>Tambah Mapel
-        </button>
+        <div class="flex items-center gap-2">
+            <form method="GET" class="flex gap-1">
+                <input type="text" name="q" value="{{ q }}" class="input text-sm w-36" placeholder="Cari mapel...">
+                <button type="submit" class="btn btn-primary text-sm px-3"><i class="fas fa-search"></i></button>
+            </form>
+            <a href="?sort={% if sort == 'asc' %}desc{% else %}asc{% endif %}&q={{ q }}"
+               class="px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition">
+                <i class="fas fa-sort-alpha-{% if sort == 'asc' %}down{% else %}up{% endif %} mr-1"></i>
+                {% if sort == 'asc' %}A-Z{% else %}Z-A{% endif %}
+            </a>
+            <button @click="showForm = !showForm" class="text-xs font-bold px-3 py-2 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
+                <i class="fas fa-plus mr-1"></i>Tambah Mapel
+            </button>
+        </div>
     </div>
 
     <!-- Add Form -->
-    <form x-show="showForm" x-cloak method="POST" action="/teacher/subjects/new" class="flex gap-2 mb-4 p-4 bg-primary-50 rounded-xl border border-primary-200">
-        <input type="text" name="name" required class="flex-1 px-4 py-2 border border-primary-200 rounded-xl text-sm font-bold" placeholder="Nama mata pelajaran...">
+    <form x-show="showForm" x-cloak method="POST" action="/teacher/subjects/new"
+          class="flex gap-2 mb-4 p-4 bg-primary-50 rounded-xl border border-primary-200">
+        <input type="text" name="name" x-model="name" required class="flex-1 px-4 py-2 border border-primary-200 rounded-xl text-sm font-bold" placeholder="Nama mata pelajaran...">
         <button type="submit" class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">Simpan</button>
         <button type="button" @click="showForm = false" class="px-4 py-2 border border-primary-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-white transition">Batal</button>
     </form>
@@ -37,7 +52,9 @@
         {% endfor %}
     </div>
     {% else %}
-    <div class="text-center py-12 text-slate-400 font-medium">Belum ada mata pelajaran. Klik "Tambah Mapel" untuk memulai.</div>
+    <div class="text-center py-12 text-slate-400 font-medium">
+        {% if q %}Tidak ada mapel dengan nama "{{ q }}"{% else %}Belum ada mata pelajaran. Klik "Tambah Mapel" untuk memulai.{% endif %}
+    </div>
     {% endif %}
 </div>
 {% endblock %}

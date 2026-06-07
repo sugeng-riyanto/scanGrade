@@ -1007,8 +1007,13 @@ def teacher_subjects():
     sid = g.get("user_school_id")
     subjects = []
     if sid:
-        subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-    return render_template("teacher/subjects.html", subjects=subjects)
+        sort = request.args.get("sort", "asc")
+        q = request.args.get("q", "")
+        data = supabase.table("subjects").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
+        if q:
+            data = [s for s in data if q.lower() in s.get("name", "").lower()]
+        subjects = data
+    return render_template("teacher/subjects.html", subjects=subjects, sort=sort, q=q)
 
 
 @teacher_bp.route("/subjects/new", methods=["POST"])
@@ -1057,9 +1062,29 @@ def teacher_class_new():
     try:
         supabase.table("classes").insert({"school_id": sid, "name": name}).execute()
         log_activity("create", "class", name, new_data={"name": name}, user_id=g.user_id)
-        return jsonify({"success": True})
+        if request.headers.get("HX-Request") or request.is_json:
+            return jsonify({"success": True})
+        flash(f"Kelas {name} berhasil ditambahkan", "success")
+        return redirect("/teacher/classes")
     except Exception as e:
         return jsonify({"error": str(e)[:60]}), 400
+
+
+@teacher_bp.route("/classes")
+@teacher_or_admin_required
+def teacher_classes():
+    supabase = get_supabase()
+    sid = g.get("user_school_id")
+    classes = []
+    if sid:
+        sort = request.args.get("sort", "asc")
+        q = request.args.get("q", "")
+        order_col = "name"
+        data = supabase.table("classes").select("*").eq("school_id", sid).order(order_col, desc=(sort == "desc")).execute().data or []
+        if q:
+            data = [c for c in data if q.lower() in c.get("name", "").lower()]
+        classes = data
+    return render_template("teacher/classes.html", classes=classes, sort=sort, q=q)
 
 
 @teacher_bp.route("/classes/<int:class_id>/delete", methods=["POST"])
@@ -1070,6 +1095,9 @@ def teacher_class_delete(class_id):
     try:
         supabase.table("classes").delete().eq("id", class_id).execute()
         log_activity("delete", "class", str(class_id), user_id=g.user_id)
-        return jsonify({"success": True})
+        if request.headers.get("HX-Request") or request.is_json:
+            return jsonify({"success": True})
+        flash("Kelas berhasil dihapus", "success")
+        return redirect("/teacher/classes")
     except Exception as e:
         return jsonify({"error": str(e)[:60]}), 400
