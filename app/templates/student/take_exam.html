@@ -1531,7 +1531,9 @@ function examApp(duration, totalQ) {
          },
         markAnswered(i, val, overwrite) {
             this.answered[i] = true;
-            if (this.questions[i].type === 'mcq' && val === true && typeof this.questions[i].answer === 'string') {
+            // Drawing on canvas (val=true) should NOT set MCQ answer
+            if (this.questions[i].type === 'mcq' && val === true) {
+                // Canvas scratch, keep existing MCQ answer (or empty)
             } else {
                 this.questions[i].answer = val;
             }
