@@ -298,6 +298,8 @@ def exam_detail(exam_id):
     start_at = start_at_str if start_at_str else None
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
+    max_attempts = int(request.form.get("max_attempts", 1))
+    publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))

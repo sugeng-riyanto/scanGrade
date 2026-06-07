@@ -114,7 +114,7 @@ def role_required(*roles):
                     return jsonify({"error": "Forbidden"}), 403
                 role_redirect = {
                     "super_admin": "/super-admin/dashboard",
-                    "admin_sekolah": "/admin/dashboard",
+                    "admin_sekolah": "/admin-sekolah/dashboard",
                     "guru": "/teacher/dashboard",
                     "murid": "/student/dashboard",
                 }
@@ -182,12 +182,13 @@ def subscription_write_required(f):
     @functools.wraps(f)
     @login_required
     def wrapper(*args, **kwargs):
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return f(*args, **kwargs)
         allowed, msg = check_subscription_write()
         if not allowed:
             if _wants_json():
                 return jsonify({"error": msg}), 403
             flash(msg, "error")
-            # Redirect back or to dashboard
             ref = request.referrer or "/"
             return redirect(ref)
         return f(*args, **kwargs)

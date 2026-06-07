@@ -139,9 +139,9 @@ def exam_list():
         all_exams = res.data or []
         # Filter by class_id if student has one
         if student_class_id:
-            exams = [e for e in all_exams if not e.get("class_ids") or student_class_id in e.get("class_ids", [])]
+            exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0 or student_class_id in e.get("class_ids", [])]
         else:
-            exams = all_exams
+            exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0]
     except Exception as e:
         current_app.logger.error(f"Exam list query error: {e}")
 
@@ -187,6 +187,17 @@ def submit_exam(exam_id):
         return jsonify({"error": "Exam not found"}), 404
     if not exam.get("is_published") or exam.get("status") != "active":
         return jsonify({"error": "Exam is not available for submission"}), 403
+
+    # Verify student's class matches exam's class_ids
+    exam_class_ids = exam.get("class_ids") or []
+    if exam_class_ids:
+        try:
+            prof = supabase.table("profiles").select("class_id").eq("id", g.user_id).single().execute()
+            student_class_id = prof.data.get("class_id") if prof.data else None
+            if student_class_id and student_class_id not in exam_class_ids:
+                return jsonify({"error": "Ujian ini tidak tersedia untuk kelas Anda"}), 403
+        except Exception:
+            pass
 
     # Check attempts
     max_attempts = exam.get("max_attempts", 1)

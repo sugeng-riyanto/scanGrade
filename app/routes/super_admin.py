@@ -2,7 +2,7 @@
 import json
 import secrets
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, render_template, g, request, jsonify, redirect, flash
+from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, current_app
 from app.utils.auth import login_required, get_supabase
 from app.services.audit_service import log_activity
 
