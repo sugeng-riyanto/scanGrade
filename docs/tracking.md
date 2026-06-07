@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 1 July 2026
+**Last Updated:** 3 July 2026
 
 ---
 
@@ -44,6 +44,16 @@
 ---
 
 ## Changelog
+
+### 3 July 2026 — Demo Page Redesign & Final Polish
+- **Demo page redesign**: Modern card UI with gradient icons, hover effects, shadow animations
+- **Click-to-copy**: Copy icon on all demo emails (not passwords) with toast notification
+- **Per-tutorial toggle**: Super admin can show/hide each tutorial button individually
+- **Fake NPSN**: All demo NPSN replaced with dummy numbers (99887711/22/33)
+- **Role verification**: All decorators correct (super_admin, admin_sekolah, guru, murid)
+- **CRUD verification**: Admin sekolah — full CRUD classes/subjects. Teacher — read-only. Student — exam only.
+- **Blueprint registration**: All 10 blueprints registered correctly
+- **DB schema**: 17 tables verified (all CREATE TABLE IF NOT EXISTS)
 
 ### 1 July 2026 — Admin Tutorial & CRUD Verification
 - **Admin tutorial page**: `/tutorial/admin-sekolah` — 5 steps covering profile, classes, subjects, import, subscriptions, teacher assignments
