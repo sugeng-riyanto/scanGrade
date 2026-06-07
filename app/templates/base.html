@@ -392,6 +392,27 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 });
 </script>
+{% set wa = get_whatsapp_number() %}
+{% if wa %}
+<div id="wa-badge" class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-1.5">
+    <div class="flex items-center gap-1 bg-white/90 backdrop-blur-sm rounded-full px-2 py-0.5 shadow border border-slate-200">
+        <button onclick="document.getElementById('wa-badge').remove()"
+            class="text-[10px] text-slate-400 hover:text-slate-600 px-1 transition">Sembunyikan</button>
+        <span class="text-slate-200">|</span>
+        <button onclick="localStorage.setItem('wa_badge_hide', Date.now() + 86400000); document.getElementById('wa-badge').remove()"
+            class="text-[10px] text-red-400 hover:text-red-600 px-1 transition">Tutup</button>
+    </div>
+    <a href="https://api.whatsapp.com/send?phone={{ wa }}" target="_blank" rel="noopener"
+       class="flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200">
+        <i class="fab fa-whatsapp text-xl"></i>
+        <span class="font-bold text-sm">Butuh bantuan? Chat WA</span>
+    </a>
+</div>
+<script>
+var h = localStorage.getItem('wa_badge_hide');
+if (h && Date.now() < parseInt(h)) document.getElementById('wa-badge')?.remove();
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>
