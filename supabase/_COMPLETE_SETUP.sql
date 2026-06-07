@@ -429,7 +429,10 @@ CREATE TABLE IF NOT EXISTS trial_settings (
 );
 
 -- Prevent duplicate plan names
-ALTER TABLE subscription_plans ADD CONSTRAINT IF NOT EXISTS subscription_plans_name_key UNIQUE (name);
+DO $$ BEGIN
+    ALTER TABLE subscription_plans ADD CONSTRAINT subscription_plans_name_key UNIQUE (name);
+EXCEPTION WHEN duplicate_table THEN NULL;
+END $$;
 
 INSERT INTO subscription_plans (name, duration_label, duration_days, price, sort_order) VALUES
     ('1 Bulan', '1 Bulan', 30, 59000, 1),
@@ -530,3 +533,6 @@ CREATE TABLE IF NOT EXISTS invoices (
 );
 
 CREATE SEQUENCE IF NOT EXISTS invoice_number_seq START 1;
+
+-- Add columns for existing invoice tables
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS activation_code TEXT DEFAULT '';
