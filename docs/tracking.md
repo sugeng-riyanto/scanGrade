@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 30 June 2026
+**Last Updated:** 1 July 2026
 
 ---
 
@@ -44,6 +44,13 @@
 ---
 
 ## Changelog
+
+### 1 July 2026 — Admin Tutorial & CRUD Verification
+- **Admin tutorial page**: `/tutorial/admin-sekolah` — 5 steps covering profile, classes, subjects, import, subscriptions, teacher assignments
+- **Landing page**: Added "Tutorial Admin" button alongside Guru & Siswa
+- **CRUD verified**: Admin sekolah — full CRUD classes & subjects. Teacher — read-only view. Student — exam/results only.
+- **Duplicate routes**: None found. All endpoints unique.
+- **Auth redirects**: admin_sekolah → `/admin-sekolah/dashboard`, guru/murid → `/auth/login-user`
 
 ### 30 June 2026 — Final Audit & Demo Data Refresh
 - **Database schema verified**: All columns exist (`active_prompt_id`, `prompts`, `base_url`, `model_name`)
