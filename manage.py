@@ -337,6 +337,10 @@ def _seed_invoices(supabase, school_id, school_conf):
         return
     for i, p in enumerate(plans):
         inv_num = f"INV-DEMO-{now.year}-{i+1:03d}"
+        # Check if already exists
+        existing = supabase.table("invoices").select("id").eq("invoice_number", inv_num).limit(1).execute()
+        if existing.data:
+            continue
         start = now - timedelta(days=i * 60)
         end = now + timedelta(days=p.get("duration_days", 30) - i * 60) if p.get("duration_days", 0) > 0 else None
         try:
