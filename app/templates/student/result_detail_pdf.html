@@ -162,6 +162,12 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
             <div class="teacher-note"><strong>Koreksi Guru:</strong> Skor {{ teacher_score }}{% if teacher_comment %} — {{ teacher_comment }}{% endif %}</div>
             {% endif %}
         {% else %}
+            {% if qtype == 'essay_text' and essay_ans is mapping and essay_ans.get('text') %}
+            <div style="margin-bottom:8px; padding:8px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:9pt;">
+                <strong style="color:#1d4ed8;">Jawaban Teks:</strong>
+                <p style="margin:4px 0 0; white-space:pre-wrap; color:#1e293b;">{{ essay_ans.text[:500] }}</p>
+            </div>
+            {% endif %}
             {% if teacher_score is defined and teacher_score != '' or teacher_comment %}
             <div class="teacher-note">
                 <strong>Koreksi Guru:</strong>
