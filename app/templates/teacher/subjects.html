@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Mata Pelajaran - ScanGrade{% endblock %}
+{% block page_title %}Mata Pelajaran{% endblock %}
+{% block content %}
+<div class="card p-6">
+    <p class="text-sm text-slate-500 font-medium mb-4">Daftar mata pelajaran yang tersedia di sekolah Anda. Dikelola oleh Admin Sekolah.</p>
+    {% if subjects %}
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        {% for s in subjects %}
+        <div class="p-4 bg-white rounded-xl border border-slate-200 text-center">
+            <div class="w-10 h-10 mx-auto rounded-xl bg-primary-100 flex items-center justify-center text-primary-600 mb-2"><i class="fas fa-book"></i></div>
+            <p class="font-extrabold text-slate-700">{{ s.name }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-12 text-slate-400 font-medium">Belum ada mata pelajaran. Hubungi Admin Sekolah.</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -162,6 +162,7 @@
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>
             <div class="nav-section-title pt-2">Tools</div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
+            <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span>Mata Pelajaran</span></a>
 
 {% elif g.user_role == 'murid' %}
             <div class="nav-section-title">Utama</div>

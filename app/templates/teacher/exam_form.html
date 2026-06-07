@@ -21,14 +21,45 @@
                     </div>
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-1">Mata Pelajaran</label>
-                        <input type="text" name="subject" value="{{ exam.subject if exam else '' }}"
+                        {% if subjects %}
+                        <select name="subject_id" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
+                            <option value="">-- Pilih Mata Pelajaran --</option>
+                            {% for s in subjects %}
+                            <option value="{{ s.id }}" {% if exam and exam.subject_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="text" name="subject" value="{{ exam.subject if exam else '' }}" placeholder="Ketik manual jika belum tersedia"
                                class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
+                        <p class="text-xs text-slate-400 mt-1">Admin sekolah belum menambahkan mata pelajaran. Anda bisa mengetik manual.</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-extrabold text-slate-700 mb-2">Kelas Tujuan (minimal 1)</label>
+                        {% if classes %}
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2" x-data="{ selected: {{ (exam.class_ids or []) | tojson }} }">
+                            {% for c in classes %}
+                            <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                                   :class="selected.includes('{{ c.id }}') ? 'border-primary-400 bg-primary-50' : 'border-slate-200 bg-white hover:border-slate-300'">
+                                <input type="checkbox" name="class_ids" value="{{ c.id }}" class="w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                                       {{ 'checked' if exam and c.id|string in (exam.class_ids or [])|map('string')|list else '' }}>
+                                <span class="text-sm font-bold text-slate-700">{{ c.name }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="text-sm text-slate-400 italic">Belum ada kelas. Admin sekolah harus menambahkan kelas terlebih dahulu.</p>
+                        {% endif %}
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Durasi (menit)</label>
-                            <input type="number" name="duration_minutes" value="{{ exam.duration_minutes or 60 }}" min="1"
-                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Durasi</label>
+                            <select name="duration_minutes" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
+                                {% for m in [10,15,20,25,30,40,45,50,60,75,90,100,120,150,180] %}
+                                <option value="{{ m }}" {% if (exam.duration_minutes or 60) == m %}selected{% endif %}>{{ m }} menit ({% if m >= 60 %}{{ m//60 }} jam {% endif %}{{ m%60 }} menit)</option>
+                                {% endfor %}
+                                <option value="0" {% if (exam.duration_minutes or 0) == 0 %}selected{% endif %}>Tidak terbatas</option>
+                            </select>
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Nilai Minimal Lulus</label>
@@ -36,10 +67,25 @@
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
                         </div>
                     </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Mulai (opsional)</label>
+                            <input type="datetime-local" name="start_at" value="{{ (exam.start_at[:16] if exam.start_at else '') }}"
+                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
+                            <p class="text-xs text-slate-400 mt-1">Kosongkan jika ingin ujian langsung aktif</p>
+                        </div>
+                    </div>
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-1">Deskripsi</label>
                         <textarea name="description" rows="3"
                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">{{ exam.description if exam else '' }}</textarea>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" name="is_template" value="true" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                                   {% if exam and exam.is_template %}checked{% endif %}>
+                            <span class="font-bold text-sm text-slate-700">Jadikan sebagai Template / Bank Soal</span>
+                        </label>
                     </div>
                 </div>
 

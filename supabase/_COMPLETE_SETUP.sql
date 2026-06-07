@@ -449,3 +449,11 @@ ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS pricing_config JSONB DEFAUL
 ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS payment_fee_config JSONB DEFAULT '{"fee_percent": 0, "fee_flat": 4000, "fee_note": "Biaya admin Rp 4.000 (transfer bank)"}';
 
 ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS payment_details JSONB DEFAULT '{}';
+
+-- Exam scheduling & class/subject improvements
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS class_ids JSONB DEFAULT '[]';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS subject_id INTEGER REFERENCES subjects(id);
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_template BOOLEAN DEFAULT false;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS source_exam_id UUID;

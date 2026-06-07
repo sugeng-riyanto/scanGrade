@@ -166,10 +166,23 @@ def dashboard():
 def exam_form():
     supabase = get_supabase()
     if request.method == "GET":
-        return render_template("teacher/exam_form.html", exam=None)
+        supabase = get_supabase()
+        sid = g.get("user_school_id")
+        subjects = []
+        classes = []
+        if sid:
+            subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+            classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+        return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes)
 
     title = request.form.get("title")
     subject = request.form.get("subject")
+    subject_id = request.form.get("subject_id", type=int) or None
+    class_ids = json.loads(request.form.get("class_ids", "[]"))
+    start_at_str = request.form.get("start_at", "").strip()
+    start_at = start_at_str if start_at_str else None
+    is_template = request.form.get("is_template", "false") == "true"
+    source_exam_id = request.form.get("source_exam_id") or None
     total_questions = int(request.form.get("total_questions", 10))
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
@@ -211,6 +224,11 @@ def exam_form():
         "teacher_id": g.user_id,
         "title": title,
         "subject": subject,
+        "subject_id": subject_id,
+        "class_ids": class_ids,
+        "start_at": start_at,
+        "is_template": is_template,
+        "source_exam_id": source_exam_id,
         "total_questions": total_questions,
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
@@ -237,7 +255,7 @@ def exam_form():
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator"]:
+        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -260,10 +278,22 @@ def exam_detail(exam_id):
             res = supabase.table("exams").select("id,title,subject,total_questions,duration_minutes,passing_score,description,status,answer_key,question_types,question_audio,question_canvas,teacher_id,created_at").eq("id", exam_id).single().execute()
         exam_data = res.data
         exam_data.setdefault("question_weights", {})
-        return render_template("teacher/exam_form.html", exam=exam_data)
+        sid = g.get("user_school_id")
+        subjects = []
+        classes = []
+        if sid:
+            subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+            classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+        return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes)
 
     title = request.form.get("title")
     subject = request.form.get("subject")
+    subject_id = request.form.get("subject_id", type=int) or None
+    class_ids = json.loads(request.form.get("class_ids", "[]"))
+    start_at_str = request.form.get("start_at", "").strip()
+    start_at = start_at_str if start_at_str else None
+    is_template = request.form.get("is_template", "false") == "true"
+    source_exam_id = request.form.get("source_exam_id") or None
     total_questions = int(request.form.get("total_questions", 10))
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
@@ -303,6 +333,11 @@ def exam_detail(exam_id):
     data = {
         "title": title,
         "subject": subject,
+        "subject_id": subject_id,
+        "class_ids": class_ids,
+        "start_at": start_at,
+        "is_template": is_template,
+        "source_exam_id": source_exam_id,
         "total_questions": total_questions,
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
@@ -329,7 +364,7 @@ def exam_detail(exam_id):
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator"]:
+        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     _recalculate_scores(exam_id)
@@ -435,6 +470,34 @@ def delete_exam(exam_id):
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
         return jsonify({"success": True})
     return redirect("/teacher/exams")
+
+
+@teacher_bp.route("/exams/<exam_id>/duplicate", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def duplicate_exam(exam_id):
+    supabase = get_supabase()
+    try:
+        res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
+        exam = res.data
+        if not exam:
+            flash("Ujian tidak ditemukan", "error")
+            return redirect("/teacher/exams")
+        import copy, uuid
+        new_data = {k: v for k, v in exam.items() if k not in ("id", "created_at", "updated_at")}
+        new_data["title"] = exam["title"] + " (salinan)"
+        new_data["status"] = "draft"
+        new_data["is_published"] = False
+        new_data["is_template"] = False
+        new_data["source_exam_id"] = exam_id
+        new_exam = supabase.table("exams").insert(new_data).execute()
+        new_id = new_exam.data[0]["id"]
+        log_activity("duplicate", "exam", new_id, new_data={"source": exam_id, "title": new_data["title"]}, user_id=g.user_id)
+        flash("Ujian berhasil digandakan. Silakan edit sesuai kebutuhan.", "success")
+        return redirect(f"/teacher/exams/{new_id}")
+    except Exception as e:
+        flash(f"Gagal menggandakan: {str(e)[:60]}", "error")
+        return redirect("/teacher/exams")
 
 
 @teacher_bp.route("/scan")
@@ -929,3 +992,14 @@ def students():
             st["sub_count"] = len(st_scores)
             st["avg_score"] = round(sum(st_scores) / len(st_scores), 1) if st_scores else None
     return render_template("teacher/students.html", students=students)
+
+
+@teacher_bp.route("/subjects")
+@teacher_or_admin_required
+def teacher_subjects():
+    supabase = get_supabase()
+    sid = g.get("user_school_id")
+    subjects = []
+    if sid:
+        subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+    return render_template("teacher/subjects.html", subjects=subjects)
