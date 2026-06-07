@@ -585,6 +585,52 @@ def delete_class(class_id):
         return jsonify({"error": str(e)}), 400
 
 
+# ─── SUBJECTS CRUD ────────────────────────────────────
+
+@admin_sekolah_bp.route("/subjects")
+@admin_sekolah_required
+def admin_subjects():
+    sid = _school_id()
+    supabase = get_supabase()
+    sort = request.args.get("sort", "asc")
+    q = request.args.get("q", "")
+    data = supabase.table("subjects").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
+    if q:
+        data = [s for s in data if q.lower() in s.get("name", "").lower()]
+    return render_template("admin_sekolah/subjects.html", subjects=data, sort=sort, q=q)
+
+
+@admin_sekolah_bp.route("/subjects/create", methods=["POST"])
+@admin_sekolah_required
+def admin_subject_create():
+    sid = _school_id()
+    supabase = get_supabase()
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Nama mapel wajib diisi", "error")
+        return redirect("/admin-sekolah/subjects")
+    try:
+        supabase.table("subjects").insert({"school_id": sid, "name": name, "is_active": True}).execute()
+        log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
+        flash("Mapel berhasil ditambahkan", "success")
+    except Exception as e:
+        flash(f"Gagal: {e}", "error")
+    return redirect("/admin-sekolah/subjects")
+
+
+@admin_sekolah_bp.route("/subjects/<int:subject_id>/delete", methods=["POST"])
+@admin_sekolah_required
+def admin_subject_delete(subject_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("teacher_assignments").delete().eq("subject_id", subject_id).execute()
+        supabase.table("subjects").delete().eq("id", subject_id).execute()
+        log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 # ─── PROMOTE (Naik Kelas) ────────────────────────────
 
 @admin_sekolah_bp.route("/promote", methods=["GET", "POST"])

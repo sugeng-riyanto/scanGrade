@@ -876,46 +876,6 @@ def teacher_update_profile():
         return jsonify({"error": str(e)}), 400
 
 
-@teacher_bp.route("/classes")
-@teacher_or_admin_required
-def teacher_classes():
-    supabase = get_supabase()
-    school_id = None
-    try:
-        profile = supabase.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
-        school_id = profile.get("school_id")
-    except Exception:
-        pass
-
-    assignments = []
-    classes = []
-    subjects = []
-    if school_id:
-        try:
-            assignments = supabase.table("teacher_assignments") \
-                .select("*, classes(id, name, grade_level), subjects(id, name, code)") \
-                .eq("teacher_id", g.user_id) \
-                .eq("school_id", school_id) \
-                .execute().data or []
-        except Exception:
-            pass
-        try:
-            classes = supabase.table("classes").select("id, name, grade_level") \
-                .eq("school_id", school_id) \
-                .order("name").execute().data or []
-        except Exception:
-            pass
-        try:
-            subjects = supabase.table("subjects").select("id, name, code") \
-                .eq("school_id", school_id) \
-                .eq("is_active", True) \
-                .order("name").execute().data or []
-        except Exception:
-            pass
-
-    return render_template("teacher/classes.html", assignments=assignments, classes=classes, subjects=subjects)
-
-
 @teacher_bp.route("/assignments", methods=["GET", "POST"])
 @teacher_or_admin_required
 def assignments():
