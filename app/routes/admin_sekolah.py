@@ -1360,7 +1360,8 @@ body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b;
 </table>
 
 <div class="footer">
-Dicetak dari ScanGrade &mdash; Invoice #{inv.get('invoice_number', '-')}
+Invoice ini sah dan diterbitkan oleh ScanGrade. Data disimpan di database dan dapat diverifikasi kapan saja.<br>
+Dicetak: {paid_at} &mdash; Terima kasih telah menggunakan ScanGrade.
 </div>
 </div></body></html>"""
     result = io.BytesIO()
