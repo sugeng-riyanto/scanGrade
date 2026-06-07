@@ -172,10 +172,12 @@ def submit_exam(exam_id):
     if not exam.get("is_published") or exam.get("status") != "active":
         return jsonify({"error": "Exam is not available for submission"}), 403
 
-    # Check if student already submitted
-    existing = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute()
-    if existing.data:
-        return jsonify({"error": "Anda sudah mengumpulkan ujian ini"}), 409
+    # Check attempts
+    max_attempts = exam.get("max_attempts", 1)
+    existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).execute()
+    attempt_count = existing.count or 0
+    if attempt_count >= max_attempts:
+        return jsonify({"error": f"Anda sudah mencapai batas maksimal {max_attempts}x mengerjakan ujian ini"}), 409
 
     answers = {}
     if request.is_json:
@@ -238,6 +240,7 @@ def submit_exam(exam_id):
         "penalty": round(penalty, 2),
         "final_score": final_score,
         "status": "submitted",
+        "is_published": exam.get("publish_mode") == "auto",
     }
     try:
         supabase.table("submissions").insert(submission).execute()

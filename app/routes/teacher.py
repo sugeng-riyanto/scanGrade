@@ -183,6 +183,8 @@ def exam_form():
     start_at = start_at_str if start_at_str else None
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
+    max_attempts = int(request.form.get("max_attempts", 1))
+    publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
@@ -229,6 +231,8 @@ def exam_form():
         "start_at": start_at,
         "is_template": is_template,
         "source_exam_id": source_exam_id,
+        "max_attempts": max_attempts,
+        "publish_mode": publish_mode,
         "total_questions": total_questions,
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
@@ -255,7 +259,7 @@ def exam_form():
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id"]:
+        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -338,6 +342,8 @@ def exam_detail(exam_id):
         "start_at": start_at,
         "is_template": is_template,
         "source_exam_id": source_exam_id,
+        "max_attempts": max_attempts,
+        "publish_mode": publish_mode,
         "total_questions": total_questions,
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
@@ -364,7 +370,7 @@ def exam_detail(exam_id):
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id"]:
+        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     _recalculate_scores(exam_id)
