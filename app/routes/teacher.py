@@ -947,19 +947,25 @@ def ai_settings():
     keys = supabase.table("teacher_ai_keys").select("*").eq("teacher_id", g.user_id).order("created_at", desc=True).execute().data or []
     settings_res = supabase.table("teacher_ai_settings").select("*").eq("teacher_id", g.user_id).limit(1).execute()
     if not settings_res.data:
-        default_prompts = json.dumps([
+        default_prompts = [
             {"id": "default", "label": "Default", "template": "Kamu adalah asisten koreksi ujian. Koreksi jawaban esai berikut berdasarkan soal dan bobot maksimal.\n\nSoal: {question}\nPedoman Penskoran: {rubric}\nBobot Maksimal: {max_score} poin\nJawaban Siswa: \"{answer}\"\n\nBerikan skor (0-{max_score}) dan feedback singkat dalam bahasa Indonesia.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
             {"id": "ketat", "label": "Ketat", "template": "Kamu adalah pemeriksa ujian yang sangat ketat. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Jangan mudah memberi nilai tinggi. Feedback harus menyebutkan kekurangan.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
             {"id": "ringan", "label": "Ringan / Santai", "template": "Kamu adalah guru yang baik hati. Koreksi jawaban esai berikut.\n\nSoal: {question}\nBobot Maksimal: {max_score} poin\nJawaban: \"{answer}\"\n\nBerikan skor (0-{max_score}). Beri nilai maksimal jika jawaban mendekati benar. Feedback yang membangun.\nFormat JSON: {\"score\": <number>, \"feedback\": \"<string>\"}"},
-        ])
+        ]
         supabase.table("teacher_ai_settings").insert({
             "teacher_id": g.user_id, "prompts": default_prompts, "active_prompt_id": "default"
         }).execute()
-        settings = {"teacher_id": g.user_id, "prompts": json.loads(default_prompts), "active_prompt_id": "default"}
+        settings = {"teacher_id": g.user_id, "prompts": default_prompts, "active_prompt_id": "default"}
     else:
         settings = settings_res.data[0]
-        if isinstance(settings.get("prompts"), str):
-            settings["prompts"] = json.loads(settings["prompts"])
+        pr = settings.get("prompts")
+        if isinstance(pr, str):
+            try:
+                settings["prompts"] = json.loads(pr)
+            except (json.JSONDecodeError, TypeError):
+                settings["prompts"] = []
+        elif pr is None:
+            settings["prompts"] = []
     return render_template("teacher/ai_settings.html", keys=keys, settings=settings)
 
 

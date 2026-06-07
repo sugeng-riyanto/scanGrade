@@ -5,7 +5,6 @@
 {% set sk = settings or {} %}
 {% set prompts = sk.get('prompts') or [] %}
 {% set active_prompt_id = sk.get('active_prompt_id') or 'default' %}
-{% if prompts is string %}{% set prompts = prompts|from_json %}{% endif %}
 <div class="max-w-4xl mx-auto space-y-6" x-data="{
     showTutorial: false, showForm: false,
     newProvider: 'gemini', newLabel: '', newKey: '', newBaseUrl: '', newModel: '',
