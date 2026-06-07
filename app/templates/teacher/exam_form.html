@@ -3,11 +3,15 @@
 {% block page_title %}{{ 'Edit' if exam else 'Buat' }} Ujian{% endblock %}
 {% block content %}
 <div class="max-w-5xl mx-auto">
-    <div class="flex items-center mb-6">
-        <a href="{{ url_for('teacher.my_exams') }}" class="text-slate-400 hover:text-slate-600 mr-4 p-2 hover:bg-slate-100 rounded-xl transition">
-            <i class="fas fa-arrow-left"></i>
+    <div class="flex items-center gap-3 mb-6">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20"><i class="fas fa-file-pen text-white text-lg"></i></div>
+        <div>
+            <h1 class="text-2xl font-extrabold text-surface-800">{{ 'Edit' if exam else 'Buat' }} Ujian</h1>
+            <p class="text-sm text-surface-500 font-medium">MCQ · Esai Teks · Esai Canvas</p>
+        </div>
+        <a href="{{ url_for('teacher.my_exams') }}" class="ml-auto text-surface-400 hover:text-surface-600 p-2 hover:bg-surface-100 rounded-xl transition">
+            <i class="fas fa-times text-lg"></i>
         </a>
-        <h1 class="text-2xl font-extrabold text-slate-800">{{ 'Edit' if exam else 'Buat' }} Exam</h1>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
