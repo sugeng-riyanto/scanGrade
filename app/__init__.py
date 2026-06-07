@@ -194,6 +194,10 @@ def create_app(env=None):
     def tutorial_guru():
         return render_template("tutorial_guru.html")
 
+    @app.route("/tutorial/admin-sekolah")
+    def tutorial_admin():
+        return render_template("tutorial_admin_sekolah.html")
+
     @app.route("/tutorial/murid")
     def tutorial_murid():
         # Default anti-cheat values (dapat diubah admin di pengaturan sekolah)

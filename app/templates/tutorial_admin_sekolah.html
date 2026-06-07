@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Tutorial Admin Sekolah - ScanGrade{% endblock %}
+{% block head_extra %}
+<style>
+.demo-step { animation: slideUp 0.4s ease-out; }
+.demo-card { transition: transform 0.2s, box-shadow 0.2s; }
+.demo-card:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.08); }
+</style>
+{% endblock %}
+{% block content_noauth %}
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
+    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
+        <div class="flex items-center gap-2">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
+                <i class="fas fa-school text-white text-sm"></i>
+            </div>
+            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-blue-600">Admin Sekolah</span></span>
+        </div>
+        <div class="flex items-center gap-3">
+            <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i>Beranda</a>
+            <a href="/auth/login" class="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-500/25 hover:from-blue-600 hover:to-blue-700 transition"><i class="fas fa-sign-in-alt mr-1"></i>Masuk sebagai Admin</a>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 py-12">
+        <div class="text-center mb-16">
+            <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-100 rounded-full text-blue-700 text-xs font-bold mb-4">🏫 Untuk Admin Sekolah</div>
+            <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900">Kelola Sekolah, Guru, dan Siswa</h1>
+            <p class="mt-3 text-lg text-surface-500 max-w-2xl mx-auto">Dashboard admin untuk mengatur semua data sekolah — dari profil hingga langganan.</p>
+        </div>
+
+        <div class="space-y-8 demo-step">
+            <!-- Step 1 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0"><span class="text-blue-700 font-extrabold text-lg">1</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Profil Sekolah</h3>
+                    <p class="mt-2 text-surface-500">Lengkapi profil sekolah: nama, NPSN, alamat, logo, dan domain email. Domain email digunakan untuk membuat akun guru dan siswa secara otomatis.</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold"><i class="fas fa-building mr-1"></i>Profil</span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold"><i class="fas fa-image mr-1"></i>Logo</span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold"><i class="fas fa-at mr-1"></i>Domain Email</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0"><span class="text-blue-700 font-extrabold text-lg">2</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Kelola Kelas &amp; Mata Pelajaran</h3>
+                    <p class="mt-2 text-surface-500">Buat kelas (VII-A, X-RPL, dll) dan daftar mata pelajaran. Data ini akan digunakan oleh guru saat membuat ujian dan menetapkan kelas tujuan.</p>
+                    <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-school text-blue-600"></i><p class="text-xs font-bold mt-1">Kelas</p></div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-book text-blue-600"></i><p class="text-xs font-bold mt-1">Mapel</p></div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-calendar text-blue-600"></i><p class="text-xs font-bold mt-1">Tahun Ajaran</p></div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-arrow-up text-blue-600"></i><p class="text-xs font-bold mt-1">Naik Kelas</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0"><span class="text-blue-700 font-extrabold text-lg">3</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Import / CRUD Guru &amp; Siswa</h3>
+                    <p class="mt-2 text-surface-500">Tambah guru dan siswa satu per satu atau import dari Excel. Setiap akun mendapat email dan password otomatis. Kamu juga bisa mereset password dan menghapus akun secara bulk.</p>
+                    <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-chalkboard-teacher text-amber-600"></i><p class="text-xs font-bold mt-1">Guru</p></div>
+                        <div class="p-3 bg-green-50 rounded-xl text-center"><i class="fas fa-user-graduate text-green-600"></i><p class="text-xs font-bold mt-1">Siswa</p></div>
+                        <div class="p-3 bg-purple-50 rounded-xl text-center"><i class="fas fa-upload text-purple-600"></i><p class="text-xs font-bold mt-1">Import Excel</p></div>
+                        <div class="p-3 bg-red-50 rounded-xl text-center"><i class="fas fa-download text-red-600"></i><p class="text-xs font-bold mt-1">Export</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0"><span class="text-blue-700 font-extrabold text-lg">4</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Langganan &amp; Aktivasi</h3>
+                    <p class="mt-2 text-surface-500">Pantau status langganan sekolah. Aktivasi menggunakan kode dari pembayaran atau dari Super Admin. Kamu juga bisa berlangganan paket dan membayar via Midtrans.</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"><i class="fas fa-credit-card mr-1"></i>Langganan</span>
+                        <span class="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"><i class="fas fa-key mr-1"></i>Kode Aktivasi</span>
+                        <span class="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-bold"><i class="fas fa-robot mr-1"></i>AI Grading</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 5 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0"><span class="text-blue-700 font-extrabold text-lg">5</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800">Tugaskan Guru ke Kelas &amp; Mapel</h3>
+                    <p class="mt-2 text-surface-500">Setelah guru dan kelas tersedia, tugaskan guru ke kelas dan mata pelajaran tertentu. Guru hanya akan melihat kelas dan mapel yang ditugaskan.</p>
+                    <div class="mt-4 p-4 bg-blue-50 rounded-xl flex items-start gap-3">
+                        <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
+                        <p class="text-sm text-blue-800 font-medium">Guru tidak bisa membuat kelas atau mapel — semua dikelola oleh Admin Sekolah.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CTA -->
+        <div class="mt-12 text-center bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-8 lg:p-12 shadow-xl">
+            <h2 class="text-2xl font-extrabold text-white">Kelola sekolah Anda</h2>
+            <p class="mt-2 text-blue-100">Masuk dengan akun admin sekolah yang sudah terdaftar.</p>
+            <a href="/auth/login" class="mt-4 inline-flex items-center gap-2 px-8 py-3.5 bg-white text-blue-700 rounded-xl font-extrabold hover:bg-blue-50 transition">Masuk sebagai Admin <i class="fas fa-arrow-right"></i></a>
+        </div>
+    </main>
+</div>
+{% endblock %}
