@@ -9,7 +9,7 @@ DEFAULT_LIMITS = {
     "default": (60, 60),
     "auth": (30, 60),
     "api": (30, 60),
-    "register": (3, 3600),
+    "register": (10, 600),
     "upload": (10, 300),
     "reset_password": (3, 300),
 }
@@ -89,14 +89,17 @@ def get_rate_limiter(app):
 
         if not allowed:
             if request.is_json or request.headers.get("Accept", "").startswith("application/json"):
-                return jsonify({
-                    "error": "Too many requests",
-                    "retry_after": retry_after,
-                    "message": f"Terlalu banyak permintaan. Coba lagi dalam {retry_after} detik.",
-                }), 429
-            return jsonify({
-                "error": "Too many requests",
-                "retry_after": retry_after,
-                "message": "Terlalu banyak permintaan. Silakan coba lagi nanti.",
-            }), 429
+                return jsonify({"error": "Too many requests", "retry_after": retry_after}), 429
+            # Return a simple HTML page for regular requests
+            from flask import render_template_string
+            from urllib.parse import quote
+            msg = f"Terlalu banyak permintaan. Silakan coba lagi dalam {retry_after} detik."
+            html = f'''<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rate Limited</title>
+<style>body{{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8fafc;}}
+.card{{max-width:400px;text-align:center;padding:40px;background:white;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.06);}}
+h1{{font-size:48px;color:#ef4444;margin:0;}}p{{color:#64748b;}}button{{margin-top:16px;padding:10px 24px;background:#3b82f6;color:white;border:none;border-radius:12px;font-weight:bold;cursor:pointer;}}
+button:hover{{background:#2563eb;}}</style></head><body>
+<div class="card"><h1>429</h1><p>{msg}</p>
+<button onclick="location.reload()">Coba Lagi</button></div></body></html>'''
+            return render_template_string(html), 429
         return None
