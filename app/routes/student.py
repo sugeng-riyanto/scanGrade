@@ -124,18 +124,23 @@ def exam_list():
     if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
 
-    # Get student's class_id
+    # Get student's class_id and school_id
     student_class_id = None
+    student_school_id = None
     try:
-        prof = supabase.table("profiles").select("class_id").eq("id", g.user_id).single().execute()
+        prof = supabase.table("profiles").select("class_id, school_id").eq("id", g.user_id).single().execute()
         if prof.data:
             student_class_id = prof.data.get("class_id")
+            student_school_id = prof.data.get("school_id")
     except Exception:
         pass
 
     exams = []
     try:
-        res = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active").order("created_at", desc=True).execute()
+        query = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active")
+        if student_school_id:
+            query = query.eq("school_id", student_school_id)
+        res = query.order("created_at", desc=True).execute()
         all_exams = res.data or []
         # Filter by class_id if student has one
         if student_class_id:

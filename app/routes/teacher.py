@@ -1098,7 +1098,11 @@ def ai_reset_prompt():
 @teacher_or_admin_required
 def students():
     supabase = get_supabase()
-    students = supabase.table("profiles").select("id,full_name,phone,role").eq("role", "murid").execute().data or []
+    school_id = g.get("user_school_id")
+    query = supabase.table("profiles").select("id,full_name,phone,role").eq("role", "murid")
+    if school_id:
+        query = query.eq("school_id", school_id)
+    students = query.execute().data or []
     exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
     if exam_ids:
         subs = supabase.table("submissions").select("student_id,score,final_score").in_("exam_id", exam_ids).execute().data or []
