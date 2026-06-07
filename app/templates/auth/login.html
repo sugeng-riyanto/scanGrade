@@ -2,20 +2,26 @@
 {% block title %}Masuk - ScanGrade{% endblock %}
 {% block head_extra %}
 <style>
-.auth-card { animation: slideUp 0.35s ease-out; }
+.auth-card { animation: slideUp 0.4s ease-out; }
 .input-icon { position: relative; }
 .input-icon i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 14px; }
 .input-icon input { padding-left: 38px; }
 .toggle-pw { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #94a3b8; cursor: pointer; padding: 4px; font-size: 14px; }
 .toggle-pw:hover { color: #64748b; }
+.role-btn { transition: all 0.2s; cursor: pointer; }
+.role-btn:hover { border-color: #93c5fd; background: #eff6ff; transform: translateY(-1px); }
+.role-btn.active { border-color: #3b82f6; background: #eff6ff; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
 </style>
 {% endblock %}
 {% block content_noauth %}
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 flex items-center justify-center p-4 lg:p-8">
-    <a href="/" class="fixed top-4 left-4 lg:top-6 lg:left-6 w-10 h-10 rounded-xl bg-white shadow-md border border-slate-200 flex items-center justify-center text-slate-500 hover:text-primary-600 hover:border-primary-200 hover:shadow-lg transition-all z-50" title="Beranda">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 flex items-center justify-center p-4 lg:p-8 relative overflow-hidden">
+    <!-- Decorative -->
+    <div class="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-blue-100/40 blur-3xl"></div>
+    <div class="absolute -bottom-40 -left-40 w-80 h-80 rounded-full bg-purple-100/40 blur-3xl"></div>
+    <a href="/" class="fixed top-4 left-4 lg:top-6 lg:left-6 w-10 h-10 rounded-xl bg-white/80 backdrop-blur-sm shadow-md border border-slate-200 flex items-center justify-center text-slate-500 hover:text-primary-600 hover:border-primary-200 hover:shadow-lg transition-all z-50" title="Beranda">
         <i class="fas fa-home text-sm"></i>
     </a>
-    <div class="w-full max-w-md auth-card">
+    <div class="w-full max-w-md auth-card relative z-10">
         <div class="text-center mb-8">
             <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/30">
                 <i class="fas fa-graduation-cap text-2xl text-white"></i>
@@ -26,7 +32,7 @@
 
         <div x-data="{ loading: false, showPw: false, email: '' }">
             {% if error %}
-            <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm font-semibold text-red-700 flex items-center gap-2" role="alert">
+            <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm font-semibold text-red-700 flex items-center gap-2 shadow-sm" role="alert">
                 <i class="fas fa-exclamation-circle shrink-0"></i><span>{{ error }}</span>
             </div>
             {% endif %}
@@ -54,7 +60,7 @@
                         <a href="{{ url_for('auth.forgot_password') }}" class="text-primary-600 hover:text-primary-700 font-semibold">Lupa password?</a>
                     </div>
                     <button type="submit" :disabled="loading"
-                            class="w-full bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white py-3 px-4 rounded-xl font-extrabold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 flex items-center justify-center gap-2">
+                            class="w-full bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white py-3 px-4 rounded-xl font-extrabold shadow-lg shadow-primary-500/25 hover:shadow-primary-500/40 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
                         <i class="fas fa-spinner fa-spin" x-show="loading" x-cloak></i>
                         <i class="fas fa-sign-in-alt" x-show="!loading"></i>
                         <span x-text="loading ? 'Memproses...' : 'Masuk'"></span>

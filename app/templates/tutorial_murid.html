@@ -9,8 +9,10 @@
 </style>
 {% endblock %}
 {% block content_noauth %}
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-amber-50">
-    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-amber-50 relative overflow-hidden">
+    <div class="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-amber-100/30 blur-3xl"></div>
+    <div class="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-orange-100/30 blur-3xl"></div>
+    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto relative z-10">
         <div class="flex items-center gap-2">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
                 <i class="fas fa-user-graduate text-white text-sm"></i>
