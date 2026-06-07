@@ -5,7 +5,10 @@
 {% set sk = settings or {} %}
 {% set prompts = sk.get('prompts') or [] %}
 {% set active_prompt_id = sk.get('active_prompt_id') or 'default' %}
-<div class="max-w-4xl mx-auto space-y-6" x-data="{
+<div class="max-w-4xl mx-auto space-y-6" x-data="window.aiSettingsData">
+
+<script>
+window.aiSettingsData = {
     showTutorial: false, showForm: false,
     newProvider: 'gemini', newLabel: '', newKey: '', newBaseUrl: '', newModel: '',
     prompts: {{ prompts | tojson }},
@@ -18,10 +21,7 @@
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: 'prompts=' + encodeURIComponent(JSON.stringify(this.prompts)) + '&active_prompt_id=' + encodeURIComponent(this.activePromptId)
-        }).then(r => {
-            if (r.ok) { location.reload(); }
-            else { alert('Gagal menyimpan'); }
-        });
+        }).then(r => { if (r.ok) location.reload(); else alert('Gagal menyimpan'); });
     },
     addPrompt() {
         const id = 'p' + Date.now();
@@ -36,7 +36,8 @@
     providerChanged() {
         if (this.newProvider !== 'custom') { this.newBaseUrl = ''; this.newModel = ''; }
     }
-}">
+};
+</script>
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}
