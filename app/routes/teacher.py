@@ -987,8 +987,12 @@ def teacher_subject_new():
     name = request.form.get("name", "").strip()
     if not name:
         return jsonify({"error": "Nama mapel wajib diisi"}), 400
+    # Check duplicate
+    dup = supabase.table("subjects").select("id, name").eq("school_id", sid).eq("name", name).limit(1).execute()
+    if dup.data:
+        return jsonify({"error": f"Mapel '{name}' sudah ada"}), 409
     try:
-        supabase.table("subjects").insert({"school_id": sid, "name": name, "is_active": True}).execute()
+        supabase.table("subjects").insert({"school_id": sid, "name": name, "is_active": True, "created_by": g.user_id}).execute()
         log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
         return jsonify({"success": True})
     except Exception as e:
@@ -1001,9 +1005,14 @@ def teacher_subject_new():
 def teacher_subject_delete(subject_id):
     supabase = get_supabase()
     try:
+        # Check ownership: warn if created by someone else
+        item = supabase.table("subjects").select("created_by").eq("id", subject_id).single().execute()
+        if item.data and item.data.get("created_by") and item.data["created_by"] != g.user_id:
+            # Allow delete but with extra cleanup of teacher_assignments
+            supabase.table("teacher_assignments").delete().eq("subject_id", subject_id).execute()
         supabase.table("subjects").delete().eq("id", subject_id).execute()
         log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
-        return jsonify({"success": True})
+        return jsonify({"success": True, "note": "Data terkait sudah dibersihkan"})
     except Exception as e:
         return jsonify({"error": str(e)[:60]}), 400
 
@@ -1019,12 +1028,35 @@ def teacher_class_new():
     name = request.form.get("name", "").strip()
     if not name:
         return jsonify({"error": "Nama kelas wajib diisi"}), 400
+    # Check duplicate
+    dup = supabase.table("classes").select("id, name").eq("school_id", sid).eq("name", name).limit(1).execute()
+    if dup.data:
+        return jsonify({"error": f"Kelas '{name}' sudah ada"}), 409
     try:
-        supabase.table("classes").insert({"school_id": sid, "name": name}).execute()
+        supabase.table("classes").insert({"school_id": sid, "name": name, "created_by": g.user_id}).execute()
         log_activity("create", "class", name, new_data={"name": name}, user_id=g.user_id)
         if request.headers.get("HX-Request") or request.is_json:
             return jsonify({"success": True})
         flash(f"Kelas {name} berhasil ditambahkan", "success")
+        return redirect("/teacher/classes")
+    except Exception as e:
+        return jsonify({"error": str(e)[:60]}), 400
+
+
+@teacher_bp.route("/classes/<int:class_id>/delete", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def teacher_class_delete(class_id):
+    supabase = get_supabase()
+    try:
+        # Clean up related data
+        supabase.table("profiles").update({"class_id": None}).eq("class_id", class_id).execute()
+        supabase.table("teacher_assignments").delete().eq("class_id", class_id).execute()
+        supabase.table("classes").delete().eq("id", class_id).execute()
+        log_activity("delete", "class", str(class_id), user_id=g.user_id)
+        if request.headers.get("HX-Request") or request.is_json:
+            return jsonify({"success": True})
+        flash("Kelas berhasil dihapus", "success")
         return redirect("/teacher/classes")
     except Exception as e:
         return jsonify({"error": str(e)[:60]}), 400

@@ -540,10 +540,15 @@ def create_class():
     if not name:
         flash("Nama kelas wajib diisi", "error")
         return redirect("/admin-sekolah/classes")
+    # Check duplicate across all roles
+    dup = supabase.table("classes").select("id").eq("school_id", sid).eq("name", name).limit(1).execute()
+    if dup.data:
+        flash(f"Kelas '{name}' sudah ada", "error")
+        return redirect("/admin-sekolah/classes")
     try:
         res = supabase.table("classes").insert({
             "name": name, "grade_level": grade_level, "school_id": sid,
-            "teacher_id": wali_id, "school_year_id": year_id,
+            "teacher_id": wali_id, "school_year_id": year_id, "created_by": g.user_id,
         }).execute()
         cid = res.data[0]["id"] if res.data else None
         log_activity("create", "class", cid, new_data={"name": name, "grade_level": grade_level}, user_id=g.user_id)
@@ -609,8 +614,13 @@ def admin_subject_create():
     if not name:
         flash("Nama mapel wajib diisi", "error")
         return redirect("/admin-sekolah/subjects")
+    # Check duplicate across all roles
+    dup = supabase.table("subjects").select("id").eq("school_id", sid).eq("name", name).limit(1).execute()
+    if dup.data:
+        flash(f"Mapel '{name}' sudah ada", "error")
+        return redirect("/admin-sekolah/subjects")
     try:
-        supabase.table("subjects").insert({"school_id": sid, "name": name, "is_active": True}).execute()
+        supabase.table("subjects").insert({"school_id": sid, "name": name, "is_active": True, "created_by": g.user_id}).execute()
         log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
         flash("Mapel berhasil ditambahkan", "success")
     except Exception as e:
