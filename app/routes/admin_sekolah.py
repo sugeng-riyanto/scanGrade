@@ -1286,8 +1286,19 @@ def download_invoice_pdf(invoice_id):
         return redirect("/admin-sekolah/invoices")
     inv = inv.data
 
-    school = supabase.table("schools").select("name, address, npsn").eq("id", sid).single().execute().data or {}
+    school = supabase.table("schools").select("name, address, npsn, city, province").eq("id", sid).single().execute().data or {}
     plan = inv.get("subscription_plans") or {}
+
+    amount = int(inv.get("amount", 0))
+    amount_fmt = f"Rp {amount:,}".replace(",", ".")
+
+    period_start = (inv.get("period_start") or "")[:10] if inv.get("period_start") else "-"
+    period_end = (inv.get("period_end") or "")[:10] if inv.get("period_end") else "Selamanya"
+    paid_at = (str(inv.get("paid_at") or inv.get("created_at", "")))[:19] if inv.get("paid_at") or inv.get("created_at") else "-"
+    address = school.get("address", "")
+    city = school.get("city", "")
+    province = school.get("province", "")
+    full_addr = f"{address}, {city}, {province}".strip(", ")
 
     from xhtml2pdf import pisa
     import io
@@ -1295,42 +1306,58 @@ def download_invoice_pdf(invoice_id):
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
-body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 11pt; color: #1e293b; padding: 20px; }}
-.invoice-box {{ max-width: 700px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 30px; }}
-.header {{ text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 15px; margin-bottom: 20px; }}
-.header h1 {{ font-size: 22pt; color: #1e293b; margin: 0; }}
-.header h2 {{ font-size: 14pt; color: #2563eb; margin: 5px 0 0; }}
-.row {{ display: flex; justify-content: space-between; padding: 4px 0; }}
-.label {{ color: #64748b; font-weight: bold; }}
-.value {{ font-weight: bold; color: #1e293b; }}
-.table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
-.table th {{ background: #f1f5f9; padding: 8px 10px; text-align: left; font-size: 9pt; border: 1px solid #e2e8f0; }}
-.table td {{ padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 10pt; }}
-.total {{ font-size: 14pt; font-weight: 900; color: #2563eb; text-align: right; margin-top: 10px; }}
-.footer {{ margin-top: 25px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8; text-align: center; }}
+@page {{ size: A4; margin: 2cm; }}
+body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b; }}
+.invoice {{ max-width: 100%; }}
+.header {{ text-align: center; border-bottom: 3px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px; }}
+.header h1 {{ font-size: 22pt; color: #1e293b; margin: 0 0 2px; }}
+.header .inv-num {{ font-size: 13pt; color: #2563eb; font-weight: bold; letter-spacing: 1px; }}
+.info-table {{ width: 100%; margin-bottom: 15px; }}
+.info-table td {{ padding: 3px 5px; vertical-align: top; }}
+.info-table .label {{ color: #64748b; font-weight: bold; width: 120px; }}
+.info-table .value {{ font-weight: bold; color: #1e293b; }}
+.detail-table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
+.detail-table th {{ background: #2563eb; color: white; padding: 8px 10px; text-align: left; font-size: 9pt; }}
+.detail-table td {{ padding: 8px 10px; border: 1px solid #e2e8f0; }}
+.total-row {{ text-align: right; font-size: 14pt; font-weight: 900; color: #2563eb; padding: 8px 10px; }}
+.footer {{ margin-top: 25px; padding-top: 10px; border-top: 2px solid #e2e8f0; font-size: 7.5pt; color: #94a3b8; text-align: center; }}
+.status-badge {{ display: inline-block; padding: 3px 12px; background: #059669; color: white; font-weight: bold; font-size: 9pt; border-radius: 4px; }}
 </style></head><body>
-<div class="invoice-box">
+<div class="invoice">
 <div class="header">
 <h1>INVOICE</h1>
-<h2>{inv.get('invoice_number', '-')}</h2>
+<div class="inv-num">{inv.get('invoice_number', '-')}</div>
 </div>
-<div class="row"><span class="label">Sekolah:</span><span class="value">{school.get('name', '-')}</span></div>
-<div class="row"><span class="label">NPSN:</span><span class="value">{school.get('npsn', '-')}</span></div>
-<div class="row"><span class="label">Alamat:</span><span class="value">{school.get('address', '-')}</span></div>
-<div class="row"><span class="label">Tanggal:</span><span class="value">{str(inv.get('paid_at') or inv.get('created_at', ''))[:19]}</span></div>
-<div class="row"><span class="label">Status:</span><span class="value" style="color:#059669;">LUNAS</span></div>
-<table class="table">
+
+<table class="info-table">
+<tr><td class="label">Kepada:</td><td class="value">{school.get('name', '-')}</td></tr>
+<tr><td class="label">NPSN:</td><td class="value">{school.get('npsn', '-')}</td></tr>
+<tr><td class="label">Alamat:</td><td class="value">{full_addr}</td></tr>
+<tr><td class="label">Tanggal:</td><td class="value">{paid_at}</td></tr>
+<tr><td class="label">Status:</td><td class="value"><span class="status-badge">LUNAS</span></td></tr>
+</table>
+
+<table class="detail-table">
 <tr><th>Deskripsi</th><th>Periode</th><th>Jumlah</th></tr>
 <tr>
 <td>Langganan ScanGrade - {plan.get('name', '-')}</td>
-<td>{str(inv.get('period_start', ''))[:10] or '-'} s/d {str(inv.get('period_end', ''))[:10] or 'Selamanya'}</td>
-<td style="text-align:right;">Rp {int(inv.get('amount', 0)):,}</td>
+<td>{period_start} s/d {period_end}</td>
+<td style="text-align:right; font-weight:bold;">{amount_fmt}</td>
 </tr>
 </table>
-<div class="total">Total: Rp {int(inv.get('amount', 0)):,}</div>
-<div class="row" style="margin-top:10px;"><span class="label">Pembayaran:</span><span class="value">{inv.get('payment_method', '-')}</span></div>
-<div class="row"><span class="label">Kode Aktivasi:</span><span class="value" style="font-family:monospace;">{inv.get('activation_code', '-') if inv.get('activation_code') else '-'}</span></div>
-<div class="footer">Dicetak dari ScanGrade &mdash; Invoice #{inv.get('invoice_number', '-')}</div>
+
+<div class="total-row">Total: {amount_fmt}</div>
+
+<table class="info-table">
+<tr><td class="label">Pembayaran:</td><td class="value">{inv.get('payment_method', '-')}</td></tr>
+<tr><td class="label">Kode Aktivasi:</td><td class="value" style="font-family:monospace;">{inv.get('activation_code', '-')}</td></tr>
+<tr><td class="label">Invoice #:</td><td class="value" style="font-family:monospace;">{inv.get('invoice_number', '-')}</td></tr>
+</table>
+
+<div class="footer">
+Invoice ini sah dan diterbitkan oleh ScanGrade. Data disimpan di database dan dapat diverifikasi kapan saja.<br>
+Dicetak: {paid_at} &mdash; Terima kasih telah menggunakan ScanGrade.
+</div>
 </div></body></html>"""
     result = io.BytesIO()
     pisa_status = pisa.CreatePDF(html, dest=result)
@@ -1339,5 +1366,6 @@ body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 11pt; color: #1e293b;
         return redirect("/admin-sekolah/invoices")
     resp = make_response(result.getvalue())
     resp.headers['Content-Type'] = 'application/pdf'
-    resp.headers['Content-Disposition'] = f'attachment; filename=invoice-{inv.get("invoice_number", "unknown")}.pdf'
+    resp.headers['Content-Disposition'] = f'attachment; filename="INVOICE-{inv.get("invoice_number", "unknown")}.pdf"'
+    resp.headers['Content-Length'] = len(result.getvalue())
     return resp

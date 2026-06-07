@@ -328,11 +328,44 @@ def _seed_exams(supabase, school_id, school_conf):
                 print(f"   ⚠️  Exam: {str(e)[:60]}")
 
 
+def _seed_invoices(supabase, school_id, school_conf):
+    """Create sample invoices for demo purposes."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    plans = supabase.table("subscription_plans").select("*").order("sort_order").limit(3).execute().data or []
+    if not plans:
+        return
+    for i, p in enumerate(plans):
+        inv_num = f"INV-DEMO-{now.year}-{i+1:03d}"
+        start = now - timedelta(days=i * 60)
+        end = now + timedelta(days=p.get("duration_days", 30) - i * 60) if p.get("duration_days", 0) > 0 else None
+        try:
+            supabase.table("invoices").insert({
+                "invoice_number": inv_num,
+                "school_id": school_id,
+                "order_id": f"DEMO-ORDER-{i+1}",
+                "plan_id": p["id"],
+                "amount": p["price"],
+                "status": "paid",
+                "payment_method": "midtrans" if i > 0 else "cash",
+                "period_start": start.isoformat(),
+                "period_end": end.isoformat() if end else None,
+                "paid_at": now.isoformat(),
+                "due_at": (now + timedelta(days=7)).isoformat(),
+                "notes": f"Langganan {p['name']}",
+                "activation_code": f"SG-DEMO-{i+1:04d}",
+            }).execute()
+            print(f"   📄 Invoice: {inv_num} - {p['name']}")
+        except Exception as e:
+            if "already" not in str(e).lower():
+                print(f"   ⚠️  Invoice: {str(e)[:60]}")
+
+
 def _reset_demo_data(supabase):
     print("\n🔄 Resetting demo data (keeping user accounts)...")
     for table in ["submissions", "violation_logs", "exam_access_codes", "analytics_cache",
                    "teacher_assignments", "exams", "payment_transactions",
-                   "school_subscriptions", "ai_grading_logs"]:
+                   "school_subscriptions", "ai_grading_logs", "invoices"]:
         try:
             supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
             print(f"   ✅ Cleared: {table}")
@@ -382,6 +415,10 @@ def cmd_seed(args):
             print("\n📝 Creating sample exams...")
             for sid, school in all_school_ids:
                 _seed_exams(supabase, sid, school)
+
+        print("\n📄 Creating sample invoices...")
+        for sid, school in all_school_ids:
+            _seed_invoices(supabase, sid, school)
 
         print("\n" + "=" * 50)
         print("✅ SEED COMPLETE")
