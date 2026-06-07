@@ -1308,9 +1308,8 @@ def download_invoice_pdf(invoice_id):
 <style>
 @page {{ size: A4; margin: 2cm; }}
 body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b; }}
-.watermark {{ position: absolute; left: 50%; top: 45%; margin-left: -250px; margin-top: -50px;
-  z-index: -1; font-size: 90pt; font-weight: 900; color: #d1fae5;
-  -pdf-rotate: 55; letter-spacing: 18px; white-space: nowrap; }}
+.watermark {{ position: absolute; left: 15%; top: 38%; width: 70%; text-align: center; z-index: -1;
+  font-size: 48pt; font-weight: 900; color: #e2e8f0; letter-spacing: 8px; white-space: nowrap; }}  
 .invoice {{ max-width: 100%; }}
 .header {{ text-align: center; padding-bottom: 10px; margin-bottom: 18px; }}
 .header h1 {{ font-size: 22pt; color: #1e293b; margin: 0 0 2px; }}
@@ -1320,14 +1319,14 @@ body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 10pt; color: #1e293b;
 .info-table .label {{ color: #64748b; font-weight: bold; width: 100px; }}
 .info-table .value {{ font-weight: bold; color: #1e293b; }}
 .detail-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
-.detail-table th {{ background: #f1f5f9; padding: 7px 10px; text-align: left; font-size: 9pt; font-weight: 800; color: #475569; }}
-.detail-table td {{ padding: 7px 10px; font-size: 9pt; }}
-.total-row {{ text-align: right; font-size: 13pt; font-weight: 900; color: #059669; padding: 6px 0; }}
+.detail-table th {{ background: #2563eb; color: white; padding: 7px 10px; text-align: left; font-size: 9pt; font-weight: 800; }}
+.detail-table td {{ padding: 7px 10px; font-size: 9pt; border: 1px solid #e2e8f0; }}
+.total-row {{ text-align: right; font-size: 13pt; font-weight: 900; color: #2563eb; padding: 6px 0; }}
 .footer {{ margin-top: 20px; padding-top: 8px; font-size: 7pt; color: #94a3b8; text-align: center; }}
 .status-badge {{ display: inline-block; padding: 2px 10px; background: #059669; color: white; font-weight: bold; font-size: 8pt; border-radius: 3px; }}
 </style></head><body>
 
-<div class="watermark">LUNAS</div>
+<div class="watermark">ScanGrade</div>
 
 <div class="invoice">
 <div class="header">
