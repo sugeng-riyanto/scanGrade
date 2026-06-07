@@ -1043,25 +1043,6 @@ def teacher_class_new():
         return jsonify({"error": str(e)[:60]}), 400
 
 
-@teacher_bp.route("/classes/<int:class_id>/delete", methods=["POST"])
-@subscription_write_required
-@teacher_or_admin_required
-def teacher_class_delete(class_id):
-    supabase = get_supabase()
-    try:
-        # Clean up related data
-        supabase.table("profiles").update({"class_id": None}).eq("class_id", class_id).execute()
-        supabase.table("teacher_assignments").delete().eq("class_id", class_id).execute()
-        supabase.table("classes").delete().eq("id", class_id).execute()
-        log_activity("delete", "class", str(class_id), user_id=g.user_id)
-        if request.headers.get("HX-Request") or request.is_json:
-            return jsonify({"success": True})
-        flash("Kelas berhasil dihapus", "success")
-        return redirect("/teacher/classes")
-    except Exception as e:
-        return jsonify({"error": str(e)[:60]}), 400
-
-
 @teacher_bp.route("/classes")
 @teacher_or_admin_required
 def teacher_classes():
