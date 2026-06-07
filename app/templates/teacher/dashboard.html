@@ -2,205 +2,241 @@
 {% block title %}Dashboard Guru - ScanGrade{% endblock %}
 {% block page_title %}Dashboard Guru{% endblock %}
 {% block content %}
-<div class="space-y-6"
-      x-data="{
-        lang: localStorage.getItem('sg_lang') || 'id',
-        showAssignForm: false,
-        assigningClassId: null,
-        assigningSubjectId: null,
-        assignLoading: false,
-        showNewSubject: false, newSubjectName: '',
-        showNewClass: false, newClassName: '',
-        createSubject() {
-            if (!this.newSubjectName.trim()) return;
-            fetch('/teacher/subjects/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'name=' + encodeURIComponent(this.newSubjectName.trim())
-            }).then(r => r.json()).then(d => { if (d.success) location.reload(); else alert(d.error || 'Gagal'); });
-        },
-        createClass() {
-            if (!this.newClassName.trim()) return;
-            fetch('/teacher/classes/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'name=' + encodeURIComponent(this.newClassName.trim())
-            }).then(r => r.json()).then(d => { if (d.success) location.reload(); else alert(d.error || 'Gagal'); });
-        }
-      }">
-
-    <!-- Welcome -->
-    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
-        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
-        <div class="absolute -bottom-6 -left-6 w-32 h-32 bg-white/5 rounded-full"></div>
+<div class="space-y-6" x-data="{
+    lang: localStorage.getItem('sg_lang') || 'id',
+    showAssignForm: false, assigningClassId: null, assigningSubjectId: null, assignLoading: false
+}">
+    <!-- Welcome Banner -->
+    <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-primary-700 p-6 lg:p-8">
+        <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2"></div>
         <div class="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-                <h2 class="text-2xl font-extrabold">
-                    <span x-show="lang==='en'">Good {{ greeting_en() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
-                    <span x-show="lang==='id'">Selamat {{ greeting() }}{% if user_name %}, {{ user_name }}{% endif %}</span>
+                <h2 class="text-2xl lg:text-3xl font-extrabold text-white">
+                    Selamat {{ greeting() }}{% if user_name %}, <span class="text-primary-200">{{ user_name }}</span>{% endif %}
                 </h2>
-                <p class="text-primary-200 font-medium mt-1" x-text="lang==='en'?'Here is your teaching overview':'Ringkasan aktivitas mengajar Anda'"></p>
+                <p class="text-primary-200/80 font-medium mt-1">Ringkasan aktivitas mengajar Anda</p>
             </div>
             <a href="/teacher/exams/new"
-               class="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 text-white px-5 py-2.5 rounded-xl font-bold text-sm backdrop-blur-sm border border-white/10 transition shrink-0">
-                <i class="fas fa-plus"></i><span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span>
+               class="inline-flex items-center gap-2 bg-white/15 backdrop-blur-sm border border-white/20 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-white/25 transition shadow-lg shrink-0">
+                <i class="fas fa-plus"></i>Buat Ujian
             </a>
         </div>
     </div>
 
     <!-- Stats -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="card stat-card animate-slide-up">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-primary-50 text-primary-600"><i class="fas fa-file-alt"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20">
+                    <i class="fas fa-file-alt text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Total Exams':'Total Ujian'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ exams|length }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Total Ujian</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ exams|length }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card animate-slide-up" style="animation-delay:50ms">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-check-circle"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                    <i class="fas fa-check-circle text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Active':'Aktif'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ exams|selectattr('status', 'equalto', 'active')|list|length }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Aktif</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ exams|selectattr('status', 'equalto', 'active')|list|length }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card animate-slide-up" style="animation-delay:100ms">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-users"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+                    <i class="fas fa-users text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Students':'Siswa'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ total_students }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Siswa</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ total_students }}</p>
                 </div>
             </div>
         </div>
-        <div class="card stat-card animate-slide-up" style="animation-delay:150ms">
-            <div class="flex items-center gap-3">
-                <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-chart-line"></i></div>
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                    <i class="fas fa-chart-line text-white text-lg"></i>
+                </div>
                 <div>
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider" x-text="lang==='en'?'Avg Score':'Rata-rata'"></p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ avg_score }}</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Rata-rata</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ avg_score }}</p>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Main Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Assigned Classes & Subjects -->
-        <div class="lg:col-span-1 card">
-            <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
-                <h3 class="font-bold text-surface-800">
-                    <i class="fas fa-school text-primary-500 mr-2"></i>
-                    <span x-text="lang==='en'?"My Classes":"Kelas & Mapel""></span>
-                </h3>
-                <button @click="showAssignForm = !showAssignForm" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
-                    <i class="fas fa-plus mr-1"></i><span x-text="lang==='en'?'Assign':'Tambah'"></span>
-                </button>
+        <!-- Left: Chart + Info -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Score Distribution Chart -->
+            <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+                <h3 class="font-extrabold text-surface-800 mb-4 flex items-center gap-2"><i class="fas fa-chart-bar text-primary-500"></i>Distribusi Nilai</h3>
+                {% if all_scores %}
+                <canvas id="scoreChart" height="180"></canvas>
+                {% else %}
+                <div class="text-center py-10 text-surface-400">
+                    <i class="fas fa-chart-simple text-3xl mb-2"></i>
+                    <p class="font-medium">Belum ada data nilai</p>
+                </div>
+                {% endif %}
             </div>
-            <div class="p-4 space-y-3">
-                {% for a in assignments %}
-                <div class="flex items-start gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition group">
-                    <div class="w-10 h-10 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center shrink-0">
-                        <i class="fas fa-book-open text-sm"></i>
+
+            <!-- Recent Exams -->
+            <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-hidden">
+                <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+                    <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-file-alt text-primary-500"></i>Ujian Terbaru</h3>
+                    <a href="/teacher/exams" class="text-xs font-bold text-primary-600 hover:text-primary-700">Lihat semua <i class="fas fa-arrow-right ml-1"></i></a>
+                </div>
+                <div class="divide-y divide-surface-50">
+                    {% for e in exams[:5] %}
+                    <a href="/teacher/exams/{{ e.id }}" class="flex items-center gap-4 px-5 py-3.5 hover:bg-surface-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center text-primary-600 group-hover:scale-110 transition-transform shrink-0">
+                            <i class="fas {% if e.is_published %}fa-globe{% else %}fa-file{% endif %}"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-surface-700 text-sm truncate">{{ e.title }}</p>
+                            <p class="text-xs text-surface-400">{{ e.subject or '-' }}</p>
+                        </div>
+                        <div class="text-right shrink-0">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold
+                                {% if e.status == 'active' and e.is_published %}bg-emerald-50 text-emerald-700
+                                {% elif e.status == 'active' %}bg-amber-50 text-amber-700
+                                {% else %}bg-surface-100 text-surface-500{% endif %}">
+                                <span class="w-1.5 h-1.5 rounded-full {% if e.status == 'active' and e.is_published %}bg-emerald-500{% elif e.status == 'active' %}bg-amber-500{% else %}bg-surface-400{% endif %}"></span>
+                                {{ e.status }}
+                            </span>
+                        </div>
+                    </a>
+                    {% else %}
+                    <div class="text-center py-10 text-surface-400">
+                        <i class="fas fa-inbox text-3xl mb-2"></i>
+                        <p class="font-medium">Belum ada ujian. <a href="/teacher/exams/new" class="text-primary-600 font-bold hover:underline">Buat ujian pertama</a></p>
                     </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="font-bold text-sm text-surface-800">{{ a.subjects.name if a.subjects else '-' }}</p>
-                        <p class="text-xs text-surface-500 font-medium">{{ a.classes.name if a.classes else '-' }} {% if a.classes and a.classes.grade_level %}&middot; Kelas {{ a.classes.grade_level }}{% endif %}</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Assignments + Quick Actions -->
+        <div class="space-y-6">
+            <!-- Assigned Classes -->
+            <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-school text-primary-500"></i>Kelas & Mapel Saya</h3>
+                    <button @click="showAssignForm = !showAssignForm" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
+                        <i class="fas fa-plus mr-0.5"></i>Tambah
+                    </button>
+                </div>
+                {% if assignments %}
+                <div class="space-y-2">
+                    {% for a in assignments %}
+                    <div class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition group border border-transparent hover:border-surface-200">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-sm shrink-0 shadow-sm">
+                            {{ a.subjects.name[:2] if a.subjects else '?' }}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-sm text-surface-800">{{ a.subjects.name if a.subjects else '-' }}</p>
+                            <p class="text-xs text-surface-500 font-medium">{{ a.classes.name if a.classes else '-' }}</p>
+                        </div>
+                        <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus?"
+                                class="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-red-500 transition p-1"><i class="fas fa-times text-xs"></i></button>
                     </div>
-                    <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus assignment ini?"
-                            class="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-red-500 transition p-1"><i class="fas fa-times text-xs"></i></button>
+                    {% endfor %}
                 </div>
                 {% else %}
-                <div class="text-center py-6">
-                    <div class="w-12 h-12 rounded-full bg-surface-100 flex items-center justify-center mx-auto mb-2">
-                        <i class="fas fa-school text-surface-400"></i>
-                    </div>
-                    <p class="text-sm font-semibold text-surface-500" x-text="lang==='en'?'No class/subject assigned':'Belum ada kelas & mapel'"></p>
-                    <p class="text-xs text-surface-400 mt-1" x-text="lang==='en'?'Click + to assign':'Klik + untuk menambah'"></p>
+                <div class="text-center py-8">
+                    <div class="w-14 h-14 mx-auto rounded-full bg-surface-100 flex items-center justify-center mb-3"><i class="fas fa-school text-surface-300 text-lg"></i></div>
+                    <p class="text-sm font-bold text-surface-500">Belum ada kelas & mapel</p>
+                    <p class="text-xs text-surface-400 mt-1">Klik "Tambah" untuk memilih</p>
                 </div>
-                {% endfor %}
+                {% endif %}
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+                <h3 class="font-extrabold text-surface-800 mb-4 flex items-center gap-2"><i class="fas fa-bolt text-amber-500"></i>Aksi Cepat</h3>
+                <div class="space-y-2">
+                    <a href="/teacher/exams/new" class="flex items-center gap-3 p-3 rounded-xl hover:bg-primary-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center text-primary-600 group-hover:scale-110 transition-transform"><i class="fas fa-plus-circle"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700">Buat Ujian Baru</p><p class="text-xs text-surface-400">MCQ, Esai Teks, atau Esai Canvas</p></div>
+                    </a>
+                    <a href="/teacher/grading" class="flex items-center gap-3 p-3 rounded-xl hover:bg-emerald-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform"><i class="fas fa-pen-alt"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700">Koreksi Esai</p><p class="text-xs text-surface-400">Gunakan AI atau tools canvas</p></div>
+                    </a>
+                    <a href="/teacher/ai-settings" class="flex items-center gap-3 p-3 rounded-xl hover:bg-purple-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 group-hover:scale-110 transition-transform"><i class="fas fa-robot"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700">Pengaturan AI</p><p class="text-xs text-surface-400">API Key & prompt grading</p></div>
+                    </a>
+                    <a href="/teacher/results" class="flex items-center gap-3 p-3 rounded-xl hover:bg-amber-50 transition group">
+                        <div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 group-hover:scale-110 transition-transform"><i class="fas fa-chart-bar"></i></div>
+                        <div><p class="text-sm font-bold text-surface-700">Hasil & Analitik</p><p class="text-xs text-surface-400">Export XLSX/PDF</p></div>
+                    </a>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- ===== ASSIGN NEW CLASS/SUBJECT FORM ===== -->
-    <div x-show="showAssignForm" x-cloak x-transition:enter="animate-slide-up" class="card p-6 border border-primary-200 bg-primary-50/50">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="font-bold text-surface-800"><i class="fas fa-plus-circle text-primary-500 mr-2"></i><span x-text="lang==='en'?'Assign New Class/Subject':'Tambah Kelas & Mapel'"></span></h3>
-            <button @click="showAssignForm=false; assigningClassId=null; assigningSubjectId=null" class="text-surface-400 hover:text-surface-600 p-1 rounded-lg hover:bg-surface-200/50 transition"><i class="fas fa-times"></i></button>
-        </div>
-
-        <form hx-post="/teacher/assignments" hx-target="this" hx-swap="outerHTML"
-              @submit="assignLoading = true"
-              @htmx:after-request="if(event.detail.successful) { showAssignForm=false; $dispatch('assignment-added'); } assignLoading = false"
-              class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-                <label class="block text-sm font-bold text-surface-700 mb-1.5">Mata Pelajaran <span class="text-red-500">*</span></label>
-                <div class="flex gap-1">
-                    <select name="subject_id" required x-model="assigningSubjectId"
-                            class="flex-1 px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-surface-700 font-medium bg-white transition">
+    <!-- Assign Form Modal -->
+    <div x-show="showAssignForm" x-cloak x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg" @click.outside="showAssignForm=false">
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="font-extrabold text-surface-800"><i class="fas fa-plus-circle text-primary-500 mr-2"></i>Tambah Kelas & Mapel</h3>
+                <button @click="showAssignForm=false" class="text-surface-400 hover:text-surface-600 p-1 rounded-lg hover:bg-surface-100 transition"><i class="fas fa-times"></i></button>
+            </div>
+            <form hx-post="/teacher/assignments" hx-target="this" hx-swap="outerHTML"
+                  @submit="assignLoading = true" @htmx:after-request="if(event.detail.successful){showAssignForm=false;$dispatch('assignment-added')}assignLoading=false"
+                  class="space-y-4">
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Mata Pelajaran</label>
+                    <select name="subject_id" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white">
                         <option value="">- Pilih Mapel -</option>
                         {% for s in subjects %}
-                        <option value="{{ s.id }}">{{ s.name }}{% if s.code %} ({{ s.code }}){% endif %}</option>
+                        <option value="{{ s.id }}">{{ s.name }}</option>
                         {% endfor %}
                     </select>
-                    <button type="button" @click="showNewSubject = true" class="px-3 py-3 border border-surface-200 rounded-xl text-surface-500 hover:text-primary-600 hover:border-primary-200 transition text-sm"
-                            title="Tambah Mapel Baru"><i class="fas fa-plus"></i></button>
                 </div>
-                <div x-show="showNewSubject" x-cloak class="mt-2 flex gap-1">
-                    <input type="text" x-model="newSubjectName" class="flex-1 px-3 py-2 border border-surface-200 rounded-xl text-sm" placeholder="Nama mapel baru...">
-                    <button type="button" @click="createSubject()" class="px-3 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">Simpan</button>
-                    <button type="button" @click="showNewSubject = false" class="px-3 py-2 border border-surface-200 rounded-xl text-xs font-bold text-surface-500 hover:bg-surface-50 transition">Batal</button>
-                </div>
-            </div>
-            <div>
-                <label class="block text-sm font-bold text-surface-700 mb-1.5">Kelas <span class="text-red-500">*</span></label>
-                <div class="flex gap-1">
-                    <select name="class_id" required x-model="assigningClassId"
-                            class="flex-1 px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-surface-700 font-medium bg-white transition">
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Kelas</label>
+                    <select name="class_id" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white">
                         <option value="">- Pilih Kelas -</option>
                         {% for c in classes %}
-                        <option value="{{ c.id }}">{{ c.name }} {% if c.grade_level %}(Kelas {{ c.grade_level }}){% endif %}</option>
+                        <option value="{{ c.id }}">{{ c.name }}</option>
                         {% endfor %}
                     </select>
-                    <button type="button" @click="showNewClass = true" class="px-3 py-3 border border-surface-200 rounded-xl text-surface-500 hover:text-primary-600 hover:border-primary-200 transition text-sm"
-                            title="Tambah Kelas Baru"><i class="fas fa-plus"></i></button>
                 </div>
-                <div x-show="showNewClass" x-cloak class="mt-2 flex gap-1">
-                    <input type="text" x-model="newClassName" class="flex-1 px-3 py-2 border border-surface-200 rounded-xl text-sm" placeholder="Nama kelas baru...">
-                    <button type="button" @click="createClass()" class="px-3 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">Simpan</button>
-                    <button type="button" @click="showNewClass = false" class="px-3 py-2 border border-surface-200 rounded-xl text-xs font-bold text-surface-500 hover:bg-surface-50 transition">Batal</button>
+                <div class="flex gap-3 pt-2">
+                    <button type="submit" :disabled="assignLoading"
+                            class="flex-1 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary-600/20 transition flex items-center justify-center gap-2">
+                        <i class="fas fa-spinner fa-spin" x-show="assignLoading" x-cloak></i>
+                        <span x-text="assignLoading ? 'Menyimpan...' : 'Tambah'"></span>
+                    </button>
+                    <button type="button" @click="showAssignForm=false" class="px-6 py-3 border border-surface-200 rounded-xl font-bold text-surface-600 hover:bg-surface-50 transition text-sm">Batal</button>
                 </div>
-            </div>
-            <div class="flex items-end gap-2">
-                <button type="submit" :disabled="assignLoading"
-                        class="flex-1 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary-600/20 transition">
-                    <i class="fas fa-check mr-1"></i><span x-text="lang==='en'?'Assign':'Tambah'"></span>
-                </button>
-                <button type="button" @click="showAssignForm=false" class="px-4 py-3 border border-surface-200 rounded-xl font-bold text-surface-600 hover:bg-surface-50 transition text-sm">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-        </form>
+            </form>
+        </div>
     </div>
-
-    <!-- HTMX target for updates -->
-    <div id="assignments-update"></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+{% if all_scores %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const ctx = document.getElementById('scoreChart');
+    var ctx = document.getElementById('scoreChart');
     if (!ctx) return;
-    const scores = {{ all_scores|tojson|safe if all_scores else '[]' }};
-    const bins = [0,0,0,0,0];
-    scores.forEach(s => { if(s<20)bins[0]++; else if(s<40)bins[1]++; else if(s<60)bins[2]++; else if(s<80)bins[3]++; else bins[4]++; });
+    var scores = {{ all_scores | tojson | safe }};
+    var bins = [0,0,0,0,0];
+    scores.forEach(function(s) { if(s<20)bins[0]++; else if(s<40)bins[1]++; else if(s<60)bins[2]++; else if(s<80)bins[3]++; else bins[4]++; });
     new Chart(ctx, {
         type: 'bar',
         data: {
@@ -209,9 +245,10 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         options: {
             responsive: true, plugins: { legend: { display: false } },
-            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { grid: { display: false } } }
+            scales: { y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } }, x: { grid: { display: false } } }
         }
     });
 });
 </script>
+{% endif %}
 {% endblock %}
