@@ -1531,11 +1531,17 @@ function examApp(duration, totalQ) {
          },
         markAnswered(i, val, overwrite) {
             this.answered[i] = true;
-            // For MCQ: don't overwrite letter answer (A/B/C/D) with boolean true from canvas drawing
             if (this.questions[i].type === 'mcq' && val === true && typeof this.questions[i].answer === 'string') {
-                // Keep existing MCQ letter answer
             } else {
                 this.questions[i].answer = val;
+            }
+            this.markDirty();
+        },
+        onAnswerInput(i) {
+            if (this.answersText[i] && this.answersText[i].trim()) {
+                this.answered[i] = true;
+            } else {
+                delete this.answered[i];
             }
             this.markDirty();
         },
@@ -1819,6 +1825,11 @@ function examApp(duration, totalQ) {
                     };
                     if (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') {
                         if (qData && qData.pages) restorePages(qData.pages);
+                        if (q.type === 'essay_text' && qData && qData.text) {
+                            if (!this.answersText) this.answersText = {};
+                            this.answersText[i] = qData.text;
+                            this.answered[i] = true;
+                        }
                     } else if (q.type === 'mcq' && qData) {
                         if (typeof qData === 'object' && qData.answer) {
                             q.answer = qData.answer;
