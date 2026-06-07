@@ -1,13 +1,13 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 28 June 2026
+**Last Updated:** 30 June 2026
 
 ---
 
 ## Overall Progress
 
 ```
-██████████████████████████  98%
+██████████████████████████  99%
 ```
 
 | Area | Progress | Status |
@@ -27,7 +27,7 @@
 | Export | 95% | ✅ Stable |
 | Anti-Cheat | 95% | ✅ Stable |
 | Subscription & Payment | 95% | ✅ Working |
-| AI Essay Grading (NEW) | 85% | ✅ Service + UI |
+| AI Essay Grading | 90% | ✅ Service + UI + 11 Prompts |
 | Multi-School | 85% | ⚠️ Needs routes |
 | OMR Scanning | 70% | ⚠️ Camera works |
 
@@ -44,6 +44,16 @@
 ---
 
 ## Changelog
+
+### 30 June 2026 — Final Audit & Demo Data Refresh
+- **Database schema verified**: All columns exist (`active_prompt_id`, `prompts`, `base_url`, `model_name`)
+- **Auth redirect fixed**: admin_sekolah → `/admin-sekolah/dashboard` (not `/admin/dashboard`)
+- **GET exemption**: `@subscription_write_required` now allows GET (read-only mode)
+- **Student class filter**: Exams filtered by student's class_id
+- **Demo data updated**: 3 schools (SMP, SMA, SMK) with different NPSN, teacher assignments, subscriptions
+- **Demo page**: Complete user list per school with login buttons
+- **Tutorial pages**: Updated with AI grading, essay text, 3 question types
+- **Anti-cheat verified**: Graduated penalty, auto-submit, rate limiting — all intact
 
 ### 28 June 2026 — Custom Provider & Subject Prompts
 - **Custom AI provider**: Any OpenAI-compatible API with custom base URL and model name
