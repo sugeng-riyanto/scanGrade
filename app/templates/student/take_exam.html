@@ -630,6 +630,19 @@
                             </div>
                         </div>
                     </template>
+                    <template x-if="q.type === 'essay_text'">
+                        <div class="mt-2">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                                    <i class="fas fa-align-left mr-0.5"></i>Jawaban Teks
+                                </span>
+                                <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + ' karakter)'"></span>
+                            </div>
+                            <textarea x-model="answersText[i]" @input="onAnswerInput(i)"
+                                class="w-full min-h-[200px] p-4 border-2 border-slate-200 rounded-xl text-sm leading-relaxed focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 resize-y"
+                                placeholder="Tulis jawaban esai Anda di sini..."></textarea>
+                        </div>
+                    </template>
                     <template x-if="q.type === 'essay_canvas'">
                         <div class="">
                             <div class="flex items-center gap-2 mb-2 flex-wrap">
@@ -669,6 +682,7 @@ function examApp(duration, totalQ) {
         currentQ: 0,
         totalQ: totalQ,
         answered: {},
+        answersText: {},
         _qOrder: null,
         _shuffledOpts: {},
         _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
@@ -1683,7 +1697,16 @@ function examApp(duration, totalQ) {
             const data = {};
             this.questions.forEach((q, i) => {
                 const oi = q.origIdx !== undefined ? q.origIdx : i;
-                if (q.type === 'essay_text' || q.type === 'essay_canvas' || q.type === 'essay') {
+                if (q.type === 'essay_text') {
+                    const textAnswer = (this.answersText[i] || '').trim();
+                    const pagesData = {};
+                    const totalP = this.totalPages || 1;
+                    for (let p = 0; p < totalP; p++) {
+                        const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
+                        if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
+                    }
+                    data[oi] = { type: 'essay_text', text: textAnswer, pages: pagesData };
+                } else if (q.type === 'essay_canvas' || q.type === 'essay') {
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
                     for (let p = 0; p < totalP; p++) {

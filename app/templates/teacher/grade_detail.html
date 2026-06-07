@@ -344,6 +344,24 @@
 
                         <div class="flex items-center gap-3 px-4 py-3 bg-stone-50 border-t no-print">
                             {% set qweight = (exam.question_weights or {}).get(i|string, 0) %}
+                            {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
+                            {% if qtype == 'essay_text' %}
+                            {% set ans_raw = submission.answers.get(i|string, {}) %}
+                            {% set student_text = ans_raw['text'] if ans_raw is mapping and 'text' in ans_raw else '' %}
+                            {% if student_text %}
+                            <div class="w-full flex items-start gap-3">
+                                <div class="flex-1 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <span class="text-[10px] font-extrabold text-blue-700"><i class="fas fa-align-left mr-1"></i>Jawaban Siswa:</span>
+                                        <button type="button" class="px-2 py-1 text-[10px] font-bold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition" onclick="aiSuggest({{ i }})">
+                                            <i class="fas fa-robot mr-0.5"></i>Koreksi AI
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">{{ student_text[:300] }}{% if student_text|length > 300 %}...{% endif %}</p>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% endif %}
                             <label class="text-xs font-extrabold text-stone-700">Skor #{{ i+1 }} <span class="text-orange-500">({{ qweight }} poin)</span>:</label>
                             <input type="number" x-model="scoreVal" min="0" max="100"
                                    class="w-20 px-3 py-1.5 border-2 border-stone-200 rounded-xl text-center font-extrabold text-lg focus:border-orange-500"
@@ -1076,6 +1094,34 @@ function calcFinal() {
     document.getElementById('final-score-hidden').value = final;
     document.getElementById('final-display').textContent = final;
     return final;
+}
+
+function aiSuggest(qIdx) {
+    const qTypes = {{ (exam.question_types or {}) | tojson | safe }};
+    const studentAns = {{ submission.answers | tojson | safe }};
+    const questionText = ""; // question text not stored in DB currently
+    const ans = studentAns[qIdx];
+    if (!ans || !ans.text) { alert('Tidak ada jawaban teks siswa untuk dikoreksi AI'); return; }
+    const maxScore = parseFloat({{ (exam.question_weights or {}) | tojson | safe }}[qIdx] || 0);
+    const btn = event.target;
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-0.5"></i>Mengoreksi...';
+    fetch('/api/grade/ai-suggest', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question: questionText, answer: ans.text, max_score: maxScore, rubric: ''})
+    })
+    .then(r => r.json())
+    .then(d => {
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>Koreksi AI';
+        if (d.error) { alert(d.error); return; }
+        const inst = QUESTION_INSTANCES[qIdx];
+        if (inst) {
+            if (d.score !== undefined) { inst.scoreVal = d.score; }
+            if (d.feedback) { inst.commentVal = d.feedback; }
+            calcFinal();
+        }
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>Koreksi AI'; alert('Gagal terhubung ke server AI'); });
 }
 
 setInterval(() => { calcFinal(); }, 2000);
