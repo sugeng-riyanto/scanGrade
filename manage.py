@@ -164,15 +164,18 @@ def _create_user(supabase, data, school_id=None, class_id=None):
 
     profile = {"id": uid, "full_name": data["full_name"], "phone": data.get("phone", ""),
                "role": data["role"], "status": "active"}
-    if school_id: profile["school_id"] = school_id
-    if class_id: profile["class_id"] = class_id
+    # Support both parameter and data dict for school_id (backward compat)
+    sid = school_id or data.get("school_id")
+    cid = class_id or data.get("class_id")
+    if sid: profile["school_id"] = sid
+    if cid: profile["class_id"] = cid
     supabase.table("profiles").upsert(profile).execute()
 
-    if data["role"] == "guru" and school_id:
-        try: supabase.table("teachers").upsert({"id": uid, "school_id": school_id}).execute()
+    if data["role"] == "guru" and sid:
+        try: supabase.table("teachers").upsert({"id": uid, "school_id": sid}).execute()
         except: pass
-    elif data["role"] == "murid" and school_id:
-        try: supabase.table("students").upsert({"id": uid, "school_id": school_id, "nisn": data.get("nisn","")}).execute()
+    elif data["role"] == "murid" and sid:
+        try: supabase.table("students").upsert({"id": uid, "school_id": sid, "nisn": data.get("nisn","")}).execute()
         except: pass
     return uid
 
