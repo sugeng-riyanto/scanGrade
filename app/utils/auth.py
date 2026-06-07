@@ -165,7 +165,7 @@ def teacher_or_admin_sekolah_required(f):
 def _unauthorized():
     if _wants_json():
         return jsonify({"error": "Unauthorized"}), 401
-    return redirect("/auth/login")
+    return redirect("/")
 
 
 def _extract_token():

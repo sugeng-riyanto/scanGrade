@@ -256,7 +256,7 @@ def _register_error_handlers(app):
     def unauthorized(e):
         if "application/json" in request.headers.get("Accept", ""):
             return jsonify({"error": "Unauthorized"}), 401
-        return redirect("/auth/login")
+        return redirect("/")
 
     @app.errorhandler(403)
     def forbidden(e):
@@ -266,7 +266,7 @@ def _register_error_handlers(app):
     def not_found(e):
         if "application/json" in request.headers.get("Accept", ""):
             return jsonify({"error": "Not found"}), 404
-        return redirect("/auth/login")
+        return redirect("/")
 
     @app.errorhandler(500)
     def server_error(e):

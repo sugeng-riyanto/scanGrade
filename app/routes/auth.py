@@ -393,7 +393,7 @@ def logout():
         pass
     if uid:
         log_activity("logout", "user", uid)
-    resp = make_response(redirect("/auth/login"))
+    resp = make_response(redirect("/auth/login-user" if g.get("user_role") in ("guru", "murid") else "/auth/login"))
     resp.delete_cookie("access_token", path="/")
     resp.delete_cookie("refresh_token", path="/")
     return resp
