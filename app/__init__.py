@@ -37,6 +37,27 @@ def create_app(env=None):
     app.config.from_object(cfg)
     cfg.validate()
 
+    # Structured logging
+    from app.utils.logger import setup_logging
+    setup_logging(app)
+
+    # Sentry initialization
+    if cfg.SENTRY_DSN:
+        try:
+            import sentry_sdk
+            from sentry_sdk.integrations.flask import FlaskIntegration
+            sentry_sdk.init(
+                dsn=cfg.SENTRY_DSN,
+                environment=cfg.SENTRY_ENVIRONMENT,
+                integrations=[FlaskIntegration()],
+                traces_sample_rate=0.1,
+            )
+            sentry_sdk.set_tag("app", "scangrade")
+            sentry_sdk.set_tag("version", cfg.APP_VERSION)
+            app.logger.info("Sentry initialized for %s", cfg.SENTRY_ENVIRONMENT)
+        except Exception as e:
+            app.logger.warning("Sentry init failed: %s", e)
+
     CORS(
         app,
         origins=[
@@ -265,29 +286,8 @@ def _register_blueprints(app):
 
 
 def _register_error_handlers(app):
-    @app.errorhandler(401)
-    def unauthorized(e):
-        if "application/json" in request.headers.get("Accept", ""):
-            return jsonify({"error": "Unauthorized"}), 401
-        return redirect("/")
-
-    @app.errorhandler(403)
-    def forbidden(e):
-        return jsonify({"error": "Forbidden"}), 403
-
-    @app.errorhandler(404)
-    def not_found(e):
-        if "application/json" in request.headers.get("Accept", ""):
-            return jsonify({"error": "Not found"}), 404
-        return redirect("/")
-
-    @app.errorhandler(500)
-    def server_error(e):
-        app.logger.error("500 error: %s", str(e), exc_info=True)
-        if app.debug:
-            import traceback
-            return jsonify({"error": "Internal server error", "detail": str(e), "traceback": traceback.format_exc()}), 500
-        return jsonify({"error": "Internal server error"}), 500
+    from app.handlers.error_handlers import register_error_handlers
+    register_error_handlers(app)
 
 
 def _register_rate_limiter(app):
@@ -319,17 +319,10 @@ def _register_request_logging(app):
         except (ValueError, TypeError):
             g.tz_offset = DEFAULT_TZ_OFFSET
 
-    if app.debug:
-        @app.after_request
-        def log_request(response):
-            if hasattr(g, "start"):
-                duration = time.time() - g.start
-                app.logger.info(
-                    "%s %s %s %.3fs user=%s",
-                    request.method,
-                    request.path,
-                    response.status_code,
-                    duration,
-                    g.get("user_id"),
-                )
-            return response
+    @app.after_request
+    def log_request(response):
+        if hasattr(g, "start"):
+            duration = time.time() - g.start
+            extra = {"user_id": g.get("user_id"), "duration": f"{duration:.3f}s"}
+            app.logger.info("%s %s %s", request.method, request.path, response.status_code, extra=extra)
+        return response

@@ -1,8 +1,10 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from app.utils.auth import login_required, teacher_required, get_supabase
 from app.services.pdf_service import upload_pdf
+from app.errors import FileTooLargeError, InvalidPDFError, NotFoundError
 
 exam_bp = Blueprint("exam", __name__)
+MAX_PDF_SIZE = 50 * 1024 * 1024
 
 
 @exam_bp.route("/", methods=["GET"])
@@ -17,21 +19,34 @@ def list_exams():
 @teacher_required
 def upload_exam_pdf(exam_id):
     if "pdf" not in request.files:
-        return jsonify({"error": "No PDF file"}), 400
+        return jsonify({"error": "File PDF diperlukan"}), 400
     file = request.files["pdf"]
     if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
+        raise ValidationError("pdf", "Pilih file terlebih dahulu")
+
+    # Check file size
+    file.seek(0, 2)
+    file_size = file.tell()
+    file.seek(0)
+    if file_size > MAX_PDF_SIZE:
+        raise FileTooLargeError(file_size, MAX_PDF_SIZE)
+
+    if not file.filename.lower().endswith(".pdf"):
+        raise InvalidPDFError("File harus berformat .pdf")
 
     supabase = get_supabase()
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
     if not exam.data:
-        return jsonify({"error": "Exam not found"}), 404
+        raise NotFoundError("Ujian", exam_id)
 
     result = upload_pdf(file, exam_id)
     supabase.table("exams").update({
         "pdf_url": result["pdf_path"],
         "pdf_page_urls": result["page_urls"],
     }).eq("id", exam_id).execute()
+
+    current_app.logger.info("PDF uploaded for exam %s: %s pages", exam_id, len(result.get("page_urls", [])),
+                            extra={"exam_id": exam_id, "file_size": file_size})
     return jsonify(result)
 
 
@@ -49,6 +64,8 @@ def create_exam():
 def get_exam(exam_id):
     supabase = get_supabase()
     res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
+    if not res.data:
+        raise NotFoundError("Ujian", exam_id)
     return jsonify(res.data)
 
 

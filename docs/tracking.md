@@ -207,6 +207,17 @@
 - **Docs**: Created `docs/SECURITY_AUDIT.md` (per-table audit with risk assessment), `docs/SECURITY_RLS_MATRIX.md` (policy overview matrix), `docs/SECURITY_CHECKLIST.md` (pre-merge checklist)
 - **Tests**: Created `tests/test_rls_security.py` with unit tests for decorator (direct match, mismatch, chained) + API-level integration tests (mocked Supabase)
 
+### 8 June 2026 — Error Handling & Sentry Monitoring (Stage 2)
+- **Custom exceptions**: Created `app/errors.py` — 10 exception classes (`ScanGradeException`, `FileTooLargeError`, `InvalidPDFError`, `AIProcessingError`, `GradingError`, `NotFoundError`, `ForbiddenError`, `ValidationError`, `PaymentError`, `SubscriptionError`) with error_code, user_message (Bahasa Indonesia), details dict
+- **Sentry integration**: Initialized `sentry_sdk` in `create_app()` with `FlaskIntegration`, 10% trace sampling; configurable via `SENTRY_DSN` + `SENTRY_ENVIRONMENT` env vars; auto-tags `app` + `version`
+- **Structured logging**: Created `app/utils/logger.py` with JSON formatter (timestamp, level, message, logger, extra fields); all request logging now structured (not debug-only)
+- **Error handlers**: Created `app/handlers/error_handlers.py` — centralized handlers for `ScanGradeException`, 400/401/403/404/413/429/500; all JSON responses with `success`, `error`, `message`, `timestamp`; 500 errors return user-friendly "Tim kami sedang menanganinya" in production
+- **Response helpers**: Created `app/utils/responses.py` — `success_response()` and `error_response()` with consistent format
+- **Sentry context**: Created `app/utils/sentry_context.py` — helpers for setting exam/student/school context
+- **Route updates**: `api.py` (ai-test-key, ai-suggest raise typed exceptions); `exam.py` (upload-pdf validates file type/size, raises `FileTooLargeError`/`InvalidPDFError`)
+- **Config**: Added `SENTRY_ENVIRONMENT`, `APP_VERSION` environment variables
+- **Tests**: Created `tests/test_error_handling.py` — unit tests for all exception classes, response helpers, error handlers (404, 500, ScanGradeException)
+
 ### 10 June 2026 — Feature Complete
 - Auth: NISN/NIP login, custom email domain, auto-generate email
 - CRUD: Full search/sort, bulk reset/delete, email display from auth

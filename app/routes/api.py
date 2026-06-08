@@ -4,6 +4,8 @@ import threading
 from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file
 from app.utils.auth import login_required, get_supabase
 from app.services.anti_cheat_service import validate_violation_log
+from app.utils.logger import get_logger
+from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
 
 api_bp = Blueprint("api", __name__)
 
@@ -485,9 +487,11 @@ def ai_test_key():
     data = request.get_json()
     key_id = (data or {}).get("key_id", "")
     if not key_id:
-        return jsonify({"success": False, "message": "key_id required"}), 400
+        raise ValidationError("key_id", "Parameter key_id diperlukan")
     from app.services.ai_service import test_api_key
     result = test_api_key(g.user_id, key_id)
+    if result.get("error"):
+        app.logger.warning("AI key test failed: %s", result["error"], extra={"user_id": g.user_id, "key_id": key_id})
     return jsonify(result)
 
 
@@ -496,13 +500,15 @@ def ai_test_key():
 def ai_suggest():
     data = request.get_json()
     if not data:
-        return jsonify({"error": "No data"}), 400
+        raise ValidationError("request body", "Data tidak boleh kosong")
     question = data.get("question", "")
     answer = data.get("answer", "")
     max_score = data.get("max_score", 100)
     rubric = data.get("rubric", "")
     if not answer:
-        return jsonify({"error": "Jawaban siswa kosong"}), 400
+        raise ValidationError("answer", "Jawaban siswa kosong")
     from app.services.ai_service import suggest_grade
     result = suggest_grade(g.user_id, question, answer, max_score, rubric)
+    if result.get("error"):
+        raise AIProcessingError(result.get("provider", "unknown"), result["error"])
     return jsonify(result)

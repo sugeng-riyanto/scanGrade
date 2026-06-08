@@ -11,6 +11,8 @@ class Config:
     SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
     NGROK_DOMAIN = os.getenv("NGROK_DOMAIN", "")
     SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+    SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "development")
+    APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
     MIDTRANS_SERVER_KEY = os.getenv("MIDTRANS_SERVER_KEY", "")
     FONNTE_API_KEY = os.getenv("FONNTE_API_KEY", "")
     REDIS_URL = os.getenv("REDIS_URL", "")
@@ -37,6 +39,7 @@ class ProductionConfig(Config):
     DEBUG = False
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = "Lax"
+    SENTRY_ENVIRONMENT = "production"
 
 
 config_map = {
