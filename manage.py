@@ -303,28 +303,28 @@ def _seed_exams(supabase, school_id, school_conf):
         class_ids = [c["id"] for c in cls]
     except: pass
 
-    for i, exam_spec in enumerate(SAMPLE_EXAMS):
-        teacher_id = teachers[i % len(teachers)]
-        subject = exam_spec["subject"]
-        if subject not in [s["name"] for s in school_conf.get("subjects", [])]:
-            continue
-        try:
-            exam_data = {
-                "teacher_id": teacher_id, "school_id": school_id,
-                "title": exam_spec["title"], "subject": subject,
-                "duration_minutes": exam_spec["duration_minutes"],
-                "total_questions": exam_spec["total_questions"],
-                "passing_score": exam_spec["passing_score"],
-                "status": "active", "is_published": True,
-                "question_types": json.dumps(exam_spec["question_types"]),
-                "answer_key": json.dumps(exam_spec["answer_key"]),
-                "question_weights": json.dumps(exam_spec["question_weights"]),
-                "anti_cheat_enabled": exam_spec["anti_cheat_enabled"],
-                "penalty_per_violation": exam_spec["penalty_per_violation"],
-                "class_ids": json.dumps(class_ids),
-                "max_attempts": 1, "publish_mode": "auto",
-            }
-            supabase.table("exams").insert(exam_data).execute()
+        for i, exam_spec in enumerate(SAMPLE_EXAMS):
+            teacher_id = teachers[i % len(teachers)]
+            subject = exam_spec["subject"]
+            if subject not in [s["name"] for s in school_conf.get("subjects", [])]:
+                continue
+            try:
+                exam_data = {
+                    "teacher_id": teacher_id, "school_id": school_id,
+                    "title": exam_spec["title"], "subject": subject,
+                    "duration_minutes": exam_spec["duration_minutes"],
+                    "total_questions": exam_spec["total_questions"],
+                    "passing_score": exam_spec["passing_score"],
+                    "status": "active", "is_published": True,
+                    "question_types": exam_spec["question_types"],
+                    "answer_key": exam_spec["answer_key"],
+                    "question_weights": exam_spec["question_weights"],
+                    "anti_cheat_enabled": exam_spec["anti_cheat_enabled"],
+                    "penalty_per_violation": exam_spec["penalty_per_violation"],
+                    "class_ids": class_ids,
+                    "max_attempts": 1, "publish_mode": "auto",
+                }
+                supabase.table("exams").insert(exam_data).execute()
             print(f"   📝 Created: {exam_spec['title']} ({len(class_ids)} classes)")
         except Exception as e:
             if "already" not in str(e).lower():
@@ -370,34 +370,41 @@ def _seed_invoices(supabase, school_id, school_conf):
 
 def _reset_demo_data(supabase):
     print("\n🔄 Resetting demo data (keeping user accounts)...")
-    for table in ["submissions", "violation_logs", "exam_access_codes", "analytics_cache",
-                   "teacher_assignments", "exams", "payment_transactions",
-                   "school_subscriptions", "ai_grading_logs", "invoices"]:
+    # Delete in FK-safe order: children first, parents last
+    tables_in_order = [
+        "submissions", "violation_logs", "exam_access_codes", "analytics_cache",
+        "teacher_assignments", "exams", "payment_transactions",
+        "school_subscriptions", "ai_grading_logs", "invoices",
+        "usage_tracking", "teacher_ai_keys", "teacher_ai_settings",
+        "students", "teachers", "subjects", "classes", "school_years",
+    ]
+    for table in tables_in_order:
         try:
             supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
             print(f"   ✅ Cleared: {table}")
         except Exception as e:
             print(f"   ⚠️  {table}: {str(e)[:50]}")
-    for table in ["students", "teachers", "subjects", "classes", "school_years",
-                   "teacher_ai_keys", "teacher_ai_settings"]:
-        try:
-            supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-        except:
-            pass
-    print("   ✅ Cleared: school child data")
 
 
 def _reset_demo(supabase):
-    for email in [u["email"] for u in [DEMO_USERS["super_admin"]]] \
-        + [s["admin"]["email"] for s in DEMO_SCHOOLS] \
-        + [t["email"] for s in DEMO_SCHOOLS for t in s.get("teachers", [])] \
-        + [st["email"] for s in DEMO_SCHOOLS for st in s.get("students", [])]:
+    """Full reset: delete all demo data AND users, then re-seed."""
+    # First clean data
+    _reset_demo_data(supabase)
+    # Then delete demo users
+    demo_emails = (
+        [DEMO_USERS["super_admin"]["email"]]
+        + [s["admin"]["email"] for s in DEMO_SCHOOLS]
+        + [t["email"] for s in DEMO_SCHOOLS for t in s.get("teachers", [])]
+        + [st["email"] for s in DEMO_SCHOOLS for st in s.get("students", [])]
+    )
+    for email in demo_emails:
         try:
-            for u in supabase.auth.admin.list_users():
+            users = supabase.auth.admin.list_users()
+            for u in users:
                 if u.email == email:
                     supabase.auth.admin.delete_user(u.id)
                     break
-        except:
+        except Exception:
             pass
 
 
