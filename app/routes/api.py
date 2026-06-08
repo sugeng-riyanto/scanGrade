@@ -65,6 +65,15 @@ def log_violation():
             exam = supabase.table("exams").select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max").eq("id", exam_id).single().execute().data or {}
             from app.services.anti_cheat_service import calculate_graduated_penalty
             penalty_info = calculate_graduated_penalty(total_count, exam)
+            # Save penalty to the student's submission
+            try:
+                sub = supabase.table("submissions").select("id,penalty").eq("exam_id", exam_id).eq("student_id", g.user_id).order("created_at", desc=True).limit(1).execute()
+                if sub.data:
+                    current_penalty = float(sub.data[0].get("penalty") or 0)
+                    new_penalty = current_penalty + penalty_info.get("current_penalty", 0)
+                    supabase.table("submissions").update({"penalty": new_penalty}).eq("id", sub.data[0]["id"]).execute()
+            except Exception:
+                pass
             results.append({"logged": True, "violation_count": total_count, **penalty_info})
         else:
             results.append({"logged": False, "reason": valid.get("reason")})
