@@ -3,6 +3,9 @@ import time
 from collections import defaultdict
 from flask import request, jsonify, current_app
 
+# Flask-Limiter instance — initialized in create_app(), imported by routes
+limiter = None
+
 _limits = {}
 
 DEFAULT_LIMITS = {

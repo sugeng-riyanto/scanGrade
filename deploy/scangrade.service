@@ -1,0 +1,25 @@
+[Unit]
+Description=ScanGrade Flask Application
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/scangrade
+EnvironmentFile=/opt/scangrade/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/scangrade/.venv/bin/gunicorn wsgi:app -c gunicorn.conf.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

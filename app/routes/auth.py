@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify, g, render_template, redirect, url
 from app.utils.auth import login_required, get_supabase, get_auth_client
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
+from app.utils.rate_limiter import limiter
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -162,6 +163,7 @@ def activate():
 # ─── LOGIN (Admin & Super Admin) ─────────────────────
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute")
 def login():
     if request.method == "GET":
         return render_template("auth/login.html")
@@ -218,6 +220,7 @@ def login():
 # ─── LOGIN USER (Guru & Murid) ───────────────────────
 
 @auth_bp.route("/login-user", methods=["GET", "POST"])
+@limiter.limit("5 per minute")
 def login_user():
     if request.method == "GET":
         role_hint = request.args.get("role", "")

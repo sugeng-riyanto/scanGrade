@@ -8,6 +8,7 @@ from app.utils.auth import login_required, get_supabase
 from app.services.anti_cheat_service import validate_violation_log
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
+from app.utils.rate_limiter import limiter
 
 api_bp = Blueprint("api", __name__)
 
@@ -85,6 +86,7 @@ def violation_count():
 
 
 @api_bp.route("/scan/process", methods=["POST"])
+@limiter.limit("20 per minute")
 @login_required
 def scan_process():
     """Process a scanned bubble sheet image and return detected answers.
