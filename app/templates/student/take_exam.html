@@ -2659,4 +2659,50 @@ function examApp(duration, totalQ) {
     };
 }
 </script>
+<script>
+/* ══════════════════════════════════════════════════════════════
+   STANDALONE ANTI-CHEAT — works independently of Alpine component
+   ══════════════════════════════════════════════════════════════ */
+(function() {
+    var enabled = {{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
+    if (!enabled) { console.log('[AC-STANDALONE] Disabled by config'); return; }
+    console.log('[AC-STANDALONE] Initializing...');
+    var violationCount = 0;
+    var totalPenalty = 0;
+    var blurTimer = null;
+    var acSubmitted = false;
+    var penaltyBase = {{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
+    var maxViolations = {{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
+    var autoSubmit = {{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
+
+    function handleViolation() {
+        violationCount++;
+        var msg = '';
+        if (violationCount === 1) {
+            msg = 'PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';
+        } else {
+            var p = violationCount === 2 ? penaltyBase : (violationCount === 3 ? penaltyBase * 2 : penaltyBase * 3);
+            totalPenalty += p;
+            msg = 'PELANGGARAN #' + violationCount + '! Penalti: -' + p + ' poin (Total: -' + totalPenalty + ')';
+        }
+        console.log('[AC-STANDALONE] ' + msg);
+        if (violationCount > 1) alert('[ANTI-CHEAT] ' + msg);
+        else alert('[ANTI-CHEAT] ' + msg + '\n\n(Gunakan F11 untuk layar penuh)');
+        if (maxViolations > 0 && violationCount >= maxViolations && autoSubmit) {
+            alert('[ANTI-CHEAT] Pelanggaran maksimal! Ujian akan dikumpulkan.');
+            acSubmitted = true;
+        }
+    }
+
+    document.addEventListener('visibilitychange', function() {
+        if (acSubmitted) return;
+        if (document.hidden) {
+            blurTimer = setTimeout(handleViolation, 1500);
+        } else {
+            if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; }
+        }
+    });
+    console.log('[AC-STANDALONE] Ready — switch tabs to test (1.5s delay)');
+})();
+</script>
 {% endblock %}
