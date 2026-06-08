@@ -2678,16 +2678,27 @@ function examApp(duration, totalQ) {
     function handleViolation() {
         violationCount++;
         var msg = '';
+        var currentPenalty = 0;
         if (violationCount === 1) {
             msg = 'PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';
         } else {
-            var p = violationCount === 2 ? penaltyBase : (violationCount === 3 ? penaltyBase * 2 : penaltyBase * 3);
-            totalPenalty += p;
-            msg = 'PELANGGARAN #' + violationCount + '! Penalti: -' + p + ' poin (Total: -' + totalPenalty + ')';
+            currentPenalty = violationCount === 2 ? penaltyBase : (violationCount === 3 ? penaltyBase * 2 : penaltyBase * 3);
+            totalPenalty += currentPenalty;
+            msg = 'PELANGGARAN #' + violationCount + '! Penalti: -' + currentPenalty + ' poin (Total: -' + totalPenalty + ')';
         }
         console.log('[AC-STANDALONE] ' + msg);
         if (violationCount > 1) alert('[ANTI-CHEAT] ' + msg);
         else alert('[ANTI-CHEAT] ' + msg + '\n\n(Gunakan F11 untuk layar penuh)');
+        // Send violation to server
+        try {
+            navigator.sendBeacon('/api/violation/log',
+                new Blob([JSON.stringify([{
+                    exam_id: '{{ exam.id }}',
+                    violation_type: 'tab_switch',
+                    timestamp: Date.now() / 1000,
+                    metadata: { violation_count: violationCount, penalty: currentPenalty }
+                }])], {type: 'application/json'}));
+        } catch(e) { console.warn('[AC-STANDALONE] sendBeacon failed', e); }
         if (maxViolations > 0 && violationCount >= maxViolations && autoSubmit) {
             alert('[ANTI-CHEAT] Pelanggaran maksimal! Ujian akan dikumpulkan.');
             acSubmitted = true;
