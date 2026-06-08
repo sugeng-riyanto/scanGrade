@@ -2,7 +2,7 @@
 import io
 import cv2
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple
 
 
 # LJK geometry constants (in mm, matching ljk_generator.py)
@@ -33,6 +33,67 @@ def _mm_to_px_x(mm_val: float) -> int:
 
 def _mm_to_px_y(mm_val: float) -> int:
     return int(round(mm_val * PX_PER_MM_Y))
+
+
+# ── Preprocessing pipeline ──────────────────────────────
+
+def deskew(img: np.ndarray) -> np.ndarray:
+    """Auto-deskew a scanned image using cv2.minAreaRect."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    coords = np.column_stack(np.where(thresh > 0))
+    if coords.shape[0] < 10:
+        return img
+
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = 90 + angle
+    if abs(angle) < 0.5:
+        return img
+
+    h, w = img.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return rotated
+
+
+def adaptive_normalize(img: np.ndarray) -> np.ndarray:
+    """Apply adaptive thresholding + CLAHE for consistent lighting."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+
+    # CLAHE for contrast normalization
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    # Adaptive threshold to handle dark/light photos
+    block_size = max(3, (min(img.shape[:2]) // 10) | 1)  # odd number
+    binary = cv2.adaptiveThreshold(
+        enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY, block_size, 5,
+    )
+
+    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
+
+def denoise(img: np.ndarray) -> np.ndarray:
+    """Remove noise via morphological operations."""
+    kernel = np.ones((2, 2), np.uint8)
+    opened = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel, iterations=1)
+    closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel, iterations=1)
+    return cv2.medianBlur(closed, 3)
+
+
+def preprocess_scan(img: np.ndarray) -> np.ndarray:
+    """Full preprocessing pipeline: deskew → adaptive normalize → denoise.
+
+    Returns preprocessed image in BGR format.
+    """
+    img = deskew(img)
+    img = adaptive_normalize(img)
+    img = denoise(img)
+    return img
 
 
 def _get_grid_positions(total_questions: int = 50, options: int = 5):
@@ -246,6 +307,12 @@ def detect_answers(
     high_conf = sum(1 for c in confidence_map.values() if c >= 0.7)
     avg_conf = round(sum(confidence_map.values()) / max(len(confidence_map), 1), 3)
 
+    # Mark answers needing human review (confidence < 0.6 or ambiguous)
+    needs_review = {
+        k for k, v in confidence_map.items()
+        if v < 0.6 or k in ambiguous
+    }
+
     return {
         "answers": answers,
         "detected": len(answers),
@@ -254,21 +321,44 @@ def detect_answers(
         "avg_confidence": avg_conf,
         "high_confidence_count": high_conf,
         "ambiguous": ambiguous,
+        "needs_review": sorted(needs_review, key=int),
+        "needs_review_count": len(needs_review),
     }
 
 
-def process_scan(image_data: bytes, total_questions: int = 50) -> dict:
-    """Full OMR pipeline: load -> find marks -> correct -> detect answers."""
-    img = load_image(image_data)
-    if img is None:
-        return {"error": "Could not decode image"}
+def process_scan(image_data: bytes, total_questions: int = 50, preprocess: bool = True) -> dict:
+    """Full OMR pipeline: load -> [preprocess] -> find marks -> correct -> detect answers.
 
-    corners = find_registration_marks(img)
-    if corners is None:
-        return {"error": "Could not find registration marks. Ensure the sheet is fully visible with corner marks."}
+    Args:
+        image_data: Raw image bytes.
+        total_questions: Number of MCQ questions on the sheet.
+        preprocess: Whether to apply deskew/CLAHE/denoise before detection.
 
-    warped = perspective_correct(img, corners)
-    return detect_answers(warped, total_questions=total_questions)
+    Returns:
+        dict with "answers", "confidence", "needs_review", or {"error": ...} on failure.
+    """
+    try:
+        img = load_image(image_data)
+        if img is None:
+            return {"error": "Gagal membaca gambar. Format tidak didukung."}
+
+        # Optional preprocessing
+        if preprocess:
+            img = preprocess_scan(img)
+
+        corners = find_registration_marks(img)
+        if corners is None:
+            return {"error": "Tanda registrasi tidak ditemukan. Pastikan seluruh lembar terlihat dalam foto."}
+
+        warped = perspective_correct(img, corners)
+        result = detect_answers(warped, total_questions=total_questions)
+        result["preprocessed"] = preprocess
+        return result
+
+    except cv2.error as e:
+        return {"error": f"Kesalahan pemrosesan gambar: {str(e)[:150]}"}
+    except Exception as e:
+        return {"error": f"Gagal memproses scan: {str(e)[:200]}"}
 
 
 def draw_debug_image(img: np.ndarray, corners=None, answers=None) -> bytes:

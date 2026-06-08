@@ -1,13 +1,19 @@
 import io
+import os
+import uuid
 import time
 import threading
-from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file
+from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file, current_app
 from app.utils.auth import login_required, get_supabase
 from app.services.anti_cheat_service import validate_violation_log
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
 
 api_bp = Blueprint("api", __name__)
+
+# ── Upload security constants ──────────────────────────
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 
 _sync_locks = {}
 _sync_lock_mutex = threading.Lock()
@@ -81,19 +87,78 @@ def violation_count():
 @api_bp.route("/scan/process", methods=["POST"])
 @login_required
 def scan_process():
-    """Process a scanned bubble sheet image and return detected answers."""
+    """Process a scanned bubble sheet image and return detected answers.
+
+    Security: validates extension, MIME type, image integrity, strips EXIF.
+    """
     if "image" not in request.files:
-        return jsonify({"error": "No image provided"}), 400
+        return jsonify({"error": "Tidak ada gambar yang dikirim"}), 400
+
+    image_file = request.files["image"]
+
+    # 1. Validate extension
+    ext = os.path.splitext(image_file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({"error": "Format file tidak didukung. Gunakan .jpg, .jpeg, atau .png"}), 422
+
+    # 2. Validate MIME type via python-magic
+    try:
+        import magic
+        header = image_file.read(2048)
+        image_file.seek(0)
+        mime_type = magic.from_buffer(header, mime=True)
+        if mime_type not in ("image/jpeg", "image/png"):
+            return jsonify({"error": f"Tipe file tidak valid ({mime_type}). Hanya jpg/png yang diizinkan."}), 422
+    except ImportError:
+        current_app.logger.warning("python-magic not installed; skipping MIME validation")
+
+    # 3. Validate size
+    image_file.seek(0, 2)
+    file_size = image_file.tell()
+    image_file.seek(0)
+    if file_size > MAX_IMAGE_SIZE:
+        return jsonify({"error": f"Gambar terlalu besar ({file_size/1024/1024:.1f}MB). Maksimal 20MB."}), 413
+    if file_size == 0:
+        return jsonify({"error": "File kosong"}), 422
+
+    # 4. Verify image integrity + strip EXIF via Pillow
+    try:
+        from PIL import Image
+        img_pil = Image.open(image_file)
+        img_pil.verify()  # raises on corrupt
+        image_file.seek(0)
+
+        # Re-open after verify (verify consumes the file)
+        img_pil = Image.open(image_file)
+        # Strip EXIF by re-saving without EXIF data
+        clean_buf = io.BytesIO()
+        # Save without EXIF (only PNG/JPEG)
+        save_format = "PNG" if mime_type == "image/png" else "JPEG"
+        if "exif" in img_pil.info:
+            img_pil.info.pop("exif")
+        # Use raw data if PNG, convert to RGB for JPEG
+        if save_format == "JPEG" and img_pil.mode != "RGB":
+            img_pil = img_pil.convert("RGB")
+        img_pil.save(clean_buf, format=save_format)
+        image_data = clean_buf.getvalue()
+        current_app.logger.info("EXIF stripped from scan image, cleaned size=%d", len(image_data))
+    except Exception as e:
+        return jsonify({"error": "Gambar tidak valid atau corrupt", "detail": str(e)[:100]}), 422
 
     exam_id = request.form.get("exam_id", "")
     total_questions = int(request.form.get("total_questions", 50))
 
-    image_file = request.files["image"]
-    image_data = image_file.read()
+    from app.services.omr_service import process_scan, draw_debug_image, preprocess_scan
 
-    from app.services.omr_service import process_scan, draw_debug_image
-
-    result = process_scan(image_data, total_questions=total_questions)
+    # 5. Preprocess + detect
+    try:
+        result = process_scan(image_data, total_questions=total_questions, preprocess=True)
+    except Exception as e:
+        current_app.logger.error("OMR processing crashed: %s", e, exc_info=True)
+        return jsonify({
+            "error": "Gagal memproses gambar. Pastikan foto jelas dan seluruh lembar jawaban terlihat.",
+            "detail": str(e)[:200] if current_app.debug else None,
+        }), 422
 
     # If no error, grade against answer key if exam_id provided
     if "error" not in result and exam_id:
