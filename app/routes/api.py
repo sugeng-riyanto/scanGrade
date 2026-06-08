@@ -577,3 +577,286 @@ def ai_suggest():
     if result.get("error"):
         raise AIProcessingError(result.get("provider", "unknown"), result["error"])
     return jsonify(result)
+
+
+# ═══════════════════════════════════════════════════════════
+# STUDENT BULK IMPORT (via API)
+# ═══════════════════════════════════════════════════════════
+
+@api_bp.route("/students/import", methods=["POST"])
+@login_required
+def api_import_students():
+    """Bulk import students via CSV (API version, uses pandas).
+
+    Accepts multipart/form-data with a 'csv_file' field.
+    CSV must have columns: nama, nisn (required); kelas, email, password (optional).
+
+    Returns: { success, failed, total, errors, message }
+    """
+    import pandas as pd
+
+    school_id = g.get("user_school_id")
+    if not school_id:
+        return jsonify({"error": "Akses ditolak: sekolah tidak terdaftar"}), 403
+
+    if "csv_file" not in request.files:
+        return jsonify({"error": "File CSV diperlukan"}), 400
+
+    file = request.files["csv_file"]
+    if file.filename == "":
+        return jsonify({"error": "Pilih file terlebih dahulu"}), 400
+
+    if not file.filename.lower().endswith(".csv"):
+        return jsonify({"error": "File harus berformat .csv"}), 422
+
+    class_id = request.form.get("class_id") or None
+
+    try:
+        df = pd.read_csv(file, dtype=str).fillna("")
+    except Exception as e:
+        return jsonify({"error": f"Gagal membaca CSV: {str(e)[:100]}"}), 422
+
+    # Validate required columns
+    required = {"nama", "nisn"}
+    missing_cols = required - set(df.columns.str.lower())
+    if missing_cols:
+        return jsonify({
+            "error": f"Kolom wajib tidak ditemukan: {', '.join(sorted(missing_cols))}",
+        }), 422
+
+    # Normalize column names to lowercase
+    df.columns = df.columns.str.lower()
+
+    supabase = get_supabase()
+    results = {"success": 0, "failed": 0, "total": len(df), "errors": []}
+
+    # Process in chunks for memory efficiency
+    chunk_size = 100
+    for start in range(0, len(df), chunk_size):
+        chunk = df.iloc[start:start + chunk_size]
+        for idx, row in chunk.iterrows():
+            row_num = idx + 2  # 1-indexed + header row
+            try:
+                nama = str(row.get("nama", "")).strip()
+                nisn = str(row.get("nisn", "")).strip()
+                if not nama or not nisn:
+                    results["failed"] += 1
+                    continue
+
+                email = str(row.get("email", "")).strip() or None
+                kelas = str(row.get("kelas", "")).strip()
+                password = str(row.get("password", "")).strip() or "siswa123"
+
+                # Check duplicate NISN
+                existing = supabase.table("students") \
+                    .select("id").eq("nisn", nisn) \
+                    .eq("school_id", school_id).maybe_single().execute()
+                if existing.data:
+                    results["failed"] += 1
+                    results["errors"].append({"row": row_num, "nisn": nisn, "message": "NISN sudah terdaftar"})
+                    continue
+
+                # Resolve class from name
+                resolved_class_id = class_id
+                if not resolved_class_id and kelas:
+                    c = supabase.table("classes") \
+                        .select("id").eq("school_id", school_id) \
+                        .eq("name", kelas).maybe_single().execute()
+                    if c.data:
+                        resolved_class_id = c.data["id"]
+
+                # Create auth user
+                user_email = email or f"{nisn}@siswa.scan-grade.app"
+                created = supabase.auth.admin.create_user({
+                    "email": user_email, "password": password,
+                    "user_metadata": {"role": "murid", "full_name": nama},
+                    "email_confirm": True,
+                })
+                uid = created.user.id
+
+                supabase.table("profiles").upsert({
+                    "id": uid, "full_name": nama, "role": "murid",
+                    "nisn": nisn, "school_id": school_id, "status": "active",
+                }).execute()
+                supabase.table("students").upsert({
+                    "id": uid, "school_id": school_id, "nisn": nisn,
+                    "class_id": resolved_class_id, "status": "active",
+                }).execute()
+                results["success"] += 1
+
+            except Exception as e:
+                results["failed"] += 1
+                results["errors"].append({
+                    "row": row_num,
+                    "nisn": str(row.get("nisn", "")),
+                    "message": str(e)[:100],
+                })
+
+    current_app.logger.info(
+        "API import: %d success, %d failed of %d",
+        results["success"], results["failed"], results["total"],
+        extra={"school_id": str(school_id)},
+    )
+    return jsonify({
+        "success": True,
+        "results": results,
+        "message": f"Berhasil: {results['success']}, Gagal: {results['failed']}",
+    })
+
+
+# ═══════════════════════════════════════════════════════════
+# EXAM REPORT & EXPORT
+# ═══════════════════════════════════════════════════════════
+
+@api_bp.route("/exams/<exam_id>/report", methods=["GET"])
+@login_required
+def exam_report(exam_id):
+    """Generate exam report with statistics. Supports ?format=excel for XLSX download.
+
+    Returns JSON stats by default. With ?format=excel returns a formatted XLSX file.
+    """
+    from app.decorators.security import require_school_access
+
+    # Manually apply school access check
+    deco = require_school_access("exams", "exam_id")
+    result = deco(lambda: None)(exam_id=exam_id)
+    # If the decorator returns a non-None tuple, it's an error response
+    if isinstance(result, tuple):
+        return result
+
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "Ujian tidak ditemukan"}), 404
+
+    subs = supabase.table("submissions") \
+        .select("*, profiles!inner(full_name, nisn)") \
+        .eq("exam_id", exam_id) \
+        .in_("status", ["submitted", "graded", "published"]) \
+        .execute().data or []
+
+    # Build student list
+    students = []
+    scores = []
+    for s in subs:
+        profile = s.get("profiles") or {}
+        score = s.get("final_score") or s.get("score") or 0
+        students.append({
+            "nama": profile.get("full_name", ""),
+            "nisn": profile.get("nisn", ""),
+            "nilai": float(score),
+            "status": s.get("status", ""),
+            "penalty": float(s.get("penalty") or 0),
+        })
+        scores.append(float(score))
+
+    if not scores:
+        stats = {"mean": 0, "median": 0, "highest": 0, "lowest": 0, "count": 0}
+    else:
+        sorted_s = sorted(scores)
+        n = len(sorted_s)
+        stats = {
+            "mean": round(sum(scores) / n, 2),
+            "median": round(sorted_s[n // 2] if n % 2 else (sorted_s[n // 2 - 1] + sorted_s[n // 2]) / 2, 2),
+            "highest": max(scores),
+            "lowest": min(scores),
+            "count": n,
+        }
+
+    # Check format parameter
+    fmt = request.args.get("format", "").lower()
+
+    if fmt == "excel":
+        return _generate_report_excel(exam, students, stats)
+
+    # Default: JSON
+    passing_score = exam.get("passing_score") or 0
+    for s in students:
+        s["keterangan"] = "Lulus" if s["nilai"] >= passing_score else "Tidak Lulus"
+
+    return jsonify({
+        "exam_title": exam.get("title", ""),
+        "exam_id": exam_id,
+        "stats": stats,
+        "students": students,
+        "passing_score": passing_score,
+    })
+
+
+def _generate_report_excel(exam, students, stats):
+    """Generate formatted Excel report with Indonesian column names."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Laporan Nilai"
+
+    # ── Styles ──
+    title_font = Font(bold=True, size=14, color="1E293B")
+    header_font = Font(bold=True, size=11, color="FFFFFF")
+    header_fill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+    stat_label_font = Font(bold=True, size=11, color="1E293B")
+    stat_value_font = Font(size=11, color="334155")
+    border = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+
+    # ── Title ──
+    ws.merge_cells("A1:E1")
+    ws["A1"] = f"Laporan Nilai — {exam.get('title', 'Ujian')}"
+    ws["A1"].font = title_font
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    # ── Statistics section ──
+    stat_start = 3
+    row = stat_start
+    for label, key in [("Rata-rata", "mean"), ("Median", "median"), ("Tertinggi", "highest"), ("Terendah", "lowest"), ("Jumlah Siswa", "count")]:
+        ws.cell(row=row, column=1, value=label).font = stat_label_font
+        ws.cell(row=row, column=2, value=stats.get(key, 0)).font = stat_value_font
+        row += 1
+
+    # ── Student table header ──
+    header_row = row + 1
+    headers = ["No", "Nama Siswa", "NISN", "Nilai", "Keterangan"]
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=header_row, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = border
+
+    # ── Student data ──
+    passing_score = exam.get("passing_score") or 0
+    for i, s in enumerate(students, 1):
+        row_idx = header_row + i
+        ws.cell(row=row_idx, column=1, value=i).border = border
+        ws.cell(row=row_idx, column=2, value=s["nama"]).border = border
+        ws.cell(row=row_idx, column=3, value=s.get("nisn", "")).border = border
+        ws.cell(row=row_idx, column=4, value=s["nilai"]).border = border
+        ket = "Lulus" if s["nilai"] >= passing_score else "Tidak Lulus"
+        ws.cell(row=row_idx, column=5, value=ket).border = border
+
+    # ── Auto-width ──
+    for col in range(1, 6):
+        max_len = len(str(headers[col - 1]))
+        for row_idx in range(header_row, header_row + len(students) + 1):
+            val = ws.cell(row=row_idx, column=col).value
+            if val:
+                max_len = max(max_len, len(str(val)))
+        ws.column_dimensions[get_column_letter(col)].width = min(max_len + 4, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    title_slug = "".join(c for c in exam.get("title", "laporan") if c.isalnum() or c in " _").strip()[:20]
+    return send_file(
+        buf,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"laporan_{title_slug}.xlsx",
+    )

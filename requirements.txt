@@ -23,6 +23,7 @@ pytest==8.3.5
 pytest-env==1.1.5
 black==25.1.0
 ruff==0.10.0
+pandas==2.2.3
 midtransclient==1.4.2
 openai==2.41.0
 google-generativeai==0.8.6
