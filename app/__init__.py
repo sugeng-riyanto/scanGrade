@@ -58,23 +58,34 @@ def create_app(env=None):
         except Exception as e:
             app.logger.warning("Sentry init failed: %s", e)
 
-    # Flask-Limiter (rate limiting)
+    # Flask-Limiter (rate limiting — uses memory:// by default, Redis if explicitly configured)
     try:
         from flask_limiter import Limiter
         from flask_limiter.util import get_remote_address
         from app.utils import rate_limiter as rl_module
 
+        storage_uri = "memory://"
+        if cfg.REDIS_URL and cfg.REDIS_URL != "redis://localhost:6379/0":
+            try:
+                from redis import Redis
+                r = Redis.from_url(cfg.REDIS_URL)
+                r.ping()
+                storage_uri = cfg.REDIS_URL
+                r.close()
+            except Exception:
+                app.logger.warning("Redis not available, falling back to memory:// rate limiting")
+
         limiter = Limiter(
             app=app,
             key_func=get_remote_address,
-            storage_uri=cfg.REDIS_URL or "memory://",
+            storage_uri=storage_uri,
             default_limits=["200 per day", "60 per hour"],
         )
         app.extensions["limiter"] = limiter
         rl_module.limiter = limiter
 
         app.config["RATELIMIT_ENABLED"] = True
-        app.logger.info("Flask-Limiter initialized (storage: %s)", "redis" if cfg.REDIS_URL else "memory")
+        app.logger.info("Flask-Limiter initialized (storage: %s)", storage_uri)
     except ImportError:
         app.logger.info("Flask-Limiter not installed")
     except Exception as e:
