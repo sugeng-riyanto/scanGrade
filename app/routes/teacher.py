@@ -1,6 +1,7 @@
 import json
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
+from app.decorators.security import require_school_access
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
@@ -271,6 +272,7 @@ def exam_form():
 @teacher_bp.route("/exams/<exam_id>", methods=["GET", "POST", "DELETE"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def exam_detail(exam_id):
     supabase = get_supabase()
     if request.method == "DELETE":
@@ -383,6 +385,7 @@ def exam_detail(exam_id):
 
 @teacher_bp.route("/preview/<exam_id>")
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def preview_exam(exam_id):
     supabase = get_supabase()
     res = supabase.table("exams").select("*").eq("id", exam_id).maybe_single().execute()
@@ -394,6 +397,7 @@ def preview_exam(exam_id):
 @teacher_bp.route("/exams/<exam_id>/publish-exam", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def publish_exam(exam_id):
     supabase = get_supabase()
     supabase.table("exams").update({
@@ -407,6 +411,7 @@ def publish_exam(exam_id):
 @teacher_bp.route("/exams/<exam_id>/upload-pdf", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def upload_exam_pdf(exam_id):
     supabase = get_supabase()
     if request.method == "GET":
@@ -442,6 +447,7 @@ def my_exams():
 @teacher_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def toggle_exam_status(exam_id):
     supabase = get_supabase()
     exam = supabase.table("exams").select("status").eq("id", exam_id).single().execute().data
@@ -455,6 +461,7 @@ def toggle_exam_status(exam_id):
 @teacher_bp.route("/exams/<exam_id>/toggle-visibility", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def toggle_exam_visibility(exam_id):
     supabase = get_supabase()
     exam = supabase.table("exams").select("is_published").eq("id", exam_id).single().execute().data
@@ -468,6 +475,7 @@ def toggle_exam_visibility(exam_id):
 @teacher_bp.route("/exams/<exam_id>/delete", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def delete_exam(exam_id):
     supabase = get_supabase()
     supabase.table("violation_logs").delete().eq("exam_id", exam_id).execute()
@@ -484,6 +492,7 @@ def delete_exam(exam_id):
 @teacher_bp.route("/exams/<exam_id>/duplicate", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("exams", "exam_id")
 def duplicate_exam(exam_id):
     supabase = get_supabase()
     try:
@@ -543,6 +552,7 @@ def retraction_requests():
 
 @teacher_bp.route("/retractions/<submission_id>/approve", methods=["POST"])
 @teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
 def approve_retraction(submission_id):
     supabase = get_supabase()
     sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
@@ -570,6 +580,7 @@ def approve_retraction(submission_id):
 
 @teacher_bp.route("/retractions/<submission_id>/reject", methods=["POST"])
 @teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
 def reject_retraction(submission_id):
     supabase = get_supabase()
     sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
@@ -633,6 +644,7 @@ def results():
 
 @teacher_bp.route("/grade/<submission_id>")
 @teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
 def grade_detail(submission_id):
     supabase = get_supabase()
     sub = supabase.table("submissions").select("*").eq("id", submission_id).maybe_single().execute()
@@ -676,6 +688,7 @@ def grade_detail(submission_id):
 @teacher_bp.route("/grade/<submission_id>/override", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
 def override_score(submission_id):
     if request.is_json:
         data = request.get_json()

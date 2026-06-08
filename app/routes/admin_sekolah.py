@@ -8,6 +8,7 @@ from datetime import datetime, timezone, date
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
 from app.utils.auth import admin_sekolah_required, get_supabase, subscription_write_required
+from app.decorators.security import require_school_access
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
 
 def _gen_password(length=12) -> str:
@@ -495,6 +496,7 @@ def school_years():
 
 @admin_sekolah_bp.route("/school-years/<year_id>/toggle", methods=["POST"])
 @admin_sekolah_required
+@require_school_access("school_years", "year_id")
 def toggle_school_year(year_id):
     sid = _school_id()
     supabase = get_supabase()
@@ -510,6 +512,7 @@ def toggle_school_year(year_id):
 
 @admin_sekolah_bp.route("/school-years/<year_id>/delete", methods=["POST"])
 @admin_sekolah_required
+@require_school_access("school_years", "year_id")
 def delete_school_year(year_id):
     supabase = get_supabase()
     try:
@@ -574,6 +577,7 @@ def create_class():
 
 @admin_sekolah_bp.route("/classes/<class_id>/edit", methods=["POST"])
 @admin_sekolah_required
+@require_school_access("classes", "class_id")
 def edit_class(class_id):
     supabase = get_supabase()
     data = {}
@@ -594,6 +598,7 @@ def edit_class(class_id):
 
 @admin_sekolah_bp.route("/classes/<class_id>/delete", methods=["POST"])
 @admin_sekolah_required
+@require_school_access("classes", "class_id")
 def delete_class(class_id):
     supabase = get_supabase()
     try:
@@ -644,6 +649,7 @@ def admin_subject_create():
 
 @admin_sekolah_bp.route("/subjects/<subject_id>/delete", methods=["POST"])
 @admin_sekolah_required
+@require_school_access("subjects", "subject_id")
 def admin_subject_delete(subject_id):
     supabase = get_supabase()
     try:
@@ -811,6 +817,7 @@ def create_teacher():
 @admin_sekolah_bp.route("/teachers/<teacher_id>/edit", methods=["POST"])
 @subscription_write_required
 @admin_sekolah_required
+@require_school_access("teachers", "teacher_id")
 def edit_teacher(teacher_id):
     supabase = get_supabase()
     data = {}
@@ -845,6 +852,7 @@ def edit_teacher(teacher_id):
 @admin_sekolah_bp.route("/teachers/<teacher_id>/delete", methods=["POST"])
 @subscription_write_required
 @admin_sekolah_required
+@require_school_access("teachers", "teacher_id")
 def delete_teacher(teacher_id):
     supabase = get_supabase()
     try:
@@ -859,6 +867,7 @@ def delete_teacher(teacher_id):
 
 @admin_sekolah_bp.route("/teachers/<teacher_id>/reset-password", methods=["POST"])
 @admin_sekolah_required
+@require_school_access("teachers", "teacher_id")
 def reset_teacher_password(teacher_id):
     supabase = get_supabase()
     password = request.form.get("password", "").strip() or _gen_password()
@@ -962,6 +971,7 @@ def create_student():
 @admin_sekolah_bp.route("/students/<student_id>/edit", methods=["POST"])
 @subscription_write_required
 @admin_sekolah_required
+@require_school_access("students", "student_id")
 def edit_student(student_id):
     supabase = get_supabase()
     data = {}
@@ -1075,6 +1085,7 @@ def bulk_reset_students_password():
 
 @admin_sekolah_bp.route("/users/<user_id>/reset-password", methods=["POST"])
 @admin_sekolah_required
+@require_school_access("profiles", "user_id")
 def admin_reset_user_password(user_id):
     """Admin sekolah reset password untuk guru/murid di sekolahnya."""
     sid = _school_id()
@@ -1095,6 +1106,7 @@ def admin_reset_user_password(user_id):
 @admin_sekolah_bp.route("/students/<student_id>/delete", methods=["POST"])
 @subscription_write_required
 @admin_sekolah_required
+@require_school_access("students", "student_id")
 def delete_student(student_id):
     supabase = get_supabase()
     try:
@@ -1110,6 +1122,7 @@ def delete_student(student_id):
 @admin_sekolah_bp.route("/students/<student_id>/reset-password", methods=["POST"])
 @subscription_write_required
 @admin_sekolah_required
+@require_school_access("students", "student_id")
 def reset_student_password(student_id):
     supabase = get_supabase()
     password = request.form.get("password", "").strip() or _gen_password()
@@ -1276,6 +1289,7 @@ def invoices():
 
 @admin_sekolah_bp.route("/invoices/<invoice_id>/download-pdf")
 @admin_sekolah_required
+@require_school_access("invoices", "invoice_id")
 def download_invoice_pdf(invoice_id):
     supabase = get_supabase()
     sid = _school_id()

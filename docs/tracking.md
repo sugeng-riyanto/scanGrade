@@ -198,6 +198,15 @@
 - **Rate limiter**: Increased register limit from 3/3600s to 10/600s; rate-limited non-JSON requests now return HTML page instead of raw JSON
 - **WhatsApp badge**: Moved from `scripts` block to `content_noauth` block in register.html (fix: badge not appearing); replaced Alpine.js x-cloak with pure JS; placed only on `/auth/register` page via base.html (then reverted to register-only); Sembunyikan/Tutup now use simple DOM remove with no persistence (badge always reappears on revisit)
 
+### 8 June 2026 — RLS Security Overhaul (Stage 1)
+- **Decorator**: Created `app/decorators/security.py` with `@require_school_access(table, resource_id_param, school_join)` — verifies user's `school_id` matches resource's `school_id` before route handler runs; supports direct lookup (exams, classes, subjects) and chained lookup (submissions → exam_id → exams → school_id)
+- **Applied decorator** to 20+ critical routes:
+  - Teacher: `exam_detail`, `preview_exam`, `publish_exam`, `upload_exam_pdf`, `toggle_status`, `toggle_visibility`, `delete_exam`, `duplicate_exam`, `grade_detail`, `override_score`, `approve_retraction`, `reject_retraction`
+  - Admin sekolah: `toggle_school_year`, `delete_school_year`, `edit_class`, `delete_class`, `admin_subject_delete`, `edit_teacher`, `delete_teacher`, `reset_teacher_password`, `edit_student`, `delete_student`, `reset_student_password`, `admin_reset_user_password`, `download_invoice_pdf`
+- **RLS migration**: Created `supabase/migrations/20260608_fix_rls_policies.sql` — adds `school_id` column + RLS to `teacher_ai_keys`, `teacher_ai_settings`; adds RLS to `invoices`, `payment_transactions`, `school_subscriptions`, `activation_codes`, `ai_grading_logs`, `violation_logs`
+- **Docs**: Created `docs/SECURITY_AUDIT.md` (per-table audit with risk assessment), `docs/SECURITY_RLS_MATRIX.md` (policy overview matrix), `docs/SECURITY_CHECKLIST.md` (pre-merge checklist)
+- **Tests**: Created `tests/test_rls_security.py` with unit tests for decorator (direct match, mismatch, chained) + API-level integration tests (mocked Supabase)
+
 ### 10 June 2026 — Feature Complete
 - Auth: NISN/NIP login, custom email domain, auto-generate email
 - CRUD: Full search/sort, bulk reset/delete, email display from auth
