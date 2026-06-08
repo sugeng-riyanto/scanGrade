@@ -186,9 +186,22 @@ def take_exam(exam_id):
         exam = res.data
     except Exception as e:
         current_app.logger.error(f"Take exam query error: {e}")
+        flash("Ujian tidak ditemukan", "error")
         return redirect("/student/exams")
     if not exam:
+        flash("Ujian tidak ditemukan", "error")
         return redirect("/student/exams")
+
+    # Check if student already reached max attempts
+    max_attempts = exam.get("max_attempts", 1)
+    try:
+        existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).execute()
+        attempt_count = existing.count or 0
+        if attempt_count >= max_attempts:
+            flash(f"Anda sudah mencapai batas maksimal {max_attempts}x mengerjakan ujian ini", "error")
+            return redirect("/student/exams")
+    except Exception:
+        pass
     # Ensure anti-cheat defaults (handle missing columns or NULL values)
     ac_defaults = {
         "anti_cheat_enabled": True,
