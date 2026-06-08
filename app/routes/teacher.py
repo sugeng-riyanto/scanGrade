@@ -181,7 +181,14 @@ def exam_form():
     title = request.form.get("title")
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
-    class_ids = json.loads(request.form.get("class_ids", "[]"))
+    _raw = request.form.get("class_ids", "[]")
+    try:
+        class_ids = json.loads(_raw)
+    except (json.JSONDecodeError, TypeError):
+        try:
+            class_ids = json.loads(_raw.replace("'", '"'))
+        except (json.JSONDecodeError, TypeError):
+            class_ids = []
     start_at_str = request.form.get("start_at", "").strip()
     start_at = start_at_str if start_at_str else None
     is_template = request.form.get("is_template", "false") == "true"
@@ -298,7 +305,14 @@ def exam_detail(exam_id):
     title = request.form.get("title")
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
-    class_ids = json.loads(request.form.get("class_ids", "[]"))
+    _raw = request.form.get("class_ids", "[]")
+    try:
+        class_ids = json.loads(_raw)
+    except (json.JSONDecodeError, TypeError):
+        try:
+            class_ids = json.loads(_raw.replace("'", '"'))
+        except (json.JSONDecodeError, TypeError):
+            class_ids = []
     start_at_str = request.form.get("start_at", "").strip()
     start_at = start_at_str if start_at_str else None
     is_template = request.form.get("is_template", "false") == "true"
