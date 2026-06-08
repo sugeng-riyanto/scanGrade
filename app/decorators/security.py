@@ -24,11 +24,11 @@ def require_school_access(table, resource_id_param="id", school_join=None):
 
             resource_id = kwargs.get(resource_id_param) or request.args.get(resource_id_param)
             if not resource_id:
-                return (jsonify({"error": "Resource ID required"}), 400) if _wants_json() else abort(400)
+                return (jsonify({"error": "ID diperlukan"}), 400) if _wants_json() else abort(400)
 
             user_school_id = g.get("user_school_id")
             if not user_school_id:
-                return (jsonify({"error": "Access denied: no school"}), 403) if _wants_json() else abort(403)
+                return (jsonify({"error": "Akses ditolak: sekolah tidak terdaftar"}), 403) if _wants_json() else abort(403)
 
             db = get_supabase()
 
@@ -48,10 +48,10 @@ def require_school_access(table, resource_id_param="id", school_join=None):
                 resource_school_id = None
 
             if not resource_school_id:
-                return (jsonify({"error": "Resource not found"}), 404) if _wants_json() else abort(404)
+                return (jsonify({"error": "Data tidak ditemukan"}), 404) if _wants_json() else abort(404)
 
             if str(user_school_id) != str(resource_school_id):
-                return (jsonify({"error": "Access denied: different school"}), 403) if _wants_json() else abort(403)
+                return (jsonify({"error": "Akses ditolak: data bukan milik sekolah Anda"}), 403) if _wants_json() else abort(403)
 
             return f(*args, **kwargs)
         return wrapper

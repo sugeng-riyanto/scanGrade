@@ -1,5 +1,5 @@
 import functools
-from flask import g, request, jsonify, current_app, redirect
+from flask import g, request, jsonify, current_app, redirect, flash
 from supabase import Client
 
 # Role name mapping: old -> new (both accepted in decorators)
@@ -164,8 +164,9 @@ def teacher_or_admin_sekolah_required(f):
 
 def _unauthorized():
     if _wants_json():
-        return jsonify({"error": "Unauthorized"}), 401
-    return redirect("/")
+        return jsonify({"error": "Silakan login terlebih dahulu"}), 401
+    flash("Silakan login terlebih dahulu", "error")
+    return redirect("/auth/login")
 
 
 def _extract_token():
