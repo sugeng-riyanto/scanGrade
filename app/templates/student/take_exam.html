@@ -844,9 +844,53 @@ function examApp(duration, totalQ) {
                 this.initStatusBar();
                 this.updateScrollState();
                 this.loadDraft();
-                this.setupAntiCheat();
                 if (this.antiCheat.watermark_name) this.startWatermark();
             });
+            // ─── Anti-cheat: set up DIRECTLY in init (not deferred) ───
+            if (this.antiCheat.enabled) {
+                const ac = this;
+                this._blurTimer = null;
+                document.addEventListener('visibilitychange', () => {
+                    if (ac.submitted) return;
+                    if (document.hidden) {
+                        ac._blurTimer = setTimeout(() => { ac.handleViolation(); }, 1500);
+                    } else {
+                        if (ac._blurTimer) { clearTimeout(ac._blurTimer); ac._blurTimer = null; }
+                    }
+                });
+                // Show badge
+                const badge = document.createElement('span');
+                badge.id = 'anti-cheat-badge';
+                badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-200';
+                badge.innerHTML = '<i class="fas fa-shield-alt text-[8px]"></i> Terproteksi';
+                const bar = document.querySelector('.sticky-topbar .flex.items-center.gap-3');
+                if (bar) bar.prepend(badge);
+                // Fullscreen
+                if (ac.antiCheat.fullscreen_required) {
+                    document.addEventListener('fullscreenchange', () => {
+                        if (ac.submitted) return;
+                        if (!document.fullscreenElement) {
+                            ac.violationMessage = 'Keluar dari layar penuh. Tekan F11 untuk kembali.';
+                            ac.violationType = 'warning';
+                            ac.showViolationBanner = true;
+                            setTimeout(() => { ac.showViolationBanner = false; }, 4000);
+                        }
+                    });
+                }
+                // Right-click
+                if (ac.antiCheat.block_right_click) {
+                    document.addEventListener('contextmenu', e => e.preventDefault());
+                }
+                // Copy-paste
+                if (ac.antiCheat.block_copy_paste) {
+                    document.addEventListener('copy', e => { if (!ac.submitted) e.preventDefault(); });
+                    document.addEventListener('cut', e => { if (!ac.submitted) e.preventDefault(); });
+                    document.addEventListener('paste', e => { if (!ac.submitted) e.preventDefault(); });
+                }
+                console.log('[AntiCheat] DIRECT setup complete');
+            } else {
+                console.log('[AntiCheat] Disabled by config');
+            }
         },
         onGoOnline() {
             this.syncStatus = 'saving';
