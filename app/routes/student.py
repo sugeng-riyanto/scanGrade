@@ -189,6 +189,21 @@ def take_exam(exam_id):
         return redirect("/student/exams")
     if not exam:
         return redirect("/student/exams")
+    # Ensure anti-cheat defaults (handle missing columns or NULL values)
+    ac_defaults = {
+        "anti_cheat_enabled": True,
+        "penalty_per_violation": 5,
+        "max_violations": 5,
+        "auto_submit_on_max": True,
+        "fullscreen_required": True,
+        "block_copy_paste": True,
+        "block_right_click": True,
+        "watermark_name": True,
+        "allow_calculator": False,
+    }
+    for k, v in ac_defaults.items():
+        if k not in exam or exam[k] is None:
+            exam[k] = v
     return render_template("student/take_exam.html", exam=exam)
 
 
