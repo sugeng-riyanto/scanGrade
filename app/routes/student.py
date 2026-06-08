@@ -204,7 +204,10 @@ def take_exam(exam_id):
     for k, v in ac_defaults.items():
         if k not in exam or exam[k] is None:
             exam[k] = v
-    return render_template("student/take_exam.html", exam=exam)
+    # Pre-render anti-cheat config as JSON for the template
+    import json as _json
+    anti_cheat_config = _json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
+    return render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config)
 
 
 @student_bp.route("/exams/<exam_id>/submit", methods=["POST"])
