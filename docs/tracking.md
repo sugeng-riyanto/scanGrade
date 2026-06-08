@@ -235,3 +235,9 @@
 - Security: CSRF, PDF validation, Redis rate limiter
 - Demo: `manage.py` seed/reset, demo settings toggle per role
 - Docs: `RBAC.md`, `PRD.md`, `plan.md`, `tracking.md`
+
+### 8 June 2026 — OMR Security + API Import/Report + DevOps + Demo Fixes
+- **OMR Security**: File upload validation (extension/MIME/Pillow verify/EXIF strip); `preprocess_scan()` pipeline (deskew → CLAHE → adaptive threshold → denoise); `cv2.error` try-except wrapping; `needs_review` flag for confidence < 0.6; `opencv-python` → `opencv-python-headless`; added `python-magic`
+- **API routes**: `POST /api/students/import` (pandas CSV, chunk 100, duplicate NISN skip); `GET /api/exams/<exam_id>/report` (stats mean/median/highest/lowest, `?format=excel` with Indonesian column names via openpyxl)
+- **DevOps**: Sentry 100% error / 10% traces; Flask-Limiter (auth:5/m, OMR:20/m, API:100/m) with Redis/memory:// fallback; `deploy/scangrade.service` systemd template; `deploy/deploy.sh` script
+- **Bug fixes**: `json.loads()` for `class_ids` handles single-quote lists; demo seed passes dicts directly for JSONB columns (no double-encode); FK-safe reset order in `_reset_demo_data()`

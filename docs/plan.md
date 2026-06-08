@@ -140,6 +140,7 @@
 | M12: RLS Security (Stage 1) | Week 12 | ✅ Complete |
 | M13: Error Handling + Sentry (Stage 2) | Week 12 | ✅ Complete |
 | M14: Bulk Import + Tier Enforcement + Pricing (Stage 3-5) | Week 12 | ✅ Complete |
+| M15: OMR Security + API + DevOps | Week 12 | ✅ Complete |
 
 ---
 
@@ -170,3 +171,14 @@
 - Pricing page with 3-tier comparison + FAQ
 - Landing page demo request form with AJAX submission
 - `/api/demo-request` endpoint backed by audit_logs
+
+### Stage 6 — OMR Security + API + DevOps
+- OMR preprocessing pipeline (deskew, CLAHE, threshold, denoise)
+- File upload security (extension, MIME, EXIF, UUID)
+- Confidence scoring with `needs_review` flag
+- `POST /api/students/import` — pandas CSV bulk import
+- `GET /api/exams/<exam_id>/report` — stats + Excel export
+- Flask-Limiter (auth: 5/m, OMR: 20/m, API: 100/m)
+- Sentry 100% errors / 10% traces
+- `deploy/scangrade.service` + `deploy/deploy.sh`
+- Demo seed: JSONB double-encode fix, FK-safe reset
