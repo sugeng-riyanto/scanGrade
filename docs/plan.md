@@ -137,3 +137,36 @@
 | M9: Subscription & Payment (Midtrans) | Week 9 | ✅ Complete |
 | M10: Role refactor & audit fixes | Week 10 | ✅ Complete |
 | M11: AI Essay Grading | Week 11 | ✅ Complete |
+| M12: RLS Security (Stage 1) | Week 12 | ✅ Complete |
+| M13: Error Handling + Sentry (Stage 2) | Week 12 | ✅ Complete |
+| M14: Bulk Import + Tier Enforcement + Pricing (Stage 3-5) | Week 12 | ✅ Complete |
+
+---
+
+## Completed Stages
+
+### Stage 1 — RLS Security
+- `@require_school_access` decorator applied to 25+ routes
+- RLS migration for teacher_ai_keys, invoices, payment_transactions, etc.
+- Docs: `SECURITY_AUDIT.md`, `SECURITY_RLS_MATRIX.md`, `SECURITY_CHECKLIST.md`
+
+### Stage 2 — Error Handling & Sentry
+- `sentry_sdk` integration in app factory with FlaskIntegration
+- Custom exception classes (`FileTooLargeError`, `AIProcessingError`, etc.)
+- Structured JSON logging via `app/utils/logger.py`
+- Centralized error handlers for all HTTP error codes
+- Response helpers (`success_response`, `error_response`)
+
+### Stage 3 — Bulk CSV Import
+- CSV validation + batch import with duplicate NISN detection
+- Drag-drop upload UI with progress + error detail
+
+### Stage 4 — Usage Tier Enforcement
+- `@require_subscription(feature)` decorator
+- Tier limits: trial (5 exams/yr), basic (10/yr), pro (unlimited), enterprise
+- Applied to exam creation route
+
+### Stage 5 — Pricing & Landing Pages
+- Pricing page with 3-tier comparison + FAQ
+- Landing page demo request form with AJAX submission
+- `/api/demo-request` endpoint backed by audit_logs
