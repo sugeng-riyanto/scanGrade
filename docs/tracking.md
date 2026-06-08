@@ -1,6 +1,6 @@
 # ScanGrade — Tracking Progress
 
-**Last Updated:** 7 June 2026
+**Last Updated:** 8 June 2026
 
 ---
 
@@ -194,7 +194,7 @@
 - **Reset demo data**: Manage.py `reset-data` — user tetap, data dihapus
 - **Teacher feedback string fix**: Parse JSON di grade_detail route
 
-### 7 June 2026 — Rate Limiter Tuning & WhatsApp Badge Fix
+### 8 June 2026 — Rate Limiter Tuning & WhatsApp Badge Fix
 - **Rate limiter**: Increased register limit from 3/3600s to 10/600s; rate-limited non-JSON requests now return HTML page instead of raw JSON
 - **WhatsApp badge**: Moved from `scripts` block to `content_noauth` block in register.html (fix: badge not appearing); replaced Alpine.js x-cloak with pure JS; placed only on `/auth/register` page via base.html (then reverted to register-only); Sembunyikan/Tutup now use simple DOM remove with no persistence (badge always reappears on revisit)
 
