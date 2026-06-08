@@ -2,6 +2,7 @@ import json
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
 from app.decorators.security import require_school_access
+from app.decorators.subscription import require_subscription
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
@@ -164,6 +165,7 @@ def dashboard():
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required
+@require_subscription("create_exam")
 def exam_form():
     supabase = get_supabase()
     if request.method == "GET":

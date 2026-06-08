@@ -271,8 +271,12 @@ def _register_blueprints(app):
     from app.routes.admin_sekolah import admin_sekolah_bp
     from app.routes.tools import tools_bp
     from app.routes.super_admin import super_bp
+    from app.routes.public import public_bp
+    from app.routes.students import student_bp as students_bp
 
     app.register_blueprint(super_bp)
+    app.register_blueprint(public_bp)
+    app.register_blueprint(students_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(exam_bp, url_prefix="/exam")
     app.register_blueprint(admin_bp, url_prefix="/admin")

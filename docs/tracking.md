@@ -218,6 +218,12 @@
 - **Config**: Added `SENTRY_ENVIRONMENT`, `APP_VERSION` environment variables
 - **Tests**: Created `tests/test_error_handling.py` — unit tests for all exception classes, response helpers, error handlers (404, 500, ScanGradeException)
 
+### 8 June 2026 — Bulk Import + Subscription Tiers + Landing (Stage 3-5)
+- **Stage 3 — CSV Bulk Import**: Created `app/services/student_import.py` (CSV validation + batch import with duplicate NISN check, class resolution, auto-email generation); `app/routes/students.py` (import page, CSV upload endpoint, template download); `app/templates/teacher/import_students.html` (drag-drop UI with progress + error details); `manage.py generate-csv` command for sample CSV
+- **Stage 4 — Usage Tier Enforcement**: Created `app/services/subscription_service.py` with `TIER_LIMITS` dict (trial/basic/pro/enterprise — exams/year, AI grading, student quotas); `app/decorators/subscription.py` with `@require_subscription(feature)` decorator; applied to exam creation route in teacher.py; created `supabase/migrations/20260608_usage_tracking.sql` with `usage_tracking`, `demo_requests` tables + `tier` column on `school_subscriptions`
+- **Stage 5 — Pricing & Landing Pages**: Created `app/templates/pricing.html` (3-tier comparison, feature matrix, FAQ accordion, CTA); updated `app/templates/landing.html` (add pricing link, demo request form with AJAX submission); created `app/routes/public.py` (pricing page route + `/api/demo-request` endpoint); registered new blueprints in `__init__.py`
+- **Tests**: Created `tests/test_stage345.py` — CSV validation unit tests, tier limit structure tests, public page response tests, demo request endpoint tests
+
 ### 10 June 2026 — Feature Complete
 - Auth: NISN/NIP login, custom email domain, auto-generate email
 - CRUD: Full search/sort, bulk reset/delete, email display from auth

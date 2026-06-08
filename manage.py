@@ -493,7 +493,7 @@ def _print_credentials():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ScanGrade Data Management")
-    parser.add_argument("command", choices=["seed", "reset", "reset-data", "list", "migrate"])
+    parser.add_argument("command", choices=["seed", "reset", "reset-data", "list", "migrate", "generate-csv"])
     parser.add_argument("--exam", action="store_true", help="Also create sample exams (with seed)")
     parser.add_argument("--demo", action="store_true", help="Use .env.demo")
     args = parser.parse_args()
@@ -508,3 +508,18 @@ if __name__ == "__main__":
         cmd_list(args)
     elif args.command == "migrate":
         print("Migrate not available without DATABASE_URL")
+    elif args.command == "generate-csv":
+        _cmd_generate_csv()
+
+
+def _cmd_generate_csv():
+    import csv, io
+    from flask import send_file
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_students.csv")
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["nama", "nisn", "email", "kelas", "password"])
+        for i in range(1, 101):
+            w.writerow([f"Siswa {i}", f"{1234567890 + i}", f"siswa{i}@sekolah.id", f"X IPA {i % 5 + 1}", "siswa123"])
+    print(f"✅ Generated sample CSV: {path}")
+    print(f"   Import via: /students/import")

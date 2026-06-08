@@ -146,11 +146,57 @@
                 <a href="/auth/register" class="px-8 py-3.5 bg-white text-primary-700 rounded-xl font-extrabold hover:bg-primary-50 transition shadow-lg text-sm">
                     <i class="fas fa-school mr-2"></i>Daftar Sekolah
                 </a>
-                <a href="/demo" class="px-8 py-3.5 border-2 border-white/30 text-white rounded-xl font-extrabold hover:bg-white/10 transition text-sm">
-                    <i class="fas fa-flask mr-2"></i>Coba Demo
+                <a href="/pricing" class="px-8 py-3.5 border-2 border-white/30 text-white rounded-xl font-extrabold hover:bg-white/10 transition text-sm">
+                    <i class="fas fa-tag mr-2"></i>Lihat Harga
                 </a>
             </div>
         </div>
+
+        <!-- Demo Request -->
+        <div class="mt-12 max-w-lg mx-auto bg-white rounded-2xl p-8 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <h3 class="text-lg font-extrabold text-surface-800 text-center">Mau lihat langsung?</h3>
+            <p class="text-xs text-surface-500 text-center mt-1 font-medium">Isi form di bawah, tim kami akan demo-kan langsung.</p>
+            <form id="demo-form" class="mt-5 space-y-3" onsubmit="return submitDemo(event)">
+                <input type="text" name="school_name" required placeholder="Nama Sekolah"
+                       class="w-full px-4 py-2.5 border border-surface-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary-500">
+                <input type="email" name="email" required placeholder="Email"
+                       class="w-full px-4 py-2.5 border border-surface-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary-500">
+                <input type="tel" name="phone" placeholder="No. WhatsApp (opsional)"
+                       class="w-full px-4 py-2.5 border border-surface-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary-500">
+                <button type="submit"
+                        class="w-full py-3 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-extrabold shadow-lg shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 transition text-sm">
+                    <i class="fas fa-paper-plane mr-2"></i>Minta Demo
+                </button>
+            </form>
+            <div id="demo-success" class="hidden mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+                <i class="fas fa-check-circle text-emerald-500 text-2xl"></i>
+                <p class="text-sm font-bold text-emerald-700 mt-1">Terima kasih! Kami akan menghubungi Anda.</p>
+            </div>
+        </div>
+
+        <script>
+        async function submitDemo(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Mengirim...';
+            try {
+                const res = await fetch('/api/demo-request', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({school_name: form.school_name.value, email: form.email.value, phone: form.phone.value}),
+                });
+                const data = await res.json();
+                form.classList.add('hidden');
+                document.getElementById('demo-success').classList.remove('hidden');
+            } catch (err) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Minta Demo';
+                alert('Gagal mengirim. Coba lagi.');
+            }
+        }
+        </script>
 
         <!-- Footer -->
         <div class="mt-12 text-center text-xs text-surface-400">
