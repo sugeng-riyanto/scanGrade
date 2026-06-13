@@ -183,7 +183,7 @@
             </form>
             <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">{{ p.duration_label }}</p>
             <p class="text-2xl font-extrabold text-slate-800 mt-1" x-text="'Rp ' + adjustedPrice({{ p.price }})"></p>
-            <p class="text-xs text-slate-400 mt-1" x-text="perMonth({{ p.price }})"></p>
+            <p class="text-xs text-slate-400 mt-1" x-text="perMonth({{ p.price }}, {{ p.duration_days }})"></p>
             <p class="text-[10px] text-slate-400 mt-0.5">+ biaya admin</p>
             <template x-if="scaledActive && getMultiplier() > 1">
                 <p class="text-xs font-bold text-amber-600 mt-1">
@@ -321,14 +321,17 @@ function subApp() {
             return this.formatPrice(adj);
         },
 
-        perMonth(base) {
+        perMonth(base, durationDays) {
+            if (!durationDays || durationDays <= 0) return '';
+            const monthly = Math.round(base * 30 / durationDays / 1000) * 1000;
             if (this.scaledActive && this.getMultiplier() > 1) {
                 const m = this.getMultiplier();
                 let adj = Math.round(base * m / 1000) * 1000;
                 if (adj < base) adj = base;
-                return 'Rp ' + this.formatPrice(Math.round(adj / 30 / 1000) * 1000) + '/bln';
+                const adjMonthly = Math.round(adj * 30 / durationDays / 1000) * 1000;
+                return 'Rp ' + this.formatPrice(adjMonthly) + '/bln';
             }
-            return 'Rp ' + this.formatPrice(Math.round(base / 30 / 1000) * 1000) + '/bln';
+            return 'Rp ' + this.formatPrice(monthly) + '/bln';
         },
 
         formatPrice(n) {
