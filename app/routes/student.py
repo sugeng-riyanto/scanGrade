@@ -32,10 +32,19 @@ def dashboard():
             query = query.eq("school_id", student_school_id)
         all_exams = query.execute().data or []
         # Filter by class_id if student has one
-        if student_class_id:
-            available_exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0 or student_class_id in e.get("class_ids", [])]
-        else:
-            available_exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0]
+        for e in all_exams:
+            cids = e.get("class_ids") or []
+            if isinstance(cids, str):
+                try:
+                    cids = json.loads(cids)
+                except (json.JSONDecodeError, TypeError):
+                    cids = []
+            if student_class_id:
+                if not cids or student_class_id in cids:
+                    available_exams.append(e)
+            else:
+                if not cids:
+                    available_exams.append(e)
         subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
         submitted_ids = {s["exam_id"] for s in subs_ids}
     except Exception as e:
@@ -160,10 +169,19 @@ def exam_list():
         res = query.order("created_at", desc=True).execute()
         all_exams = res.data or []
         # Filter by class_id if student has one
-        if student_class_id:
-            exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0 or student_class_id in e.get("class_ids", [])]
-        else:
-            exams = [e for e in all_exams if not e.get("class_ids") or len(e.get("class_ids", [])) == 0]
+        for e in all_exams:
+            cids = e.get("class_ids") or []
+            if isinstance(cids, str):
+                try:
+                    cids = json.loads(cids)
+                except (json.JSONDecodeError, TypeError):
+                    cids = []
+            if student_class_id:
+                if not cids or student_class_id in cids:
+                    exams.append(e)
+            else:
+                if not cids:
+                    exams.append(e)
     except Exception as e:
         current_app.logger.error(f"Exam list query error: {e}")
 
