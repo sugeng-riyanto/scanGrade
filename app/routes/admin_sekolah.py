@@ -892,7 +892,7 @@ def students():
 
     classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
     students_raw = supabase.table("students").select(
-        "*, profiles!inner(id, full_name, phone, nisn), classes(name)"
+        "*, profiles!inner(id, full_name, phone), classes(name)"
     ).eq("school_id", sid).order("nisn").execute().data or []
 
     _email_map = {}
@@ -954,7 +954,7 @@ def create_student():
         })
         uid = res.user.id
         supabase.table("profiles").upsert({
-            "id": uid, "full_name": nama, "role": "murid", "nisn": nisn,
+            "id": uid, "full_name": nama, "role": "murid",
             "class_id": class_id, "status": "active", "school_id": sid,
         }).execute()
         supabase.table("students").upsert({
@@ -989,7 +989,6 @@ def edit_student(student_id):
     try:
         if data:
             supabase.table("students").update(data).eq("id", student_id).execute()
-            supabase.table("profiles").update({"nisn": data.get("nisn"), "class_id": data.get("class_id")}).eq("id", student_id).execute()
         if profile_data:
             supabase.table("profiles").update(profile_data).eq("id", student_id).execute()
         log_activity("update", "student", student_id, new_data={**data, **profile_data}, user_id=g.user_id)
