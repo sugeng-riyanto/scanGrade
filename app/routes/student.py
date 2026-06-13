@@ -49,9 +49,6 @@ def dashboard():
             else:
                 if not cids:
                     available_exams.append(e)
-            else:
-                if not cids:
-                    available_exams.append(e)
         subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
         submitted_ids = {s["exam_id"] for s in subs_ids}
     except Exception as e:
