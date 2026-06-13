@@ -81,6 +81,41 @@ def log_violation():
     return jsonify({"violations": results})
 
 
+@api_bp.route("/student/force-submit", methods=["POST"])
+@login_required
+def force_submit():
+    """Force-submit an exam when anti-cheat max violations reached.
+    This is a fallback when the Alpine component cannot be triggered.
+    """
+    data = request.get_json()
+    exam_id = (data or {}).get("exam_id", "")
+    if not exam_id:
+        return jsonify({"error": "exam_id required"}), 400
+
+    supabase = get_supabase()
+    # Find the latest draft submission and submit it
+    try:
+        sub = supabase.table("submissions") \
+            .select("id,answers") \
+            .eq("exam_id", exam_id) \
+            .eq("student_id", g.user_id) \
+            .eq("status", "draft") \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if sub.data:
+            answers = sub.data[0].get("answers") or {}
+            supabase.table("submissions") \
+                .update({"status": "submitted", "answers": answers}) \
+                .eq("id", sub.data[0]["id"]) \
+                .execute()
+            return jsonify({"success": True})
+        return jsonify({"error": "No draft submission found"}), 404
+    except Exception as e:
+        current_app.logger.error("force_submit error: %s", e)
+        return jsonify({"error": str(e)[:100]}), 500
+
+
 @api_bp.route("/violation/count", methods=["GET"])
 @login_required
 def violation_count():

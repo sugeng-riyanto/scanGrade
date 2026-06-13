@@ -105,21 +105,13 @@ def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=5
 
             # Create auth user
             user_email = email or f"{nisn}@siswa.scan-grade.app"
-            supabase.auth.admin.create_user({
-                "email": user_email,
-                "password": password,
-                "user_metadata": {"role": "murid", "full_name": nama},
-                "email_confirm": True,
-            })
-
-            # Fetch the created user to get ID
-            # (create_user returns the user, but we use a direct approach)
             created = supabase.auth.admin.create_user({
                 "email": user_email,
                 "password": password,
                 "user_metadata": {"role": "murid", "full_name": nama},
                 "email_confirm": True,
             })
+            uid = created.user.id
             uid = created.user.id
 
             supabase.table("profiles").upsert({
