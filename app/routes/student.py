@@ -31,8 +31,12 @@ def dashboard():
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         all_exams = query.execute().data or []
-        # Filter by class_id if student has one
+        now_iso = datetime.now(timezone.utc).isoformat()
+        # Filter by class_id if student has one, AND check scheduling
         for e in all_exams:
+            start_at = e.get("start_at")
+            if start_at and str(start_at) > now_iso[:19]:
+                continue
             cids = e.get("class_ids") or []
             if isinstance(cids, str):
                 try:
@@ -41,6 +45,9 @@ def dashboard():
                     cids = []
             if student_class_id:
                 if not cids or student_class_id in cids:
+                    available_exams.append(e)
+            else:
+                if not cids:
                     available_exams.append(e)
             else:
                 if not cids:
@@ -168,8 +175,13 @@ def exam_list():
             query = query.eq("school_id", student_school_id)
         res = query.order("created_at", desc=True).execute()
         all_exams = res.data or []
-        # Filter by class_id if student has one
+        now_iso = datetime.now(timezone.utc).isoformat()
+        # Filter by class_id if student has one, AND check scheduling
         for e in all_exams:
+            # Skip exams with future start_at
+            start_at = e.get("start_at")
+            if start_at and str(start_at) > now_iso[:19]:
+                continue
             cids = e.get("class_ids") or []
             if isinstance(cids, str):
                 try:
@@ -209,6 +221,20 @@ def take_exam(exam_id):
     if not exam:
         flash("Ujian tidak ditemukan", "error")
         return redirect("/student/exams")
+
+    # Check if exam is scheduled for the future
+    start_at = exam.get("start_at")
+    if start_at:
+        try:
+            if isinstance(start_at, str):
+                start_dt = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+            else:
+                start_dt = start_at
+            if start_dt > datetime.now(timezone.utc):
+                flash("Ujian ini belum tersedia. Silakan cek kembali jadwal.", "error")
+                return redirect("/student/exams")
+        except Exception:
+            pass
 
     # Check if student already reached max attempts
     max_attempts = exam.get("max_attempts", 1)
