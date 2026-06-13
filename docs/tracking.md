@@ -241,3 +241,9 @@
 - **API routes**: `POST /api/students/import` (pandas CSV, chunk 100, duplicate NISN skip); `GET /api/exams/<exam_id>/report` (stats mean/median/highest/lowest, `?format=excel` with Indonesian column names via openpyxl)
 - **DevOps**: Sentry 100% error / 10% traces; Flask-Limiter (auth:5/m, OMR:20/m, API:100/m) with Redis/memory:// fallback; `deploy/scangrade.service` systemd template; `deploy/deploy.sh` script
 - **Bug fixes**: `json.loads()` for `class_ids` handles single-quote lists; demo seed passes dicts directly for JSONB columns (no double-encode); FK-safe reset order in `_reset_demo_data()`
+
+### 8 June 2026 — Anti-Cheat Overhaul & Penalty Fix
+- **Standalone anti-cheat**: Added independent `alert()`-based anti-cheat script that works outside Alpine.js component; sends violations to `/api/violation/log` via `sendBeacon`; triggers auto-submit at max violations via Alpine's `submitExam()` + direct `sendBeacon` fallback
+- **Penalty persistence**: Fixed `/api/violation/log` endpoint to save penalty to `submissions.penalty` (was logging to `violation_logs` but never updating the submission); penalties now visible in student dashboard, results, PDF, and teacher grading/results pages
+- **Attempt check**: `take_exam` route now validates `max_attempts` before rendering exam page; redirects with flash error if already maxed out
+- **Anti-cheat defaults**: Route-level defaults for all anti-cheat fields (handle NULL/missing columns); pre-rendered `anti_cheat_config` JSON from Python (bypasses fragile Jinja2 `tojson` on dict)
