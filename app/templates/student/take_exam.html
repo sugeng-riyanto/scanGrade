@@ -2702,6 +2702,20 @@ function examApp(duration, totalQ) {
         if (maxViolations > 0 && violationCount >= maxViolations && autoSubmit) {
             alert('[ANTI-CHEAT] Pelanggaran maksimal! Ujian akan dikumpulkan.');
             acSubmitted = true;
+            // Trigger Alpine component's submit
+            try {
+                var alpineEl = document.querySelector('[x-data]');
+                if (alpineEl && alpineEl.__x) {
+                    alpineEl.__x.$data.submitted = true;
+                    alpineEl.__x.$data.submitExam();
+                }
+            } catch(e) { console.warn('[AC-STANDALONE] auto-submit trigger failed', e); }
+            // Fallback: direct POST
+            try {
+                navigator.sendBeacon('/student/exams/{{ exam.id }}/submit',
+                    new Blob([JSON.stringify({answers_json: {}})],
+                    {type: 'application/json'}));
+            } catch(e) {}
         }
     }
 
