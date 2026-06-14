@@ -1,25 +1,29 @@
 [Unit]
 Description=ScanGrade Flask Application
-After=network.target
+After=network.target redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+User=scangrade
+Group=scangrade
 WorkingDirectory=/opt/scangrade
 EnvironmentFile=/opt/scangrade/.env
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/scangrade/.venv/bin/gunicorn wsgi:app -c gunicorn.conf.py
 Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
+RestartSec=5
+
+# Rate limiting
+LimitNOFILE=65536
+LimitNPROC=4096
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
 PrivateTmp=true
+PrivateDevices=true
 
 [Install]
 WantedBy=multi-user.target
