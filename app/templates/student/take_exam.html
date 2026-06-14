@@ -2611,4 +2611,12 @@ function examApp(duration, totalQ) {
     };
 }
 </script>
+<script>
+(function(){
+    if (!{{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }}) return;
+    var v=0,p=0,t=0,d=0,eid='{{ exam.id }}',b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }},m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }},a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
+    function h(){v++;var msg='',cp=0;if(v===1)msg='PERHATIAN! Anda berpindah tab.';else{cp=v===2?b:(v===3?b*2:b*3);p+=cp;msg='PELANGGARAN #'+v+'! Penalti: -'+cp+' poin';}alert(msg);try{fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:cp}}]),keepalive:true});}catch(ex){}if(m>0&&v>=m&&a&&!d){d=1;alert('Pelanggaran maksimal! Ujian dikumpulkan.');try{fetch('/api/student/force-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:eid}),keepalive:true});}catch(ex){}setTimeout(function(){window.location.href='/student/dashboard';},1500);}}
+    document.addEventListener('visibilitychange',function(){if(d)return;if(document.hidden){t=setTimeout(function(){if(!d)h();},1500);}else{if(t){clearTimeout(t);t=0;}}});
+})();
+</script>
 {% endblock %}
