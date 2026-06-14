@@ -470,6 +470,7 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_template BOOLEAN DEFAULT false;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS source_exam_id UUID;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS max_attempts INTEGER DEFAULT 1;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS publish_mode TEXT DEFAULT 'manual';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS question_pages JSONB DEFAULT '{}';
 
 -- Prevent duplicate class/subject names per school
 ALTER TABLE classes ADD COLUMN IF NOT EXISTS created_by UUID;

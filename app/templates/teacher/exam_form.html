@@ -125,8 +125,7 @@
                             <i class="fas fa-plus-circle"></i>Tambah MCQ
                         </button>
                         <button type="button" @click="addEssay()"
-                                class="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-emerald-200 transition"
-                                :class="hasEssay ? 'opacity-50 cursor-not-allowed' : ''" :disabled="hasEssay">
+                                class="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-emerald-200 transition">
                             <i class="fas fa-pencil-alt"></i>Tambah Esai
                         </button>
                         <button type="button" @click="normalizeTo100()"
@@ -149,21 +148,26 @@
                                     <div class="flex items-center gap-2">
                                         <span class="text-sm font-extrabold text-slate-700" x-text="'Soal ' + (i + 1)"></span>
                                         <span class="text-xs px-2 py-1 rounded-full font-extrabold"
-                                              :class="q.type === 'mcq' ? 'bg-amber-100 text-amber-700' : (q.type === 'essay_text' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700')"
-                                              x-text="q.type === 'mcq' ? 'MCQ' : (q.type === 'essay_text' ? 'Esai Teks' : 'Esai Canvas')"></span>
+                                              :class="q.type === 'mcq' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
+                                              x-text="q.type === 'mcq' ? 'MCQ' : 'Esai'"></span>
                                         <span x-show="q.bonus" class="text-xs px-2 py-1 rounded-full font-extrabold bg-purple-100 text-purple-700">Bonus</span>
                                     </div>
                                     <div class="flex items-center gap-2">
                                         <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1"
-                                                x-model="q.type" @change="onTypeChange(i)">
+                                                x-model="q.type">
                                             <option value="mcq">MCQ</option>
-                                            <option value="essay_text">Esai Teks</option>
-                                            <option value="essay">Esai Canvas</option>
+                                            <option value="essay">Esai</option>
                                         </select>
                                         <button type="button" @click="removeQuestion(i)" class="text-slate-400 hover:text-red-500 p-1 transition">
                                             <i class="fas fa-times-circle text-sm"></i>
                                         </button>
                                     </div>
+                                </div>
+                                <!-- Page Range (wajib diisi) -->
+                                <div class="mb-2">
+                                    <input type="text" :name="'pages_' + i" x-model="q.pages" required
+                                           placeholder="Halaman PDF (contoh: 1-3 atau 1,2,3)"
+                                           class="w-full text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-primary-500 transition">
                                 </div>
 
                                 <div x-show="q.type === 'mcq'" class="mcq-options space-y-2">
@@ -185,11 +189,8 @@
                                     </div>
                                 </div>
 
-                                <div x-show="q.type === 'essay_text'" class="text-xs font-bold text-blue-700 bg-blue-50 rounded-xl px-3 py-2 border border-blue-100">
-                                    <i class="fas fa-align-left mr-1"></i>Siswa mengetik jawaban paragraf
-                                </div>
                                 <div x-show="q.type === 'essay'" class="text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
-                                    <i class="fas fa-pencil-alt mr-1"></i>Siswa menggambar/menulis di atas PDF
+                                    <i class="fas fa-pencil-alt mr-1"></i>Siswa mengetik jawaban + menggambar di atas PDF
                                 </div>
                             </div>
                         </template>
@@ -199,6 +200,7 @@
                     <input type="hidden" name="question_types" id="question-types-input" :value="getTypesJson()">
                     <input type="hidden" name="answer_key" id="answer-key-input" :value="getAnswerKeyJson()">
                     <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
+                    <input type="hidden" name="question_pages" id="question-pages-input" :value="getPagesJson()">
                 </div>
 
                 <input type="hidden" name="anti_cheat_enabled" value="true">
@@ -348,10 +350,11 @@ function questionManager() {
             try {
                 var qtypes = {{ (exam.question_types if exam else {}) | tojson | safe }};
                 var akey = {{ (exam.answer_key if exam else {}) | tojson | safe }};
+                var ppages = {{ (exam.question_pages if exam else {}) | tojson | safe }};
                 if (Object.keys(qtypes).length === 0) return [];
                 return Object.keys(qtypes).map(function(i) {
                     var t = qtypes[i];
-                    var q = {_id: parseInt(i) + 1, type: t, audio: '', youtube: ''};
+                    var q = {_id: parseInt(i) + 1, type: t, pages: ppages[i] || ''};
                     if (t === 'mcq') {
                         var k = akey[i];
                         q.bonus = k === 'bonus';
@@ -373,12 +376,11 @@ function questionManager() {
         _mcqPct: 70,
         _essayPct: 30,
         addMcq() {
-            this.questions.push({_id: ++this._cid, type:'mcq', answers:['A'], bonus:false, audio:'', youtube:''});
+            this.questions.push({_id: ++this._cid, type:'mcq', answers:['A'], bonus:false, pages:''});
             this._mcqPct = 70; this._essayPct = 30;
         },
         addEssay() {
-            if (this.hasEssay) return;
-            this.questions.push({_id: ++this._cid, type:'essay_text', audio:'', youtube:''});
+            this.questions.push({_id: ++this._cid, type:'essay', pages:''});
             this._mcqPct = 70; this._essayPct = 30;
         },
         removeQuestion(i) { this.questions.splice(i, 1); },
@@ -390,7 +392,7 @@ function questionManager() {
             if (idx > -1) q.answers.splice(idx, 1); else q.answers.push(opt);
             if (q.answers.length === 0) q.answers.push(opt);
         },
-        onTypeChange(i) { this.questions[i].bonus = false; },
+        onTypeChange(i) { this.questions[i].bonus = false; if (this.questions[i].type !== 'mcq') this.questions[i].answers = []; },
         onBonusToggle(i) { if (this.questions[i].bonus) this.questions[i].answers = []; },
         normalizeTo100() {
             const m = this.mcqCount, e = this.essayCount;
@@ -410,6 +412,9 @@ function questionManager() {
         },
         getWeightsJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.type === 'mcq' ? this.mcqPerQ : this.essayPerQ])));
+        },
+        getPagesJson() {
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.pages || ''])));
         }
     };
 }
