@@ -12,7 +12,7 @@
 .cred-cell:hover { background: #f8fafc; transform: scale(1.02); }
 </style>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50" x-data="{ copyText(t) { navigator.clipboard.writeText(t).then(()=>{let e=document.createElement('div');e.className='fixed top-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg z-50 animate-slide-down';e.textContent='✅ Tersalin!';document.body.appendChild(e);setTimeout(()=>e.remove(),1500)}).catch(()=>{});} }">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50" x-data="{ copyText(t) { try{navigator.clipboard.writeText(t)}catch(e){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}clearTimeout(this._ct);var o=document.getElementById('ctoast');if(o)o.remove();var d=document.createElement('div');d.id='ctoast';d.className='fixed top-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg z-50';d.textContent='Tersalin!';document.body.appendChild(d);this._ct=setTimeout(function(){d.remove()},1500)} }">
     <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
         <a href="/" class="flex items-center gap-2 group">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:shadow-purple-500/40 transition">
