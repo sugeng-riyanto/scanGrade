@@ -187,6 +187,7 @@
                     penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
                     max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
                     fullscreen_required: {{ 'true' if (exam.get('fullscreen_required') if exam else True) else 'false' }},
+                    watermark_name: {{ 'true' if (exam.get('watermark_name') if exam else True) else 'false' }},
                     block_copy_paste: {{ 'true' if (exam.get('block_copy_paste') if exam else True) else 'false' }},
                     block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
                     auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
