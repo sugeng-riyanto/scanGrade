@@ -81,6 +81,11 @@
             <button id="btn-stop-cam" class="border-2 border-surface-200 px-5 py-2.5 rounded-xl text-surface-700 hover:bg-surface-50 text-sm font-bold transition hidden">
                 <i class="fas fa-stop mr-1"></i>Stop
             </button>
+            <span class="text-surface-300 font-bold text-sm">|</span>
+            <label class="bg-gradient-to-r from-violet-500 to-purple-500 text-white px-5 py-2.5 rounded-xl hover:from-violet-600 hover:to-purple-600 text-sm font-extrabold shadow-lg shadow-violet-500/25 transition cursor-pointer">
+                <i class="fas fa-upload mr-1"></i>Upload File
+                <input type="file" id="file-upload" accept="image/*,.pdf" class="hidden">
+            </label>
             <span id="scan-status" class="text-sm font-bold text-surface-500 hidden"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</span>
         </div>
     </div>
@@ -352,6 +357,19 @@ document.getElementById('btn-save').addEventListener('click', async function() {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-save mr-1"></i>Simpan Hasil';
     }
+});
+
+// File upload handler
+document.getElementById('file-upload').addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf';
+    if (isPdf) {
+        // PDF → extract first page as image
+        alert('PDF akan diproses (halaman pertama).');
+    }
+    await processScan(file);
+    this.value = '';
 });
 </script>
 {% endblock %}

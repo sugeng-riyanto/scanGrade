@@ -186,27 +186,41 @@ def scan_process():
         return jsonify({"error": "Tidak ada gambar yang dikirim"}), 400
 
     image_file = request.files["image"]
+    raw_bytes = image_file.read()
+
+    # 0. Handle PDF upload — convert first page to image
+    ext = os.path.splitext(image_file.filename or "")[1].lower()
+    if ext == ".pdf":
+        try:
+            from pdf2image import convert_from_bytes
+            pages = convert_from_bytes(raw_bytes, first_page=1, last_page=1)
+            if not pages:
+                return jsonify({"error": "Gagal membaca PDF"}), 422
+            out = io.BytesIO()
+            pages[0].save(out, format="JPEG", quality=90)
+            raw_bytes = out.getvalue()
+        except ImportError:
+            return jsonify({"error": "PDF support tidak tersedia (install pdf2image)"}), 422
+        except Exception as e:
+            return jsonify({"error": f"Gagal memproses PDF: {str(e)[:100]}"}), 422
 
     # 1. Validate extension
-    ext = os.path.splitext(image_file.filename or "")[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        return jsonify({"error": "Format file tidak didukung. Gunakan .jpg, .jpeg, atau .png"}), 422
+    if ext not in ALLOWED_EXTENSIONS and ext != ".pdf":
+        return jsonify({"error": "Format file tidak didukung. Gunakan .jpg, .jpeg, .png, atau .pdf"}), 422
 
     # 2. Validate MIME type via python-magic
+    mime_type = None
     try:
         import magic
-        header = image_file.read(2048)
-        image_file.seek(0)
+        header = raw_bytes[:2048]
         mime_type = magic.from_buffer(header, mime=True)
-        if mime_type not in ("image/jpeg", "image/png"):
+        if ext != ".pdf" and mime_type not in ("image/jpeg", "image/png"):
             return jsonify({"error": f"Tipe file tidak valid ({mime_type}). Hanya jpg/png yang diizinkan."}), 422
     except ImportError:
         current_app.logger.warning("python-magic not installed; skipping MIME validation")
 
     # 3. Validate size
-    image_file.seek(0, 2)
-    file_size = image_file.tell()
-    image_file.seek(0)
+    file_size = len(raw_bytes)
     if file_size > MAX_IMAGE_SIZE:
         return jsonify({"error": f"Gambar terlalu besar ({file_size/1024/1024:.1f}MB). Maksimal 20MB."}), 413
     if file_size == 0:
@@ -215,19 +229,15 @@ def scan_process():
     # 4. Verify image integrity + strip EXIF via Pillow
     try:
         from PIL import Image
-        img_pil = Image.open(image_file)
-        img_pil.verify()  # raises on corrupt
-        image_file.seek(0)
-
-        # Re-open after verify (verify consumes the file)
-        img_pil = Image.open(image_file)
-        # Strip EXIF by re-saving without EXIF data
+        buf = io.BytesIO(raw_bytes)
+        img_pil = Image.open(buf)
+        img_pil.verify()
+        buf.seek(0)
+        img_pil = Image.open(buf)
         clean_buf = io.BytesIO()
-        # Save without EXIF (only PNG/JPEG)
         save_format = "PNG" if mime_type == "image/png" else "JPEG"
         if "exif" in img_pil.info:
             img_pil.info.pop("exif")
-        # Use raw data if PNG, convert to RGB for JPEG
         if save_format == "JPEG" and img_pil.mode != "RGB":
             img_pil = img_pil.convert("RGB")
         img_pil.save(clean_buf, format=save_format)
@@ -453,6 +463,7 @@ def grade_batch():
 
 @api_bp.route("/scan/save", methods=["POST"])
 @login_required
+@_rate_limit("30 per minute")
 def scan_save():
     """Save scanned answers as a submission."""
     data = request.get_json()
@@ -468,11 +479,17 @@ def scan_save():
 
     supabase = get_supabase()
 
-    # Verify exam belongs to this teacher
+    # Verify exam exists and user has access (teacher or admin_sekolah)
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
-    if str(exam.get("teacher_id")) != g.user_id:
+    user_role = g.get("user_role")
+    user_school = g.get("user_school_id")
+    if user_role == "guru" and str(exam.get("teacher_id")) != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
+    if user_role == "admin_sekolah" and str(exam.get("school_id")) != str(user_school):
+        return jsonify({"error": "Forbidden"}), 403
+    if user_role not in ("guru", "admin_sekolah"):
         return jsonify({"error": "Forbidden"}), 403
 
     # Grade MCQ answers
