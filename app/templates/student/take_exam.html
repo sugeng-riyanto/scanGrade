@@ -1,7 +1,32 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
-{% block page_title %}{{ exam.title }}{% endblock %}
 {% block head_extra %}
+<script>
+(function(){
+    var e={{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
+    if(!e)return;
+    var v=0,tp=0,timer=0,d=0,b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
+    var m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
+    var a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
+    var eid='{{ exam.id }}';
+    function h(){
+        v++;var msg,p=0;
+        if(v===1){msg='PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';}
+        else{p=v===2?b:(v===3?b*2:b*3);tp+=p;msg='PELANGGARAN #'+v+'! Penalti: -'+p+' poin';}
+        alert(msg);
+        try{navigator.sendBeacon('/api/violation/log',new Blob([JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:p}}])],{type:'application/json'}));}catch(ex){}
+        if(m>0&&v>=m&&a&&!d){
+            d=1;
+            alert('Pelanggaran maksimal! Ujian dikumpulkan.');
+            try{navigator.sendBeacon('/api/student/force-submit',new Blob([JSON.stringify({exam_id:eid})],{type:'application/json'}));}catch(ex){}
+            setTimeout(function(){window.location.href='/student/dashboard';},1500);
+        }
+    }
+    document.addEventListener('visibilitychange',function(){if(d)return;if(document.hidden){timer=setTimeout(h,1500);}else{if(timer){clearTimeout(timer);timer=0;}}});
+    // Backup: window blur
+    document.addEventListener('webkitvisibilitychange',function(){if(d)return;if(document.webkitHidden){timer=setTimeout(h,1500);}else{if(timer){clearTimeout(timer);timer=0;}}});
+})();
+</script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
@@ -2659,41 +2684,5 @@ function examApp(duration, totalQ) {
     };
 }
 </script>
-<script>
-(function() {
-    var enabled = {{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
-    if (!enabled) return;
-    var vc = 0, tp = 0, timer = null, done = false;
-    var base = {{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
-    var maxV = {{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
-    var autoSub = {{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
-
-    function viol() {
-        vc++;
-        var msg, p = 0;
-        if (vc === 1) { msg = 'PERHATIAN! Anda berpindah tab.'; }
-        else {
-            p = vc === 2 ? base : (vc === 3 ? base*2 : base*3);
-            tp += p;
-            msg = 'PELANGGARAN #' + vc + '! Penalti: -' + p + ' poin';
-        }
-        alert('[SCANGRADE] ' + msg);
-        try {
-            navigator.sendBeacon('/api/violation/log',
-                new Blob([JSON.stringify([{exam_id:'{{ exam.id }}', violation_type:'tab_switch', timestamp:Date.now()/1000, metadata:{violation_count:vc, penalty:p}}])], {type:'application/json'}));
-        } catch(e) {}
-        if (maxV > 0 && vc >= maxV && autoSub && !done) {
-            done = true;
-            alert('Pelanggaran maksimal! Ujian akan dikumpulkan.');
-            try { navigator.sendBeacon('/api/student/force-submit', new Blob([JSON.stringify({exam_id:'{{ exam.id }}'})], {type:'application/json'})); } catch(e) {}
-            setTimeout(function(){ window.location.href = '/student/dashboard'; }, 1500);
-        }
-    }
-    document.addEventListener('visibilitychange', function() {
-        if (done) return;
-        if (document.hidden) { timer = setTimeout(viol, 1500); }
-        else { if (timer) { clearTimeout(timer); timer = null; } }
-    });
-})();
 </script>
 {% endblock %}
