@@ -714,7 +714,6 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script defer src="/static/js/tools.js"></script>
 <script>
 console.log('[Exam] Page loaded, Alpine should init examApp');
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
