@@ -1,6 +1,42 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block head_extra %}
+<script>
+// examApp proxy — auto-patches with real implementation when available
+window.examApp = function(duration, totalQ) {
+    var obj = {
+        timeLeft: duration, totalQ: totalQ, submitted: false,
+        showExamAgreement: true, agreed: false,
+        questions: [], answered: {}, answersText: {},
+        violationCount: 0, totalPenalty: 0, antiCheat: {},
+        init: function() {
+            var self = this;
+            function patch() {
+                if (window.__examAppReal) {
+                    var real = window.__examAppReal(duration, totalQ);
+                    for (var k in real) {
+                        if (typeof real[k] === 'function') self[k] = real[k];
+                    }
+                    if (real.antiCheat) self.antiCheat = real.antiCheat;
+                    if (real.questions) self.questions = real.questions;
+                    if (real.totalPages !== undefined) self.totalPages = real.totalPages;
+                    if (real.pages) self.pages = real.pages;
+                    // Call real init
+                    if (real.init) real.init.call(self);
+                } else {
+                    setTimeout(patch, 50);
+                }
+            }
+            patch();
+        },
+        agreeExam: function() {
+            this.showExamAgreement = false;
+            try { localStorage.setItem('sg_agreed_', '1'); } catch(e) {}
+        },
+    };
+    return obj;
+};
+</script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
@@ -719,7 +755,7 @@ console.log('[Exam] Page loaded, Alpine should init examApp');
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 
-window.examApp = function examApp(duration, totalQ) {
+window.__examAppReal = function examAppReal(duration, totalQ) {
     return {
         timeLeft: duration,
         sidebarOpen: false,
