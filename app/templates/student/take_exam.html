@@ -715,6 +715,7 @@
 {% endblock %}
 {% block scripts %}
 <script>
+alert('Script running - examApp will be defined now');
 console.log('[Exam] Page loaded, Alpine should init examApp');
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
