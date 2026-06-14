@@ -629,7 +629,7 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="q.type === 'essay_text'">
+                    <template x-if="q.type === 'essay_text' || q.type === 'essay'">
                         <div class="mt-2">
                             <div class="flex items-center gap-2 mb-2">
                                 <span class="text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
@@ -669,6 +669,7 @@
 <script>
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
+const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
 
 function examApp(duration, totalQ) {
     return {
@@ -693,10 +694,15 @@ function examApp(duration, totalQ) {
                 answer: null,
                 audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
                 youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
-                canvas: QUESTION_CANVAS[i] || false,
+                canvas: QUESTION_CANVAS[i] || ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] === 'essay' || false,
             };
         }),
-        // Per-page per-question storage
+        // Per-question page range from question_pages
+        get qPages() { return QUESTION_PAGES[this.currentQ] || ''; },
+        get pageLabel() {
+            var p = this.qPages;
+            return p ? 'Hlm ' + p : '';
+        },
         textBoxes: {},         // {i: {p: [{x_pct, y_pct, text}, ...]}}
         hasDrawn: {},          // {i: {p: true/false}}
         canvasData: {},        // {i: {p: "data:..."}} — saved canvas data URLs per page
