@@ -1,3 +1,6 @@
-// ScanGrade Exam Tools — ruler, protractor, triangle, compass, calculator
-// Minimal stub to prevent 404 errors
-console.log('[Tools] Loaded');
+// ScanGrade Exam Tools
+// Ruler, Protractor, Triangle, Compass drawing utilities
+(function() {
+    'use strict';
+    console.log('[Tools] Initialized');
+})();

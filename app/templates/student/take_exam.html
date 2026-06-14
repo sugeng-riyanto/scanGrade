@@ -1,15 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
+{% block page_title %}{{ exam.title }}{% endblock %}
 {% block head_extra %}
-<script>
-window.examApp = function(duration, totalQ) {
-    if (window.__examAppReal) return window.__examAppReal(duration, totalQ);
-    return {timeLeft:duration,totalQ:totalQ,submitted:false,showExamAgreement:true,agreed:false,questions:[],answered:{},answersText:{},violationCount:0,totalPenalty:0,antiCheat:{},
-        init(){var s=this;!function p(){if(window.__examAppReal){var r=window.__examAppReal(duration,totalQ);for(var k in r){if(typeof r[k]==='function')s[k]=r[k]}if(r.questions)s.questions=r.questions;if(r.antiCheat)s.antiCheat=r.antiCheat;if(r.init)r.init.call(s)}else setTimeout(p,50)}()},
-        agreeExam(){this.showExamAgreement=false;try{localStorage.setItem('sg_agreed_','1')}catch(e){}},
-    };
-};
-</script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
@@ -67,45 +59,7 @@ window.examApp = function(duration, totalQ) {
 </style>
 {% endblock %}
 {% block content %}
-<div x-data="window.examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
-    <!-- Anti-Cheat Status Badge (updated by script) -->
-    <div id="ac-bar" class="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 border" style="background:#f0fdf4;color:#16a34a;border-color:#bbf7d0;">
-        <i class="fas fa-shield-alt"></i>
-        <span id="ac-status">Anti-Cheat Aktif — switch tab untuk test</span>
-        <span class="ml-auto text-[10px] opacity-60" id="ac-stats">Violasi: 0 | Penalti: 0</span>
-    </div>
-    <script>
-    (function(){
-        var bar=document.getElementById('ac-bar'),st=document.getElementById('ac-status'),stats=document.getElementById('ac-stats');
-        var e={{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
-        if(!e){bar.style.background='#fef2f2';bar.style.color='#dc2626';bar.style.borderColor='#fca5a5';st.textContent='Anti-Cheat NONAKTIF';return;}
-        var v=0,tp=0,timer=0,d=0,b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
-        var m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
-        var a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
-        var eid='{{ exam.id }}',pending=0;
-        function fire(){
-            v++;pending=0;var msg,p=0;
-            if(v===1){msg='PERHATIAN! Anda berpindah tab.';st.textContent=msg;}
-            else{p=v===2?b:(v===3?b*2:b*3);tp+=p;msg='PELANGGARAN #'+v+'! Penalti: -'+p+' poin';st.textContent=msg;}
-            stats.textContent='Violasi: '+v+' | Penalti: '+tp;
-            bar.style.background='#fef2f2';bar.style.color='#dc2626';bar.style.borderColor='#fca5a5';
-            alert(msg);
-            try{fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:p}}]),keepalive:true});}catch(ex){}
-            if(m>0&&v>=m&&a&&!d){
-                d=1;st.textContent='PELANGGARAN MAKSIMAL!';alert('Pelanggaran maksimal! Ujian dikumpulkan.');
-                // Use fetch with keepalive (waits for server response unlike sendBeacon)
-                fetch('/api/student/force-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:eid}),keepalive:true})
-                .then(function(){window.location.href='/student/dashboard';})
-                .catch(function(){window.location.href='/student/dashboard';});
-            }
-        }
-        document.addEventListener('visibilitychange',function(){
-            if(d)return;
-            if(document.hidden){timer=setTimeout(function(){pending=1;st.textContent='⚠️ Terdeteksi pindah tab...';},1500);}
-            else{if(timer){clearTimeout(timer);timer=0;}if(pending){pending=0;fire();}}
-        });
-    })();
-    </script>
+<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
     <!-- Top Bar -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex items-center justify-between border border-surface-100">
         <div class="flex items-center gap-3">
@@ -206,11 +160,6 @@ window.examApp = function(duration, totalQ) {
             <i class="fas fa-exclamation-triangle"></i>Penalti: -<span x-text="totalPenalty"></span>
         </div>
     </template>
-    <!-- Static anti-cheat badge (always visible when enabled) -->
-    <div x-show="antiCheat.enabled && !submitted" x-cloak
-         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-200 shrink-0">
-        <i class="fas fa-shield-alt text-[8px]"></i> Terproteksi
-    </div>
 
     <!-- Scientific Calculator (standar matematika/fisika) -->
     <div x-show="showCalculator && !submitted && !showExamAgreement" x-transition x-cloak
@@ -403,14 +352,7 @@ window.examApp = function(duration, totalQ) {
         <div class="flex-1 min-w-0">
     <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit">
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
-            <div x-show="!submitted" class="mb-3">
-                <template x-if="questions.length === 0">
-                    <div class="bg-white rounded-2xl p-8 text-center text-slate-400 border border-slate-200">
-                        <i class="fas fa-inbox text-4xl mb-3"></i>
-                        <p class="font-bold">Ujian ini belum memiliki soal</p>
-                        <p class="text-xs mt-1">Hubungi guru Anda untuk menambahkan soal</p>
-                    </div>
-                </template>
+            <div x-show="!submitted" style="display:none" class="mb-3">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
                     <div x-show="currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
@@ -723,12 +665,12 @@ window.examApp = function(duration, totalQ) {
 </div>
 {% endblock %}
 {% block scripts %}
+<script defer src="/static/js/tools.js"></script>
 <script>
-console.log('[Exam] Page loaded, Alpine should init examApp');
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 
-window.__examAppReal = function examAppReal(duration, totalQ) {
+function examApp(duration, totalQ) {
     return {
         timeLeft: duration,
         sidebarOpen: false,
@@ -822,8 +764,20 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
         showViolationBanner: false,
         violationMessage: '',
         violationType: 'warning',
-        antiCheat: {{ anti_cheat_config | safe }},
-        // Agreement widget — auto-dismiss if already agreed in this session
+        antiCheat: {{ {
+            'enabled': exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True,
+            'penalty_per_violation': exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5,
+            'max_violations': exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5,
+            'auto_submit_on_max': exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True,
+            'fullscreen_required': exam.get('fullscreen_required', True) if exam.get('fullscreen_required') is not none else True,
+            'randomize_questions': exam.get('randomize_questions', False) if exam.get('randomize_questions') is not none else False,
+            'randomize_options': exam.get('randomize_options', False) if exam.get('randomize_options') is not none else False,
+            'watermark_name': exam.get('watermark_name', True) if exam.get('watermark_name') is not none else True,
+            'block_copy_paste': exam.get('block_copy_paste', True) if exam.get('block_copy_paste') is not none else True,
+            'block_right_click': exam.get('block_right_click', True) if exam.get('block_right_click') is not none else True,
+            'allow_calculator': exam.get('allow_calculator', False) if exam.get('allow_calculator') is not none else False,
+        } | tojson | safe }},
+        // Agreement widget
         showExamAgreement: (function() { try { return !localStorage.getItem('sg_agreed_' + '{{ exam.id }}'); } catch(e) { return true; } })(),
         agreed: false,
         examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
@@ -850,22 +804,6 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
         audioInputLabel: '',
         audioOutputLabel: '',
         init() {
-            // Clear any stale timers from bfcache/page-restore
-            if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
-            if (this._offlinePollTimer) { clearInterval(this._offlinePollTimer); this._offlinePollTimer = null; }
-            // Reset all anti-cheat state
-            this.violationCount = 0;
-            this.totalPenalty = 0;
-            this.submitted = false;
-            // Handle bfcache restore — reset state completely
-            window.addEventListener('pageshow', (e) => {
-                if (e.persisted) {
-                    this.violationCount = 0;
-                    this.totalPenalty = 0;
-                    this.submitted = false;
-                    if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
-                }
-            });
             this.timer = setInterval(() => {
                 if (this.timeLeft <= 0) this.submitExam();
                 else this.timeLeft--;
@@ -883,22 +821,10 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
             window.addEventListener('offline', () => this.onGoOffline());
             window.addEventListener('beforeunload', (e) => {
                 this.saveToLocal();
-                if (this.submitted) return;
-                // Detect navigation away from exam (back/forward/close)
                 if (this.dirty) {
                     const data = this.getAnswersLight();
-                    fetch('/api/student/sync-draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:'{{ exam.id }}',answers:data,light:true}),keepalive:true});
-                }
-                // Log violation for navigating away
-                if (this.antiCheat.enabled) {
-                    this.violationCount++;
-                    const base = this.antiCheat.penalty_per_violation || 5;
-                    let p = 0;
-                    if (this.violationCount >= 2) {
-                        p = this.violationCount === 2 ? base : (this.violationCount === 3 ? base * 2 : base * 3);
-                        this.totalPenalty += p;
-                    }
-                    fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:'{{ exam.id }}',violation_type:'nav_away',timestamp:Date.now()/1000,metadata:{violation_count:this.violationCount,penalty:p}}]),keepalive:true});
+                    navigator.sendBeacon('/api/student/sync-draft',
+                        new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data})], {type: 'application/json'}));
                 }
             });
             // Shuffle questions if enabled
@@ -925,49 +851,9 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
                 this.initStatusBar();
                 this.updateScrollState();
                 this.loadDraft();
-                // Reset violations AFTER loadDraft (ignore stale localStorage data)
-                this.violationCount = 0;
-                this.totalPenalty = 0;
+                this.setupAntiCheat();
                 if (this.antiCheat.watermark_name) this.startWatermark();
             });
-            // ─── Anti-cheat: set up DIRECTLY in init (not deferred) ───
-            if (this.antiCheat.enabled) {
-                const ac = this;
-                this._blurTimer = null;
-                // Show badge in topbar
-                const badge = document.createElement('span');
-                badge.id = 'anti-cheat-badge';
-                badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-200';
-                badge.innerHTML = '<i class="fas fa-shield-alt text-[8px]"></i> Terproteksi';
-                const bar = document.querySelector('.sticky-topbar .flex.items-center.gap-3');
-                if (bar) bar.prepend(badge);
-                // Fullscreen
-                if (ac.antiCheat.fullscreen_required) {
-                if (ac.antiCheat.fullscreen_required) {
-                    document.addEventListener('fullscreenchange', () => {
-                        if (ac.submitted) return;
-                        if (!document.fullscreenElement) {
-                            ac.violationMessage = 'Keluar dari layar penuh. Tekan F11 untuk kembali.';
-                            ac.violationType = 'warning';
-                            ac.showViolationBanner = true;
-                            setTimeout(() => { ac.showViolationBanner = false; }, 4000);
-                        }
-                    });
-                }
-                // Right-click
-                if (ac.antiCheat.block_right_click) {
-                    document.addEventListener('contextmenu', e => e.preventDefault());
-                }
-                // Copy-paste
-                if (ac.antiCheat.block_copy_paste) {
-                    document.addEventListener('copy', e => { if (!ac.submitted) e.preventDefault(); });
-                    document.addEventListener('cut', e => { if (!ac.submitted) e.preventDefault(); });
-                    document.addEventListener('paste', e => { if (!ac.submitted) e.preventDefault(); });
-                }
-                console.log('[AntiCheat] DIRECT setup complete');
-            } else {
-                console.log('[AntiCheat] Disabled by config');
-            }
         },
         onGoOnline() {
             this.syncStatus = 'saving';
@@ -985,7 +871,6 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
             this.dirty = true;
         },
         setupAntiCheat() {
-            console.log('[AntiCheat] setupAntiCheat called, enabled=' + this.antiCheat.enabled);
             if (!this.antiCheat.enabled) {
                 console.log('Anti-cheat disabled for this exam');
                 return;
@@ -998,7 +883,6 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
             acBadge.innerHTML = '<i class="fas fa-shield-alt text-[8px]"></i> Anti-Cheat ON';
             const topBar = document.querySelector('.sticky-topbar .flex.items-center.gap-3');
             if (topBar) topBar.prepend(acBadge);
-            console.log('[AntiCheat] Badge added to DOM');
 
             // ─── Tab switch detection (reliable, no false positives) ───
             document.addEventListener('visibilitychange', () => {
@@ -1647,19 +1531,11 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
          },
         markAnswered(i, val, overwrite) {
             this.answered[i] = true;
-            // Drawing on canvas (val=true) should NOT set MCQ answer
-            if (this.questions[i].type === 'mcq' && val === true) {
-                // Canvas scratch, keep existing MCQ answer (or empty)
+            // For MCQ: don't overwrite letter answer (A/B/C/D) with boolean true from canvas drawing
+            if (this.questions[i].type === 'mcq' && val === true && typeof this.questions[i].answer === 'string') {
+                // Keep existing MCQ letter answer
             } else {
                 this.questions[i].answer = val;
-            }
-            this.markDirty();
-        },
-        onAnswerInput(i) {
-            if (this.answersText[i] && this.answersText[i].trim()) {
-                this.answered[i] = true;
-            } else {
-                delete this.answered[i];
             }
             this.markDirty();
         },
@@ -1943,11 +1819,6 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
                     };
                     if (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') {
                         if (qData && qData.pages) restorePages(qData.pages);
-                        if (q.type === 'essay_text' && qData && qData.text) {
-                            if (!this.answersText) this.answersText = {};
-                            this.answersText[i] = qData.text;
-                            this.answered[i] = true;
-                        }
                     } else if (q.type === 'mcq' && qData) {
                         if (typeof qData === 'object' && qData.answer) {
                             q.answer = qData.answer;
@@ -1964,9 +1835,9 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
         getAnswers() {
             return this.getAnswersWithCanvas();
         },
-        submitExam(force) {
+        submitExam() {
             if (this.submitted) return;
-            if (!force && !confirm('Yakin ingin mengumpulkan? Soal terjawab: ' + this.answeredCount + '/' + this.totalQ)) return;
+            if (!confirm('Yakin ingin mengumpulkan? Soal terjawab: ' + this.answeredCount + '/' + this.totalQ)) return;
             this.submitted = true;
             clearInterval(this.timer);
             clearInterval(this.autoSaveTimer);
@@ -2735,6 +2606,5 @@ window.__examAppReal = function examAppReal(duration, totalQ) {
         },
     };
 }
-</script>
 </script>
 {% endblock %}
