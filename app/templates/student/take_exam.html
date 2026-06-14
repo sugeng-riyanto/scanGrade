@@ -67,7 +67,7 @@ window.examApp = function(duration, totalQ) {
 </style>
 {% endblock %}
 {% block content %}
-<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
+<div x-data="window.examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
     <!-- Anti-Cheat Status Badge (updated by script) -->
     <div id="ac-bar" class="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 border" style="background:#f0fdf4;color:#16a34a;border-color:#bbf7d0;">
         <i class="fas fa-shield-alt"></i>
