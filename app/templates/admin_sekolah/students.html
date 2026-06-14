@@ -2,8 +2,7 @@
 {% block title %}Murid - ScanGrade{% endblock %}
 {% block page_title %}Data Murid{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '', formName: '', formEmail: '', formPassword: '', generateEmail() { if(!this.formName.trim()) return; fetch('/admin-sekolah/generate-email?name='+encodeURIComponent(this.formName)).then(r=>r.json()).then(d=>{ this.formEmail = d.email; this.formPassword = d.password; this.generatedPassword = d.password; }).catch(()=>{}); } }">
-    <!-- Info Banner -->
+<div class="space-y-6" x-data="{ showForm: {{ 'true' if students|length == 0 else 'false' }}, showPassword: false, generatedPassword: '', formName: '', formEmail: '', formPassword: '', generateEmail() { if(!this.formName.trim()) return; fetch('/admin-sekolah/generate-email?name='+encodeURIComponent(this.formName)).then(r=>r.json()).then(d=>{ this.formEmail = d.email; this.formPassword = d.password; this.generatedPassword = d.password; }).catch(()=>{}); } }">
     <div class="bg-blue-50 rounded-xl p-3 flex items-start gap-3 border border-blue-200">
         <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
         <div class="text-xs text-blue-800">
@@ -23,7 +22,6 @@
     {% endif %}
     {% endwith %}
 
-    <!-- Password Modal -->
     <div x-show="showPassword" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showPassword=false">
         <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border-t-4 border-emerald-500">
             <div class="text-center">
@@ -40,13 +38,12 @@
     </div>
 
     <div class="flex items-center justify-between">
-        <p class="text-sm text-stone-500 font-medium">{{ students|length }} murid</p>
+        <p class="text-sm text-stone-500 font-medium">{{ total }} murid</p>
         <button @click="showForm=!showForm" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-500/25 transition">
             <i class="fas fa-plus mr-1"></i>Tambah Murid
         </button>
     </div>
 
-    <!-- Add Form -->
     <div x-show="showForm" x-collapse class="card p-6 border border-orange-200">
         <form method="POST" action="/admin-sekolah/students/create" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -85,28 +82,36 @@
         </form>
     </div>
 
-    <!-- Search -->
     <div class="card p-4">
-        <div class="relative">
-            <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-stone-400"></i>
-            <input type="text" id="studentSearch" placeholder="Cari murid..." class="w-full pl-10 pr-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
-        </div>
+        <form method="GET" action="/admin-sekolah/students" class="flex gap-2">
+            <div class="relative flex-1">
+                <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-stone-400"></i>
+                <input type="text" name="q" value="{{ q }}" placeholder="Cari NISN..." class="w-full pl-10 pr-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+            </div>
+            <button type="submit" class="px-5 py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 transition">
+                <i class="fas fa-search"></i>
+            </button>
+            {% if q %}
+            <a href="/admin-sekolah/students" class="px-5 py-3 border border-stone-200 text-stone-500 rounded-xl font-bold hover:bg-stone-50 transition">
+                <i class="fas fa-times"></i>
+            </a>
+            {% endif %}
+        </form>
     </div>
 
-    <!-- Table -->
     <div class="card overflow-hidden">
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead class="bg-stone-50 text-xs font-bold text-stone-500 uppercase">
                     <tr>
-                        <th class="text-left px-4 py-3 cursor-pointer select-none hover:text-stone-800" onclick="window.location.href='?sort=nisn&dir={{ 'desc' if sort_by=='nisn' and sort_dir=='asc' else 'asc' }}&q={{ q }}'">NISN <i class="fas fa-sort ml-1 text-stone-300"></i></th>
-                        <th class="text-left px-4 py-3 cursor-pointer select-none hover:text-stone-800" onclick="window.location.href='?sort=name&dir={{ 'desc' if sort_by=='name' and sort_dir=='asc' else 'asc' }}&q={{ q }}'">Nama <i class="fas fa-sort ml-1 text-stone-300"></i></th>
-                        <th class="text-left px-4 py-3 cursor-pointer select-none hover:text-stone-800" onclick="window.location.href='?sort=class_name&dir={{ 'desc' if sort_by=='class_name' and sort_dir=='asc' else 'asc' }}&q={{ q }}'">Kelas <i class="fas fa-sort ml-1 text-stone-300"></i></th>
+                        <th class="text-left px-4 py-3">NISN</th>
+                        <th class="text-left px-4 py-3">Nama</th>
+                        <th class="text-left px-4 py-3">Kelas</th>
                         <th class="text-left px-4 py-3">Email</th>
                         <th class="text-right px-4 py-3">Aksi</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-stone-50" id="studentTableBody">
+                <tbody class="divide-y divide-stone-50">
                     {% for s in students %}
                     <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }">
                         <td class="px-4 py-3 font-mono font-bold text-stone-700">{{ s.nisn }}</td>
@@ -122,14 +127,13 @@
                                 <button hx-post="/admin-sekolah/students/{{ s.id }}/delete" hx-target="body" hx-confirm="Hapus murid {{ s.name }}?"
                                         class="px-2.5 py-1.5 text-xs font-bold bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200">Hapus</button>
                             </div>
-                            <!-- Edit Inline -->
                             <div x-show="editing" x-collapse x-cloak class="mt-3 text-left">
                                 <form method="POST" action="/admin-sekolah/students/{{ s.id }}/edit" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-stone-50 rounded-xl">
                                     <input type="text" name="nisn" value="{{ s.nisn }}"
                                            class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
                                     <input type="text" name="name" value="{{ s.name }}"
                                            class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
-                                    <span class="px-3 py-2 text-stone-500 text-sm flex items-center" title="Email tidak bisa diubah">{{ s.email }}</span>
+                                    <span class="px-3 py-2 text-stone-500 text-sm flex items-center">{{ s.email }}</span>
                                     <select name="class_id"
                                             class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium bg-white">
                                         <option value="">- Kelas -</option>
@@ -146,7 +150,7 @@
                     <tr>
                         <td colspan="5" class="px-4 py-12 text-center text-stone-400 font-medium">
                             <i class="fas fa-user-graduate text-3xl mb-2 block text-stone-300"></i>
-                            Belum ada murid
+                            {% if q %}Pencarian tidak ditemukan{% else %}Belum ada murid{% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -154,21 +158,29 @@
             </table>
         </div>
     </div>
-</div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const search = document.getElementById('studentSearch');
-    const tbody = document.getElementById('studentTableBody');
-    if (search && tbody) {
-        search.addEventListener('input', function() {
-            const q = this.value.toLowerCase();
-            tbody.querySelectorAll('tr').forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(q) ? '' : 'none';
-            });
-        });
-    }
-});
-</script>
+    {% if total_pages > 1 %}
+    <div class="flex items-center justify-center gap-2">
+        {% if page > 1 %}
+        <a href="?page={{ page - 1 }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
+            <i class="fas fa-chevron-left mr-1"></i>Sebelumnya
+        </a>
+        {% endif %}
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page %}
+            <span class="px-4 py-2 bg-orange-500 text-white rounded-xl text-sm font-bold">{{ p }}</span>
+            {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
+            <a href="?page={{ p }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">{{ p }}</a>
+            {% elif p == 4 or p == total_pages - 3 %}
+            <span class="px-2 text-stone-400">...</span>
+            {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <a href="?page={{ page + 1 }}&q={{ q }}" class="px-4 py-2 border border-stone-200 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-50 transition">
+            Selanjutnya<i class="fas fa-chevron-right ml-1"></i>
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
 {% endblock %}

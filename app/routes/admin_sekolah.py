@@ -543,14 +543,18 @@ def classes():
     sid = _school_id()
     supabase = get_supabase()
     classes_list = supabase.table("classes").select("*, profiles!classes_teacher_id_fkey(full_name)").eq("school_id", sid).order("name").execute().data or []
+    # Batch fetch student counts per class
+    class_ids = [c["id"] for c in classes_list]
+    if class_ids:
+        all_students = supabase.table("profiles").select("class_id", count="exact").eq("role", "murid").eq("school_id", sid).in_("class_id", class_ids).execute().data or []
+        from collections import Counter
+        counts = Counter(s.get("class_id") for s in all_students)
+    else:
+        counts = {}
     for c in classes_list:
         c["wali_kelas"] = (c.get("profiles") or {}).get("full_name")
         c["wali_kelas_id"] = c.get("teacher_id")
-        try:
-            sc = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", sid).eq("class_id", c["id"]).execute()
-            c["student_count"] = sc.count or 0
-        except Exception:
-            c["student_count"] = 0
+        c["student_count"] = counts.get(c["id"], 0)
     teachers = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("school_id", sid).execute().data or []
     years = supabase.table("school_years").select("*").eq("school_id", sid).order("name", desc=True).execute().data or []
     return render_template("admin_sekolah/classes.html", classes=classes_list, teachers=teachers, years=years)
@@ -744,13 +748,23 @@ def teachers():
     sid = _school_id()
     supabase = get_supabase()
     q = request.args.get("q", "").strip()
-    sort_by = request.args.get("sort", "name")
-    sort_dir = request.args.get("dir", "asc")
+    page = int(request.args.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
 
     subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-    teachers_raw = supabase.table("teachers").select(
+
+    # Count
+    count_q = supabase.table("teachers").select("id", count="exact").eq("school_id", sid)
+    data_q = supabase.table("teachers").select(
         "*, profiles!inner(id, full_name, phone), subjects(name)"
-    ).eq("school_id", sid).execute().data or []
+    ).eq("school_id", sid)
+    if q:
+        count_q = count_q.ilike("employee_id", f"%{q}%")
+        data_q = data_q.ilike("employee_id", f"%{q}%")
+    total = (count_q.execute().count or 0)
+
+    teachers_raw = data_q.order("employee_id").range(offset, offset + per_page - 1).execute().data or []
 
     # Fetch auth emails once for all users
     _email_map = _get_email_map(supabase)
@@ -770,15 +784,9 @@ def teachers():
             "phone": prof.get("phone", ""),
             "employee_id": t.get("employee_id", ""),
         })
-    if q:
-        ql = q.lower()
-        teachers_list = [t for t in teachers_list if ql in t["name"].lower() or ql in t["employee_number"].lower()]
-    reverse = sort_dir == "desc"
-    if sort_by == "name":
-        teachers_list.sort(key=lambda t: t["name"].lower(), reverse=reverse)
-    elif sort_by == "employee_number":
-        teachers_list.sort(key=lambda t: t["employee_number"], reverse=reverse)
-    return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects, q=q, sort_by=sort_by, sort_dir=sort_dir)
+    total_pages = max(1, -(-total // per_page))
+    return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects,
+                           q=q, page=page, total=total, total_pages=total_pages, per_page=per_page)
 
 
 @admin_sekolah_bp.route("/teachers/create", methods=["POST"])
@@ -893,13 +901,23 @@ def students():
     sid = _school_id()
     supabase = get_supabase()
     q = request.args.get("q", "").strip()
-    sort_by = request.args.get("sort", "name")
-    sort_dir = request.args.get("dir", "asc")
+    page = int(request.args.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
 
     classes_list = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
-    students_raw = supabase.table("students").select(
+
+    # Count with optional NISN search
+    count_q = supabase.table("students").select("id", count="exact").eq("school_id", sid)
+    data_q = supabase.table("students").select(
         "*, profiles!inner(id, full_name, phone), classes(name)"
-    ).eq("school_id", sid).order("nisn").execute().data or []
+    ).eq("school_id", sid)
+    if q:
+        count_q = count_q.ilike("nisn", f"%{q}%")
+        data_q = data_q.ilike("nisn", f"%{q}%")
+    total = (count_q.execute().count or 0)
+
+    students_raw = data_q.order("nisn").range(offset, offset + per_page - 1).execute().data or []
 
     _email_map = {}
     try:
@@ -921,17 +939,9 @@ def students():
             "phone": prof.get("phone", ""),
             "email": _email_map.get(uid, ""),
         })
-    if q:
-        ql = q.lower()
-        students_list = [s for s in students_list if ql in s["name"].lower() or ql in s["nisn"]]
-    reverse = sort_dir == "desc"
-    if sort_by == "name":
-        students_list.sort(key=lambda s: s["name"].lower(), reverse=reverse)
-    elif sort_by == "nisn":
-        students_list.sort(key=lambda s: s["nisn"], reverse=reverse)
-    elif sort_by == "class_name":
-        students_list.sort(key=lambda s: s["class_name"], reverse=reverse)
-    return render_template("admin_sekolah/students.html", students=students_list, classes=classes_list, q=q, sort_by=sort_by, sort_dir=sort_dir)
+    total_pages = max(1, -(-total // per_page))
+    return render_template("admin_sekolah/students.html", students=students_list, classes=classes_list,
+                           q=q, page=page, total=total, total_pages=total_pages, per_page=per_page)
 
 
 @admin_sekolah_bp.route("/students/create", methods=["POST"])

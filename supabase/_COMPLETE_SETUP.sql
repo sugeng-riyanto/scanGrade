@@ -169,6 +169,15 @@ CREATE INDEX IF NOT EXISTS idx_exams_subject ON exams(subject_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_published ON submissions(is_published) WHERE is_published = TRUE;
 CREATE INDEX IF NOT EXISTS idx_violations_exam_user ON violation_logs(exam_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_exam_student ON submissions(exam_id, student_id);
+CREATE INDEX IF NOT EXISTS idx_profiles_school_role ON profiles(school_id, role);
+CREATE INDEX IF NOT EXISTS idx_students_school ON students(school_id);
+CREATE INDEX IF NOT EXISTS idx_teachers_school ON teachers(school_id);
+CREATE INDEX IF NOT EXISTS idx_classes_school ON classes(school_id);
+CREATE INDEX IF NOT EXISTS idx_subjects_school ON subjects(school_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_exam ON submissions(exam_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_student ON submissions(student_id);
+CREATE INDEX IF NOT EXISTS idx_exams_status_published ON exams(status, is_published);
+CREATE INDEX IF NOT EXISTS idx_violation_logs_exam_user ON violation_logs(exam_id, user_id);
 
 -- 4. RLS — ENABLE ON ALL TABLES
 -- ============================================================
