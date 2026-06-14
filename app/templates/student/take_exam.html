@@ -1885,10 +1885,14 @@ function examApp(duration, totalQ) {
                     window.location.href = '/student/results';
                 } else {
                     return r.json().then(d => {
-                        alert('Gagal kirim: ' + (d.error || 'coba lagi'));
-                        this.submitted = false;
-                        this.syncStatus = 'error';
-                        this.syncLabel = 'Gagal kirim — coba lagi';
+                        if (r.status === 409) {
+                            window.location.href = '/student/results';
+                        } else {
+                            alert('Gagal kirim: ' + (d.error || 'coba lagi'));
+                            this.submitted = false;
+                            this.syncStatus = 'error';
+                            this.syncLabel = 'Gagal kirim — coba lagi';
+                        }
                     });
                 }
             })
