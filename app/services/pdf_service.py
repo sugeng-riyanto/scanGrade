@@ -3,20 +3,21 @@ import uuid
 import fitz
 from flask import current_app
 
-# PDF magic bytes: %PDF
-PDF_MAGIC = b'%PDF'
 
-
-def _is_valid_pdf(file_obj) -> bool:
-    """Check if file starts with PDF magic bytes."""
-    file_obj.seek(0)
-    header = file_obj.read(4)
-    file_obj.seek(0)
-    return header == PDF_MAGIC
+def _upload_to_supabase(file_data: bytes, path: str, mime: str) -> str:
+    """Upload file to Supabase Storage bucket exam-pdfs, return public URL."""
+    from app.utils.auth import get_supabase
+    supabase = get_supabase()
+    supabase.storage.from_("exam-pdfs").upload(path, file_data, {"content-type": mime})
+    # Return public URL
+    base = current_app.config.get("SUPABASE_URL", "").rstrip("/")
+    if "/rest/v1" in base:
+        base = base.split("/rest/v1")[0]
+    return f"{base}/storage/v1/object/public/exam-pdfs/{path}"
 
 
 def upload_pdf(file_obj, exam_id: str) -> dict:
-    """Upload PDF file and convert pages to images.
+    """Upload PDF file to Supabase Storage, convert pages to PNG images.
 
     Returns:
         dict with pdf_path, page_urls, total_pages
@@ -26,49 +27,42 @@ def upload_pdf(file_obj, exam_id: str) -> dict:
     if not file_obj or not file_obj.filename:
         raise ValueError("File tidak ditemukan")
 
-    if not _is_valid_pdf(file_obj):
+    raw = file_obj.read()
+    if len(raw) < 4 or raw[:4] != b'%PDF':
         raise ValueError("File yang diupload bukan PDF valid")
-
-    # Validate file size (50MB max)
-    file_obj.seek(0, 2)
-    size = file_obj.tell()
-    file_obj.seek(0)
-    if size > 50 * 1024 * 1024:
+    if len(raw) > 50 * 1024 * 1024:
         raise ValueError("File terlalu besar. Maksimal 50MB")
-    if size == 0:
+    if len(raw) == 0:
         raise ValueError("File kosong")
 
-    base = os.path.join(current_app.root_path, "static", "uploads", "exams", exam_id)
-    os.makedirs(base, exist_ok=True)
-
-    pdf_filename = f"{uuid.uuid4().hex[:12]}.pdf"
-    pdf_path = os.path.join(base, pdf_filename)
-    file_obj.save(pdf_path)
-
     try:
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(stream=raw, filetype="pdf")
     except Exception as e:
-        os.remove(pdf_path)
         raise ValueError(f"Gagal membaca PDF: {e}")
 
+    pdf_filename = f"{exam_id}/{uuid.uuid4().hex[:12]}.pdf"
     page_urls = []
+
     try:
+        # Upload original PDF
+        pdf_url = _upload_to_supabase(raw, pdf_filename, "application/pdf")
+
+        # Convert each page to PNG and upload
         for i in range(len(doc)):
             page = doc.load_page(i)
             pix = page.get_pixmap(dpi=150)
-            img_name = f"page_{i+1:03d}.png"
-            img_path = os.path.join(base, img_name)
-            pix.save(img_path)
-            page_urls.append(f"/static/uploads/exams/{exam_id}/{img_name}")
+            img_bytes = pix.tobytes("png")
+            img_name = f"{exam_id}/page_{i+1:03d}.png"
+            img_url = _upload_to_supabase(img_bytes, img_name, "image/png")
+            page_urls.append(img_url)
     finally:
         doc.close()
 
     if not page_urls:
-        os.remove(pdf_path)
         raise ValueError("PDF tidak memiliki halaman")
 
     return {
-        "pdf_path": f"/static/uploads/exams/{exam_id}/{pdf_filename}",
+        "pdf_path": pdf_url,
         "page_urls": page_urls,
         "total_pages": len(page_urls),
     }
