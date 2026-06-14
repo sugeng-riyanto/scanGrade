@@ -307,7 +307,16 @@
                         <span class="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Esai</span>
                     </div>
                     <div class="space-y-3">
-                        {% if essay_ans is mapping and essay_ans.get('pages') %}
+                        {% if (qtype == 'essay_text' or qtype == 'essay') and essay_ans is mapping and essay_ans.get('text') %}
+                        <div class="p-4 bg-blue-50 rounded-xl border border-blue-200">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i class="fas fa-align-left text-blue-600 text-sm"></i>
+                                <span class="text-xs font-extrabold text-blue-700">Jawaban Teks:</span>
+                            </div>
+                            <p class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{{ essay_ans.text }}</p>
+                        </div>
+                        {% endif %}
+                        {% if essay_ans is mapping and essay_ans.get('pages') is not none %}
                             {% set s_pages = essay_ans.get('pages', {}) %}
                             {% set s_page_keys = s_pages.keys() | list %}
                             {% set ov_page_keys = teacher_overlay.keys() | list %}
@@ -365,17 +374,9 @@
                             {% endif %}
                             {% endfor %}
                         {% else %}
-                            {% if (qtype == 'essay_text' or qtype == 'essay') and essay_ans is mapping and essay_ans.get('text') %}
-                            <div class="p-4 bg-blue-50 rounded-xl border border-blue-200">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <i class="fas fa-align-left text-blue-600 text-sm"></i>
-                                    <span class="text-xs font-extrabold text-blue-700">Jawaban Teks:</span>
-                                </div>
-                                <p class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{{ essay_ans.text }}</p>
-                            </div>
-                            {% elif student_ans is string and student_ans %}
+                            {% if student_ans is string and student_ans %}
                             <p class="text-sm font-bold text-stone-600">{{ student_ans }}</p>
-                            {% else %}
+                            {% elif not ((qtype == 'essay_text' or qtype == 'essay') and essay_ans is mapping and essay_ans.get('text')) %}
                             <p class="text-xs text-stone-400 italic">Jawaban kosong</p>
                             {% endif %}
                         {% endif %}
