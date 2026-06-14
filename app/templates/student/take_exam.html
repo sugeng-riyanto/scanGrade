@@ -1,33 +1,32 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block head_extra %}
-<div id="ac-debug" style="display:none;position:fixed;top:0;left:0;z-index:99999;background:red;color:white;padding:10px;font-size:20px;font-weight:bold;">ANTI-CHEAT DEBUG</div>
 <script>
 (function(){
     var e={{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
-    var dbg=document.getElementById('ac-debug');
-    if(!e){dbg.style.display='block';dbg.textContent='ANTI-CHEAT DISABLED';return;}
-    dbg.style.display='block';dbg.textContent='ANTI-CHEAT ACTIVE - switch tabs to test';
+    if(!e)return;
     var v=0,tp=0,timer=0,d=0,b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
     var m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
     var a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
     var eid='{{ exam.id }}';
-    function h(){
-        v++;var msg,p=0;
-        if(v===1){msg='PERHATIAN! Anda berpindah tab.';}
-        else{p=v===2?b:(v===3?b*2:b*3);tp+=p;msg='PELANGGARAN #'+v+'!';}
-        dbg.textContent=msg;
+    var pending=0;
+    function fire(){
+        v++;pending=0;var msg,p=0;
+        if(v===1){msg='PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';}
+        else{p=v===2?b:(v===3?b*2:b*3);tp+=p;msg='PELANGGARAN #'+v+'! Penalti: -'+p+' poin';}
         alert(msg);
         try{navigator.sendBeacon('/api/violation/log',new Blob([JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:p}}])],{type:'application/json'}));}catch(ex){}
         if(m>0&&v>=m&&a&&!d){
-            d=1;dbg.textContent='AUTO-SUBMIT!';
-            alert('Pelanggaran maksimal! Ujian dikumpulkan.');
+            d=1;alert('Pelanggaran maksimal! Ujian dikumpulkan.');
             try{navigator.sendBeacon('/api/student/force-submit',new Blob([JSON.stringify({exam_id:eid})],{type:'application/json'}));}catch(ex){}
             setTimeout(function(){window.location.href='/student/dashboard';},1500);
         }
     }
-    document.addEventListener('visibilitychange',function(){if(d)return;if(document.hidden){timer=setTimeout(h,1500);}else{if(timer){clearTimeout(timer);timer=0;}}});
-    document.addEventListener('webkitvisibilitychange',function(){if(d)return;if(document.webkitHidden){timer=setTimeout(h,1500);}else{if(timer){clearTimeout(timer);timer=0;}}});
+    document.addEventListener('visibilitychange',function(){
+        if(d)return;
+        if(document.hidden){timer=setTimeout(function(){pending=1;},1500);}
+        else{if(timer){clearTimeout(timer);timer=0;}if(pending){pending=0;fire();}}
+    });
 })();
 </script>
 <style>
