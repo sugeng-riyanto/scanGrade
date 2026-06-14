@@ -118,9 +118,9 @@
                         </td>
                         <td class="px-5 py-3 text-center">
                             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
-                                  :class="s.status==='graded'||s.status==='published'?'bg-emerald-50 text-emerald-700':s.status==='submitted'||s.status==='draft'?'bg-amber-50 text-amber-700':s.status==='retracted'?'bg-red-50 text-red-600':'bg-surface-100 text-surface-600'">
-                                <i class="fas mr-0.5 text-xs" :class="s.status==='graded'||s.status==='published'?'fa-check':s.status==='submitted'||s.status==='draft'?'fa-clock':s.status==='retracted'?'fa-undo':'fa-file'"></i>
-                                <span x-text="s.status"></span>
+                                  :class="s.status==='graded'||s.status==='published'?'bg-emerald-50 text-emerald-700':s.status==='submitted'?'bg-amber-50 text-amber-700':s.status==='draft'?'bg-slate-100 text-slate-500':s.status==='retracted'?'bg-red-50 text-red-600':'bg-surface-100 text-surface-600'">
+                                <i class="fas mr-0.5 text-xs" :class="s.status==='graded'||s.status==='published'?'fa-check':s.status==='submitted'?'fa-clock':s.status==='draft'?'fa-pen':s.status==='retracted'?'fa-undo':'fa-file'"></i>
+                                <span x-text="s.status==='draft'?'Draft (belum dikumpulkan)':s.status"></span>
                             </span>
                             <template x-if="s.answers?._retract_request?.status==='pending'">
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600 ml-1"><i class="fas fa-hourglass-half"></i> Menunggu</span>
@@ -129,6 +129,9 @@
                         <td class="px-5 py-3 text-surface-500 font-medium text-xs" x-text="formatDate(s.submitted_at)"></td>
                         <td class="px-5 py-3">
                             <div class="flex items-center justify-center gap-1.5">
+                                <template x-if="s.status==='draft' && s.exam?.id">
+                                    <a :href="'/student/exams/'+s.exam.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-600 text-white hover:bg-primary-700 transition"><i class="fas fa-play mr-1"></i>Lanjutkan</a>
+                                </template>
                                 <a :href="'/student/results/'+s.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-50 text-primary-700 hover:bg-primary-100 transition">Detail</a>
                                 <template x-if="(s.status==='submitted'||s.status==='draft') && (!s.answers?._retract_request || s.answers?._retract_request?.status!=='pending')">
                                     <form method="POST" :action="'/student/submissions/'+s.id+'/retract'" class="inline" onsubmit="return confirm('Yakin tarik jawaban?')">
