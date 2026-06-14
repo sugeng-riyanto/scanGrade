@@ -108,11 +108,42 @@ def force_submit():
             .execute()
         if sub.data:
             answers = sub.data[0].get("answers") or {}
+            # Re-fetch submission for answer key
+            exam = supabase.table("exams").select("answer_key,question_types,question_weights,total_questions,penalty_per_violation").eq("id", exam_id).single().execute().data or {}
+            key = exam.get("answer_key") or {}
+            qtypes = exam.get("question_types") or {}
+            weights = exam.get("question_weights") or {}
+            total_q = exam.get("total_questions", 0)
+            penalty = float(exam.get("penalty_per_violation", 5))
+            # Calculate MCQ score
+            earned = 0.0
+            mcq_count = 0
+            for i in range(total_q):
+                qi = str(i)
+                qt = qtypes.get(qi, "mcq")
+                kv = key.get(qi)
+                w = float(weights.get(qi, 0))
+                if qt == "mcq" and kv and w > 0:
+                    mcq_count += 1
+                    ans = answers.get(qi)
+                    if isinstance(ans, dict): ans = ans.get("answer", "")
+                    if kv == "bonus":
+                        if ans and str(ans).strip(): earned += w
+                    elif isinstance(kv, list):
+                        if ans in kv: earned += w
+                    elif ans == kv: earned += w
+            score = round(min(earned, 100), 2)
+            # Get actual penalty from violation logs
+            viol_count = supabase.table("violation_logs").select("id", count="exact").eq("user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
+            from app.services.anti_cheat_service import calculate_graduated_penalty
+            pinfo = calculate_graduated_penalty(viol_count, exam)
+            total_penalty = pinfo.get("penalty", 0)
+            final = max(0.0, round(score - total_penalty, 2))
             supabase.table("submissions") \
-                .update({"status": "submitted", "answers": answers}) \
+                .update({"status": "submitted", "answers": answers, "score": score, "final_score": final, "penalty": total_penalty}) \
                 .eq("id", sub.data[0]["id"]) \
                 .execute()
-            return jsonify({"success": True})
+            return jsonify({"success": True, "score": score, "final_score": final, "penalty": total_penalty})
         return jsonify({"error": "No draft submission found"}), 404
     except Exception as e:
         current_app.logger.error("force_submit error: %s", e)

@@ -2702,18 +2702,19 @@ function examApp(duration, totalQ) {
         if (maxViolations > 0 && violationCount >= maxViolations && autoSubmit) {
             alert('[ANTI-CHEAT] Pelanggaran maksimal! Ujian akan dikumpulkan.');
             acSubmitted = true;
-            // Trigger Alpine component's submit with force=true (skip confirm)
+            // Try Alpine submit first
             try {
                 var alpineEl = document.querySelector('[x-data]');
                 if (alpineEl && alpineEl.__x) {
                     alpineEl.__x.$data.submitExam(true);
                 }
-            } catch(e) { console.warn('[AC-STANDALONE] auto-submit trigger failed', e); }
-            // Fallback: direct POST to force-submit endpoint
+            } catch(e) { console.warn('[AC-STANDALONE] Alpine trigger failed', e); }
+            // Fallback: force-submit via API (saves + grades)
             try {
                 navigator.sendBeacon('/api/student/force-submit',
                     new Blob([JSON.stringify({exam_id: '{{ exam.id }}'})],
                     {type: 'application/json'}));
+                setTimeout(function(){ window.location.href = '/student/dashboard'; }, 2000);
             } catch(e) {}
         }
     }
