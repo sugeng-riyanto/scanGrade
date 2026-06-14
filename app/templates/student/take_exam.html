@@ -865,10 +865,29 @@ function examApp(duration, totalQ) {
             window.addEventListener('offline', () => this.onGoOffline());
             window.addEventListener('beforeunload', (e) => {
                 this.saveToLocal();
+                if (this.submitted) return;
+                // Detect navigation away from exam (back/forward/close)
                 if (this.dirty) {
                     const data = this.getAnswersLight();
                     navigator.sendBeacon('/api/student/sync-draft',
                         new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data})], {type: 'application/json'}));
+                }
+                // Log violation for navigating away
+                if (this.antiCheat.enabled) {
+                    this.violationCount++;
+                    const base = this.antiCheat.penalty_per_violation || 5;
+                    let p = 0;
+                    if (this.violationCount >= 2) {
+                        p = this.violationCount === 2 ? base : (this.violationCount === 3 ? base * 2 : base * 3);
+                        this.totalPenalty += p;
+                    }
+                    navigator.sendBeacon('/api/violation/log',
+                        new Blob([JSON.stringify([{
+                            exam_id: '{{ exam.id }}',
+                            violation_type: 'nav_away',
+                            timestamp: Date.now() / 1000,
+                            metadata: { violation_count: this.violationCount, penalty: p }
+                        }])], {type: 'application/json'}));
                 }
             });
             // Shuffle questions if enabled
@@ -919,6 +938,14 @@ function examApp(duration, totalQ) {
                 badge.innerHTML = '<i class="fas fa-shield-alt text-[8px]"></i> Terproteksi';
                 const bar = document.querySelector('.sticky-topbar .flex.items-center.gap-3');
                 if (bar) bar.prepend(badge);
+                // Window blur (click outside browser)
+                window.addEventListener('blur', () => {
+                    if (ac.submitted) return;
+                    ac._blurTimer = setTimeout(() => { ac.handleViolation(); }, 1500);
+                });
+                window.addEventListener('focus', () => {
+                    if (ac._blurTimer) { clearTimeout(ac._blurTimer); ac._blurTimer = null; }
+                });
                 // Fullscreen
                 if (ac.antiCheat.fullscreen_required) {
                     document.addEventListener('fullscreenchange', () => {
