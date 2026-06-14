@@ -49,8 +49,11 @@ def dashboard():
             else:
                 if not cids:
                     available_exams.append(e)
-        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).neq("status", "retracted").execute().data or []
+        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
         submitted_ids = {s["exam_id"] for s in subs_ids}
+        # Exclude retracted
+        retracted = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).eq("status", "retracted").execute().data or []
+        submitted_ids -= {s["exam_id"] for s in retracted}
     except Exception as e:
         current_app.logger.error(f"Dashboard query error: {e}")
     available_exams = [e for e in available_exams if e["id"] not in submitted_ids]
@@ -233,10 +236,10 @@ def take_exam(exam_id):
         except Exception:
             pass
 
-    # Check if student already reached max attempts (exclude retracted submissions)
+    # Check if student already reached max attempts (exclude draft + retracted)
     max_attempts = exam.get("max_attempts", 1)
     try:
-        existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).neq("status", "retracted").execute()
+        existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute()
         attempt_count = existing.count or 0
         if attempt_count >= max_attempts:
             flash(f"Anda sudah mencapai batas maksimal {max_attempts}x mengerjakan ujian ini", "error")
@@ -297,9 +300,9 @@ def submit_exam(exam_id):
         except Exception:
             pass
 
-    # Check attempts (exclude retracted)
+    # Check attempts (exclude draft + retracted)
     max_attempts = exam.get("max_attempts", 1)
-    existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).neq("status", "retracted").execute()
+    existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute()
     attempt_count = existing.count or 0
     if attempt_count >= max_attempts:
         return jsonify({"error": f"Anda sudah mencapai batas maksimal {max_attempts}x mengerjakan ujian ini"}), 409
