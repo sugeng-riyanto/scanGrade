@@ -8,6 +8,20 @@
         <div><h1 class="text-2xl font-extrabold text-surface-800">Ujian Tersedia</h1><p class="text-sm text-surface-500 font-medium">Ujian yang bisa Anda kerjakan sekarang</p></div>
     </div>
 
+    <!-- DIAGNOSTIC: show what the server found -->
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs">
+        <p class="font-bold text-amber-800">🔍 Debug: {{ exams|length }} ujian ditemukan</p>
+        {% if exams %}
+        <ul class="mt-1 space-y-1">
+            {% for e in exams %}
+            <li class="text-amber-700">✅ {{ e.title }} ({{ e.subject }})</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-amber-600 mt-1">Tidak ada ujian. Cek: published=True, status=active, school_id cocok, class_id cocok, tidak ada submission</p>
+        {% endif %}
+    </div>
+
     {% if exams %}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {% for e in exams %}
