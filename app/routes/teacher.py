@@ -183,7 +183,7 @@ def exam_form():
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
     start_at_str = request.form.get("start_at", "").strip()
-    start_at = start_at_str if start_at_str else None
+    start_at = None if action == "publish" else (start_at_str if start_at_str else None)
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
     max_attempts = int(request.form.get("max_attempts", 1))
@@ -321,7 +321,7 @@ def exam_detail(exam_id):
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
     start_at_str = request.form.get("start_at", "").strip()
-    start_at = start_at_str if start_at_str else None
+    start_at = None if action == "publish" else (start_at_str if start_at_str else None)
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
     max_attempts = int(request.form.get("max_attempts", 1))
