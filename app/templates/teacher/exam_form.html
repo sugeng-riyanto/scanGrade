@@ -181,21 +181,15 @@
                 </div>
 
                 <input type="hidden" name="anti_cheat_enabled" value="true">
-                <input type="hidden" name="fullscreen_required" id="fullscreen-required">
-                <input type="hidden" name="block_copy_paste" id="block-copy-paste">
-                <input type="hidden" name="block_right_click" id="block-right-click">
-                <input type="hidden" name="auto_submit_on_max" id="auto-submit-on-max">
-                <input type="hidden" name="allow_calculator" id="allow-calculator">
 
                 <div class="card p-5 space-y-4" x-data="antiCheatSettings({
                     enabled: true,
                     penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
                     max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
-                    auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
                     fullscreen_required: {{ 'true' if (exam.get('fullscreen_required') if exam else True) else 'false' }},
-                    watermark_name: {{ 'true' if (exam.get('watermark_name') if exam else True) else 'false' }},
                     block_copy_paste: {{ 'true' if (exam.get('block_copy_paste') if exam else True) else 'false' }},
                     block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
+                    auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
                     allow_calculator: {{ 'true' if (exam.get('allow_calculator') if exam else False) else 'false' }},
                 })">
                     <div class="flex items-center justify-between">
@@ -207,32 +201,32 @@
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
-                            <input type="checkbox" x-model="fullscreen_required" class="w-4 h-4 text-primary-600 rounded">
+                            <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Wajib Fullscreen</span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="watermark_name ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
-                            <input type="checkbox" x-model="watermark_name" class="w-4 h-4 text-primary-600 rounded">
+                            <input type="checkbox" x-model="watermark_name" name="watermark_name" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Watermark Nama</span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="block_copy_paste ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
-                            <input type="checkbox" x-model="block_copy_paste" class="w-4 h-4 text-primary-600 rounded">
+                            <input type="checkbox" x-model="block_copy_paste" name="block_copy_paste" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Blokir Copy-Paste</span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="block_right_click ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
-                            <input type="checkbox" x-model="block_right_click" class="w-4 h-4 text-primary-600 rounded">
+                            <input type="checkbox" x-model="block_right_click" name="block_right_click" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Blokir Klik Kanan</span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="auto_submit_on_max ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
-                            <input type="checkbox" x-model="auto_submit_on_max" class="w-4 h-4 text-primary-600 rounded">
+                            <input type="checkbox" x-model="auto_submit_on_max" name="auto_submit_on_max" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Auto-Submit</span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="allow_calculator ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
-                            <input type="checkbox" x-model="allow_calculator" class="w-4 h-4 text-primary-600 rounded">
+                            <input type="checkbox" x-model="allow_calculator" name="allow_calculator" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Kalkulator Ilmiah</span>
                         </label>
                     </div>
@@ -401,19 +395,6 @@ function questionManager() {
 function antiCheatSettings(cfg) { return cfg; }
 
 function prepareSubmit() {
-    var ac = document.querySelector('[x-data*="antiCheatSettings"]');
-    if (ac && ac.__x) {
-        var d = ac.__x.$data;
-        var setVal = function(id, val) {
-            var el = document.getElementById(id);
-            if (el) el.value = val ? 'true' : 'false';
-        };
-        setVal('fullscreen-required', d.fullscreen_required);
-        setVal('block-copy-paste', d.block_copy_paste);
-        setVal('block-right-click', d.block_right_click);
-        setVal('auto-submit-on-max', d.auto_submit_on_max);
-        setVal('allow-calculator', d.allow_calculator);
-    }
     return true;
 }
 

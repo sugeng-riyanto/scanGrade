@@ -216,13 +216,13 @@ def exam_form():
     anti_cheat_enabled = True
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
-    auto_submit_on_max = request.form.get("auto_submit_on_max", "true") == "true"
-    fullscreen_required = request.form.get("fullscreen_required", "true") == "true"
+    auto_submit_on_max = request.form.get("auto_submit_on_max") == "true"
+    fullscreen_required = request.form.get("fullscreen_required") == "true"
     randomize_questions = request.form.get("randomize_questions", "false") == "true"
     randomize_options = request.form.get("randomize_options", "false") == "true"
-    watermark_name = request.form.get("watermark_name", "true") == "true"
-    block_copy_paste = request.form.get("block_copy_paste", "true") == "true"
-    block_right_click = request.form.get("block_right_click", "true") == "true"
+    watermark_name = request.form.get("watermark_name") == "true"
+    block_copy_paste = request.form.get("block_copy_paste") == "true"
+    block_right_click = request.form.get("block_right_click") == "true"
     block_screenshot = request.form.get("block_screenshot", "false") == "true"
     allow_calculator = request.form.get("allow_calculator", "false") == "true"
     for i in range(total_questions):
@@ -367,13 +367,13 @@ def exam_detail(exam_id):
     anti_cheat_enabled = True
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
-    auto_submit_on_max = request.form.get("auto_submit_on_max", "true") == "true"
-    fullscreen_required = request.form.get("fullscreen_required", "true") == "true"
+    auto_submit_on_max = request.form.get("auto_submit_on_max") == "true"
+    fullscreen_required = request.form.get("fullscreen_required") == "true"
     randomize_questions = request.form.get("randomize_questions", "false") == "true"
     randomize_options = request.form.get("randomize_options", "false") == "true"
-    watermark_name = request.form.get("watermark_name", "true") == "true"
-    block_copy_paste = request.form.get("block_copy_paste", "true") == "true"
-    block_right_click = request.form.get("block_right_click", "true") == "true"
+    watermark_name = request.form.get("watermark_name") == "true"
+    block_copy_paste = request.form.get("block_copy_paste") == "true"
+    block_right_click = request.form.get("block_right_click") == "true"
     block_screenshot = request.form.get("block_screenshot", "false") == "true"
     allow_calculator = request.form.get("allow_calculator", "false") == "true"
     for i in range(total_questions):
