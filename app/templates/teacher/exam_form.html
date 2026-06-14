@@ -16,7 +16,7 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2">
-            <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()">
+            <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
                 <div class="card p-6 space-y-4">
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-1">Judul Exam</label>
@@ -397,14 +397,35 @@
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-3">
+                <!-- PDF Upload Section -->
+                <div class="card p-5 border border-dashed border-slate-300 bg-slate-50/50">
+                    <h3 class="font-extrabold text-slate-700 text-sm flex items-center gap-2">
+                        <i class="fas fa-file-pdf text-orange-500"></i>Upload PDF Soal (Opsional)
+                    </h3>
+                    <p class="text-xs text-slate-400 mt-1">Upload file PDF yang berisi soal ujian. Setiap halaman akan dikonversi menjadi gambar.</p>
+                    <div class="mt-3 flex items-center gap-4">
+                        {% if exam and exam.pdf_url %}
+                        <div class="flex items-center gap-2 text-emerald-700 font-bold text-sm">
+                            <i class="fas fa-check-circle"></i>PDF sudah diupload
+                            <a href="{{ exam.pdf_url }}" target="_blank" class="text-primary-600 hover:text-primary-700 underline text-xs">Lihat</a>
+                        </div>
+                        {% endif %}
+                        <input type="file" name="pdf" accept=".pdf" class="text-sm font-medium text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-extrabold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100">
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 flex-wrap">
                     <button type="submit" name="action" value="save_draft"
                             class="px-6 py-3 border-2 border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 font-extrabold text-sm transition">
-                        Simpan Draft
+                        <i class="fas fa-save mr-1"></i>Simpan Draft
                     </button>
                     <button type="submit" name="action" value="save_active"
                             class="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg shadow-primary-600/20 transition">
-                        <i class="fas fa-save mr-1"></i>Simpan & Aktifkan
+                        <i class="fas fa-check mr-1"></i>Simpan & Aktifkan
+                    </button>
+                    <button type="submit" name="action" value="publish"
+                            class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg shadow-emerald-500/30 hover:from-emerald-700 hover:to-emerald-600 transition">
+                        <i class="fas fa-paper-plane mr-1"></i>Publish & Kirim ke Kelas
                     </button>
                 </div>
             </form>

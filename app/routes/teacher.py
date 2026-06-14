@@ -241,8 +241,9 @@ def exam_form():
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
         "description": description,
-        "status": "active" if action == "save_active" else "draft",
-        "is_published": action == "save_active",
+        "status": "active" if action in ("save_active", "publish") else "draft",
+        "is_published": action in ("save_active", "publish"),
+        "publish_mode": "auto" if action == "publish" else publish_mode,
         "answer_key": answer_key,
         "question_types": question_types,
         "question_weights": question_weights,
@@ -269,6 +270,25 @@ def exam_form():
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
     log_activity("create", "exam", exam_id, new_data={"title": title, "subject": subject, "total_questions": total_questions}, user_id=g.user_id)
+    # Handle PDF upload inline
+    pdf_file = request.files.get("pdf")
+    if pdf_file and pdf_file.filename:
+        try:
+            from app.services.pdf_service import upload_pdf
+            result = upload_pdf(pdf_file, exam_id)
+            supabase.table("exams").update({
+                "pdf_url": result["pdf_path"],
+                "pdf_page_urls": result["page_urls"],
+            }).eq("id", exam_id).execute()
+        except Exception as e:
+            current_app.logger.error(f"PDF upload failed: {e}")
+    # If action is publish, also publish scores automatically
+    if action == "publish":
+        try:
+            _recalculate_scores(exam_id)
+            supabase.table("submissions").update({"is_published": True, "status": "published"}).eq("exam_id", exam_id).execute()
+        except Exception:
+            pass
     return redirect(f"/teacher/exams/{exam_id}")
 
 
@@ -359,8 +379,9 @@ def exam_detail(exam_id):
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
         "description": description,
-        "status": "active" if action == "save_active" else "draft",
-        "is_published": action == "save_active",
+        "status": "active" if action in ("save_active", "publish") else "draft",
+        "is_published": action in ("save_active", "publish"),
+        "publish_mode": "auto" if action == "publish" else publish_mode,
         "answer_key": answer_key,
         "question_types": question_types,
         "question_weights": question_weights,
