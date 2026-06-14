@@ -15,6 +15,25 @@ def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
     return "".join(secrets.choice(chars) for _ in range(length))
 
+
+# Cached email map — avoids slow list_users() call on every page load
+_email_cache = {"data": {}, "ts": 0}
+
+def _get_email_map(supabase):
+    """Return dict of user_id → email, cached for 60 seconds."""
+    now = time()
+    if now - _email_cache["ts"] < 60 and _email_cache["data"]:
+        return _email_cache["data"]
+    try:
+        m = {}
+        for u in supabase.auth.admin.list_users():
+            m[u.id] = u.email
+        _email_cache["data"] = m
+        _email_cache["ts"] = now
+        return m
+    except Exception:
+        return _email_cache["data"]
+
 admin_sekolah_bp = Blueprint("admin_sekolah", __name__)
 
 
@@ -414,12 +433,7 @@ def export_excel():
     years = supabase.table("school_years").select("name").eq("school_id", sid).eq("is_active", True).execute().data or []
     academic_year = years[0]["name"] if years else "2025/2026"
     domain = _get_email_domain(sid)
-    _email_map = {}
-    try:
-        for u in supabase.auth.admin.list_users():
-            _email_map[u.id] = u.email
-    except:
-        pass
+    _email_map = _get_email_map(supabase)
 
     wb = Workbook()
     # Students sheet (sama format dengan template download)
@@ -742,12 +756,7 @@ def teachers():
     ).eq("school_id", sid).execute().data or []
 
     # Fetch auth emails once for all users
-    _email_map = {}
-    try:
-        for u in supabase.auth.admin.list_users():
-            _email_map[u.id] = u.email
-    except:
-        pass
+    _email_map = _get_email_map(supabase)
 
     teachers_list = []
     for t in teachers_raw:
@@ -897,8 +906,7 @@ def students():
 
     _email_map = {}
     try:
-        for u in supabase.auth.admin.list_users():
-            _email_map[u.id] = u.email
+        _email_map = _get_email_map(supabase)
     except:
         pass
 
