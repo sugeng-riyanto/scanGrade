@@ -10,6 +10,9 @@ from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
 from app.utils.rate_limiter import limiter
 
+def _rate_limit(n):
+    return limiter.limit(n) if limiter else (lambda f: f)
+
 api_bp = Blueprint("api", __name__)
 
 # ── Upload security constants ──────────────────────────
@@ -130,7 +133,7 @@ def violation_count():
 
 
 @api_bp.route("/scan/process", methods=["POST"])
-@limiter.limit("20 per minute")
+@_rate_limit("20 per minute")
 @login_required
 def scan_process():
     """Process a scanned bubble sheet image and return detected answers.

@@ -297,29 +297,28 @@ def _seed_exams(supabase, school_id, school_conf):
         class_ids = [class_ids_all[0]] if class_ids_all else []
     except: pass
 
-        for i, exam_spec in enumerate(SAMPLE_EXAMS):
-            teacher_id = teachers[i % len(teachers)]
-            subject = exam_spec["subject"]
-            if subject not in [s["name"] for s in school_conf.get("subjects", [])]:
-                continue
-            try:
-                exam_data = {
-                    "teacher_id": teacher_id, "school_id": school_id,
-                    "title": exam_spec["title"], "subject": subject,
-                    "duration_minutes": exam_spec["duration_minutes"],
-                    "total_questions": exam_spec["total_questions"],
-                    "passing_score": exam_spec["passing_score"],
-                    "status": "active", "is_published": True,
-                    "question_types": exam_spec["question_types"],
-                    "answer_key": exam_spec["answer_key"],
-                    "question_weights": exam_spec["question_weights"],
-                    "anti_cheat_enabled": exam_spec["anti_cheat_enabled"],
-                    "penalty_per_violation": exam_spec["penalty_per_violation"],
-                    "class_ids": class_ids,
-                    "max_attempts": 1, "publish_mode": "auto",
-                }
-                supabase.table("exams").insert(exam_data).execute()
-            print(f"   📝 Created: {exam_spec['title']} ({len(class_ids)} classes)")
+    for i, exam_spec in enumerate(SAMPLE_EXAMS):
+        teacher_id = teachers[i % len(teachers)]
+        subject = exam_spec["subject"]
+        if subject not in [s["name"] for s in school_conf.get("subjects", [])]:
+            continue
+        try:
+            exam_data = {
+                "teacher_id": teacher_id, "school_id": school_id,
+                "title": exam_spec["title"], "subject": subject,
+                "duration_minutes": exam_spec["duration_minutes"],
+                "total_questions": exam_spec["total_questions"],
+                "passing_score": exam_spec["passing_score"],
+                "status": "active", "is_published": True,
+                "question_types": exam_spec["question_types"],
+                "answer_key": exam_spec["answer_key"],
+                "question_weights": exam_spec["question_weights"],
+                "anti_cheat_enabled": exam_spec["anti_cheat_enabled"],
+                "penalty_per_violation": exam_spec["penalty_per_violation"],
+                "class_ids": class_ids,
+                "max_attempts": 1, "publish_mode": "auto",
+            }
+            supabase.table("exams").insert(exam_data).execute()
         except Exception as e:
             if "already" not in str(e).lower():
                 print(f"   ⚠️  Exam: {str(e)[:60]}")
