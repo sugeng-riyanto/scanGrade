@@ -81,11 +81,13 @@
             stats.textContent='Violasi: '+v+' | Penalti: '+tp;
             bar.style.background='#fef2f2';bar.style.color='#dc2626';bar.style.borderColor='#fca5a5';
             alert(msg);
-            try{navigator.sendBeacon('/api/violation/log',new Blob([JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:p}}])],{type:'application/json'}));}catch(ex){}
+            try{fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:p}}]),keepalive:true});}catch(ex){}
             if(m>0&&v>=m&&a&&!d){
                 d=1;st.textContent='PELANGGARAN MAKSIMAL!';alert('Pelanggaran maksimal! Ujian dikumpulkan.');
-                try{navigator.sendBeacon('/api/student/force-submit',new Blob([JSON.stringify({exam_id:eid})],{type:'application/json'}));}catch(ex){}
-                setTimeout(function(){window.location.href='/student/dashboard';},1500);
+                // Use fetch with keepalive (waits for server response unlike sendBeacon)
+                fetch('/api/student/force-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:eid}),keepalive:true})
+                .then(function(){window.location.href='/student/dashboard';})
+                .catch(function(){window.location.href='/student/dashboard';});
             }
         }
         document.addEventListener('visibilitychange',function(){
@@ -869,8 +871,7 @@ function examApp(duration, totalQ) {
                 // Detect navigation away from exam (back/forward/close)
                 if (this.dirty) {
                     const data = this.getAnswersLight();
-                    navigator.sendBeacon('/api/student/sync-draft',
-                        new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data})], {type: 'application/json'}));
+                    fetch('/api/student/sync-draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:'{{ exam.id }}',answers:data,light:true}),keepalive:true});
                 }
                 // Log violation for navigating away
                 if (this.antiCheat.enabled) {
@@ -881,13 +882,7 @@ function examApp(duration, totalQ) {
                         p = this.violationCount === 2 ? base : (this.violationCount === 3 ? base * 2 : base * 3);
                         this.totalPenalty += p;
                     }
-                    navigator.sendBeacon('/api/violation/log',
-                        new Blob([JSON.stringify([{
-                            exam_id: '{{ exam.id }}',
-                            violation_type: 'nav_away',
-                            timestamp: Date.now() / 1000,
-                            metadata: { violation_count: this.violationCount, penalty: p }
-                        }])], {type: 'application/json'}));
+                    fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:'{{ exam.id }}',violation_type:'nav_away',timestamp:Date.now()/1000,metadata:{violation_count:this.violationCount,penalty:p}}]),keepalive:true});
                 }
             });
             // Shuffle questions if enabled
@@ -923,30 +918,15 @@ function examApp(duration, totalQ) {
             if (this.antiCheat.enabled) {
                 const ac = this;
                 this._blurTimer = null;
-                document.addEventListener('visibilitychange', () => {
-                    if (ac.submitted) return;
-                    if (document.hidden) {
-                        ac._blurTimer = setTimeout(() => { ac.handleViolation(); }, 1500);
-                    } else {
-                        if (ac._blurTimer) { clearTimeout(ac._blurTimer); ac._blurTimer = null; }
-                    }
-                });
-                // Show badge
+                // Show badge in topbar
                 const badge = document.createElement('span');
                 badge.id = 'anti-cheat-badge';
                 badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-200';
                 badge.innerHTML = '<i class="fas fa-shield-alt text-[8px]"></i> Terproteksi';
                 const bar = document.querySelector('.sticky-topbar .flex.items-center.gap-3');
                 if (bar) bar.prepend(badge);
-                // Window blur (click outside browser)
-                window.addEventListener('blur', () => {
-                    if (ac.submitted) return;
-                    ac._blurTimer = setTimeout(() => { ac.handleViolation(); }, 1500);
-                });
-                window.addEventListener('focus', () => {
-                    if (ac._blurTimer) { clearTimeout(ac._blurTimer); ac._blurTimer = null; }
-                });
                 // Fullscreen
+                if (ac.antiCheat.fullscreen_required) {
                 if (ac.antiCheat.fullscreen_required) {
                     document.addEventListener('fullscreenchange', () => {
                         if (ac.submitted) return;
