@@ -261,8 +261,15 @@ def take_exam(exam_id):
     for k, v in ac_defaults.items():
         if k not in exam or exam[k] is None:
             exam[k] = v
-    # Pre-render anti-cheat config as JSON for the template
+    # Parse JSON fields that may come as strings from Supabase
     import json as _json
+    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
+        _val = exam.get(_field)
+        if isinstance(_val, str):
+            try:
+                exam[_field] = _json.loads(_val)
+            except (_json.JSONDecodeError, TypeError):
+                exam[_field] = {}
     anti_cheat_config = _json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
     resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"

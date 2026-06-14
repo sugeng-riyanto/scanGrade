@@ -878,6 +878,9 @@ function examApp(duration, totalQ) {
                 this.initStatusBar();
                 this.updateScrollState();
                 this.loadDraft();
+                // Navigate to first page of first question's range
+                var rng0 = this.parsePageRange(QUESTION_PAGES[v] || '');
+                if (rng0.length > 0) this.page = Math.max(1, Math.min(rng0[0], this.totalPages));
                 this.setupAntiCheat();
                 if (this.antiCheat.watermark_name) this.startWatermark();
             });
