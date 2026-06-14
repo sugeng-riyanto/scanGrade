@@ -832,6 +832,22 @@ function examApp(duration, totalQ) {
         audioInputLabel: '',
         audioOutputLabel: '',
         init() {
+            // Clear any stale timers from bfcache/page-restore
+            if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
+            if (this._offlinePollTimer) { clearInterval(this._offlinePollTimer); this._offlinePollTimer = null; }
+            // Reset all anti-cheat state
+            this.violationCount = 0;
+            this.totalPenalty = 0;
+            this.submitted = false;
+            // Handle bfcache restore — reset state completely
+            window.addEventListener('pageshow', (e) => {
+                if (e.persisted) {
+                    this.violationCount = 0;
+                    this.totalPenalty = 0;
+                    this.submitted = false;
+                    if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
+                }
+            });
             this.timer = setInterval(() => {
                 if (this.timeLeft <= 0) this.submitExam();
                 else this.timeLeft--;
