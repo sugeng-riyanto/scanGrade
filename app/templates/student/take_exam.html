@@ -1,34 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block head_extra %}
-<script>
-(function(){
-    var e={{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
-    if(!e)return;
-    var v=0,tp=0,timer=0,d=0,b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
-    var m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
-    var a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
-    var eid='{{ exam.id }}';
-    var pending=0;
-    function fire(){
-        v++;pending=0;var msg,p=0;
-        if(v===1){msg='PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';}
-        else{p=v===2?b:(v===3?b*2:b*3);tp+=p;msg='PELANGGARAN #'+v+'! Penalti: -'+p+' poin';}
-        alert(msg);
-        try{navigator.sendBeacon('/api/violation/log',new Blob([JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:p}}])],{type:'application/json'}));}catch(ex){}
-        if(m>0&&v>=m&&a&&!d){
-            d=1;alert('Pelanggaran maksimal! Ujian dikumpulkan.');
-            try{navigator.sendBeacon('/api/student/force-submit',new Blob([JSON.stringify({exam_id:eid})],{type:'application/json'}));}catch(ex){}
-            setTimeout(function(){window.location.href='/student/dashboard';},1500);
-        }
-    }
-    document.addEventListener('visibilitychange',function(){
-        if(d)return;
-        if(document.hidden){timer=setTimeout(function(){pending=1;},1500);}
-        else{if(timer){clearTimeout(timer);timer=0;}if(pending){pending=0;fire();}}
-    });
-})();
-</script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
@@ -87,6 +59,42 @@
 {% endblock %}
 {% block content %}
 <div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
+    <!-- Anti-Cheat Status Badge (updated by script) -->
+    <div id="ac-bar" class="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 border" style="background:#f0fdf4;color:#16a34a;border-color:#bbf7d0;">
+        <i class="fas fa-shield-alt"></i>
+        <span id="ac-status">Anti-Cheat Aktif — switch tab untuk test</span>
+        <span class="ml-auto text-[10px] opacity-60" id="ac-stats">Violasi: 0 | Penalti: 0</span>
+    </div>
+    <script>
+    (function(){
+        var bar=document.getElementById('ac-bar'),st=document.getElementById('ac-status'),stats=document.getElementById('ac-stats');
+        var e={{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
+        if(!e){bar.style.background='#fef2f2';bar.style.color='#dc2626';bar.style.borderColor='#fca5a5';st.textContent='Anti-Cheat NONAKTIF';return;}
+        var v=0,tp=0,timer=0,d=0,b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
+        var m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
+        var a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
+        var eid='{{ exam.id }}',pending=0;
+        function fire(){
+            v++;pending=0;var msg,p=0;
+            if(v===1){msg='PERHATIAN! Anda berpindah tab.';st.textContent=msg;}
+            else{p=v===2?b:(v===3?b*2:b*3);tp+=p;msg='PELANGGARAN #'+v+'! Penalti: -'+p+' poin';st.textContent=msg;}
+            stats.textContent='Violasi: '+v+' | Penalti: '+tp;
+            bar.style.background='#fef2f2';bar.style.color='#dc2626';bar.style.borderColor='#fca5a5';
+            alert(msg);
+            try{navigator.sendBeacon('/api/violation/log',new Blob([JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:p}}])],{type:'application/json'}));}catch(ex){}
+            if(m>0&&v>=m&&a&&!d){
+                d=1;st.textContent='PELANGGARAN MAKSIMAL!';alert('Pelanggaran maksimal! Ujian dikumpulkan.');
+                try{navigator.sendBeacon('/api/student/force-submit',new Blob([JSON.stringify({exam_id:eid})],{type:'application/json'}));}catch(ex){}
+                setTimeout(function(){window.location.href='/student/dashboard';},1500);
+            }
+        }
+        document.addEventListener('visibilitychange',function(){
+            if(d)return;
+            if(document.hidden){timer=setTimeout(function(){pending=1;st.textContent='⚠️ Terdeteksi pindah tab...';},1500);}
+            else{if(timer){clearTimeout(timer);timer=0;}if(pending){pending=0;fire();}}
+        });
+    })();
+    </script>
     <!-- Top Bar -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex items-center justify-between border border-surface-100">
         <div class="flex items-center gap-3">
