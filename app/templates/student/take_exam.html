@@ -816,7 +816,7 @@ function examApp(duration, totalQ) {
         violationType: 'warning',
         antiCheat: {{ anti_cheat_config | safe }},
         // Agreement widget — auto-dismiss if already agreed in this session
-        showExamAgreement: false,
+        showExamAgreement: (function() { try { return !localStorage.getItem('sg_agreed_' + '{{ exam.id }}'); } catch(e) { return true; } })(),
         agreed: false,
         examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
         // Calculator — Scientific (standar matematika/fisika)
