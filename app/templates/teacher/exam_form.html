@@ -314,7 +314,7 @@
 <script>
 function questionManager() {
     return {
-        questions: JSON.parse('{{ (_init_questions or "[]") | tojson | safe }}' || '[]'),
+        questions: [],
         get mcqCount() { return this.questions.filter(q => q.type === 'mcq').length; },
         get essayCount() { return this.questions.filter(q => q.type !== 'mcq').length; },
         get mcqPct() { return this.mcqCount > 0 ? +(this._mcqPct || 70) : 0; },
