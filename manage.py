@@ -289,9 +289,11 @@ def _seed_exams(supabase, school_id, school_conf):
     if not teachers: return
 
     class_ids = []
+    class_ids_all = []
     try:
-        cls = supabase.table("classes").select("id").eq("school_id", school_id).execute().data or []
-        class_ids = [c["id"] for c in cls]
+        cls = supabase.table("classes").select("id").eq("school_id", school_id).order("name").execute().data or []
+        class_ids_all = [c["id"] for c in cls]
+        class_ids = [class_ids_all[0]] if class_ids_all else []
     except: pass
 
     for i, exam_spec in enumerate(SAMPLE_EXAMS):
