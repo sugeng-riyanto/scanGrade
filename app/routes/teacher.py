@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
 from app.decorators.security import require_school_access
@@ -183,7 +184,17 @@ def exam_form():
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
     start_at_str = request.form.get("start_at", "").strip()
-    start_at = None if action == "publish" else (start_at_str if start_at_str else None)
+    if action == "publish":
+        start_at = None
+    elif start_at_str:
+        try:
+            tz_off = g.get("tz_offset", 7)
+            local_dt = datetime.fromisoformat(start_at_str)
+            start_at = (local_dt - timedelta(hours=tz_off)).isoformat()
+        except Exception:
+            start_at = start_at_str
+    else:
+        start_at = None
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
     max_attempts = int(request.form.get("max_attempts", 1))
@@ -321,7 +332,17 @@ def exam_detail(exam_id):
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
     start_at_str = request.form.get("start_at", "").strip()
-    start_at = None if action == "publish" else (start_at_str if start_at_str else None)
+    if action == "publish":
+        start_at = None
+    elif start_at_str:
+        try:
+            tz_off = g.get("tz_offset", 7)
+            local_dt = datetime.fromisoformat(start_at_str)
+            start_at = (local_dt - timedelta(hours=tz_off)).isoformat()
+        except Exception:
+            start_at = start_at_str
+    else:
+        start_at = None
     is_template = request.form.get("is_template", "false") == "true"
     source_exam_id = request.form.get("source_exam_id") or None
     max_attempts = int(request.form.get("max_attempts", 1))
