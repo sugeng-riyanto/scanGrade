@@ -4,11 +4,23 @@ import fitz
 from flask import current_app
 
 
+def _ensure_bucket(supabase):
+    """Create exam-pdfs bucket if not exists."""
+    try:
+        supabase.storage.from_("exam-pdfs").info()
+    except Exception:
+        try:
+            supabase.storage.create_bucket("exam-pdfs", {"public": True})
+        except Exception:
+            pass
+
+
 def _upload_to_supabase(file_data: bytes, path: str, mime: str) -> str:
     """Upload file to Supabase Storage bucket exam-pdfs, return public URL."""
     from app.utils.auth import get_supabase
     supabase = get_supabase()
-    supabase.storage.from_("exam-pdfs").upload(path, file_data, {"content-type": mime})
+    _ensure_bucket(supabase)
+    supabase.storage.from_("exam-pdfs").upload(path, file_data, {"content-type": mime, "upsert": "true"})
     # Return public URL
     base = current_app.config.get("SUPABASE_URL", "").rstrip("/")
     if "/rest/v1" in base:
