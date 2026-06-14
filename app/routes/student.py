@@ -262,15 +262,14 @@ def take_exam(exam_id):
         if k not in exam or exam[k] is None:
             exam[k] = v
     # Parse JSON fields that may come as strings from Supabase
-    import json as _json
     for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
         _val = exam.get(_field)
         if isinstance(_val, str):
             try:
-                exam[_field] = _json.loads(_val)
-            except (_json.JSONDecodeError, TypeError):
+                exam[_field] = json.loads(_val)
+            except (json.JSONDecodeError, TypeError):
                 exam[_field] = {}
-    anti_cheat_config = _json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
+    anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
     resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
@@ -471,6 +470,14 @@ def result_detail(submission_id):
                 submission[field] = {} if field != "answers" else {}
         if not isinstance(submission.get(field), dict):
             submission[field] = {} if field != "answers" else {}
+    # Parse exam JSON fields
+    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
+        _val = submission.get("exam", {}).get(_field)
+        if isinstance(_val, str):
+            try:
+                submission["exam"][_field] = json.loads(_val)
+            except (json.JSONDecodeError, TypeError):
+                submission["exam"][_field] = {}
     student_name = g.user_name or g.user_email or ""
     return render_template("student/result_detail.html", submission=submission, student_name=student_name)
 

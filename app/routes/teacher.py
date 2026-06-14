@@ -739,6 +739,14 @@ def grade_detail(submission_id):
                 sub[field] = {} if field != "answers" else {}
         if not isinstance(sub.get(field), dict):
             sub[field] = {} if field != "answers" else {}
+    # Parse exam JSON fields
+    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
+        _val = exam.get(_field)
+        if isinstance(_val, str):
+            try:
+                exam[_field] = json.loads(_val)
+            except (json.JSONDecodeError, TypeError):
+                exam[_field] = {}
     return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
 
 
