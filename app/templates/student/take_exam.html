@@ -1,33 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block head_extra %}
-<script>
-window.examApp = function(duration, totalQ) {
-    return window._examApp ? window._examApp(duration, totalQ) : {
-        timeLeft: duration, sidebarOpen: false, submitted: false, page: 1, totalPages: 0, pages: [],
-        currentQ: 0, totalQ: totalQ, answered: {}, answersText: {}, questions: [],
-        textBoxes: {}, hasDrawn: {}, canvasData: {}, canvasHistory: {},
-        dragState: null, pdfImgWidth: 700, canvasDraw: {}, canvasTool: {}, canvasColor: {}, canvasHeight: {},
-        showCanvas: {}, canvasBg: {}, fullCanvasInited: {}, essayCanvasMode: {}, essayCanvasColor: {}, essayLineWidth: {},
-        lineDash: {}, ecCanvasInited: {}, textFontSize: {}, textFontFamily: {}, textOrientation: {},
-        showRuler: {}, rulerX: {}, rulerY: {}, rulerWidth: {}, rulerAngle: {}, rulerScale: {}, snapRuler: {},
-        showProtractor: {}, protractorX: {}, protractorY: {}, protractorSize: {}, protractorAngle: {}, protractorScale: {}, snapProtractor: {},
-        showCompass: {}, compassX: {}, compassY: {}, compassSize: {}, compassAngle: {}, compassScale: {}, snapCompass: {},
-        showTriangle: {}, triangleX: {}, triangleY: {}, triangleSize: {}, triangleAngle: {}, triangleScale: {}, snapTriangle: {},
-        canScrollUp: false, canScrollDown: false,
-        syncStatus: 'synced', syncLabel: '', lastSyncAt: Date.now(), pendingSync: false, dirty: false, canvasDirty: {}, lastSyncHash: '',
-        _syncInFlight: false, _canvasSyncInFlight: false,
-        violationCount: 0, totalPenalty: 0, showViolationBanner: false, violationMessage: '', violationType: 'warning',
-        antiCheat: {}, showExamAgreement: true, agreed: false, examRules: '',
-        showCalculator: false, calcInput: '0', calcResult: 0, calcOp: null, calcPrev: 0, calcNew: true, calcExpression: '', calcAngleMode: 'DEG', calcMem: 0,
-        audioOutputs: [], audioInputs: [], audioOutputLabel: '',
-        init() {},
-        agreeExam() { this.showExamAgreement = false; try { localStorage.setItem('sg_agreed_', '1'); } catch(e) {} },
-        submitExam() {}, loadDraft() {}, initStatusBar() {}, updateScrollState() {}, periodicSync() {}, saveToLocal() {},
-        getAnswersLight() { return {}; }, getAnswers() { return {}; }, closeAllTools() {}, initEcCanvas() {},
-    };
-};
-</script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
@@ -85,7 +58,7 @@ window.examApp = function(duration, totalQ) {
 </style>
 {% endblock %}
 {% block content %}
-<div x-data="_examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
+<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
     <!-- Anti-Cheat Status Badge (updated by script) -->
     <div id="ac-bar" class="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 border" style="background:#f0fdf4;color:#16a34a;border-color:#bbf7d0;">
         <i class="fas fa-shield-alt"></i>
@@ -746,7 +719,7 @@ console.log('[Exam] Page loaded, Alpine should init examApp');
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 
-window._examApp = function examApp(duration, totalQ) {
+window.examApp = function examApp(duration, totalQ) {
     return {
         timeLeft: duration,
         sidebarOpen: false,

@@ -58,12 +58,17 @@ def log_violation():
         )
         if valid["valid"]:
             exam_id = log.get("exam_id", "")
-            supabase.table("violation_logs").insert({
-                "exam_id": exam_id,
-                "user_id": g.user_id,
-                "violation_type": log.get("violation_type", "unknown"),
-                "metadata": log.get("metadata", {}),
-            }).execute()
+            try:
+                supabase.table("violation_logs").insert({
+                    "exam_id": exam_id,
+                    "user_id": g.user_id,
+                    "violation_type": log.get("violation_type", "unknown"),
+                    "metadata": log.get("metadata", {}),
+                }).execute()
+            except Exception:
+                current_app.logger.warning("Violation log insert failed for exam %s", exam_id)
+                results.append({"logged": False, "reason": "db_error"})
+                continue
             total_count = supabase.table("violation_logs").select("id", count="exact").eq("user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
             exam = supabase.table("exams").select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max").eq("id", exam_id).single().execute().data or {}
             from app.services.anti_cheat_service import calculate_graduated_penalty
