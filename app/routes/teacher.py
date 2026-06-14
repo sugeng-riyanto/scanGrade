@@ -188,6 +188,9 @@ def exam_form():
     max_attempts = int(request.form.get("max_attempts", 1))
     publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
+    if total_questions < 1:
+        flash("Minimal 1 soal", "error")
+        return redirect(request.referrer or "/teacher/exams")
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
     description = request.form.get("description", "")
@@ -336,6 +339,9 @@ def exam_detail(exam_id):
     max_attempts = int(request.form.get("max_attempts", 1))
     publish_mode = request.form.get("publish_mode", "manual")
     total_questions = int(request.form.get("total_questions", 10))
+    if total_questions < 1:
+        flash("Minimal 1 soal", "error")
+        return redirect(request.referrer or "/teacher/exams")
     duration_minutes = int(request.form.get("duration_minutes", 60))
     passing_score = int(request.form.get("passing_score", 70))
     description = request.form.get("description", "")
