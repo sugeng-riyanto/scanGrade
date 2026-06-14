@@ -329,6 +329,15 @@ def submit_exam(exam_id):
         except json.JSONDecodeError:
             pass
 
+    # Parse JSON fields that may be strings from Supabase
+    for _fld in ("answer_key", "question_types", "question_weights", "question_pages"):
+        _v = exam.get(_fld)
+        if isinstance(_v, str):
+            try:
+                exam[_fld] = json.loads(_v)
+            except (json.JSONDecodeError, TypeError):
+                exam[_fld] = {}
+
     mcq_count = sum(1 for v in (exam.get("answer_key") or {}).values() if v not in ("essay", "essay_text", "essay_canvas", None))
     question_weights = exam.get("question_weights") or {}
     question_types = exam.get("question_types") or {}

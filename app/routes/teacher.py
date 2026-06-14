@@ -33,6 +33,14 @@ def _recalculate_scores(exam_id):
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
     if not exam:
         return
+    # Parse JSON fields that may be strings from Supabase
+    for _fld in ("answer_key", "question_types", "question_weights", "question_pages"):
+        _v = exam.get(_fld)
+        if isinstance(_v, str):
+            try:
+                exam[_fld] = json.loads(_v)
+            except (json.JSONDecodeError, TypeError):
+                exam[_fld] = {}
     answer_key = exam.get("answer_key") or {}
     question_types = exam.get("question_types") or {}
     question_weights = exam.get("question_weights") or {}
@@ -60,6 +68,12 @@ def _recalculate_scores(exam_id):
                     question_weights[str(i)] = each
     subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
     for sub in subs:
+        # Parse JSON fields in each submission
+        for _sf in ("answers", "teacher_feedback"):
+            _sv = sub.get(_sf)
+            if isinstance(_sv, str):
+                try: sub[_sf] = json.loads(_sv)
+                except (json.JSONDecodeError, TypeError): sub[_sf] = {}
         answers = sub.get("answers") or {}
         earned = 0.0
         for i in range(total_q):
