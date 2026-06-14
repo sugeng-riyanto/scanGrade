@@ -1711,14 +1711,15 @@ function examApp(duration, totalQ) {
                         if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
                     }
                     data[oi] = { type: 'essay_text', text: textAnswer, pages: pagesData };
-                } else if (q.type === 'essay_canvas' || q.type === 'essay') {
+                } else if (q.type === 'essay') {
+                    const textAnswer = (this.answersText[i] || '').trim();
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
                     for (let p = 0; p < totalP; p++) {
                         const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
                         if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
                     }
-                    data[oi] = { type: q.type, pages: pagesData };
+                    data[oi] = { type: 'essay', text: textAnswer, pages: pagesData };
                 } else if (q.type === 'mcq') {
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
@@ -1825,6 +1826,11 @@ function examApp(duration, totalQ) {
                     };
                     if (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') {
                         if (qData && qData.pages) restorePages(qData.pages);
+                        if (qData && qData.text) {
+                            if (!this.answersText) this.answersText = {};
+                            this.answersText[i] = qData.text;
+                            this.answered[i] = true;
+                        }
                     } else if (q.type === 'mcq' && qData) {
                         if (typeof qData === 'object' && qData.answer) {
                             q.answer = qData.answer;

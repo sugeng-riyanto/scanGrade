@@ -141,7 +141,7 @@
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold
                             {% if qtype == 'essay_text' %}bg-gradient-to-r from-amber-50 to-orange-50 text-amber-700{% else %}bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700{% endif %}">
                             <i class="fas {% if qtype == 'essay_text' %}fa-font{% else %}fa-pen-fancy{% endif %}"></i>
-                            <span>Soal #{{ i+1 }} — Jawaban {{ 'Teks+Coretan' if qtype == 'essay_text' else 'Canvas' }}</span>
+                            <span>Soal #{{ i+1 }} — Jawaban {{ 'Teks+Coretan' if qtype == 'essay_text' else 'Canvas+Coretan' if qtype == 'essay_canvas' else 'Teks+Canvas' }}</span>
                             <span class="ml-auto" x-text="totalPages>0 ? 'Hlm '+page+'/'+totalPages : ''"></span>
                         </div>
 
@@ -344,7 +344,7 @@
                         <div class="flex items-center gap-3 px-4 py-3 bg-stone-50 border-t no-print">
                             {% set qweight = (exam.question_weights or {}).get(i|string, 0) %}
                             {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
-                            {% if qtype == 'essay_text' %}
+                            {% if qtype == 'essay_text' or qtype == 'essay' %}
                             {% set ans_raw = submission.answers.get(i|string, {}) %}
                             {% set student_text = ans_raw['text'] if ans_raw is mapping and 'text' in ans_raw else '' %}
                             {% if student_text %}

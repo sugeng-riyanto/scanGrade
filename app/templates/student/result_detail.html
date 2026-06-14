@@ -365,7 +365,7 @@
                             {% endif %}
                             {% endfor %}
                         {% else %}
-                            {% if qtype == 'essay_text' and essay_ans is mapping and essay_ans.get('text') %}
+                            {% if (qtype == 'essay_text' or qtype == 'essay') and essay_ans is mapping and essay_ans.get('text') %}
                             <div class="p-4 bg-blue-50 rounded-xl border border-blue-200">
                                 <div class="flex items-center gap-2 mb-2">
                                     <i class="fas fa-align-left text-blue-600 text-sm"></i>
