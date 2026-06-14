@@ -7,7 +7,7 @@
         <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20"><i class="fas fa-file-pen text-white text-lg"></i></div>
         <div>
             <h1 class="text-2xl font-extrabold text-surface-800">{{ 'Edit' if exam else 'Buat' }} Ujian</h1>
-            <p class="text-sm text-surface-500 font-medium">MCQ · Esai Teks · Esai Canvas</p>
+            <p class="text-sm text-surface-500 font-medium">Isi data ujian, tambah soal, upload PDF, lalu publikasikan ke kelas</p>
         </div>
         <a href="{{ url_for('teacher.my_exams') }}" class="ml-auto text-surface-400 hover:text-surface-600 p-2 hover:bg-surface-100 rounded-xl transition">
             <i class="fas fa-times text-lg"></i>
@@ -18,28 +18,39 @@
         <div class="lg:col-span-2">
             <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
                 <div class="card p-6 space-y-4">
-                    <div>
-                        <label class="block text-sm font-extrabold text-slate-700 mb-1">Judul Exam</label>
-                        <input type="text" name="title" value="{{ exam.title if exam else '' }}" required
-                               class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="sm:col-span-2">
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Judul Ujian</label>
+                            <input type="text" name="title" value="{{ exam.title if exam else '' }}" required placeholder="Contoh: Ulangan Harian - Persamaan Linear"
+                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Mata Pelajaran</label>
+                            {% if subjects %}
+                            <select name="subject_id" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                                <option value="">-- Pilih --</option>
+                                {% for s in subjects %}
+                                <option value="{{ s.id }}" {% if exam and exam.subject_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                                {% endfor %}
+                            </select>
+                            {% else %}
+                            <input type="text" name="subject" value="{{ exam.subject if exam else '' }}" placeholder="Ketik manual"
+                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                            {% endif %}
+                        </div>
+                        <div>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Durasi</label>
+                            <select name="duration_minutes" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                                {% for m in [10,15,20,25,30,40,45,50,60,75,90,100,120,150,180] %}
+                                <option value="{{ m }}" {% if (exam.duration_minutes or 60) == m %}selected{% endif %}>{{ m }} menit</option>
+                                {% endfor %}
+                                <option value="0" {% if (exam.duration_minutes or 0) == 0 %}selected{% endif %}>Tak terbatas</option>
+                            </select>
+                        </div>
                     </div>
+
                     <div>
-                        <label class="block text-sm font-extrabold text-slate-700 mb-1">Mata Pelajaran</label>
-                        {% if subjects %}
-                        <select name="subject_id" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
-                            <option value="">-- Pilih Mata Pelajaran --</option>
-                            {% for s in subjects %}
-                            <option value="{{ s.id }}" {% if exam and exam.subject_id == s.id %}selected{% endif %}>{{ s.name }}</option>
-                            {% endfor %}
-                        </select>
-                        {% else %}
-                        <input type="text" name="subject" value="{{ exam.subject if exam else '' }}" placeholder="Ketik manual jika belum tersedia"
-                               class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
-                        <p class="text-xs text-slate-400 mt-1">Admin sekolah belum menambahkan mata pelajaran. Anda bisa mengetik manual.</p>
-                        {% endif %}
-                    </div>
-                    <div>
-                        <label class="block text-sm font-extrabold text-slate-700 mb-2">Kelas Tujuan (minimal 1)</label>
+                        <label class="block text-sm font-extrabold text-slate-700 mb-2">Kelas Tujuan</label>
                         {% if classes %}
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2" x-data="{ selected: {{ (exam.class_ids or []) | tojson }} }">
                             {% for c in classes %}
@@ -55,110 +66,39 @@
                         <p class="text-sm text-slate-400 italic">Belum ada kelas. Admin sekolah harus menambahkan kelas terlebih dahulu.</p>
                         {% endif %}
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Durasi</label>
-                            <select name="duration_minutes" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
-                                {% for m in [10,15,20,25,30,40,45,50,60,75,90,100,120,150,180] %}
-                                <option value="{{ m }}" {% if (exam.duration_minutes or 60) == m %}selected{% endif %}>{{ m }} menit ({% if m >= 60 %}{{ m//60 }} jam {% endif %}{{ m%60 }} menit)</option>
-                                {% endfor %}
-                                <option value="0" {% if (exam.duration_minutes or 0) == 0 %}selected{% endif %}>Tidak terbatas</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Nilai Minimal Lulus</label>
-                            <input type="number" name="passing_score" value="{{ exam.passing_score or 70 }}" min="0" max="100"
-                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Mulai (opsional)</label>
-                            <input type="datetime-local" name="start_at"
-                                   value="{% if exam.start_at %}{{ (exam.start_at[:19] + '+00:00') | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
-                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
-                            <p class="text-xs text-slate-400 mt-1">Kosongkan jika ingin ujian langsung aktif</p>
-                        </div>
-                    </div>
+
                     <div>
-                        <label class="block text-sm font-extrabold text-slate-700 mb-1">Deskripsi</label>
-                        <textarea name="description" rows="3"
-                                  class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">{{ exam.description if exam else '' }}</textarea>
-                    </div>
-                    <div class="flex items-center gap-3">
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" name="is_template" value="true" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
-                                   {% if exam and exam.is_template %}checked{% endif %}>
-                            <span class="font-bold text-sm text-slate-700">Jadikan sebagai Template / Bank Soal</span>
-                        </label>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4 pt-3 border-t border-slate-200">
-                        <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Max Attempt (kali)</label>
-                            <input type="number" name="max_attempts" value="{{ exam.max_attempts or 1 }}" min="1" max="10"
-                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
-                            <p class="text-xs text-slate-400 mt-1">Berapa kali siswa bisa mengulang ujian. Default: 1</p>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Publikasi Nilai</label>
-                            <select name="publish_mode" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-bold transition">
-                                <option value="manual" {% if (exam.publish_mode or 'manual') == 'manual' %}selected{% endif %}>Manual (guru publikasi)</option>
-                                <option value="auto" {% if exam.publish_mode == 'auto' %}selected{% endif %}>Otomatis (setelah submit)</option>
-                            </select>
-                            <p class="text-xs text-slate-400 mt-1">Otomatis = siswa langsung lihat nilai setelah submit</p>
-                        </div>
+                        <label class="block text-sm font-extrabold text-slate-700 mb-1">Deskripsi (opsional)</label>
+                        <textarea name="description" rows="2" placeholder="Petunjuk atau catatan untuk siswa"
+                                  class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">{{ exam.description if exam else '' }}</textarea>
                     </div>
                 </div>
 
                 <div class="card p-6" x-data="questionManager()">
-                     <div class="flex items-center justify-between mb-4">
-                         <h2 class="text-lg font-extrabold text-slate-800">Soal & Kunci Jawaban</h2>
-                         <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-extrabold"
-                              :class="mcqPct + essayPct === 100 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'">
-                             <i :class="mcqPct + essayPct === 100 ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle'"></i>
-                             <span x-text="mcqPct + essayPct === 100 ? 'Total 100 poin' : (mcqPct + essayPct) + ' / 100 poin'"></span>
-                         </div>
-                     </div>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-extrabold text-slate-800">Soal & Kunci Jawaban</h2>
+                        <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-extrabold"
+                             :class="totalPct === 100 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'">
+                            <i :class="totalPct === 100 ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle'"></i>
+                            <span x-text="totalPct === 100 ? 'Total 100 poin' : totalPct + ' / 100 poin'"></span>
+                        </div>
+                    </div>
 
-                     <div class="grid grid-cols-2 gap-4 mb-4 p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
-                         <div>
-                             <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i>Bobot MCQ</label>
-                             <div class="flex items-center gap-2">
-                                 <input type="number" x-model.number="mcqPct" min="0" max="100" step="1"
-                                        @input="onGroupPctChange()"
-                                        class="w-20 px-3 py-2 border-2 border-amber-200 rounded-xl text-center font-extrabold text-amber-700 focus:border-amber-400">
-                                 <span class="text-sm font-bold text-slate-500">%</span>
-                                 <span class="text-xs font-bold text-slate-400" x-text="mcqCount + ' soal × ' + mcqPerQ.toFixed(1) + ' poin'"></span>
-                             </div>
-                         </div>
-                         <div>
-                             <label class="text-xs font-extrabold text-emerald-700 mb-1 flex items-center gap-1"><i class="fas fa-pencil-alt"></i>Bobot Esai</label>
-                             <div class="flex items-center gap-2">
-                                 <input type="number" x-model.number="essayPct" min="0" max="100" step="1"
-                                        @input="onGroupPctChange()"
-                                        class="w-20 px-3 py-2 border-2 border-emerald-200 rounded-xl text-center font-extrabold text-emerald-700 focus:border-emerald-400">
-                                 <span class="text-sm font-bold text-slate-500">%</span>
-                                 <span class="text-xs font-bold text-slate-400" x-text="essayCount + ' soal × ' + essayPerQ.toFixed(1) + ' poin'"></span>
-                             </div>
-                         </div>
-                     </div>
-
-                     <div class="flex gap-3 mb-4">
-                         <button type="button" @click="addMcq()"
-                                 class="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-amber-200 transition">
-                             <i class="fas fa-plus-circle"></i>Tambah MCQ
-                         </button>
-                         <button type="button" @click="addEssay()"
-                                 class="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-emerald-200 transition"
-                                 :class="hasEssay ? 'opacity-50 cursor-not-allowed' : ''"
-                                 :disabled="hasEssay">
-                             <i class="fas fa-pencil-alt"></i>Tambah Esai
-                         </button>
-                         <button type="button" @click="normalizeTo100()"
-                                 class="flex items-center gap-2 bg-primary-50 hover:bg-primary-100 text-primary-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-primary-200 transition">
-                             <i class="fas fa-balance-scale"></i>Sesuaikan 100%
-                         </button>
-                     </div>
+                    <div class="flex gap-3 mb-4">
+                        <button type="button" @click="addMcq()"
+                                class="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-amber-200 transition">
+                            <i class="fas fa-plus-circle"></i>Tambah MCQ
+                        </button>
+                        <button type="button" @click="addEssay()"
+                                class="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-emerald-200 transition"
+                                :class="hasEssay ? 'opacity-50 cursor-not-allowed' : ''" :disabled="hasEssay">
+                            <i class="fas fa-pencil-alt"></i>Tambah Esai
+                        </button>
+                        <button type="button" @click="normalizeTo100()"
+                                class="flex items-center gap-2 bg-primary-50 hover:bg-primary-100 text-primary-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-primary-200 transition">
+                            <i class="fas fa-balance-scale"></i>100%
+                        </button>
+                    </div>
 
                     <template x-if="questions.length === 0">
                         <div class="text-center py-8 text-slate-400">
@@ -172,25 +112,20 @@
                             <div class="p-4 bg-slate-50 rounded-2xl border-2 border-slate-200 question-item">
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
-                                        <span class="text-sm font-extrabold text-slate-700" x-text="q.type === 'mcq' ? 'Soal ' + (i + 1) : 'Esai'"></span>
+                                        <span class="text-sm font-extrabold text-slate-700" x-text="'Soal ' + (i + 1)"></span>
                                         <span class="text-xs px-2 py-1 rounded-full font-extrabold"
                                               :class="q.type === 'mcq' ? 'bg-amber-100 text-amber-700' : (q.type === 'essay_text' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700')"
-                                              x-text="q.type === 'mcq' ? 'MCQ' : (q.type === 'essay_text' ? 'Esai Teks' : 'Esai')">
-                                        </span>
+                                              x-text="q.type === 'mcq' ? 'MCQ' : (q.type === 'essay_text' ? 'Esai Teks' : 'Esai Canvas')"></span>
                                         <span x-show="q.bonus" class="text-xs px-2 py-1 rounded-full font-extrabold bg-purple-100 text-purple-700">Bonus</span>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                         <span class="text-xs px-2 py-0.5 rounded-full font-extrabold"
-                                               :class="q.type === 'mcq' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'"
-                                               x-text="(q.type === 'mcq' ? mcqPerQ : essayPerQ).toFixed(1) + ' poin'"></span>
-                                         <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1 focus:border-primary-500"
+                                        <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1"
                                                 x-model="q.type" @change="onTypeChange(i)">
-                                             <option value="mcq">MCQ</option>
-                                             <option value="essay_text">Esai Teks (Paragraph)</option>
-                                             <option value="essay">Esai (Canvas)</option>
+                                            <option value="mcq">MCQ</option>
+                                            <option value="essay_text">Esai Teks</option>
+                                            <option value="essay">Esai Canvas</option>
                                         </select>
-                                        <button type="button" @click="removeQuestion(i)"
-                                                class="text-slate-400 hover:text-red-500 p-1 transition">
+                                        <button type="button" @click="removeQuestion(i)" class="text-slate-400 hover:text-red-500 p-1 transition">
                                             <i class="fas fa-times-circle text-sm"></i>
                                         </button>
                                     </div>
@@ -198,220 +133,110 @@
 
                                 <div x-show="q.type === 'mcq'" class="mcq-options space-y-2">
                                     <div class="flex items-center justify-between">
-                                        <label class="text-xs font-extrabold text-slate-500">Kunci Jawaban (bisa lebih dari satu):</label>
+                                        <label class="text-xs font-extrabold text-slate-500">Kunci Jawaban:</label>
                                         <label class="flex items-center gap-1.5 cursor-pointer">
-                                            <input type="checkbox" x-model="q.bonus" @change="onBonusToggle(i)"
-                                                   class="w-4 h-4 text-purple-600 border-slate-300 rounded focus:ring-purple-500">
+                                            <input type="checkbox" x-model="q.bonus" @change="onBonusToggle(i)" class="w-4 h-4 text-purple-600 border-slate-300 rounded">
                                             <span class="text-xs font-extrabold" :class="q.bonus ? 'text-purple-700' : 'text-slate-400'">Bonus</span>
                                         </label>
                                     </div>
                                     <div class="flex gap-2 flex-wrap">
                                         <template x-for="opt in ['A','B','C','D','E']">
                                             <button type="button" @click="toggleAnswer(i, opt)"
-                                                    class="text-sm font-extrabold cursor-pointer px-3 py-1.5 rounded-xl border-2 transition"
+                                                    class="text-sm font-extrabold px-3 py-1.5 rounded-xl border-2 transition"
                                                     :class="q.bonus ? 'bg-purple-50 border-purple-300 text-purple-700' : (q.answers && q.answers.includes(opt) ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-600')">
                                                 <span x-text="opt"></span>
                                             </button>
                                         </template>
                                     </div>
-                                    <div x-show="q.bonus" class="text-[11px] font-bold text-purple-600 bg-purple-50 rounded-lg px-3 py-1.5 border border-purple-100">
-                                        <i class="fas fa-gift mr-1"></i>Soal bonus — semua jawaban dihitung benar
-                                    </div>
                                 </div>
 
                                 <div x-show="q.type === 'essay_text'" class="text-xs font-bold text-blue-700 bg-blue-50 rounded-xl px-3 py-2 border border-blue-100">
-                                    <i class="fas fa-align-left mr-1"></i>Esai Teks — siswa menulis jawaban dalam bentuk paragraf
+                                    <i class="fas fa-align-left mr-1"></i>Siswa mengetik jawaban paragraf
                                 </div>
                                 <div x-show="q.type === 'essay'" class="text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
-                                    <i class="fas fa-pencil-alt mr-1"></i>Esai Canvas — siswa menggambar & mengetik di atas halaman PDF
-                                </div>
-
-                                <div class="mt-2 space-y-1.5">
-                                    <div class="flex items-center gap-1">
-                                        <i class="fas fa-music text-xs text-slate-400"></i>
-                                        <input type="text" :name="'audio_' + i" placeholder="URL audio (opsional)"
-                                               x-model="q.audio"
-                                               class="text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 w-full focus:border-primary-500 transition">
-                                    </div>
-                                    <div class="flex items-center gap-1">
-                                        <i class="fab fa-youtube text-xs text-red-500"></i>
-                                        <input type="text" :name="'youtube_' + i" placeholder="URL YouTube (opsional)"
-                                               x-model="q.youtube"
-                                               class="text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 w-full focus:border-primary-500 transition">
-                                    </div>
+                                    <i class="fas fa-pencil-alt mr-1"></i>Siswa menggambar/menulis di atas PDF
                                 </div>
                             </div>
                         </template>
                     </div>
 
                     <input type="hidden" name="total_questions" id="total-questions-input" :value="questions.length">
-                     <input type="hidden" name="question_types" id="question-types-input" :value="getTypesJson()">
-                     <input type="hidden" name="answer_key" id="answer-key-input" :value="getAnswerKeyJson()">
-                     <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
-                 </div>
+                    <input type="hidden" name="question_types" id="question-types-input" :value="getTypesJson()">
+                    <input type="hidden" name="answer_key" id="answer-key-input" :value="getAnswerKeyJson()">
+                    <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
+                </div>
 
                 <input type="hidden" name="anti_cheat_enabled" value="true">
                 <input type="hidden" name="fullscreen_required" id="fullscreen-required">
-                <input type="hidden" name="randomize_questions" id="randomize-questions">
-                <input type="hidden" name="randomize_options" id="randomize-options">
-                <input type="hidden" name="watermark_name" id="watermark-name">
                 <input type="hidden" name="block_copy_paste" id="block-copy-paste">
                 <input type="hidden" name="block_right_click" id="block-right-click">
-                <input type="hidden" name="block_screenshot" id="block-screenshot">
                 <input type="hidden" name="auto_submit_on_max" id="auto-submit-on-max">
                 <input type="hidden" name="allow_calculator" id="allow-calculator">
 
-                <div class="card p-6 space-y-4" x-data="antiCheatSettings({
-                    enabled: {{ 'true' if (exam.get('anti_cheat_enabled') if exam else True) else 'false' }},
+                <div class="card p-5 space-y-4" x-data="antiCheatSettings({
+                    enabled: true,
                     penalty_per_violation: {{ exam.get('penalty_per_violation', 5) if exam else 5 }},
                     max_violations: {{ exam.get('max_violations', 5) if exam else 5 }},
                     auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
                     fullscreen_required: {{ 'true' if (exam.get('fullscreen_required') if exam else True) else 'false' }},
-                    randomize_questions: {{ 'true' if (exam.get('randomize_questions') if exam else False) else 'false' }},
-                    randomize_options: {{ 'true' if (exam.get('randomize_options') if exam else False) else 'false' }},
                     watermark_name: {{ 'true' if (exam.get('watermark_name') if exam else True) else 'false' }},
                     block_copy_paste: {{ 'true' if (exam.get('block_copy_paste') if exam else True) else 'false' }},
                     block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
-                    block_screenshot: {{ 'true' if (exam.get('block_screenshot') if exam else False) else 'false' }},
                     allow_calculator: {{ 'true' if (exam.get('allow_calculator') if exam else False) else 'false' }},
                 })">
                     <div class="flex items-center justify-between">
                         <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-                            <i class="fas fa-shield-alt text-primary-600"></i>Pengaturan Anti-Cheat
+                            <i class="fas fa-shield-alt text-primary-600"></i>Anti-Cheat
                         </h2>
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" x-model="enabled" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500">
-                            <span class="text-sm font-extrabold" :class="enabled ? 'text-primary-700' : 'text-slate-400'" x-text="enabled ? 'Aktif' : 'Nonaktif'"></span>
-                        </label>
+                        <span class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">Selalu Aktif</span>
                     </div>
-
-                    <div x-show="enabled" x-transition class="space-y-4">
-
-                        <div class="p-4 bg-amber-50 rounded-2xl border-2 border-amber-200 space-y-3">
-                            <p class="text-xs font-extrabold text-amber-800 flex items-center gap-1"><i class="fas fa-exclamation-triangle"></i>Skala Penalti Tab Switch</p>
-                            <div class="grid grid-cols-4 gap-2 text-center text-xs">
-                                <div class="bg-white rounded-xl p-2 border border-amber-200">
-                                    <p class="font-extrabold text-amber-700">1x</p>
-                                    <p class="font-bold text-slate-600">WARNING</p>
-                                    <p class="font-bold text-emerald-600">0 poin</p>
-                                </div>
-                                <div class="bg-white rounded-xl p-2 border border-amber-200">
-                                    <p class="font-extrabold text-amber-700">2x</p>
-                                    <p class="font-bold text-slate-600">-<span x-text="penalty_per_violation"></span> poin</p>
-                                </div>
-                                <div class="bg-white rounded-xl p-2 border border-amber-200">
-                                    <p class="font-extrabold text-amber-700">3x</p>
-                                    <p class="font-bold text-slate-600">-<span x-text="penalty_per_violation * 2"></span> poin</p>
-                                </div>
-                                <div class="bg-white rounded-xl p-2 border border-amber-200">
-                                    <p class="font-extrabold text-red-700">4x+</p>
-                                    <p class="font-bold text-slate-600">-<span x-text="penalty_per_violation * 3"></span>/violation</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div>
-                                <label class="block text-xs font-extrabold text-slate-700 mb-1"><i class="fas fa-minus-circle text-red-400 mr-1"></i>Penalti per Violation</label>
-                                <input type="number" x-model.number="penalty_per_violation" name="penalty_per_violation" min="0" max="100" step="1"
-                                       class="w-full px-3 py-2 border-2 border-slate-200 rounded-xl text-center font-extrabold focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
-                                <p class="text-[10px] font-bold text-slate-400 mt-0.5">Poin dikurangi per tab switch (setelah warning)</p>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-extrabold text-slate-700 mb-1"><i class="fas fa-ban text-red-400 mr-1"></i>Max Violations</label>
-                                <input type="number" x-model.number="max_violations" name="max_violations" min="0" max="50" step="1"
-                                       class="w-full px-3 py-2 border-2 border-slate-200 rounded-xl text-center font-extrabold focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
-                                <p class="text-[10px] font-bold text-slate-400 mt-0.5">0 = unlimited (hanya penalti poin)</p>
-                            </div>
-                            <div class="flex flex-col justify-center">
-                                <label class="flex items-center gap-2 cursor-pointer p-3 rounded-xl border-2" :class="auto_submit_on_max ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="auto_submit_on_max" name="auto_submit_on_max" class="w-5 h-5 text-red-600 border-slate-300 rounded focus:ring-red-500">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="auto_submit_on_max ? 'text-red-700' : 'text-slate-500'">Auto-Submit</p>
-                                        <p class="text-[10px] font-bold text-slate-400">Ujian otomatis dikumpulkan saat max violation</p>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="border-t border-slate-100 pt-4">
-                            <p class="text-xs font-extrabold text-slate-700 mb-3"><i class="fas fa-lock text-primary-500 mr-1"></i>Proteksi Tambahan</p>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="fullscreen_required ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="fullscreen_required ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-expand mr-1"></i>Wajib Fullscreen</p>
-                                        <p class="text-[10px] font-bold text-slate-400">Keluar fullscreen = tab switch violation</p>
-                                    </div>
-                                </label>
-                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="randomize_questions ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="randomize_questions" name="randomize_questions" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="randomize_questions ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-random mr-1"></i>Acak Urutan Soal</p>
-                                        <p class="text-[10px] font-bold text-slate-400">Setiap siswa mendapat urutan soal berbeda</p>
-                                    </div>
-                                </label>
-                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="randomize_options ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="randomize_options" name="randomize_options" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="randomize_options ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-sort-amount-down mr-1"></i>Acak Urutan Opsi MCQ</p>
-                                        <p class="text-[10px] font-bold text-slate-400">A/B/C/D/E diacak per siswa</p>
-                                    </div>
-                                </label>
-                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="watermark_name ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="watermark_name" name="watermark_name" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="watermark_name ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-user-tag mr-1"></i>Watermark Nama Siswa</p>
-                                        <p class="text-[10px] font-bold text-slate-400">Overlay nama di halaman soal (cegah screenshot sharing)</p>
-                                    </div>
-                                </label>
-                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="block_copy_paste ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="block_copy_paste" name="block_copy_paste" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="block_copy_paste ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-copy mr-1"></i>Blokir Copy-Paste</p>
-                                        <p class="text-[10px] font-bold text-slate-400">Cegah copy/paste di textarea esai</p>
-                                    </div>
-                                </label>
-                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="block_right_click ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="block_right_click" name="block_right_click" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="block_right_click ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-mouse mr-1"></i>Blokir Klik Kanan</p>
-                                        <p class="text-[10px] font-bold text-slate-400">Disable context menu selama ujian</p>
-                                    </div>
-                                </label>
-                                <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border-2 transition" :class="allow_calculator ? 'border-primary-200 bg-primary-50' : 'border-slate-200 bg-slate-50'">
-                                    <input type="checkbox" x-model="allow_calculator" name="allow_calculator" class="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5">
-                                    <div>
-                                        <p class="text-xs font-extrabold" :class="allow_calculator ? 'text-primary-700' : 'text-slate-500'"><i class="fas fa-calculator mr-1"></i>Izinkan Kalkulator</p>
-                                        <p class="text-[10px] font-bold text-slate-400">Tampilkan kalkulator ilmiah selama ujian</p>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                            <p class="text-[10px] font-bold text-slate-500"><i class="fas fa-info-circle mr-1"></i>
-                                Total penalti maksimal jika <span x-text="max_violations || '∞'"></span> violation:
-                                <strong class="text-slate-700" x-text="calculatePreviewPenalty()"></strong> poin
-                            </p>
-                        </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="fullscreen_required" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Wajib Fullscreen</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="watermark_name ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="watermark_name" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Watermark Nama</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="block_copy_paste ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="block_copy_paste" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Blokir Copy-Paste</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="block_right_click ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="block_right_click" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Blokir Klik Kanan</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="auto_submit_on_max ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="auto_submit_on_max" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Auto-Submit</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="allow_calculator ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="allow_calculator" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Kalkulator Ilmiah</span>
+                        </label>
                     </div>
                 </div>
 
-                <!-- PDF Upload Section -->
                 <div class="card p-5 border border-dashed border-slate-300 bg-slate-50/50">
                     <h3 class="font-extrabold text-slate-700 text-sm flex items-center gap-2">
-                        <i class="fas fa-file-pdf text-orange-500"></i>Upload PDF Soal (Opsional)
+                        <i class="fas fa-file-pdf text-orange-500"></i>Upload PDF Soal (opsional)
                     </h3>
-                    <p class="text-xs text-slate-400 mt-1">Upload file PDF yang berisi soal ujian. Setiap halaman akan dikonversi menjadi gambar.</p>
+                    <p class="text-xs text-slate-400 mt-1">Upload file PDF berisi soal. Setiap halaman dikonversi ke gambar untuk siswa.</p>
                     <div class="mt-3 flex items-center gap-4">
                         {% if exam and exam.pdf_url %}
                         <div class="flex items-center gap-2 text-emerald-700 font-bold text-sm">
                             <i class="fas fa-check-circle"></i>PDF sudah diupload
-                            <a href="{{ exam.pdf_url }}" target="_blank" class="text-primary-600 hover:text-primary-700 underline text-xs">Lihat</a>
+                            <a href="{{ exam.pdf_url }}" target="_blank" class="text-primary-600 underline text-xs">Lihat</a>
                         </div>
                         {% endif %}
-                        <input type="file" name="pdf" accept=".pdf" class="text-sm font-medium text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-extrabold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100">
+                        <input type="file" name="pdf" accept=".pdf" class="text-sm font-medium file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-extrabold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100">
                     </div>
                 </div>
 
@@ -421,11 +246,11 @@
                         <i class="fas fa-save mr-1"></i>Simpan Draft
                     </button>
                     <button type="submit" name="action" value="save_active"
-                            class="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg shadow-primary-600/20 transition">
+                            class="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg transition">
                         <i class="fas fa-check mr-1"></i>Simpan & Aktifkan
                     </button>
                     <button type="submit" name="action" value="publish"
-                            class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg shadow-emerald-500/30 hover:from-emerald-700 hover:to-emerald-600 transition">
+                            class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition">
                         <i class="fas fa-paper-plane mr-1"></i>Publish & Kirim ke Kelas
                     </button>
                 </div>
@@ -435,70 +260,49 @@
         <div class="lg:col-span-1">
             {% if exam and exam.id %}
             <div class="card p-6 space-y-4 sticky top-20">
-                <h3 class="font-extrabold text-slate-800">Pengaturan Exam</h3>
-                {% if exam.pdf_url %}
-                <div class="p-3 bg-emerald-50 rounded-xl flex items-center gap-2 border border-emerald-100">
-                    <i class="fas fa-check-circle text-emerald-600"></i>
-                    <span class="text-sm font-bold text-emerald-700">PDF sudah diupload</span>
-                </div>
-                {% endif %}
-                <div class="border-t border-slate-100 pt-4">
-                    <p class="text-sm font-extrabold text-slate-700 mb-2">PDF Soal</p>
-                    {% if exam.pdf_url %}
-                    <div class="p-3 bg-emerald-50 rounded-xl mb-2 border border-emerald-100">
-                        <p class="text-xs font-bold text-emerald-700"><i class="fas fa-check mr-1"></i>PDF terupload</p>
-                    </div>
-                    {% else %}
-                    <p class="text-xs font-bold text-slate-400 mb-2">Upload PDF soal ujian</p>
-                    {% endif %}
-                    <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
-                       class="text-sm font-extrabold text-primary-600 hover:text-primary-700 transition">
-                        <i class="fas fa-upload mr-1"></i>{{ 'Ganti PDF' if exam.pdf_url else 'Upload PDF' }}
-                    </a>
-                </div>
-                <div class="border-t border-slate-100 pt-4 space-y-2">
-                    <p class="text-sm font-extrabold text-slate-700 mb-2">Aksi</p>
+                <h3 class="font-extrabold text-slate-800">Aksi</h3>
+                <div class="space-y-2">
                     <a href="{{ url_for('teacher.preview_exam', exam_id=exam.id) }}"
-                       class="block text-sm bg-primary-600 text-white px-3 py-2.5 rounded-xl hover:bg-primary-700 font-extrabold text-center shadow-lg shadow-primary-600/20 transition">
-                        <i class="fas fa-eye mr-1"></i>{{ 'Lihat Preview' if not exam.is_published else 'Lihat Halaman Siswa' }}
+                       class="block text-sm bg-primary-600 text-white px-3 py-2.5 rounded-xl hover:bg-primary-700 font-extrabold text-center shadow-lg transition">
+                        <i class="fas fa-eye mr-1"></i>Preview
                     </a>
                     <a href="{{ url_for('teacher.bubble_sheet', exam_id=exam.id) }}"
-                       class="block text-sm font-extrabold text-primary-600 hover:text-primary-700 transition px-3 py-2 hover:bg-primary-50 rounded-xl">
+                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
                         <i class="fas fa-print mr-1"></i>Cetak LJK
                     </a>
                     <a href="{{ url_for('teacher.results', exam_id=exam.id) }}"
-                       class="block text-sm font-extrabold text-primary-600 hover:text-primary-700 transition px-3 py-2 hover:bg-primary-50 rounded-xl">
-                        <i class="fas fa-chart-bar mr-1"></i>Lihat Hasil
+                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
+                        <i class="fas fa-chart-bar mr-1"></i>Hasil
                     </a>
-                    <a href="{{ url_for('teacher.scan_page') }}"
-                       class="block text-sm font-extrabold text-primary-600 hover:text-primary-700 transition px-3 py-2 hover:bg-primary-50 rounded-xl">
-                        <i class="fas fa-camera mr-1"></i>Scan Jawaban
+                    <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
+                       class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
+                        <i class="fas fa-upload mr-1"></i>{{ 'Ganti PDF' if exam.pdf_url else 'Upload PDF' }}
                     </a>
                     <button type="button" onclick="deleteExam('{{ exam.id }}')"
-                            class="block w-full text-sm font-extrabold text-red-600 hover:text-red-700 transition px-3 py-2 hover:bg-red-50 rounded-xl text-left">
-                        <i class="fas fa-trash mr-1"></i>Hapus Exam
+                            class="block w-full text-sm font-extrabold text-red-600 hover:bg-red-50 px-3 py-2 rounded-xl text-left transition">
+                        <i class="fas fa-trash mr-1"></i>Hapus
                     </button>
                 </div>
             </div>
             {% else %}
             <div class="card p-6 sticky top-20">
-                <h3 class="font-extrabold text-slate-800 mb-4">Langkah Selanjutnya</h3>
+                <h3 class="font-extrabold text-slate-800 mb-4">Langkah</h3>
                 <ol class="space-y-3 text-sm font-bold text-slate-600">
                     <li class="flex items-start gap-2">
                         <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">1</span>
-                        <span>Isi data exam dan klik <strong class="text-slate-800">Simpan</strong></span>
+                        <span>Isi data & soal, klik <strong class="text-slate-800">Simpan</strong></span>
                     </li>
                     <li class="flex items-start gap-2">
                         <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">2</span>
-                        <span><strong class="text-slate-800">Upload PDF</strong> soal ujian</span>
+                        <span>Upload <strong class="text-slate-800">PDF</strong> soal (opsional)</span>
                     </li>
                     <li class="flex items-start gap-2">
                         <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">3</span>
-                        <span><strong class="text-slate-800">Cetak LJK</strong> (bubble sheet) untuk siswa</span>
+                        <span><strong class="text-slate-800">Publikasikan</strong> ke kelas</span>
                     </li>
                     <li class="flex items-start gap-2">
                         <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">4</span>
-                        <span>Siswa kerjakan ujian, guru <strong class="text-slate-800">koreksi & publikasi</strong></span>
+                        <span>Siswa kerjakan, guru <strong class="text-slate-800">koreksi</strong></span>
                     </li>
                 </ol>
             </div>
@@ -506,184 +310,87 @@
         </div>
     </div>
 </div>
-{% endblock %}
-{% block scripts %}
+
 <script>
-function deleteExam(id) {
-    if (!confirm('Yakin hapus exam ini? Semua data submission akan ikut terhapus.')) return;
-    fetch('/teacher/exams/' + id + '/delete', { method: 'POST', headers: {'Accept':'application/json','Content-Type':'application/json'} })
-        .then(r => r.json())
-        .then(d => { if (d.success) window.location.href = '/teacher/exams'; else alert('Gagal: ' + (d.error || '?')); })
-        .catch(e => alert('Gagal: ' + e.message));
-}
-function antiCheatSettings(init) {
-    return {
-        enabled: init.enabled,
-        penalty_per_violation: init.penalty_per_violation,
-        max_violations: init.max_violations,
-        auto_submit_on_max: init.auto_submit_on_max,
-        fullscreen_required: init.fullscreen_required,
-        randomize_questions: init.randomize_questions,
-        randomize_options: init.randomize_options,
-        watermark_name: init.watermark_name,
-        block_copy_paste: init.block_copy_paste,
-        block_right_click: init.block_right_click,
-        block_screenshot: init.block_screenshot,
-        allow_calculator: init.allow_calculator,
-        calculatePreviewPenalty() {
-            var max = this.max_violations || 10;
-            var total = 0;
-            for (var v = 1; v <= max; v++) {
-                if (v === 1) total += 0;
-                else if (v === 2) total += this.penalty_per_violation;
-                else if (v === 3) total += this.penalty_per_violation * 2;
-                else total += this.penalty_per_violation * 3;
-            }
-            return Math.min(total, 100);
-        }
-    };
-}
 function questionManager() {
-    const existing = {{ (exam.question_types if exam else {}) | tojson | safe }};
-    const existingAudioRaw = {{ (exam.question_audio if exam else {}) | tojson | safe }};
-    const existingAnswer = {{ (exam.answer_key if exam else {}) | tojson | safe }};
-    const existingWeights = {{ (exam.get('question_weights', {}) if exam else {}) | tojson | safe }};
-    const totalExisting = {{ exam.total_questions if exam else 0 }};
-
-    let initial = [];
-    if (totalExisting > 0) {
-        for (let i = 0; i < totalExisting; i++) {
-            const rawMedia = existingAudioRaw[i] || {};
-            const audioUrl = typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || '');
-            const youtubeUrl = typeof rawMedia === 'object' ? (rawMedia.youtube || '') : '';
-            let answers = [];
-            let bonus = false;
-            const rawAns = existingAnswer[i];
-            if (rawAns === 'bonus') {
-                bonus = true;
-            } else if (Array.isArray(rawAns)) {
-                answers = rawAns;
-            } else if (rawAns && rawAns !== 'essay' && rawAns !== 'essay_canvas' && rawAns !== 'essay_text') {
-                answers = [rawAns];
-            }
-            initial.push({
-                _id: Date.now() + i,
-                type: existing[i] || 'mcq',
-                answers: answers,
-                bonus: bonus,
-                weight: existingWeights[i] || 0,
-                audio: audioUrl,
-                youtube: youtubeUrl,
-            });
-        }
-    }
-
-    const initMcqPct = initial.length > 0 ? Math.round(initial.filter(q => q.type === 'mcq').reduce((s, q) => s + (q.weight || 0), 0)) : 70;
-    const initEssayPct = initial.length > 0 ? Math.round(initial.filter(q => q.type !== 'mcq').reduce((s, q) => s + (q.weight || 0), 0)) : 30;
-
     return {
-        questions: initial,
-        mcqPct: initMcqPct,
-        essayPct: initEssayPct,
-        get hasEssay() { return this.questions.some(q => q.type !== 'mcq'); },
+        questions: JSON.parse('{{ (_init_questions or "[]") | tojson | safe }}' || '[]'),
         get mcqCount() { return this.questions.filter(q => q.type === 'mcq').length; },
         get essayCount() { return this.questions.filter(q => q.type !== 'mcq').length; },
+        get mcqPct() { return this.mcqCount > 0 ? +(this._mcqPct || 70) : 0; },
+        get essayPct() { return this.essayCount > 0 ? +(this._essayPct || 30) : 0; },
+        get totalPct() { return +this.mcqPct + +this.essayPct; },
         get mcqPerQ() { return this.mcqCount > 0 ? this.mcqPct / this.mcqCount : 0; },
         get essayPerQ() { return this.essayCount > 0 ? this.essayPct / this.essayCount : 0; },
-        onGroupPctChange() {
-            if (this.mcqPct + this.essayPct > 100) {
-                this.essayPct = 100 - this.mcqPct;
-            }
-            if (this.essayPct < 0) this.essayPct = 0;
-            if (this.mcqPct < 0) this.mcqPct = 0;
-        },
-        normalizeTo100() {
-            const total = this.mcqPct + this.essayPct;
-            if (total === 0) { this.mcqPct = 70; this.essayPct = 30; return; }
-            this.mcqPct = Math.round(this.mcqPct / total * 100);
-            this.essayPct = 100 - this.mcqPct;
-        },
+        get hasEssay() { return this.essayCount > 0; },
+        _cid: 0,
+        _mcqPct: 70,
+        _essayPct: 30,
         addMcq() {
-            this.questions.push({ _id: Date.now(), type: 'mcq', answers: [], bonus: false, weight: 0, audio: '', youtube: '' });
-            if (this.mcqPct + this.essayPct === 0) { this.mcqPct = 100; this.essayPct = 0; }
+            this.questions.push({_id: ++this._cid, type:'mcq', answers:['A'], bonus:false, audio:'', youtube:''});
+            this._mcqPct = 70; this._essayPct = 30;
         },
         addEssay() {
             if (this.hasEssay) return;
-            this.questions.push({ _id: Date.now(), type: 'essay', answers: [], bonus: false, weight: 0, audio: '', youtube: '' });
-            if (this.mcqPct + this.essayPct === 0) { this.mcqPct = 70; this.essayPct = 30; }
-            else if (this.essayPct === 0) { this.essayPct = 30; this.mcqPct = Math.min(this.mcqPct, 70); }
+            this.questions.push({_id: ++this._cid, type:'essay_text', audio:'', youtube:''});
+            this._mcqPct = 70; this._essayPct = 30;
         },
-        removeQuestion(i) {
-            this.questions.splice(i, 1);
-            if (this.questions.length === 0) { this.mcqPct = 0; this.essayPct = 0; }
-        },
+        removeQuestion(i) { this.questions.splice(i, 1); },
         toggleAnswer(i, opt) {
             const q = this.questions[i];
-            let ans = q.answers ? [...q.answers] : [];
-            const idx = ans.indexOf(opt);
-            if (idx >= 0) { ans.splice(idx, 1); }
-            else { ans.push(opt); }
-            q.answers = ans;
+            if (q.type !== 'mcq') return;
+            if (!q.answers) q.answers = [];
+            const idx = q.answers.indexOf(opt);
+            if (idx > -1) q.answers.splice(idx, 1); else q.answers.push(opt);
+            if (q.answers.length === 0) q.answers.push(opt);
         },
-        onBonusToggle(i) {
-            if (this.questions[i].bonus) {
-                this.questions[i].answers = [];
-            }
-        },
-        onTypeChange(i) {
-            if (this.questions[i].type !== 'mcq') {
-                this.questions[i].answers = [];
-                this.questions[i].bonus = false;
-            } else {
-                this.questions[i].bonus = false;
-            }
+        onTypeChange(i) { this.questions[i].bonus = false; },
+        onBonusToggle(i) { if (this.questions[i].bonus) this.questions[i].answers = []; },
+        normalizeTo100() {
+            const m = this.mcqCount, e = this.essayCount;
+            if (m + e === 0) return;
+            if (m > 0 && e > 0) { this._mcqPct = 70; this._essayPct = 30; }
+            else if (m > 0) { this._mcqPct = 100; this._essayPct = 0; }
+            else { this._mcqPct = 0; this._essayPct = 100; }
         },
         getTypesJson() {
-            const obj = {};
-            this.questions.forEach((q, i) => { obj[i] = q.type; });
-            return JSON.stringify(obj);
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.type])));
         },
         getAnswerKeyJson() {
-            const obj = {};
-            this.questions.forEach((q, i) => {
-                if (q.type !== 'mcq') {
-                    obj[i] = 'essay';
-                } else if (q.bonus) {
-                    obj[i] = 'bonus';
-                } else if (q.answers && q.answers.length === 1) {
-                    obj[i] = q.answers[0];
-                } else if (q.answers && q.answers.length > 1) {
-                    obj[i] = q.answers;
-                } else {
-                    obj[i] = null;
-                }
-            });
-            return JSON.stringify(obj);
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => {
+                if (q.type === 'mcq') return [i, q.bonus ? 'bonus' : (q.answers && q.answers.length === 1 ? q.answers[0] : (q.answers || ['A']))];
+                return [i, 'essay'];
+            })));
         },
         getWeightsJson() {
-            const obj = {};
-            this.questions.forEach((q, i) => {
-                obj[i] = q.type === 'mcq' ? this.mcqPerQ : this.essayPerQ;
-            });
-            return JSON.stringify(obj);
-        },
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.type === 'mcq' ? this.mcqPerQ : this.essayPerQ])));
+        }
     };
 }
+
+function antiCheatSettings(cfg) { return cfg; }
+
 function prepareSubmit() {
     var ac = document.querySelector('[x-data*="antiCheatSettings"]');
     if (ac && ac.__x) {
         var d = ac.__x.$data;
-        document.getElementById('fullscreen-required').value = d.fullscreen_required ? 'true' : 'false';
-        document.getElementById('randomize-questions').value = d.randomize_questions ? 'true' : 'false';
-        document.getElementById('randomize-options').value = d.randomize_options ? 'true' : 'false';
-        document.getElementById('watermark-name').value = d.watermark_name ? 'true' : 'false';
-        document.getElementById('block-copy-paste').value = d.block_copy_paste ? 'true' : 'false';
-        document.getElementById('block-right-click').value = d.block_right_click ? 'true' : 'false';
-        document.getElementById('block-screenshot').value = d.block_screenshot ? 'true' : 'false';
-        document.getElementById('auto-submit-on-max').value = d.auto_submit_on_max ? 'true' : 'false';
-        document.getElementById('allow-calculator').value = d.allow_calculator ? 'true' : 'false';
+        var setVal = function(id, val) {
+            var el = document.getElementById(id);
+            if (el) el.value = val ? 'true' : 'false';
+        };
+        setVal('fullscreen-required', d.fullscreen_required);
+        setVal('block-copy-paste', d.block_copy_paste);
+        setVal('block-right-click', d.block_right_click);
+        setVal('auto-submit-on-max', d.auto_submit_on_max);
+        setVal('allow-calculator', d.allow_calculator);
     }
     return true;
+}
+
+function deleteExam(id) {
+    if (confirm('Hapus ujian ini?')) {
+        fetch('/teacher/exams/' + id, {method:'DELETE'}).then(() => window.location.href='/teacher/exams');
+    }
 }
 </script>
 {% endblock %}
