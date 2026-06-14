@@ -167,6 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_exams_school ON exams(school_id);
 CREATE INDEX IF NOT EXISTS idx_exams_class ON exams(class_id);
 CREATE INDEX IF NOT EXISTS idx_exams_subject ON exams(subject_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_published ON submissions(is_published) WHERE is_published = TRUE;
+CREATE INDEX IF NOT EXISTS idx_violations_exam_user ON violation_logs(exam_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_exam_student ON submissions(exam_id, student_id);
 
 -- 4. RLS — ENABLE ON ALL TABLES
 -- ============================================================
@@ -464,7 +466,6 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS class_ids JSONB DEFAULT '[]';
-ALTER TABLE exams ADD COLUMN IF NOT EXISTS subject_id INTEGER REFERENCES subjects(id);
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_template BOOLEAN DEFAULT false;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS source_exam_id UUID;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS max_attempts INTEGER DEFAULT 1;
