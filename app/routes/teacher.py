@@ -199,7 +199,7 @@ def exam_form():
     question_weights = json.loads(request.form.get("question_weights", "{}"))
     question_audio = {}
     question_canvas = {}
-    anti_cheat_enabled = request.form.get("anti_cheat_enabled", "true") == "true"
+    anti_cheat_enabled = True
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
     auto_submit_on_max = request.form.get("auto_submit_on_max", "true") == "true"
@@ -317,7 +317,7 @@ def exam_detail(exam_id):
     question_weights = json.loads(request.form.get("question_weights", "{}"))
     question_audio = {}
     question_canvas = {}
-    anti_cheat_enabled = request.form.get("anti_cheat_enabled", "true") == "true"
+    anti_cheat_enabled = True
     penalty_per_violation = int(request.form.get("penalty_per_violation", 5))
     max_violations = int(request.form.get("max_violations", 5))
     auto_submit_on_max = request.form.get("auto_submit_on_max", "true") == "true"

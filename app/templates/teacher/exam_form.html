@@ -249,7 +249,7 @@
                      <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
                  </div>
 
-                <input type="hidden" name="anti_cheat_enabled" id="anti-cheat-enabled">
+                <input type="hidden" name="anti_cheat_enabled" value="true">
                 <input type="hidden" name="fullscreen_required" id="fullscreen-required">
                 <input type="hidden" name="randomize_questions" id="randomize-questions">
                 <input type="hidden" name="randomize_options" id="randomize-options">
@@ -651,7 +651,6 @@ function prepareSubmit() {
     var ac = document.querySelector('[x-data*="antiCheatSettings"]');
     if (ac && ac.__x) {
         var d = ac.__x.$data;
-        document.getElementById('anti-cheat-enabled').value = d.enabled ? 'true' : 'false';
         document.getElementById('fullscreen-required').value = d.fullscreen_required ? 'true' : 'false';
         document.getElementById('randomize-questions').value = d.randomize_questions ? 'true' : 'false';
         document.getElementById('randomize-options').value = d.randomize_options ? 'true' : 'false';
