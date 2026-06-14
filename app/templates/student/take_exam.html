@@ -1,6 +1,52 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block head_extra %}
+<script>
+window.examApp = function(duration, totalQ) {
+    return {
+        timeLeft: duration, sidebarOpen: false, submitted: false, page: 1,
+        totalPages: {{ (exam.pdf_page_urls or []) | length }},
+        pages: {{ (exam.pdf_page_urls or []) | tojson | safe }},
+        currentQ: 0, totalQ: totalQ, answered: {}, answersText: {}, _qOrder: null, _shuffledOpts: {},
+        _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
+        questions: Array.from({length: totalQ}, (_, i) => ({
+            type: ({{ (exam.question_types or {}) | tojson }})[i] || 'mcq',
+            origIdx: i, answer: null, audio: null, youtube: null,
+            canvas: ({{ (exam.question_canvas or {}) | tojson }})[i] || false
+        })),
+        textBoxes: {}, hasDrawn: {}, canvasData: {}, canvasHistory: {},
+        dragState: null, pdfImgWidth: 700, canvasDraw: {}, canvasTool: {}, canvasColor: {}, canvasHeight: {},
+        showCanvas: {}, canvasBg: {}, fullCanvasInited: {}, essayCanvasMode: {}, essayCanvasColor: {}, essayLineWidth: {},
+        lineDash: {}, ecCanvasInited: {}, textFontSize: {}, textFontFamily: {}, textOrientation: {},
+        showRuler: {}, rulerX: {}, rulerY: {}, rulerWidth: {}, rulerAngle: {}, rulerScale: {}, snapRuler: {},
+        showProtractor: {}, protractorX: {}, protractorY: {}, protractorSize: {}, protractorAngle: {}, protractorScale: {}, snapProtractor: {},
+        showCompass: {}, compassX: {}, compassY: {}, compassSize: {}, compassAngle: {}, compassScale: {}, snapCompass: {},
+        showTriangle: {}, triangleX: {}, triangleY: {}, triangleSize: {}, triangleAngle: {}, triangleScale: {}, snapTriangle: {},
+        canScrollUp: false, canScrollDown: false,
+        syncStatus: navigator.onLine ? 'synced' : 'offline', syncLabel: navigator.onLine ? 'Tersinkron' : 'Offline',
+        lastSyncAt: Date.now(), pendingSync: false, dirty: false, canvasDirty: {}, lastSyncHash: '',
+        _syncInFlight: false, _canvasSyncInFlight: false,
+        violationCount: 0, totalPenalty: 0, showViolationBanner: false, violationMessage: '', violationType: 'warning',
+        antiCheat: {{ anti_cheat_config | safe }},
+        showExamAgreement: (function() { try { return !localStorage.getItem('sg_agreed_' + '{{ exam.id }}'); } catch(e) { return true; } })(),
+        agreed: false, examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
+        showCalculator: false, calcInput: '0', calcResult: 0, calcOp: null, calcPrev: 0, calcNew: true, calcExpression: '', calcAngleMode: 'DEG', calcMem: 0,
+        audioOutputs: [], audioInputs: [], audioOutputLabel: '',
+        init() {
+            this.timer = setInterval(() => { if (this.timeLeft <= 0) this.submitExam(); else this.timeLeft--; }, 1000);
+            this.autoSaveTimer = setInterval(() => this.periodicSync(), 20000);
+            this.$watch('currentQ', (val, oldVal) => { if (oldVal !== undefined) this.closeAllTools(oldVal); });
+            window.addEventListener('online', () => { this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; });
+            window.addEventListener('offline', () => { this.syncStatus = 'offline'; this.syncLabel = 'Offline'; });
+            this.$nextTick(() => { this.initStatusBar(); this.updateScrollState(); this.loadDraft(); });
+        },
+        submitExam(force) { if (this.submitted) return; if (!force && !confirm('Kumpulkan?')) return; },
+        loadDraft() {}, initStatusBar() {}, updateScrollState() {}, periodicSync() {}, saveToLocal() {},
+        getAnswersLight() { return {}; }, getAnswers() { return {}; },
+        closeAllTools() {}, initEcCanvas() {},
+    };
+};
+</script>
 <style>
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }

@@ -261,7 +261,11 @@ def take_exam(exam_id):
     # Pre-render anti-cheat config as JSON for the template
     import json as _json
     anti_cheat_config = _json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
-    return render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config)
+    resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @student_bp.route("/exams/<exam_id>/submit", methods=["POST"])
