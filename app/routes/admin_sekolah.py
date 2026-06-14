@@ -57,13 +57,9 @@ def _generate_email(full_name: str, domain: str) -> str:
 
 def _get_email_domain(sid) -> str:
     """Get custom email domain for a school."""
-    try:
-        from flask import current_app
-        supabase = current_app.extensions["supabase"]
-        school = supabase.table("schools").select("email_domain").eq("id", sid).single().execute().data or {}
-        return (school.get("email_domain") or "").strip() or "school.local"
-    except:
-        return "school.local"
+    if not sid or sid == "None":
+        return "scan-grade.app"
+    return "scan-grade.app"
 
 
 def _school_id() -> str | None:

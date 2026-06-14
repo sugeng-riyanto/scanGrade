@@ -496,6 +496,33 @@ def approve_request(request_id):
             .eq("id", request_id) \
             .execute()
 
+        # ── Create school record ──
+        school_res = supabase.table("schools").insert({
+            "name": req.get("school_name", ""),
+            "npsn": req.get("npsn", ""),
+            "status": "active",
+        }).execute()
+        school_id = school_res.data[0]["id"]
+
+        # ── Activate admin profile ──
+        if req.get("profile_id"):
+            supabase.table("profiles").update({
+                "school_id": school_id,
+                "status": "active",
+            }).eq("id", req["profile_id"]).execute()
+
+        # ── Create trial subscription ──
+        now_utc = datetime.now(timezone.utc)
+        trial_end = now_utc + timedelta(days=14)
+        supabase.table("school_subscriptions").insert({
+            "school_id": school_id,
+            "status": "trial",
+            "trial_days": 14,
+            "trial_start": now_utc.isoformat(),
+            "trial_end": trial_end.isoformat(),
+            "activation_code": code,
+        }).execute()
+
         # Send notification
         expires_str = expires_at.strftime("%d %B %Y %H:%M") if expires_at else "Tidak terbatas"
         notify_approval(

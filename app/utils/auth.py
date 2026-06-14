@@ -75,11 +75,13 @@ def login_required(f):
             if pd:
                 g.user_role = _normalize_role(pd.get("role", "murid"))
                 g.user_school_id = pd.get("school_id") or user.user.user_metadata.get("school_id")
+                if g.user_school_id == "None": g.user_school_id = None
                 g.user_status = pd.get("status", "active")
             else:
                 meta = user.user.user_metadata
                 g.user_role = _normalize_role(meta.get("role", "murid"))
                 g.user_school_id = meta.get("school_id")
+                if g.user_school_id == "None": g.user_school_id = None
                 g.user_status = "active"
 
             # Block pending users from accessing protected routes
