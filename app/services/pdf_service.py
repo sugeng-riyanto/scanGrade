@@ -6,9 +6,8 @@ from flask import current_app
 
 def _ensure_bucket(supabase):
     """Create exam-pdfs bucket if not exists."""
-    try:
-        supabase.storage.from_("exam-pdfs").info()
-    except Exception:
+    existing = [b.name for b in supabase.storage.list_buckets()]
+    if "exam-pdfs" not in existing:
         try:
             supabase.storage.create_bucket("exam-pdfs", {"public": True})
         except Exception:
