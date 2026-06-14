@@ -204,7 +204,9 @@ def exam_list():
     except Exception as e:
         current_app.logger.error(f"Submission query error: {e}")
     exams = [e for e in exams if e["id"] not in submitted_ids]
-    return render_template("student/exam_list.html", exams=exams)
+    resp = make_response(render_template("student/exam_list.html", exams=exams))
+    resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
+    return resp
 
 
 @student_bp.route("/exams/<exam_id>")
@@ -271,9 +273,8 @@ def take_exam(exam_id):
                 exam[_field] = {}
     anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
     resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config))
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
+    # Allow short browser caching for exam page (exam data is static once started)
+    resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 
 

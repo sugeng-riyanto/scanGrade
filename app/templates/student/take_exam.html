@@ -833,7 +833,7 @@ function examApp(duration, totalQ) {
                 if (this.timeLeft <= 0) this.submitExam();
                 else this.timeLeft--;
             }, 1000);
-            this.autoSaveTimer = setInterval(() => this.periodicSync(), 20000);
+            this.autoSaveTimer = setInterval(() => this.periodicSync(), 60000);
             this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 60000);
             this.$watch('currentQ', (val, oldVal) => {
                 if (oldVal !== undefined) this.closeAllTools(oldVal);
@@ -1889,7 +1889,11 @@ function examApp(duration, totalQ) {
                 this._startOfflineSubmitPoll();
                 return;
             }
-            this._doSubmit(answers);
+            // Staggered submit: random delay 0-15s to distribute server load
+            var delay = Math.floor(Math.random() * 15000);
+            this.syncStatus = 'saving';
+            this.syncLabel = 'Mengirim dalam ' + Math.ceil(delay / 1000) + 's...';
+            setTimeout(() => { this._doSubmit(answers); }, delay);
         },
         _startOfflineSubmitPoll() {
             this._offlinePollTimer = setInterval(() => {

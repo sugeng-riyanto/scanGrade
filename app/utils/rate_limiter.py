@@ -9,15 +9,17 @@ limiter = None
 _limits = {}
 
 DEFAULT_LIMITS = {
-    "default": (60, 60),
+    "default": (120, 60),
     "auth": (30, 60),
-    "api": (30, 60),
+    "api": (120, 60),
+    "api_student": (300, 60),
     "register": (10, 600),
     "upload": (10, 300),
     "reset_password": (3, 300),
 }
 
 _exempt_paths = {"/health", "/static/"}
+_endpoint_self_limited = {"/api/student/sync-draft", "/api/violation/log", "/api/student/force-submit"}
 
 
 def _get_redis():
@@ -71,8 +73,16 @@ def get_rate_limiter(app):
         for ex in _exempt_paths:
             if path.startswith(ex):
                 return None
+        # Endpoints with their own per-user rate limiter
+        for ex in _endpoint_self_limited:
+            if path.startswith(ex):
+                return None
 
         ip = request.remote_addr or "unknown"
+        # Use user_id as key for authenticated users (school NAT friendly)
+        user_id = g.get("user_id") if hasattr(g, "user_id") else None
+        identity = user_id or ip
+
         if path.startswith(("/auth/register",)):
             group = "register"
         elif path.startswith(("/auth/reset-password", "/auth/forgot-password")):
@@ -87,7 +97,7 @@ def get_rate_limiter(app):
             group = "default"
 
         max_req, window = DEFAULT_LIMITS.get(group, DEFAULT_LIMITS["default"])
-        key = f"rl:{group}:{ip}" if redis else f"{group}:{ip}"
+        key = f"rl:{group}:{identity}" if redis else f"{group}:{identity}"
         allowed, retry_after = _check_limit(key, max_req, window, redis)
 
         if not allowed:
