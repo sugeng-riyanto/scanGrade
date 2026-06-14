@@ -242,6 +242,7 @@ def exam_form():
         "passing_score": passing_score,
         "description": description,
         "status": "active" if action == "save_active" else "draft",
+        "is_published": action == "save_active",
         "answer_key": answer_key,
         "question_types": question_types,
         "question_weights": question_weights,
@@ -310,6 +311,7 @@ def exam_detail(exam_id):
     passing_score = int(request.form.get("passing_score", 70))
     description = request.form.get("description", "")
     action = request.form.get("action", "save_draft")
+
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
     question_weights = json.loads(request.form.get("question_weights", "{}"))
@@ -342,6 +344,8 @@ def exam_detail(exam_id):
             question_audio[str(i)] = media
 
     data = {
+        "teacher_id": g.user_id,
+        "school_id": g.get("user_school_id"),
         "title": title,
         "subject": subject,
         "subject_id": subject_id,
@@ -356,6 +360,7 @@ def exam_detail(exam_id):
         "passing_score": passing_score,
         "description": description,
         "status": "active" if action == "save_active" else "draft",
+        "is_published": action == "save_active",
         "answer_key": answer_key,
         "question_types": question_types,
         "question_weights": question_weights,
