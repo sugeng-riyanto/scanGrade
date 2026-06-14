@@ -832,6 +832,9 @@ function examApp(duration, totalQ) {
         audioInputLabel: '',
         audioOutputLabel: '',
         init() {
+            // Reset anti-cheat state on fresh load (clear stale localStorage data)
+            this.violationCount = 0;
+            this.totalPenalty = 0;
             this.timer = setInterval(() => {
                 if (this.timeLeft <= 0) this.submitExam();
                 else this.timeLeft--;
