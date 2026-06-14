@@ -56,10 +56,6 @@ DEMO_SCHOOLS = [
         "students": [
             {"email": "siswa1_smp@scan-grade.app", "password": "demo123", "full_name": "Ahmad Pratama", "nisn": "1000000001", "phone": "081444444441"},
             {"email": "siswa2_smp@scan-grade.app", "password": "demo123", "full_name": "Bella Safira", "nisn": "1000000002", "phone": "081444444442"},
-            {"email": "siswa3_smp@scan-grade.app", "password": "demo123", "full_name": "Candra Wijaya", "nisn": "1000000003", "phone": "081444444443"},
-            {"email": "siswa4_smp@scan-grade.app", "password": "demo123", "full_name": "Dian Pertiwi", "nisn": "1000000004", "phone": "081444444444"},
-            {"email": "siswa5_smp@scan-grade.app", "password": "demo123", "full_name": "Eko Saputra", "nisn": "1000000005", "phone": "081444444445"},
-            {"email": "siswa6_smp@scan-grade.app", "password": "demo123", "full_name": "Fitri Handayani", "nisn": "1000000006", "phone": "081444444446"},
         ],
     },
     {
@@ -81,9 +77,6 @@ DEMO_SCHOOLS = [
         "students": [
             {"email": "siswa1_sma@scan-grade.app", "password": "demo123", "full_name": "Citra Amalia", "nisn": "2000000001", "phone": "081444444447"},
             {"email": "siswa2_sma@scan-grade.app", "password": "demo123", "full_name": "Doni Prasetyo", "nisn": "2000000002", "phone": "081444444448"},
-            {"email": "siswa3_sma@scan-grade.app", "password": "demo123", "full_name": "Eka Rahmawati", "nisn": "2000000003", "phone": "081444444449"},
-            {"email": "siswa4_sma@scan-grade.app", "password": "demo123", "full_name": "Fani Nurhaliza", "nisn": "2000000004", "phone": "081444444450"},
-            {"email": "siswa5_sma@scan-grade.app", "password": "demo123", "full_name": "Gilang Ramadan", "nisn": "2000000005", "phone": "081444444451"},
         ],
     },
     {
@@ -104,8 +97,6 @@ DEMO_SCHOOLS = [
         "students": [
             {"email": "siswa1_smk@scan-grade.app", "password": "demo123", "full_name": "Galih Saputra", "nisn": "3000000001", "phone": "081444444452"},
             {"email": "siswa2_smk@scan-grade.app", "password": "demo123", "full_name": "Hesti Purnama", "nisn": "3000000002", "phone": "081444444453"},
-            {"email": "siswa3_smk@scan-grade.app", "password": "demo123", "full_name": "Irfan Hakim", "nisn": "3000000003", "phone": "081444444454"},
-            {"email": "siswa4_smk@scan-grade.app", "password": "demo123", "full_name": "Jenna Marbun", "nisn": "3000000004", "phone": "081444444455"},
         ],
     },
 ]
@@ -298,9 +289,12 @@ def _seed_exams(supabase, school_id, school_conf):
     if not teachers: return
 
     class_ids = []
+    class_ids_all = []
     try:
-        cls = supabase.table("classes").select("id").eq("school_id", school_id).execute().data or []
-        class_ids = [c["id"] for c in cls]
+        cls = supabase.table("classes").select("id,name").eq("school_id", school_id).order("name").execute().data or []
+        class_ids_all = [c["id"] for c in cls]
+        # Assign exam to first class only (for demo isolation testing)
+        class_ids = [class_ids_all[0]] if class_ids_all else []
     except: pass
 
         for i, exam_spec in enumerate(SAMPLE_EXAMS):
