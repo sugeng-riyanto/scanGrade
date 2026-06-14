@@ -183,6 +183,15 @@ def exam_form():
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
+    is_template = request.form.get("is_template", "false") == "true"
+    source_exam_id = request.form.get("source_exam_id") or None
+    max_attempts = int(request.form.get("max_attempts", 1))
+    publish_mode = request.form.get("publish_mode", "manual")
+    total_questions = int(request.form.get("total_questions", 10))
+    duration_minutes = int(request.form.get("duration_minutes", 60))
+    passing_score = int(request.form.get("passing_score", 70))
+    description = request.form.get("description", "")
+    action = request.form.get("action", "save_draft")
     start_at_str = request.form.get("start_at", "").strip()
     if action == "publish":
         start_at = None
@@ -195,15 +204,6 @@ def exam_form():
             start_at = start_at_str
     else:
         start_at = None
-    is_template = request.form.get("is_template", "false") == "true"
-    source_exam_id = request.form.get("source_exam_id") or None
-    max_attempts = int(request.form.get("max_attempts", 1))
-    publish_mode = request.form.get("publish_mode", "manual")
-    total_questions = int(request.form.get("total_questions", 10))
-    duration_minutes = int(request.form.get("duration_minutes", 60))
-    passing_score = int(request.form.get("passing_score", 70))
-    description = request.form.get("description", "")
-    action = request.form.get("action", "save_draft")
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
@@ -331,6 +331,15 @@ def exam_detail(exam_id):
     subject = request.form.get("subject")
     subject_id = request.form.get("subject_id") or None
     class_ids = request.form.getlist("class_ids")
+    is_template = request.form.get("is_template", "false") == "true"
+    source_exam_id = request.form.get("source_exam_id") or None
+    max_attempts = int(request.form.get("max_attempts", 1))
+    publish_mode = request.form.get("publish_mode", "manual")
+    total_questions = int(request.form.get("total_questions", 10))
+    duration_minutes = int(request.form.get("duration_minutes", 60))
+    passing_score = int(request.form.get("passing_score", 70))
+    description = request.form.get("description", "")
+    action = request.form.get("action", "save_draft")
     start_at_str = request.form.get("start_at", "").strip()
     if action == "publish":
         start_at = None
@@ -343,15 +352,6 @@ def exam_detail(exam_id):
             start_at = start_at_str
     else:
         start_at = None
-    is_template = request.form.get("is_template", "false") == "true"
-    source_exam_id = request.form.get("source_exam_id") or None
-    max_attempts = int(request.form.get("max_attempts", 1))
-    publish_mode = request.form.get("publish_mode", "manual")
-    total_questions = int(request.form.get("total_questions", 10))
-    duration_minutes = int(request.form.get("duration_minutes", 60))
-    passing_score = int(request.form.get("passing_score", 70))
-    description = request.form.get("description", "")
-    action = request.form.get("action", "save_draft")
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
