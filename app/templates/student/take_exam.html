@@ -41,6 +41,14 @@ window.examApp = function(duration, totalQ) {
             this.$nextTick(() => { this.initStatusBar(); this.updateScrollState(); this.loadDraft(); });
         },
         submitExam(force) { if (this.submitted) return; if (!force && !confirm('Kumpulkan?')) return; },
+        agreeExam() {
+            this.showExamAgreement = false;
+            this.sidebarOpen = false;
+            try { localStorage.setItem('sg_agreed_' + '{{ exam.id }}', '1'); } catch(e) {}
+            if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+        },
         loadDraft() {}, initStatusBar() {}, updateScrollState() {}, periodicSync() {}, saveToLocal() {},
         getAnswersLight() { return {}; }, getAnswers() { return {}; },
         closeAllTools() {}, initEcCanvas() {},
@@ -761,7 +769,6 @@ window.examApp = function(duration, totalQ) {
 {% endblock %}
 {% block scripts %}
 <script>
-alert('Script running - examApp will be defined now');
 console.log('[Exam] Page loaded, Alpine should init examApp');
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
