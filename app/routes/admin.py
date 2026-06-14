@@ -482,6 +482,13 @@ def approve_request(request_id):
         if not req:
             return jsonify({"error": "Request not found"}), 404
 
+        # ── Check NPSN not already registered ──
+        req_npsn = req.get("npsn", "")
+        if req_npsn:
+            dup = supabase.table("schools").select("id", "name").eq("npsn", req_npsn).execute()
+            if dup.data:
+                return jsonify({"error": f"NPSN {req_npsn} sudah terdaftar untuk sekolah '{dup.data[0].get('name', '')}'"}), 409
+
         update_data = {
             "status": "approved",
             "activation_code": code,

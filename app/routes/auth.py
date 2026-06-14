@@ -34,6 +34,27 @@ def register():
 
     supabase = get_supabase()
 
+    # ── Check NPSN duplicate ──
+    try:
+        existing_npsn = supabase.table("school_registration_requests") \
+            .select("id", "status", "school_name") \
+            .eq("npsn", npsn) \
+            .in_("status", ["pending", "approved"]) \
+            .execute()
+        if existing_npsn.data:
+            dup = existing_npsn.data[0]
+            if dup.get("status") == "pending":
+                return render_template("auth/register.html", error="NPSN ini sudah memiliki permohonan pendaftaran yang menunggu verifikasi")
+            return render_template("auth/register.html", error=f"NPSN ini sudah terdaftar untuk sekolah '{dup.get('school_name', '')}'. Hubungi Super Admin.")
+    except Exception:
+        pass
+    try:
+        existing_school = supabase.table("schools").select("id", "name").eq("npsn", npsn).execute()
+        if existing_school.data:
+            return render_template("auth/register.html", error=f"NPSN ini sudah terdaftar untuk sekolah '{existing_school.data[0].get('name', '')}'")
+    except Exception:
+        pass
+
     # ── Step 1: Create Auth user ──
     try:
         from supabase import Client
