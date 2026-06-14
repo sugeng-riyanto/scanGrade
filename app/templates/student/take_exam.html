@@ -2,39 +2,12 @@
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block head_extra %}
 <script>
-// examApp proxy — auto-patches with real implementation when available
 window.examApp = function(duration, totalQ) {
-    var obj = {
-        timeLeft: duration, totalQ: totalQ, submitted: false,
-        showExamAgreement: true, agreed: false,
-        questions: [], answered: {}, answersText: {},
-        violationCount: 0, totalPenalty: 0, antiCheat: {},
-        init: function() {
-            var self = this;
-            function patch() {
-                if (window.__examAppReal) {
-                    var real = window.__examAppReal(duration, totalQ);
-                    for (var k in real) {
-                        if (typeof real[k] === 'function') self[k] = real[k];
-                    }
-                    if (real.antiCheat) self.antiCheat = real.antiCheat;
-                    if (real.questions) self.questions = real.questions;
-                    if (real.totalPages !== undefined) self.totalPages = real.totalPages;
-                    if (real.pages) self.pages = real.pages;
-                    // Call real init
-                    if (real.init) real.init.call(self);
-                } else {
-                    setTimeout(patch, 50);
-                }
-            }
-            patch();
-        },
-        agreeExam: function() {
-            this.showExamAgreement = false;
-            try { localStorage.setItem('sg_agreed_', '1'); } catch(e) {}
-        },
+    if (window.__examAppReal) return window.__examAppReal(duration, totalQ);
+    return {timeLeft:duration,totalQ:totalQ,submitted:false,showExamAgreement:true,agreed:false,questions:[],answered:{},answersText:{},violationCount:0,totalPenalty:0,antiCheat:{},
+        init(){var s=this;!function p(){if(window.__examAppReal){var r=window.__examAppReal(duration,totalQ);for(var k in r){if(typeof r[k]==='function')s[k]=r[k]}if(r.questions)s.questions=r.questions;if(r.antiCheat)s.antiCheat=r.antiCheat;if(r.init)r.init.call(s)}else setTimeout(p,50)}()},
+        agreeExam(){this.showExamAgreement=false;try{localStorage.setItem('sg_agreed_','1')}catch(e){}},
     };
-    return obj;
 };
 </script>
 <style>
