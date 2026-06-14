@@ -333,6 +333,8 @@
                                       x-show="q.type !== 'mcq'">
                                     <i :class="q.type === 'essay_text' ? 'fas fa-font' : 'fas fa-paint-brush'"></i>
                                 </span>
+                                <span class="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[6px] font-bold text-stone-400 leading-tight whitespace-nowrap"
+                                      x-show="QUESTION_PAGES[i]" x-text="'Hlm '+QUESTION_PAGES[i]"></span>
                             </button>
                         </template>
                     </div>
@@ -358,7 +360,7 @@
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
                             <i class="fas fa-pencil-alt"></i>
                             <span>Soal #<span x-text="i+1"></span> <span x-text="q.type==='mcq'?'— Corat-coret pada halaman PDF':'— Canvas + PDF'"></span></span>
-                            <span class="ml-auto" x-text="totalPages>0 ? 'Hlm '+page+'/'+totalPages : ''"></span>
+                            <span class="ml-auto" x-text="totalPages>0 ? (pageLabel ? pageLabel + ' — ' : '') + 'Hal '+page+'/'+totalPages : ''"></span>
                         </div>
                         <div class="draw-toolbar px-3 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100 flex-wrap">
                             <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1">Gambar:</span>
@@ -389,7 +391,7 @@
                                     class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-left text-[9px]"></i>
                             </button>
-                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="(pageLabel ? pageLabel + ' — ' : '') + 'Hal ' + page + ' / ' + totalPages"></span>
                             <button type="button" @click="nextPage" :disabled="page >= totalPages"
                                     class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-right text-[9px]"></i>
@@ -557,7 +559,7 @@
                                     class="px-3 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-left text-[9px]"></i> Sebelumnya
                             </button>
-                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="(pageLabel ? pageLabel + ' — ' : '') + 'Hal ' + page + ' / ' + totalPages"></span>
                             <button type="button" @click="nextPage" :disabled="page >= totalPages"
                                     class="px-3 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 Selanjutnya <i class="fas fa-chevron-right text-[9px]"></i>
@@ -703,6 +705,23 @@ function examApp(duration, totalQ) {
             var p = this.qPages;
             return p ? 'Hlm ' + p : '';
         },
+        parsePageRange(str) {
+            if (!str || typeof str !== 'string') return [];
+            str = str.replace(/\s/g, '');
+            var pages = [], parts = str.split(',');
+            for (var k = 0; k < parts.length; k++) {
+                var m = parts[k].match(/^(\d+)-(\d+)$/);
+                if (m) {
+                    var s = parseInt(m[1]), e = parseInt(m[2]);
+                    if (s > e) { var t = s; s = e; e = t; }
+                    for (var p = s; p <= e; p++) pages.push(p);
+                } else if (/^\d+$/.test(parts[k])) {
+                    pages.push(parseInt(parts[k]));
+                }
+            }
+            return pages;
+        },
+        get qPageNums() { return this.parsePageRange(this.qPages); },
         textBoxes: {},         // {i: {p: [{x_pct, y_pct, text}, ...]}}
         hasDrawn: {},          // {i: {p: true/false}}
         canvasData: {},        // {i: {p: "data:..."}} — saved canvas data URLs per page
@@ -818,6 +837,8 @@ function examApp(duration, totalQ) {
             this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 60000);
             this.$watch('currentQ', (val, oldVal) => {
                 if (oldVal !== undefined) this.closeAllTools(oldVal);
+                var rng = this.parsePageRange(QUESTION_PAGES[val] || '');
+                if (rng.length > 0) this.page = Math.max(1, Math.min(rng[0], this.totalPages));
                 if (this.questions[val] && this.questions[val].canvas && this.showCanvas[val] && this.questions[val]?.type !== 'essay_text') {
                     this.$nextTick(() => this.initCanvas(val));
                 }

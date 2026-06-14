@@ -142,7 +142,7 @@
                             {% if qtype == 'essay_text' %}bg-gradient-to-r from-amber-50 to-orange-50 text-amber-700{% else %}bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700{% endif %}">
                             <i class="fas {% if qtype == 'essay_text' %}fa-font{% else %}fa-pen-fancy{% endif %}"></i>
                             <span>Soal #{{ i+1 }} — Jawaban {{ 'Teks+Coretan' if qtype == 'essay_text' else 'Canvas+Coretan' if qtype == 'essay_canvas' else 'Teks+Canvas' }}</span>
-                            <span class="ml-auto" x-text="totalPages>0 ? 'Hlm '+page+'/'+totalPages : ''"></span>
+                            <span class="ml-auto" x-text="totalPages>0 ? (qPageLabel ? qPageLabel + ' — ' : '') + 'Hal '+page+'/'+totalPages : ''"></span>
                         </div>
 
                         <div class="draw-toolbar px-4 py-2.5 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b">
@@ -184,7 +184,7 @@
                                     class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 flex items-center gap-1">
                                 <i class="fas fa-chevron-left text-[9px]"></i>
                             </button>
-                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="'Halaman ' + page + ' / ' + totalPages"></span>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="(qPageLabel ? qPageLabel + ' — ' : '') + 'Hal ' + page + ' / ' + totalPages"></span>
                             <button type="button" @click="nextPage" :disabled="page >= totalPages"
                                     class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 flex items-center gap-1">
                                 <i class="fas fa-chevron-right text-[9px]"></i>
@@ -448,7 +448,25 @@ const SAVED_COMMENTS = {{ fb_comments | tojson | safe }};
 const TOTAL_Q = {{ exam.total_questions }};
 const PDF_LEN = PDF_PAGES.length;
 const MCQ_TOTAL = {{ (exam.answer_key or {}) | length }};
+const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
 let autoSaveTimer = null;
+
+function parsePageRange(str) {
+    if (!str || typeof str !== 'string') return [];
+    str = str.replace(/\s/g, '');
+    var pages = [], parts = str.split(',');
+    for (var k = 0; k < parts.length; k++) {
+        var m = parts[k].match(/^(\d+)-(\d+)$/);
+        if (m) {
+            var s = parseInt(m[1]), e = parseInt(m[2]);
+            if (s > e) { var t = s; s = e; e = t; }
+            for (var p = s; p <= e; p++) pages.push(p);
+        } else if (/^\d+$/.test(parts[k])) {
+            pages.push(parseInt(parts[k]));
+        }
+    }
+    return pages;
+}
 
 function compressCanvas(canvas, maxW) {
     maxW = maxW || 600;
@@ -469,6 +487,11 @@ function gradeApp() {
         calcHasMem: false, calcParenLevel: 0,
         init() {
             this.$watch('currentQ', val => {
+                var rng = parsePageRange(QUESTION_PAGES[val] || '');
+                if (rng.length > 0) {
+                    var inst = QUESTION_INSTANCES[val];
+                    if (inst) inst.page = Math.max(1, Math.min(rng[0], inst.totalPages));
+                }
                 this.$nextTick(() => {
                     setTimeout(() => {
                         const inst = QUESTION_INSTANCES[val];
@@ -525,6 +548,12 @@ function gradeQuestion(qIdx) {
         ctx: null, canvas: null, drawing: false, lx: 0, ly: 0, history: [],
         scoreVal: SAVED_SCORES[qIdx] || '',
         commentVal: SAVED_COMMENTS[qIdx] || '',
+        get qPageLabel() {
+            var raw = QUESTION_PAGES[this.qIdx] || '';
+            if (!raw) return '';
+            var nums = parsePageRange(raw);
+            return nums.length > 0 ? 'Hlm ' + raw : '';
+        },
         teacherBoxes: (() => {
             const raw = SAVED_OVERLAY[qIdx] || {};
             const boxes = {};
