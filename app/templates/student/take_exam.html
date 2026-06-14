@@ -2660,74 +2660,40 @@ function examApp(duration, totalQ) {
 }
 </script>
 <script>
-/* ══════════════════════════════════════════════════════════════
-   STANDALONE ANTI-CHEAT — works independently of Alpine component
-   ══════════════════════════════════════════════════════════════ */
 (function() {
     var enabled = {{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }};
-    if (!enabled) { console.log('[AC-STANDALONE] Disabled by config'); return; }
-    console.log('[AC-STANDALONE] Initializing...');
-    var violationCount = 0;
-    var totalPenalty = 0;
-    var blurTimer = null;
-    var acSubmitted = false;
-    var penaltyBase = {{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
-    var maxViolations = {{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
-    var autoSubmit = {{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
+    if (!enabled) return;
+    var vc = 0, tp = 0, timer = null, done = false;
+    var base = {{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }};
+    var maxV = {{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }};
+    var autoSub = {{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
 
-    function handleViolation() {
-        violationCount++;
-        var msg = '';
-        var currentPenalty = 0;
-        if (violationCount === 1) {
-            msg = 'PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';
-        } else {
-            currentPenalty = violationCount === 2 ? penaltyBase : (violationCount === 3 ? penaltyBase * 2 : penaltyBase * 3);
-            totalPenalty += currentPenalty;
-            msg = 'PELANGGARAN #' + violationCount + '! Penalti: -' + currentPenalty + ' poin (Total: -' + totalPenalty + ')';
+    function viol() {
+        vc++;
+        var msg, p = 0;
+        if (vc === 1) { msg = 'PERHATIAN! Anda berpindah tab.'; }
+        else {
+            p = vc === 2 ? base : (vc === 3 ? base*2 : base*3);
+            tp += p;
+            msg = 'PELANGGARAN #' + vc + '! Penalti: -' + p + ' poin';
         }
-        console.log('[AC-STANDALONE] ' + msg);
-        if (violationCount > 1) alert('[ANTI-CHEAT] ' + msg);
-        else alert('[ANTI-CHEAT] ' + msg + '\n\n(Gunakan F11 untuk layar penuh)');
-        // Send violation to server
+        alert('[SCANGRADE] ' + msg);
         try {
             navigator.sendBeacon('/api/violation/log',
-                new Blob([JSON.stringify([{
-                    exam_id: '{{ exam.id }}',
-                    violation_type: 'tab_switch',
-                    timestamp: Date.now() / 1000,
-                    metadata: { violation_count: violationCount, penalty: currentPenalty }
-                }])], {type: 'application/json'}));
-        } catch(e) { console.warn('[AC-STANDALONE] sendBeacon failed', e); }
-        if (maxViolations > 0 && violationCount >= maxViolations && autoSubmit) {
-            alert('[ANTI-CHEAT] Pelanggaran maksimal! Ujian akan dikumpulkan.');
-            acSubmitted = true;
-            // Try Alpine submit first
-            try {
-                var alpineEl = document.querySelector('[x-data]');
-                if (alpineEl && alpineEl.__x) {
-                    alpineEl.__x.$data.submitExam(true);
-                }
-            } catch(e) { console.warn('[AC-STANDALONE] Alpine trigger failed', e); }
-            // Fallback: force-submit via API (saves + grades)
-            try {
-                navigator.sendBeacon('/api/student/force-submit',
-                    new Blob([JSON.stringify({exam_id: '{{ exam.id }}'})],
-                    {type: 'application/json'}));
-                setTimeout(function(){ window.location.href = '/student/dashboard'; }, 2000);
-            } catch(e) {}
+                new Blob([JSON.stringify([{exam_id:'{{ exam.id }}', violation_type:'tab_switch', timestamp:Date.now()/1000, metadata:{violation_count:vc, penalty:p}}])], {type:'application/json'}));
+        } catch(e) {}
+        if (maxV > 0 && vc >= maxV && autoSub && !done) {
+            done = true;
+            alert('Pelanggaran maksimal! Ujian akan dikumpulkan.');
+            try { navigator.sendBeacon('/api/student/force-submit', new Blob([JSON.stringify({exam_id:'{{ exam.id }}'})], {type:'application/json'})); } catch(e) {}
+            setTimeout(function(){ window.location.href = '/student/dashboard'; }, 1500);
         }
     }
-
     document.addEventListener('visibilitychange', function() {
-        if (acSubmitted) return;
-        if (document.hidden) {
-            blurTimer = setTimeout(handleViolation, 1500);
-        } else {
-            if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; }
-        }
+        if (done) return;
+        if (document.hidden) { timer = setTimeout(viol, 1500); }
+        else { if (timer) { clearTimeout(timer); timer = null; } }
     });
-    console.log('[AC-STANDALONE] Ready — switch tabs to test (1.5s delay)');
 })();
 </script>
 {% endblock %}
