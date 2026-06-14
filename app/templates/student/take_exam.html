@@ -394,7 +394,7 @@
         <div class="flex-1 min-w-0">
     <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit">
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
-            <div x-show="!submitted" style="display:none" class="mb-3">
+            <div x-show="!submitted" class="mb-3">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
                     <div x-show="currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
