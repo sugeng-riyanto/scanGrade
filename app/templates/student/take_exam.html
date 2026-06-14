@@ -719,7 +719,7 @@ console.log('[Exam] Page loaded, Alpine should init examApp');
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 
-function examApp(duration, totalQ) {
+window.examApp = function examApp(duration, totalQ) {
     return {
         timeLeft: duration,
         sidebarOpen: false,
