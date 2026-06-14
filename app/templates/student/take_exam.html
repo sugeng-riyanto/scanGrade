@@ -832,9 +832,6 @@ function examApp(duration, totalQ) {
         audioInputLabel: '',
         audioOutputLabel: '',
         init() {
-            // Reset anti-cheat state on fresh load (clear stale localStorage data)
-            this.violationCount = 0;
-            this.totalPenalty = 0;
             this.timer = setInterval(() => {
                 if (this.timeLeft <= 0) this.submitExam();
                 else this.timeLeft--;
@@ -882,6 +879,9 @@ function examApp(duration, totalQ) {
                 this.initStatusBar();
                 this.updateScrollState();
                 this.loadDraft();
+                // Reset violations AFTER loadDraft (ignore stale localStorage data)
+                this.violationCount = 0;
+                this.totalPenalty = 0;
                 if (this.antiCheat.watermark_name) this.startWatermark();
             });
             // ─── Anti-cheat: set up DIRECTLY in init (not deferred) ───

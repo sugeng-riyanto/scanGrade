@@ -49,7 +49,7 @@ def dashboard():
             else:
                 if not cids:
                     available_exams.append(e)
-        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
+        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).neq("status", "retracted").execute().data or []
         submitted_ids = {s["exam_id"] for s in subs_ids}
     except Exception as e:
         current_app.logger.error(f"Dashboard query error: {e}")
@@ -57,7 +57,7 @@ def dashboard():
 
     subs = []
     try:
-        subs = supabase.table("submissions").select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, teacher_feedback, exams(id, title, answer_key, question_types, total_questions, pdf_page_urls)").eq("student_id", g.user_id).order("submitted_at", desc=True).execute().data or []
+        subs = supabase.table("submissions").select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, teacher_feedback, exams(id, title, answer_key, question_types, total_questions, pdf_page_urls)").eq("student_id", g.user_id).neq("status", "retracted").order("submitted_at", desc=True).execute().data or []
     except Exception as e:
         current_app.logger.error(f"Dashboard submissions query error: {e}")
     completed_exams = []
@@ -196,7 +196,7 @@ def exam_list():
 
     submitted_ids = set()
     try:
-        subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
+        subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).neq("status", "retracted").execute().data or []
         submitted_ids = {s["exam_id"] for s in subs}
     except Exception as e:
         current_app.logger.error(f"Submission query error: {e}")
@@ -233,10 +233,10 @@ def take_exam(exam_id):
         except Exception:
             pass
 
-    # Check if student already reached max attempts
+    # Check if student already reached max attempts (exclude retracted submissions)
     max_attempts = exam.get("max_attempts", 1)
     try:
-        existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).execute()
+        existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).neq("status", "retracted").execute()
         attempt_count = existing.count or 0
         if attempt_count >= max_attempts:
             flash(f"Anda sudah mencapai batas maksimal {max_attempts}x mengerjakan ujian ini", "error")
@@ -293,9 +293,9 @@ def submit_exam(exam_id):
         except Exception:
             pass
 
-    # Check attempts
+    # Check attempts (exclude retracted)
     max_attempts = exam.get("max_attempts", 1)
-    existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).execute()
+    existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).neq("status", "retracted").execute()
     attempt_count = existing.count or 0
     if attempt_count >= max_attempts:
         return jsonify({"error": f"Anda sudah mencapai batas maksimal {max_attempts}x mengerjakan ujian ini"}), 409
