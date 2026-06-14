@@ -460,6 +460,7 @@ ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS payment_details JSONB 
 ALTER TABLE school_settings ADD COLUMN IF NOT EXISTS whatsapp_number TEXT DEFAULT '';
 
 -- Exam scheduling & class/subject improvements
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS class_ids JSONB DEFAULT '[]';

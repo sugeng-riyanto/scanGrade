@@ -287,6 +287,17 @@ def create_app(env=None):
             "uptime_ms": int((time.time() - app._start_time) * 1000) if hasattr(app, '_start_time') else 0,
         })
 
+    @app.route("/debug/exam/<exam_id>")
+    def debug_exam(exam_id):
+        try:
+            supabase = app.extensions["supabase"]
+            exam = supabase.table("exams").select("id,title,status,is_published,school_id,teacher_id,class_ids,start_at").eq("id", exam_id).single().execute().data
+            if not exam:
+                return jsonify({"error": "not found"}), 404
+            return jsonify({k: str(v) if not isinstance(v, (bool, int, float, list, dict)) and v is not None else v for k, v in exam.items()})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     app._start_time = time.time()
 
     return app
