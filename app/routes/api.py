@@ -73,7 +73,7 @@ def log_violation():
                 sub = supabase.table("submissions").select("id,penalty").eq("exam_id", exam_id).eq("student_id", g.user_id).order("created_at", desc=True).limit(1).execute()
                 if sub.data:
                     current_penalty = float(sub.data[0].get("penalty") or 0)
-                    new_penalty = current_penalty + penalty_info.get("current_penalty", 0)
+                    new_penalty = current_penalty + penalty_info.get("current_penalty_this_violation", 0)
                     supabase.table("submissions").update({"penalty": new_penalty}).eq("id", sub.data[0]["id"]).execute()
             except Exception:
                 pass
