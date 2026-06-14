@@ -1,7 +1,7 @@
 """Rate limiter with optional Redis backend for multi-worker support."""
 import time
 from collections import defaultdict
-from flask import request, jsonify, current_app
+from flask import g, request, jsonify, current_app
 
 # Flask-Limiter instance — initialized in create_app(), imported by routes
 limiter = None
