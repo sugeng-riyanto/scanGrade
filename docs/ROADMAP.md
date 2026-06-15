@@ -30,6 +30,7 @@
 
 | Feature | Target | Status |
 |---------|--------|--------|
+| Collaborative whiteboard | Q3 2026 | Planned |
 | Mobile app (Android/iOS) | Q3 2026 | Research |
 | Real-time proctoring (webcam) | Q3 2026 | Research |
 | Advanced analytics dashboard | Q3 2026 | Planned |
