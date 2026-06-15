@@ -4,7 +4,7 @@
 {% block content %}
 <div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
     <!-- Welcome -->
-    <div class="card p-6 bg-gradient-to-r from-primary-600 to-primary-700 border-0 text-white relative overflow-hidden">
+    <div class="rounded-2xl p-6 bg-gradient-to-r from-primary-600 to-primary-700 text-white relative overflow-hidden shadow-lg shadow-primary-500/30">
         <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
         <div class="relative z-10">
             <h2 class="text-2xl font-extrabold">{{ school.name or 'Sekolah' }}</h2>
