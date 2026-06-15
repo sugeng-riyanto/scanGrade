@@ -156,7 +156,7 @@
                 <div class="text-center p-5 bg-gradient-to-br from-emerald-50 to-emerald-50 rounded-2xl border border-emerald-100">
                     <div class="text-3xl font-extrabold text-emerald-600">0%</div>
                     <div class="text-xs font-bold text-emerald-700 mt-1">Tingkat Error</div>
-                    <div class="text-[10px] text-emerald-400 mt-0.5">dari total akses*</div>
+                    <div class="text-[10px] text-emerald-400 mt-0.5">dari total akses&#42;</div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-amber-50 to-amber-50 rounded-2xl border border-amber-100">
                     <div class="text-3xl font-extrabold text-amber-600">&lt; 1 detik</div>
@@ -169,8 +169,8 @@
                     <div class="text-[10px] text-primary-400 mt-0.5">durasi 10 menit</div>
                 </div>
             </div>
-            <div class="mt-6 text-center text-xs text-slate-400">
-                * Uji coba menggunakan Locust dengan 500 akun siswa (demo) melakukan login, membuka dashboard, daftar ujian, dan hasil — seluruhnya berjalan tanpa error. Metrik diukur dari 46.698 permintaan HTTP dalam 10 menit.
+            <div class="mt-6 text-center text-[11px] text-slate-400 leading-relaxed">
+                &#42; Uji coba menggunakan Locust (alat uji beban) terhadap server produksi <span class="text-slate-500">scangrade.web.id</span>. Seratus persen request berstatus 2xx. Waktu respon adalah rata-rata dari seluruh endpoint.
             </div>
         </div>
 
