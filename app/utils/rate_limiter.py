@@ -18,7 +18,7 @@ DEFAULT_LIMITS = {
     "reset_password": (3, 300),
 }
 
-_exempt_paths = {"/health", "/static/"}
+_exempt_paths = {"/health", "/static/", "/", "/pricing", "/demo", "/auth/login-user", "/auth/login", "/auth/register"}
 _endpoint_self_limited = {"/api/student/sync-draft", "/api/violation/log", "/api/student/force-submit"}
 
 
