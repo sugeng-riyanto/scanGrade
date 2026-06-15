@@ -915,32 +915,37 @@ def file_management():
                 from app.services.pdf_service import _ensure_bucket
                 _ensure_bucket(supabase)
                 deleted = 0
-                # List top-level items (exam_id folders or direct files)
-                top = supabase.storage.from_("exam-pdfs").list()
-                for item in top:
-                    name = item.get("name", "")
-                    if not name:
-                        continue
-                    # Try to remove as file first
-                    try:
-                        supabase.storage.from_("exam-pdfs").remove([name])
-                        deleted += 1
-                    except Exception:
-                        # It's a folder — list and remove contents
+                # List all items recursively using Supabase prefix search
+                prefixes = [""]
+                while prefixes:
+                    pfx = prefixes.pop(0)
+                    items = supabase.storage.from_("exam-pdfs").list(pfx)
+                    for item in items or []:
+                        name = item.get("name", "")
+                        if not name:
+                            continue
+                        full = f"{pfx}/{name}" if pfx else name
+                        # Check if it's a directory (has children)
                         try:
-                            sub = supabase.storage.from_("exam-pdfs").list(name)
-                            for sub_item in sub:
-                                sub_name = sub_item.get("name", "")
-                                if sub_name:
-                                    full_path = f"{name}/{sub_name}"
-                                    supabase.storage.from_("exam-pdfs").remove([full_path])
-                                    deleted += 1
-                            # Remove the folder itself
-                            supabase.storage.from_("exam-pdfs").remove([name])
+                            children = supabase.storage.from_("exam-pdfs").list(full)
+                            if children and len(children) > 0:
+                                prefixes.append(full)
+                                continue
+                        except Exception:
+                            pass
+                        # It's a file — remove it
+                        try:
+                            supabase.storage.from_("exam-pdfs").remove([full])
                             deleted += 1
                         except Exception:
                             pass
-                flash(f"✅ {deleted} file/folder dihapus dari Supabase Storage", "success")
+                    # Remove empty directories
+                    if pfx:
+                        try:
+                            supabase.storage.from_("exam-pdfs").remove([pfx])
+                        except Exception:
+                            pass
+                flash(f"✅ {deleted} file dihapus dari Supabase Storage", "success")
             except Exception as e:
                 flash(f"Error: {e}", "error")
             return redirect("/super-admin/file-management")
