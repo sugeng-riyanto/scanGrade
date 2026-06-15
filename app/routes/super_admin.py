@@ -904,10 +904,35 @@ def file_management():
         # Clear Supabase Storage bucket
         elif action == "clear_storage":
             try:
-                files = supabase.storage.from_("exam-pdfs").list()
-                for f in files:
-                    supabase.storage.from_("exam-pdfs").remove([f["name"]])
-                flash(f"✅ {len(files)} file dihapus dari Supabase Storage", "success")
+                from app.services.pdf_service import _ensure_bucket
+                _ensure_bucket(supabase)
+                deleted = 0
+                # List top-level items (exam_id folders or direct files)
+                top = supabase.storage.from_("exam-pdfs").list()
+                for item in top:
+                    name = item.get("name", "")
+                    if not name:
+                        continue
+                    # Try to remove as file first
+                    try:
+                        supabase.storage.from_("exam-pdfs").remove([name])
+                        deleted += 1
+                    except Exception:
+                        # It's a folder — list and remove contents
+                        try:
+                            sub = supabase.storage.from_("exam-pdfs").list(name)
+                            for sub_item in sub:
+                                sub_name = sub_item.get("name", "")
+                                if sub_name:
+                                    full_path = f"{name}/{sub_name}"
+                                    supabase.storage.from_("exam-pdfs").remove([full_path])
+                                    deleted += 1
+                            # Remove the folder itself
+                            supabase.storage.from_("exam-pdfs").remove([name])
+                            deleted += 1
+                        except Exception:
+                            pass
+                flash(f"✅ {deleted} file/folder dihapus dari Supabase Storage", "success")
             except Exception as e:
                 flash(f"Error: {e}", "error")
             return redirect("/super-admin/file-management")
