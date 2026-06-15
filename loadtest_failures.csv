@@ -1,6 +1,0 @@
-Method,Name,Error,Occurrences,First Seen,Last Seen
-GET,GET /student/exams,HTTPError('429 Client Error: TOO MANY REQUESTS for url: GET /student/exams'),19304,2026-06-15T13:11:37Z,2026-06-15T13:21:32Z
-GET,GET /student/results (list),HTTPError('429 Client Error: TOO MANY REQUESTS for url: GET /student/results (list)'),3920,2026-06-15T13:11:38Z,2026-06-15T13:21:32Z
-POST,POST /auth/login (login),HTTPError('429 Client Error: TOO MANY REQUESTS for url: POST /auth/login (login)'),495,2026-06-15T13:11:34Z,2026-06-15T13:11:53Z
-GET,GET /student/results,HTTPError('429 Client Error: TOO MANY REQUESTS for url: GET /student/results'),3857,2026-06-15T13:11:38Z,2026-06-15T13:21:32Z
-GET,GET /student/dashboard,HTTPError('429 Client Error: TOO MANY REQUESTS for url: GET /student/dashboard'),11575,2026-06-15T13:11:38Z,2026-06-15T13:21:32Z
