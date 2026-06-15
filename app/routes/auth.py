@@ -245,7 +245,6 @@ def login():
 # ─── LOGIN USER (Guru & Murid) ───────────────────────
 
 @auth_bp.route("/login-user", methods=["GET", "POST"])
-@_rate_limit("5 per minute")
 def login_user():
     if request.method == "GET":
         role_hint = request.args.get("role", "")
