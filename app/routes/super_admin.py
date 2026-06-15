@@ -899,7 +899,7 @@ def file_management():
 def download_school_zip(school_id):
     """Download ZIP berisi data sekolah + file terkait (JSON, XLSX, TXT)."""
     supabase = get_supabase()
-    import io, zipfile, csv
+    import io, zipfile
 
     school = supabase.table("schools").select("*").eq("id", school_id).single().execute().data
     if not school:
