@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="id" class="h-full">
+<script>if(localStorage.getItem('theme')==='dark'||(!localStorage.getItem('theme')&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')</script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -22,37 +23,50 @@
     <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
     <script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/static/sw.js').catch(function(){})</script>
     <style>
+        :root { --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-hover: #f8fafc; --text: #1e293b; --text-dim: #64748b; --text-nav: #94a3b8; --border: #e2e8f0; --input: #ffffff; --input-border: #e2e8f0; --shadow: 0 1px 2px rgba(0,0,0,0.03); }
+        .dark { --bg-body: #0f172a; --bg-card: #1e293b; --bg-hover: #263348; --text: #e2e8f0; --text-dim: #94a3b8; --text-nav: #94a3b8; --border: #334155; --input: #263348; --input-border: #475569; --shadow: 0 1px 2px rgba(0,0,0,0.2); }
         * { font-family: 'Inter', system-ui, sans-serif; }
-        body { background: #f1f5f9 !important; }
-        .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; border-radius: 0.75rem; font-weight: 600; font-size: 0.875rem; transition: all 0.15s; color: #94a3b8; }
+        body { background: var(--bg-body) !important; }
+        html { transition: background-color .3s, color .3s; }
+        .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; border-radius: 0.75rem; font-weight: 600; font-size: 0.875rem; transition: all .15s; color: #94a3b8; }
         .nav-item:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
         .nav-item.active { background: rgba(59,130,246,0.15); color: #93c5fd; }
-        .nav-item i { width: 20px; text-align: center; font-size: 0.9rem; }
-        .nav-section-title { padding: 0.5rem 0.875rem 0.25rem; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; }
-        .card { background: #fff; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
-        .card-hover:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); transform: translateY(-1px); transition: all 0.2s; }
+        .nav-item i { width: 20px; text-align: center; font-size: .9rem; }
+        .nav-section-title { padding: .5rem .875rem .25rem; font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #475569; }
+        .card { background: var(--bg-card); border-radius: 1rem; border: 1px solid var(--border); box-shadow: var(--shadow); }
+        .card-hover:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); transform: translateY(-1px); transition: all .2s; }
         .stat-card { padding: 1.25rem 1.5rem; }
         .stat-icon { width: 44px; height: 44px; border-radius: 0.75rem; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; }
-        .badge { display: inline-flex; align-items: center; padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; }
+        .badge { display: inline-flex; align-items: center; padding: .2rem .6rem; border-radius: 9999px; font-size: .7rem; font-weight: 700; letter-spacing: .02em; }
         [x-cloak] { display: none !important; }
-        .toast-enter { animation: slideUp 0.25s ease-out forwards; }
-        .toast-leave { animation: fadeIn 0.2s ease-in reverse forwards; }
-        @media (max-width: 1023px) {
-            .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 40; backdrop-filter: blur(4px); }
-        }
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        dialog { max-height: 90vh; }
-        dialog::backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
+        .btn { display: inline-flex; align-items: center; gap: .375rem; padding: .625rem 1.25rem; border-radius: .75rem; font-weight: 700; font-size: .875rem; transition: all .15s; cursor: pointer; border: none; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-ghost { background: transparent; color: var(--text-dim); border: 2px solid var(--border); }
+        .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+        .input { width: 100%; padding: .75rem 1rem; border: 2px solid var(--input-border); border-radius: .75rem; font-size: .875rem; font-weight: 500; transition: all .15s; background: var(--input); color: var(--text); }
+        .input:focus { outline: none; border-color: #3b82f6; }
+        .toast-enter { animation: slideUp .25s ease-out forwards; }
+        .toast-leave { animation: fadeIn .2s ease-in reverse forwards; }
+        @media (max-width: 1023px) { .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 40; backdrop-filter: blur(4px); } }
+        ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; } ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        dialog { max-height: 90vh; } dialog::backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
         @supports (height: 100dvh) { .h-full { height: 100dvh; } }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
         .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
-        /* Mobile bottom nav */
-        @media (max-width: 1023px) {
-            main { padding-bottom: 4rem; }
-        }
+        @media (max-width: 1023px) { main { padding-bottom: 4rem; } }
+        .dark-header { background: var(--bg-card); }
+        /* Utility dark overrides for inline Tailwind classes used in templates */
+        .dark .bg-white { background: var(--bg-card) !important; }
+        .dark .bg-surface-50 { background: #1a2332 !important; } .dark .bg-surface-100 { background: #1e293b !important; }
+        .dark .border-surface-200 { border-color: var(--border) !important; }
+        .dark .text-surface-500, .dark .text-surface-600 { color: var(--text-dim) !important; }
+        .dark .text-surface-400 { color: #64748b !important; }
+        .dark .text-surface-700, .dark .text-surface-800 { color: var(--text) !important; }
+        .dark .hover\:bg-surface-50:hover, .dark .hover\:bg-surface-100:hover { background: var(--bg-hover) !important; }
+        .dark .divide-surface-50, .dark .divide-surface-100, .dark .divide-surface-200 { border-color: var(--border) !important; }
+        .dark .shadow-sm { box-shadow: var(--shadow) !important; }
+        .dark .shadow-lg, .dark .shadow-xl, .dark .shadow-2xl { box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important; }
     </style>
     <meta name="csrf-token" content="{{ csrf_token() }}">
     {% block head_extra %}{% endblock %}
@@ -61,6 +75,12 @@
       x-data="{
         sidebarOpen: false,
         lang: localStorage.getItem('sg_lang') || 'id',
+        darkMode: localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme:dark)').matches),
+        toggleDark() {
+            this.darkMode = !this.darkMode;
+            document.documentElement.classList.toggle('dark', this.darkMode);
+            localStorage.setItem('theme', this.darkMode ? 'dark' : 'light');
+        },
         loading: false,
         toasts: [],
         toastId: 0,
@@ -71,6 +91,7 @@
         },
         userMenuOpen: false,
       }"
+      x-init="document.documentElement.classList.toggle('dark', darkMode)"
       @htmx:before-request.window="loading = true"
       @htmx:after-request.window="loading = false"
       @htmx:response-error.window="notify('Terjadi kesalahan', 'error')">
@@ -226,6 +247,15 @@
                 <button @click="lang = lang==='id'?'en':'id'; localStorage.setItem('sg_lang', lang)"
                         class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 text-surface-500 hover:bg-surface-50 hover:text-surface-700 transition"
                         x-text="lang==='id'?'EN':'ID'">
+                </button>
+
+                <!-- Dark Mode Toggle -->
+                <button @click="toggleDark()"
+                        class="text-xs px-2.5 py-1.5 rounded-lg border transition hidden sm:inline-flex items-center gap-1"
+                        :class="darkMode ? 'bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'"
+                        :title="darkMode ? 'Mode Terang' : 'Mode Gelap'">
+                    <i :class="darkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
+                    <span class="text-[10px] font-bold" x-text="darkMode ? 'Terang' : 'Gelap'"></span>
                 </button>
 
                 <!-- User dropdown -->
@@ -409,6 +439,12 @@ document.addEventListener('DOMContentLoaded', function() {
     <a href="/student/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/exams' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span>Ujian</span></a>
     <a href="/student/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/results' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-bar text-lg mb-0.5"></i><span>Nilai</span></a>
     {% endif %}
+    <button @click="toggleDark()" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold transition"
+            :class="darkMode ? 'text-indigo-500' : 'text-surface-400'"
+            :title="darkMode ? 'Mode Terang' : 'Mode Gelap'">
+        <i :class="darkMode ? 'fas fa-sun text-lg mb-0.5' : 'fas fa-moon text-lg mb-0.5'"></i>
+        <span x-text="darkMode ? 'Terang' : 'Gelap'"></span>
+    </button>
 </nav>
 {% endif %}
 </body>
