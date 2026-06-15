@@ -65,7 +65,7 @@ def create_app(env=None):
         from app.utils import rate_limiter as rl_module
 
         storage_uri = "memory://"
-        if cfg.REDIS_URL and cfg.REDIS_URL != "redis://localhost:6379/0":
+        if cfg.REDIS_URL:
             try:
                 from redis import Redis
                 r = Redis.from_url(cfg.REDIS_URL)
