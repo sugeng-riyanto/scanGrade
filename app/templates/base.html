@@ -67,6 +67,30 @@
         .dark .divide-surface-50, .dark .divide-surface-100, .dark .divide-surface-200 { border-color: var(--border) !important; }
         .dark .shadow-sm { box-shadow: var(--shadow) !important; }
         .dark .shadow-lg, .dark .shadow-xl, .dark .shadow-2xl { box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important; }
+        /* Dark mode for status colors used in badges, alerts */
+        .dark .bg-amber-50 { background: #451a03 !important; } .dark .text-amber-700 { color: #fbbf24 !important; }
+        .dark .bg-emerald-50 { background: #052e16 !important; } .dark .text-emerald-700 { color: #34d399 !important; }
+        .dark .bg-red-50 { background: #450a0a !important; } .dark .text-red-600, .dark .text-red-700 { color: #f87171 !important; }
+        .dark .bg-blue-50 { background: #172554 !important; } .dark .text-blue-600, .dark .text-blue-700 { color: #60a5fa !important; }
+        .dark .bg-orange-50 { background: #431407 !important; } .dark .text-orange-600, .dark .text-orange-700 { color: #fb923c !important; }
+        .dark .bg-purple-50 { background: #2e1065 !important; } .dark .text-purple-600, .dark .text-purple-700 { color: #a78bfa !important; }
+        .dark .bg-violet-50 { background: #2e1065 !important; } .dark .text-violet-600, .dark .text-violet-700 { color: #a78bfa !important; }
+        .dark .bg-slate-50 { background: #1a2332 !important; }
+        .dark .text-slate-400, .dark .text-slate-500 { color: #94a3b8 !important; }
+        .dark .text-slate-700, .dark .text-slate-800 { color: #e2e8f0 !important; }
+        .dark .border-slate-200 { border-color: #334155 !important; }
+        .dark .text-stone-400, .dark .text-stone-500 { color: #94a3b8 !important; }
+        .dark .text-stone-600, .dark .text-stone-700 { color: #e2e8f0 !important; }
+        .dark .bg-stone-50 { background: #1a2332 !important; }
+        .dark .border-amber-200 { border-color: #78350f !important; }
+        .dark .border-emerald-200 { border-color: #065f46 !important; }
+        .dark .border-red-200 { border-color: #7f1d1d !important; }
+        .dark .border-blue-200 { border-color: #1e3a5f !important; }
+        .dark .border-orange-200 { border-color: #7c2d12 !important; }
+        .dark .border-purple-200 { border-color: #4c1d95 !important; }
+        .dark .border-violet-200 { border-color: #4c1d95 !important; }
+        .dark .border-stone-200 { border-color: #334155 !important; }
+        .dark .bg-stone-100 { background: #1e293b !important; }
     </style>
     <meta name="csrf-token" content="{{ csrf_token() }}">
     {% block head_extra %}{% endblock %}
