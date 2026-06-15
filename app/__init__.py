@@ -12,7 +12,7 @@ from app.config import get_config
 DEFAULT_TZ_OFFSET = 7
 
 # SocketIO instance (module-level, init_app called in create_app)
-socketio = SocketIO(async_mode='eventlet')
+socketio = SocketIO(async_mode='threading')
 
 _lru_cache = {}
 _lru_cache_ttl = {}
@@ -109,8 +109,8 @@ def create_app(env=None):
     app.extensions["supabase"] = supabase
     app.extensions["supabase_auth"] = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY)
 
-    # SocketIO initialization
-    socketio.init_app(app, cors_allowed_origins="*")
+    # SocketIO initialization (threading mode — no eventlet needed)
+    socketio.init_app(app, cors_allowed_origins="*", async_mode='threading')
     from app.routes.whiteboard_socket import register_socket_events
     register_socket_events(socketio)
     app.extensions["socketio"] = socketio

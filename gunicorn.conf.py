@@ -2,7 +2,7 @@ import os
 
 bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
 workers = 8
-worker_class = "eventlet"
+worker_class = "sync"
 timeout = 120
 max_requests = 5000
 max_requests_jitter = 500
