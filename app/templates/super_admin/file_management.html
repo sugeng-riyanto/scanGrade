@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Manajemen File - ScanGrade{% endblock %}
+{% block page_title %}Manajemen File{% endblock %}
+{% block content %}
+<div class="space-y-6">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <!-- Storage Overview -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="card p-5">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fas fa-hard-drive text-xl"></i></div>
+                <div>
+                    <p class="text-xs font-bold text-surface-400">Lokal VPS</p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ local_total_mb }} MB</p>
+                    <p class="text-[10px] font-bold text-surface-400">{{ local_exams|length }} exam</p>
+                </div>
+            </div>
+        </div>
+        <div class="card p-5">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"><i class="fas fa-cloud text-xl"></i></div>
+                <div>
+                    <p class="text-xs font-bold text-surface-400">Supabase Storage</p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ sb_count }} file</p>
+                    <p class="text-[10px] font-bold text-surface-400">bucket exam-pdfs</p>
+                </div>
+            </div>
+        </div>
+        <div class="card p-5">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center"><i class="fas fa-database text-xl"></i></div>
+                <div>
+                    <p class="text-xs font-bold text-surface-400">Supabase DB</p>
+                    <p class="text-2xl font-extrabold text-surface-800">500 MB</p>
+                    <p class="text-[10px] font-bold text-surface-400">free tier</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-arrow-up"></i>Migrasi File Lokal → Supabase</h3>
+        </div>
+        <div class="p-5">
+            <p class="text-sm text-surface-500 mb-4">Pindahkan semua gambar PDF dari penyimpanan lokal VPS ke Supabase Storage (CDN). Setelah migrasi, file lokal bisa dihapus.</p>
+            <form method="POST">
+                <input type="hidden" name="action" value="migrate">
+                <button type="submit" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-sm hover:from-amber-600 hover:to-orange-600 transition shadow-lg" onclick="return confirm('Migrasi {{ local_total_mb }} MB file ke Supabase Storage?')">
+                    <i class="fas fa-cloud-upload-alt mr-1"></i>Migrate {{ local_exams|length }} Exam ke Supabase
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Local Files -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-folder-open"></i>File Lokal VPS ({{ local_exams|length }} exam)</h3>
+            <span class="text-xs font-bold text-surface-400">{{ local_total_mb }} MB</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-surface-50 text-xs font-bold text-surface-500 uppercase">
+                    <tr>
+                        <th class="text-left px-5 py-3">Exam ID</th>
+                        <th class="text-center px-5 py-3">Files</th>
+                        <th class="text-right px-5 py-3">Size</th>
+                        <th class="text-right px-5 py-3">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-50">
+                    {% for e in local_exams %}
+                    <tr class="hover:bg-surface-50 transition">
+                        <td class="px-5 py-3 font-mono text-xs font-bold text-surface-700">{{ e.exam_id[:16] }}...</td>
+                        <td class="px-5 py-3 text-center text-surface-600">{{ e.files }}</td>
+                        <td class="px-5 py-3 text-right font-bold text-surface-700">{{ e.size_mb }} MB</td>
+                        <td class="px-5 py-3 text-right">
+                            <form method="POST" class="inline" onsubmit="return confirm('Hapus file lokal exam ini?')">
+                                <input type="hidden" name="action" value="delete_local">
+                                <input type="hidden" name="exam_id" value="{{ e.exam_id }}">
+                                <button type="submit" class="px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-200">
+                                    <i class="fas fa-trash mr-1"></i>Hapus
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="px-5 py-12 text-center text-surface-400 font-medium">
+                            <i class="fas fa-folder-open text-3xl mb-2 block text-surface-300"></i>
+                            Tidak ada file lokal
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- School ZIP Download -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-download"></i>Download Data per Sekolah (ZIP)</h3>
+        </div>
+        <div class="p-5">
+            <p class="text-sm text-surface-500 mb-4">Download seluruh data sekolah (profil, guru, murid, kelas, ujian, submission) dalam format JSON. Cocok untuk backup atau serah terima ke sekolah.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {% for s in schools %}
+                <a href="/super-admin/file-management/download/{{ s.id }}" class="flex items-center gap-3 p-4 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
+                    <div class="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+                        <i class="fas fa-school"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-bold text-surface-700 truncate">{{ s.name }}</p>
+                        <p class="text-[10px] font-bold text-surface-400">NPSN: {{ s.npsn or '-' }}</p>
+                    </div>
+                    <i class="fas fa-download text-surface-400"></i>
+                </a>
+                {% else %}
+                <p class="col-span-full text-sm text-surface-400 italic">Belum ada sekolah terdaftar</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Supabase Quick Actions -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-database"></i>Manajemen Database</h3>
+        </div>
+        <div class="p-5">
+            <p class="text-sm text-surface-500 mb-4">Akses cepat ke Supabase Dashboard untuk manage database dan storage.</p>
+            <div class="flex flex-wrap gap-3">
+                <a href="https://supabase.com/dashboard/project/roshkbzgfzpfedowozfo" target="_blank" class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-bold text-sm hover:from-emerald-600 hover:to-emerald-700 transition shadow-lg">
+                    <i class="fas fa-external-link-alt mr-1"></i>Buka Supabase Dashboard
+                </a>
+                <a href="https://supabase.com/dashboard/project/roshkbzgfzpfedowozfo/storage/buckets" target="_blank" class="px-5 py-2.5 border-2 border-surface-200 text-surface-700 rounded-xl font-bold text-sm hover:bg-surface-50 transition">
+                    <i class="fas fa-cloud mr-1"></i>Storage Buckets
+                </a>
+                <a href="https://supabase.com/dashboard/project/roshkbzgfzpfedowozfo/sql/new" target="_blank" class="px-5 py-2.5 border-2 border-surface-200 text-surface-700 rounded-xl font-bold text-sm hover:bg-surface-50 transition">
+                    <i class="fas fa-terminal mr-1"></i>SQL Editor
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
