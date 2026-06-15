@@ -9,6 +9,11 @@ public_bp = Blueprint("public", __name__)
 logger = get_logger("public")
 
 
+@public_bp.route("/loaderio-51ecf273210e88abe9f24d4eb2dba2a8.html")
+def loaderio_verify():
+    return "loaderio-51ecf273210e88abe9f24d4eb2dba2a8", 200, {"Content-Type": "text/plain"}
+
+
 @public_bp.route("/pricing")
 def pricing():
     try:
