@@ -1,0 +1,28 @@
+{
+  "name": "scangrade",
+  "version": "1.0.0",
+  "description": "Sistem koreksi ujian digital — scan lembar jawaban pilihan ganda via kamera, koreksi esai dengan AI similarity scoring + teacher override, anti-cheat deteksi tab switch, analytics dashboard, dan export hasil ke XLSX/PDF.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sugeng-riyanto/scanGrade.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/sugeng-riyanto/scanGrade/issues"
+  },
+  "homepage": "https://github.com/sugeng-riyanto/scanGrade#readme",
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}
