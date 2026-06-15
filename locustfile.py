@@ -37,21 +37,12 @@ class ScanGradeStudent(HttpUser):
         self.exam_ids = []
 
         resp = self.client.post(
-            "/auth/login",
-            json={"email": self.email, "password": self.password},
-            name="POST /auth/login (login)",
+            "/auth/login-user",
+            data={"email": self.email, "password": self.password},
+            name="POST /auth/login-user (student login)",
         )
         if resp.status_code == 200 or resp.status_code == 302:
             self.logged_in = True
-        else:
-            # Try demo endpoint
-            resp2 = self.client.post(
-                "/auth/demo-login",
-                json={"role": "murid"},
-                name="POST /auth/demo-login",
-            )
-            if resp2.status_code == 200 or resp2.status_code == 302:
-                self.logged_in = True
 
     @task(3)
     def view_dashboard(self):
