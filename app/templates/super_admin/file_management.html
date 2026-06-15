@@ -139,8 +139,8 @@
         <div class="px-5 py-4 border-b border-surface-100">
             <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-database"></i>Manajemen Database</h3>
         </div>
-        <div class="p-5">
-            <p class="text-sm text-surface-500 mb-4">Akses cepat ke Supabase Dashboard untuk manage database dan storage.</p>
+        <div class="p-5 space-y-4">
+            <p class="text-sm text-surface-500">Akses cepat ke Supabase Dashboard dan operasi pembersihan data.</p>
             <div class="flex flex-wrap gap-3">
                 <a href="https://supabase.com/dashboard/project/roshkbzgfzpfedowozfo" target="_blank" class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-bold text-sm hover:from-emerald-600 hover:to-emerald-700 transition shadow-lg">
                     <i class="fas fa-external-link-alt mr-1"></i>Buka Supabase Dashboard
@@ -151,6 +151,29 @@
                 <a href="https://supabase.com/dashboard/project/roshkbzgfzpfedowozfo/sql/new" target="_blank" class="px-5 py-2.5 border-2 border-surface-200 text-surface-700 rounded-xl font-bold text-sm hover:bg-surface-50 transition">
                     <i class="fas fa-terminal mr-1"></i>SQL Editor
                 </a>
+            </div>
+            <div class="border-t border-surface-200 pt-4">
+                <p class="text-sm font-bold text-surface-700 mb-3">Operasi Pembersihan</p>
+                <div class="flex flex-wrap gap-3">
+                    <form method="POST" onsubmit="return confirm('Hapus SEMUA file lokal VPS? Data di Supabase AMAN.')">
+                        <input type="hidden" name="action" value="clear_local">
+                        <button type="submit" class="px-5 py-2.5 bg-amber-50 text-amber-700 border-2 border-amber-200 rounded-xl font-bold text-sm hover:bg-amber-100 transition">
+                            <i class="fas fa-trash-alt mr-1"></i>Hapus Semua File Lokal
+                        </button>
+                    </form>
+                    <form method="POST" onsubmit="return confirm('Hapus SEMUA file dari Supabase Storage bucket exam-pdfs?')">
+                        <input type="hidden" name="action" value="clear_storage">
+                        <button type="submit" class="px-5 py-2.5 bg-orange-50 text-orange-700 border-2 border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-100 transition">
+                            <i class="fas fa-cloud-upload-alt mr-1"></i>Hapus Semua File Supabase
+                        </button>
+                    </form>
+                    <form method="POST" onsubmit="return confirm('⚠️ HAPUS SEMUA DATA UJIAN + SUBMISSION + LOG? Data master (sekolah, guru, murid) AMAN.')">
+                        <input type="hidden" name="action" value="reset_exam_data">
+                        <button type="submit" class="px-5 py-2.5 bg-red-50 text-red-700 border-2 border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 transition">
+                            <i class="fas fa-skull-crossbones mr-1"></i>Reset Data Ujian
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
