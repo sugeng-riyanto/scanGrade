@@ -1,0 +1,16 @@
+{
+  "name": "ScanGrade",
+  "short_name": "ScanGrade",
+  "description": "Platform ujian online dengan koreksi AI, OMR scanner, dan analitik",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#1e293b",
+  "background_color": "#f8fafc",
+  "categories": ["education", "productivity"],
+  "icons": [
+    { "src": "/static/icon.svg", "type": "image/svg+xml", "sizes": "512x512" },
+    { "src": "/static/icon.svg", "type": "image/svg+xml", "sizes": "192x192", "purpose": "any" }
+  ]
+}

@@ -40,6 +40,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#1e293b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+    <script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/static/sw.js').catch(function(){})</script>
     <style>
         * { font-family: 'Inter', system-ui, sans-serif; }
         body { background: #f1f5f9; }
@@ -65,6 +72,13 @@
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         dialog { max-height: 90vh; }
         dialog::backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
+        @supports (height: 100dvh) { .h-full { height: 100dvh; } }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+        .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+        /* Mobile bottom nav */
+        @media (max-width: 1023px) {
+            main { padding-bottom: 4rem; }
+        }
     </style>
     <meta name="csrf-token" content="{{ csrf_token() }}">
     {% block head_extra %}{% endblock %}
@@ -201,7 +215,7 @@
     </template>
 
     <!-- ===== MAIN ===== -->
-    <div class="flex-1 flex flex-col min-w-0 max-w-full">
+    <div class="flex-1 flex flex-col min-w-0 max-w-full pb-safe lg:pb-0">
 
         <!-- Topbar -->
         <header class="h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-sm">
@@ -394,5 +408,32 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 {% block scripts %}{% endblock %}
+{% if g.user_role %}
+<!-- Mobile bottom nav -->
+<nav class="fixed bottom-0 inset-x-0 z-50 bg-white border-t border-surface-200 pb-safe lg:hidden shadow-2xl flex">
+    {% set role = g.user_role %}
+    {% if role == 'super_admin' %}
+    <a href="/super-admin/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-crown text-lg mb-0.5"></i><span>Dashboard</span></a>
+    <a href="/super-admin/schools" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/schools' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-school text-lg mb-0.5"></i><span>Sekolah</span></a>
+    <a href="/super-admin/plans" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/plans' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-tags text-lg mb-0.5"></i><span>Paket</span></a>
+    <a href="/admin/registration-requests" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin/registration-requests' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-user-plus text-lg mb-0.5"></i><span>Registrasi</span></a>
+    {% elif role == 'admin_sekolah' %}
+    <a href="/admin-sekolah/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span></a>
+    <a href="/admin-sekolah/classes" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/classes' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-school text-lg mb-0.5"></i><span>Kelas</span></a>
+    <a href="/admin-sekolah/teachers" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/teachers' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chalkboard-teacher text-lg mb-0.5"></i><span>Guru</span></a>
+    <a href="/admin-sekolah/students" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/students' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-user-graduate text-lg mb-0.5"></i><span>Murid</span></a>
+    <a href="/admin-sekolah/subscription" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/subscription' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-credit-card text-lg mb-0.5"></i><span>Langganan</span></a>
+    {% elif role == 'guru' %}
+    <a href="/teacher/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span></a>
+    <a href="/teacher/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.startswith('/teacher/exams') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span>Ujian</span></a>
+    <a href="/teacher/grading" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/grading' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-pen-alt text-lg mb-0.5"></i><span>Koreksi</span></a>
+    <a href="/teacher/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.startswith('/teacher/results') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-bar text-lg mb-0.5"></i><span>Nilai</span></a>
+    {% elif role == 'murid' %}
+    <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-home text-lg mb-0.5"></i><span>Beranda</span></a>
+    <a href="/student/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/exams' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span>Ujian</span></a>
+    <a href="/student/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/results' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-bar text-lg mb-0.5"></i><span>Nilai</span></a>
+    {% endif %}
+</nav>
+{% endif %}
 </body>
 </html>
