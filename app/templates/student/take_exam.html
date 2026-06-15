@@ -600,7 +600,7 @@
                                 <div class="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
                                     <i class="fas fa-headphones text-orange-500 text-sm"></i>
                                 </div>
-                                <audio :src="q.audio" controls class="h-9 w-full max-w-md" preload="none"></audio>
+                                <audio :src="gdriveDirect(q.audio)" controls class="h-9 w-full max-w-md" preload="none"></audio>
                             </div>
                             <p class="text-[11px] text-stone-400 mt-1.5 ml-12">Putar audio soal</p>
                         </div>
@@ -1553,21 +1553,27 @@ function examApp(duration, totalQ) {
                 this.essayCanvasMode[idx] = 'pen';
             }
         },
-         youtubeEmbedUrl(url) {
-             if (!url) return '';
-             let videoId = '';
-             const patterns = [
-                 /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
-                 /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
-                 /youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/,
-             ];
-             for (const p of patterns) {
-                 const m = url.match(p);
-                 if (m) { videoId = m[1]; break; }
-             }
-             if (!videoId) return '';
-             return 'https://www.youtube.com/embed/' + videoId + '?rel=0&modestbranding=1';
-         },
+          youtubeEmbedUrl(url) {
+              if (!url) return '';
+              let videoId = '';
+              const patterns = [
+                  /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+                  /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+                  /youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/,
+              ];
+              for (const p of patterns) {
+                  const m = url.match(p);
+                  if (m) { videoId = m[1]; break; }
+              }
+              if (!videoId) return '';
+              return 'https://www.youtube.com/embed/' + videoId + '?rel=0&modestbranding=1';
+          },
+          gdriveDirect(url) {
+              if (!url) return '';
+              const match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+              if (match) return 'https://docs.google.com/uc?export=download&id=' + match[1];
+              return url;
+          },
         markAnswered(i, val, overwrite) {
             this.answered[i] = true;
             // For MCQ: don't overwrite letter answer (A/B/C/D) with boolean true from canvas drawing

@@ -206,7 +206,7 @@
                                                 &#8226; Upload file audio (mp3, ogg, wav) ke Google Drive &rarr; Share &rarr; <strong class="text-slate-600">General access: Anyone with the link</strong> &rarr; Copy link
                                             </p>
                                             <div x-show="q.audio" class="mt-1 flex items-center gap-2">
-                                                <audio :src="q.audio" controls class="h-8 w-full max-w-xs"></audio>
+                                                <audio :src="gdriveDirect(q.audio)" controls class="h-8 w-full max-w-xs"></audio>
                                                 <a :href="q.audio" target="_blank" class="text-xs text-rose-600 hover:underline">Buka link</a>
                                             </div>
                                         </div>
@@ -506,6 +506,12 @@ function questionManager() {
                      || url.match(/youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/);
             if (match) return 'https://www.youtube.com/embed/' + match[1] + '?rel=0&modestbranding=1';
             return '';
+        },
+        gdriveDirect(url) {
+            if (!url) return '';
+            var match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (match) return 'https://docs.google.com/uc?export=download&id=' + match[1];
+            return url;
         },
     };
 }
