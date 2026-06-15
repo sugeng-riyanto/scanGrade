@@ -823,14 +823,22 @@ def file_management():
     local_exams.sort(key=lambda x: x["exam_id"])
 
     # Supabase storage stats
-    sb_files = []
     sb_total = 0
     try:
-        sb_list = supabase.storage.from_("exam-pdfs").list()
-        for item in sb_list:
+        top = supabase.storage.from_("exam-pdfs").list()
+        for item in top or []:
+            name = item.get("name", "")
+            if not name or name == "." or name == "..":
+                continue
             sb_total += 1
+            # If folder, count children
+            try:
+                sub = supabase.storage.from_("exam-pdfs").list(name)
+                sb_total += len([s for s in sub or [] if s.get("name") and s["name"] not in (".","..")])
+            except Exception:
+                pass
     except Exception:
-        sb_list = []
+        pass
 
     # Schools list for download
     schools = []
