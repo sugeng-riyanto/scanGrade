@@ -855,8 +855,6 @@ def file_management():
     except Exception:
         db_size_mb = 0.5
     db_pct = round(db_size_mb / db_limit * 100, 1) if db_limit > 0 else 0
-    except Exception:
-        pass
 
     # Schools list for download
     schools = []
