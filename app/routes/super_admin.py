@@ -888,6 +888,42 @@ def file_management():
                 flash(f"✅ File lokal exam {exam_id[:8]}... dihapus", "success")
             return redirect("/super-admin/file-management")
 
+        # Clear ALL local exam files
+        elif action == "clear_local":
+            import shutil
+            count = 0
+            if os.path.isdir(local_base):
+                for eid in os.listdir(local_base):
+                    edir = os.path.join(local_base, eid)
+                    if os.path.isdir(edir):
+                        shutil.rmtree(edir)
+                        count += 1
+            flash(f"✅ {count} folder exam dihapus dari VPS", "success")
+            return redirect("/super-admin/file-management")
+
+        # Clear Supabase Storage bucket
+        elif action == "clear_storage":
+            try:
+                files = supabase.storage.from_("exam-pdfs").list()
+                for f in files:
+                    supabase.storage.from_("exam-pdfs").remove([f["name"]])
+                flash(f"✅ {len(files)} file dihapus dari Supabase Storage", "success")
+            except Exception as e:
+                flash(f"Error: {e}", "error")
+            return redirect("/super-admin/file-management")
+
+        # Reset all exam data from DB
+        elif action == "reset_exam_data":
+            try:
+                supabase.table("submissions").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                supabase.table("exams").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                supabase.table("violation_logs").delete().neq("id", 0).execute()
+                supabase.table("audit_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                flash("✅ Semua data ujian, submission, dan log telah dihapus", "success")
+            except Exception as e:
+                flash(f"Error: {e}", "error")
+            return redirect("/super-admin/file-management")
+
     return render_template("super_admin/file_management.html",
                            local_exams=local_exams, local_total=local_total,
                            local_total_mb=round(local_total / 1048576, 2),
@@ -909,16 +945,14 @@ def download_school_zip(school_id):
     npsn = school.get("npsn", school_id)
     prefix = f"sekolah/{npsn}"
 
-    # ── Helpers ──
     def _add_json(name, data):
         zf.writestr(f"{prefix}/{name}.json", json.dumps(data, indent=2, default=str, ensure_ascii=False))
 
     def _add_xlsx(name, data, columns):
-        """Create XLSX from list of dicts using only specified columns."""
         import openpyxl
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = name
+        ws.title = name[:31]
         if data and columns:
             ws.append(list(columns.keys()))
             for row in data:
@@ -927,57 +961,62 @@ def download_school_zip(school_id):
         wb.save(buf_xl)
         zf.writestr(f"{prefix}/{name}.xlsx", buf_xl.getvalue())
 
-    def _add_txt(name, data, title):
-        """Create formatted TXT report."""
-        lines = [f"=== {title} ===", f"Total: {len(data)} record\n"]
-        for i, row in enumerate(data, 1):
-            lines.append(f"--- #{i} ---")
-            for k, v in row.items():
-                if isinstance(v, (dict, list)):
-                    v = json.dumps(v, default=str)
-                lines.append(f"{k}: {v}")
-            lines.append("")
+    def _add_txt(name, lines):
         zf.writestr(f"{prefix}/{name}.txt", "\n".join(lines))
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # 1. School info
+        # 1. School
         _add_json("info", school)
-        _add_txt("info", [school], "Profil Sekolah")
+        _add_txt("info", [f"=== Profil Sekolah ===",
+                          f"Nama: {school.get('name','')}", f"NPSN: {school.get('npsn','')}",
+                          f"Status: {school.get('status','')}"])
 
         # 2. Teachers
-        teachers = supabase.table("teachers").select("*, profiles(full_name, phone)").eq("school_id", school_id).execute().data or []
-        flat_teachers = []
-        for t in teachers:
-            p = t.pop("profiles", {}) or {}
-            flat_teachers.append({**t, "name": p.get("full_name", ""), "phone": p.get("phone", "")})
-        _add_json("guru", teachers)
-        _add_xlsx("guru", flat_teachers, {"employee_id": "NIP", "name": "Nama", "phone": "No HP", "subject_id": "Mapel ID"})
-        _add_txt("guru", flat_teachers, "Data Guru")
+        teachers_raw = supabase.table("teachers").select("*, profiles!inner(full_name, phone)").eq("school_id", school_id).execute().data or []
+        teachers_json = []
+        teachers_flat = []
+        for t in teachers_raw:
+            p = t.get("profiles") or {}
+            item = {"employee_id": t.get("employee_id",""), "name": p.get("full_name",""),
+                    "phone": p.get("phone",""), "subject_id": t.get("subject_id","")}
+            teachers_json.append({**t, "name": p.get("full_name",""), "phone": p.get("phone","")})
+            teachers_flat.append(item)
+        _add_json("guru", teachers_json)
+        _add_xlsx("guru", teachers_flat, {"employee_id": "NIP", "name": "Nama", "phone": "No HP"})
+        _add_txt("guru", [f"=== Data Guru ({len(teachers_flat)} orang) ==="] +
+                 [f"{i+1}. {t['name']} ({t['employee_id']})" for i, t in enumerate(teachers_flat)])
 
         # 3. Students
-        students = supabase.table("students").select("*, profiles(full_name, phone)").eq("school_id", school_id).execute().data or []
-        flat_students = []
-        for s in students:
-            p = s.pop("profiles", {}) or {}
-            flat_students.append({**s, "name": p.get("full_name", ""), "phone": p.get("phone", "")})
-        _add_json("murid", students)
-        _add_xlsx("murid", flat_students, {"nisn": "NISN", "name": "Nama", "class_id": "Kelas ID", "phone": "No HP"})
-        _add_txt("murid", flat_students, "Data Murid")
+        students_raw = supabase.table("students").select("*, profiles!inner(full_name, phone)").eq("school_id", school_id).execute().data or []
+        students_json = []
+        students_flat = []
+        for s in students_raw:
+            p = s.get("profiles") or {}
+            item = {"nisn": s.get("nisn",""), "name": p.get("full_name",""),
+                    "class_id": s.get("class_id",""), "phone": p.get("phone","")}
+            students_json.append({**s, "name": p.get("full_name",""), "phone": p.get("phone","")})
+            students_flat.append(item)
+        _add_json("murid", students_json)
+        _add_xlsx("murid", students_flat, {"nisn": "NISN", "name": "Nama", "class_id": "Kelas ID", "phone": "No HP"})
+        _add_txt("murid", [f"=== Data Murid ({len(students_flat)} orang) ==="] +
+                 [f"{i+1}. {s['name']} ({s.get('nisn','')})" for i, s in enumerate(students_flat)])
 
         # 4. Classes
         classes = supabase.table("classes").select("*").eq("school_id", school_id).execute().data or []
         _add_json("kelas", classes)
-        _add_xlsx("kelas", classes, {"name": "Nama Kelas", "grade_level": "Tingkat", "teacher_id": "Wali Kelas ID"})
-        _add_txt("kelas", classes, "Data Kelas")
+        _add_xlsx("kelas", classes, {"name": "Nama Kelas", "grade_level": "Tingkat"})
+        _add_txt("kelas", [f"=== Data Kelas ({len(classes)} kelas) ==="] +
+                 [f"{c.get('name','')} - {c.get('grade_level','')}" for c in classes])
 
         # 5. Exams
         exams = supabase.table("exams").select("*").eq("school_id", school_id).execute().data or []
         _add_json("ujian", exams)
-        _add_xlsx("ujian", exams, {"id": "ID", "title": "Judul", "subject": "Mapel", "total_questions": "Soal", "status": "Status"})
-        _add_txt("ujian", exams, "Data Ujian")
+        _add_xlsx("ujian", exams, {"title": "Judul", "subject": "Mapel", "total_questions": "Soal", "status": "Status"})
+        _add_txt("ujian", [f"=== Data Ujian ({len(exams)} ujian) ==="] +
+                 [f"{e.get('title','')} - {e.get('subject','')} ({e.get('total_questions',0)} soal)" for e in exams])
 
-        # 6. Submissions (by exam_id)
+        # 6. Submissions
         exam_ids = [e["id"] for e in exams]
         submissions = []
         for eid in exam_ids:
@@ -986,8 +1025,9 @@ def download_school_zip(school_id):
                 s["_exam_id"] = eid
                 submissions.append(s)
         _add_json("submission", submissions)
-        _add_xlsx("submission", submissions, {"id": "ID", "exam_id": "Ujian ID", "student_id": "Murid ID", "score": "Skor", "final_score": "Nilai Akhir", "status": "Status"})
-        _add_txt("submission", submissions, "Data Submission")
+        _add_xlsx("submission", submissions, {"student_id": "Murid ID", "score": "Skor", "final_score": "Nilai Akhir", "status": "Status"})
+        _add_txt("submission", [f"=== Data Submission ({len(submissions)} submission) ==="] +
+                 [f"- Murid {s.get('student_id','')}: skor {s.get('score','-')}, final {s.get('final_score','-')} ({s.get('status','')})" for s in submissions])
 
     buf.seek(0)
     return send_file(buf, mimetype="application/zip", as_attachment=True,
