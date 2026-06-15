@@ -11,7 +11,13 @@ logger = get_logger("public")
 
 @public_bp.route("/pricing")
 def pricing():
-    return render_template("pricing.html")
+    try:
+        from app.utils.auth import get_supabase
+        supabase = get_supabase()
+        plans = supabase.table("subscription_plans").select("*").eq("is_active", True).order("sort_order").execute().data or []
+    except Exception:
+        plans = []
+    return render_template("pricing.html", plans=plans)
 
 
 @public_bp.route("/api/demo-request", methods=["POST"])
