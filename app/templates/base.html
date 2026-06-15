@@ -392,8 +392,8 @@
 </button>
 <!-- Dark mode toggle for desktop -->
 <button @click="toggleDark()"
-        class="fixed bottom-20 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-sm font-bold transition border-2 hidden lg:flex"
-        :class="darkMode ? 'bg-slate-800 text-amber-400 border-slate-600 hover:bg-slate-700' : 'bg-primary-600 text-white border-primary-500 hover:bg-primary-700'"
+        class="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-sm font-bold transition border-2 hidden lg:flex"
+        :class="darkMode ? 'bg-slate-800 text-amber-400 border-slate-600 hover:bg-slate-700' : 'bg-primary-600 text-white border-primary-500 hover:bg-primary-700 hover:shadow-lg'"
         :title="darkMode ? 'Mode Terang' : 'Mode Gelap'">
     <i :class="darkMode ? 'fas fa-sun text-amber-400' : 'fas fa-moon text-white'"></i>
     <span x-text="darkMode ? 'Terang' : 'Gelap'"></span>
