@@ -79,7 +79,7 @@ def create_app(env=None):
             app=app,
             key_func=get_remote_address,
             storage_uri=storage_uri,
-            default_limits=["200 per day", "60 per hour"],
+            default_limits=[],
         )
         app.extensions["limiter"] = limiter
         rl_module.limiter = limiter
