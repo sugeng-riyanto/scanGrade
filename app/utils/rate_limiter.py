@@ -18,7 +18,8 @@ DEFAULT_LIMITS = {
     "reset_password": (3, 300),
 }
 
-_exempt_paths = {"/health", "/static/", "/", "/pricing", "/demo", "/auth/login-user", "/auth/login", "/auth/register"}
+_exempt_paths = {"/health", "/static/"}
+_exact_exempt = {"/", "/pricing", "/demo", "/auth/login-user", "/auth/login", "/auth/register"}
 _endpoint_self_limited = {"/api/student/sync-draft", "/api/violation/log", "/api/student/force-submit"}
 
 
@@ -73,6 +74,9 @@ def get_rate_limiter(app):
         for ex in _exempt_paths:
             if path.startswith(ex):
                 return None
+        # Exact path exemption (public pages)
+        if path in _exact_exempt:
+            return None
         # Endpoints with their own per-user rate limiter
         for ex in _endpoint_self_limited:
             if path.startswith(ex):
