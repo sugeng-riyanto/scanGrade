@@ -767,7 +767,11 @@ def teachers():
     teachers_raw = data_q.order("employee_id").range(offset, offset + per_page - 1).execute().data or []
 
     # Fetch auth emails once for all users
-    _email_map = _get_email_map(supabase)
+    _email_map = {}
+    try:
+        _email_map = _get_email_map(supabase)
+    except Exception:
+        pass
 
     teachers_list = []
     for t in teachers_raw:
