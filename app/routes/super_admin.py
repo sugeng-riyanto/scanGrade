@@ -897,9 +897,9 @@ def file_management():
 @super_bp.route("/file-management/download/<school_id>")
 @_sa_required
 def download_school_zip(school_id):
-    """Download ZIP berisi data sekolah + file terkait."""
+    """Download ZIP berisi data sekolah + file terkait (JSON, XLSX, TXT)."""
     supabase = get_supabase()
-    import io, zipfile
+    import io, zipfile, csv
 
     school = supabase.table("schools").select("*").eq("id", school_id).single().execute().data
     if not school:
@@ -909,29 +909,73 @@ def download_school_zip(school_id):
     npsn = school.get("npsn", school_id)
     prefix = f"sekolah/{npsn}"
 
+    # ── Helpers ──
+    def _add_json(name, data):
+        zf.writestr(f"{prefix}/{name}.json", json.dumps(data, indent=2, default=str, ensure_ascii=False))
+
+    def _add_xlsx(name, data, columns):
+        """Create XLSX from list of dicts using only specified columns."""
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = name
+        if data and columns:
+            ws.append(list(columns.keys()))
+            for row in data:
+                ws.append([str(row.get(k, "")) for k in columns.keys()])
+        buf_xl = io.BytesIO()
+        wb.save(buf_xl)
+        zf.writestr(f"{prefix}/{name}.xlsx", buf_xl.getvalue())
+
+    def _add_txt(name, data, title):
+        """Create formatted TXT report."""
+        lines = [f"=== {title} ===", f"Total: {len(data)} record\n"]
+        for i, row in enumerate(data, 1):
+            lines.append(f"--- #{i} ---")
+            for k, v in row.items():
+                if isinstance(v, (dict, list)):
+                    v = json.dumps(v, default=str)
+                lines.append(f"{k}: {v}")
+            lines.append("")
+        zf.writestr(f"{prefix}/{name}.txt", "\n".join(lines))
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        def _add_json(name, data):
-            zf.writestr(f"{prefix}/{name}.json", json.dumps(data, indent=2, default=str, ensure_ascii=False))
-
         # 1. School info
         _add_json("info", school)
+        _add_txt("info", [school], "Profil Sekolah")
 
         # 2. Teachers
         teachers = supabase.table("teachers").select("*, profiles(full_name, phone)").eq("school_id", school_id).execute().data or []
+        flat_teachers = []
+        for t in teachers:
+            p = t.pop("profiles", {}) or {}
+            flat_teachers.append({**t, "name": p.get("full_name", ""), "phone": p.get("phone", "")})
         _add_json("guru", teachers)
+        _add_xlsx("guru", flat_teachers, {"employee_id": "NIP", "name": "Nama", "phone": "No HP", "subject_id": "Mapel ID"})
+        _add_txt("guru", flat_teachers, "Data Guru")
 
         # 3. Students
         students = supabase.table("students").select("*, profiles(full_name, phone)").eq("school_id", school_id).execute().data or []
+        flat_students = []
+        for s in students:
+            p = s.pop("profiles", {}) or {}
+            flat_students.append({**s, "name": p.get("full_name", ""), "phone": p.get("phone", "")})
         _add_json("murid", students)
+        _add_xlsx("murid", flat_students, {"nisn": "NISN", "name": "Nama", "class_id": "Kelas ID", "phone": "No HP"})
+        _add_txt("murid", flat_students, "Data Murid")
 
         # 4. Classes
         classes = supabase.table("classes").select("*").eq("school_id", school_id).execute().data or []
         _add_json("kelas", classes)
+        _add_xlsx("kelas", classes, {"name": "Nama Kelas", "grade_level": "Tingkat", "teacher_id": "Wali Kelas ID"})
+        _add_txt("kelas", classes, "Data Kelas")
 
         # 5. Exams
         exams = supabase.table("exams").select("*").eq("school_id", school_id).execute().data or []
         _add_json("ujian", exams)
+        _add_xlsx("ujian", exams, {"id": "ID", "title": "Judul", "subject": "Mapel", "total_questions": "Soal", "status": "Status"})
+        _add_txt("ujian", exams, "Data Ujian")
 
         # 6. Submissions (by exam_id)
         exam_ids = [e["id"] for e in exams]
@@ -942,6 +986,8 @@ def download_school_zip(school_id):
                 s["_exam_id"] = eid
                 submissions.append(s)
         _add_json("submission", submissions)
+        _add_xlsx("submission", submissions, {"id": "ID", "exam_id": "Ujian ID", "student_id": "Murid ID", "score": "Skor", "final_score": "Nilai Akhir", "status": "Status"})
+        _add_txt("submission", submissions, "Data Submission")
 
     buf.seek(0)
     return send_file(buf, mimetype="application/zip", as_attachment=True,
