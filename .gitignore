@@ -60,3 +60,7 @@ improve/
 references/
 .opencode/
 .aider*
+
+node_modules/
+package-lock.json
+app/static/css/input.css
