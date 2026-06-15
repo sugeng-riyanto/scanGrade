@@ -247,3 +247,18 @@
 - **Penalty persistence**: Fixed `/api/violation/log` endpoint to save penalty to `submissions.penalty` (was logging to `violation_logs` but never updating the submission); penalties now visible in student dashboard, results, PDF, and teacher grading/results pages
 - **Attempt check**: `take_exam` route now validates `max_attempts` before rendering exam page; redirects with flash error if already maxed out
 - **Anti-cheat defaults**: Route-level defaults for all anti-cheat fields (handle NULL/missing columns); pre-rendered `anti_cheat_config` JSON from Python (bypasses fragile Jinja2 `tojson` on dict)
+
+### 15 June 2026 — Final Production Setup & PWA
+- **Domain & SSL**: Setup `scangrade.web.id` via Biznet DNS → Certbot SSL → HTTP→HTTPS redirect + HSTS security headers
+- **PWA**: `manifest.json`, `sw.js` (network-first API, cache-first static), SVG icon, meta theme-color, apple-touch-icon
+- **Mobile**: Bottom navigation per role (super_admin/admin_sekolah/guru/murid), `touch-action:none` canvas, `env(safe-area-inset-bottom)`, `100dvh` iOS fix
+- **Self-host assets**: Tailwind CSS via CLI (no CDN), Font Awesome + HTMX + Chart.js → `/static/vendor/`, `crypto.randomUUID` polyfill for HTTP
+- **Performance**: Workers 2 (optimal 1GB RAM), Redis shared rate limiter, pagination students/teachers, SQL indexes
+- **Load test**: 600 concurrent users → avg 524ms, error 0%, timeout 0
+- **QC**: Lighthouse (Performance 49, Accessibility 85, Best Practices 77, SEO 82), data isolation role check ✅
+- **File Management**: New `/super-admin/file-management` page — migrate local PDFs to Supabase Storage, ZIP download per school (JSON+XLSX+TXT), delete local/storage/DB records per-exam or per-school
+- **Backup VPS**: `deploy/backup.sh` → cron 03:00 → tar config files (.env, nginx, service, SSL) → upload Supabase Storage → retensi 7 hari
+- **Monitoring**: `deploy/health-check.sh` → cron tiap 5 menit → auto-restart service/down → log `/var/log/scangrade-health.log`
+- **Bootstrap**: `deploy/bootstrap.sh` — auto-setup from scratch (git clone → .env → venv → pip → systemd → NGINX)
+- **Bugs fixed**: `import os` missing in super_admin.py, orphaned `except` block (SyntaxError), ZIP download empty (data extraction + profiles join), `violation_logs.id` UUID vs SERIAL, Supabase Storage clear_storage recursive delete, nginx.conf `server_name _` → `scangrade.web.id`
+- **Rating API**: `POST /api/transaction/status` — check payment transaction status
