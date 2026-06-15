@@ -427,6 +427,24 @@ def results():
                 s["answers"] = {}
         if not isinstance(s.get("answers"), dict):
             s["answers"] = {}
+    # Hanya tampilkan 1 submission terbaru per exam (draft boleh standalone)
+    seen = {}
+    for s in submissions:
+        eid = s.get("exam", {}).get("id")
+        if not eid:
+            continue
+        if eid in seen:
+            existing = seen[eid]
+            # Draft diganti sama non-draft (final)
+            if existing["status"] == "draft" and s["status"] != "draft":
+                seen[eid] = s
+            # Non-draft tidak diganti draft
+            elif existing["status"] != "draft" and s["status"] == "draft":
+                continue
+        else:
+            seen[eid] = s
+    seen_no_key = [s for s in submissions if not s.get("exam", {}).get("id")]
+    submissions = seen_no_key + list(seen.values())
     # Group by subject for total scores
     subjects = {}
     for s in submissions:
