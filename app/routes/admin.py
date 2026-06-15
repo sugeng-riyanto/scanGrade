@@ -20,6 +20,9 @@ admin_bp = Blueprint("admin", __name__)
 @admin_bp.route("/dashboard")
 @admin_required
 def dashboard():
+    # Redirect admin_sekolah users to their own dashboard
+    if g.get("user_role") == "admin_sekolah":
+        return redirect("/admin-sekolah/dashboard")
     supabase = get_supabase()
     profiles = supabase.table("profiles").select("*").execute().data or []
     exams = []
