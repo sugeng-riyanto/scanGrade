@@ -797,3 +797,141 @@ def whatsapp_settings():
     except Exception:
         pass
     return render_template("super_admin/whatsapp_settings.html", number=number)
+
+
+# ─── FILE MANAGEMENT ────────────────────────────────
+
+@super_bp.route("/file-management", methods=["GET", "POST"])
+@_sa_required
+def file_management():
+    supabase = get_supabase()
+    local_base = os.path.join(current_app.root_path, "static", "uploads", "exams")
+
+    # ── Collect storage stats ──
+    local_exams = []
+    local_total = 0
+    if os.path.isdir(local_base):
+        for eid in os.listdir(local_base):
+            edir = os.path.join(local_base, eid)
+            if not os.path.isdir(edir):
+                continue
+            size = sum(f.stat().st_size for f in os.scandir(edir) if f.is_file())
+            count = len([f for f in os.scandir(edir) if f.is_file()])
+            local_total += size
+            local_exams.append({"exam_id": eid, "files": count, "size": size, "size_mb": round(size / 1048576, 2)})
+    local_exams.sort(key=lambda x: x["exam_id"])
+
+    # Supabase storage stats
+    sb_files = []
+    sb_total = 0
+    try:
+        sb_list = supabase.storage.from_("exam-pdfs").list()
+        for item in sb_list:
+            sb_total += 1
+    except Exception:
+        sb_list = []
+
+    # Schools list for download
+    schools = []
+    try:
+        schools = supabase.table("schools").select("id, name, npsn").order("name").execute().data or []
+    except Exception:
+        pass
+
+    # ── Actions ──
+    if request.method == "POST":
+        action = request.form.get("action", "")
+
+        # Migrate local PDFs to Supabase
+        if action == "migrate":
+            migrated = 0
+            for eid in os.listdir(local_base):
+                edir = os.path.join(local_base, eid)
+                if not os.path.isdir(edir):
+                    continue
+                for fname in os.listdir(edir):
+                    fpath = os.path.join(edir, fname)
+                    if not os.path.isfile(fpath):
+                        continue
+                    with open(fpath, "rb") as fh:
+                        data = fh.read()
+                    spath = f"{eid}/{fname}"
+                    try:
+                        supabase.storage.from_("exam-pdfs").upload(spath, data, {"content-type": "image/png", "upsert": "true"})
+                        migrated += 1
+                    except Exception:
+                        pass
+            # Update exam records to point to Supabase
+            try:
+                supabase_url = current_app.config.get("SUPABASE_URL", "").rstrip("/")
+                if "/rest/v1" in supabase_url:
+                    supabase_url = supabase_url.split("/rest/v1")[0]
+                for e in local_exams:
+                    eid = e["exam_id"]
+                    new_urls = []
+                    for i in range(1, e["files"] + 1):
+                        new_urls.append(f"{supabase_url}/storage/v1/object/public/exam-pdfs/{eid}/page_{i:03d}.png")
+                    supabase.table("exams").update({"pdf_page_urls": new_urls}).eq("id", eid).execute()
+            except Exception:
+                pass
+            flash(f"✅ {migrated} file berhasil dipindahkan ke Supabase Storage", "success")
+            return redirect("/super-admin/file-management")
+
+        # Delete local files for an exam
+        elif action == "delete_local":
+            exam_id = request.form.get("exam_id", "")
+            edir = os.path.join(local_base, exam_id)
+            if os.path.isdir(edir):
+                import shutil
+                shutil.rmtree(edir)
+                flash(f"✅ File lokal exam {exam_id[:8]}... dihapus", "success")
+            return redirect("/super-admin/file-management")
+
+    return render_template("super_admin/file_management.html",
+                           local_exams=local_exams, local_total=local_total,
+                           local_total_mb=round(local_total / 1048576, 2),
+                           sb_count=sb_total, schools=schools)
+
+
+@super_bp.route("/file-management/download/<school_id>")
+@_sa_required
+def download_school_zip(school_id):
+    """Download ZIP berisi data sekolah + file terkait."""
+    supabase = get_supabase()
+    import io, zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 1. School info (JSON)
+        school = supabase.table("schools").select("*").eq("id", school_id).single().execute().data or {}
+        if school:
+            zf.writestr(f"sekolah/{school.get('npsn', school_id)}/info.json", json.dumps(school, indent=2, default=str))
+
+        # 2. Teachers (JSON)
+        teachers = supabase.table("teachers").select("*, profiles(full_name, phone, email)").eq("school_id", school_id).execute().data or []
+        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/guru.json", json.dumps(teachers, indent=2, default=str))
+
+        # 3. Students (JSON)
+        students = supabase.table("students").select("*, profiles(full_name, phone)").eq("school_id", school_id).execute().data or []
+        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/murid.json", json.dumps(students, indent=2, default=str))
+
+        # 4. Classes (JSON)
+        classes = supabase.table("classes").select("*").eq("school_id", school_id).execute().data or []
+        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/kelas.json", json.dumps(classes, indent=2, default=str))
+
+        # 5. Exams (JSON)
+        exams = supabase.table("exams").select("*").eq("school_id", school_id).execute().data or []
+        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/ujian.json", json.dumps(exams, indent=2, default=str))
+
+        # 6. Submissions (JSON)
+        subs = supabase.table("submissions").select("*, exams(school_id)").execute().data or []
+        sub_filtered = [s for s in subs if (s.get("exams") or {}).get("school_id") == school_id]
+        for s in sub_filtered:
+            s.pop("exams", None)
+        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/submission.json", json.dumps(sub_filtered, indent=2, default=str))
+
+    buf.seek(0)
+    npsn = school.get("npsn", school_id)
+    from flask import send_file
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"scangrade_{npsn}.zip")

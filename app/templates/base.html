@@ -114,6 +114,8 @@
             <a href="/super-admin/payment-fee-settings" class="nav-item {% if request.path == '/super-admin/payment-fee-settings' %}active{% endif %}"><i class="fas fa-receipt"></i><span>Biaya Admin</span></a>
             <a href="/super-admin/trial-settings" class="nav-item {% if request.path == '/super-admin/trial-settings' %}active{% endif %}"><i class="fas fa-clock"></i><span>Masa Trial</span></a>
             <a href="/super-admin/whatsapp-settings" class="nav-item {% if request.path == '/super-admin/whatsapp-settings' %}active{% endif %}"><i class="fab fa-whatsapp"></i><span>WhatsApp</span></a>
+            <div class="nav-section-title pt-2">Data</div>
+            <a href="/super-admin/file-management" class="nav-item {% if request.path == '/super-admin/file-management' %}active{% endif %}"><i class="fas fa-folder-open"></i><span>Manajemen File</span></a>
             <div class="nav-section-title pt-2">Tools</div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
             <a href="/super-admin/reset-school-data" class="nav-item {% if request.path == '/super-admin/reset-school-data' %}active{% endif %}"><i class="fas fa-skull-crossbones text-red-400"></i><span class="text-red-400">Reset Sekolah</span></a>
@@ -389,7 +391,7 @@ document.addEventListener('DOMContentLoaded', function() {
     {% if role == 'super_admin' %}
     <a href="/super-admin/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-crown text-lg mb-0.5"></i><span>Dashboard</span></a>
     <a href="/super-admin/schools" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/schools' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-school text-lg mb-0.5"></i><span>Sekolah</span></a>
-    <a href="/super-admin/plans" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/plans' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-tags text-lg mb-0.5"></i><span>Paket</span></a>
+    <a href="/super-admin/file-management" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/file-management' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-folder-open text-lg mb-0.5"></i><span>File</span></a>
     <a href="/admin/registration-requests" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin/registration-requests' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-user-plus text-lg mb-0.5"></i><span>Registrasi</span></a>
     {% elif role == 'admin_sekolah' %}
     <a href="/admin-sekolah/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span></a>
