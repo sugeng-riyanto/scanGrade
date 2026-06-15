@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Manajemen File - ScanGrade{% endblock %}
 {% block page_title %}Manajemen File{% endblock %}
+{% block head_extra %}
+<style>
+.tip { border-left: 4px solid #6366f1; background: #f5f3ff; padding: 10px 14px; border-radius: 8px; font-size: 12px; color: #4338ca; font-weight: 500; }
+.tip-warn { border-left-color: #f59e0b; background: #fffbeb; color: #92400e; }
+.tip-danger { border-left-color: #ef4444; background: #fef2f2; color: #991b1b; }
+</style>
+{% endblock %}
 {% block content %}
 <div class="space-y-6">
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -47,77 +54,83 @@
         </div>
     </div>
 
-    <!-- Actions -->
-    <div class="card overflow-hidden">
-        <div class="px-5 py-4 border-b border-surface-100">
-            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-arrow-up"></i>Migrasi File Lokal → Supabase</h3>
+    <!-- ⭐ Migrasi -->
+    <div class="card overflow-hidden border-l-4 border-l-amber-400">
+        <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-arrow-up text-amber-500"></i>Migrasi File Lokal → Supabase</h3>
+            <span class="badge bg-amber-100 text-amber-700">Rekomendasi</span>
         </div>
-        <div class="p-5">
-            <p class="text-sm text-surface-500 mb-4">Pindahkan semua gambar PDF dari penyimpanan lokal VPS ke Supabase Storage (CDN). Setelah migrasi, file lokal bisa dihapus.</p>
+        <div class="p-5 space-y-3">
+            <p class="text-sm text-surface-600">Pindahkan file PDF dari penyimpanan <strong>VPS (lokal)</strong> ke <strong>Supabase Storage (CDN)</strong>.</p>
+            <div class="tip">💡 <strong>Manfaat:</strong> File di-CDN jadi loading lebih cepat, storage VPS jadi longgar, aman walau VPS restart. Setelah migrasi, file lokal aman dihapus.</div>
             <form method="POST">
                 <input type="hidden" name="action" value="migrate">
-                <button type="submit" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-sm hover:from-amber-600 hover:to-orange-600 transition shadow-lg" onclick="return confirm('Migrasi {{ local_total_mb }} MB file ke Supabase Storage?')">
+                <button type="submit" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-sm hover:from-amber-600 hover:to-orange-600 transition shadow-lg" onclick="return confirm('Migrate {{ local_total_mb }} MB file ke Supabase Storage?')">
                     <i class="fas fa-cloud-upload-alt mr-1"></i>Migrate {{ local_exams|length }} Exam ke Supabase
                 </button>
             </form>
         </div>
     </div>
 
-    <!-- Local Files -->
+    <!-- ⭐ File Lokal -->
     <div class="card overflow-hidden">
         <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
             <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-folder-open"></i>File Lokal VPS ({{ local_exams|length }} exam)</h3>
             <span class="text-xs font-bold text-surface-400">{{ local_total_mb }} MB</span>
         </div>
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-surface-50 text-xs font-bold text-surface-500 uppercase">
-                    <tr>
-                        <th class="text-left px-5 py-3">Exam ID</th>
-                        <th class="text-center px-5 py-3">Files</th>
-                        <th class="text-right px-5 py-3">Size</th>
-                        <th class="text-right px-5 py-3">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-surface-50">
-                    {% for e in local_exams %}
-                    <tr class="hover:bg-surface-50 transition">
-                        <td class="px-5 py-3 font-mono text-xs font-bold text-surface-700">{{ e.exam_id[:16] }}...</td>
-                        <td class="px-5 py-3 text-center text-surface-600">{{ e.files }}</td>
-                        <td class="px-5 py-3 text-right font-bold text-surface-700">{{ e.size_mb }} MB</td>
-                        <td class="px-5 py-3 text-right">
-                            <form method="POST" class="inline" onsubmit="return confirm('Hapus file lokal exam ini?')">
-                                <input type="hidden" name="action" value="delete_local">
-                                <input type="hidden" name="exam_id" value="{{ e.exam_id }}">
-                                <button type="submit" class="px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-200">
-                                    <i class="fas fa-trash mr-1"></i>Hapus
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4" class="px-5 py-12 text-center text-surface-400 font-medium">
-                            <i class="fas fa-folder-open text-3xl mb-2 block text-surface-300"></i>
-                            Tidak ada file lokal
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="p-5">
+            <div class="tip tip-warn mb-4">⚠️ <strong>Catatan:</strong> File lokal hanya dipakai sebagai cadangan. Setelah migrasi ke Supabase, file lokal bisa dihapus per-exam atau sekaligus (tombol di bagian bawah).</div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-surface-50 text-xs font-bold text-surface-500 uppercase">
+                        <tr>
+                            <th class="text-left px-5 py-3">Exam ID</th>
+                            <th class="text-center px-5 py-3">Files</th>
+                            <th class="text-right px-5 py-3">Size</th>
+                            <th class="text-right px-5 py-3">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-50">
+                        {% for e in local_exams %}
+                        <tr class="hover:bg-surface-50 transition">
+                            <td class="px-5 py-3 font-mono text-xs font-bold text-surface-700" title="{{ e.exam_id }}">{{ e.exam_id[:16] }}...</td>
+                            <td class="px-5 py-3 text-center text-surface-600">{{ e.files }}</td>
+                            <td class="px-5 py-3 text-right font-bold text-surface-700">{{ e.size_mb }} MB</td>
+                            <td class="px-5 py-3 text-right">
+                                <form method="POST" class="inline" onsubmit="return confirm('Hapus file lokal exam {{ e.exam_id[:8] }}...? Data Supabase AMAN.')">
+                                    <input type="hidden" name="action" value="delete_local">
+                                    <input type="hidden" name="exam_id" value="{{ e.exam_id }}">
+                                    <button type="submit" class="px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-200" title="Hapus file exam ini dari VPS (aman — tidak hapus data di Supabase)">
+                                        <i class="fas fa-trash mr-1"></i>Hapus
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="px-5 py-12 text-center text-surface-400 font-medium">
+                                <i class="fas fa-folder-open text-3xl mb-2 block text-surface-300"></i>
+                                Tidak ada file lokal — semua sudah dimigrasi atau tidak ada PDF diupload
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
-    <!-- School ZIP Download -->
-    <div class="card overflow-hidden">
+    <!-- ⭐ Download ZIP -->
+    <div class="card overflow-hidden border-l-4 border-l-emerald-400">
         <div class="px-5 py-4 border-b border-surface-100">
-            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-download"></i>Download Data per Sekolah (ZIP)</h3>
+            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-download text-emerald-500"></i>Download Data per Sekolah (ZIP)</h3>
         </div>
-        <div class="p-5">
-            <p class="text-sm text-surface-500 mb-4">Download seluruh data sekolah (profil, guru, murid, kelas, ujian, submission) dalam format JSON. Cocok untuk backup atau serah terima ke sekolah.</p>
+        <div class="p-5 space-y-3">
+            <p class="text-sm text-surface-600">Download semua data sekolah dalam format <strong>JSON + XLSX + TXT</strong>. Cocok untuk <strong>backup</strong> atau <strong>serah terima data</strong> ke NPSN bersangkutan.</p>
+            <div class="tip">💡 <strong>Isi ZIP:</strong> info.json/xlsx/txt, guru, murid, kelas, ujian, submission. Data diambil langsung dari Supabase database, bukan dari file VPS.</div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {% for s in schools %}
-                <a href="/super-admin/file-management/download/{{ s.id }}" class="flex items-center gap-3 p-4 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
+                <a href="/super-admin/file-management/download/{{ s.id }}" class="flex items-center gap-3 p-4 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200 hover:border-emerald-300" title="Download ZIP sekolah {{ s.name }}">
                     <div class="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
                         <i class="fas fa-school"></i>
                     </div>
@@ -134,13 +147,13 @@
         </div>
     </div>
 
-    <!-- Supabase Quick Actions -->
+    <!-- ⭐ Manajemen Database -->
     <div class="card overflow-hidden">
         <div class="px-5 py-4 border-b border-surface-100">
             <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-database"></i>Manajemen Database</h3>
         </div>
         <div class="p-5 space-y-4">
-            <p class="text-sm text-surface-500">Akses cepat ke Supabase Dashboard dan operasi pembersihan data.</p>
+            <p class="text-sm text-surface-600">Akses cepat ke dashboard Supabase untuk manage tabel, storage, dan query SQL langsung.</p>
             <div class="flex flex-wrap gap-3">
                 <a href="https://supabase.com/dashboard/project/roshkbzgfzpfedowozfo" target="_blank" class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-bold text-sm hover:from-emerald-600 hover:to-emerald-700 transition shadow-lg">
                     <i class="fas fa-external-link-alt mr-1"></i>Buka Supabase Dashboard
@@ -152,27 +165,60 @@
                     <i class="fas fa-terminal mr-1"></i>SQL Editor
                 </a>
             </div>
-            <div class="border-t border-surface-200 pt-4">
-                <p class="text-sm font-bold text-surface-700 mb-3">Operasi Pembersihan</p>
-                <div class="flex flex-wrap gap-3">
-                    <form method="POST" onsubmit="return confirm('Hapus SEMUA file lokal VPS? Data di Supabase AMAN.')">
-                        <input type="hidden" name="action" value="clear_local">
-                        <button type="submit" class="px-5 py-2.5 bg-amber-50 text-amber-700 border-2 border-amber-200 rounded-xl font-bold text-sm hover:bg-amber-100 transition">
-                            <i class="fas fa-trash-alt mr-1"></i>Hapus Semua File Lokal
-                        </button>
-                    </form>
-                    <form method="POST" onsubmit="return confirm('Hapus SEMUA file dari Supabase Storage bucket exam-pdfs?')">
-                        <input type="hidden" name="action" value="clear_storage">
-                        <button type="submit" class="px-5 py-2.5 bg-orange-50 text-orange-700 border-2 border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-100 transition">
-                            <i class="fas fa-cloud-upload-alt mr-1"></i>Hapus Semua File Supabase
-                        </button>
-                    </form>
-                    <form method="POST" onsubmit="return confirm('⚠️ HAPUS SEMUA DATA UJIAN + SUBMISSION + LOG? Data master (sekolah, guru, murid) AMAN.')">
-                        <input type="hidden" name="action" value="reset_exam_data">
-                        <button type="submit" class="px-5 py-2.5 bg-red-50 text-red-700 border-2 border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 transition">
-                            <i class="fas fa-skull-crossbones mr-1"></i>Reset Data Ujian
-                        </button>
-                    </form>
+
+            <!-- Divider -->
+            <hr class="border-surface-200">
+
+            <!-- ⭐ Operasi Pembersihan -->
+            <div>
+                <h4 class="text-sm font-bold text-surface-700 mb-1">Operasi Pembersihan</h4>
+                <p class="text-xs text-surface-400 mb-3">Gunakan dengan hati-hati. Setiap tombol sudah ada konfirmasi.</p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <!-- Clear Local -->
+                    <div class="p-4 rounded-xl border border-amber-200 bg-amber-50/30 space-y-2">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center"><i class="fas fa-trash-alt text-sm"></i></div>
+                            <span class="text-sm font-bold text-amber-800">Hapus File Lokal VPS</span>
+                        </div>
+                        <p class="text-xs text-amber-700">Hapus semua folder exam dari VPS. Data di Supabase <strong>AMAN</strong>.</p>
+                        <form method="POST" onsubmit="return confirm('Hapus SEMUA file lokal VPS? ({# local_exams|length #} exam). Data Supabase tetap aman.')">
+                            <input type="hidden" name="action" value="clear_local">
+                            <button type="submit" class="w-full px-4 py-2 bg-amber-100 text-amber-800 rounded-xl font-bold text-xs hover:bg-amber-200 transition">
+                                <i class="fas fa-trash-alt mr-1"></i>Hapus Semua
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Clear Supabase Storage -->
+                    <div class="p-4 rounded-xl border border-orange-200 bg-orange-50/30 space-y-2">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center"><i class="fas fa-cloud-upload-alt text-sm"></i></div>
+                            <span class="text-sm font-bold text-orange-800">Hapus File Supabase</span>
+                        </div>
+                        <p class="text-xs text-orange-700">Hapus semua file dari bucket <code>exam-pdfs</code> di Supabase Storage. Data database <strong>AMAN</strong>.</p>
+                        <form method="POST" onsubmit="return confirm('Hapus SEMUA file Supabase Storage bucket exam-pdfs?{{ '' }} Gambar PDF di ujian akan hilang (404).')">
+                            <input type="hidden" name="action" value="clear_storage">
+                            <button type="submit" class="w-full px-4 py-2 bg-orange-100 text-orange-800 rounded-xl font-bold text-xs hover:bg-orange-200 transition">
+                                <i class="fas fa-cloud-upload-alt mr-1"></i>Hapus Semua
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Reset Exam Data -->
+                    <div class="p-4 rounded-xl border border-red-200 bg-red-50/30 space-y-2">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-lg bg-red-100 text-red-700 flex items-center justify-center"><i class="fas fa-skull-crossbones text-sm"></i></div>
+                            <span class="text-sm font-bold text-red-800">Reset Data Ujian</span>
+                        </div>
+                        <p class="text-xs text-red-700">Hapus SEMUA <strong>submissions + exams + violation logs + audit logs</strong>. Data master (sekolah, guru, murid, kelas) <strong>AMAN</strong>.</p>
+                        <form method="POST" onsubmit="return confirm('⚠️⚠️⚠️ YAKIN?\n\nIni akan menghapus:\n- Semua submissions\n- Semua exams + soal\n- Semua violation logs\n- Semua audit logs\n\nData guru, murid, kelas, sekolah TETAP AMAN.\n\nLanjutkan?')">
+                            <input type="hidden" name="action" value="reset_exam_data">
+                            <button type="submit" class="w-full px-4 py-2 bg-red-100 text-red-800 rounded-xl font-bold text-xs hover:bg-red-200 transition">
+                                <i class="fas fa-skull-crossbones mr-1"></i>Reset Semua
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
