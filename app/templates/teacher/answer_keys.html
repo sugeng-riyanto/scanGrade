@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Kunci Jawaban - {{ exam.title }}{% endblock %}
+{% block content %}
+<div class="p-4 lg:p-6 max-w-4xl mx-auto" x-data="answerKeyEditor()" x-init="init()">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <a href="/teacher/exams" class="text-sm text-primary-600 hover:underline">&larr; Kembali ke Daftar Ujian</a>
+            <h1 class="text-2xl font-bold mt-1">{{ exam.title }}</h1>
+            <p class="text-sm text-gray-500">Atur kunci jawaban untuk soal pilihan ganda</p>
+        </div>
+        <button form="answer-form" type="submit" class="btn btn-primary">
+            <i class="fas fa-save"></i> Simpan & Hitung Ulang
+        </button>
+    </div>
+
+    <form id="answer-form" method="POST">
+        <input type="hidden" name="answer_key" id="answer-key-input" :value="getJson()">
+
+        {% if questions|selectattr("type", "equalto", "mcq")|list|length == 0 %}
+        <div class="card p-8 text-center">
+            <div class="text-4xl mb-3">&#x1F4DD;</div>
+            <p class="font-semibold">Tidak ada soal pilihan ganda</p>
+            <p class="text-sm text-gray-500 mt-1">Ujian ini hanya memiliki soal esai yang dinilai manual</p>
+        </div>
+        {% else %}
+        <div class="space-y-3">
+            {% for q in questions %}
+            {% if q.type == 'mcq' %}
+            <div class="card p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="font-bold text-sm">Soal {{ q.index + 1 }}</span>
+                    <label class="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
+                        <input type="checkbox" @change="toggleBonus({{ q.index }})"
+                               {{ 'checked' if q.is_bonus else '' }}>
+                        <span class="text-amber-600">Bonus (semua benar)</span>
+                    </label>
+                </div>
+                <div class="flex gap-2 flex-wrap">
+                    {% for opt in ['A','B','C','D','E'] %}
+                    <button type="button" @click="toggle({{ q.index }}, '{{ opt }}')"
+                            :class="isSelected({{ q.index }}, '{{ opt }}') ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-700 border-gray-300 hover:border-primary-400'"
+                            class="px-5 py-2.5 rounded-xl font-bold text-sm border-2 transition">
+                        {{ opt }}
+                    </button>
+                    {% endfor %}
+                </div>
+                <div class="mt-2 text-xs text-gray-400">
+                    Kunci saat ini: <span x-text="displayKey({{ q.index }})" class="font-mono font-bold text-gray-600"></span>
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="mt-6 flex justify-end">
+            <button form="answer-form" type="submit" class="btn btn-primary">
+                <i class="fas fa-save"></i> Simpan & Hitung Ulang
+            </button>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<script>
+function answerKeyEditor() {
+    return {
+        keys: {},
+        init() {
+            {% for q in questions %}
+            {% if q.type == 'mcq' %}
+            {% if q.is_bonus %}
+            this.keys[{{ q.index }}] = 'bonus';
+            {% elif q.is_multi %}
+            this.keys[{{ q.index }}] = {{ q.key | tojson | safe }};
+            {% elif q.key and q.key != 'essay' %}
+            this.keys[{{ q.index }}] = '{{ q.key }}';
+            {% else %}
+            this.keys[{{ q.index }}] = [];
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+        },
+        toggle(idx, opt) {
+            let cur = this.keys[idx];
+            if (!cur || cur === 'bonus') {
+                this.keys[idx] = [opt];
+                return;
+            }
+            if (typeof cur === 'string') {
+                if (cur === opt) {
+                    this.keys[idx] = [];
+                } else {
+                    this.keys[idx] = [cur, opt];
+                }
+                return;
+            }
+            if (Array.isArray(cur)) {
+                const i = cur.indexOf(opt);
+                if (i > -1) {
+                    cur.splice(i, 1);
+                    if (cur.length === 0) this.keys[idx] = [];
+                } else {
+                    cur.push(opt);
+                }
+            }
+        },
+        toggleBonus(idx) {
+            let cur = this.keys[idx];
+            if (cur === 'bonus') {
+                this.keys[idx] = [];
+            } else {
+                this.keys[idx] = 'bonus';
+            }
+        },
+        isSelected(idx, opt) {
+            let cur = this.keys[idx];
+            if (cur === 'bonus') return true;
+            if (typeof cur === 'string') return cur === opt;
+            if (Array.isArray(cur)) return cur.indexOf(opt) > -1;
+            return false;
+        },
+        displayKey(idx) {
+            let cur = this.keys[idx];
+            if (!cur || (Array.isArray(cur) && cur.length === 0)) return 'Belum diatur';
+            if (cur === 'bonus') return 'Bonus (semua benar)';
+            if (typeof cur === 'string') return cur;
+            if (Array.isArray(cur)) return cur.join(' + ');
+            return '-';
+        },
+        getJson() {
+            let out = {};
+            Object.keys(this.keys).forEach(k => {
+                let v = this.keys[k];
+                if (v === 'bonus') { out[k] = 'bonus'; return; }
+                if (Array.isArray(v) && v.length === 1) { out[k] = v[0]; return; }
+                if (Array.isArray(v) && v.length > 1) { out[k] = v; return; }
+                if (typeof v === 'string') { out[k] = v; return; }
+                out[k] = 'essay';
+            });
+            return JSON.stringify(out);
+        }
+    };
+}
+</script>
+{% endblock %}

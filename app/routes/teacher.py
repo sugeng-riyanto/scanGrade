@@ -589,6 +589,58 @@ def duplicate_exam(exam_id):
         return redirect("/teacher/exams")
 
 
+@teacher_bp.route("/exams/<exam_id>/answer-keys", methods=["GET", "POST"])
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def answer_keys(exam_id):
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    if not exam:
+        flash("Ujian tidak ditemukan", "error")
+        return redirect("/teacher/exams")
+
+    # Parse JSON fields
+    for fld in ("answer_key", "question_types"):
+        v = exam.get(fld)
+        if isinstance(v, str):
+            try: exam[fld] = json.loads(v)
+            except: exam[fld] = {}
+
+    if request.method == "POST":
+        answer_key = request.form.get("answer_key", "{}")
+        try:
+            answer_key = json.loads(answer_key)
+        except json.JSONDecodeError:
+            answer_key = {}
+        supabase.table("exams").update({"answer_key": json.dumps(answer_key)}).eq("id", exam_id).execute()
+        # Recalculate scores
+        try:
+            from app.routes.teacher import _recalculate_scores
+            _recalculate_scores(exam_id)
+        except Exception:
+            pass
+        flash("Kunci jawaban berhasil disimpan & nilai diperbarui!", "success")
+        return redirect(f"/teacher/exams/{exam_id}/answer-keys")
+
+    # GET: build question list from question_types
+    qtypes = exam.get("question_types", {})
+    akey = exam.get("answer_key", {})
+    questions = []
+    for i in sorted(qtypes.keys(), key=int):
+        idx = str(i)
+        qtype = qtypes[idx]
+        k = akey.get(idx)
+        questions.append({
+            "index": int(idx),
+            "type": qtype,
+            "key": k,
+            "is_bonus": k == "bonus",
+            "is_multi": isinstance(k, list),
+        })
+
+    return render_template("teacher/answer_keys.html", exam=exam, questions=questions)
+
+
 @teacher_bp.route("/scan")
 @teacher_or_admin_required
 def scan_page():
