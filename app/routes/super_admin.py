@@ -969,7 +969,6 @@ def file_management():
         # Reset all exam data from DB
         elif action == "reset_exam_data":
             failed = []
-            # Order: delete children first to avoid FK violations
             for tbl in ["submissions", "exams", "audit_logs", "violation_logs"]:
                 try:
                     supabase.table(tbl).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
@@ -979,6 +978,37 @@ def file_management():
                 flash(f"⚠️ Sebagian berhasil. Gagal: {', '.join(failed)}", "warning")
             else:
                 flash("✅ Semua data ujian, submission, dan log telah dihapus", "success")
+            return redirect("/super-admin/file-management")
+
+        # ── Per-School Actions ──
+        elif action == "delete_school_local":
+            school_id = request.form.get("school_id", "")
+            if os.path.isdir(local_base):
+                try:
+                    exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("school_id", school_id).execute().data or []]
+                except Exception:
+                    exam_ids = []
+                deleted = 0
+                for eid in exam_ids:
+                    edir = os.path.join(local_base, eid)
+                    if os.path.isdir(edir):
+                        import shutil
+                        shutil.rmtree(edir)
+                        deleted += 1
+                flash(f"✅ {deleted} folder exam dihapus dari VPS untuk sekolah ini", "success")
+            return redirect("/super-admin/file-management")
+
+        elif action == "delete_school_exam_data":
+            school_id = request.form.get("school_id", "")
+            try:
+                exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("school_id", school_id).execute().data or []]
+                for eid in exam_ids:
+                    supabase.table("submissions").delete().eq("exam_id", eid).execute()
+                    supabase.table("violation_logs").delete().eq("exam_id", eid).execute()
+                    supabase.table("exams").delete().eq("id", eid).execute()
+                flash(f"✅ {len(exam_ids)} exam + submission dihapus untuk sekolah ini", "success")
+            except Exception as e:
+                flash(f"Error: {e}", "error")
             return redirect("/super-admin/file-management")
 
     return render_template("super_admin/file_management.html",
