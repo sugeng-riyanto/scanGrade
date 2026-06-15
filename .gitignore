@@ -64,3 +64,6 @@ references/
 node_modules/
 package-lock.json
 app/static/css/input.css
+
+# Load test artifacts
+loadtest_*.csv
