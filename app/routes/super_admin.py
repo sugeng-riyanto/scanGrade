@@ -914,14 +914,20 @@ def file_management():
 
         # Reset all exam data from DB
         elif action == "reset_exam_data":
-            try:
-                supabase.table("submissions").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-                supabase.table("exams").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-                supabase.table("violation_logs").delete().neq("id", 0).execute()
-                supabase.table("audit_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            failed = []
+            # Order: delete children first to avoid FK violations
+            for tbl in ["violation_logs", "submissions", "exams", "audit_logs"]:
+                try:
+                    if tbl == "violation_logs":
+                        supabase.table(tbl).delete().gte("id", 1).execute()
+                    else:
+                        supabase.table(tbl).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                except Exception as e:
+                    failed.append(f"{tbl}: {str(e)[:60]}")
+            if failed:
+                flash(f"⚠️ Sebagian berhasil. Gagal: {', '.join(failed)}", "warning")
+            else:
                 flash("✅ Semua data ujian, submission, dan log telah dihapus", "success")
-            except Exception as e:
-                flash(f"Error: {e}", "error")
             return redirect("/super-admin/file-management")
 
     return render_template("super_admin/file_management.html",
