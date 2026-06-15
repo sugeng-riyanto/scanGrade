@@ -916,12 +916,9 @@ def file_management():
         elif action == "reset_exam_data":
             failed = []
             # Order: delete children first to avoid FK violations
-            for tbl in ["violation_logs", "submissions", "exams", "audit_logs"]:
+            for tbl in ["submissions", "exams", "audit_logs", "violation_logs"]:
                 try:
-                    if tbl == "violation_logs":
-                        supabase.table(tbl).delete().gte("id", 1).execute()
-                    else:
-                        supabase.table(tbl).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                    supabase.table(tbl).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
                 except Exception as e:
                     failed.append(f"{tbl}: {str(e)[:60]}")
             if failed:
