@@ -831,12 +831,30 @@ def file_management():
             if not name or name == "." or name == "..":
                 continue
             sb_total += 1
-            # If folder, count children
             try:
                 sub = supabase.storage.from_("exam-pdfs").list(name)
                 sb_total += len([s for s in sub or [] if s.get("name") and s["name"] not in (".","..")])
             except Exception:
                 pass
+    except Exception:
+        pass
+
+    # Real DB size — estimate from row counts
+    db_size_mb = 0.5
+    db_limit = 500
+    try:
+        total_bytes = 0
+        for tbl in ["profiles", "exams", "submissions", "schools", "classes", "teachers", "students", "audit_logs", "violation_logs"]:
+            res = supabase.table(tbl).select("id", count="exact").execute()
+            cnt = res.count or 0
+            # Estimate ~2KB per row average
+            total_bytes += cnt * 2048
+        db_size_mb = round(total_bytes / 1048576, 1)
+        if db_size_mb < 0.5:
+            db_size_mb = 0.5
+    except Exception:
+        db_size_mb = 0.5
+    db_pct = round(db_size_mb / db_limit * 100, 1) if db_limit > 0 else 0
     except Exception:
         pass
 
@@ -968,7 +986,8 @@ def file_management():
     return render_template("super_admin/file_management.html",
                            local_exams=local_exams, local_total=local_total,
                            local_total_mb=round(local_total / 1048576, 2),
-                           sb_count=sb_total, schools=schools)
+                           sb_count=sb_total, schools=schools,
+                           db_size_mb=db_size_mb, db_limit=db_limit, db_pct=db_pct)
 
 
 @super_bp.route("/file-management/download/<school_id>")
