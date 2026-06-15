@@ -88,6 +88,22 @@
                     </div>
                 </div>
 
+                <!-- Tips: Audio & YouTube -->
+                <div class="card p-4 bg-gradient-to-r from-rose-50 to-amber-50 border-2 border-rose-200">
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-lightbulb text-amber-500 mt-0.5"></i>
+                        <div class="text-sm text-slate-700">
+                            <p class="font-bold text-rose-800 mb-1"><i class="fas fa-headphones mr-1"></i>Tips Media Listening</p>
+                            <ul class="text-xs space-y-1 text-slate-600">
+                                <li>&#8226; Upload file <strong>mp3/ogg/wav</strong> ke Google Drive &rarr; <strong class="text-slate-800">Bagikan</strong> &rarr; <strong class="text-slate-800">Akses umum</strong> &rarr; <strong class="text-slate-800">Salin link</strong> &rarr; Tempel di kolom Audio</li>
+                                <li>&#8226; Untuk YouTube: Buka video &rarr; <strong class="text-slate-800">Salin URL dari browser</strong> &rarr; Tempel di kolom YouTube</li>
+                                <li>&#8226; Pastikan Google Drive di-set <strong class="text-slate-800">Anyone with the link</strong> dan video YouTube <strong class="text-slate-800">tidak private/blocked</strong></li>
+                                <li>&#8226; Siswa tidak bisa membuka YouTube di tab baru &mdash; video diputar di dalam halaman ujian</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card p-6" x-data="questionManager()">
                     <div class="flex items-center justify-between mb-4">
                         <h2 class="text-lg font-extrabold text-slate-800">Soal & Kunci Jawaban</h2>
@@ -151,6 +167,9 @@
                                               :class="q.type === 'mcq' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
                                               x-text="q.type === 'mcq' ? 'MCQ' : 'Esai'"></span>
                                         <span x-show="q.bonus" class="text-xs px-2 py-1 rounded-full font-extrabold bg-purple-100 text-purple-700">Bonus</span>
+                                        <span x-show="q.audio || q.youtube" class="text-xs px-2 py-1 rounded-full font-extrabold bg-rose-100 text-rose-700">
+                                            <i class="fas fa-headphones mr-0.5"></i>Media
+                                        </span>
                                     </div>
                                     <div class="flex items-center gap-2">
                                         <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1"
@@ -168,6 +187,46 @@
                                     <input type="text" :name="'pages_' + i" x-model="q.pages" required
                                            placeholder="Halaman PDF (contoh: 1-3 atau 1,2,3)"
                                            class="w-full text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-primary-500 transition">
+                                </div>
+
+                                <!-- Media: Audio + YouTube -->
+                                <div class="mb-2 border border-slate-200 rounded-xl overflow-hidden">
+                                    <button type="button" @click="q._showMedia = !q._showMedia" class="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 transition">
+                                        <span><i class="fas fa-headphones text-rose-500 mr-1.5"></i>Media Pendukung (audio/video)</span>
+                                        <i class="fas" :class="q._showMedia ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                                    </button>
+                                    <div x-show="q._showMedia" class="px-3 pb-3 space-y-2 border-t border-slate-200 pt-2">
+                                        <div>
+                                            <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                                                <i class="fas fa-music text-rose-500"></i>Audio (Google Drive link)
+                                            </label>
+                                            <input type="url" :name="'audio_' + i" x-model="q.audio" placeholder="https://drive.google.com/file/d/..."
+                                                   class="w-full text-xs border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-rose-400 transition mt-1">
+                                            <p class="text-xs text-slate-400 mt-0.5">
+                                                &#8226; Upload file audio (mp3, ogg, wav) ke Google Drive &rarr; Share &rarr; <strong class="text-slate-600">General access: Anyone with the link</strong> &rarr; Copy link
+                                            </p>
+                                            <div x-show="q.audio" class="mt-1 flex items-center gap-2">
+                                                <audio :src="q.audio" controls class="h-8 w-full max-w-xs"></audio>
+                                                <a :href="q.audio" target="_blank" class="text-xs text-rose-600 hover:underline">Buka link</a>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                                                <i class="fab fa-youtube text-red-500"></i>YouTube (video)
+                                            </label>
+                                            <input type="url" :name="'youtube_' + i" x-model="q.youtube" placeholder="https://youtu.be/xxx atau https://youtube.com/watch?v=..."
+                                                   class="w-full text-xs border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-red-400 transition mt-1">
+                                            <p class="text-xs text-slate-400 mt-0.5">
+                                                &#8226; Copy URL dari browser saat membuka video YouTube (tidak perlu login)
+                                                <br>&#8226; Pastikan video tidak <strong class="text-slate-600">private</strong>
+                                            </p>
+                                            <div x-show="q.youtube" class="mt-1">
+                                                <div class="relative" style="padding-bottom:56.25%">
+                                                    <iframe :src="youtubeEmbedUrl(q.youtube)" class="absolute inset-0 w-full h-full rounded-xl" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div x-show="q.type === 'mcq'" class="mcq-options space-y-2">
@@ -201,6 +260,7 @@
                     <input type="hidden" name="answer_key" id="answer-key-input" :value="getAnswerKeyJson()">
                     <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
                     <input type="hidden" name="question_pages" id="question-pages-input" :value="getPagesJson()">
+                    <input type="hidden" name="question_audio" id="question-audio-input" :value="getAudioJson()">
                 </div>
 
                 <input type="hidden" name="anti_cheat_enabled" value="true">
@@ -363,10 +423,13 @@ function questionManager() {
                 var qtypes = {{ (exam.question_types if exam else {}) | tojson | safe }};
                 var akey = {{ (exam.answer_key if exam else {}) | tojson | safe }};
                 var ppages = {{ (exam.question_pages if exam else {}) | tojson | safe }};
+                var amedia = {{ (exam.question_audio if exam else {}) | tojson | safe }};
                 if (Object.keys(qtypes).length === 0) return [];
                 return Object.keys(qtypes).map(function(i) {
                     var t = qtypes[i];
-                    var q = {_id: parseInt(i) + 1, type: t, pages: ppages[i] || ''};
+                    var m = amedia[i] || {};
+                    var q = {_id: parseInt(i) + 1, type: t, pages: ppages[i] || '',
+                             audio: m.audio || '', youtube: m.youtube || '', _showMedia: false};
                     if (t === 'mcq') {
                         var k = akey[i];
                         q.bonus = k === 'bonus';
@@ -388,11 +451,11 @@ function questionManager() {
         _mcqPct: 70,
         _essayPct: 30,
         addMcq() {
-            this.questions.push({_id: ++this._cid, type:'mcq', answers:['A'], bonus:false, pages:''});
+            this.questions.push({_id: ++this._cid, type:'mcq', answers:['A'], bonus:false, pages:'', audio:'', youtube:'', _showMedia:false});
             this._mcqPct = 70; this._essayPct = 30;
         },
         addEssay() {
-            this.questions.push({_id: ++this._cid, type:'essay', pages:''});
+            this.questions.push({_id: ++this._cid, type:'essay', pages:'', audio:'', youtube:'', _showMedia:false});
             this._mcqPct = 70; this._essayPct = 30;
         },
         removeQuestion(i) { this.questions.splice(i, 1); },
@@ -427,7 +490,23 @@ function questionManager() {
         },
         getPagesJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.pages || ''])));
-        }
+        },
+        getAudioJson() {
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => {
+                var m = {};
+                if (q.audio) m.audio = q.audio;
+                if (q.youtube) m.youtube = q.youtube;
+                return [i, Object.keys(m).length > 0 ? m : null];
+            }).filter(([k,v]) => v !== null)));
+        },
+        youtubeEmbedUrl(url) {
+            if (!url) return '';
+            var match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/)
+                     || url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/)
+                     || url.match(/youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/);
+            if (match) return 'https://www.youtube.com/embed/' + match[1] + '?rel=0&modestbranding=1';
+            return '';
+        },
     };
 }
 
