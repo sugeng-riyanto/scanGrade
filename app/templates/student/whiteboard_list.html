@@ -1,8 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Papan Tulis - Murid{% endblock %}
+{% block title %}Papan Tulis{% endblock %}
 {% block content %}
-<div class="p-6">
-    <h1 class="text-2xl font-bold mb-4">Papan Tulis</h1>
-    <p class="text-gray-500">Coming soon.</p>
+<div class="p-4 lg:p-6 max-w-4xl mx-auto">
+    <h1 class="text-2xl font-bold mb-6">Papan Tulis</h1>
+
+    {% if not whiteboards %}
+    <div class="card p-8 text-center">
+        <div class="text-4xl mb-3">&#x1F4DD;</div>
+        <p class="text-lg font-semibold mb-1">Belum ada papan tulis</p>
+        <p class="text-sm text-gray-500">Guru akan membuat papan tulis untuk kelas Anda</p>
+    </div>
+    {% else %}
+    <div class="grid gap-4">
+        {% for wb in whiteboards %}
+        <div class="card p-4 flex items-center justify-between card-hover">
+            <div class="flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl {{ 'bg-green-100 text-green-600' if wb.status == 'active' else 'bg-gray-100 text-gray-400' }} flex items-center justify-center">
+                    <i class="fas fa-chalkboard"></i>
+                </div>
+                <div>
+                    <a href="/student/whiteboard/{{ wb.id }}" class="font-semibold hover:text-primary-600">{{ wb.title }}</a>
+                    <div class="text-xs text-gray-500 mt-0.5">{{ wb.created_at[:10] }}</div>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="badge {{ 'bg-green-100 text-green-700' if wb.status == 'active' else 'bg-gray-100 text-gray-500' }}">
+                    {{ 'Sedang Berlangsung' if wb.status == 'active' else 'Selesai' }}
+                </span>
+                {% if wb.status == 'active' %}
+                <a href="/student/whiteboard/{{ wb.id }}" class="btn btn-primary text-sm py-1.5 px-3">
+                    <i class="fas fa-arrow-right"></i> Masuk
+                </a>
+                {% else %}
+                <a href="/student/whiteboard/{{ wb.id }}/download" class="btn btn-ghost text-sm py-1.5 px-3">
+                    <i class="fas fa-download"></i>
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

@@ -1,8 +1,202 @@
 {% extends "base.html" %}
-{% block title %}Papan Tulis - Canvas{% endblock %}
+{% block title %}Papan Tulis - {{ whiteboard.title }}{% endblock %}
 {% block content %}
-<div class="p-6">
-    <h1 class="text-2xl font-bold mb-4">Papan Tulis</h1>
-    <p class="text-gray-500">Canvas coming soon.</p>
+<div class="h-screen flex flex-col" x-data="studentCanvas()" x-init="init()">
+    <!-- Top bar -->
+    <div class="flex items-center justify-between px-4 py-2 border-b bg-white dark:bg-gray-900 shrink-0">
+        <div class="flex items-center gap-3">
+            <a href="/student/whiteboard" class="text-gray-500 hover:text-gray-700">&larr;</a>
+            <h1 class="font-bold text-base truncate max-w-[200px]">{{ whiteboard.title }}</h1>
+            <span id="focus-badge" class="badge bg-green-100 text-green-700 text-xs">&#9679; Fokus</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <div id="timer-display" class="font-mono font-bold text-sm px-3 py-1 rounded-lg bg-gray-100 dark:bg-gray-800">00:00</div>
+            <button @click="downloadPDF()" class="btn btn-ghost text-sm py-1 px-3">
+                <i class="fas fa-download"></i> PDF
+            </button>
+            <button @click="requestAnnotate()" x-show="!canAnnotate && !requested" class="btn btn-primary text-sm py-1 px-3">
+                <i class="fas fa-pen"></i> Minta Izin Anotasi
+            </button>
+            <span x-show="requested && !canAnnotate" class="text-xs text-yellow-600 bg-yellow-50 px-3 py-1 rounded-lg">
+                Menunggu persetujuan...
+            </span>
+            <span x-show="canAnnotate" class="text-xs text-green-600 bg-green-50 px-3 py-1 rounded-lg">
+                &#10003; Sedang Menganotasi
+            </span>
+        </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Toolbar (only when can annotate) -->
+        <div x-show="canAnnotate" class="w-12 md:w-14 bg-white dark:bg-gray-900 border-r flex flex-col items-center py-2 gap-1 shrink-0 overflow-y-auto">
+            <button @click="setTool('pen')" :class="tool === 'pen' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Pena">
+                <i class="fas fa-pen"></i>
+            </button>
+            <button @click="setTool('eraser')" :class="tool === 'eraser' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penghapus">
+                <i class="fas fa-eraser"></i>
+            </button>
+            <button @click="enableText()" :class="tool === 'text' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Teks">
+                <i class="fas fa-font"></i>
+            </button>
+            <input type="color" x-model="color" @input="canvas?.setColor(color)" class="w-8 h-8 rounded cursor-pointer border-0 p-0" title="Warna">
+            <hr class="w-6 border-t my-1">
+            <button @click="canvas?.undo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Undo">
+                <i class="fas fa-undo"></i>
+            </button>
+            <button @click="canvas?.redo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Redo">
+                <i class="fas fa-redo"></i>
+            </button>
+        </div>
+
+        <!-- Canvas -->
+        <div class="flex-1 relative bg-gray-100 dark:bg-gray-800 overflow-hidden">
+            <canvas id="whiteboard-canvas" class="absolute inset-0 w-full h-full"></canvas>
+            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
+                Slide <span x-text="currentSlide + 1"></span>/<span x-text="slides.length"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom slide navigator (view only) -->
+    <div class="h-16 bg-white dark:bg-gray-900 border-t flex items-center px-4 gap-2 overflow-x-auto shrink-0">
+        <template x-for="(slide, i) in slides" :key="i">
+            <div :class="'shrink-0 w-16 h-10 rounded-lg overflow-hidden cursor-pointer border-2 ' + (i === currentSlide ? 'border-primary-500' : 'border-gray-200 dark:border-gray-700')">
+                <img x-show="slide.background_url" :src="slide.background_url" class="w-full h-full object-cover">
+                <div x-show="!slide.background_url" class="w-full h-full flex items-center justify-center text-xs text-gray-400 bg-gray-100 dark:bg-gray-800">
+                    <span x-text="i + 1"></span>
+                </div>
+            </div>
+        </template>
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vendor/socket.io.min.js"></script>
+<script src="/static/js/whiteboard-canvas.js"></script>
+<script src="/static/js/whiteboard-websocket.js"></script>
+<script src="/static/js/whiteboard-timer.js"></script>
+<script>
+function studentCanvas() {
+    return {
+        whiteboardId: "{{ whiteboard.id }}",
+        slides: {{ slides | tojson | safe }},
+        currentSlide: 0,
+        tool: "pen",
+        color: "#000000",
+        canAnnotate: false,
+        requested: false,
+        canvas: null,
+        ws: null,
+        timer: null,
+
+        init() {
+            this.canvas = new WhiteboardCanvas("whiteboard-canvas", {
+                onDraw: (op) => { this.ws?.sendDraw(op.op_type, op.data); },
+            });
+
+            fetch(`/student/api/whiteboard/${this.whiteboardId}/can-annotate`)
+                .then(r => r.json())
+                .then(d => { this.canAnnotate = d.can_annotate; });
+
+            this.ws = new WhiteboardSocket(this.whiteboardId, {
+                onConnect: () => this.startHeartbeat(),
+                onDrawOp: (data) => { this.canvas.replayOp(data); },
+                onAnnotateApproved: (data) => {
+                    if (data.student_id === {{ g.user_id | tojson }}) {
+                        this.canAnnotate = true;
+                        this.requested = false;
+                    }
+                },
+                onAnnotateRevoked: (data) => {
+                    if (data.student_id === {{ g.user_id | tojson }}) {
+                        this.canAnnotate = false;
+                    }
+                },
+                onSlideChanged: (data) => { this.goToSlide(data.slide_number - 1); },
+                onTimerUpdate: (data) => { this.timer?.syncRemote(data.seconds, data.running); },
+            });
+            this.ws.connect();
+
+            this.timer = new WhiteboardTimer("timer-display");
+
+            // Anti-cheat tracking
+            document.addEventListener("visibilitychange", () => {
+                const status = document.hidden ? "hidden" : "visible";
+                this.ws.sendFocusStatus(status);
+                this.updateFocusBadge(status);
+                if (document.hidden) {
+                    fetch(`/student/api/whiteboard/${this.whiteboardId}/anti-cheat`, {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({ event_type: "visibility", event_data: { status: "hidden" } }),
+                    });
+                }
+            });
+
+            window.addEventListener("blur", () => {
+                this.ws.sendFocusStatus("blurred");
+                this.updateFocusBadge("blurred");
+                fetch(`/student/api/whiteboard/${this.whiteboardId}/anti-cheat`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ event_type: "blur", event_data: {} }),
+                });
+            });
+
+            window.addEventListener("focus", () => {
+                this.ws.sendFocusStatus("focused");
+                this.updateFocusBadge("focused");
+            });
+
+            // Load first slide
+            if (this.slides.length > 0) this.loadSlide(this.slides[0]);
+        },
+
+        loadSlide(slide) {
+            this.canvas.setBackground(slide.background_url || null);
+            fetch(`/student/api/whiteboard/${this.whiteboardId}/ops?slide=${slide.slide_number}`)
+                .then(r => r.json())
+                .then(d => { if (d.ops) this.canvas.loadOps(d.ops); })
+                .catch(() => {});
+        },
+
+        goToSlide(i) {
+            if (i < 0 || i >= this.slides.length) return;
+            this.currentSlide = i;
+            this.loadSlide(this.slides[i]);
+        },
+
+        setTool(t) { this.tool = t; if (t !== "text") this.canvas.setTool(t); },
+        enableText() { this.tool = "text"; this.canvas.enableTextMode(); },
+
+        requestAnnotate() {
+            this.requested = true;
+            this.ws.requestAnnotate({{ g.user_id | tojson }}, {{ g.user_name | tojson | default('"Murid"') }});
+        },
+
+        updateFocusBadge(status) {
+            const badge = document.getElementById("focus-badge");
+            if (!badge) return;
+            if (status === "focused" || status === "visible") {
+                badge.className = "badge bg-green-100 text-green-700 text-xs";
+                badge.innerHTML = "&#9679; Fokus";
+            } else {
+                badge.className = "badge bg-red-100 text-red-700 text-xs";
+                badge.innerHTML = "&#9679; Tidak Fokus";
+            }
+        },
+
+        startHeartbeat() {
+            setInterval(() => this.ws?.sendHeartbeat(), 5000);
+        },
+
+        downloadPDF() {
+            window.open(`/student/whiteboard/${this.whiteboardId}/download`, "_blank");
+        },
+
+        destroy() { this.ws?.disconnect(); },
+    };
+}
+</script>
 {% endblock %}
