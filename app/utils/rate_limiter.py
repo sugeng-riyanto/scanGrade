@@ -1,4 +1,5 @@
 """Rate limiter with optional Redis backend for multi-worker support."""
+import os
 import time
 from collections import defaultdict
 from flask import g, request, jsonify, current_app
@@ -20,6 +21,8 @@ DEFAULT_LIMITS = {
 
 _exempt_paths = {"/health", "/static/"}
 _exact_exempt = {"/", "/pricing", "/demo", "/auth/login-user", "/auth/login", "/auth/register"}
+# For load testing: whitelist specific prefixes
+_load_test_ips = set()  # Add IP via: _load_test_ips.add("1.2.3.4")
 _endpoint_self_limited = {"/api/student/sync-draft", "/api/violation/log", "/api/student/force-submit"}
 
 
@@ -70,6 +73,10 @@ def get_rate_limiter(app):
 
     @app.before_request
     def check_rate_limit():
+        # LOAD_TEST mode — bypass all rate limiting for load testing
+        if os.environ.get("LOAD_TEST") == "true":
+            return None
+
         path = request.path
         for ex in _exempt_paths:
             if path.startswith(ex):

@@ -17,6 +17,9 @@
             <a href="/teacher/export/bubble-sheet/{{ exam_id }}" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
                 <i class="fas fa-print mr-1 text-orange-600"></i>Cetak LJK
             </a>
+            <a href="/teacher/exams/{{ exam_id }}/answer-keys" class="border-2 border-amber-200 px-4 py-2 rounded-xl hover:bg-amber-50 text-sm font-bold text-amber-700 transition">
+                <i class="fas fa-key mr-1"></i>Kunci
+            </a>
             <form method="POST" action="/teacher/publish/{{ exam_id }}" class="inline">
                 <button type="submit" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-4 py-2 rounded-xl hover:from-emerald-600 hover:to-green-600 text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition"
                         onclick="return confirm('Publikasikan nilai ke semua siswa?')">

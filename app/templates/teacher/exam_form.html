@@ -215,6 +215,8 @@
                     block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
                     auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
                     allow_calculator: {{ 'true' if (exam.get('allow_calculator') if exam else False) else 'false' }},
+                    randomize_questions: {{ 'true' if (exam.get('randomize_questions') if exam else False) else 'false' }},
+                    randomize_options: {{ 'true' if (exam.get('randomize_options') if exam else False) else 'false' }},
                 })">
                     <div class="flex items-center justify-between">
                         <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
@@ -252,6 +254,16 @@
                                :class="allow_calculator ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="allow_calculator" name="allow_calculator" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Kalkulator Ilmiah</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="randomize_questions ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="randomize_questions" name="randomize_questions" value="true" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Acak Soal</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="randomize_options ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="randomize_options" name="randomize_options" value="true" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700">Acak Opsi</span>
                         </label>
                     </div>
                 </div>

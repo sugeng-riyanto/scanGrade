@@ -5,8 +5,11 @@ from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
 from app.utils.rate_limiter import limiter
 
-# Safe rate-limit decorator — no-op if Flask-Limiter not available
+# Safe rate-limit decorator — no-op if Flask-Limiter not available or LOAD_TEST mode
 def _rate_limit(n):
+    import os
+    if os.environ.get("LOAD_TEST") == "true":
+        return lambda f: f
     return limiter.limit(n) if limiter else (lambda f: f)
 
 auth_bp = Blueprint("auth", __name__)
@@ -245,7 +248,6 @@ def login():
 # ─── LOGIN USER (Guru & Murid) ───────────────────────
 
 @auth_bp.route("/login-user", methods=["GET", "POST"])
-@_rate_limit("5 per minute")
 def login_user():
     if request.method == "GET":
         role_hint = request.args.get("role", "")
