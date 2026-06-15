@@ -32,71 +32,38 @@
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            <!-- Starter -->
-            <div class="tier-card bg-white rounded-2xl p-8 shadow-lg shadow-surface-200/40 border border-surface-100">
-                <h3 class="text-lg font-extrabold text-surface-800">Starter</h3>
-                <p class="text-surface-400 text-sm mt-1 font-medium">Coba gratis 14 hari</p>
+            {% for plan in plans %}
+            <div class="tier-card bg-white rounded-2xl p-8 shadow-lg shadow-surface-200/40 border border-surface-100 {% if loop.index == 2 %}popular border-primary-500 scale-105 shadow-xl shadow-primary-500/10{% endif %}">
+                <h3 class="text-lg font-extrabold text-surface-800">{{ plan.name }}</h3>
+                <p class="text-surface-400 text-sm mt-1 font-medium">{{ plan.duration_label }}</p>
                 <div class="mt-4">
+                    {% if plan.price > 0 %}
+                    <span class="text-3xl font-extrabold text-surface-800">Rp {{ "{:,.0f}".format(plan.price).replace(',','.') }}</span>
+                    <span class="text-surface-400 text-sm">/{{ plan.duration_label|lower }}</span>
+                    {% else %}
                     <span class="text-3xl font-extrabold text-surface-800">Gratis</span>
-                </div>
-                <ul class="mt-6 space-y-3 text-sm">
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> 5 ujian per tahun</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Hingga 100 siswa</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> 3 tipe soal (MCQ, Esai Teks, Canvas)</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Anti-cheat dasar</li>
-                    <li class="flex items-start gap-2 text-surface-400"><i class="fas fa-times text-surface-300 mt-0.5"></i> Koreksi AI</li>
-                    <li class="flex items-start gap-2 text-surface-400"><i class="fas fa-times text-surface-300 mt-0.5"></i> Alat ukur digital</li>
-                </ul>
-                <a href="/auth/register" class="mt-6 w-full block text-center py-3 border-2 border-surface-200 text-surface-700 rounded-xl font-extrabold hover:border-primary-300 hover:text-primary-700 transition text-sm">
-                    Mulai Gratis
-                </a>
-            </div>
-
-            <!-- Pro (Popular) -->
-            <div class="tier-card popular bg-white rounded-2xl p-8 shadow-xl shadow-primary-500/10 border-primary-500 scale-105">
-                <h3 class="text-lg font-extrabold text-surface-800">Pro</h3>
-                <p class="text-surface-400 text-sm mt-1 font-medium">Untuk sekolah menengah</p>
-                <div class="mt-4">
-                    <span class="text-3xl font-extrabold text-surface-800">Rp 249k</span>
-                    <span class="text-surface-400 text-sm">/bulan</span>
+                    {% endif %}
                 </div>
                 <ul class="mt-6 space-y-3 text-sm">
                     <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Ujian tak terbatas</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Siswa tak terbatas</li>
                     <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Semua tipe soal</li>
                     <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Anti-cheat lengkap</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Koreksi AI (Gemini/OpenAI/DeepSeek/Groq)</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Alat ukur digital</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Export XLSX/PDF</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Import CSV/XLSX</li>
+                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Koreksi AI</li>
+                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> OMR Scanner</li>
+                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Export &amp; Import</li>
                 </ul>
-                <a href="/auth/register" class="mt-6 w-full block text-center py-3 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-extrabold shadow-lg shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 transition text-sm">
-                    Daftar Sekarang
+                <a href="/auth/register" class="mt-6 w-full block text-center py-3 {% if loop.index == 2 %}bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-500/25{% else %}border-2 border-surface-200 text-surface-700 hover:border-primary-300 hover:text-primary-700{% endif %} rounded-xl font-extrabold transition text-sm">
+                    {% if plan.price > 0 %}Daftar Sekarang{% else %}Mulai Gratis{% endif %}
                 </a>
             </div>
-
-            <!-- Enterprise -->
-            <div class="tier-card bg-white rounded-2xl p-8 shadow-lg shadow-surface-200/40 border border-surface-100">
-                <h3 class="text-lg font-extrabold text-surface-800">Enterprise</h3>
-                <p class="text-surface-400 text-sm mt-1 font-medium">Untuk yayasan/kabupaten</p>
-                <div class="mt-4">
-                    <span class="text-3xl font-extrabold text-surface-800">Hubungi</span>
-                </div>
-                <ul class="mt-6 space-y-3 text-sm">
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Semua fitur Pro</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Multi-sekolah</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> API akses</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> Prioritas support</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> White-label</li>
-                    <li class="flex items-start gap-2 text-surface-600"><i class="fas fa-check text-emerald-500 mt-0.5"></i> On-premise opsional</li>
-                </ul>
-                <a href="https://wa.me/6281225468054?text=Halo%20ScanGrade,%20saya%20tertarik%20paket%20Enterprise" target="_blank" class="mt-6 w-full block text-center py-3 border-2 border-surface-200 text-surface-700 rounded-xl font-extrabold hover:border-primary-300 hover:text-primary-700 transition text-sm">
-                    <i class="fab fa-whatsapp mr-2"></i>Hubungi Kami
-                </a>
+            {% else %}
+            <div class="col-span-full text-center py-12 text-surface-400">
+                <p class="text-lg font-bold">Belum ada paket tersedia</p>
+                <p class="text-sm mt-1">Hubungi admin untuk informasi harga.</p>
             </div>
+            {% endfor %}
         </div>
 
-        <!-- FAQ -->
         <div class="mt-16 max-w-3xl mx-auto">
             <h2 class="text-2xl font-extrabold text-surface-800 text-center mb-8">Pertanyaan Umum</h2>
             <div class="space-y-3">
@@ -110,11 +77,11 @@
                 </details>
                 <details class="bg-white rounded-xl p-5 shadow-sm border border-surface-100">
                     <summary class="font-bold text-surface-700 cursor-pointer">Pembayaran melalui apa?</summary>
-                    <p class="mt-2 text-sm text-surface-500">Kami menerima transfer bank (BCA, Mandiri, BRI, BNI) dan berbagai metode pembayaran melalui Midtrans.</p>
+                    <p class="mt-2 text-sm text-surface-500">Kami menerima transfer bank dan berbagai metode pembayaran melalui Midtrans.</p>
                 </details>
                 <details class="bg-white rounded-xl p-5 shadow-sm border border-surface-100">
                     <summary class="font-bold text-surface-700 cursor-pointer">Data sekolah aman?</summary>
-                    <p class="mt-2 text-sm text-surface-500">Ya. Setiap sekolah terisolasi dengan NPSN unik. Data dienkripsi dan backup otomatis. Kami menggunakan Supabase dengan standar keamanan enterprise.</p>
+                    <p class="mt-2 text-sm text-surface-500">Ya. Setiap sekolah terisolasi dengan NPSN unik. Data dienkripsi dan backup otomatis.</p>
                 </details>
             </div>
         </div>
@@ -128,7 +95,7 @@
         </div>
 
         <div class="mt-12 text-center text-xs text-surface-400">
-            <p>© 2026 ScanGrade. Dibuat dengan <i class="fas fa-heart text-red-400"></i> untuk pendidikan Indonesia.</p>
+            <p>&copy; 2026 ScanGrade. Dibuat dengan <i class="fas fa-heart text-red-400"></i> untuk pendidikan Indonesia.</p>
         </div>
     </main>
 </div>
