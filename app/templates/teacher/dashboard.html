@@ -6,6 +6,24 @@
     lang: localStorage.getItem('sg_lang') || 'id',
     showAssignForm: false, assigningClassId: null, assigningSubjectId: null, assignLoading: false
 }">
+    {% if exams_no_key %}
+    <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4 flex items-start gap-3">
+        <i class="fas fa-exclamation-triangle text-amber-600 mt-0.5"></i>
+        <div class="flex-1">
+            <p class="font-bold text-amber-800 text-sm">Kunci jawaban belum diatur</p>
+            <p class="text-xs text-amber-700 mt-1">{{ exams_no_key|length }} ujian belum memiliki kunci jawaban — skor siswa akan 0.</p>
+            <div class="flex flex-wrap gap-2 mt-2">
+                {% for e in exams_no_key[:3] %}
+                <a href="/teacher/exams/{{ e.id }}/answer-keys" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition">{{ e.title[:30] }}</a>
+                {% endfor %}
+                {% if exams_no_key|length > 3 %}
+                <a href="/teacher/exams" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition">+{{ exams_no_key|length - 3 }} lainnya</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Welcome Banner -->
     <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-primary-700 p-6 lg:p-8">
         <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>

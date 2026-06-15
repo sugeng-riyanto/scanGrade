@@ -128,6 +128,23 @@ def dashboard():
 
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
 
+    # Detect exams with missing answer keys
+    exams_no_key = []
+    for e in exams:
+        ak = e.get("answer_key")
+        if not ak or ak == "{}" or ak == {}:
+            # Check if exam has MCQ questions
+            qt = e.get("question_types")
+            if isinstance(qt, str):
+                try: qt = json.loads(qt)
+                except: qt = {}
+            if qt:
+                has_mcq = any(v == "mcq" for v in (qt.values() if isinstance(qt, dict) else []))
+                if has_mcq:
+                    exams_no_key.append(e)
+                elif not qt:
+                    exams_no_key.append(e)
+
     # Get teacher's school_id (column may not exist in older schema)
     school_id = None
     try:
@@ -174,7 +191,7 @@ def dashboard():
     return render_template("teacher/dashboard.html", exams=exams, total_students=total_students,
                            avg_score=avg_score, all_scores=all_scores, user_name=user_name,
                            assignments=assignments, classes=classes, subjects=subjects,
-                           school_info=school_info)
+                           school_info=school_info, exams_no_key=exams_no_key)
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
@@ -952,6 +969,7 @@ def grading_center():
 @teacher_bp.route("/analytics")
 @teacher_or_admin_required
 def analytics():
+    import statistics
     supabase = get_supabase()
     exams = supabase.table("exams").select("id,title,passing_score").eq("teacher_id", g.user_id).execute().data or []
     exam_ids = [e["id"] for e in exams]
@@ -960,6 +978,7 @@ def analytics():
     dist_bins = [0, 0, 0, 0, 0]
     exam_labels = []
     exam_avgs = []
+    exam_medians = []
     total_submissions = 0
     pass_count = 0
     for e in exams:
@@ -971,16 +990,21 @@ def analytics():
         pc = sum(1 for sc in scores if sc >= passing)
         pass_count += pc
         if scores:
+            sorted_s = sorted(scores)
+            n = len(sorted_s)
+            median = sorted_s[n // 2] if n % 2 == 1 else (sorted_s[n // 2 - 1] + sorted_s[n // 2]) / 2
             exam_breakdown.append({
                 "title": e["title"],
                 "count": len(scores),
                 "avg": round(sum(scores) / len(scores), 1),
+                "median": round(median, 1),
                 "max": round(max(scores), 1),
                 "min": round(min(scores), 1),
                 "pass_pct": round(pc / len(scores) * 100),
             })
             exam_labels.append(e["title"][:20])
             exam_avgs.append(round(sum(scores) / len(scores), 1))
+            exam_medians.append(round(median, 1))
     for sc in all_scores:
         if sc < 20: dist_bins[0] += 1
         elif sc < 40: dist_bins[1] += 1
@@ -989,13 +1013,15 @@ def analytics():
         else: dist_bins[4] += 1
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else 0
     pass_rate = round(pass_count / len(all_scores) * 100) if all_scores else 0
+    std_dev = round(statistics.stdev(all_scores), 1) if len(all_scores) > 1 else 0
     stats = {
         "total_exams": len(exams),
         "total_submissions": total_submissions,
         "avg_score": avg_score,
         "pass_rate": pass_rate,
+        "std_dev": std_dev,
     }
-    return render_template("teacher/analytics.html", stats=stats, exam_breakdown=exam_breakdown, dist_bins=dist_bins, exam_labels=exam_labels, exam_avgs=exam_avgs)
+    return render_template("teacher/analytics.html", stats=stats, exam_breakdown=exam_breakdown, dist_bins=dist_bins, exam_labels=exam_labels, exam_avgs=exam_avgs, exam_medians=exam_medians)
 
 
 @teacher_bp.route("/reset-password", methods=["POST"])
