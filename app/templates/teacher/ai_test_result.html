@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Test API Key{% endblock %}
+{% block page_title %}Test API Key{% endblock %}
+{% block content %}
+<div class="max-w-lg mx-auto text-center card p-8">
+    {% if success %}
+    <div class="w-16 h-16 mx-auto rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-2xl mb-4"><i class="fas fa-check-circle"></i></div>
+    <h3 class="font-extrabold text-xl text-emerald-700 mb-2">Berhasil!</h3>
+    {% else %}
+    <div class="w-16 h-16 mx-auto rounded-full bg-red-100 flex items-center justify-center text-red-600 text-2xl mb-4"><i class="fas fa-times-circle"></i></div>
+    <h3 class="font-extrabold text-xl text-red-700 mb-2">Gagal</h3>
+    {% endif %}
+    <p class="text-slate-600">{{ message }}</p>
+    <a href="/teacher/ai-settings" class="btn btn-primary mt-6">Kembali</a>
+</div>
+{% endblock %}

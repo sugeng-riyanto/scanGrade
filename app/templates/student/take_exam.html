@@ -830,7 +830,7 @@ function examApp(duration, totalQ) {
         audioOutputLabel: '',
         init() {
             this.timer = setInterval(() => {
-                if (this.timeLeft <= 0) this.submitExam();
+                if (this.timeLeft <= 0) this.submitExam(true);
                 else this.timeLeft--;
             }, 1000);
             this.autoSaveTimer = setInterval(() => this.periodicSync(), 60000);
@@ -1004,7 +1004,7 @@ function examApp(duration, totalQ) {
                 this.violationMessage = 'PELANGGARAN MAKSIMAL! Ujian otomatis dikumpulkan.';
                 this.violationType = 'severe';
                 this.showViolationBanner = true;
-                setTimeout(() => { if (!this.submitted) this.submitExam(); }, 3000);
+                    setTimeout(() => { if (!this.submitted) this.submitExam(true); }, 3000);
             }
         },
         startWatermark() {
@@ -1747,12 +1747,17 @@ function examApp(duration, totalQ) {
                 } else if (q.type === 'mcq') {
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
+                    let hasAny = false;
                     for (let p = 0; p < totalP; p++) {
                         const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
-                        if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
+                        const hasDrawing = !!(this.hasDrawn[i]?.[p]);
+                        if (boxes.length > 0 || hasDrawing) {
+                            pagesData[p] = { textBoxes: boxes };
+                            hasAny = true;
+                        }
                     }
-                    if (Object.keys(pagesData).length > 0) {
-                        data[oi] = { answer: q.answer, pages: pagesData };
+                    if (hasAny) {
+                        data[oi] = { answer: q.answer || '', pages: pagesData };
                     } else if (q.answer) {
                         data[oi] = q.answer;
                     }
@@ -1871,9 +1876,9 @@ function examApp(duration, totalQ) {
         getAnswers() {
             return this.getAnswersWithCanvas();
         },
-        submitExam() {
+        submitExam(auto) {
             if (this.submitted) return;
-            if (!confirm('Yakin ingin mengumpulkan? Soal terjawab: ' + this.answeredCount + '/' + this.totalQ)) return;
+            if (!auto && !confirm('Yakin ingin mengumpulkan? Soal terjawab: ' + this.answeredCount + '/' + this.totalQ)) return;
             this.submitted = true;
             clearInterval(this.timer);
             clearInterval(this.autoSaveTimer);
