@@ -3,7 +3,7 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, current_app
+from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, current_app, send_file
 from app.utils.auth import login_required, get_supabase
 from app.services.audit_service import log_activity
 
@@ -901,38 +901,48 @@ def download_school_zip(school_id):
     supabase = get_supabase()
     import io, zipfile
 
+    school = supabase.table("schools").select("*").eq("id", school_id).single().execute().data
+    if not school:
+        flash("Sekolah tidak ditemukan", "error")
+        return redirect("/super-admin/file-management")
+
+    npsn = school.get("npsn", school_id)
+    prefix = f"sekolah/{npsn}"
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # 1. School info (JSON)
-        school = supabase.table("schools").select("*").eq("id", school_id).single().execute().data or {}
-        if school:
-            zf.writestr(f"sekolah/{school.get('npsn', school_id)}/info.json", json.dumps(school, indent=2, default=str))
+        def _add_json(name, data):
+            zf.writestr(f"{prefix}/{name}.json", json.dumps(data, indent=2, default=str, ensure_ascii=False))
 
-        # 2. Teachers (JSON)
-        teachers = supabase.table("teachers").select("*, profiles(full_name, phone, email)").eq("school_id", school_id).execute().data or []
-        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/guru.json", json.dumps(teachers, indent=2, default=str))
+        # 1. School info
+        _add_json("info", school)
 
-        # 3. Students (JSON)
+        # 2. Teachers
+        teachers = supabase.table("teachers").select("*, profiles(full_name, phone)").eq("school_id", school_id).execute().data or []
+        _add_json("guru", teachers)
+
+        # 3. Students
         students = supabase.table("students").select("*, profiles(full_name, phone)").eq("school_id", school_id).execute().data or []
-        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/murid.json", json.dumps(students, indent=2, default=str))
+        _add_json("murid", students)
 
-        # 4. Classes (JSON)
+        # 4. Classes
         classes = supabase.table("classes").select("*").eq("school_id", school_id).execute().data or []
-        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/kelas.json", json.dumps(classes, indent=2, default=str))
+        _add_json("kelas", classes)
 
-        # 5. Exams (JSON)
+        # 5. Exams
         exams = supabase.table("exams").select("*").eq("school_id", school_id).execute().data or []
-        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/ujian.json", json.dumps(exams, indent=2, default=str))
+        _add_json("ujian", exams)
 
-        # 6. Submissions (JSON)
-        subs = supabase.table("submissions").select("*, exams(school_id)").execute().data or []
-        sub_filtered = [s for s in subs if (s.get("exams") or {}).get("school_id") == school_id]
-        for s in sub_filtered:
-            s.pop("exams", None)
-        zf.writestr(f"sekolah/{school.get('npsn', school_id)}/submission.json", json.dumps(sub_filtered, indent=2, default=str))
+        # 6. Submissions (by exam_id)
+        exam_ids = [e["id"] for e in exams]
+        submissions = []
+        for eid in exam_ids:
+            subs = supabase.table("submissions").select("*").eq("exam_id", eid).execute().data or []
+            for s in subs:
+                s["_exam_id"] = eid
+                submissions.append(s)
+        _add_json("submission", submissions)
 
     buf.seek(0)
-    npsn = school.get("npsn", school_id)
-    from flask import send_file
     return send_file(buf, mimetype="application/zip", as_attachment=True,
                      download_name=f"scangrade_{npsn}.zip")
