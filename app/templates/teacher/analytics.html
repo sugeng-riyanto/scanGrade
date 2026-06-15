@@ -13,7 +13,7 @@
     </div>
 
     <!-- Stat Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div class="card stat-card">
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-brand-50 text-brand-600"><i class="fas fa-file-alt"></i></div>
@@ -50,6 +50,17 @@
                 </div>
             </div>
         </div>
+        {% if stats.std_dev and stats.std_dev > 0 %}
+        <div class="card stat-card">
+            <div class="flex items-center gap-3">
+                <div class="stat-icon bg-rose-50 text-rose-600"><i class="fas fa-chart-bar"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Std Dev</p>
+                    <p class="text-2xl font-extrabold text-slate-800">{{ stats.std_dev }}</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Empty state when no data -->
@@ -94,6 +105,7 @@
                     <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
                     <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Submissions':'Pengumpulan'"></th>
                     <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Average':'Rata-rata'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Median':'Median'"></th>
                     <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Highest':'Tertinggi'"></th>
                     <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Lowest':'Terendah'"></th>
                     <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Pass %':'Lulus %'"></th>
@@ -104,6 +116,7 @@
                         <td class="px-5 py-3 font-semibold text-slate-700">{{ e.title }}</td>
                         <td class="px-5 py-3 text-slate-600">{{ e.count }}</td>
                         <td class="px-5 py-3 font-bold text-slate-800">{{ e.avg }}</td>
+                        <td class="px-5 py-3 font-semibold text-slate-700">{{ e.median }}</td>
                         <td class="px-5 py-3 text-emerald-600 font-semibold">{{ e.max }}</td>
                         <td class="px-5 py-3 text-red-500 font-semibold">{{ e.min }}</td>
                         <td class="px-5 py-3">
@@ -115,7 +128,7 @@
                     </tr>
                     {% endfor %}
                     {% if not exam_breakdown %}
-                    <tr><td colspan="6" class="px-5 py-8 text-center text-slate-400 font-medium" x-text="lang==='en'?'No data yet':'Belum ada data'"></td></tr>
+                    <tr><td colspan="7" class="px-5 py-8 text-center text-slate-400 font-medium" x-text="lang==='en'?'No data yet':'Belum ada data'"></td></tr>
                     {% endif %}
                 </tbody>
             </table>
@@ -142,11 +155,15 @@ document.addEventListener('DOMContentLoaded', function() {
     if (examCtx) {
         const labels = {{ exam_labels|tojson|safe if exam_labels else '[]' }};
         const avgs = {{ exam_avgs|tojson|safe if exam_avgs else '[]' }};
+        const medians = {{ exam_medians|tojson|safe if exam_medians else '[]' }};
         new Chart(examCtx, {
             type: 'line',
             data: {
                 labels: labels,
-                datasets: [{ label: 'Avg Score', data: avgs, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: '#3b82f6' }]
+                datasets: [
+                    { label: 'Rata-rata', data: avgs, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: '#3b82f6' },
+                    { label: 'Median', data: medians, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.05)', fill: false, tension: 0.3, pointRadius: 3, pointBackgroundColor: '#f59e0b', borderDash: [5, 5] },
+                ]
             },
             options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { grid: { display: false } } } }
         });
