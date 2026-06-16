@@ -42,6 +42,9 @@
                 <a href="/wb/teacher/whiteboard/{{ wb.id }}" class="btn btn-ghost text-sm py-1.5 px-3">
                     <i class="fas fa-arrow-right"></i>
                 </a>
+                <button onclick="confirmDelete('{{ wb.id }}', '{{ wb.title }}')" class="btn btn-ghost text-sm py-1.5 px-2 text-red-500 hover:bg-red-50">
+                    <i class="fas fa-trash"></i>
+                </button>
             </div>
         </div>
         {% endfor %}
@@ -125,6 +128,14 @@ function whiteboardList() {
             .finally(() => { this.loading = false; });
         },
     };
+}
+
+function confirmDelete(id, title) {
+    if (!confirm(`Hapus papan tulis "${title}"? Semua data terkait akan dihapus.`)) return;
+    fetch(`/wb/teacher/api/whiteboard/${id}`, { method: "DELETE" })
+        .then(r => r.json())
+        .then(d => { if (d.success) window.location.reload(); else alert(d.error || "Gagal"); })
+        .catch(() => alert("Gagal menghapus"));
 }
 </script>
 {% endblock %}
