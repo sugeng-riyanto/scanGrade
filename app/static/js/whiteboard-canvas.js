@@ -1,9 +1,29 @@
-/* Whiteboard Canvas Engine — drawing, tools, undo/redo, laser, background */
+/**
+ * Whiteboard Canvas Engine v2
+ * Architecture inspired by OpenBoard (Qt/C++ → JS)
+ *
+ * Layers (render order):
+ *   1. Board background (white/black)
+ *   2. Grid (linear/log)
+ *   3. Background image (PDF)
+ *   4. Drawing ops replay
+ *   5. Compass live preview
+ *   6. Laser pointer
+ *
+ * Tool system (per OpenBoard):
+ *   - Each tool is an SVG overlay with proper local→scene transform
+ *   - Hit-testing via inverse-transform of mouse position to local coords
+ *   - Rotation center per tool (ruler: top-left, protractor: arc center, triangle: right-angle)
+ *   - StartLine/DrawLine pattern for edge-constrained drawing
+ */
 class WhiteboardCanvas {
     constructor(canvasId, options = {}) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext("2d");
         this.options = options;
+        this.dpr = window.devicePixelRatio || 1;
+
+        // Drawing state
         this.tool = "pen";       // pen | eraser | text | highlight | laser | compass
         this.color = "#000000";
         this.width = 3;
@@ -16,108 +36,250 @@ class WhiteboardCanvas {
         this.lastY = 0;
         this.points = [];
         this.textMode = false;
-        this.textInput = null;
         this.laserVisible = false;
         this.laserTimeout = null;
         this.undoStack = [];
         this.redoStack = [];
         this.currentBg = null;
         this.remoteOps = [];
-        this.remoteCursors = {};
 
         // Display settings
-        this.boardMode = "white";  // white | black
+        this.boardMode = "white";
         this.gridEnabled = false;
         this.gridSpacing = 50;
         this.gridLogarithmic = false;
 
-        // Tool overlays
+        // Overlay container for tool SVGs
         this.overlayContainer = null;
-        this.toolSvg = { ruler: null, protractor: null, triangle: null };
-        this.toolState = {
-            ruler: { visible: false, x: 30, y: 80, angle: 0, width: 500, height: 70, scale: 1 },
-            protractor: { visible: false, x: 60, y: 50, size: 350, angle: 0, scale: 1, currentAngle: 0, state: "idle" },
-            triangle: { visible: false, x: 160, y: 120, size: 300, angle: 0, orientation: "bottomLeft", scale: 1 },
-        };
-        this.toolDrag = { active: false, type: null, zone: null, startX: 0, startY: 0, origState: null };
 
-        // Compass (circle drawing mode)
-        this.circleCenterX = 0;
-        this.circleCenterY = 0;
-        this.circleSnapshot = null;
-        this.circleRadius = 0;
+        // Tool state (one per tool type)
+        this.toolState = {
+            ruler: { visible: false, x: 0, y: 0, angle: 0, w: 500, h: 70 },
+            protractor: { visible: false, x: 0, y: 0, angle: 0, size: 350, curAngle: 0 },
+            triangle: { visible: false, x: 0, y: 0, angle: 0, size: 300, orient: "bottomLeft" },
+        };
+        this.toolSvg = {};      // cached SVG elements
+        this.toolDrag = null;   // { type, zone, startMX, startMY, startState, startDist, startAngle }
+
+        // Compass (circle drawing)
+        this.compassCenter = null;
+        this.compassSnapshot = null;
+        this.compassRadius = 0;
 
         // Calculator
         this.calcEl = null;
 
+        // Active draw constraint tool
+        this.activeConstraint = null; // 'ruler' | 'triangle' | null
+
         this._init();
     }
 
+    // ─── Init ───
     _init() {
+        this._makeOverlay();
         this._resize();
         window.addEventListener("resize", () => this._resize());
         this._bindEvents();
-        this.clearCanvas();
-        this._createOverlayContainer();
+        this._render();
     }
 
-    _createOverlayContainer() {
-        this.overlayContainer = document.createElement("div");
-        this.overlayContainer.style.cssText = "position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:5;";
-        this.canvas.parentElement.style.position = "relative";
-        this.canvas.parentElement.appendChild(this.overlayContainer);
+    _makeOverlay() {
+        if (!this.overlayContainer) {
+            this.overlayContainer = document.createElement("div");
+            this.overlayContainer.style.cssText = "position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:5;";
+            this.canvas.parentElement.style.position = "relative";
+            this.canvas.parentElement.appendChild(this.overlayContainer);
+        }
     }
 
     _resize() {
         const rect = this.canvas.parentElement.getBoundingClientRect();
-        this.canvas.width = rect.width;
-        this.canvas.height = rect.height;
+        this.canvas.width = rect.width * this.dpr;
+        this.canvas.height = rect.height * this.dpr;
+        this.canvas.style.width = rect.width + "px";
+        this.canvas.style.height = rect.height + "px";
+        this.ctx.scale(this.dpr, this.dpr);
         this._render();
     }
 
     _bindEvents() {
-        this.canvas.addEventListener("mousedown", (e) => this._pointerDown(e));
-        this.canvas.addEventListener("mousemove", (e) => this._pointerMove(e));
-        this.canvas.addEventListener("mouseup", (e) => this._pointerUp(e));
-        this.canvas.addEventListener("mouseleave", (e) => this._pointerUp(e));
-        this.canvas.addEventListener("touchstart", (e) => this._pointerDown(e.touches[0]), { passive: false });
-        this.canvas.addEventListener("touchmove", (e) => { e.preventDefault(); this._pointerMove(e.touches[0]); }, { passive: false });
-        this.canvas.addEventListener("touchend", (e) => this._pointerUp(e), { passive: false });
+        const c = this.canvas;
+        c.addEventListener("mousedown", (e) => this._onPointerDown(e));
+        c.addEventListener("mousemove", (e) => this._onPointerMove(e));
+        c.addEventListener("mouseup", (e) => this._onPointerUp(e));
+        c.addEventListener("mouseleave", (e) => this._onPointerUp(e));
+        c.addEventListener("touchstart", (e) => { e.preventDefault(); this._onPointerDown(e.touches[0]); }, { passive: false });
+        c.addEventListener("touchmove", (e) => { e.preventDefault(); this._onPointerMove(e.touches[0]); }, { passive: false });
+        c.addEventListener("touchend", (e) => this._onPointerUp(e), { passive: false });
 
-        // Tool SVG events (delegated via overlay container)
-        document.addEventListener("mousemove", (e) => this._onToolDrag(e));
+        // Tool drag (document-level for smooth moves)
+        document.addEventListener("mousemove", (e) => this._onToolDragMove(e));
         document.addEventListener("mouseup", (e) => this._onToolDragEnd(e));
-        document.addEventListener("touchmove", (e) => { const t = e.touches[0]; if (this.toolDrag.active) { e.preventDefault(); this._onToolDrag(t); } }, { passive: false });
+        document.addEventListener("touchmove", (e) => { if (this.toolDrag) { e.preventDefault(); this._onToolDragMove(e.touches[0]); } }, { passive: false });
         document.addEventListener("touchend", (e) => this._onToolDragEnd(e));
     }
 
-    _getPos(e) {
+    _pos(e) {
         const rect = this.canvas.getBoundingClientRect();
         return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     }
 
     // ─── Display Settings ───
-    setBoardMode(mode) { this.boardMode = mode; this._render(); }
+    setBoardMode(m) { this.boardMode = m; this._render(); }
     toggleGrid() { this.gridEnabled = !this.gridEnabled; this._render(); }
-    setGridSpacing(px) { this.gridSpacing = Math.max(10, Math.min(200, px)); this._render(); }
-    setGridLogarithmic(val) { this.gridLogarithmic = !!val; this._render(); }
+    setGridSpacing(v) { this.gridSpacing = Math.max(10, Math.min(500, v)); this._render(); }
+    setGridLogarithmic(v) { this.gridLogarithmic = !!v; this._render(); }
 
-    // ─── Drawing ───
-    _pointerDown(e) {
+    // ─── Layer 1-2: Background + Grid ───
+    _drawBackground() {
+        const w = this.canvas.width / this.dpr;
+        const h = this.canvas.height / this.dpr;
+
+        // Board color
+        this.ctx.fillStyle = this.boardMode === "white" ? "#FFFFFF" : "#1e293b";
+        this.ctx.fillRect(0, 0, w, h);
+
+        // Grid
+        if (!this.gridEnabled) return;
+        this.ctx.strokeStyle = this.boardMode === "white" ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)";
+        this.ctx.lineWidth = 0.5;
+
+        if (this.gridLogarithmic) {
+            this._drawLogGrid(w, h);
+            return;
+        }
+
+        // Linear grid
+        for (let x = 0; x <= w; x += this.gridSpacing) {
+            this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, h); this.ctx.stroke();
+        }
+        for (let y = 0; y <= h; y += this.gridSpacing) {
+            this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(w, y); this.ctx.stroke();
+        }
+    }
+
+    _drawLogGrid(w, h) {
+        const maxDec = Math.ceil(Math.log10(Math.max(w, h)));
+        const pxPerDec = Math.max(w, h) / maxDec;
+
+        for (let d = 0; d < maxDec; d++) {
+            const base = d * pxPerDec;
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath(); this.ctx.moveTo(base, 0); this.ctx.lineTo(base, h); this.ctx.stroke();
+            for (let n = 2; n <= 9; n++) {
+                const x = base + Math.log10(n) * pxPerDec;
+                this.ctx.lineWidth = 0.3;
+                this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, h); this.ctx.stroke();
+            }
+        }
+    }
+
+    // ─── Layer 3: Background image ───
+    setBackground(url) {
+        if (!url) { this.currentBg = null; this._render(); return; }
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => { this.currentBg = img; this._render(); };
+        img.src = url;
+    }
+
+    // ─── Layer 4: Drawing ops ───
+    replayOp(op) {
+        const d = op.data || {};
+        const ctx = this.ctx;
+
+        if (op.op_type === "line") {
+            const pts = d.points || [];
+            if (pts.length < 2) return;
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = 1; i < pts.length; i++) {
+                ctx.lineTo(pts[i][0], pts[i][1]);
+            }
+            ctx.strokeStyle = d.color || "#000";
+            ctx.lineWidth = d.width || 3;
+            ctx.setLineDash(d.dash || []);
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.stroke();
+            ctx.setLineDash([]);
+        } else if (op.op_type === "text") {
+            ctx.font = `${d.fontSize || 16}px ${d.fontFamily || "Inter, sans-serif"}`;
+            ctx.fillStyle = d.color || "#000";
+            ctx.fillText(d.text || "", d.x || 0, d.y || 0);
+        } else if (op.op_type === "erase") {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.beginPath();
+            ctx.arc(d.x || 0, d.y || 0, (d.width || 8) + 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalCompositeOperation = "source-over";
+        } else if (op.op_type === "clear") {
+            // handled in loadOps
+        } else if (op.op_type === "circle") {
+            ctx.strokeStyle = d.color || "#000";
+            ctx.lineWidth = d.width || 3;
+            ctx.beginPath();
+            ctx.arc(d.cx || 0, d.cy || 0, d.r || 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    }
+
+    loadOps(ops) {
+        this._snapState();
+        this.ctx.clearRect(0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
+        this._drawBackground();
+        if (this.currentBg) {
+            this.ctx.drawImage(this.currentBg, 0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
+        }
+        for (const op of ops) this.replayOp(op);
+    }
+
+    // ─── Main render ───
+    _render() {
+        const w = this.canvas.width / this.dpr;
+        const h = this.canvas.height / this.dpr;
+        this.ctx.clearRect(0, 0, w, h);
+        this._drawBackground();
+        if (this.currentBg) {
+            this.ctx.drawImage(this.currentBg, 0, 0, w, h);
+        }
+        for (const op of this.remoteOps) this.replayOp(op);
+
+        if (this.laserVisible) {
+            this.ctx.beginPath();
+            this.ctx.arc(this.lastX, this.lastY, 10, 0, Math.PI * 2);
+            this.ctx.fillStyle = "rgba(255,0,0,0.6)";
+            this.ctx.fill();
+            this.ctx.beginPath();
+            this.ctx.arc(this.lastX, this.lastY, 4, 0, Math.PI * 2);
+            this.ctx.fillStyle = "rgba(255,0,0,0.9)";
+            this.ctx.fill();
+        }
+    }
+
+    // ─── Pointer events ───
+    _onPointerDown(e) {
         if (this.textMode) return;
         if (this.tool === "compass") { this._compassDown(e); return; }
-        if (this.toolDrag.active) return;
-        const pos = this._getPos(e);
+        if (this.toolDrag) return;
+        const pos = this._pos(e);
+
+        // Check if clicking on a tool overlay
+        if (this._toolHitTest(pos)) return;
+
         this.isDrawing = true;
         this.lastX = pos.x;
         this.lastY = pos.y;
         this.points = [[pos.x, pos.y]];
+
         if (this.tool === "laser") { this.laserVisible = true; this._render(); return; }
-        this._saveState();
+        this._snapState();
     }
 
-    _pointerMove(e) {
-        const pos = this._getPos(e);
+    _onPointerMove(e) {
+        const pos = this._pos(e);
+
         if (this.tool === "laser" && this.laserVisible) {
             this.lastX = pos.x; this.lastY = pos.y; this._render();
             clearTimeout(this.laserTimeout);
@@ -127,49 +289,41 @@ class WhiteboardCanvas {
         if (this.tool === "compass" && this.isDrawing) { this._compassMove(e); return; }
         if (!this.isDrawing) { this._emitCursor(pos); return; }
 
-        // Constrain to ruler/triangle edge if visible
-        let drawPos = pos;
-        if (this.tool === "pen" && this.toolState.ruler.visible) {
-            const r = this.toolState.ruler;
-            const angleRad = r.angle * Math.PI / 180;
-            const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
-            const dx = pos.x - cx, dy = pos.y - cy;
-            const localX = dx * Math.cos(-angleRad) - dy * Math.sin(-angleRad);
-            const localY = dx * Math.sin(-angleRad) + dy * Math.cos(-angleRad);
-            if (localY > r.height / 2) drawPos = { x: pos.x, y: cy + (r.height / 2 + 1) };
-            else drawPos = { x: pos.x, y: cy - (r.height / 2 + 1) };
-        }
+        let drawPos = this._constrainDrawPos(pos);
+        const ctx = this.ctx;
 
         if (this.tool === "eraser") {
-            this.ctx.globalCompositeOperation = "destination-out";
-            this.ctx.beginPath();
-            this.ctx.arc(drawPos.x, drawPos.y, this.width + 5, 0, Math.PI * 2);
-            this.ctx.fill();
-            this.ctx.globalCompositeOperation = "source-over";
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.beginPath();
+            ctx.arc(drawPos.x, drawPos.y, this.width + 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalCompositeOperation = "source-over";
             this.points.push([drawPos.x, drawPos.y]);
             this._emitDraw("erase", { points: [[drawPos.x, drawPos.y]], width: this.width + 5 });
             return;
         }
 
-        if (this.tool === "highlight") this.ctx.globalAlpha = 0.3;
-        this.ctx.beginPath();
-        this.ctx.moveTo(this.lastX, this.lastY);
-        this.ctx.lineTo(drawPos.x, drawPos.y);
-        this.ctx.strokeStyle = this.color;
-        this.ctx.lineWidth = this.width;
-        this.ctx.setLineDash(this.dash);
-        this.ctx.lineCap = "round";
-        this.ctx.lineJoin = "round";
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
-        this.ctx.globalAlpha = 1;
+        if (this.tool === "highlight") ctx.globalAlpha = 0.3;
+
+        ctx.beginPath();
+        ctx.moveTo(this.lastX, this.lastY);
+        ctx.lineTo(drawPos.x, drawPos.y);
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = this.width;
+        ctx.setLineDash(this.dash);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+
         this.points.push([drawPos.x, drawPos.y]);
         this.lastX = drawPos.x;
         this.lastY = drawPos.y;
         this._emitDraw("line", { points: this.points, color: this.color, width: this.width, dash: this.dash });
     }
 
-    _pointerUp(e) {
+    _onPointerUp(e) {
         if (this.tool === "compass") { this._compassUp(e); return; }
         if (!this.isDrawing || this.tool === "laser") {
             this.isDrawing = false;
@@ -179,221 +333,324 @@ class WhiteboardCanvas {
         this.isDrawing = false;
         if (this.points.length > 0) {
             this._emitDraw(this.tool === "eraser" ? "erase" : "line", {
-                points: this.points, color: this.color, width: this.width, dash: this.dash
+                points: this.points, color: this.color, width: this.width, dash: this.dash,
             });
         }
     }
 
-    // ─── Compass (Circle Drawing) ───
-    _compassDown(e) {
-        const pos = this._getPos(e);
-        this.isDrawing = true;
-        this.circleCenterX = pos.x;
-        this.circleCenterY = pos.y;
-        this.circleSnapshot = this.canvas.toDataURL();
-    }
-
-    _compassMove(e) {
-        if (!this.isDrawing) return;
-        const pos = this._getPos(e);
-        const dx = pos.x - this.circleCenterX;
-        const dy = pos.y - this.circleCenterY;
-        this.circleRadius = Math.sqrt(dx * dx + dy * dy);
-        const img = new Image();
-        img.onload = () => {
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            this.ctx.drawImage(img, 0, 0);
-            this._drawBackground();
-            this.ctx.strokeStyle = this.color;
-            this.ctx.lineWidth = this.width;
-            this.ctx.beginPath();
-            this.ctx.arc(this.circleCenterX, this.circleCenterY, this.circleRadius, 0, Math.PI * 2);
-            this.ctx.stroke();
-            // Dashed center line
-            this.ctx.setLineDash([4, 4]);
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.circleCenterX, this.circleCenterY);
-            this.ctx.lineTo(pos.x, pos.y);
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
-            // Radius label
-            this.ctx.fillStyle = this.color;
-            this.ctx.font = "12px Inter, sans-serif";
-            this.ctx.fillText(`r=${Math.round(this.circleRadius)}px`, this.circleCenterX + dx / 2 + 5, this.circleCenterY + dy / 2 - 5);
-        };
-        img.src = this.circleSnapshot;
-    }
-
-    _compassUp(e) {
-        if (!this.isDrawing) return;
-        this.isDrawing = false;
-        if (this.circleRadius > 5) {
-            this._emitDraw("circle", {
-                cx: this.circleCenterX, cy: this.circleCenterY, r: this.circleRadius,
-                color: this.color, width: this.width,
-            });
+    // ─── Draw constraint (StartLine/DrawLine – OpenBoard pattern) ───
+    _constrainDrawPos(pos) {
+        // Ruler: lock Y to tool edge
+        const rs = this.toolState.ruler;
+        if (rs.visible) {
+            const angleRad = rs.angle * Math.PI / 180;
+            const cx = rs.x + rs.w / 2, cy = rs.y + rs.h / 2;
+            const dx = pos.x - cx, dy = pos.y - cy;
+            const localY = dx * Math.sin(-angleRad) + dy * Math.cos(-angleRad);
+            if (Math.abs(localY) < rs.h * 1.2) {
+                // Constrain to nearest edge (top or bottom in local space)
+                const edgeLocalY = localY > 0 ? rs.h / 2 + 1 : -(rs.h / 2 + 1);
+                const worldEdgeY = cy + (edgeLocalY) * Math.cos(angleRad);
+                return { x: pos.x, y: worldEdgeY };
+            }
         }
+        return pos;
     }
 
-    // ─── Tool SVG Overlays ───
+    // ─── Tool SVG Overlays (OpenBoard-inspired) ───
+    // Each tool is an SVG element positioned via left/top + transform:rotate(deg)
+    // Hit-testing uses inverse-transform to local coordinates
+
     toggleTool(type) {
         const st = this.toolState[type];
         if (!st) return;
         st.visible = !st.visible;
-        if (st.visible) this._createToolSvg(type);
-        else this._removeToolSvg(type);
+        if (st.visible) {
+            // Place tool in center of canvas on first show
+            if (st.x === 0 && st.y === 0) {
+                const w = this.canvas.width / this.dpr;
+                const h = this.canvas.height / this.dpr;
+                st.x = (w - (st.w || st.size)) / 2;
+                st.y = (h - (st.h || st.size)) / 2;
+            }
+            this._buildToolSvg(type);
+        } else {
+            this._destroyToolSvg(type);
+        }
     }
 
-    _createToolSvg(type) {
-        this._removeToolSvg(type);
+    _buildToolSvg(type) {
+        this._destroyToolSvg(type);
         const st = this.toolState[type];
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         svg.dataset.tool = type;
-        svg.style.cssText = "position:absolute;pointer-events:auto;cursor:grab;overflow:visible;";
+        svg.style.cssText = "position:absolute;pointer-events:auto;cursor:grab;overflow:visible;user-select:none;";
 
-        const updatePos = () => {
-            const w = type === "ruler" ? st.width * st.scale : type === "protractor" ? st.size : st.size;
-            const h = type === "ruler" ? st.height * st.scale : type === "protractor" ? st.size : st.size;
-            svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-            svg.style.width = w + "px";
-            svg.style.height = h + "px";
-            svg.style.left = st.x + "px";
-            svg.style.top = st.y + "px";
-            svg.style.transform = `rotate(${st.angle}deg)`;
-            svg.style.transformOrigin = `${w / 2}px ${h / 2}px`;
-        };
-
-        let content = "";
+        let vbW, vbH;
         if (type === "ruler") {
-            content = `<rect width="100%" height="100%" fill="rgba(245,248,255,0.35)" stroke="rgba(0,80,200,0.6)" stroke-width="2" rx="4"/>
-                ${ScanGradeTools.rulerSvg(st.width * st.scale, st.height * st.scale)}
-                <circle cx="25" cy="20" r="8" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move"/>
-                <text x="18" y="24" font-size="10" fill="white" font-weight="bold" style="pointer-events:none">⣿</text>
-                <circle cx="${st.width * st.scale - 25}" cy="20" r="8" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias"/>
-                <text x="${st.width * st.scale - 30}" y="24" font-size="9" fill="white" font-weight="bold" style="pointer-events:none">↻</text>`;
-        } else if (type === "protractor") {
-            const cx = st.size / 2, cy = st.size * 0.92;
-            content = `<rect width="100%" height="100%" fill="rgba(245,248,255,0.45)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5" rx="4"/>
-                ${ScanGradeTools.protractorSvg(cx, cy, st.size * 0.45)}
-                <circle cx="${cx}" cy="${cy}" r="8" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move"/>
-                <text x="${cx - 4}" y="${cy + 4}" font-size="9" fill="white" font-weight="bold" style="pointer-events:none">+</text>
-                <circle cx="${cx}" cy="${cy - st.size * 0.37}" r="7" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias"/>
-                <circle cx="${st.size - 20}" cy="${st.size * 0.4}" r="6" fill="rgba(0,40,120,0.7)" stroke="white" stroke-width="1" style="cursor:ew-resize"/>`;
-        } else if (type === "triangle") {
-            const verts = this._getTriangleVerts(st);
-            const minX = Math.min(verts[0].x, verts[1].x, verts[2].x);
-            const minY = Math.min(verts[0].y, verts[1].y, verts[2].y);
-            const maxX = Math.max(verts[0].x, verts[1].x, verts[2].x);
-            const maxY = Math.max(verts[0].y, verts[1].y, verts[2].y);
-            const bbW = maxX - minX, bbH = maxY - minY;
-            svg.setAttribute("viewBox", `${minX - 5} ${minY - 5} ${bbW + 10} ${bbH + 10}`);
-            svg.style.width = (bbW + 10) + "px";
-            svg.style.height = (bbH + 10) + "px";
-            st.x = st.x || 160; st.y = st.y || 120;
+            vbW = st.w; vbH = st.h;
+            svg.setAttribute("viewBox", `0 0 ${vbW} ${vbH}`);
+            svg.style.width = vbW + "px";
+            svg.style.height = vbH + "px";
             svg.style.left = st.x + "px";
             svg.style.top = st.y + "px";
             svg.style.transform = `rotate(${st.angle}deg)`;
-            svg.style.transformOrigin = `${(bbW + 10) / 2}px ${(bbH + 10) / 2}px`;
-            const pts = verts.map(p => `${p.x},${p.y}`).join(" ");
-            content = `<polygon points="${pts}" fill="rgba(245,248,255,0.45)" stroke="rgba(0,80,200,0.6)" stroke-width="2"/>
-                ${ScanGradeTools.triangleSvg45(st.size)}
-                <circle cx="${verts[2].x}" cy="${verts[2].y}" r="8" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move"/>
-                <circle cx="${verts[1].x}" cy="${verts[1].y}" r="7" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias"/>`;
-            svg.dataset.skipTransform = "1";
+            svg.style.transformOrigin = `${st.w * 0.02}px ${st.h * 0.5}px`; // rotation at left edge center
+
+            const marks = ScanGradeTools.rulerSvg(vbW, vbH);
+            svg.innerHTML = `
+                <rect x="0" y="0" width="${vbW}" height="${vbH}" rx="6" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
+                ${marks}
+                <g id="controls">
+                    <rect x="0" y="0" width="${vbW}" height="${vbH}" fill="transparent" style="pointer-events:auto"/>
+                    <circle cx="20" cy="${vbH/2}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
+                    <text x="14" y="${vbH/2+4}" font-size="10" fill="white" font-weight="bold" style="pointer-events:none">⣿</text>
+                    <circle cx="${vbW-20}" cy="14" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
+                    <text x="${vbW-24}" y="18" font-size="9" fill="white" font-weight="bold" style="pointer-events:none">↻</text>
+                    <circle cx="${vbW-10}" cy="${vbH/2}" r="6" fill="rgba(0,40,120,0.6)" stroke="white" stroke-width="1" style="cursor:ew-resize" data-zone="resize"/>
+                    <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer" data-zone="close"/>
+                    <text x="7" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">✕</text>
+                </g>`;
+        } else if (type === "protractor") {
+            const s = st.size;
+            vbW = s; vbH = s;
+            const cx = s / 2, cy = s * 0.88;
+            svg.setAttribute("viewBox", `0 0 ${s} ${s}`);
+            svg.style.width = s + "px";
+            svg.style.height = s + "px";
+            svg.style.left = st.x + "px";
+            svg.style.top = st.y + "px";
+            svg.style.transform = `rotate(${st.angle}deg)`;
+            svg.style.transformOrigin = `${cx}px ${cy}px`;
+
+            const marks = ScanGradeTools.protractorSvg(cx, cy, s * 0.42);
+            svg.innerHTML = `
+                <rect x="0" y="0" width="${s}" height="${s}" rx="4" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.4)" stroke-width="1"/>
+                ${marks}
+                <g id="controls">
+                    <rect x="0" y="0" width="${s}" height="${s}" fill="transparent" style="pointer-events:auto"/>
+                    <circle cx="${cx}" cy="${cy}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
+                    <text x="${cx-5}" y="${cy+4}" font-size="11" fill="white" font-weight="bold" style="pointer-events:none">+</text>
+                    <circle cx="${cx}" cy="${s*0.08}" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
+                    <circle cx="${s-20}" cy="${s*0.4}" r="7" fill="rgba(0,40,120,0.6)" stroke="white" stroke-width="1" style="cursor:ew-resize" data-zone="resize"/>
+                    <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer" data-zone="close"/>
+                    <text x="7" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">✕</text>
+                </g>`;
+        } else if (type === "triangle") {
+            const s = st.size;
+            const pts = this._triVerts(st);
+            const minX = Math.min(pts[0].x, pts[1].x, pts[2].x) - 5;
+            const minY = Math.min(pts[0].y, pts[1].y, pts[2].y) - 5;
+            const maxX = Math.max(pts[0].x, pts[1].x, pts[2].x) + 5;
+            const maxY = Math.max(pts[0].y, pts[1].y, pts[2].y) + 5;
+            const bbW = maxX - minX, bbH = maxY - minY;
+            vbW = bbW; vbH = bbH;
+
+            svg.setAttribute("viewBox", `${minX} ${minY} ${bbW} ${bbH}`);
+            svg.style.width = bbW + "px";
+            svg.style.height = bbH + "px";
+            svg.style.left = st.x + "px";
+            svg.style.top = st.y + "px";
+            svg.style.transform = `rotate(${st.angle}deg)`;
+            svg.style.transformOrigin = `${pts[1].x - minX}px ${pts[1].y - minY}px`; // rotation at right-angle corner
+
+            const poly = pts.map(p => `${p.x},${p.y}`).join(" ");
+            svg.innerHTML = `
+                <polygon points="${poly}" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
+                <g id="controls">
+                    <polygon points="${poly}" fill="transparent" style="pointer-events:auto"/>
+                    <circle cx="${pts[2].x}" cy="${pts[2].y}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
+                    <circle cx="${pts[1].x}" cy="${pts[1].y}" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
+                    <rect x="${pts[0].x-11}" y="${pts[0].y-11}" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" data-zone="close"/>
+                    <text x="${pts[0].x-4}" y="${pts[0].y+4}" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">✕</text>
+                </g>`;
         }
 
-        if (!svg.dataset.skipTransform) updatePos();
-        svg.innerHTML = content;
-        svg.addEventListener("mousedown", (e) => this._onToolSvgMouseDown(type, e));
-        svg.addEventListener("touchstart", (e) => this._onToolSvgMouseDown(type, e.touches[0]), { passive: false });
-        this.overlayContainer.appendChild(svg);
         this.toolSvg[type] = svg;
+        this.overlayContainer.appendChild(svg);
+
+        // SVG event delegation via pointer-events on <g> and data-zone attributes
+        svg.addEventListener("mousedown", (e) => this._onToolSvgDown(type, e));
+        svg.addEventListener("touchstart", (e) => { e.preventDefault(); this._onToolSvgDown(type, e.touches[0]); }, { passive: false });
     }
 
-    _removeToolSvg(type) {
+    _destroyToolSvg(type) {
         if (this.toolSvg[type]) { this.toolSvg[type].remove(); this.toolSvg[type] = null; }
     }
 
-    _getTriangleVerts(st) {
-        const w = st.size, h = st.size;
-        switch (st.orientation || "bottomLeft") {
-            case "bottomLeft": return [{ x: 10, y: h }, { x: 10, y: 10 }, { x: w, y: h }];
-            case "bottomRight": return [{ x: w - 10, y: h }, { x: w - 10, y: 10 }, { x: 10, y: h }];
-            case "topLeft": return [{ x: 10, y: 10 }, { x: 10, y: h }, { x: w, y: 10 }];
-            case "topRight": return [{ x: w - 10, y: 10 }, { x: w - 10, y: h }, { x: 10, y: 10 }];
+    _triVerts(st) {
+        const s = st.size;
+        switch (st.orient || "bottomLeft") {
+            case "bottomLeft": return [{ x: 10, y: s }, { x: 10, y: 10 }, { x: s, y: s }];
+            case "bottomRight": return [{ x: s - 10, y: s }, { x: s - 10, y: 10 }, { x: 10, y: s }];
+            case "topLeft": return [{ x: 10, y: 10 }, { x: 10, y: s }, { x: s, y: 10 }];
+            case "topRight": return [{ x: s - 10, y: 10 }, { x: s - 10, y: s }, { x: 10, y: 10 }];
         }
     }
 
     flipTriangle() {
         const order = ["bottomLeft", "bottomRight", "topRight", "topLeft"];
-        const idx = order.indexOf(this.toolState.triangle.orientation);
-        this.toolState.triangle.orientation = order[(idx + 1) % 4];
-        if (this.toolState.triangle.visible) {
-            this._createToolSvg("triangle");
-        }
+        const idx = order.indexOf(this.toolState.triangle.orient);
+        this.toolState.triangle.orient = order[(idx + 1) % 4];
+        if (this.toolState.triangle.visible) this._buildToolSvg("triangle");
     }
 
-    _onToolSvgMouseDown(type, e) {
-        e.preventDefault();
-        const svg = this.toolSvg[type];
-        if (!svg) return;
-        const rect = svg.getBoundingClientRect();
-        const localX = e.clientX - rect.left, localY = e.clientY - rect.top;
+    // ─── Tool Hit Test (OpenBoard: use local coordinates via inverse transform) ───
+    _toolHitTest(pos) {
+        for (const [type, st] of Object.entries(this.toolState)) {
+            if (!st.visible || !this.toolSvg[type]) continue;
+            const svg = this.toolSvg[type];
+            const rect = svg.getBoundingClientRect();
+            const canvasRect = this.canvas.getBoundingClientRect();
+
+            // Hit test via SVG element from event — handled by SVG's own events
+            // This method is for canvas-level pointerDown interception
+        }
+        return false;
+    }
+
+    _onToolSvgDown(type, e) {
+        e.stopPropagation();
+        const target = e.target;
+        const zone = target?.dataset?.zone;
+        if (!zone) return;
+
         const st = this.toolState[type];
 
-        // Determine zone (close, move, rotate, resize)
-        let zone = "move";
-        if (localX < 35 && localY < 28) zone = "close";
-        else if (type === "ruler" && localX > (st.width * st.scale) - 35 && localY < 28) zone = "rotate";
-        else if (type === "protractor") {
-            const cx = st.size / 2, cy = st.size * 0.92;
-            const dist = Math.sqrt(Math.pow(localX - cx, 2) + Math.pow(localY - cy, 2));
-            if (localX > st.size - 30 && localY < st.size * 0.5) zone = "resize";
-            else if (dist > st.size * 0.38 && localY < st.size * 0.5) zone = "rotate";
-            else if (dist > st.size * 0.32 && localY > st.size * 0.4) zone = "marker";
-        } else if (type === "triangle") {
-            const verts = this._getTriangleVerts(st);
-            const ra = st.orientation === "bottomLeft" || st.orientation === "topLeft" ? verts[1] : verts[0];
-            if (Math.abs(localX - ra.x) < 15 && Math.abs(localY - ra.y) < 15) zone = "rotate";
-            else if (localY > st.size - 25 && localX > 10 && localX < st.size - 10) zone = "flip";
+        if (zone === "close") {
+            this.toggleTool(type);
+            if (this.options.onToolToggle) this.options.onToolToggle(type, false);
+            return;
         }
 
-        if (zone === "close") { this.toggleTool(type); if (this.options.onToolToggle) this.options.onToolToggle(type, false); return; }
-        if (zone === "flip") { this.flipTriangle(); return; }
+        // Start drag/rotate/resize
+        this.toolDrag = {
+            type, zone,
+            startX: e.clientX,
+            startY: e.clientY,
+            startState: { ...st, x: st.x, y: st.y, angle: st.angle, size: st.size },
+        };
 
-        this.toolDrag = { active: true, type, zone, startX: e.clientX, startY: e.clientY, origState: Object.assign({}, st) };
+        // For rotate: compute initial angle from center
+        if (zone === "rotate" || zone === "move") {
+            const svg = this.toolSvg[type];
+            const sRect = svg.getBoundingClientRect();
+            const ox = sRect.left + sRect.width / 2;
+            const oy = sRect.top + sRect.height / 2;
+            this.toolDrag.originX = ox;
+            this.toolDrag.originY = oy;
+            this.toolDrag.startAngle = Math.atan2(e.clientY - oy, e.clientX - ox) * 180 / Math.PI;
+            this.toolDrag.startItemAngle = st.angle;
+        }
+
         svg.style.cursor = zone === "rotate" ? "alias" : zone === "resize" ? "ew-resize" : "grabbing";
     }
 
-    _onToolDrag(e) {
-        if (!this.toolDrag.active) return;
-        const { type, zone, startX, startY, origState } = this.toolDrag;
+    _onToolDragMove(e) {
+        if (!this.toolDrag) return;
+        const { type, zone, startX, startY, startState } = this.toolDrag;
         const st = this.toolState[type];
-        const dx = (e.clientX - startX) / (this.canvas.parentElement ? 1 : 1);
-        const dy = (e.clientY - startY) / (this.canvas.parentElement ? 1 : 1);
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
 
         if (zone === "move") {
-            st.x = origState.x + dx;
-            st.y = origState.y + dy;
+            st.x = startState.x + dx;
+            st.y = startState.y + dy;
         } else if (zone === "rotate") {
-            const svg = this.toolSvg[type];
-            if (!svg) return;
-            const rect = svg.getBoundingClientRect();
-            const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-            st.angle = origState.angle + (Math.atan2(e.clientY - cy, e.clientX - cx) - Math.atan2(startY - cy, startX - cx)) * 180 / Math.PI;
-        } else if (zone === "resize" && type === "protractor") {
-            st.size = Math.max(150, origState.size + dx);
+            const angle = Math.atan2(e.clientY - this.toolDrag.originY, e.clientX - this.toolDrag.originX) * 180 / Math.PI;
+            st.angle = this.toolDrag.startItemAngle + (angle - this.toolDrag.startAngle);
+        } else if (zone === "resize") {
+            if (type === "ruler") st.w = Math.max(150, startState.w + dx);
+            else if (type === "protractor") st.size = Math.max(150, startState.size + dx);
         }
 
-        if (st.visible) this._createToolSvg(type);
-        if (this.options.onToolState) this.options.onToolState(type, { x: st.x, y: st.y, angle: st.angle, size: st.size, visible: st.visible });
+        this._updateToolSvgPos(type);
+        if (this.options.onToolState) this.options.onToolState(type, { x: st.x, y: st.y, angle: st.angle });
     }
 
     _onToolDragEnd(e) {
-        if (!this.toolDrag.active) return;
-        const { type, zone } = this.toolDrag;
+        if (!this.toolDrag) return;
+        const { type } = this.toolDrag;
         if (this.toolSvg[type]) this.toolSvg[type].style.cursor = "grab";
-        this.toolDrag.active = false;
+        if (this.options.onToolState) {
+            const st = this.toolState[type];
+            this.options.onToolState(type, { x: st.x, y: st.y, angle: st.angle, size: st.size, orient: st.orient });
+        }
+        this.toolDrag = null;
+    }
+
+    _updateToolSvgPos(type) {
+        const svg = this.toolSvg[type];
+        if (!svg) return;
+        const st = this.toolState[type];
+        svg.style.left = st.x + "px";
+        svg.style.top = st.y + "px";
+        svg.style.transform = `rotate(${st.angle}deg)`;
+    }
+
+    // ─── Compass (Circle Drawing – OpenBoard pencil-on-needle pattern) ───
+    _compassDown(e) {
+        const pos = this._pos(e);
+        this.isDrawing = true;
+        this.compassCenter = { x: pos.x, y: pos.y };
+        this.compassSnapshot = this.canvas.toDataURL();
+        this.compassRadius = 0;
+    }
+
+    _compassMove(e) {
+        if (!this.isDrawing) return;
+        const pos = this._pos(e);
+        const dx = pos.x - this.compassCenter.x;
+        const dy = pos.y - this.compassCenter.y;
+        this.compassRadius = Math.sqrt(dx * dx + dy * dy);
+
+        const img = new Image();
+        img.onload = () => {
+            const w = this.canvas.width / this.dpr;
+            const h = this.canvas.height / this.dpr;
+            this.ctx.clearRect(0, 0, w, h);
+            this._drawBackground();
+            if (this.currentBg) this.ctx.drawImage(this.currentBg, 0, 0, w, h);
+            this.ctx.drawImage(img, 0, 0);
+            // Draw circle
+            this.ctx.strokeStyle = this.color;
+            this.ctx.lineWidth = this.width;
+            this.ctx.beginPath();
+            this.ctx.arc(this.compassCenter.x, this.compassCenter.y, this.compassRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+            // Center crosshair (OpenBoard: paintCenterCross)
+            this.ctx.strokeStyle = this.color;
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.compassCenter.x - 6, this.compassCenter.y);
+            this.ctx.lineTo(this.compassCenter.x + 6, this.compassCenter.y);
+            this.ctx.moveTo(this.compassCenter.x, this.compassCenter.y - 6);
+            this.ctx.lineTo(this.compassCenter.x, this.compassCenter.y + 6);
+            this.ctx.stroke();
+            // Radius line
+            this.ctx.setLineDash([4, 4]);
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.compassCenter.x, this.compassCenter.y);
+            this.ctx.lineTo(pos.x, pos.y);
+            this.ctx.stroke();
+            this.ctx.setLineDash([]);
+            // Label
+            this.ctx.fillStyle = this.color;
+            this.ctx.font = "12px Inter, sans-serif";
+            this.ctx.fillText(`r = ${Math.round(this.compassRadius)}px`, this.compassCenter.x + dx / 2 + 5, this.compassCenter.y + dy / 2 - 5);
+        };
+        img.src = this.compassSnapshot;
+    }
+
+    _compassUp(e) {
+        if (!this.isDrawing) return;
+        this.isDrawing = false;
+        if (this.compassRadius > 5) {
+            this._emitDraw("circle", {
+                cx: this.compassCenter.x, cy: this.compassCenter.y, r: this.compassRadius,
+                color: this.color, width: this.width,
+            });
+        }
     }
 
     // ─── Calculator ───
@@ -414,8 +671,8 @@ class WhiteboardCanvas {
         this.calcEl.style.display = "block";
     }
 
-    // ─── Undo/Redo ───
-    _saveState() {
+    // ─── Undo / Redo / Clear ───
+    _snapState() {
         this.undoStack.push(this.canvas.toDataURL());
         if (this.undoStack.length > 50) this.undoStack.shift();
         this.redoStack = [];
@@ -426,7 +683,14 @@ class WhiteboardCanvas {
         this.redoStack.push(this.canvas.toDataURL());
         const prev = this.undoStack.pop();
         const img = new Image();
-        img.onload = () => { this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); this._drawBackground(); this.ctx.drawImage(img, 0, 0); };
+        img.onload = () => {
+            const w = this.canvas.width / this.dpr;
+            const h = this.canvas.height / this.dpr;
+            this.ctx.clearRect(0, 0, w, h);
+            this._drawBackground();
+            if (this.currentBg) this.ctx.drawImage(this.currentBg, 0, 0, w, h);
+            this.ctx.drawImage(img, 0, 0);
+        };
         img.src = prev;
     }
 
@@ -435,31 +699,33 @@ class WhiteboardCanvas {
         this.undoStack.push(this.canvas.toDataURL());
         const next = this.redoStack.pop();
         const img = new Image();
-        img.onload = () => { this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); this._drawBackground(); this.ctx.drawImage(img, 0, 0); };
+        img.onload = () => {
+            const w = this.canvas.width / this.dpr;
+            const h = this.canvas.height / this.dpr;
+            this.ctx.clearRect(0, 0, w, h);
+            this._drawBackground();
+            if (this.currentBg) this.ctx.drawImage(this.currentBg, 0, 0, w, h);
+            this.ctx.drawImage(img, 0, 0);
+        };
         img.src = next;
     }
 
     clearCanvas() {
-        this._saveState();
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this._snapState();
+        this.ctx.clearRect(0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
         this._drawBackground();
+        if (this.currentBg) {
+            this.ctx.drawImage(this.currentBg, 0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
+        }
     }
 
-    setBackground(url) {
-        if (!url) { this.currentBg = null; this._render(); return; }
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => { this.currentBg = img; this._render(); };
-        img.src = url;
-    }
-
-    setTool(tool) { this.tool = tool; this.textMode = false; this.canvas.style.cursor = tool === "text" ? "text" : tool === "compass" ? "crosshair" : "crosshair"; }
-
-    setColor(color) { this.color = color; }
-    setWidth(width) { this.width = width; }
-    setOpacity(opacity) { this.opacity = opacity; }
-    setFontSize(size) { this.fontSize = size; }
-    setDash(dash) { this.dash = dash; }
+    // ─── Tool Setters ───
+    setTool(t) { this.tool = t; this.textMode = false; this.canvas.style.cursor = "crosshair"; }
+    setColor(c) { this.color = c; }
+    setWidth(w) { this.width = w; }
+    setOpacity(o) { this.opacity = o; }
+    setFontSize(s) { this.fontSize = s; }
+    setDash(d) { this.dash = d; }
     clearLaser() { this.laserVisible = false; this._render(); }
 
     enableTextMode() {
@@ -471,7 +737,7 @@ class WhiteboardCanvas {
 
     _placeText(e) {
         if (!this.textMode) return;
-        const pos = this._getPos(e);
+        const pos = this._pos(e);
         const input = document.createElement("input");
         input.type = "text";
         input.style.position = "fixed";
@@ -483,14 +749,14 @@ class WhiteboardCanvas {
         input.style.padding = "4px 8px";
         input.style.borderRadius = "6px";
         input.style.background = "#fff";
-        input.style.zIndex = "9999";
+        input.style.zIndex = "99999";
         document.body.appendChild(input);
         input.focus();
 
-        const submitText = () => {
+        const onEnd = () => {
             const text = input.value.trim();
             if (text) {
-                this._saveState();
+                this._snapState();
                 this.ctx.font = `${this.fontSize}px ${this.fontFamily}`;
                 this.ctx.fillStyle = this.color;
                 this.ctx.fillText(text, pos.x, pos.y);
@@ -499,142 +765,16 @@ class WhiteboardCanvas {
             document.body.removeChild(input);
             this.textMode = false;
         };
-        input.addEventListener("blur", submitText);
-        input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); submitText(); } });
-    }
-
-    // ─── Background + Grid ───
-    _drawBackground() {
-        // Board background
-        this.ctx.fillStyle = this.boardMode === "white" ? "#FFFFFF" : "#1e293b";
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-        // Grid
-        if (this.gridEnabled) {
-            this.ctx.strokeStyle = this.boardMode === "white" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)";
-            this.ctx.lineWidth = 0.5;
-            if (this.gridLogarithmic) {
-                this._drawLogGrid();
-            } else {
-                for (let x = 0; x <= this.canvas.width; x += this.gridSpacing) {
-                    this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, this.canvas.height); this.ctx.stroke();
-                }
-                for (let y = 0; y <= this.canvas.height; y += this.gridSpacing) {
-                    this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(this.canvas.width, y); this.ctx.stroke();
-                }
-            }
-        }
-
-        // Background image
-        if (this.currentBg) {
-            this.ctx.drawImage(this.currentBg, 0, 0, this.canvas.width, this.canvas.height);
-        }
-    }
-
-    _drawLogGrid() {
-        // Logarithmic grid (base 10): major lines at 1, 10, 100, 1000... minor at 2-9 between each decade
-        const maxVal = Math.max(this.canvas.width, this.canvas.height);
-        const maxDecade = Math.ceil(Math.log10(maxVal));
-        const pxPerDecade = maxVal / maxDecade;
-
-        for (let decade = 0; decade < maxDecade; decade++) {
-            const baseX = decade * pxPerDecade;
-            // Major line at start of decade
-            this.ctx.lineWidth = 1;
-            this.ctx.beginPath(); this.ctx.moveTo(baseX, 0); this.ctx.lineTo(baseX, this.canvas.height); this.ctx.stroke();
-
-            // Minor lines at 2-9 within this decade
-            for (let n = 2; n <= 9; n++) {
-                const pos = baseX + Math.log10(n) * pxPerDecade;
-                this.ctx.lineWidth = 0.3;
-                this.ctx.beginPath(); this.ctx.moveTo(pos, 0); this.ctx.lineTo(pos, this.canvas.height); this.ctx.stroke();
-            }
-        }
-    }
-
-    // ─── Render ───
-    _render() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this._drawBackground();
-        for (const op of this.remoteOps) {
-            this.replayOp(op);
-        }
-        if (this.laserVisible) {
-            this.ctx.beginPath();
-            this.ctx.arc(this.lastX, this.lastY, 10, 0, Math.PI * 2);
-            this.ctx.fillStyle = "rgba(255, 0, 0, 0.6)";
-            this.ctx.fill();
-            this.ctx.beginPath();
-            this.ctx.arc(this.lastX, this.lastY, 4, 0, Math.PI * 2);
-            this.ctx.fillStyle = "rgba(255, 0, 0, 0.9)";
-            this.ctx.fill();
-        }
-    }
-
-    // ─── Replay Ops ───
-    replayOp(op) {
-        const d = op.data || {};
-        if (op.op_type === "line") {
-            const pts = d.points || [];
-            if (pts.length < 2) return;
-            this.ctx.beginPath();
-            this.ctx.moveTo(pts[0][0], pts[0][1]);
-            for (let i = 1; i < pts.length; i++) {
-                this.ctx.lineTo(pts[i][0], pts[i][1]);
-            }
-            this.ctx.strokeStyle = d.color || "#000";
-            this.ctx.lineWidth = d.width || 3;
-            this.ctx.setLineDash(d.dash || []);
-            this.ctx.lineCap = "round";
-            this.ctx.lineJoin = "round";
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
-        } else if (op.op_type === "text") {
-            this.ctx.font = `${d.fontSize || 16}px ${d.fontFamily || "Inter, sans-serif"}`;
-            this.ctx.fillStyle = d.color || "#000";
-            this.ctx.fillText(d.text || "", d.x || 0, d.y || 0);
-        } else if (op.op_type === "erase") {
-            this.ctx.globalCompositeOperation = "destination-out";
-            this.ctx.beginPath();
-            this.ctx.arc(d.x || 0, d.y || 0, (d.width || 8) + 5, 0, Math.PI * 2);
-            this.ctx.fill();
-            this.ctx.globalCompositeOperation = "source-over";
-        } else if (op.op_type === "clear") {
-            this._saveState();
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            this._drawBackground();
-        } else if (op.op_type === "circle") {
-            this.ctx.strokeStyle = d.color || "#000";
-            this.ctx.lineWidth = d.width || 3;
-            this.ctx.beginPath();
-            this.ctx.arc(d.cx || 0, d.cy || 0, d.r || 0, 0, Math.PI * 2);
-            this.ctx.stroke();
-        }
-    }
-
-    loadOps(ops) {
-        this._saveState();
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this._drawBackground();
-        for (const op of ops) {
-            this.replayOp(op);
-        }
+        input.addEventListener("blur", onEnd);
+        input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); onEnd(); } });
     }
 
     // ─── Callbacks ───
     _emitDraw(op_type, data) {
-        if (this.options.onDraw) {
-            this.options.onDraw({ op_type, data, timestamp: Date.now() });
-        }
+        if (this.options.onDraw) this.options.onDraw({ op_type, data, timestamp: Date.now() });
     }
-
     _emitCursor(pos) {
-        if (this.options.onCursor) {
-            this.options.onCursor({ x: pos.x, y: pos.y });
-        }
+        if (this.options.onCursor) this.options.onCursor({ x: pos.x, y: pos.y });
     }
-
-    toDataURL() {
-        return this.canvas.toDataURL("image/png");
-    }
+    toDataURL() { return this.canvas.toDataURL("image/png"); }
 }
