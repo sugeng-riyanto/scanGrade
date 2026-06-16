@@ -232,6 +232,78 @@ def _bubble_filled(roi: np.ndarray, threshold: float = 0.40) -> tuple:
     return is_filled, fill_ratio, mean_darkness
 
 
+def _get_nisn_positions():
+    """Compute NISN bubble centers (10 digits × 10 options = 0-9).
+    Matches answer_sheet_generator.py _draw_student_id_grid layout.
+    Returns: list of (digit_idx, option_value, cx, cy), and bubble radius in px.
+    """
+    # NISN grid position (from answer_sheet_generator.py)
+    nisn_x_mm = LJK_MARGIN + 3.0  # from left margin
+    nisn_y_mm = LJK_GRID_TOP_Y - 10.0  # above answer grid
+
+    # Convert to warped image pixel coords (relative to registration marks)
+    nisn_x = _mm_to_px_x(nisn_x_mm - MARK_MARGIN_MM)
+    nisn_y = _mm_to_px_y(nisn_y_mm - MARK_MARGIN_MM)
+
+    id_col_w = 4.8  # mm (ID_COL_W)
+    id_gap_x = 0.6  # mm (ID_GAP_X)
+    id_gap_y = 4.0  # mm (ID_GAP_Y)
+    id_circle_r = 1.6  # mm (ID_CIRCLE_R)
+
+    b_r_px = _mm_to_px_y(id_circle_r)
+    col_step_px = _mm_to_px_x(id_col_w + id_gap_x)
+    row_step_px = _mm_to_px_y(id_gap_y)
+
+    positions = []
+    for digit in range(10):  # 10 digit positions
+        for opt in range(10):  # options 0-9
+            cx = nisn_x + digit * col_step_px + _mm_to_px_x(id_circle_r)
+            cy = nisn_y + opt * row_step_px  # 0 at top, 9 at bottom
+            positions.append((digit, opt, cx, cy))
+
+    return positions, b_r_px
+
+
+def detect_nisn(warped: np.ndarray) -> dict:
+    """Detect NISN from 10-digit bubble grid. Returns dict {digit_idx: option_value}."""
+    positions, b_r = _get_nisn_positions()
+    h, w = warped.shape[:2]
+
+    digits = {}
+    for digit_idx, opt_val, cx, cy in positions:
+        x1 = max(0, cx - b_r - 2)
+        y1 = max(0, cy - b_r - 2)
+        x2 = min(w, cx + b_r + 2)
+        y2 = min(h, cy + b_r + 2)
+        roi = warped[y1:y2, x1:x2]
+        if roi.size == 0:
+            continue
+        filled, ratio, dark = _bubble_filled(roi)
+        if filled:
+            # Store darkest filled option per digit
+            if digit_idx not in digits or dark > digits[digit_idx].get("dark", 0):
+                digits[digit_idx] = {"value": str(opt_val), "dark": dark, "ratio": ratio}
+
+    # Build NISN string
+    nisn_parts = []
+    confidence_sum = 0
+    for i in range(10):
+        if i in digits:
+            nisn_parts.append(digits[i]["value"])
+            confidence_sum += min(1.0, digits[i].get("ratio", 0) / 0.6)
+        else:
+            nisn_parts.append("?")
+
+    nisn = "".join(nisn_parts)
+    avg_conf = confidence_sum / 10 if confidence_sum > 0 else 0
+
+    return {
+        "nisn": nisn,
+        "nisn_confidence": round(avg_conf, 3),
+        "nisn_digits": {str(k): v["value"] for k, v in digits.items()},
+    }
+
+
 def detect_answers(
     warped: np.ndarray,
     total_questions: int = 50,
@@ -352,6 +424,9 @@ def process_scan(image_data: bytes, total_questions: int = 50, preprocess: bool 
 
         warped = perspective_correct(img, corners)
         result = detect_answers(warped, total_questions=total_questions)
+        # Detect NISN from answer sheet
+        nisn_result = detect_nisn(warped)
+        result.update(nisn_result)
         result["preprocessed"] = preprocess
         return result
 
