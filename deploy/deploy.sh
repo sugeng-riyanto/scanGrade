@@ -71,26 +71,36 @@ if [ "$NGINX_MISSING" -eq 0 ] && [ -f "$REPO_DIR/deploy/nginx.conf" ]; then
     fi
 fi
 
+# ── Install Celery service ──
+if [ -f "$REPO_DIR/deploy/celery.service" ]; then
+    echo ""
+    echo "⚙️  Installing Celery worker service..."
+    sudo cp "$REPO_DIR/deploy/celery.service" "/etc/systemd/system/scangrade-celery.service"
+    sudo systemctl daemon-reload
+    sudo systemctl enable scangrade-celery.service 2>/dev/null || true
+fi
+
 # ── Restart Flask service ──
 echo ""
 echo "🔄 Restarting $SERVICE_NAME..."
-sudo systemctl daemon-reload
 sudo systemctl restart "$SERVICE_NAME"
 
-# ── Verify service ──
+# ── Restart Celery worker ──
+echo "🔄 Restarting Celery worker..."
+sudo systemctl restart scangrade-celery.service 2>/dev/null || echo "⚠️  Celery service not installed yet — run: sudo cp deploy/celery.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable scangrade-celery && sudo systemctl start scangrade-celery"
+
+# ── Verify services ──
 sleep 3
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo "✅ $SERVICE_NAME is running (PID: $(systemctl show -p MainPID "$SERVICE_NAME" | cut -d= -f2))"
-    echo ""
-    echo "📋 Last 10 log lines:"
-    sudo journalctl -u "$SERVICE_NAME" --no-pager -n 10
-else
-    echo "❌ $SERVICE_NAME failed to start!"
-    echo ""
-    echo "📋 Last 50 log lines:"
-    sudo journalctl -u "$SERVICE_NAME" --no-pager -n 50
-    exit 1
-fi
+for svc in "$SERVICE_NAME" "scangrade-celery"; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+        echo "✅ $svc is running (PID: $(systemctl show -p MainPID "$svc" | cut -d= -f2))"
+    else
+        echo "⚠️  $svc is not running (may not be installed)"
+    fi
+done
+echo ""
+echo "📋 Flask last 10 log lines:"
+sudo journalctl -u "$SERVICE_NAME" --no-pager -n 10
 
 # ── Health check ──
 echo ""

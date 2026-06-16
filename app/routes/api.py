@@ -252,7 +252,6 @@ def scan_process():
     exam_id = request.form.get("exam_id", "")
     total_questions = int(request.form.get("total_questions", 50))
 
-    # Clean stale temp files
     _cleanup_scan_tmp()
 
     # Save original image to temp
@@ -267,47 +266,85 @@ def scan_process():
     except Exception as e:
         current_app.logger.warning("Failed to save scan temp: %s", e)
 
-    from app.services.omr_service import process_scan, draw_debug_image, preprocess_scan
-
-    # 5. Preprocess + detect
+    # Enqueue async Celery task
     try:
-        result = process_scan(image_data, total_questions=total_questions, preprocess=True)
-    except Exception as e:
-        current_app.logger.error("OMR processing crashed: %s", e, exc_info=True)
+        from app.services.omr_tasks import process_omr_scan
+        task = process_omr_scan.delay(
+            image_path=scan_temp_path,
+            total_questions=total_questions,
+            exam_id=exam_id,
+        )
+        current_app.logger.info("OMR task enqueued: %s", task.id)
         return jsonify({
-            "error": "Gagal memproses gambar. Pastikan foto jelas dan seluruh lembar jawaban terlihat.",
-            "detail": str(e)[:200] if current_app.debug else None,
-        }), 422
+            "async": True,
+            "task_id": task.id,
+            "scan_file_id": scan_file_id,
+            "status": "processing",
+        })
+    except Exception as e:
+        current_app.logger.error("Failed to enqueue OMR task: %s", e)
+        # Fallback to synchronous processing
+        from app.services.omr_service import process_scan, draw_debug_image, preprocess_scan
+        try:
+            result = process_scan(image_data, total_questions=total_questions, preprocess=True)
+        except Exception as e2:
+            return jsonify({"error": f"Gagal memproses: {str(e2)[:200]}"}), 422
 
-    # If no error, grade against answer key if exam_id provided
-    if "error" not in result and exam_id:
-        supabase = get_supabase()
-        exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
-        if exam and exam.get("answer_key"):
-            key = exam["answer_key"]
-            if isinstance(key, str):
-                key = json.loads(key)
-            detected = result.get("answers", {})
-            correct = 0
-            for k, v in key.items():
-                if k in detected and detected[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
-                    correct += 1
-            mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
-            result["score"] = round((correct / max(mcq_count, 1)) * 100, 2)
-            result["correct"] = correct
+        if "error" not in result and exam_id:
+            supabase = get_supabase()
+            exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+            if exam and exam.get("answer_key"):
+                key = exam["answer_key"]
+                if isinstance(key, str):
+                    key = json.loads(key)
+                detected = result.get("answers", {})
+                correct = 0
+                for k, v in key.items():
+                    if k in detected and detected[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
+                        correct += 1
+                mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
+                result["score"] = round((correct / max(mcq_count, 1)) * 100, 2)
+                result["correct"] = correct
 
-    # Generate debug image
-    if "error" not in result:
-        from app.services.omr_service import load_image, find_registration_marks
-        img = load_image(image_data)
-        if img is not None:
-            corners = find_registration_marks(img)
-            debug_jpg = draw_debug_image(img, corners, result.get("answers"))
-            import base64
-            result["debug_image"] = base64.b64encode(debug_jpg).decode()
-            result["scan_file_id"] = scan_file_id
+        if "error" not in result:
+            from app.services.omr_service import load_image, find_registration_marks
+            img = load_image(image_data)
+            if img is not None:
+                corners = find_registration_marks(img)
+                debug_jpg = draw_debug_image(img, corners, result.get("answers"))
+                import base64
+                result["debug_image"] = base64.b64encode(debug_jpg).decode()
+                result["scan_file_id"] = scan_file_id
 
-    return jsonify(result)
+        result["async"] = False
+        return jsonify(result)
+
+
+@api_bp.route("/scan/task/<task_id>", methods=["GET"])
+@login_required
+def scan_task_status(task_id):
+    """Poll Celery task status and get result when done."""
+    from app.celery_app import celery_app
+    task = celery_app.AsyncResult(task_id)
+    response = {"task_id": task_id, "status": task.state}
+
+    if task.state == "PENDING":
+        response["status"] = "pending"
+    elif task.state == "PROCESSING":
+        response["status"] = "processing"
+    elif task.state == "PROGRESS":
+        response["status"] = "processing"
+        response["progress"] = task.info
+    elif task.state == "SUCCESS":
+        response["status"] = "done"
+        response["result"] = task.result
+    elif task.state == "FAILURE":
+        response["status"] = "error"
+        response["error"] = str(task.info)
+        # Clean up task result
+        task.forget()
+
+    return jsonify(response)
 
 
 @api_bp.route("/scan/bulk", methods=["POST"])
