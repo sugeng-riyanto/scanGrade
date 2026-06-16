@@ -1,0 +1,78 @@
+{% set is_scan_section = _source == 'scan' %}
+{% set sub_list = scan_subs if is_scan_section else online_subs %}
+
+<!-- Mobile cards -->
+<div class="sm:hidden space-y-3">
+    {% for s in sub_list %}
+    {% set ans = s.get('answers', {}) if s.get('answers') is mapping else {} %}
+    <div class="border border-stone-200 rounded-xl p-3 space-y-2">
+        <div class="flex items-center justify-between gap-2">
+            <span class="font-extrabold text-stone-800 text-sm truncate">{{ s.student_name or s.student_id[:12] ~ '...' }}</span>
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded-full {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700{% elif s.status == 'published' %}bg-sky-100 text-sky-700{% else %}bg-amber-100 text-amber-700{% endif %}">{{ s.status }}</span>
+        </div>
+        <div class="grid grid-cols-4 gap-1 text-center text-[10px]">
+            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Skor</span><br><span class="font-extrabold text-stone-700">{{ s.score if s.score is not none else '-' }}</span></div>
+            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Penalti</span><br><span class="font-extrabold text-red-500">{{ s.penalty if s.penalty is not none else 0 }}</span></div>
+            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
+            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">NISN</span><br><span class="font-extrabold text-violet-600 text-[9px]">{{ ans.get('_nisn', '-') if is_scan_section else '-' }}</span></div>
+        </div>
+        <div class="flex items-center justify-between pt-1 border-t border-stone-100">
+            <span class="text-[9px] text-stone-400">{{ s.submitted_at|tz if s.submitted_at else '-' }}</span>
+            <div class="flex gap-1.5">
+                <a href="/teacher/grade/{{ s.id }}" class="text-xs font-extrabold text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg hover:bg-orange-100 transition inline-flex items-center gap-1"><i class="fas fa-eye"></i>Detail</a>
+                {% if s.status != 'published' %}
+                <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
+                    <button type="submit" class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition"><i class="fas fa-share"></i></button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Desktop table -->
+<div class="hidden sm:block overflow-x-auto">
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-stone-500 border-b border-stone-200">
+                <th class="pb-3 font-extrabold w-8">#</th>
+                <th class="pb-3 font-extrabold">Siswa</th>
+                <th class="pb-3 font-extrabold text-center">Skor</th>
+                <th class="pb-3 font-extrabold text-center">Penalti</th>
+                <th class="pb-3 font-extrabold text-center">Final</th>
+                {% if is_scan_section %}<th class="pb-3 font-extrabold text-center">NISN</th>{% endif %}
+                <th class="pb-3 font-extrabold text-center">Waktu</th>
+                <th class="pb-3 font-extrabold text-center">Status</th>
+                <th class="pb-3 font-extrabold text-center">Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in sub_list %}
+            {% set ans = s.get('answers', {}) if s.get('answers') is mapping else {} %}
+            <tr class="border-b border-stone-200 last:border-0 hover:bg-orange-50/30 transition">
+                <td class="py-3 font-bold text-stone-600">{{ loop.index }}</td>
+                <td class="py-3 font-extrabold text-stone-800">{{ s.student_name or s.student_id[:12] ~ '...' }}</td>
+                <td class="py-3 font-bold text-stone-600 text-center">{{ s.score if s.score is not none else '-' }}</td>
+                <td class="py-3 font-bold text-red-600 text-center">{{ s.penalty if s.penalty is not none else 0 }}</td>
+                <td class="py-3 font-extrabold text-center {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
+                    {{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}
+                </td>
+                {% if is_scan_section %}<td class="py-3 text-center font-bold text-violet-600 text-xs">{{ ans.get('_nisn', '-') }}</td>{% endif %}
+                <td class="py-3 text-xs font-bold text-stone-500 text-center">{{ s.submitted_at|tz if s.submitted_at else '-' }}</td>
+                <td class="py-3 text-center">
+                    <span class="px-2.5 py-1 text-[10px] font-bold rounded-full {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700{% elif s.status == 'published' %}bg-sky-100 text-sky-700{% else %}bg-amber-100 text-amber-700{% endif %}">{{ s.status }}</span>
+                </td>
+                <td class="py-3 text-center">
+                    <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block"><i class="fas fa-eye mr-1"></i>Detail</a>
+                    {% if s.status != 'published' %}
+                    <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
+                        <button type="submit" class="text-emerald-600 hover:text-emerald-700 font-extrabold text-xs p-2 hover:bg-emerald-50 rounded-xl transition" title="Publish"><i class="fas fa-share"></i></button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
