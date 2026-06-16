@@ -18,7 +18,6 @@
             <input type="file" accept=".pdf,.png,.jpg,.jpeg" id="fu" class="hidden" @change="uploadFile($event)">
             <button @click="document.getElementById('fu').click()" class="btn btn-ghost text-[11px] py-0.5 px-1.5"><i class="fas fa-file-upload"></i></button>
             <button @click="downloadPDF()" class="btn btn-ghost text-[11px] py-0.5 px-1.5"><i class="fas fa-download"></i></button>
-            <button @click="c?.toggleFullscreen()" class="btn btn-ghost text-[11px] py-0.5 px-1.5"><i class="fas fa-expand-arrows-alt"></i></button>
             <button @click="endSession()" class="btn text-[11px] py-0.5 px-1.5 {{ 'bg-red-500 text-white' if whiteboard.status=='active' else 'bg-gray-300 text-gray-500' }}">{{ 'Akhiri' if whiteboard.status=='active' else 'Selesai' }}</button>
         </div>
     </div>
@@ -69,11 +68,6 @@
             <button @click="c.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Kalkulator"><i class="fas fa-calculator"></i></button>
             <hr class="w-5 border-t my-0.5">
             <button @click="snapshot()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Snapshot"><i class="fas fa-camera"></i></button>
-            <hr class="w-5 border-t my-0.5">
-            <span class="text-[10px] font-bold text-gray-400" x-text="((c?._zoom||1)*100).toFixed(0)+'%'"></span>
-            <button @click="c?.zoomIn()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perbesar"><i class="fas fa-search-plus"></i></button>
-            <button @click="c?.zoomOut()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perkecil"><i class="fas fa-search-minus"></i></button>
-            <button @click="c?._resetView()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Reset Zoom"><i class="fas fa-expand"></i></button>
         </div>
 
         <!-- Canvas -->
