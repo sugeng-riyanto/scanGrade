@@ -1,11 +1,9 @@
 import os
 import uuid
 import json
-import fitz
 from io import BytesIO
 from datetime import datetime, timezone
 from flask import current_app, g
-from PIL import Image, ImageDraw
 from app.utils.auth import get_supabase
 
 UPLOAD_DIR = "app/static/uploads/whiteboard"
@@ -198,6 +196,7 @@ def upload_slide_background(whiteboard_id: str, file_obj) -> dict:
     raw = file_obj.read()
 
     if raw[:4] == b"%PDF":
+        import fitz
         doc = fitz.open(stream=raw, filetype="pdf")
         pages = []
         for i in range(len(doc)):
@@ -312,6 +311,7 @@ def list_snapshots(whiteboard_id: str) -> list:
 
 def _replay_ops_on_background(background_path: str, ops: list, output_path: str):
     """Render drawing ops on a background image using Pillow."""
+    from PIL import Image, ImageDraw
     img = Image.open(background_path).convert("RGBA")
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
