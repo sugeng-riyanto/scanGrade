@@ -1,6 +1,0 @@
-Method,Name,Error,Occurrences,First Seen,Last Seen
-GET,GET results list,HTTPError('500 Server Error: Internal Server Error for url: GET results list'),516,2026-06-16T06:56:05Z,2026-06-16T07:05:49Z
-GET,GET exams list,HTTPError('500 Server Error: Internal Server Error for url: GET exams list'),4180,2026-06-16T06:56:04Z,2026-06-16T07:05:50Z
-POST,POST login-user,HTTPError('500 Server Error: Internal Server Error for url: POST login-user'),129,2026-06-16T06:56:03Z,2026-06-16T06:56:35Z
-GET,GET results list (detail),HTTPError('500 Server Error: Internal Server Error for url: GET results list (detail)'),534,2026-06-16T06:56:04Z,2026-06-16T07:05:50Z
-GET,GET dashboard,HTTPError('500 Server Error: Internal Server Error for url: GET dashboard'),2625,2026-06-16T06:56:04Z,2026-06-16T07:05:50Z
