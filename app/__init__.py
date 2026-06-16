@@ -324,10 +324,7 @@ def create_app(env=None):
                 lines = [l.strip() for l in raw if l.strip() and "ALERT" not in l][-200:]
             except Exception:
                 pass
-        try:
-            return render_template("monitor.html", log_lines=lines)
-        except Exception as e:
-            return f"Template error: {str(e)[:200]}", 500
+        return render_template("monitor.html", log_lines=lines)
 
     @app.route("/debug/exam/<exam_id>")
     def debug_exam(exam_id):
