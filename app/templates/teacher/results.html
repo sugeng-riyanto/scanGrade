@@ -2,28 +2,28 @@
 {% block title %}Hasil - ScanGrade{% endblock %}
 {% block page_title %}Hasil Ujian{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-extrabold text-stone-800">Hasil Ujian</h1>
-        <div class="flex gap-2">
+<div class="space-y-4 sm:space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 class="text-xl sm:text-2xl font-extrabold text-stone-800">Hasil Ujian</h1>
+        <div class="flex flex-wrap gap-1.5">
             {% if exams and not exam_id %}
             {% elif exam_id %}
-            <a href="/teacher/export/xlsx?exam_id={{ exam_id }}" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
-                <i class="fas fa-file-excel mr-1 text-emerald-600"></i>XLSX
+            <a href="/teacher/export/xlsx?exam_id={{ exam_id }}" class="border-2 border-stone-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-stone-50 text-[11px] sm:text-sm font-bold text-stone-600 transition whitespace-nowrap">
+                <i class="fas fa-file-excel mr-1 text-emerald-600"></i><span class="hidden sm:inline">XLSX</span>
             </a>
-            <a href="/teacher/export/pdf?exam_id={{ exam_id }}" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
-                <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
+            <a href="/teacher/export/pdf?exam_id={{ exam_id }}" class="border-2 border-stone-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-stone-50 text-[11px] sm:text-sm font-bold text-stone-600 transition whitespace-nowrap">
+                <i class="fas fa-file-pdf mr-1 text-red-600"></i><span class="hidden sm:inline">PDF</span>
             </a>
-            <a href="/teacher/export/bubble-sheet/{{ exam_id }}" class="border-2 border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-50 text-sm font-bold text-stone-600 transition">
-                <i class="fas fa-print mr-1 text-orange-600"></i>Cetak LJK
+            <a href="/teacher/export/bubble-sheet/{{ exam_id }}" class="border-2 border-stone-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-stone-50 text-[11px] sm:text-sm font-bold text-stone-600 transition whitespace-nowrap">
+                <i class="fas fa-print mr-1 text-orange-600"></i><span class="hidden sm:inline">LJK</span>
             </a>
-            <a href="/teacher/exams/{{ exam_id }}/answer-keys" class="border-2 border-amber-200 px-4 py-2 rounded-xl hover:bg-amber-50 text-sm font-bold text-amber-700 transition">
-                <i class="fas fa-key mr-1"></i>Kunci
+            <a href="/teacher/exams/{{ exam_id }}/answer-keys" class="border-2 border-amber-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-amber-50 text-[11px] sm:text-sm font-bold text-amber-700 transition whitespace-nowrap">
+                <i class="fas fa-key mr-1"></i><span class="hidden sm:inline">Kunci</span>
             </a>
             <form method="POST" action="/teacher/publish/{{ exam_id }}" class="inline">
-                <button type="submit" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-4 py-2 rounded-xl hover:from-emerald-600 hover:to-green-600 text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition"
+                <button type="submit" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:from-emerald-600 hover:to-green-600 text-[11px] sm:text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition whitespace-nowrap"
                         onclick="return confirm('Publikasikan nilai ke semua siswa?')">
-                    <i class="fas fa-share mr-1"></i>Publish
+                    <i class="fas fa-share mr-1"></i><span class="hidden sm:inline">Publish</span>
                 </button>
             </form>
             {% endif %}
@@ -47,33 +47,61 @@
         {% endif %}
     </div>
     {% else %}
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
-            <p class="text-sm font-bold text-stone-500">Rata-rata</p>
-            <p class="text-3xl font-extrabold text-orange-600">{{ stats.avg }}</p>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-200">
+            <p class="text-[10px] sm:text-sm font-bold text-stone-500">Rata-rata</p>
+            <p class="text-xl sm:text-3xl font-extrabold text-orange-600">{{ stats.avg }}</p>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
-            <p class="text-sm font-bold text-stone-500">Tertinggi</p>
-            <p class="text-3xl font-extrabold text-emerald-600">{{ stats.max }}</p>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-200">
+            <p class="text-[10px] sm:text-sm font-bold text-stone-500">Tertinggi</p>
+            <p class="text-xl sm:text-3xl font-extrabold text-emerald-600">{{ stats.max }}</p>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
-            <p class="text-sm font-bold text-stone-500">Terendah</p>
-            <p class="text-3xl font-extrabold text-red-600">{{ stats.min }}</p>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-200">
+            <p class="text-[10px] sm:text-sm font-bold text-stone-500">Terendah</p>
+            <p class="text-xl sm:text-3xl font-extrabold text-red-600">{{ stats.min }}</p>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
-            <p class="text-sm font-bold text-stone-500">Peserta</p>
-            <p class="text-3xl font-extrabold text-stone-800">{{ stats.count }}</p>
+        <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-200">
+            <p class="text-[10px] sm:text-sm font-bold text-stone-500">Peserta</p>
+            <p class="text-xl sm:text-3xl font-extrabold text-stone-800">{{ stats.count }}</p>
         </div>
     </div>
 
-    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 border border-stone-100">
-        <div class="px-6 py-4 border-b border-stone-100 flex justify-between items-center">
-            <h2 class="text-lg font-extrabold text-stone-800">Daftar Nilai</h2>
-            <span class="text-sm font-bold text-stone-500">{{ submissions|length }} siswa</span>
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 border border-stone-200">
+        <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-stone-200 flex justify-between items-center">
+            <h2 class="text-sm sm:text-lg font-extrabold text-stone-800">Daftar Nilai</h2>
+            <span class="text-[11px] sm:text-sm font-bold text-stone-500">{{ submissions|length }} siswa</span>
         </div>
-        <div class="p-6">
+        <div class="p-3 sm:p-6">
             {% if submissions %}
-            <div class="overflow-x-auto">
+            <!-- mobile cards -->
+            <div class="sm:hidden space-y-3">
+                {% for s in submissions %}
+                <div class="border border-stone-200 rounded-xl p-3 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="font-extrabold text-stone-800 text-sm">{{ s.student_name or s.student_id[:12] ~ '...' }}</span>
+                        <span class="px-2 py-1 text-[10px] font-bold rounded-full {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700{% elif s.status == 'published' %}bg-sky-100 text-sky-700{% else %}bg-amber-100 text-amber-700{% endif %}">{{ s.status }}</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-center text-[11px]">
+                        <div><span class="text-stone-400">Skor</span><br><span class="font-extrabold text-stone-700">{{ s.score if s.score is not none else '-' }}</span></div>
+                        <div><span class="text-stone-400">Penalti</span><br><span class="font-extrabold text-red-500">{{ s.penalty if s.penalty is not none else 0 }}</span></div>
+                        <div><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
+                    </div>
+                    <div class="flex items-center justify-between pt-1 border-t border-stone-100">
+                        <span class="text-[10px] text-stone-400">{{ s.submitted_at|tz if s.submitted_at else '-' }}</span>
+                        <div class="flex gap-2">
+                            <a href="/teacher/grade/{{ s.id }}" class="text-xs font-extrabold text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg hover:bg-orange-100 transition inline-flex items-center gap-1"><i class="fas fa-eye"></i>Detail</a>
+                            {% if s.status != 'published' %}
+                            <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
+                                <button type="submit" class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition"><i class="fas fa-share"></i></button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <!-- desktop table -->
+            <div class="hidden sm:block overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-stone-500 border-b border-stone-100">
