@@ -1,6 +1,3 @@
-{% set is_scan_section = _source == 'scan' %}
-{% set sub_list = scan_subs if is_scan_section else online_subs %}
-
 <!-- Mobile cards -->
 <div class="sm:hidden space-y-3">
     {% for s in sub_list %}
