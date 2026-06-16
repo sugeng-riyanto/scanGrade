@@ -853,17 +853,26 @@ document.getElementById('btn-save').addEventListener('click', async function() {
         }
         const data = await resp.json();
         if (data.success) {
-            // Redirect to grade page if submission ID available
             const subId = data.submission?.id;
-            if (subId) {
-                window.location.href = '/teacher/grade/' + subId;
-            } else {
-                alert('Disimpan! Skor: ' + data.score + '% (' + data.correct + '/' + data.total + ' benar)');
-                // Reset scan result
-                document.getElementById('scan-result').classList.add('hidden');
-                document.getElementById('btn-save').classList.add('hidden');
-                try { sessionStorage.removeItem('sg_scan_result'); } catch(e) {}
-            }
+            // Show success bar with actions
+            const saveBtn = document.getElementById('btn-save');
+            const scanAgainBtn = document.getElementById('btn-scan-again');
+            saveBtn.classList.add('hidden');
+            saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i>Simpan Hasil';
+            // Replace result with success message
+            const resultDiv = document.getElementById('scan-result');
+            const successBar = document.createElement('div');
+            successBar.className = 'bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between';
+            successBar.innerHTML = '<div><span class="font-extrabold text-emerald-800 text-sm">✅ Tersimpan!</span><span class="text-xs text-emerald-600 ml-2">Skor: ' + data.score + '% (' + data.correct + '/' + data.total + ' benar)</span></div>' +
+                '<div class="flex gap-2">' +
+                (subId ? '<a href="/teacher/grade/' + subId + '" class="text-xs font-bold text-primary-600 hover:text-primary-700 px-3 py-1.5 bg-white rounded-lg border border-primary-200 hover:bg-primary-50 transition inline-flex items-center gap-1"><i class="fas fa-eye"></i>Detail</a>' : '') +
+                '<button onclick="resetScan()" class="text-xs font-bold text-surface-600 px-3 py-1.5 bg-white rounded-lg border border-surface-200 hover:bg-surface-50 transition inline-flex items-center gap-1"><i class="fas fa-redo"></i>Scan Lagi</button></div>';
+            resultDiv.parentNode.insertBefore(successBar, resultDiv);
+            resultDiv.classList.add('hidden');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save mr-1"></i>Simpan Hasil';
+            try { sessionStorage.removeItem('sg_scan_result'); } catch(e) {}
+            return; // skip finally
         } else {
             alert('Gagal menyimpan: ' + (data.error || 'Unknown error'));
         }
@@ -874,6 +883,22 @@ document.getElementById('btn-save').addEventListener('click', async function() {
         btn.innerHTML = '<i class="fas fa-save mr-1"></i>Simpan Hasil';
     }
 });
+
+// Reset scan for next student
+function resetScan() {
+    document.getElementById('scan-result').classList.add('hidden');
+    document.getElementById('btn-save').classList.add('hidden');
+    document.getElementById('answers-tbody').innerHTML = '';
+    document.getElementById('nisn-value').textContent = '';
+    document.getElementById('avg-confidence').classList.add('hidden');
+    document.getElementById('score-badge').classList.add('hidden');
+    document.getElementById('nisn-badge').classList.add('hidden');
+    document.getElementById('needs-review-badge').classList.add('hidden');
+    document.getElementById('debug-image').src = '';
+    _ansData = [];
+    const bar = document.querySelector('.bg-emerald-50.border-emerald-200');
+    if (bar) bar.remove();
+}
 
 // File upload handler
 document.getElementById('file-upload').addEventListener('change', async function(e) {
