@@ -33,8 +33,17 @@ def _format_dt(val, offset=DEFAULT_TZ_OFFSET):
         return str(val)[:19]
 
 
+def _nisn_val(answers, fallback):
+    """Extract readable NISN or fallback to student UUID."""
+    if isinstance(answers, str):
+        return fallback
+    nisn = (answers or {}).get("_nisn", "")
+    if nisn and nisn.replace("?", "") and not nisn.startswith("?" * 8):
+        return nisn
+    return fallback
+
+
 def _parse_answer(ans_data, q_idx, q_type, answer_key):
-    """Extract readable answer from submission JSON."""
     if ans_data is None:
         return "", ""
     if isinstance(ans_data, str):
@@ -119,7 +128,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
         row_data = [
             i,
             s.get("student_name", s.get("student_id", "")[:12]),
-            answers.get("_nisn") or s.get("student_id", ""),
+            _nisn_val(answers, s.get("student_id", "")),
             s.get("score", 0),
             s.get("penalty", 0),
             s.get("final_score", s.get("score", 0)),
@@ -187,7 +196,7 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
                 answers = {}
 
         student_name = s.get("student_name", s.get("student_id", "")[:12])
-        student_nisn = answers.get("_nisn") or ""
+        student_nisn = _nisn_val(s.get("answers", ""), "")
         score = s.get("score", 0)
         penalty = s.get("penalty", 0)
         final_score = s.get("final_score", score)
