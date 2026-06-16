@@ -2,6 +2,7 @@ import io
 import json
 import base64
 import re
+from datetime import datetime, timedelta, timezone
 from flask import send_file
 from PIL import Image as PilImage
 import openpyxl
@@ -10,6 +11,26 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.utils import ImageReader
+
+
+DEFAULT_TZ_OFFSET = 7  # WIB
+
+
+def _format_dt(val, offset=DEFAULT_TZ_OFFSET):
+    """Format ISO datetime string to human-readable local time."""
+    if not val:
+        return "-"
+    try:
+        if isinstance(val, str):
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+        else:
+            dt = val
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(timezone(timedelta(hours=offset)))
+        return dt.strftime("%d %b %Y %H:%M")
+    except (ValueError, TypeError):
+        return str(val)[:19]
 
 
 def _parse_answer(ans_data, q_idx, q_type, answer_key):
@@ -103,7 +124,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
             s.get("penalty", 0),
             s.get("final_score", s.get("score", 0)),
             s.get("status", "submitted"),
-            str(s.get("submitted_at", ""))[:19],
+            _format_dt(s.get("submitted_at", "")),
         ]
 
         for qi in range(total_q):
