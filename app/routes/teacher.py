@@ -756,7 +756,7 @@ def results():
         if user_role == "admin_sekolah" and school_id:
             query = supabase.table("exams").select("id,title").eq("school_id", school_id)
         exams = query.execute().data or []
-        return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams, exam={})
+        return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams, exam={}, scan_subs=[], online_subs=[])
 
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     query = supabase.table("exams").select("id,title,subject").eq("teacher_id", g.user_id)
@@ -770,7 +770,6 @@ def results():
             s["student_name"] = s.pop("profiles").get("full_name", "")
 
     # Deduplicate: keep latest per (student_id, source)
-    # Source: "scan" if answers has _nisn, else "online"
     seen = {}
     for s in sorted(subs, key=lambda x: x.get("submitted_at", "") or "", reverse=True):
         sid = s.get("student_id", "")
@@ -786,6 +785,8 @@ def results():
             s["_source"] = source
             seen[key] = s
     subs = list(seen.values())
+    scan_subs = [s for s in subs if s.get("_source") == "scan"]
+    online_subs = [s for s in subs if s.get("_source") != "scan"]
 
     if subs:
         scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs]
@@ -798,7 +799,7 @@ def results():
     else:
         stats = {"avg": 0, "max": 0, "min": 0, "count": 0}
 
-    return render_template("teacher/results.html", submissions=subs, stats=stats, exam_id=exam_id, exams=exams, exam=exam)
+    return render_template("teacher/results.html", submissions=subs, stats=stats, exam_id=exam_id, exams=exams, exam=exam, scan_subs=scan_subs, online_subs=online_subs)
 
 
 @teacher_bp.route("/grade/<submission_id>")
