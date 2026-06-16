@@ -40,16 +40,22 @@ class WhiteboardCanvas {
     }
 
     _init() {
-        // Set canvas size once from the stage div
-        const stage = document.getElementById("wb-stage");
-        if (stage) {
-            const r = stage.getBoundingClientRect();
-            if (r.width > 1 && r.height > 1) {
-                this.canvas.width = r.width;
-                this.canvas.height = r.height;
-            }
-        }
+        this._resize();
+        window.addEventListener("resize", () => this._resize());
         this._bindEvents();
+        this._render();
+    }
+
+    _resize() {
+        // Size canvas to fill viewport (1:1 CSS pixel ratio)
+        const r = this.canvas.getBoundingClientRect();
+        if (r.width < 10 || r.height < 10) {
+            setTimeout(() => this._resize(), 50);
+            return;
+        }
+        this.canvas.width = r.width;
+        this.canvas.height = r.height;
+        if (this.currentBg) this._calcBgBounds();
         this._render();
     }
 
@@ -59,12 +65,13 @@ class WhiteboardCanvas {
         const iw = this.currentBg.naturalWidth || this.currentBg.width;
         const ih = this.currentBg.naturalHeight || this.currentBg.height;
         if (!iw || !ih) { this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; return; }
-        // PDF rendered at 150 DPI → screen at ~96 DPI → scale by 96/150
-        // This gives actual paper size (A4 ≈ 794×1123 CSS px)
-        const dpiScale = 96 / 150;
-        const bw = iw * dpiScale;
-        const bh = ih * dpiScale;
-        // Center on canvas
+        // PDF at 150 DPI → screen ~96 DPI → actual paper size
+        let bw = iw * 96 / 150, bh = ih * 96 / 150;
+        // If still larger than viewport, scale down to fit
+        if (bw > cw || bh > ch) {
+            const sc = Math.min(cw / bw, ch / bh);
+            bw *= sc; bh *= sc;
+        }
         this.bgBounds = { x: (cw - bw) / 2, y: (ch - bh) / 2, w: bw, h: bh };
     }
 
