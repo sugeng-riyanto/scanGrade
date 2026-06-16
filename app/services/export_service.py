@@ -37,8 +37,9 @@ def _nisn_val(answers, fallback):
     """Extract readable NISN or fallback to student UUID."""
     if isinstance(answers, str):
         return fallback
-    nisn = (answers or {}).get("_nisn", "")
-    if nisn and nisn.replace("?", "") and not nisn.startswith("?" * 8):
+    nisn = (answers or {}).get("_nisn", "") or ""
+    clean = nisn.replace("?", "")
+    if clean and len(clean) >= 4:  # at least 4 digits detected
         return nisn
     return fallback
 
