@@ -219,34 +219,13 @@ class WhiteboardCanvas {
         img.crossOrigin = "anonymous";
         img.onload = () => {
             this.currentBg = img;
-            const iw = img.naturalWidth || img.width || 0;
-            const ih = img.naturalHeight || img.height || 0;
-            if (!iw || !ih) { this._render(); return; }
-
-            const actualW = iw * 96 / 150;
-            const actualH = ih * 96 / 150;
-
-            // 1. Reset zoom, set stage to PDF actual size
-            this._zoom = 1;
-            const stage = this.canvas.parentElement;
-            if (stage) {
-                stage.style.width = actualW + "px";
-                stage.style.height = actualH + "px";
-            }
-            this._resize();
-
-            // 2. Auto-zoom to fit viewport (this resizes stage again)
-            if (stage && this.canvas.width > 0) {
-                const fitZoom = Math.min(
-                    (this.canvas.width * 0.9) / actualW,
-                    (this.canvas.height * 0.9) / actualH
-                );
-                this.setZoom(Math.max(0.25, Math.min(5, fitZoom)));
-            }
-
-            // 3. NOW compute bgBounds with the final canvas dimensions
-            this.bgBounds = { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
-
+            // Fit image within the current canvas, preserving aspect ratio (contain)
+            const cw = this.canvas.width, ch = this.canvas.height;
+            const iw = img.naturalWidth || img.width || 1;
+            const ih = img.naturalHeight || img.height || 1;
+            const sc = Math.min(cw / iw, ch / ih);
+            const bw = iw * sc, bh = ih * sc;
+            this.bgBounds = { x: (cw - bw) / 2, y: (ch - bh) / 2, w: bw, h: bh };
             this._render();
         };
         img.src = url;
