@@ -110,7 +110,7 @@ def create_app(env=None):
     app.extensions["supabase_auth"] = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY)
 
     # SocketIO initialization (threading mode — no eventlet needed)
-    socketio.init_app(app, cors_allowed_origins="*", async_mode='threading')
+    socketio.init_app(app, cors_allowed_origins="*")
     from app.routes.whiteboard_socket import register_socket_events
     register_socket_events(socketio)
     app.extensions["socketio"] = socketio
