@@ -1,5 +1,6 @@
 import io
 import os
+import json
 import uuid
 import time
 import threading
@@ -267,6 +268,8 @@ def scan_process():
         exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
         if exam and exam.get("answer_key"):
             key = exam["answer_key"]
+            if isinstance(key, str):
+                key = json.loads(key)
             detected = result.get("answers", {})
             correct = 0
             for k, v in key.items():
