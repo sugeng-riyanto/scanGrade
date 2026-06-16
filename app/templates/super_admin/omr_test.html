@@ -3,9 +3,14 @@
 {% block page_title %}Uji Coba OMR{% endblock %}
 {% block head_extra %}
 <style>
-.stat-card { background: linear-gradient(135deg, #fff 0%, #f8fafc 100%); transition: all 0.2s; }
+.stat-card { background: linear-gradient(135deg, #fff 0%, #f8fafc 100%); transition: all 0.2s; border: 1px solid #e2e8f0; }
 .stat-card:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(0,0,0,0.06); }
-.dark .stat-card { background: linear-gradient(135deg, #1e2038 0%, #232540 100%); }
+.dark .stat-card { background: linear-gradient(135deg, #1e2038 0%, #232540 100%) !important; border-color: #2d3050 !important; }
+.dark .stat-card .text-surface-800 { color: #e2e8f0 !important; }
+.chart-card { background: #fff; border: 1px solid #e2e8f0; }
+.dark .chart-card { background: #1e2038 !important; border-color: #2d3050 !important; }
+.dark .chart-card h4 { color: #e2e8f0 !important; }
+.dark .chart-card p { color: #8892b0 !important; }
 @media (max-width:640px) { .chart-grid { grid-template-columns: 1fr !important; } }
 </style>
 {% endblock %}
@@ -58,17 +63,17 @@
 
   <!-- Charts -->
   <div id="charts-area" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-4 hover:shadow-md transition">
+    <div class="chart-card rounded-xl p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center"><i class="fas fa-chart-pie text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Success Rate</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Proporsi scan berhasil vs gagal. Idealnya &gt;95% success — jika rendah, periksa pencahayaan atau fokus kamera.</p>
       <canvas id="chart-pie" height="140"></canvas>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-4 hover:shadow-md transition">
+    <div class="chart-card rounded-xl p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-primary-400 to-blue-500 flex items-center justify-center"><i class="fas fa-chart-bar text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Distribusi Keyakinan</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Sebaran confidence 0-100%. <span class="text-emerald-600 font-bold">Hijau</span> = yakin, <span class="text-amber-600 font-bold">kuning</span> = ragu, <span class="text-red-500 font-bold">merah</span> = perlu review. Target: &gt;70% di &ge;80%.</p>
       <canvas id="chart-histogram" height="140"></canvas>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-4 hover:shadow-md transition">
+    <div class="chart-card rounded-xl p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center"><i class="fas fa-layer-group text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Tingkat Deteksi</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Jumlah bubble terdeteksi per file. Semua bar harus mencapai garis total soal — jika tidak, geometry mungkin meleset.</p>
       <canvas id="chart-detection" height="140"></canvas>
