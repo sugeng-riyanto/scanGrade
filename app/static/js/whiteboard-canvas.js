@@ -45,6 +45,27 @@ class WhiteboardCanvas {
         window.addEventListener("resize", () => this._resize());
     }
 
+    // ─── Zoom (via stage sizing, keeps canvas pixels at 2000x2000) ───
+    setZoom(v) {
+        const z = Math.max(0.25, Math.min(5, parseFloat(v) || 1));
+        const stage = this.canvas.parentElement;
+        if (!stage) return;
+        stage.style.width = (2000 * z) + "px";
+        stage.style.height = (2000 * z) + "px";
+        // Recalculate canvas dimensions from new stage size
+        this._resize();
+        if (this.options.onZoom) this.options.onZoom(z);
+    }
+    zoomIn() {
+        const z = parseFloat(this.canvas.parentElement?.style.width) / 2000 || 1;
+        this.setZoom(z * 1.25);
+    }
+    zoomOut() {
+        const z = parseFloat(this.canvas.parentElement?.style.width) / 2000 || 1;
+        this.setZoom(z / 1.25);
+    }
+    zoomReset() { this.setZoom(1); }
+
     _waitForSize() {
         if (this.canvas.clientWidth > 10 && this.canvas.clientHeight > 10) {
             this._resize();

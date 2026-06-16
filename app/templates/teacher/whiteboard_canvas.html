@@ -68,6 +68,11 @@
             <button @click="c.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Kalkulator"><i class="fas fa-calculator"></i></button>
             <hr class="w-5 border-t my-0.5">
             <button @click="snapshot()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Snapshot"><i class="fas fa-camera"></i></button>
+            <hr class="w-5 border-t my-0.5">
+            <span class="text-[10px] font-bold text-gray-400" x-text="zoomPct"></span>
+            <button @click="c?.zoomIn()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perbesar"><i class="fas fa-search-plus"></i></button>
+            <button @click="c?.zoomOut()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perkecil"><i class="fas fa-search-minus"></i></button>
+            <button @click="c?.zoomReset()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Reset"><i class="fas fa-expand"></i></button>
         </div>
 
         <!-- Canvas -->
@@ -175,6 +180,7 @@ function whiteboardCanvas() {
         slides: {{ slides | tojson | safe }},
         members: {{ members | tojson | safe }},
         slideIdx: 0, t: "pen", col: "#000000", pw: 0.75, onlineCount: 0,
+        get zoomPct() { const s = this.c?.canvas?.parentElement?.style; return s ? Math.round(parseFloat(s.width)/2000*100)+'%' : '100%'; },
         c: null, ws: null, timer: null, hb: null,
         boardMode: "white", g: false, gridSpacing: 50, gridLog: false,
         rulerOn: false, rulerX: 60, rulerY: 80, rulerAngle: 0,
