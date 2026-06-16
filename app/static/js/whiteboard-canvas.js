@@ -64,23 +64,30 @@ class WhiteboardCanvas {
     }
 
     _beginFrame() {
-        // Transform drawing coords → canvas pixel coords (zoom + pan + DPR)
+        const ed = this._effectiveDpr();
         const z = this.zoom, px = this.panX, py = this.panY;
-        this.ctx.setTransform(this.dpr * z, 0, 0, this.dpr * z, this.dpr * px, this.dpr * py);
+        this.ctx.setTransform(ed * z, 0, 0, ed * z, ed * px, ed * py);
     }
 
     // Convert screen coords to canvas-logical coords (accounting for zoom/pan)
     _pos(e) {
         const src = e.touches ? e.touches[0] : e;
         const r = this.canvas.getBoundingClientRect();
-        // Get canvas pixel position from CSS mouse position
-        const px = (src.clientX - r.left) * (this.canvas.width / r.width);
-        const py = (src.clientY - r.top) * (this.canvas.height / r.height);
-        // Invert the display transform to get document coordinates
+        // Effective DPR from actual canvas vs CSS size (not window.devicePixelRatio)
+        const effectiveDpr = this.canvas.width / r.width;
+        const px = (src.clientX - r.left) * effectiveDpr;
+        const py = (src.clientY - r.top) * effectiveDpr;
+        // Invert the display transform: canvas_pixel = docX * zoom * dpr + panX * dpr
+        // docX = (canvas_pixel - panX * dpr) / (zoom * dpr)
         return {
-            x: (px - this.panX * this.dpr) / (this.zoom * this.dpr),
-            y: (py - this.panY * this.dpr) / (this.zoom * this.dpr),
+            x: (px - this.panX * effectiveDpr) / (this.zoom * effectiveDpr),
+            y: (py - this.panY * effectiveDpr) / (this.zoom * effectiveDpr),
         };
+    }
+
+    _effectiveDpr() {
+        const r = this.canvas.getBoundingClientRect();
+        return r.width > 0 ? this.canvas.width / r.width : this.dpr;
     }
 
     _bindEvents() {
@@ -130,9 +137,10 @@ class WhiteboardCanvas {
         const delta = -e.deltaY * 0.001;
         const factor = 1 + delta;
         const newZoom = Math.max(0.1, Math.min(10, this.zoom * factor));
-        // Zoom toward mouse position (CSS coords)
+        // Zoom toward mouse position
         const rect = this.canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        // Pan keeps the point under the cursor stationary
         this.panX = mx - (mx - this.panX) * (newZoom / this.zoom);
         this.panY = my - (my - this.panY) * (newZoom / this.zoom);
         this.zoom = newZoom;
