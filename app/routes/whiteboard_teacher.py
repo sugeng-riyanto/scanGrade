@@ -46,6 +46,13 @@ def whiteboard_canvas(whiteboard_id):
     wb = get_whiteboard(whiteboard_id)
     if not wb:
         return render_template("errors/404.html"), 404
+    # Parse display_settings JSON field
+    ds = wb.get("display_settings")
+    if isinstance(ds, str):
+        try: wb["display_settings"] = json.loads(ds)
+        except: wb["display_settings"] = {}
+    elif not isinstance(ds, dict):
+        wb["display_settings"] = {}
     slides = list_slides(whiteboard_id)
     members = get_members(whiteboard_id)
     return render_template("teacher/whiteboard_canvas.html", whiteboard=wb, slides=slides, members=members)
@@ -239,6 +246,22 @@ def api_save_snapshot(whiteboard_id):
         return jsonify({"error": "Image data required"}), 400
     result = save_snapshot(whiteboard_id, slide_number, image_data)
     return jsonify({"success": True, "snapshot": result})
+
+
+@whiteboard_teacher_bp.route("/api/whiteboard/<whiteboard_id>/display-settings", methods=["POST"])
+@login_required
+@guru_required
+@require_school_access("whiteboards", "whiteboard_id")
+def api_display_settings(whiteboard_id):
+    data = request.get_json() or {}
+    settings = {
+        "board_mode": data.get("board_mode", "white"),
+        "grid_enabled": data.get("grid_enabled", False),
+        "grid_spacing": data.get("grid_spacing", 50),
+        "grid_logarithmic": data.get("grid_logarithmic", False),
+    }
+    get_supabase().table("whiteboards").update({"display_settings": json.dumps(settings)}).eq("id", whiteboard_id).execute()
+    return jsonify({"success": True})
 
 
 @whiteboard_teacher_bp.route("/api/class/<class_id>/students")

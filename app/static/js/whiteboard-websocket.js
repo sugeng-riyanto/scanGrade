@@ -57,6 +57,14 @@ class WhiteboardSocket {
             if (this.options.onTimerUpdate) this.options.onTimerUpdate(data);
         });
 
+        this.socket.on("tool_state_update", (data) => {
+            if (this.options.onToolStateUpdate) this.options.onToolStateUpdate(data);
+        });
+
+        this.socket.on("display_settings_update", (data) => {
+            if (this.options.onDisplaySettingsUpdate) this.options.onDisplaySettingsUpdate(data);
+        });
+
         this.socket.on("reaction_broadcast", (data) => {
             if (this.options.onReaction) this.options.onReaction(data);
         });
@@ -137,7 +145,19 @@ class WhiteboardSocket {
         if (!this.socket || !this.connected) return;
         this.socket.emit("timer_sync", { whiteboard_id: this.whiteboardId, seconds, running });
     }
+
+    sendToolState(type, state) {
+        if (!this.socket || !this.connected) return;
+        this.socket.emit("tool_state", { whiteboard_id: this.whiteboardId, tool: type, state });
+    }
+
+    sendDisplaySettings(settings) {
+        if (!this.socket || !this.connected) return;
+        this.socket.emit("display_settings", { whiteboard_id: this.whiteboardId, ...settings });
+    }
 }
+
+/* Heartbeat: every 5 seconds */
 
 /* Heartbeat: every 5 seconds */
 function startHeartbeat(ws) {
