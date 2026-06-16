@@ -365,104 +365,35 @@ def scan_bulk():
 
     _cleanup_scan_tmp()
 
-    from app.services.omr_service import process_scan, load_image, find_registration_marks
+    # Save ZIP to temp
+    zip_id = str(uuid.uuid4())[:8]
+    zip_dir = os.path.join(UPLOAD_SCAN_DIR, "tmp")
+    os.makedirs(zip_dir, exist_ok=True)
+    zip_path = os.path.join(zip_dir, f"bulk_{zip_id}.zip")
+    archive_file.save(zip_path)
 
-    results = []
-    errors = []
-    temp_dir = os.path.join(UPLOAD_SCAN_DIR, "bulk_tmp", str(uuid.uuid4())[:12])
-    os.makedirs(temp_dir, exist_ok=True)
-
+    # Enqueue async Celery task
     try:
-        with zipfile.ZipFile(archive_file, "r") as zf:
-            image_files = [n for n in zf.namelist() if n.lower().endswith((".jpg", ".jpeg", ".png"))]
-            if not image_files:
-                return jsonify({"error": "Tidak ditemukan file gambar (.jpg/.png) dalam ZIP"}), 422
-
-            for fname in sorted(image_files):
-                try:
-                    raw = zf.read(fname)
-                    image_data = raw
-
-                    # Validate image via Pillow
-                    from PIL import Image
-                    buf = io.BytesIO(raw)
-                    img_pil = Image.open(buf)
-                    img_pil.verify()
-                    buf.seek(0)
-                    img_pil = Image.open(buf)
-                    clean_buf = io.BytesIO()
-                    fmt = "PNG" if fname.lower().endswith(".png") else "JPEG"
-                    if fmt == "JPEG" and img_pil.mode != "RGB":
-                        img_pil = img_pil.convert("RGB")
-                    img_pil.save(clean_buf, format=fmt)
-                    image_data = clean_buf.getvalue()
-
-                    # Save original image to temp
-                    scan_file_id = str(uuid.uuid4())[:8]
-                    scan_ext = ".png" if fmt == "PNG" else ".jpg"
-                    scan_tmp = os.path.join(UPLOAD_SCAN_DIR, "tmp", scan_file_id + scan_ext)
-                    os.makedirs(os.path.join(UPLOAD_SCAN_DIR, "tmp"), exist_ok=True)
-                    with open(scan_tmp, "wb") as sf:
-                        sf.write(image_data)
-
-                    # OMR process
-                    omr_result = process_scan(image_data, total_questions=total_questions, preprocess=True)
-
-                    entry = {
-                        "filename": fname,
-                        "scan_file_id": scan_file_id,
-                        "nisn": omr_result.get("nisn", "????????"),
-                        "nisn_confidence": omr_result.get("nisn_confidence", 0),
-                        "answers": omr_result.get("answers", {}),
-                        "detected": omr_result.get("detected", 0),
-                        "confidence": omr_result.get("confidence", {}),
-                        "avg_confidence": omr_result.get("avg_confidence", 0),
-                        "needs_review": omr_result.get("needs_review", []),
-                        "error": omr_result.get("error"),
-                    }
-
-                    # Grade if exam_id provided
-                    if exam_id and "error" not in omr_result:
-                        supabase = get_supabase()
-                        exam = supabase.table("exams").select("answer_key").eq("id", exam_id).single().execute().data
-                        if exam and exam.get("answer_key"):
-                            key = exam["answer_key"]
-                            if isinstance(key, str):
-                                key = json.loads(key)
-                            detected = omr_result.get("answers", {})
-                            correct = 0
-                            for k, v in key.items():
-                                if k in detected and detected[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
-                                    correct += 1
-                            mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
-                            entry["score"] = round((correct / max(mcq_count, 1)) * 100, 2)
-                            entry["correct"] = correct
-                            entry["total"] = mcq_count
-
-                    if omr_result.get("error"):
-                        errors.append(entry)
-                    else:
-                        results.append(entry)
-
-                except Exception as e:
-                    errors.append({"filename": fname, "error": str(e)[:150]})
-
-    except zipfile.BadZipFile:
-        return jsonify({"error": "File ZIP rusak atau tidak valid"}), 422
+        from app.services.omr_tasks import process_bulk_scan
+        task = process_bulk_scan.delay(
+            zip_path=zip_path,
+            total_questions=total_questions,
+            exam_id=exam_id,
+        )
+        current_app.logger.info("Bulk OMR task enqueued: %s (%d images)", task.id, 0)
+        return jsonify({
+            "async": True,
+            "task_id": task.id,
+            "status": "processing",
+        })
     except Exception as e:
-        return jsonify({"error": f"Gagal memproses ZIP: {str(e)[:200]}"}), 500
-    finally:
-        import shutil
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-    return jsonify({
-        "success": True,
-        "total": len(results) + len(errors),
-        "processed": len(results),
-        "failed": len(errors),
-        "results": results,
-        "errors": errors,
-    })
+        current_app.logger.error("Failed to enqueue bulk task: %s", e)
+        # Fallback: remove temp ZIP and return error
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+        return jsonify({"error": "Gagal mengantrekan pemrosesan. Coba lagi."}), 500
 
 
 @api_bp.route("/scan/bulk-save", methods=["POST"])
