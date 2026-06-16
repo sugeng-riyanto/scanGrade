@@ -34,14 +34,14 @@ def _format_dt(val, offset=DEFAULT_TZ_OFFSET):
 
 
 def _nisn_val(answers, fallback):
-    """Extract readable NISN or fallback to student UUID."""
+    """Extract readable NISN or '-' if not detected."""
     if isinstance(answers, str):
-        return fallback
+        return "-"
     nisn = (answers or {}).get("_nisn", "") or ""
     clean = nisn.replace("?", "")
-    if clean and len(clean) >= 4:  # at least 4 digits detected
+    if clean and len(clean) >= 4:
         return nisn
-    return fallback
+    return "-"
 
 
 def _parse_answer(ans_data, q_idx, q_type, answer_key):
@@ -129,7 +129,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
         row_data = [
             i,
             s.get("student_name", s.get("student_id", "")[:12]),
-            _nisn_val(answers, s.get("student_id", "")),
+            _nisn_val(answers, ""),
             s.get("score", 0),
             s.get("penalty", 0),
             s.get("final_score", s.get("score", 0)),
