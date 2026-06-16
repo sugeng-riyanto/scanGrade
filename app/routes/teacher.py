@@ -769,6 +769,23 @@ def results():
         if s.get("profiles"):
             s["student_name"] = s.pop("profiles").get("full_name", "")
 
+    # Deduplicate: keep latest per (student_id, source)
+    # Source: "scan" if answers has _nisn, else "online"
+    seen = {}
+    for s in sorted(subs, key=lambda x: x.get("submitted_at", "") or "", reverse=True):
+        sid = s.get("student_id", "")
+        ans = s.get("answers") or {}
+        if isinstance(ans, str):
+            try:
+                ans = json.loads(ans)
+            except Exception:
+                ans = {}
+        source = "scan" if isinstance(ans, dict) and ans.get("_nisn") else "online"
+        key = (sid, source)
+        if key not in seen:
+            seen[key] = s
+    subs = list(seen.values())
+
     if subs:
         scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs]
         stats = {
