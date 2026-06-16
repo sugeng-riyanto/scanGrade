@@ -66,6 +66,9 @@ def dashboard():
     completed_exams = []
     all_scores = []
     for s in subs:
+        # Only show submitted/graded/published in dashboard (hide drafts)
+        if s.get("status") in ("draft",):
+            continue
         if s.get("exams"):
             s["exam"] = s.pop("exams")
         s.setdefault("is_hidden", False)
