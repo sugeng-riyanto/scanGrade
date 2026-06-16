@@ -40,21 +40,27 @@ class WhiteboardCanvas {
     }
 
     _init() {
-        this._resize();
-        window.addEventListener("resize", () => this._resize());
         this._bindEvents();
-        this._render();
+        // Wait for layout then resize
+        const tryResize = () => {
+            const p = this.canvas.parentElement;
+            if (!p || p.clientWidth < 10) { setTimeout(tryResize, 50); return; }
+            this._resize();
+        };
+        tryResize();
+        window.addEventListener("resize", () => this._resize());
     }
 
     _resize() {
-        // Size canvas to fill viewport (1:1 CSS pixel ratio)
-        const r = this.canvas.getBoundingClientRect();
-        if (r.width < 10 || r.height < 10) {
+        const p = this.canvas.parentElement;
+        if (!p) return;
+        const w = p.clientWidth, h = p.clientHeight;
+        if (w < 10 || h < 10) {
             setTimeout(() => this._resize(), 50);
             return;
         }
-        this.canvas.width = r.width;
-        this.canvas.height = r.height;
+        this.canvas.width = w;
+        this.canvas.height = h;
         if (this.currentBg) this._calcBgBounds();
         this._render();
     }
