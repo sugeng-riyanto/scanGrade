@@ -223,11 +223,10 @@ class WhiteboardCanvas {
             const ih = img.naturalHeight || img.height || 0;
             if (!iw || !ih) { this._render(); return; }
 
-            // PDF at 150 DPI → screen ~96 DPI → actual paper size
             const actualW = iw * 96 / 150;
             const actualH = ih * 96 / 150;
 
-            // Reset zoom to 1x, set stage to actual paper size
+            // 1. Reset zoom, set stage to PDF actual size
             this._zoom = 1;
             const stage = this.canvas.parentElement;
             if (stage) {
@@ -236,17 +235,17 @@ class WhiteboardCanvas {
             }
             this._resize();
 
-            // Image fills the canvas 1:1
-            this.bgBounds = { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
-
-            // Auto-zoom to fit viewport (90% margin)
+            // 2. Auto-zoom to fit viewport (this resizes stage again)
             if (stage && this.canvas.width > 0) {
-                const zoom = Math.min(
+                const fitZoom = Math.min(
                     (this.canvas.width * 0.9) / actualW,
                     (this.canvas.height * 0.9) / actualH
                 );
-                this.setZoom(Math.max(0.25, Math.min(5, zoom)));
+                this.setZoom(Math.max(0.25, Math.min(5, fitZoom)));
             }
+
+            // 3. NOW compute bgBounds with the final canvas dimensions
+            this.bgBounds = { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
 
             this._render();
         };
