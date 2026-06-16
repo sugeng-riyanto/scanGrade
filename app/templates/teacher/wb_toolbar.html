@@ -1,15 +1,36 @@
-<!-- wb_toolbar.html — shared toolbar buttons, used in desktop (left/top/bottom) and mobile -->
-<button @click="setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Pena"><i class="fas fa-pen"></i></button>
-<button @click="setTool('line')" :class="t==='line'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Garis Lurus (0.5px)"><i class="fas fa-minus"></i></button>
-<button @click="setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Penghapus"><i class="fas fa-eraser"></i></button>
-<button @click="textMode()" :class="t==='text'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Teks"><i class="fas fa-font"></i></button>
-<button @click="setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Stabilo"><i class="fas fa-highlighter"></i></button>
-<button @click="setTool('laser')" :class="t==='laser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Laser"><i class="fas fa-crosshairs"></i></button>
+<!-- wb_toolbar.html — shared toolbar with text labels + grid options -->
+<button @click="setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Pena">
+    <i class="fas fa-pen"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Pena</span>
+</button>
+<button @click="setTool('line')" :class="t==='line'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Garis Lurus (0.5px)">
+    <i class="fas fa-minus"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Garis</span>
+</button>
+<button @click="setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Penghapus">
+    <i class="fas fa-eraser"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Hapus</span>
+</button>
+<button @click="textMode()" :class="t==='text'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Teks">
+    <i class="fas fa-font"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Teks</span>
+</button>
+<button @click="setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Stabilo">
+    <i class="fas fa-highlighter"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Stabilo</span>
+</button>
+<button @click="setTool('laser')" :class="t==='laser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Laser Pointer">
+    <i class="fas fa-crosshairs"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Laser</span>
+</button>
 <span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
 <input type="color" x-model="col" @input="c.setColor(col)" class="w-5 h-5 md:w-6 md:h-6 rounded cursor-pointer border-0 p-0 shrink-0" title="Warna">
 <div x-data="{o:false}" class="relative shrink-0">
-    <button @click="o=!o" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-[9px] font-bold text-gray-500 hover:bg-primary-50" title="Ukuran"><span x-text="pw.toFixed(1)"></span></button>
-    <div x-show="o" @click.outside="o=false" class="absolute z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-2 w-36" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0 md:bottom-auto'" style="display:none">
+    <button @click="o=!o" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-[9px] font-bold text-gray-500 hover:bg-primary-50 relative group" title="Ukuran Pena">
+        <span x-text="pw.toFixed(1)"></span>
+        <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Ukuran</span>
+    </button>
+    <div x-show="o" @click.outside="o=false" class="absolute z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-2 w-36" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0'" style="display:none">
         <input type="range" x-model="pw" @input="c.setWidth(pw)" min="0.1" max="20" step="0.1" class="w-full">
         <div class="flex flex-wrap gap-0.5 mt-1">
             <button @click="pw=0.1;c.setWidth(0.1);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.1</button>
@@ -23,20 +44,72 @@
     </div>
 </div>
 <span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
-<button @click="c.undo()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Undo"><i class="fas fa-undo"></i></button>
-<button @click="c.redo()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Redo"><i class="fas fa-redo"></i></button>
-<button @click="c.clearCanvas()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-red-500 hover:bg-red-50 shrink-0" title="Bersihkan"><i class="fas fa-trash"></i></button>
+<button @click="c.undo()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0 relative group" title="Undo">
+    <i class="fas fa-undo"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Undo</span>
+</button>
+<button @click="c.redo()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0 relative group" title="Redo">
+    <i class="fas fa-redo"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Redo</span>
+</button>
+<button @click="c.clearCanvas()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-red-500 hover:bg-red-50 shrink-0 relative group" title="Bersihkan">
+    <i class="fas fa-trash"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Bersih</span>
+</button>
 <span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
-<button @click="rulerOn=!rulerOn;if(rulerOn){rulerX=(c?.canvas?.width||2000)/2-250;rulerY=(c?.canvas?.height||1000)/2-35}" :class="rulerOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Penggaris 30cm"><i class="fas fa-ruler-combined"></i></button>
-<button @click="protOn=!protOn;if(protOn){protX=(c?.canvas?.width||2000)/2-150;protY=(c?.canvas?.height||1000)/2-150}" :class="protOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Busur 180°"><i class="fas fa-drafting-compass"></i></button>
-<button @click="triOn=!triOn;if(triOn){triX=(c?.canvas?.width||2000)/2-150;triY=(c?.canvas?.height||1000)/2-150}" :class="triOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Segitiga Siku"><i class="fas fa-play"></i></button>
-<button @click="setTool('compass')" :class="t==='compass'?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Jangka"><i class="fas fa-circle"></i></button>
-<button @click="c.toggleCalculator()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Kalkulator"><i class="fas fa-calculator"></i></button>
+<button @click="rulerOn=!rulerOn;if(rulerOn){rulerX=(c?.canvas?.width||2000)/2-250;rulerY=(c?.canvas?.height||1000)/2-35}" :class="rulerOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Penggaris 30cm">
+    <i class="fas fa-ruler-combined"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Penggaris</span>
+</button>
+<button @click="protOn=!protOn;if(protOn){protX=(c?.canvas?.width||2000)/2-150;protY=(c?.canvas?.height||1000)/2-150}" :class="protOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Busur 180°">
+    <i class="fas fa-drafting-compass"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Busur</span>
+</button>
+<button @click="triOn=!triOn;if(triOn){triX=(c?.canvas?.width||2000)/2-150;triY=(c?.canvas?.height||1000)/2-150}" :class="triOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Segitiga Siku">
+    <i class="fas fa-play"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Segitiga</span>
+</button>
+<button @click="setTool('compass')" :class="t==='compass'?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Jangka">
+    <i class="fas fa-circle"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Jangka</span>
+</button>
+<button @click="c.toggleCalculator()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0 relative group" title="Kalkulator">
+    <i class="fas fa-calculator"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Kalkulator</span>
+</button>
 <span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
+<!-- Grid options: OFF / Grid / Row / Blank -->
+<div x-data="{gOpen:false}" class="relative shrink-0">
+    <button @click="gOpen=!gOpen" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 relative group" title="Grid Options">
+        <i class="fas fa-border-all"></i>
+        <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Grid</span>
+    </button>
+    <div x-show="gOpen" @click.outside="gOpen=false" class="absolute z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-1.5 w-24" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0'" style="display:none">
+        <button @click="gridMode='off';g=0;c.gridEnabled=false;c.gridRowOnly=false;c._render();gOpen=false" :class="gridMode==='off'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#10060; Off</button>
+        <button @click="gridMode='grid';g=1;c.gridEnabled=true;c.gridRowOnly=false;c.gridLogarithmic=false;c._render();sendDisplay();gOpen=false" :class="gridMode==='grid'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9638; Grid</button>
+        <button @click="gridMode='row';g=2;c.gridEnabled=true;c.gridRowOnly=true;c.gridLogarithmic=false;c._render();sendDisplay();gOpen=false" :class="gridMode==='row'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9474; Row</button>
+        <button @click="gridMode='blank';g=3;c.gridEnabled=false;c.gridRowOnly=false;c._render();sendDisplay();gOpen=false" :class="gridMode==='blank'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9632; Blank</button>
+    </div>
+</div>
 <span class="text-[8px] font-bold text-gray-400 hidden md:inline shrink-0" x-text="zoomPct"></span>
-<button @click="c.zoomIn()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Perbesar"><i class="fas fa-search-plus"></i></button>
-<button @click="c.zoomOut()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Perkecil"><i class="fas fa-search-minus"></i></button>
-<button @click="c.zoomReset()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Reset"><i class="fas fa-expand"></i></button>
+<button @click="c.zoomIn()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0 relative group" title="Perbesar">
+    <i class="fas fa-search-plus"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Zoom+</span>
+</button>
+<button @click="c.zoomOut()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0 relative group" title="Perkecil">
+    <i class="fas fa-search-minus"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Zoom-</span>
+</button>
+<button @click="c.zoomReset()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0 relative group" title="Reset Zoom">
+    <i class="fas fa-expand"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Reset</span>
+</button>
 <span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
-<button @click="snapshot()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Snapshot"><i class="fas fa-camera"></i></button>
-<button @click="showSidebar=!showSidebar" :class="showSidebar?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Siswa"><i class="fas fa-users"></i></button>
+<button @click="snapshot()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0 relative group" title="Snapshot">
+    <i class="fas fa-camera"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Foto</span>
+</button>
+<button @click="showSidebar=!showSidebar" :class="showSidebar?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0 relative group" title="Siswa">
+    <i class="fas fa-users"></i>
+    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Siswa</span>
+</button>

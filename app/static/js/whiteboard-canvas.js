@@ -8,6 +8,7 @@ class WhiteboardCanvas {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext("2d");
         this.options = options;
+        this._wbId = options.whiteboardId || '';
         this.tool = "pen";
         this.color = "#000000";
         this._width = 0.75;
@@ -31,6 +32,7 @@ class WhiteboardCanvas {
 
         this.boardMode = "white";
         this.gridEnabled = false;
+        this.gridRowOnly = false;
         this.gridSpacing = 50;
         this.gridLogarithmic = false;
 
@@ -196,8 +198,13 @@ class WhiteboardCanvas {
         if (!this.gridEnabled) return;
         this.ctx.strokeStyle = this.boardMode === "white" ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)";
         this.ctx.lineWidth = 0.5;
-        for (let x = 0; x <= w; x += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, h); this.ctx.stroke(); }
-        for (let y = 0; y <= h; y += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(w, y); this.ctx.stroke(); }
+        if (this.gridRowOnly) {
+            // Only horizontal lines (row mode)
+            for (let y = 0; y <= h; y += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(w, y); this.ctx.stroke(); }
+        } else {
+            for (let x = 0; x <= w; x += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, h); this.ctx.stroke(); }
+            for (let y = 0; y <= h; y += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(w, y); this.ctx.stroke(); }
+        }
     }
 
     setBackground(url) {
@@ -431,11 +438,42 @@ class WhiteboardCanvas {
         for (const op of ops) this._replay(op);
     }
 
-    setBoardMode(m) { this.boardMode = m; this._render(); }
+    setBoardMode(m) {
+        this.boardMode = m;
+        // Auto-contrast pen color: dark board → white pen, white board → black pen
+        if (m === 'black' && (this.color === '#000000' || this.color === '#000' || this.color === 'black')) {
+            this.color = '#ffffff';
+            if (this.options.onColorChange) this.options.onColorChange('#ffffff');
+        } else if (m === 'white' && (this.color === '#ffffff' || this.color === '#fff' || this.color === 'white')) {
+            this.color = '#000000';
+            if (this.options.onColorChange) this.options.onColorChange('#000000');
+        }
+        this._render();
+    }
     toggleGrid() { this.gridEnabled = !this.gridEnabled; this._render(); }
     setGridSpacing(v) { this.gridSpacing = Math.max(10, Math.min(500, v)); this._render(); }
     setGridLogarithmic(v) { this.gridLogarithmic = !!v; this._render(); }
 
-    _emitDraw(op_type, data) { if (this.options.onDraw) this.options.onDraw({ op_type, data, timestamp: Date.now() }); }
+    _emitDraw(op_type, data) {
+        const op = { op_type, data, timestamp: Date.now() };
+        if (this.options.onDraw) this.options.onDraw(op);
+        // Offline queue: save to localStorage if no WebSocket
+        if (!navigator.onLine) {
+            try {
+                const q = JSON.parse(localStorage.getItem('wb_offline_' + (this.options.whiteboardId || '')) || '[]');
+                q.push(op);
+                localStorage.setItem('wb_offline_' + (this.options.whiteboardId || ''), JSON.stringify(q.slice(-200)));
+            } catch(e) {}
+        }
+    }
+    flushOfflineQueue() {
+        try {
+            const key = 'wb_offline_' + (this.options.whiteboardId || '');
+            const q = JSON.parse(localStorage.getItem(key) || '[]');
+            if (q.length === 0) return;
+            localStorage.removeItem(key);
+            q.forEach(op => { if (this.options.onDraw) this.options.onDraw(op); });
+        } catch(e) {}
+    }
     toDataURL() { return this.canvas.toDataURL("image/png"); }
 }

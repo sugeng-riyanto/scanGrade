@@ -34,21 +34,15 @@
     <!-- Main area -->
     <div class="flex-1 relative overflow-hidden flex" :class="toolbarPos==='top'||toolbarPos==='bottom'?'flex-col':'flex-row'">
         <!-- Toolbar (position based on setting) -->
-        <template x-if="toolbarPos==='left'">
-        <div class="hidden md:flex flex-col bg-white dark:bg-gray-900 border-r py-1 px-0.5 gap-0.5 shrink-0 overflow-y-auto w-11">
+        <div x-show="toolbarPos==='left'" class="hidden md:flex flex-col bg-white dark:bg-gray-900 border-r py-1 px-0.5 gap-0.5 shrink-0 overflow-y-auto w-11">
             {% include "teacher/wb_toolbar.html" %}
         </div>
-        </template>
-        <template x-if="toolbarPos==='top'">
-        <div class="hidden md:flex flex-row bg-white dark:bg-gray-900 border-b py-0.5 px-1 gap-0.5 shrink-0 overflow-x-auto h-10 items-center">
+        <div x-show="toolbarPos==='top'" class="hidden md:flex flex-row bg-white dark:bg-gray-900 border-b py-0.5 px-1 gap-0.5 shrink-0 overflow-x-auto h-10 items-center">
             {% include "teacher/wb_toolbar.html" %}
         </div>
-        </template>
-        <template x-if="toolbarPos==='bottom'">
-        <div class="hidden md:flex flex-row bg-white dark:bg-gray-900 border-t py-0.5 px-1 gap-0.5 shrink-0 overflow-x-auto h-10 items-center order-last">
+        <div x-show="toolbarPos==='bottom'" class="hidden md:flex flex-row bg-white dark:bg-gray-900 border-t py-0.5 px-1 gap-0.5 shrink-0 overflow-x-auto h-10 items-center order-last">
             {% include "teacher/wb_toolbar.html" %}
         </div>
-        </template>
 
         <!-- Canvas area -->
         <div class="flex-1 relative overflow-hidden p-2 md:p-3" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%)">
@@ -157,7 +151,7 @@ function whiteboardCanvas() {
         slides: {{ slides | tojson | safe }},
         members: {{ members | tojson | safe }},
         slideIdx: 0, t: "pen", col: "#000000", pw: 0.75, onlineCount: 0,
-        showSidebar: false, g: false, gridSpacing: 50, gridLog: false,
+        showSidebar: false, g: false, gridSpacing: 50, gridLog: false, gridMode: "grid",
         boardMode: "white", toolbarPos: "left",
         rulerOn: false, rulerX: 60, rulerY: 80, rulerAngle: 0,
         protOn: false, protX: 100, protY: 50, protAngle: 0, protCX: 150, protCY: 264,
@@ -173,12 +167,14 @@ function whiteboardCanvas() {
             this.g = {{ 'true' if ds.get('grid_enabled') else 'false' }};
             {% endif %}
             this.c = new WhiteboardCanvas("wb-canvas", {
+                whiteboardId: this.whiteboardId,
                 onDraw: (op) => { this.ws?.sendDraw(op.op_type, op.data); },
+                onColorChange: (c) => { this.col = c; },
             });
             this.c.setBoardMode(this.boardMode); this.c.setWidth(this.pw);
             if (this.g) { this.c.gridEnabled = true; this.c.gridSpacing = this.gridSpacing; this.c.setGridLogarithmic(this.gridLog); }
             this.ws = new WhiteboardSocket(this.whiteboardId, {
-                onConnect: () => { this.ws?.sendHeartbeat(); this.onlineCount++; },
+                onConnect: () => { this.ws?.sendHeartbeat(); this.onlineCount++; this.c?.flushOfflineQueue(); },
                 onDrawOp: (data) => { this.c.replayOp(data); },
                 onSlideChanged: (data) => { this.goToSlide(data.slide_number-1); },
                 onTimerUpdate: (data) => { this.timer?.syncRemote(data.seconds, data.running); },
@@ -201,7 +197,7 @@ function whiteboardCanvas() {
         pmk(el) { if(el&&ScanGradeTools) el.innerHTML = ScanGradeTools.protractorSvg(150,264,126); },
         drg(which,e) { const p={ruler:'ruler',prot:'prot',tri:'tri'}[which]; this._drg={which:p,sx:e.clientX,sy:e.clientY,ox:this[p+'X'],oy:this[p+'Y']}; this._onDragMove=(ev)=>{if(!this._drg)return;const dx=(ev.clientX||ev.touches[0].clientX)-this._drg.sx,dy=(ev.clientY||ev.touches[0].clientY)-this._drg.sy;const p=this._drg.which;this[p+'X']=this._drg.ox+dx;this[p+'Y']=this._drg.oy+dy;}; this._onDragEnd=()=>{this._drg=null;document.removeEventListener('mousemove',this._onDragMove);document.removeEventListener('mouseup',this._onDragEnd);}; document.addEventListener('mousemove',this._onDragMove);document.addEventListener('mouseup',this._onDragEnd); },
         rot(which,e) { const p={ruler:'ruler',prot:'prot',tri:'tri'}[which]; this._drg={which:p,sx:e.clientX,sy:e.clientY,sa:Math.atan2(e.clientY-this[p+'Y'],e.clientX-this[p+'X'])*180/Math.PI,oa:this[p+'Angle']}; this._onDragMove=(ev)=>{if(!this._drg)return;const a=Math.atan2((ev.clientY||ev.touches[0].clientY)-this[p+'Y'],(ev.clientX||ev.touches[0].clientX)-this[p+'X'])*180/Math.PI;this[p+'Angle']=this._drg.oa+(a-this._drg.sa);}; this._onDragEnd=()=>{this._drg=null;document.removeEventListener('mousemove',this._onDragMove);document.removeEventListener('mouseup',this._onDragEnd);}; document.addEventListener('mousemove',this._onDragMove);document.addEventListener('mouseup',this._onDragEnd); },
-        sendDisplay() { this.ws?.sendDisplaySettings({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog}); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/display-settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog})}).catch(()=>{}); },
+        sendDisplay() { this.ws?.sendDisplaySettings({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog,grid_row_only: this.gridMode==='row'}); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/display-settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog})}).catch(()=>{}); },
         uploadFile(e) { const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides/upload`,{method:'POST',body:fd}).then(r=>r.json()).then(d=>{if(d.success)window.location.reload();}).catch(()=>{alert('Upload gagal');}); },
         addSlide() { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(d=>{if(d.success)window.location.reload();}).catch(()=>{}); },
         downloadPDF() { window.open(`/wb/teacher/whiteboard/${this.whiteboardId}/download`,'_blank'); },
