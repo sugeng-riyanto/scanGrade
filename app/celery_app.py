@@ -17,5 +17,8 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    result_expires=300,  # auto-delete task results after 5 min (save Redis memory)
+    result_expires=300,
 )
+
+# Import task modules to register them with Celery
+import app.services.omr_tasks  # noqa: register OMR tasks
