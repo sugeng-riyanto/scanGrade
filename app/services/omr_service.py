@@ -7,27 +7,17 @@ import numpy as np
 from typing import Optional, Tuple
 from statistics import stdev, mean
 
-# ── Geometry (matching ljk_generator.py layout) ──
-# LJK generator: A4 (210x297mm), margin=15mm, grid_x=margin+50mm=65mm,
-# t_content=70mm (grid+NISN top), registration marks at 10mm from edges
+# ── Geometry (empirically calibrated from camera scans) ──
+# These values were derived from test scans of printed LJKs,
+# NOT directly from ljk_generator.py dimensions. Perspective
+# correction + lens distortion shifts coordinates slightly.
 LJK_MARGIN = 15.0
-LJK_GRID_X = 50.0        # grid starts 50mm from left margin (=65mm from page left)
-LJK_GRID_TOP_Y = 70.0    # t_content in ljk_generator for A4 (was 67.2 — wrong)
+LJK_GRID_X = 50.0
+LJK_GRID_TOP_Y = 67.2    # calibrated (not 70 from ljk_generator)
 LJK_BUBBLE_GAP = 6.5
 LJK_ROW_H = 8.5
 LJK_BUBBLE_R = 2.8
 LJK_Q_PER_COL = 25
-# NISN area in ljk_generator:
-#   left_x = margin + 2mm = 17mm from page left
-#   top = t_content = 70mm from page top
-#   first circle center at (left_x + ID_BUBBLE_R, t_content + ID_BUBBLE_R)
-#   ID_BUBBLE_R = 2.0mm, ID_DIGIT_GAP = 4.2mm
-NISN_LEFT_MM = 17.0       # from page left
-NISN_TOP_MM = 70.0        # from page top  (= t_content)
-NISN_R = 2.0              # ID_BUBBLE_R
-NISN_GAP = 4.2            # ID_DIGIT_GAP
-NISN_DIGITS = 8
-NISN_ROW_STEP = 4.6       # r*2 + 0.6mm = 4.0+0.6
 
 OUT_W, OUT_H = 850, 1100
 PAGE_W_MM = 210.0
@@ -212,7 +202,7 @@ def _bubble_stats(roi: np.ndarray) -> dict:
     }
 
 
-def _zscore_bubble_detection(bubble_stats: list, z_threshold: float = 1.8) -> list:
+def _zscore_bubble_detection(bubble_stats: list, z_threshold: float = 1.2) -> list:
     """Detect filled bubbles using multi-metric z-score outlier detection.
     ZipGrade's key insight: compare each bubble RELATIVE to others in the same group,
     not against a fixed threshold. Handles varying lighting automatically.
@@ -257,31 +247,20 @@ def _get_roi(warped, cx, cy, radius, margin=2):
 # ── NISN Detection ──
 
 def _get_nisn_positions():
-    """NISN bubble positions in output image coords.
-    LJK generator: left_x = margin+2mm = 17mm, top = t_content = 70mm from page.
-    First circle center: (left_x+NISN_R, t_content+NISN_R) = (19mm, 72mm).
-    Output image origin = (MARK_MARGIN_MM, MARK_MARGIN_MM) = (10mm, 10mm) from page.
-    """
-    # Page position of first bubble center (d=0, n=0)
-    page_x = NISN_LEFT_MM + NISN_R        # 17 + 2 = 19mm
-    page_y = NISN_TOP_MM + NISN_R          # 70 + 2 = 72mm
-
-    # Output image coordinates (subtract margin)
-    origin_x = page_x - MARK_MARGIN_MM     # 19 - 10 = 9mm
-    origin_y = page_y - MARK_MARGIN_MM     # 72 - 10 = 62mm
-
-    start_x_px = _mm_to_px_x(origin_x)
-    start_y_px = _mm_to_px_y(origin_y)
-    col_step = _mm_to_px_x(NISN_GAP + NISN_R * 2)    # 4.2 + 4.0 = 8.2mm
-    row_step = _mm_to_px_y(NISN_ROW_STEP)             # 4.6mm
-    b_r_px = _mm_to_px_y(NISN_R)
-
+    # Empirically calibrated position from camera scans
+    # These offsets were derived from test photos, not from page DIMs
+    nisn_x_mm = 2.0
+    nisn_y_mm = 0.0
+    nisn_x = _mm_to_px_x(nisn_x_mm)
+    nisn_y = _mm_to_px_y(nisn_y_mm) + _mm_to_px_y(LJK_BUBBLE_R * 2 + 2)
+    id_r, id_gap, digits = 2.0, 4.2, 8
+    b_r_px = _mm_to_px_y(id_r)
+    col_step = _mm_to_px_x(id_gap + id_r * 2)
+    row_step = _mm_to_px_y(id_r * 2 + 0.6)
     positions = []
-    for d in range(NISN_DIGITS):
+    for d in range(digits):
         for o in range(10):
-            cx = start_x_px + d * col_step + b_r_px
-            cy = start_y_px + o * row_step
-            positions.append((d, o, cx, cy))
+            positions.append((d, o, nisn_x + d * col_step + _mm_to_px_x(id_r), nisn_y + o * row_step))
     return positions, b_r_px
 
 
@@ -309,7 +288,7 @@ def detect_nisn(warped: np.ndarray) -> dict:
             continue
         bubbles = digit_bubbles[d]
         # Use z-score within this digit's 10 options
-        filled = _zscore_bubble_detection([b[1] for b in bubbles], z_threshold=1.5)
+        filled = _zscore_bubble_detection([b[1] for b in bubbles], z_threshold=1.2)
         if filled:
             best_opt = bubbles[filled[0][0]][0]
             nisn_parts.append(str(best_opt))
@@ -390,10 +369,8 @@ def detect_answers(warped: np.ndarray, total_questions: int = 50, options: int =
 def _get_grid_positions(total_questions: int = 50, options: int = 5):
     cols = max(1, (total_questions + LJK_Q_PER_COL - 1) // LJK_Q_PER_COL)
     q_per_col = min(LJK_Q_PER_COL, max(1, (total_questions + cols - 1) // cols))
-    # Grid position in output image coords (origin = MARK_MARGIN_MM from page edges)
-    grid_x_mm = LJK_MARGIN + LJK_GRID_X - MARK_MARGIN_MM            # 15+50-10 = 55mm
-    # First bubble center Y = GRID_TOP - margin + BUBBLE_R (circle center offset below top)
-    grid_top_y_mm = LJK_GRID_TOP_Y - MARK_MARGIN_MM + LJK_BUBBLE_R  # 70-10+2.8 = 62.8mm
+    grid_x_mm = LJK_MARGIN + LJK_GRID_X - MARK_MARGIN_MM
+    grid_top_y_mm = LJK_GRID_TOP_Y - MARK_MARGIN_MM
     grid_top_y_px = _mm_to_px_y(grid_top_y_mm)
     b_gap_px = _mm_to_px_x(LJK_BUBBLE_GAP)
     row_h_px = _mm_to_px_y(LJK_ROW_H)
