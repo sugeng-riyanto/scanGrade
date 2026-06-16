@@ -167,10 +167,9 @@
                 <div class="min-w-[500px] px-4 sm:px-0" id="answers-table-wrap">
                     <table class="w-full text-xs" id="answers-table">
                         <thead><tr class="text-surface-500 border-b border-surface-200">
-                            <th class="pb-2 font-bold text-left w-10">#</th>
+                            <th class="pb-2 font-bold text-left w-8">#</th>
                             <th class="pb-2 font-bold text-left">Jawaban</th>
-                            <th class="pb-2 font-bold text-center w-16">Yakin</th>
-                            <th class="pb-2 font-bold text-center w-20">Edit</th>
+                            <th class="pb-2 font-bold text-center w-12">Yakin</th>
                         </tr></thead>
                         <tbody id="answers-tbody"></tbody>
                     </table>
@@ -705,14 +704,15 @@ function renderScanResult(data) {
     } catch (e) {}
 })();
 
-// ── Editable answers table with search & sort ──
+// ── Editable answers table with inline clickable A-E buttons ──
 let _ansData = []; // {q, answer, conf}
 let _sortAsc = true;
 let _searchVal = '';
 
+const _OPTIONS = ['A','B','C','D','E'];
+
 function renderAnswersTable(answers, total, confidence) {
     _ansData = [];
-    const labels = ['A','B','C','D','E','F','G'];
     for (let i = 0; i < total; i++) {
         const raw = answers[i];
         _ansData.push({
@@ -736,51 +736,42 @@ function _renderTable() {
         const tr = document.createElement('tr');
         tr.className = 'border-b border-surface-100 hover:bg-surface-50/50 transition';
 
-        // Color row based on confidence
-        let rowColor = '';
-        if (!d.answer) rowColor = 'text-stone-300';
-        else if (d.conf >= 0.7) rowColor = 'text-emerald-700';
-        else if (d.conf >= 0.4) rowColor = 'text-amber-700';
-        else rowColor = 'text-red-600';
+        // Conf badge color
+        let confBg = 'bg-stone-100 text-stone-400';
+        if (d.answer && d.conf >= 0.7) confBg = 'bg-emerald-100 text-emerald-700';
+        else if (d.answer && d.conf >= 0.4) confBg = 'bg-amber-100 text-amber-700';
+        else if (d.answer && d.conf > 0) confBg = 'bg-red-100 text-red-600';
+
+        // Build option circles
+        let optsHtml = '';
+        for (const o of _OPTIONS) {
+            const sel = o === d.answer;
+            optsHtml += '<button class="opt-btn w-7 h-7 sm:w-8 sm:h-8 rounded-full text-xs sm:text-sm font-extrabold border-2 transition active:scale-90 ' +
+                (sel
+                    ? 'bg-primary-600 text-white border-primary-600 shadow-sm shadow-primary-300/40'
+                    : 'bg-white text-surface-400 border-surface-200 hover:border-primary-400 hover:text-primary-600') +
+                '" data-q="' + d.q + '" data-opt="' + o + '">' + o + '</button>';
+        }
 
         tr.innerHTML =
-            '<td class="py-2 pr-2 font-bold text-surface-400 text-[11px] align-middle">' + (d.q + 1) + '</td>' +
-            '<td class="py-2 font-extrabold text-sm align-middle"><span class="' + rowColor + ' answer-display" data-q="' + d.q + '">' + (d.answer || '-') + '</span></td>' +
-            '<td class="py-2 text-center align-middle"><span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ' +
-                (d.conf >= 0.7 ? 'bg-emerald-100 text-emerald-700' : d.conf >= 0.4 ? 'bg-amber-100 text-amber-700' : d.conf > 0 ? 'bg-red-100 text-red-600' : 'bg-stone-100 text-stone-400') +
-                '">' + Math.round(d.conf * 100) + '%</span></td>' +
-            '<td class="py-2 text-center align-middle"><button class="edit-btn text-[10px] text-primary-500 hover:text-primary-700 font-bold px-2 py-1 hover:bg-primary-50 rounded-lg transition" data-q="' + d.q + '"><i class="fas fa-pen mr-0.5"></i></button></td>';
+            '<td class="py-1.5 pr-1.5 font-bold text-surface-400 text-[10px] align-middle w-8">' + (d.q + 1) + '</td>' +
+            '<td class="py-1.5"><div class="flex items-center gap-1">' + optsHtml + '</div></td>' +
+            '<td class="py-1.5 text-center align-middle w-12"><span class="inline-block px-1 py-0.5 rounded text-[9px] font-bold ' + confBg + '">' + Math.round(d.conf * 100) + '%</span></td>';
         tbody.appendChild(tr);
     }
 
     document.getElementById('answer-count').textContent = filtered.length + '/' + _ansData.length + ' soal';
 
-    // Bind edit buttons
-    tbody.querySelectorAll('.edit-btn').forEach(btn => {
+    // Bind click on option buttons
+    tbody.querySelectorAll('.opt-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const q = parseInt(this.dataset.q);
+            const opt = this.dataset.opt;
             const d = _ansData.find(x => x.q === q);
             if (!d) return;
-            const current = d.answer || '';
-            const labels = ['A','B','C','D','E','F','G'];
-            let opts = labels.slice(0, 5); // default 5 options
-            // Show small popup or inline edit
-            const td = this.closest('tr').querySelector('.answer-display');
-            const orig = td.textContent;
-            const sel = document.createElement('select');
-            sel.className = 'text-xs font-bold p-1 border border-primary-400 rounded-lg bg-white';
-            sel.innerHTML = '<option value="">—</option>' + opts.map(o => '<option value="' + o + '" ' + (o === current ? 'selected' : '') + '>' + o + '</option>').join('');
-            sel.addEventListener('change', function() {
-                const val = this.value;
-                d.answer = val;
-                _renderTable(); // re-render to update colors
-            });
-            sel.addEventListener('blur', function() {
-                // Keep the value, just remove the select if focus lost
-            });
-            td.innerHTML = '';
-            td.appendChild(sel);
-            sel.focus();
+            // Toggle: if same answer clicked, clear it; otherwise set it
+            d.answer = d.answer === opt ? '' : opt;
+            _renderTable(); // re-render to update highlights
         });
     });
 }
