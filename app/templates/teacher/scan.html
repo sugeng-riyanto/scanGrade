@@ -549,14 +549,18 @@ async function processScan(blob) {
     formData.append('total_questions', totalQ);
 
     try {
+        console.log('📤 Sending scan request...');
         const resp = await fetch('/api/scan/process', { method: 'POST', body: formData });
+        console.log('📥 Response status:', resp.status);
         if (!resp.ok) {
             const text = await resp.text();
+            console.error('❌ Server error:', resp.status, text.slice(0,300));
             showError('Server error (' + resp.status + '): ' + (text.slice(0,200) || resp.statusText));
             status.classList.add('hidden');
             return;
         }
         const data = await resp.json();
+        console.log('📦 Response data:', data);
 
         // Handle async task (Celery)
         if (data.async) {
