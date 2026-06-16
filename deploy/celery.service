@@ -1,0 +1,21 @@
+[Unit]
+Description=ScanGrade Celery Worker (OMR async)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/scangrade
+Environment=FLASK_ENV=production
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/scangrade/.venv/bin/celery -A app.celery_app worker --loglevel=info --concurrency=2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

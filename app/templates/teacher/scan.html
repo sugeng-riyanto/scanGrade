@@ -491,6 +491,17 @@ async function processScan(blob) {
     try {
         const resp = await fetch('/api/scan/process', { method: 'POST', body: formData });
         const data = await resp.json();
+
+        // Handle async task (Celery)
+        if (data.async) {
+            status.querySelector('.loading-spinner').classList.remove('hidden');
+            status.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...';
+            status.classList.remove('hidden');
+            await pollTaskResult(data.task_id, data.scan_file_id);
+            status.classList.add('hidden');
+            return;
+        }
+
         status.classList.add('hidden');
 
         if (data.error) {
@@ -499,59 +510,95 @@ async function processScan(blob) {
             return;
         }
 
-        lastAnswers = data.answers || {};
-        const scoreBadge = document.getElementById('score-badge');
-
-        if (data.score !== undefined) {
-            scoreBadge.classList.remove('hidden');
-            scoreBadge.textContent = 'Skor: ' + data.score + '% (' + data.correct + ' benar)';
-        } else {
-            scoreBadge.classList.add('hidden');
-        }
-
-        // Average confidence
-        const avgConfEl = document.getElementById('avg-confidence');
-        if (data.avg_confidence !== undefined) {
-            avgConfEl.classList.remove('hidden');
-            const pct = (data.avg_confidence * 100).toFixed(0);
-            const color = data.avg_confidence >= 0.7 ? 'text-emerald-600' : data.avg_confidence >= 0.5 ? 'text-amber-600' : 'text-red-500';
-            avgConfEl.className = 'text-xs font-bold ' + color;
-            avgConfEl.textContent = 'Keyakinan rata-rata: ' + pct + '%';
-        } else {
-            avgConfEl.classList.add('hidden');
-        }
-
-        // Show detected NISN
-        const nisnBadge = document.getElementById('nisn-badge');
-        if (data.nisn) {
-            nisnBadge.classList.remove('hidden');
-            document.getElementById('nisn-value').textContent = data.nisn;
-            document.getElementById('nisn-confidence').textContent = 'keyakinan: ' + (data.nisn_confidence * 100).toFixed(0) + '%';
-        } else {
-            nisnBadge.classList.add('hidden');
-        }
-
-        // Needs review badge
-        const reviewBadge = document.getElementById('needs-review-badge');
-        const reviewList = document.getElementById('needs-review-list');
-        if (data.needs_review && data.needs_review.length > 0) {
-            reviewBadge.classList.remove('hidden');
-            const nums = data.needs_review.map(n => parseInt(n) + 1).join(', ');
-            reviewList.textContent = 'Soal ' + nums;
-        } else {
-            reviewBadge.classList.add('hidden');
-        }
-
-        renderAnswers(lastAnswers, totalQ, data.confidence || {});
-        if (data.debug_image) showDebug(data.debug_image);
-        result.classList.remove('hidden');
-        document.getElementById('btn-save').classList.remove('hidden');
+        renderScanResult(data);
         window._lastScanData = data;
 
     } catch (err) {
         status.classList.add('hidden');
         showError('Gagal memproses: ' + err.message);
     }
+}
+
+async function pollTaskResult(taskId, scanFileId) {
+    const status = document.getElementById('scan-status');
+    const maxAttempts = 120; // 2 menit timeout
+    for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+            const resp = await fetch('/api/scan/task/' + taskId);
+            const data = await resp.json();
+
+            if (data.status === 'done') {
+                renderScanResult(data.result);
+                data.result.scan_file_id = scanFileId;
+                window._lastScanData = data.result;
+                return;
+            }
+            if (data.status === 'error') {
+                showError(data.error || 'Gagal memproses scan');
+                return;
+            }
+            // Still processing — update status text
+            status.textContent = 'Memproses... (' + (i + 1) + 's)';
+        } catch (err) {
+            // Network error, continue polling
+        }
+    }
+    showError('Waktu habis. Silakan coba lagi.');
+}
+
+function renderScanResult(data) {
+    const status = document.getElementById('scan-status');
+    const result = document.getElementById('scan-result');
+    status.classList.add('hidden');
+
+    lastAnswers = data.answers || {};
+    const scoreBadge = document.getElementById('score-badge');
+
+    if (data.score !== undefined) {
+        scoreBadge.classList.remove('hidden');
+        scoreBadge.textContent = 'Skor: ' + data.score + '% (' + data.correct + ' benar)';
+    } else {
+        scoreBadge.classList.add('hidden');
+    }
+
+    // Average confidence
+    const avgConfEl = document.getElementById('avg-confidence');
+    if (data.avg_confidence !== undefined) {
+        avgConfEl.classList.remove('hidden');
+        const pct = (data.avg_confidence * 100).toFixed(0);
+        const color = data.avg_confidence >= 0.7 ? 'text-emerald-600' : data.avg_confidence >= 0.5 ? 'text-amber-600' : 'text-red-500';
+        avgConfEl.className = 'text-xs font-bold ' + color;
+        avgConfEl.textContent = 'Keyakinan rata-rata: ' + pct + '%';
+    } else {
+        avgConfEl.classList.add('hidden');
+    }
+
+    // Show detected NISN
+    const nisnBadge = document.getElementById('nisn-badge');
+    if (data.nisn) {
+        nisnBadge.classList.remove('hidden');
+        document.getElementById('nisn-value').textContent = data.nisn;
+        document.getElementById('nisn-confidence').textContent = 'keyakinan: ' + (data.nisn_confidence * 100).toFixed(0) + '%';
+    } else {
+        nisnBadge.classList.add('hidden');
+    }
+
+    // Needs review badge
+    const reviewBadge = document.getElementById('needs-review-badge');
+    const reviewList = document.getElementById('needs-review-list');
+    if (data.needs_review && data.needs_review.length > 0) {
+        reviewBadge.classList.remove('hidden');
+        const nums = data.needs_review.map(n => parseInt(n) + 1).join(', ');
+        reviewList.textContent = 'Soal ' + nums;
+    } else {
+        reviewBadge.classList.add('hidden');
+    }
+
+    renderAnswers(lastAnswers, data.total || 50, data.confidence || {});
+    if (data.debug_image) showDebug(data.debug_image);
+    result.classList.remove('hidden');
+    document.getElementById('btn-save').classList.remove('hidden');
 }
 
 function renderAnswers(answers, total, confidence) {
