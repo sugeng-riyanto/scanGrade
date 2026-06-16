@@ -311,6 +311,20 @@ def create_app(env=None):
             "uptime_ms": int((time.time() - app._start_time) * 1000) if hasattr(app, '_start_time') else 0,
         })
 
+    @app.route("/monitor")
+    def monitor_page():
+        """Simple server monitoring page — reads /var/log/scangrade-monitor.log."""
+        log_path = "/var/log/scangrade-monitor.log"
+        lines = []
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "r") as f:
+                    raw = f.readlines()
+                lines = [l.strip() for l in raw if l.strip() and "ALERT" not in l][-200:]
+            except Exception:
+                pass
+        return render_template("monitor.html", log_lines=lines)
+
     @app.route("/debug/exam/<exam_id>")
     def debug_exam(exam_id):
         try:

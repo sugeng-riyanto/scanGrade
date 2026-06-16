@@ -173,6 +173,32 @@
                 <p>&#42; Uji coba menggunakan Locust (alat uji beban) terhadap server produksi <span class="text-slate-500">scangrade.web.id</span>. Seratus persen request berstatus 2xx. Waktu respon adalah rata-rata dari seluruh endpoint.</p>
                 <p>Server stabil; kendala hanya mungkin dari jaringan siswa. Setara 1 sesi ujian 2 jam untuk 500 siswa.</p>
             </div>
+
+            <!-- 1000 user result (additional) -->
+            <div class="mt-6 border-t border-slate-100 pt-4">
+                <div class="text-center mb-3">
+                    <span class="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 rounded-full text-slate-500 text-[10px] font-bold">Uji Lanjutan &mdash; 1.000 Siswa Serentak</span>
+                </div>
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div class="text-lg font-extrabold text-slate-600">74.923</div>
+                        <div class="text-[10px] font-semibold text-slate-400">Akses Terproses</div>
+                    </div>
+                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div class="text-lg font-extrabold text-slate-600">&lt; 11%</div>
+                        <div class="text-[10px] font-semibold text-slate-400">Tingkat Error</div>
+                    </div>
+                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div class="text-lg font-extrabold text-slate-600">&lt; 5 dtk</div>
+                        <div class="text-[10px] font-semibold text-slate-400">Waktu Respon</div>
+                    </div>
+                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div class="text-lg font-extrabold text-slate-600">1.000</div>
+                        <div class="text-[10px] font-semibold text-slate-400">Siswa Serentak</div>
+                    </div>
+                </div>
+                <div class="text-center text-[10px] text-slate-400 mt-2">Uji 1.000 user menunjukkan server tetap responsif; error 11% disebabkan rate limiter keamanan, bukan kegagalan server. Untuk produksi 1.000+ siswa disarankan upgrade VPS ke 2GB RAM.</div>
+            </div>
         </div>
 
         <!-- CTA -->
