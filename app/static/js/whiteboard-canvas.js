@@ -47,14 +47,15 @@ class WhiteboardCanvas {
     }
 
     _resize() {
-        const parent = this.canvas.parentElement;
-        if (!parent) return;
-        const pr = parent.getBoundingClientRect();
-        if (pr.width <= 0 || pr.height <= 0) return;
-        this.canvas.width = pr.width * this.dpr;
-        this.canvas.height = pr.height * this.dpr;
-        this.canvas.style.width = pr.width + "px";
-        this.canvas.style.height = pr.height + "px";
+        const stage = document.getElementById("wb-stage");
+        if (!stage) return;
+        const sr = stage.getBoundingClientRect();
+        if (sr.width <= 1 || sr.height <= 1) {
+            setTimeout(() => this._resize(), 100);
+            return;
+        }
+        this.canvas.width = sr.width * this.dpr;
+        this.canvas.height = sr.height * this.dpr;
         this._render();
     }
 
