@@ -52,6 +52,10 @@
         <!-- Camera area -->
         <div id="camera-area" class="relative bg-surface-800 rounded-xl overflow-hidden mb-4 border-2 border-dashed border-surface-300" style="min-height:300px">
             <video id="camera-preview" autoplay playsinline class="w-full h-full object-contain" style="transform:scaleX(-1)"></video>
+            <div id="cam-quality-badge" class="absolute top-2 right-2 hidden px-2 py-1 rounded-lg text-[10px] font-bold shadow-lg pointer-events-none"></div>
+            <div id="auto-indicator" class="absolute bottom-2 left-1/2 -translate-x-1/2 hidden px-3 py-1 rounded-full text-[10px] font-bold shadow-lg pointer-events-none bg-surface-800/70 text-white whitespace-nowrap">
+                <i class="fas fa-spinner fa-spin mr-1"></i>Mendeteksi...
+            </div>
             <svg id="alignment-overlay" class="absolute inset-0 w-full h-full pointer-events-none">
                 <rect class="align-box" x="15%" y="10%" width="70%" height="80%" rx="8"/>
                 <circle class="align-corner" cx="15%" cy="10%" r="4"/>
@@ -86,6 +90,9 @@
                 <i class="fas fa-upload mr-1"></i>Upload File
                 <input type="file" id="file-upload" accept="image/*,.pdf" class="hidden">
             </label>
+            <button id="btn-auto" class="border-2 border-surface-200 px-3 py-2.5 rounded-xl text-sm font-bold transition hidden" title="Scan otomatis">
+                <i class="fas fa-magic mr-1"></i>Auto
+            </button>
             <span id="scan-status" class="text-sm font-bold text-surface-500 hidden"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</span>
         </div>
     </div>
@@ -95,14 +102,27 @@
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-4 sm:p-6">
             <div class="flex items-center justify-between mb-4">
                 <h2 class="font-extrabold text-surface-800">Hasil Scan</h2>
-                <div id="score-badge" class="hidden bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-extrabold"></div>
+                <div class="flex items-center gap-3">
+                    <span id="avg-confidence" class="hidden text-xs font-bold text-surface-500"></span>
+                    <div id="score-badge" class="hidden bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-extrabold"></div>
+                </div>
             </div>
             <div id="nisn-badge" class="hidden mb-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-2 flex items-center gap-3">
                 <i class="fas fa-id-card text-violet-500"></i>
                 <span class="text-sm font-bold text-violet-700">NISN: <span id="nisn-value"></span></span>
                 <span id="nisn-confidence" class="text-[10px] text-violet-400"></span>
             </div>
+            <div id="needs-review-badge" class="hidden mb-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 flex items-center gap-2">
+                <i class="fas fa-exclamation-triangle text-amber-500 text-sm"></i>
+                <span class="text-sm font-bold text-amber-700">Perlu dicek:</span>
+                <span id="needs-review-list" class="text-sm text-amber-600"></span>
+            </div>
             <div id="answers-grid" class="grid grid-cols-5 sm:grid-cols-10 gap-1.5 text-xs"></div>
+            <div class="mt-4 flex items-center gap-2 text-[10px] text-surface-400">
+                <span class="inline-block w-2.5 h-2.5 rounded bg-emerald-100 border border-emerald-300"></span> Yakin
+                <span class="inline-block w-2.5 h-2.5 rounded bg-amber-100 border border-amber-300 ml-2"></span> Kurang yakin
+                <span class="inline-block w-2.5 h-2.5 rounded bg-stone-100 border border-stone-200 ml-2"></span> Kosong
+            </div>
         </div>
 
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-4 sm:p-6">
@@ -182,7 +202,9 @@ async function startCamera() {
         document.getElementById('btn-capture').classList.remove('hidden');
         document.getElementById('btn-stop-cam').classList.remove('hidden');
         document.getElementById('btn-flip-cam').classList.remove('hidden');
+        document.getElementById('btn-auto').classList.remove('hidden');
         document.getElementById('scan-result').classList.add('hidden');
+        startQualityCheck();
     } catch (err) {
         showError('Kamera tidak tersedia: ' + err.message + '. Gunakan upload file sebagai alternatif.');
         startBtn.disabled = false;
@@ -226,23 +248,164 @@ document.getElementById('btn-stop-cam').addEventListener('click', function() {
     this.classList.add('hidden');
     document.getElementById('btn-capture').classList.add('hidden');
     document.getElementById('btn-flip-cam').classList.add('hidden');
+    document.getElementById('btn-auto').classList.add('hidden');
     document.getElementById('btn-start-cam').classList.remove('hidden');
+    document.getElementById('cam-quality-badge').classList.add('hidden');
+    document.getElementById('auto-indicator').classList.add('hidden');
+    if (window._qualityCheckTimer) { clearInterval(window._qualityCheckTimer); window._qualityCheckTimer = null; }
+    _autoMode = false; _autoReadyFrames = 0;
 });
 
-// Capture photo
+// Auto-capture toggle
+document.getElementById('btn-auto').addEventListener('click', function() {
+    _autoMode = !_autoMode; _autoReadyFrames = 0;
+    this.className = _autoMode
+        ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white px-3 py-2.5 rounded-xl text-sm font-extrabold shadow-lg shadow-emerald-500/25 transition'
+        : 'border-2 border-surface-200 px-3 py-2.5 rounded-xl text-sm font-bold transition';
+    this.innerHTML = _autoMode
+        ? '<i class="fas fa-stop mr-1"></i>Auto'
+        : '<i class="fas fa-magic mr-1"></i>Auto';
+    if (!_autoMode) document.getElementById('auto-indicator').classList.add('hidden');
+});
+
+// ── Real-time quality + sharpness + auto-capture ──
+let _autoMode = false;
+let _autoReadyFrames = 0;
+const AUTO_REQUIRED_READY_FRAMES = 3;
+
+function measureSharpness(video) {
+    const c = document.createElement('canvas');
+    c.width = 320; c.height = 240;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(video, 0, 0, 320, 240);
+    const data = ctx.getImageData(0, 0, 320, 240).data;
+    let sumDiff = 0, count = 0;
+    const step = 4;
+    for (let y = step; y < 240 - step; y += step) {
+        for (let x = step; x < 320 - step; x += step) {
+            const idx = (y * 320 + x) * 4;
+            const cV = data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114;
+            const lV = data[(y * 320 + (x-step)) * 4] * 0.299 + data[(y * 320 + (x-step)) * 4 + 1] * 0.587 + data[(y * 320 + (x-step)) * 4 + 2] * 0.114;
+            const rV = data[(y * 320 + (x+step)) * 4] * 0.299 + data[(y * 320 + (x+step)) * 4 + 1] * 0.587 + data[(y * 320 + (x+step)) * 4 + 2] * 0.114;
+            sumDiff += Math.abs(2*cV - lV - rV); count++;
+        }
+    }
+    return count > 0 ? sumDiff / count : 0;
+}
+
+function checkImageQuality(video) {
+    const c = document.createElement('canvas');
+    c.width = 160; c.height = 120;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(video, 0, 0, 160, 120);
+    const data = ctx.getImageData(0, 0, 160, 120).data;
+    let sum = 0, sumSq = 0, n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+        const g = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+        sum += g; sumSq += g * g; n++;
+    }
+    const m = sum / n;
+    return { brightness: m, contrast: Math.sqrt(sumSq / n - m * m) };
+}
+
+function startQualityCheck() {
+    const video = document.getElementById('camera-preview');
+    const badge = document.getElementById('cam-quality-badge');
+    const autoInd = document.getElementById('auto-indicator');
+    window._qualityCheckTimer = setInterval(() => {
+        if (!video.videoWidth) return;
+        const q = checkImageQuality(video);
+        const sharp = measureSharpness(video);
+        let label, color, ready = false;
+        if (q.brightness < 50) { label = 'Gelap'; color = 'bg-red-500 text-white'; }
+        else if (q.brightness > 220) { label = 'Terlalu terang'; color = 'bg-red-500 text-white'; }
+        else if (sharp < 8) { label = 'Kabur'; color = 'bg-red-500 text-white'; }
+        else if (q.contrast < 20) { label = 'Kurang kontras'; color = 'bg-amber-500 text-white'; }
+        else { label = 'Siap'; color = 'bg-emerald-500 text-white'; ready = true; }
+        badge.className = 'absolute top-2 right-2 px-2 py-1 rounded-lg text-[10px] font-bold shadow-lg pointer-events-none ' + color;
+        badge.textContent = label + ' ' + sharp.toFixed(1);
+        badge.classList.remove('hidden');
+
+        if (_autoMode) {
+            if (ready) {
+                _autoReadyFrames++;
+                autoInd.className = 'absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[10px] font-bold shadow-lg pointer-events-none bg-emerald-600/80 text-white whitespace-nowrap';
+                autoInd.innerHTML = '<i class="fas fa-check-circle mr-1"></i>Mengambil... ' + _autoReadyFrames + '/' + AUTO_REQUIRED_READY_FRAMES;
+                autoInd.classList.remove('hidden');
+                if (_autoReadyFrames >= AUTO_REQUIRED_READY_FRAMES) {
+                    _autoMode = false; _autoReadyFrames = 0;
+                    document.getElementById('btn-capture').click();
+                }
+            } else {
+                _autoReadyFrames = 0;
+                autoInd.className = 'absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[10px] font-bold shadow-lg pointer-events-none bg-amber-600/80 text-white whitespace-nowrap';
+                autoInd.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Mencari lembar...';
+                autoInd.classList.remove('hidden');
+            }
+        }
+    }, 600);
+}
+
+// ── Multi-frame averaging ──
+const FRAME_COUNT = 5;
+const FRAME_INTERVAL = 80; // ms between frames
+
+function medianBlendFrames(canvases, w, h) {
+    const n = canvases.length;
+    const result = document.createElement('canvas');
+    result.width = w; result.height = h;
+    const rctx = result.getContext('2d');
+    // Get pixel data from all frames
+    const frameData = canvases.map(c => c.getContext('2d').getImageData(0, 0, w, h).data);
+    const outData = new Uint8ClampedArray(w * h * 4);
+    const buf = new Array(n);
+    for (let i = 0; i < w * h; i++) {
+        const idx = i * 4;
+        for (let ch = 0; ch < 3; ch++) {
+            for (let f = 0; f < n; f++) buf[f] = frameData[f][idx + ch];
+            buf.sort((a, b) => a - b);
+            outData[idx + ch] = buf[Math.floor(n / 2)];
+        }
+        outData[idx + 3] = 255; // alpha
+    }
+    const imgData = new ImageData(outData, w, h);
+    rctx.putImageData(imgData, 0, 0);
+    return result;
+}
+
+async function captureBlendedFrame(video) {
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    const canvases = [];
+    for (let i = 0; i < FRAME_COUNT; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, FRAME_INTERVAL));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.translate(w, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0);
+        canvases.push(c);
+    }
+    const blended = medianBlendFrames(canvases, w, h);
+    return new Promise(resolve => blended.toBlob(resolve, 'image/jpeg', 0.92));
+}
+
+// Capture photo (with multi-frame averaging)
 document.getElementById('btn-capture').addEventListener('click', async function() {
     const video = document.getElementById('camera-preview');
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext('2d');
-    // Mirror the image (since video is mirrored)
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0);
-    canvas.toBlob(async (blob) => {
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>Mengambil ' + FRAME_COUNT + ' frame...';
+    try {
+        const blob = await captureBlendedFrame(video);
         await processScan(blob);
-    }, 'image/jpeg', 0.85);
+    } catch (err) {
+        showError('Gagal mengambil frame: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-camera-retro mr-1"></i>Ambil Foto';
+    }
 });
 
 async function processScan(blob) {
@@ -285,6 +448,18 @@ async function processScan(blob) {
             scoreBadge.classList.add('hidden');
         }
 
+        // Average confidence
+        const avgConfEl = document.getElementById('avg-confidence');
+        if (data.avg_confidence !== undefined) {
+            avgConfEl.classList.remove('hidden');
+            const pct = (data.avg_confidence * 100).toFixed(0);
+            const color = data.avg_confidence >= 0.7 ? 'text-emerald-600' : data.avg_confidence >= 0.5 ? 'text-amber-600' : 'text-red-500';
+            avgConfEl.className = 'text-xs font-bold ' + color;
+            avgConfEl.textContent = 'Keyakinan rata-rata: ' + pct + '%';
+        } else {
+            avgConfEl.classList.add('hidden');
+        }
+
         // Show detected NISN
         const nisnBadge = document.getElementById('nisn-badge');
         if (data.nisn) {
@@ -295,10 +470,22 @@ async function processScan(blob) {
             nisnBadge.classList.add('hidden');
         }
 
-        renderAnswers(lastAnswers, totalQ);
+        // Needs review badge
+        const reviewBadge = document.getElementById('needs-review-badge');
+        const reviewList = document.getElementById('needs-review-list');
+        if (data.needs_review && data.needs_review.length > 0) {
+            reviewBadge.classList.remove('hidden');
+            const nums = data.needs_review.map(n => parseInt(n) + 1).join(', ');
+            reviewList.textContent = 'Soal ' + nums;
+        } else {
+            reviewBadge.classList.add('hidden');
+        }
+
+        renderAnswers(lastAnswers, totalQ, data.confidence || {});
         if (data.debug_image) showDebug(data.debug_image);
         result.classList.remove('hidden');
         document.getElementById('btn-save').classList.remove('hidden');
+        window._lastScanData = data;
 
     } catch (err) {
         status.classList.add('hidden');
@@ -306,17 +493,33 @@ async function processScan(blob) {
     }
 }
 
-function renderAnswers(answers, total) {
+function renderAnswers(answers, total, confidence) {
     const grid = document.getElementById('answers-grid');
     grid.innerHTML = '';
-    const labels = ['A', 'B', 'C', 'D', 'E'];
     for (let i = 0; i < total; i++) {
         const div = document.createElement('div');
-        div.className = 'flex flex-col items-center p-1.5 rounded-xl ' +
-            (answers[i] ? 'bg-orange-50 border-2 border-orange-200' : 'bg-stone-50 border-2 border-stone-200');
+        const hasAnswer = answers[i] !== undefined && answers[i] !== null;
+        const conf = confidence ? (confidence[i] || 0) : 0.5;
+
+        let bg, border, textColor, confLabel;
+        if (!hasAnswer) {
+            bg = 'bg-stone-50'; border = 'border-stone-200'; textColor = 'text-stone-300';
+            confLabel = '';
+        } else if (conf >= 0.7) {
+            bg = 'bg-emerald-50'; border = 'border-emerald-300'; textColor = 'text-emerald-700';
+            confLabel = '';
+        } else if (conf >= 0.4) {
+            bg = 'bg-amber-50'; border = 'border-amber-300'; textColor = 'text-amber-700';
+            confLabel = '<span class="text-[8px] text-amber-400">!</span>';
+        } else {
+            bg = 'bg-red-50'; border = 'border-red-300'; textColor = 'text-red-600';
+            confLabel = '<span class="text-[8px] text-red-400">!!</span>';
+        }
+
+        div.className = 'flex flex-col items-center p-1.5 rounded-xl ' + bg + ' border-2 ' + border;
         div.innerHTML = '<span class="text-stone-400 font-bold text-[10px]">' + (i + 1) + '</span>' +
-            '<span class="font-extrabold text-sm ' + (answers[i] ? 'text-orange-700' : 'text-stone-300') + '">' +
-            (answers[i] || '-') + '</span>';
+            '<span class="font-extrabold text-sm ' + textColor + '">' + (answers[i] || '-') + '</span>' +
+            confLabel;
         grid.appendChild(div);
     }
 }
@@ -353,6 +556,16 @@ document.getElementById('btn-save').addEventListener('click', async function() {
     btn.disabled = true;
     btn.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>Menyimpan...';
     try {
+        const nisnVal = document.getElementById('nisn-value').textContent;
+        // Collect confidence data from last scan result
+        let confData = {};
+        let reviewList = [];
+        if (window._lastScanData && window._lastScanData.confidence) {
+            confData = window._lastScanData.confidence;
+        }
+        if (window._lastScanData && window._lastScanData.needs_review) {
+            reviewList = window._lastScanData.needs_review;
+        }
         const resp = await fetch('/api/scan/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -360,6 +573,9 @@ document.getElementById('btn-save').addEventListener('click', async function() {
                 exam_id: examId,
                 student_id: studentId,
                 answers: lastAnswers,
+                nisn: nisnVal || '',
+                confidence: confData,
+                needs_review: reviewList,
             }),
         });
         const data = await resp.json();

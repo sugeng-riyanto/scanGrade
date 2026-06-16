@@ -474,6 +474,8 @@ def scan_save():
     student_id = data.get("student_id")
     answers = data.get("answers")
     nisn = data.get("nisn") or ""
+    confidence = data.get("confidence") or {}
+    needs_review = data.get("needs_review") or []
 
     if not all([exam_id, student_id, answers]):
         return jsonify({"error": "exam_id, student_id, and answers are required"}), 400
@@ -503,6 +505,20 @@ def scan_save():
     mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
     score = round((correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
 
+    # Build enriched answers dict with confidence metadata
+    enriched_answers = {}
+    for k, v in answers.items():
+        entry = {"answer": v}
+        if k in confidence:
+            entry["confidence"] = confidence[k]
+        if k in needs_review:
+            entry["review"] = True
+        enriched_answers[k] = entry
+    if nisn:
+        enriched_answers["_nisn"] = nisn
+    if needs_review:
+        enriched_answers["_needs_review"] = needs_review
+
     # Check for existing submission and update or create
     existing = supabase.table("submissions") \
         .select("*") \
@@ -510,26 +526,22 @@ def scan_save():
         .eq("student_id", student_id) \
         .execute().data
 
+    update_data = {
+        "answers": enriched_answers,
+        "score": score,
+        "max_score": mcq_count,
+        "status": "graded",
+    }
+
     if existing:
         sub = supabase.table("submissions") \
-            .update({
-                "answers": answers,
-                "score": score,
-                "max_score": mcq_count,
-                "status": "graded",
-            }) \
+            .update(update_data) \
             .eq("id", existing[0]["id"]) \
             .execute().data
     else:
+        update_data.update({"exam_id": exam_id, "student_id": student_id})
         sub = supabase.table("submissions") \
-            .insert({
-                "exam_id": exam_id,
-                "student_id": student_id,
-                "answers": answers,
-                "score": score,
-                "max_score": mcq_count,
-                "status": "graded",
-            }) \
+            .insert(update_data) \
             .execute().data
 
     return jsonify({
@@ -537,6 +549,7 @@ def scan_save():
         "score": score,
         "correct": correct,
         "total": mcq_count,
+        "needs_review": len(needs_review),
         "submission": sub[0] if sub else None,
     })
 
