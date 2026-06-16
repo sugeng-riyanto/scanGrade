@@ -473,6 +473,7 @@ def scan_save():
     exam_id = data.get("exam_id")
     student_id = data.get("student_id")
     answers = data.get("answers")
+    nisn = data.get("nisn") or ""
 
     if not all([exam_id, student_id, answers]):
         return jsonify({"error": "exam_id, student_id, and answers are required"}), 400

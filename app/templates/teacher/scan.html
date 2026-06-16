@@ -97,6 +97,11 @@
                 <h2 class="font-extrabold text-surface-800">Hasil Scan</h2>
                 <div id="score-badge" class="hidden bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-extrabold"></div>
             </div>
+            <div id="nisn-badge" class="hidden mb-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-2 flex items-center gap-3">
+                <i class="fas fa-id-card text-violet-500"></i>
+                <span class="text-sm font-bold text-violet-700">NISN: <span id="nisn-value"></span></span>
+                <span id="nisn-confidence" class="text-[10px] text-violet-400"></span>
+            </div>
             <div id="answers-grid" class="grid grid-cols-5 sm:grid-cols-10 gap-1.5 text-xs"></div>
         </div>
 
@@ -278,6 +283,16 @@ async function processScan(blob) {
             scoreBadge.textContent = 'Skor: ' + data.score + '% (' + data.correct + ' benar)';
         } else {
             scoreBadge.classList.add('hidden');
+        }
+
+        // Show detected NISN
+        const nisnBadge = document.getElementById('nisn-badge');
+        if (data.nisn) {
+            nisnBadge.classList.remove('hidden');
+            document.getElementById('nisn-value').textContent = data.nisn;
+            document.getElementById('nisn-confidence').textContent = 'keyakinan: ' + (data.nisn_confidence * 100).toFixed(0) + '%';
+        } else {
+            nisnBadge.classList.add('hidden');
         }
 
         renderAnswers(lastAnswers, totalQ);
