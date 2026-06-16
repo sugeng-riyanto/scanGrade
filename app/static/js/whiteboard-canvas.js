@@ -7,7 +7,7 @@ class WhiteboardCanvas {
 
         this.tool = "pen";
         this.color = "#000000";
-        this.width = 1.5;
+        this.width = 0.75;
         this.opacity = 1;
         this.fontSize = 16;
         this.dash = [];
@@ -71,15 +71,15 @@ class WhiteboardCanvas {
 
     // Convert screen coords to canvas-logical coords (accounting for zoom/pan)
     _pos(e) {
-        // Like exam canvas: CSS coords → canvas pixel coords
         const src = e.touches ? e.touches[0] : e;
         const r = this.canvas.getBoundingClientRect();
+        // Get canvas pixel position from CSS mouse position
         const px = (src.clientX - r.left) * (this.canvas.width / r.width);
         const py = (src.clientY - r.top) * (this.canvas.height / r.height);
-        // Convert to drawing coords (accounting for zoom + pan)
+        // Invert the display transform to get document coordinates
         return {
-            x: (px - this.dpr * this.panX) / (this.dpr * this.zoom),
-            y: (py - this.dpr * this.panY) / (this.dpr * this.zoom),
+            x: (px - this.panX * this.dpr) / (this.zoom * this.dpr),
+            y: (py - this.panY * this.dpr) / (this.zoom * this.dpr),
         };
     }
 
