@@ -190,6 +190,30 @@ def create_app(env=None):
             return ""
     app.jinja_env.globals["get_whatsapp_number"] = get_whatsapp_number
 
+    _features_cache = {}
+    def get_school_features(school_id=None):
+        """Return features dict for a school (whiteboard_enabled, etc.), cached per request."""
+        sid = school_id or getattr(g, "user_school_id", None)
+        if not sid:
+            return {}
+        req_key = f"feat_{id(request)}_{sid}"
+        if req_key in _features_cache:
+            return _features_cache[req_key]
+        try:
+            supabase = app.extensions["supabase"]
+            data = supabase.table("schools").select("features").eq("id", sid).single().execute().data or {}
+            result = data.get("features") or {}
+            if isinstance(result, str):
+                import json
+                result = json.loads(result)
+        except Exception:
+            result = {}
+        if not isinstance(result, dict):
+            result = {}
+        _features_cache[req_key] = result
+        return result
+    app.jinja_env.globals["get_school_features"] = get_school_features
+
     @app.template_global()
     def school_favicon(school_info=None):
         """Generate a simple SVG favicon from school initials or default."""

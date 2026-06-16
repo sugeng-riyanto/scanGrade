@@ -99,6 +99,26 @@ def schools():
     return render_template("super_admin/schools.html", schools=data, q=q)
 
 
+@super_bp.route("/api/school/<school_id>/toggle-whiteboard", methods=["POST"])
+@_sa_required
+def toggle_school_whiteboard(school_id):
+    supabase = get_supabase()
+    try:
+        current = supabase.table("schools").select("features").eq("id", school_id).single().execute().data or {}
+        feat = current.get("features") or {}
+        if isinstance(feat, str):
+            import json
+            feat = json.loads(feat)
+        elif not isinstance(feat, dict):
+            feat = {}
+        new_val = not feat.get("whiteboard_enabled", True)
+        feat["whiteboard_enabled"] = new_val
+        supabase.table("schools").update({"features": feat}).eq("id", school_id).execute()
+        return jsonify({"success": True, "enabled": new_val})
+    except Exception as e:
+        return jsonify({"error": str(e)[:80]}), 500
+
+
 @super_bp.route("/users")
 @_sa_required
 def users():
