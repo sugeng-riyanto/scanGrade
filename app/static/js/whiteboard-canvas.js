@@ -11,6 +11,10 @@ class WhiteboardCanvas {
         this.tool = "pen";
         this.color = "#000000";
         this._width = 0.75;
+        // Line tool state (straight line drawing)
+        this.lineStart = null;
+        this.lineSnapshot = null;
+        this.isLineDrawing = false;
         this.fontSize = 16;
         this.dash = [];
         this.isDrawing = false;
@@ -116,6 +120,7 @@ class WhiteboardCanvas {
     _down(e) {
         if (this.textMode || this.isDrawing) return;
         if (this.tool === "compass") { this._compDown(e); return; }
+        if (this.tool === "line") { this._lineDown(e); return; }
         const p = this._pos(e);
         this.isDrawing = true;
         this.lastX = p.x; this.lastY = p.y;
@@ -133,6 +138,7 @@ class WhiteboardCanvas {
             return;
         }
         if (this.tool === "compass" && this.isDrawing) { this._compMove(e); return; }
+        if (this.tool === "line" && this.isLineDrawing) { this._lineMove(e); return; }
         if (!this.isDrawing) return;
 
         if (this.tool === "eraser") {
@@ -165,6 +171,7 @@ class WhiteboardCanvas {
 
     _up(e) {
         if (this.tool === "compass") { this._compUp(e); return; }
+        if (this.tool === "line") { this._lineUp(e); return; }
         if (!this.isDrawing || this.tool === "laser") {
             this.isDrawing = false;
             if (this.tool === "laser") { this.laserVisible = false; this._render(); }
@@ -266,6 +273,53 @@ class WhiteboardCanvas {
         this.ctx.fillText(`r=${Math.round(this.compassRadius)}px`, cx + (p.x - cx) / 2 + 5, cy + (p.y - cy) / 2 - 5);
     }
     _compUp(e) { if (!this.isDrawing) return; this.isDrawing = false; if (this.compassRadius > 5) { this._emitDraw("circle", { cx: this.compassCenter.x, cy: this.compassCenter.y, r: this.compassRadius, color: this.color, width: this._width }); } }
+
+    // ─── Line tool (straight lines) ───
+    _lineDown(e) {
+        const p = this._pos(e);
+        this.isLineDrawing = true;
+        this.lineStart = { x: p.x, y: p.y };
+        this.lineSnapshot = new Image();
+        this.lineSnapshot.src = this.canvas.toDataURL();
+        this._snap();
+    }
+    _lineMove(e) {
+        if (!this.isLineDrawing) return;
+        const p = this._pos(e);
+        const s = this.lineStart;
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this._drawBackground();
+        if (this.lineSnapshot.complete) this.ctx.drawImage(this.lineSnapshot, 0, 0);
+        // Draw preview line
+        this.ctx.beginPath();
+        this.ctx.moveTo(s.x, s.y);
+        this.ctx.lineTo(p.x, p.y);
+        this.ctx.strokeStyle = this.color;
+        this.ctx.lineWidth = Math.max(0.1, this._width);
+        this.ctx.lineCap = "round";
+        this.ctx.stroke();
+        // Show distance label
+        const dist = Math.hypot(p.x - s.x, p.y - s.y);
+        this.ctx.fillStyle = this.color;
+        this.ctx.font = "11px Inter, sans-serif";
+        this.ctx.fillText(`${Math.round(dist)}px`, (s.x + p.x) / 2 + 5, (s.y + p.y) / 2 - 5);
+    }
+    _lineUp(e) {
+        if (!this.isLineDrawing) return;
+        this.isLineDrawing = false;
+        const p = this._pos(e);
+        const s = this.lineStart;
+        // Finalize line on snapshot
+        this._snap();
+        this.ctx.beginPath();
+        this.ctx.moveTo(s.x, s.y);
+        this.ctx.lineTo(p.x, p.y);
+        this.ctx.strokeStyle = this.color;
+        this.ctx.lineWidth = Math.max(0.1, this._width);
+        this.ctx.lineCap = "round";
+        this.ctx.stroke();
+        this._emitDraw("line", { points: [[s.x, s.y], [p.x, p.y]], color: this.color, width: this._width, dash: this.dash });
+    }
 
     toggleCalculator() {
         if (this.calcEl && this.calcEl.style.display !== "none") { this.calcEl.style.display = "none"; return; }

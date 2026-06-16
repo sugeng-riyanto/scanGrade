@@ -27,6 +27,7 @@
         <!-- Left sidebar toggle (mobile) & toolbar (desktop) -->
         <div class="hidden md:flex flex-col bg-white dark:bg-gray-900 border-r py-1 px-0.5 gap-0.5 shrink-0 overflow-y-auto w-11" id="toolbar">
             <button @click="setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Pena"><i class="fas fa-pen"></i></button>
+            <button @click="setTool('line')" :class="t==='line'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Garis Lurus"><i class="fas fa-minus"></i></button>
             <button @click="setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Penghapus"><i class="fas fa-eraser"></i></button>
             <button @click="textMode()" :class="t==='text'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Teks"><i class="fas fa-font"></i></button>
             <button @click="setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Stabilo"><i class="fas fa-highlighter"></i></button>
@@ -69,7 +70,7 @@
         </div>
 
         <!-- Canvas area -->
-        <div class="flex-1 relative bg-gray-100 dark:bg-gray-800 overflow-hidden">
+        <div class="flex-1 relative" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%);overflow:hidden">
             <div id="wb-stage" style="width:2000px;height:2000px;position:relative">
                 <canvas id="wb-canvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
 
@@ -142,9 +143,9 @@
     <!-- Mobile bottom toolbar (only visible on < 768px) -->
     <div class="md:hidden bg-white dark:bg-gray-900 border-t flex items-center justify-around py-1 px-1 shrink-0 overflow-x-auto">
         <button @click="setTool('pen')" :class="t==='pen'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-pen text-sm"></i><span>Pena</span></button>
+        <button @click="setTool('line')" :class="t==='line'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-minus text-sm"></i><span>Garis</span></button>
         <button @click="setTool('eraser')" :class="t==='eraser'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-eraser text-sm"></i><span>Hapus</span></button>
         <button @click="textMode()" :class="t==='text'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-font text-sm"></i><span>Teks</span></button>
-        <button @click="setTool('laser')" :class="t==='laser'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-crosshairs text-sm"></i><span>Laser</span></button>
         <button @click="c.undo()" class="flex flex-col items-center px-2 py-0.5 text-[9px] text-gray-500"><i class="fas fa-undo text-sm"></i><span>Undo</span></button>
         <button @click="c.redo()" class="flex flex-col items-center px-2 py-0.5 text-[9px] text-gray-500"><i class="fas fa-redo text-sm"></i><span>Redo</span></button>
         <button @click="showSidebar=!showSidebar" :class="showSidebar?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-users text-sm"></i><span>Siswa</span></button>
@@ -220,7 +221,7 @@ function whiteboardCanvas() {
             this.timer = new WhiteboardTimer("timer");
             if (this.slides.length > 0) this.loadSlide(this.slides[0]);
         },
-        setTool(t) { this.t=t; if(t==='laser'){this.c.setTool('laser');return;} if(t==='text')return; if(t==='compass'){this.c.setTool('compass');return;} this.c.setTool(t); },
+        setTool(t) { this.t=t; if(t==='laser'){this.c.setTool('laser');return;} if(t==='text')return; if(t==='compass'){this.c.setTool('compass');return;} this.c.setTool(t); if(t==='line'){this.c.setWidth(this.pw);} },
         textMode() { this.t="text"; this.c.enableTextMode(); },
         loadSlide(sl) { this.c.setBackground(sl.background_url||null); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/ops?slide=${sl.slide_number}`).then(r=>r.json()).then(d=>{if(d.ops)this.c.loadOps(d.ops);}).catch(()=>{}); },
         goToSlide(i) { if(i<0||i>=this.slides.length)return; this.slideIdx=i; this.loadSlide(this.slides[i]); this.ws?.sendSlideChange(i+1); },
