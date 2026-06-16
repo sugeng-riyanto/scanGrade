@@ -731,9 +731,12 @@ async function processBulk(file) {
         ? (parseInt(document.getElementById('manual-qcount').value) || 50)
         : parseInt(examSelect.options[examSelect.selectedIndex].dataset.questions) || 50;
 
-    document.getElementById('bulk-progress').classList.remove('hidden');
-    document.getElementById('bulk-results').classList.add('hidden');
-    document.getElementById('bulk-errors').classList.add('hidden');
+    const progress = document.getElementById('bulk-progress');
+    const resultsDiv = document.getElementById('bulk-results');
+    const errorsDiv = document.getElementById('bulk-errors');
+    progress.classList.remove('hidden');
+    resultsDiv.classList.add('hidden');
+    errorsDiv.classList.add('hidden');
 
     const fd = new FormData();
     fd.append('archive', file);
@@ -743,83 +746,115 @@ async function processBulk(file) {
     try {
         const resp = await fetch('/api/scan/bulk', { method: 'POST', body: fd });
         const data = await resp.json();
-        document.getElementById('bulk-progress').classList.add('hidden');
 
-        if (data.error) {
-            document.getElementById('bulk-error-list').innerHTML = '<p>' + data.error + '</p>';
-            document.getElementById('bulk-errors').classList.remove('hidden');
+        // Handle async
+        if (data.async) {
+            progress.querySelector('span:not(.loading-spinner)').textContent = '0';
+            await pollBulkTask(data.task_id);
+            progress.classList.add('hidden');
             return;
         }
 
-        bulkResults = data.results || [];
-
-        // Summary
-        document.getElementById('bulk-summary').textContent = '— ' + data.processed + ' berhasil, ' + data.failed + ' gagal';
-
-        // Table
-        const tbl = document.getElementById('bulk-table');
-        if (bulkResults.length === 0) {
-            tbl.innerHTML = '<p class="text-sm text-surface-400">Tidak ada hasil yang terdeteksi.</p>';
-        } else {
-            let html = '<table class="w-full text-xs"><thead><tr class="bg-surface-100">';
-            html += '<th class="p-2 text-left font-bold text-surface-600">File</th>';
-            html += '<th class="p-2 text-left font-bold text-surface-600">NISN</th>';
-            html += '<th class="p-2 text-left font-bold text-surface-600">Siswa</th>';
-            html += '<th class="p-2 text-center font-bold text-surface-600">Terdeteksi</th>';
-            html += '<th class="p-2 text-center font-bold text-surface-600">Keyakinan</th>';
-            html += '<th class="p-2 text-center font-bold text-surface-600">Skor</th>';
-            html += '<th class="p-2 text-center font-bold text-surface-600">Review</th>';
-            html += '</tr>';
-            for (const r of bulkResults) {
-                const confPct = Math.round((r.avg_confidence || 0) * 100);
-                const confColor = confPct >= 70 ? 'text-emerald-600' : confPct >= 40 ? 'text-amber-600' : 'text-red-500';
-                html += '<tr class="border-t border-surface-100">';
-                html += '<td class="p-2 font-medium text-surface-700">' + r.filename + '</td>';
-                html += '<td class="p-2 font-bold text-surface-800">' + r.nisn + '</td>';
-                html += '<td class="p-2">';
-                html += '<select class="student-select text-[10px] p-1 border rounded" data-nisn="' + (r.nisn || '') + '">';
-                html += '<option value="">-- Pilih --</option>';
-                // student options filled below
-                html += '</select></td>';
-                html += '<td class="p-2 text-center font-bold">' + r.detected + '</td>';
-                html += '<td class="p-2 text-center font-bold ' + confColor + '">' + confPct + '%</td>';
-                html += '<td class="p-2 text-center font-bold ' + (r.score !== undefined ? 'text-primary-600' : 'text-surface-300') + '">' + (r.score !== undefined ? r.score + '%' : '-') + '</td>';
-                html += '<td class="p-2 text-center">' + (r.needs_review?.length > 0 ? '<span class="text-amber-600 font-bold">' + r.needs_review.length + '</span>' : '<span class="text-emerald-500">✓</span>') + '</td>';
-                html += '</tr>';
-            }
-            html += '</table>';
-            tbl.innerHTML = html;
-
-            // Populate student dropdowns
-            const studentSelect = document.getElementById('student-select');
-            const studentOpts = studentSelect.querySelectorAll('option[value!=""]');
-            tbl.querySelectorAll('.student-select').forEach(sel => {
-                const nisn = sel.dataset.nisn;
-                studentOpts.forEach(opt => {
-                    const o = document.createElement('option');
-                    o.value = opt.value;
-                    o.textContent = opt.textContent;
-                    sel.appendChild(o);
-                });
-            });
-
-            // Show save button if exam selected
-            document.getElementById('btn-bulk-save').classList.toggle('hidden', !examId);
-        }
-
-        document.getElementById('bulk-results').classList.remove('hidden');
-
-        // Errors
-        if (data.errors && data.errors.length > 0) {
-            const el = document.getElementById('bulk-error-list');
-            el.innerHTML = data.errors.map(e => '<p>• ' + e.filename + ': ' + (e.error || 'Unknown') + '</p>').join('');
-            document.getElementById('bulk-errors').classList.remove('hidden');
-        }
-
+        progress.classList.add('hidden');
+        renderBulkResults(data);
     } catch (err) {
-        document.getElementById('bulk-progress').classList.add('hidden');
-        document.getElementById('bulk-error-list').innerHTML = '<p>Gagal memproses ZIP: ' + err.message + '</p>';
-        document.getElementById('bulk-errors').classList.remove('hidden');
+        progress.classList.add('hidden');
+        document.getElementById('bulk-error-list').innerHTML = '<p>Gagal: ' + err.message + '</p>';
+        errorsDiv.classList.remove('hidden');
+    }
+}
+
+async function pollBulkTask(taskId) {
+    const progress = document.getElementById('bulk-progress');
+    const errorsDiv = document.getElementById('bulk-errors');
+
+    for (let i = 0; i < 300; i++) { // 5 menit timeout
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+            const resp = await fetch('/api/scan/task/' + taskId);
+            const data = await resp.json();
+
+            if (data.status === 'done') {
+                renderBulkResults(data.result);
+                return;
+            }
+            if (data.status === 'error') {
+                document.getElementById('bulk-error-list').innerHTML = '<p>' + (data.error || 'Gagal memproses ZIP') + '</p>';
+                errorsDiv.classList.remove('hidden');
+                return;
+            }
+            // Update progress
+            const pct = data.progress || {};
+            progress.querySelector('span:not(.loading-spinner)').textContent = (pct.current || '?') + '/' + (pct.total || '?');
+            if (pct.file) progress.querySelector('span:not(.loading-spinner)').textContent += ' (' + pct.file + ')';
+        } catch (err) {
+            // Network glitch, keep polling
+        }
+    }
+    document.getElementById('bulk-error-list').innerHTML = '<p>Waktu habis. Coba lagi.</p>';
+    errorsDiv.classList.remove('hidden');
+}
+
+function renderBulkResults(data) {
+    bulkResults = data.results || [];
+    const tbl = document.getElementById('bulk-table');
+    const errorsDiv = document.getElementById('bulk-errors');
+
+    // Summary
+    document.getElementById('bulk-summary').textContent = '— ' + data.processed + ' berhasil, ' + data.failed + ' gagal';
+
+    if (bulkResults.length === 0) {
+        tbl.innerHTML = '<p class="text-sm text-surface-400">Tidak ada hasil yang terdeteksi.</p>';
+    } else {
+        let html = '<table class="w-full text-xs"><thead><tr class="bg-surface-100">';
+        html += '<th class="p-2 text-left font-bold text-surface-600">File</th>';
+        html += '<th class="p-2 text-left font-bold text-surface-600">NISN</th>';
+        html += '<th class="p-2 text-left font-bold text-surface-600">Siswa</th>';
+        html += '<th class="p-2 text-center font-bold text-surface-600">Terdeteksi</th>';
+        html += '<th class="p-2 text-center font-bold text-surface-600">Keyakinan</th>';
+        html += '<th class="p-2 text-center font-bold text-surface-600">Skor</th>';
+        html += '<th class="p-2 text-center font-bold text-surface-600">Review</th>';
+        html += '</tr>';
+        for (const r of bulkResults) {
+            const confPct = Math.round((r.avg_confidence || 0) * 100);
+            const confColor = confPct >= 70 ? 'text-emerald-600' : confPct >= 40 ? 'text-amber-600' : 'text-red-500';
+            html += '<tr class="border-t border-surface-100">';
+            html += '<td class="p-2 font-medium text-surface-700">' + r.filename + '</td>';
+            html += '<td class="p-2 font-bold text-surface-800">' + r.nisn + '</td>';
+            html += '<td class="p-2">';
+            html += '<select class="student-select text-[10px] p-1 border rounded" data-nisn="' + (r.nisn || '') + '">';
+            html += '<option value="">-- Pilih --</option>';
+            html += '</select></td>';
+            html += '<td class="p-2 text-center font-bold">' + r.detected + '</td>';
+            html += '<td class="p-2 text-center font-bold ' + confColor + '">' + confPct + '%</td>';
+            html += '<td class="p-2 text-center font-bold ' + (r.score !== undefined ? 'text-primary-600' : 'text-surface-300') + '">' + (r.score !== undefined ? r.score + '%' : '-') + '</td>';
+            html += '<td class="p-2 text-center">' + (r.needs_review?.length > 0 ? '<span class="text-amber-600 font-bold">' + r.needs_review.length + '</span>' : '<span class="text-emerald-500">✓</span>') + '</td>';
+            html += '</tr>';
+        }
+        html += '</table>';
+        tbl.innerHTML = html;
+
+        // Populate student dropdowns
+        const studentSelect = document.getElementById('student-select');
+        const studentOpts = studentSelect.querySelectorAll('option[value!=""]');
+        tbl.querySelectorAll('.student-select').forEach(sel => {
+            studentOpts.forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.textContent;
+                sel.appendChild(o);
+            });
+        });
+
+        document.getElementById('btn-bulk-save').classList.toggle('hidden', !document.getElementById('exam-select').value || document.getElementById('exam-select').value === '__custom__');
+    }
+
+    document.getElementById('bulk-results').classList.remove('hidden');
+
+    if (data.errors && data.errors.length > 0) {
+        const el = document.getElementById('bulk-error-list');
+        el.innerHTML = data.errors.map(e => '<p>• ' + e.filename + ': ' + (e.error || 'Unknown') + '</p>').join('');
+        errorsDiv.classList.remove('hidden');
     }
 }
 
