@@ -1,0 +1,42 @@
+<!-- wb_toolbar.html — shared toolbar buttons, used in desktop (left/top/bottom) and mobile -->
+<button @click="setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Pena"><i class="fas fa-pen"></i></button>
+<button @click="setTool('line')" :class="t==='line'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Garis Lurus (0.5px)"><i class="fas fa-minus"></i></button>
+<button @click="setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Penghapus"><i class="fas fa-eraser"></i></button>
+<button @click="textMode()" :class="t==='text'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Teks"><i class="fas fa-font"></i></button>
+<button @click="setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Stabilo"><i class="fas fa-highlighter"></i></button>
+<button @click="setTool('laser')" :class="t==='laser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Laser"><i class="fas fa-crosshairs"></i></button>
+<span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
+<input type="color" x-model="col" @input="c.setColor(col)" class="w-5 h-5 md:w-6 md:h-6 rounded cursor-pointer border-0 p-0 shrink-0" title="Warna">
+<div x-data="{o:false}" class="relative shrink-0">
+    <button @click="o=!o" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-[9px] font-bold text-gray-500 hover:bg-primary-50" title="Ukuran"><span x-text="pw.toFixed(1)"></span></button>
+    <div x-show="o" @click.outside="o=false" class="absolute z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-2 w-36" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0 md:bottom-auto'" style="display:none">
+        <input type="range" x-model="pw" @input="c.setWidth(pw)" min="0.1" max="20" step="0.1" class="w-full">
+        <div class="flex flex-wrap gap-0.5 mt-1">
+            <button @click="pw=0.1;c.setWidth(0.1);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.1</button>
+            <button @click="pw=0.5;c.setWidth(0.5);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.5</button>
+            <button @click="pw=0.75;c.setWidth(0.75);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.75</button>
+            <button @click="pw=1.5;c.setWidth(1.5);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">1.5</button>
+            <button @click="pw=3;c.setWidth(3);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">3</button>
+            <button @click="pw=5;c.setWidth(5);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">5</button>
+            <button @click="pw=8;c.setWidth(8);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">8</button>
+        </div>
+    </div>
+</div>
+<span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
+<button @click="c.undo()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Undo"><i class="fas fa-undo"></i></button>
+<button @click="c.redo()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Redo"><i class="fas fa-redo"></i></button>
+<button @click="c.clearCanvas()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-red-500 hover:bg-red-50 shrink-0" title="Bersihkan"><i class="fas fa-trash"></i></button>
+<span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
+<button @click="rulerOn=!rulerOn;if(rulerOn){rulerX=(c?.canvas?.width||2000)/2-250;rulerY=(c?.canvas?.height||1000)/2-35}" :class="rulerOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Penggaris 30cm"><i class="fas fa-ruler-combined"></i></button>
+<button @click="protOn=!protOn;if(protOn){protX=(c?.canvas?.width||2000)/2-150;protY=(c?.canvas?.height||1000)/2-150}" :class="protOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Busur 180°"><i class="fas fa-drafting-compass"></i></button>
+<button @click="triOn=!triOn;if(triOn){triX=(c?.canvas?.width||2000)/2-150;triY=(c?.canvas?.height||1000)/2-150}" :class="triOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Segitiga Siku"><i class="fas fa-play"></i></button>
+<button @click="setTool('compass')" :class="t==='compass'?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Jangka"><i class="fas fa-circle"></i></button>
+<button @click="c.toggleCalculator()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Kalkulator"><i class="fas fa-calculator"></i></button>
+<span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
+<span class="text-[8px] font-bold text-gray-400 hidden md:inline shrink-0" x-text="zoomPct"></span>
+<button @click="c.zoomIn()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Perbesar"><i class="fas fa-search-plus"></i></button>
+<button @click="c.zoomOut()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Perkecil"><i class="fas fa-search-minus"></i></button>
+<button @click="c.zoomReset()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Reset"><i class="fas fa-expand"></i></button>
+<span class="w-px h-4 bg-gray-200 mx-0.5 shrink-0 hidden md:block"></span>
+<button @click="snapshot()" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 shrink-0" title="Snapshot"><i class="fas fa-camera"></i></button>
+<button @click="showSidebar=!showSidebar" :class="showSidebar?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-xs shrink-0" title="Siswa"><i class="fas fa-users"></i></button>
