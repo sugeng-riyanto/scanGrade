@@ -233,32 +233,33 @@ def _bubble_filled(roi: np.ndarray, threshold: float = 0.40) -> tuple:
 
 
 def _get_nisn_positions():
-    """Compute NISN bubble centers (10 digits × 10 options = 0-9).
-    Matches answer_sheet_generator.py _draw_student_id_grid layout.
+    """Compute NISN bubble centers (8 digits × 10 options = 0-9).
+    Matches ljk_generator.py _draw_student_id_area layout.
     Returns: list of (digit_idx, option_value, cx, cy), and bubble radius in px.
     """
-    # NISN grid position (from answer_sheet_generator.py)
-    nisn_x_mm = LJK_MARGIN + 3.0  # from left margin
-    nisn_y_mm = LJK_GRID_TOP_Y - 10.0  # above answer grid
+    # LJK layout: NISN at left_x = margin + 2mm, same Y as answer grid top
+    # Both registration marks are at 10mm from edge
+    # In warped coords: registration marks are at (0,0) to (OUT_W, OUT_H)
+    nisn_x_mm = 2.0       # from registration mark: (margin+2mm) - mark_margin = (10+2)-10 = 2mm
+    nisn_y_mm = 0.0       # starts at same Y as answer grid top = 0 in warped coords
 
-    # Convert to warped image pixel coords (relative to registration marks)
-    nisn_x = _mm_to_px_x(nisn_x_mm - MARK_MARGIN_MM)
-    nisn_y = _mm_to_px_y(nisn_y_mm - MARK_MARGIN_MM)
+    nisn_x = _mm_to_px_x(nisn_x_mm)
+    nisn_y = _mm_to_px_y(nisn_y_mm) + _mm_to_px_y(LJK_BUBBLE_R * 2 + 2)  # offset below header
 
-    id_col_w = 4.8  # mm (ID_COL_W)
-    id_gap_x = 0.6  # mm (ID_GAP_X)
-    id_gap_y = 4.0  # mm (ID_GAP_Y)
-    id_circle_r = 1.6  # mm (ID_CIRCLE_R)
+    # LJK generator constants for NISN bubbles
+    id_r = 2.0           # mm (ID_BUBBLE_R)
+    id_gap = 4.2         # mm (ID_DIGIT_GAP)
+    digits = 8           # 8 digit NISN
 
-    b_r_px = _mm_to_px_y(id_circle_r)
-    col_step_px = _mm_to_px_x(id_col_w + id_gap_x)
-    row_step_px = _mm_to_px_y(id_gap_y)
+    b_r_px = _mm_to_px_y(id_r)
+    col_step_px = _mm_to_px_x(id_gap + id_r * 2)  # gap + 2*radius = column pitch
+    row_step_px = _mm_to_px_y(id_r * 2 + 0.6)     # 2*radius + 0.6mm = row pitch
 
     positions = []
-    for digit in range(10):  # 10 digit positions
-        for opt in range(10):  # options 0-9
-            cx = nisn_x + digit * col_step_px + _mm_to_px_x(id_circle_r)
-            cy = nisn_y + opt * row_step_px  # 0 at top, 9 at bottom
+    for digit in range(digits):
+        for opt in range(10):  # options 0 (bottom in PDF = top in image) to 9
+            cx = nisn_x + digit * col_step_px + _mm_to_px_x(id_r)
+            cy = nisn_y + opt * row_step_px
             positions.append((digit, opt, cx, cy))
 
     return positions, b_r_px
@@ -284,10 +285,11 @@ def detect_nisn(warped: np.ndarray) -> dict:
             if digit_idx not in digits or dark > digits[digit_idx].get("dark", 0):
                 digits[digit_idx] = {"value": str(opt_val), "dark": dark, "ratio": ratio}
 
-    # Build NISN string
+    # Build NISN string (8 digits from LJK, fill left)
     nisn_parts = []
     confidence_sum = 0
-    for i in range(10):
+    total_digits = 8
+    for i in range(total_digits):
         if i in digits:
             nisn_parts.append(digits[i]["value"])
             confidence_sum += min(1.0, digits[i].get("ratio", 0) / 0.6)
@@ -295,7 +297,7 @@ def detect_nisn(warped: np.ndarray) -> dict:
             nisn_parts.append("?")
 
     nisn = "".join(nisn_parts)
-    avg_conf = confidence_sum / 10 if confidence_sum > 0 else 0
+    avg_conf = confidence_sum / total_digits if confidence_sum > 0 else 0
 
     return {
         "nisn": nisn,
