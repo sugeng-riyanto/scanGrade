@@ -133,9 +133,12 @@ function whiteboardList() {
 function confirmDelete(id, title) {
     if (!confirm(`Hapus papan tulis "${title}"? Semua data terkait akan dihapus.`)) return;
     fetch(`/wb/teacher/api/whiteboard/${id}`, { method: "DELETE" })
-        .then(r => r.json())
-        .then(d => { if (d.success) window.location.reload(); else alert(d.error || "Gagal"); })
-        .catch(() => alert("Gagal menghapus"));
+        .then(r => r.json().catch(() => ({error: "Gagal parse response"})))
+        .then(d => {
+            if (d.success) window.location.reload();
+            else alert(d.error || "Gagal menghapus");
+        })
+        .catch(() => alert("Gagal menghapus (network error)"));
 }
 </script>
 {% endblock %}
