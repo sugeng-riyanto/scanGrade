@@ -672,7 +672,38 @@ function renderScanResult(data) {
     if (data.debug_image) showDebug(data.debug_image);
     result.classList.remove('hidden');
     document.getElementById('btn-save').classList.remove('hidden');
+    // Save to sessionStorage for recovery after login redirect
+    try {
+        sessionStorage.setItem('sg_scan_result', JSON.stringify({
+            answers: data.answers,
+            total: data.total || 50,
+            confidence: data.confidence,
+            nisn: data.nisn,
+            nisn_confidence: data.nisn_confidence,
+            avg_confidence: data.avg_confidence,
+            needs_review: data.needs_review,
+            score: data.score,
+            correct: data.correct,
+            detected: data.detected,
+            scan_file_id: data.scan_file_id,
+        }));
+    } catch (e) {}
 }
+
+// Restore scan result from sessionStorage (after login redirect)
+(function() {
+    try {
+        const saved = sessionStorage.getItem('sg_scan_result');
+        if (saved) {
+            const data = JSON.parse(saved);
+            // Only restore if the result section is hidden
+            if (document.getElementById('scan-result').classList.contains('hidden')) {
+                renderScanResult(data);
+                sessionStorage.removeItem('sg_scan_result');
+            }
+        }
+    } catch (e) {}
+})();
 
 // ── Editable answers table with search & sort ──
 let _ansData = []; // {q, answer, conf}
@@ -821,6 +852,14 @@ document.getElementById('btn-save').addEventListener('click', async function() {
                 scan_file_id: window._lastScanData?.scan_file_id || '',
             }),
         });
+        // Check if redirected to login page (session expired)
+        if (resp.url.includes('/auth/login')) {
+            alert('Sesi habis. Hasil scan akan dipulihkan setelah login.');
+            // Save state before redirect
+            try { sessionStorage.setItem('sg_scan_result', JSON.stringify(window._lastScanData || {})); } catch(e) {}
+            window.location.href = '/auth/login?next=/teacher/scan';
+            return;
+        }
         const data = await resp.json();
         if (data.success) {
             alert('Hasil scan disimpan! Skor: ' + data.score + '% (' + data.correct + '/' + data.total + ' benar)');
