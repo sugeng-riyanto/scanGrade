@@ -37,7 +37,14 @@ def _parse_answer(ans_data, q_idx, q_type, answer_key):
 
 def _get_answer_key(exam, q_idx):
     """Get correct answer for a question."""
+    if not exam:
+        return ""
     ak = exam.get("answer_key") or {}
+    if isinstance(ak, str):
+        try:
+            ak = json.loads(ak)
+        except (json.JSONDecodeError, TypeError):
+            ak = {}
     return ak.get(str(q_idx), "")
 
 
@@ -55,6 +62,11 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     wrap_align = Alignment(horizontal="center", vertical="top", wrap_text=True)
 
     q_types = exam.get("question_types") or {}
+    if isinstance(q_types, str):
+        try:
+            q_types = json.loads(q_types)
+        except (json.JSONDecodeError, TypeError):
+            q_types = {}
     total_q = exam.get("total_questions", 0)
 
     # Headers
@@ -136,9 +148,14 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
     buf = io.BytesIO()
     c = pdf_canvas.Canvas(buf, pagesize=A4)
     width, height = A4
-
     q_types = exam.get("question_types") or {} if exam else {}
+    if isinstance(q_types, str):
+        try:
+            q_types = json.loads(q_types)
+        except (json.JSONDecodeError, TypeError):
+            q_types = {}
     total_q = exam.get("total_questions", 0) if exam else 0
+
 
     for s in submissions:
         answers = s.get("answers") or {}
