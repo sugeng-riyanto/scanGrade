@@ -332,22 +332,14 @@ def _register_blueprints(app):
     app.register_blueprint(admin_sekolah_bp, url_prefix="/admin-sekolah")
     app.register_blueprint(tools_bp, url_prefix="/tools")
 
-    # Whiteboard blueprints (lazy — only loaded when first request hits /wb/)
+    # Whiteboard blueprints (registered but heavy imports deferred)
     try:
         from app.routes.whiteboard_teacher import whiteboard_teacher_bp
         from app.routes.whiteboard_student import whiteboard_student_bp
         app.register_blueprint(whiteboard_teacher_bp, url_prefix="/wb/teacher")
         app.register_blueprint(whiteboard_student_bp, url_prefix="/wb/student")
-
-        # SocketIO — only inits when first whiteboard page is loaded (non-blocking)
-        from flask_socketio import SocketIO
-        sio = SocketIO(async_mode='threading')
-        sio.init_app(app, cors_allowed_origins="*")
-        from app.routes.whiteboard_socket import register_socket_events
-        register_socket_events(sio)
-        app.extensions["socketio"] = sio
-    except Exception as e:
-        app.logger.warning("Whiteboard init skipped: %s", str(e)[:80])
+    except Exception:
+        pass
 
 
 def _register_error_handlers(app):
