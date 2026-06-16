@@ -151,16 +151,26 @@ async function startCamera() {
     hideError();
     try {
         const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-        // Try back camera first, fallback to any camera
-        let constraints = {
-            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-        };
-        try {
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
-        } catch (e) {
-            // Fallback: any camera
-            constraints = { video: { width: { ideal: 1920 }, height: { ideal: 1080 } } };
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Mobile/tablet: always back camera (exact: environment)
+        // Desktop: any camera
+        let constraints;
+        if (isMobile) {
+            try {
+                constraints = { video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (e) {
+                // Fallback to any camera if back camera not available
+                constraints = { video: { width: { ideal: 1920 }, height: { ideal: 1080 } } };
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            }
+        } else {
+            constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (e) {
+                constraints = { video: { width: { ideal: 1920 }, height: { ideal: 1080 } } };
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            }
         }
         document.getElementById('camera-preview').srcObject = stream;
         startBtn.classList.add('hidden');
