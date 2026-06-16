@@ -54,8 +54,9 @@ class WhiteboardCanvas {
     }
 
     _resize() {
-        const w = this.canvas.clientWidth;
-        const h = this.canvas.clientHeight;
+        const p = this.canvas.parentElement;
+        if (!p) return;
+        const w = p.clientWidth, h = p.clientHeight;
         if (w < 10 || h < 10) return;
         this.canvas.width = w;
         this.canvas.height = h;
@@ -64,13 +65,14 @@ class WhiteboardCanvas {
         this._render();
     }
 
-    // ─── Coordinate: offsetX/Y (mouse) or clientX-rect.left (touch) ───
+    // ─── Coordinate: exam canvas formula (take_exam.html:1187-1191) ───
     _pos(e) {
-        if (e.offsetX !== undefined && e.offsetY !== undefined) {
-            return { x: e.offsetX, y: e.offsetY };
-        }
+        const src = e.touches ? e.touches[0] : e;
         const r = this.canvas.getBoundingClientRect();
-        return { x: e.clientX - r.left, y: e.clientY - r.top };
+        return {
+            x: (src.clientX - r.left) * (this.canvas.width / r.width),
+            y: (src.clientY - r.top) * (this.canvas.height / r.height),
+        };
     }
 
     _bindEvents() {
