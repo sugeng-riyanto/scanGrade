@@ -47,25 +47,37 @@ class WhiteboardCanvas {
     }
 
     _resize() {
-        const stage = document.getElementById("wb-stage");
-        if (!stage) return;
-        const sr = stage.getBoundingClientRect();
-        if (sr.width <= 1 || sr.height <= 1) {
-            setTimeout(() => this._resize(), 100);
-            return;
-        }
-        this.canvas.width = sr.width * this.dpr;
-        this.canvas.height = sr.height * this.dpr;
+        // Like exam canvas: use parentElement.clientWidth (CSS pixels, no DPR)
+        const p = this.canvas.parentElement;
+        if (!p) return;
+        const w = p.clientWidth, h = p.clientHeight;
+        if (w <= 0 || h <= 0) return;
+        this.canvas.width = w;
+        this.canvas.height = h;
+        // Compute bg bounds at 1:1 canvas pixel = CSS pixel
+        if (this.currentBg) this._calcBgBounds();
         this._render();
     }
 
-    // ─── Coordinate: EXACT same as exam canvas (take_exam.html:1187-1191) ───
+    _calcBgBounds() {
+        if (!this.currentBg) { this.bgBounds = null; return; }
+        const cw = this.canvas.width, ch = this.canvas.height;
+        const iw = this.currentBg.naturalWidth || this.currentBg.width;
+        const ih = this.currentBg.naturalHeight || this.currentBg.height;
+        if (!iw || !ih) { this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; return; }
+        const sc = Math.min(cw / iw, ch / ih);
+        this.bgBounds = { x: (cw - iw * sc) / 2, y: (ch - ih * sc) / 2, w: iw * sc, h: ih * sc };
+    }
+
+    // ─── Coordinate: 1:1 CSS pixels → canvas pixels (no DPR) ───
     _pos(e) {
         const src = e.touches ? e.touches[0] : e;
         const r = this.canvas.getBoundingClientRect();
+        // Since canvas.width = parent.clientWidth (CSS pixels, no DPR),
+        // the ratio canvas.width / r.width = 1. So we just return CSS offset.
         return {
-            x: (src.clientX - r.left) * (this.canvas.width / r.width),
-            y: (src.clientY - r.top) * (this.canvas.height / r.height),
+            x: src.clientX - r.left,
+            y: src.clientY - r.top,
         };
     }
 
@@ -87,7 +99,7 @@ class WhiteboardCanvas {
         });
     }
 
-    // ─── Drawing ───
+    // ─── Drawing (1:1 CSS pixel units, no DPR) ───
     _down(e) {
         if (this.textMode || this.isDrawing) return;
         if (this.tool === "compass") { this._compDown(e); return; }
@@ -113,7 +125,7 @@ class WhiteboardCanvas {
         if (this.tool === "eraser") {
             this.ctx.globalCompositeOperation = "destination-out";
             this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, (this._width + 5) * this.dpr, 0, Math.PI * 2);
+            this.ctx.arc(p.x, p.y, (this._width + 5), 0, Math.PI * 2);
             this.ctx.fill();
             this.ctx.globalCompositeOperation = "source-over";
             this.points.push([p.x, p.y]);
@@ -127,7 +139,7 @@ class WhiteboardCanvas {
         this.ctx.moveTo(this.lastX, this.lastY);
         this.ctx.lineTo(p.x, p.y);
         this.ctx.strokeStyle = this.color;
-        this.ctx.lineWidth = Math.max(0.5, this._width * this.dpr);
+        this.ctx.lineWidth = Math.max(0.5, this._width);
         this.ctx.lineCap = "round";
         this.ctx.lineJoin = "round";
         this.ctx.stroke();
@@ -154,21 +166,18 @@ class WhiteboardCanvas {
     }
 
     // ─── Background ───
-    get _w() { return this.canvas.width; }
-    get _h() { return this.canvas.height; }
-
     _drawBackground() {
+        const w = this.canvas.width, h = this.canvas.height;
         this.ctx.fillStyle = this.boardMode === "white" ? "#FFFFFF" : "#1e293b";
-        this.ctx.fillRect(0, 0, this._w, this._h);
+        this.ctx.fillRect(0, 0, w, h);
         if (this.currentBg && this.bgBounds) {
             this.ctx.drawImage(this.currentBg, this.bgBounds.x, this.bgBounds.y, this.bgBounds.w, this.bgBounds.h);
         }
         if (!this.gridEnabled) return;
         this.ctx.strokeStyle = this.boardMode === "white" ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)";
         this.ctx.lineWidth = 0.5;
-        const sp = this.gridSpacing * this.dpr;
-        for (let x = 0; x <= this._w; x += sp) { this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, this._h); this.ctx.stroke(); }
-        for (let y = 0; y <= this._h; y += sp) { this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(this._w, y); this.ctx.stroke(); }
+        for (let x = 0; x <= w; x += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, h); this.ctx.stroke(); }
+        for (let y = 0; y <= h; y += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(w, y); this.ctx.stroke(); }
     }
 
     setBackground(url) {
@@ -177,10 +186,7 @@ class WhiteboardCanvas {
         img.crossOrigin = "anonymous";
         img.onload = () => {
             this.currentBg = img;
-            const cw = this._w, ch = this._h;
-            const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
-            const sc = Math.min(cw / iw, ch / ih);
-            this.bgBounds = { x: (cw - iw * sc) / 2, y: (ch - ih * sc) / 2, w: iw * sc, h: ih * sc };
+            this._calcBgBounds();
             this._render();
         };
         img.src = url;
@@ -200,23 +206,23 @@ class WhiteboardCanvas {
         const p = this._pos(e);
         const cx = this.compassCenter.x, cy = this.compassCenter.y;
         this.compassRadius = Math.hypot(p.x - cx, p.y - cy);
-        this.ctx.clearRect(0, 0, this._w, this._h);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this._drawBackground();
         if (this.compassSnapshot.complete) this.ctx.drawImage(this.compassSnapshot, 0, 0);
-        this.ctx.strokeStyle = this.color; this.ctx.lineWidth = Math.max(0.5, this._width * this.dpr);
+        this.ctx.strokeStyle = this.color; this.ctx.lineWidth = Math.max(0.5, this._width);
         this.ctx.beginPath(); this.ctx.arc(cx, cy, this.compassRadius, 0, Math.PI * 2); this.ctx.stroke();
         this.ctx.strokeStyle = this.color; this.ctx.lineWidth = 1;
-        this.ctx.beginPath(); this.ctx.moveTo(cx - 6 * this.dpr, cy); this.ctx.lineTo(cx + 6 * this.dpr, cy); this.ctx.stroke();
-        this.ctx.beginPath(); this.ctx.moveTo(cx, cy - 6 * this.dpr); this.ctx.lineTo(cx, cy + 6 * this.dpr); this.ctx.stroke();
-        this.ctx.setLineDash([4 * this.dpr, 4 * this.dpr]);
+        this.ctx.beginPath(); this.ctx.moveTo(cx - 6, cy); this.ctx.lineTo(cx + 6, cy); this.ctx.stroke();
+        this.ctx.beginPath(); this.ctx.moveTo(cx, cy - 6); this.ctx.lineTo(cx, cy + 6); this.ctx.stroke();
+        this.ctx.setLineDash([4, 4]);
         this.ctx.beginPath(); this.ctx.moveTo(cx, cy); this.ctx.lineTo(p.x, p.y); this.ctx.stroke(); this.ctx.setLineDash([]);
-        this.ctx.fillStyle = this.color; this.ctx.font = `${12 * this.dpr}px Inter, sans-serif`;
-        this.ctx.fillText(`r=${Math.round(this.compassRadius / this.dpr)}px`, cx + (p.x - cx) / 2 + 5 * this.dpr, cy + (p.y - cy) / 2 - 5 * this.dpr);
+        this.ctx.fillStyle = this.color; this.ctx.font = "12px Inter, sans-serif";
+        this.ctx.fillText(`r=${Math.round(this.compassRadius)}px`, cx + (p.x - cx) / 2 + 5, cy + (p.y - cy) / 2 - 5);
     }
     _compUp(e) {
         if (!this.isDrawing) return;
         this.isDrawing = false;
-        if (this.compassRadius > 5 * this.dpr) {
+        if (this.compassRadius > 5) {
             this._emitDraw("circle", { cx: this.compassCenter.x, cy: this.compassCenter.y, r: this.compassRadius, color: this.color, width: this._width });
         }
     }
@@ -240,19 +246,19 @@ class WhiteboardCanvas {
         if (this.undoStack.length === 0) return;
         this.redoStack.push(this.canvas.toDataURL());
         const img = new Image();
-        img.onload = () => { this.ctx.clearRect(0, 0, this._w, this._h); this._drawBackground(); this.ctx.drawImage(img, 0, 0); };
+        img.onload = () => { this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); this._drawBackground(); this.ctx.drawImage(img, 0, 0); };
         img.src = this.undoStack.pop();
     }
     redo() {
         if (this.redoStack.length === 0) return;
         this.undoStack.push(this.canvas.toDataURL());
         const img = new Image();
-        img.onload = () => { this.ctx.clearRect(0, 0, this._w, this._h); this._drawBackground(); this.ctx.drawImage(img, 0, 0); };
+        img.onload = () => { this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); this._drawBackground(); this.ctx.drawImage(img, 0, 0); };
         img.src = this.redoStack.pop();
     }
     clearCanvas() {
         this._snap();
-        this.ctx.clearRect(0, 0, this._w, this._h);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this._drawBackground();
         if (this.currentBg && this.bgBounds) this.ctx.drawImage(this.currentBg, this.bgBounds.x, this.bgBounds.y, this.bgBounds.w, this.bgBounds.h);
     }
@@ -288,10 +294,10 @@ class WhiteboardCanvas {
             const text = input.value.trim();
             if (text) {
                 this._snap();
-                this.ctx.font = `${this.fontSize * this.dpr}px Inter, sans-serif`;
+                this.ctx.font = this.fontSize + "px Inter, sans-serif";
                 this.ctx.fillStyle = this.color;
                 this.ctx.fillText(text, p.x, p.y);
-                this._emitDraw("text", { text, x: p.x / this.dpr, y: p.y / this.dpr, color: this.color, fontSize: this.fontSize });
+                this._emitDraw("text", { text, x: p.x, y: p.y, color: this.color, fontSize: this.fontSize });
             }
             document.body.removeChild(input);
             this.textMode = false;
@@ -302,41 +308,41 @@ class WhiteboardCanvas {
 
     // ─── Render ───
     _render() {
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        this.ctx.clearRect(0, 0, this._w, this._h);
+        const w = this.canvas.width, h = this.canvas.height;
+        this.ctx.clearRect(0, 0, w, h);
         this._drawBackground();
         for (const op of this.remoteOps) this._replay(op);
     }
 
-    // ─── Replay (receive remote ops in CSS coords, convert to canvas pixels) ───
+    // ─── Replay (1:1 CSS pixel coordinates) ───
     _replay(op) {
         const d = op.data || {};
         const ctx = this.ctx;
         if (op.op_type === "line") {
             const pts = d.points || [];
             if (pts.length < 2) return;
-            ctx.beginPath(); ctx.moveTo(pts[0][0] * this.dpr, pts[0][1] * this.dpr);
-            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * this.dpr, pts[i][1] * this.dpr);
+            ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
             ctx.strokeStyle = d.color || "#000";
-            ctx.lineWidth = Math.max(0.5, (d.width || 3) * this.dpr);
+            ctx.lineWidth = Math.max(0.5, d.width || 3);
             ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
         } else if (op.op_type === "text") {
-            ctx.font = `${(d.fontSize || 16) * this.dpr}px Inter, sans-serif`;
+            ctx.font = (d.fontSize || 16) + "px Inter, sans-serif";
             ctx.fillStyle = d.color || "#000";
-            ctx.fillText(d.text || "", (d.x || 0) * this.dpr, (d.y || 0) * this.dpr);
+            ctx.fillText(d.text || "", d.x || 0, d.y || 0);
         } else if (op.op_type === "erase") {
             ctx.globalCompositeOperation = "destination-out";
-            ctx.beginPath(); ctx.arc((d.x || 0) * this.dpr, (d.y || 0) * this.dpr, ((d.width || 8) + 5) * this.dpr, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(d.x || 0, d.y || 0, (d.width || 8) + 5, 0, Math.PI * 2); ctx.fill();
             ctx.globalCompositeOperation = "source-over";
         } else if (op.op_type === "circle") {
-            ctx.strokeStyle = d.color || "#000"; ctx.lineWidth = (d.width || 3) * this.dpr;
-            ctx.beginPath(); ctx.arc((d.cx || 0) * this.dpr, (d.cy || 0) * this.dpr, (d.r || 0) * this.dpr, 0, Math.PI * 2); ctx.stroke();
+            ctx.strokeStyle = d.color || "#000"; ctx.lineWidth = d.width || 3;
+            ctx.beginPath(); ctx.arc(d.cx || 0, d.cy || 0, d.r || 0, 0, Math.PI * 2); ctx.stroke();
         }
     }
 
     loadOps(ops) {
         this._snap();
-        this.ctx.clearRect(0, 0, this._w, this._h);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this._drawBackground();
         if (this.currentBg && this.bgBounds) this.ctx.drawImage(this.currentBg, this.bgBounds.x, this.bgBounds.y, this.bgBounds.w, this.bgBounds.h);
         for (const op of ops) this._replay(op);
