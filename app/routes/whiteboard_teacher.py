@@ -194,6 +194,10 @@ def api_upload_slides(whiteboard_id):
 
     try:
         result = upload_slide_background(whiteboard_id, file)
+        # Delete existing slides for this whiteboard before inserting new ones
+        db = get_supabase()
+        db.table("whiteboard_slides").delete().eq("whiteboard_id", whiteboard_id).execute()
+        db.table("whiteboard_ops").delete().eq("whiteboard_id", whiteboard_id).execute()
         for page in result["pages"]:
             add_slide(whiteboard_id, page["slide_number"], page["background_url"])
         return jsonify({"success": True, **result})
