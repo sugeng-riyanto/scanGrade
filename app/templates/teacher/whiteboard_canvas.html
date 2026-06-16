@@ -1,188 +1,147 @@
 {% extends "base.html" %}
 {% block title %}Papan Tulis - {{ whiteboard.title }}{% endblock %}
 {% block content %}
-<div class="h-screen flex flex-col" x-data="whiteboardCanvas()" x-init="initCanvas()">
+<div class="h-screen flex flex-col" x-data="whiteboardCanvas()" x-init="init()">
     <!-- Top bar -->
-    <div class="flex items-center justify-between px-4 py-2 border-b bg-white dark:bg-gray-900 shrink-0">
-        <div class="flex items-center gap-3">
-            <a href="/wb/teacher/whiteboard" class="text-gray-500 hover:text-gray-700">&larr;</a>
-            <h1 class="font-bold text-base truncate max-w-[200px]">{{ whiteboard.title }}</h1>
-            <span class="text-xs text-gray-400" x-text="onlineCount + ' online'"></span>
-        </div>
+    <div class="flex items-center justify-between px-3 py-1.5 border-b bg-white dark:bg-gray-900 shrink-0">
         <div class="flex items-center gap-2">
-            <div id="timer-display" class="font-mono font-bold text-sm px-3 py-1 rounded-lg bg-gray-100 dark:bg-gray-800">00:00</div>
-            <button @click="downloadPDF" class="btn btn-ghost text-sm py-1 px-3">
-                <i class="fas fa-download"></i> PDF
-            </button>
-            <button @click="endSession" class="btn text-sm py-1 px-3 {{ 'bg-red-500 text-white' if whiteboard.status == 'active' else 'bg-gray-300 text-gray-500' }}">
-                {{ 'Akhiri' if whiteboard.status == 'active' else 'Selesai' }}
-            </button>
+            <a href="/wb/teacher/whiteboard" class="text-gray-500 hover:text-gray-700 text-sm">&larr;</a>
+            <h1 class="font-bold text-sm truncate max-w-[160px]">{{ whiteboard.title }}</h1>
+            <span class="text-[10px] text-gray-400" x-text="onlineCount>0 ? onlineCount+' online' : ''"></span>
+        </div>
+        <div class="flex items-center gap-1">
+            <button @click="boardMode='white';c.setBoardMode('white');sendDisplay()" :class="boardMode==='white'?'bg-primary-100 border-primary-400 text-primary-700':'bg-white border-gray-200 text-gray-500'" class="text-[10px] font-bold px-1.5 py-0.5 rounded border-2 hidden md:inline"><i class="far fa-square"></i></button>
+            <button @click="boardMode='black';c.setBoardMode('black');sendDisplay()" :class="boardMode==='black'?'bg-gray-800 border-gray-600 text-white':'bg-white border-gray-200 text-gray-500'" class="text-[10px] font-bold px-1.5 py-0.5 rounded border-2 hidden md:inline"><i class="fas fa-square"></i></button>
+            <button @click="g=!g;c.toggleGrid();sendDisplay()" :class="g?'bg-primary-100 text-primary-700 border-primary-300':'bg-white text-gray-500 border-gray-200'" class="text-[10px] font-bold px-1.5 py-0.5 rounded border-2 hidden md:inline"><i class="fas fa-border-all"></i></button>
+            <span class="w-px h-4 bg-gray-200 mx-0.5 hidden md:block"></span>
+            <div id="timer" class="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-gray-100">00:00</div>
+            <input type="file" accept=".pdf,.png,.jpg,.jpeg" id="fu" class="hidden" @change="uploadFile($event)">
+            <button @click="document.getElementById('fu').click()" class="btn btn-ghost text-[11px] py-0.5 px-1.5"><i class="fas fa-file-upload"></i></button>
+            <button @click="downloadPDF()" class="btn btn-ghost text-[11px] py-0.5 px-1.5"><i class="fas fa-download"></i></button>
+            <button @click="endSession()" class="btn text-[11px] py-0.5 px-1.5 {{ 'bg-red-500 text-white' if whiteboard.status=='active' else 'bg-gray-300 text-gray-500' }}">{{ 'Akhiri' if whiteboard.status=='active' else 'Selesai' }}</button>
         </div>
     </div>
 
     <div class="flex flex-1 overflow-hidden">
-        <!-- Left Toolbar -->
-        <div class="w-12 md:w-14 bg-white dark:bg-gray-900 border-r flex flex-col items-center py-2 gap-1 shrink-0 overflow-y-auto">
-            <button @click="setTool('pen')" :class="tool === 'pen' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Pena">
-                <i class="fas fa-pen"></i>
-            </button>
-            <button @click="setTool('eraser')" :class="tool === 'eraser' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penghapus">
-                <i class="fas fa-eraser"></i>
-            </button>
-            <button @click="enableText()" :class="tool === 'text' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Teks">
-                <i class="fas fa-font"></i>
-            </button>
-            <button @click="setTool('highlight')" :class="tool === 'highlight' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Stabilo">
-                <i class="fas fa-highlighter"></i>
-            </button>
-            <button @click="setTool('laser')" :class="tool === 'laser' ? 'bg-primary-100 text-primary-600' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Laser Pointer">
-                <i class="fas fa-arrows-alt"></i>
-            </button>
-            <hr class="w-6 border-t my-1">
-            <input type="color" x-model="color" @input="canvas?.setColor(color)" class="w-8 h-8 rounded cursor-pointer border-0 p-0" title="Warna">
-            <hr class="w-6 border-t my-1">
-            <button @click="canvas?.undo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Undo">
-                <i class="fas fa-undo"></i>
-            </button>
-            <button @click="canvas?.redo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Redo">
-                <i class="fas fa-redo"></i>
-            </button>
-            <button @click="canvas?.clearCanvas()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-red-500 hover:bg-red-50" title="Bersihkan">
-                <i class="fas fa-trash"></i>
-            </button>
-            <hr class="w-6 border-t my-1">
-            <!-- Drawing Tools -->
-            <button @click="toggleTool('ruler')" :class="rulerOn ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penggaris 30cm">
-                <i class="fas fa-ruler-combined"></i>
-            </button>
-            <button @click="toggleTool('protractor')" :class="protractorOn ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Busur 180°">
-                <i class="fas fa-drafting-compass"></i>
-            </button>
-            <button @click="toggleTool('triangle')" :class="triangleOn ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Segitiga Siku">
-                <i class="fas fa-play"></i>
-            </button>
-            <button @click="setTool('compass')" :class="tool === 'compass' ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Jangka">
-                <i class="fas fa-circle"></i>
-            </button>
-            <button @click="canvas?.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Kalkulator Ilmiah">
-                <i class="fas fa-calculator"></i>
-            </button>
-            <hr class="w-6 border-t my-1">
-            <!-- Display Settings -->
-            <button @click="showDisplay = !showDisplay" :class="showDisplay ? 'bg-teal-100 text-teal-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Tampilan">
-                <i class="fas fa-palette"></i>
-            </button>
-            <button @click="takeSnapshot()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Snapshot">
-                <i class="fas fa-camera"></i>
-            </button>
-        </div>
-
-        <!-- Display Settings Panel -->
-        <div x-show="showDisplay" class="absolute left-14 top-16 z-20 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-4 w-64" style="display:none">
-            <div class="font-bold text-xs text-gray-500 mb-3 uppercase tracking-wider">Tampilan</div>
-            <div class="space-y-3">
-                <div>
-                    <label class="text-xs font-semibold text-gray-600 block mb-1">Mode Papan</label>
-                    <div class="flex gap-2">
-                        <button @click="boardMode='white'; canvas?.setBoardMode('white'); sendDisplaySettings()"
-                                :class="boardMode==='white' ? 'bg-primary-100 border-primary-400 text-primary-700' : 'bg-gray-50 border-gray-200 text-gray-600'"
-                                class="flex-1 text-xs font-bold py-1.5 rounded-lg border-2 transition">
-                            <i class="far fa-square mr-1"></i>Putih
-                        </button>
-                        <button @click="boardMode='black'; canvas?.setBoardMode('black'); sendDisplaySettings()"
-                                :class="boardMode==='black' ? 'bg-gray-800 border-gray-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600'"
-                                class="flex-1 text-xs font-bold py-1.5 rounded-lg border-2 transition">
-                            <i class="fas fa-square mr-1"></i>Hitam
-                        </button>
-                    </div>
-                </div>
-                <div>
-                    <label class="flex items-center justify-between">
-                        <span class="text-xs font-semibold text-gray-600">Grid</span>
-                        <button @click="gridEnabled=!gridEnabled; canvas?.toggleGrid(); sendDisplaySettings()"
-                                :class="gridEnabled ? 'bg-primary-600' : 'bg-gray-300'"
-                                class="w-9 h-5 rounded-full relative transition">
-                            <span :class="gridEnabled ? 'translate-x-4' : 'translate-x-0'" class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform"></span>
-                        </button>
-                    </label>
-                    <div x-show="gridEnabled" class="mt-2 space-y-2">
-                        <div>
-                            <label class="text-xs text-gray-500">Jarak: <span x-text="gridSpacing + 'px'"></span></label>
-                            <input type="range" x-model="gridSpacing" @input="canvas?.setGridSpacing(gridSpacing)" min="10" max="200" step="5" class="w-full">
-                        </div>
-                        <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                            <input type="checkbox" x-model="gridLog" @change="canvas?.setGridLogarithmic(gridLog); sendDisplaySettings()" class="rounded">
-                            Skala Logaritmik (basis 10)
-                        </label>
+        <!-- Toolbar -->
+        <div class="w-12 bg-white dark:bg-gray-900 border-r flex flex-col items-center py-1 gap-0.5 shrink-0 overflow-y-auto">
+            <button @click="t='pen';c.setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Pena"><i class="fas fa-pen"></i></button>
+            <button @click="t='eraser';c.setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penghapus"><i class="fas fa-eraser"></i></button>
+            <button @click="textMode()" :class="t==='text'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Teks"><i class="fas fa-font"></i></button>
+            <button @click="t='highlight';c.setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Stabilo"><i class="fas fa-highlighter"></i></button>
+            <button @click="t='laser';c.setTool('laser')" :class="t==='laser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Laser"><i class="fas fa-crosshairs"></i></button>
+            <hr class="w-5 border-t my-0.5">
+            <input type="color" x-model="col" @input="c.setColor(col)" class="w-6 h-6 rounded cursor-pointer border-0 p-0" title="Warna">
+            <div x-data="{o:false}">
+                <button @click="o=!o" class="w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-bold text-gray-500 hover:bg-primary-50" title="Ukuran"><span x-text="pw.toFixed(1)"></span></button>
+                <div x-show="o" @click.outside="o=false" class="absolute left-12 top-32 z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-2 w-40" style="display:none">
+                    <input type="range" x-model="pw" @input="c.setWidth(pw)" min="0.5" max="20" step="0.5" class="w-full">
+                    <div class="flex gap-1 mt-1">
+                        <button @click="pw=1.5;c.setWidth(1.5);o=false" class="flex-1 text-[10px] py-0.5 rounded bg-gray-100 hover:bg-gray-200 font-semibold">1.5</button>
+                        <button @click="pw=3;c.setWidth(3);o=false" class="flex-1 text-[10px] py-0.5 rounded bg-gray-100 hover:bg-gray-200 font-semibold">3</button>
+                        <button @click="pw=5;c.setWidth(5);o=false" class="flex-1 text-[10px] py-0.5 rounded bg-gray-100 hover:bg-gray-200 font-semibold">5</button>
+                        <button @click="pw=8;c.setWidth(8);o=false" class="flex-1 text-[10px] py-0.5 rounded bg-gray-100 hover:bg-gray-200 font-semibold">8</button>
                     </div>
                 </div>
             </div>
+            <hr class="w-5 border-t my-0.5">
+            <button @click="c.undo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Undo"><i class="fas fa-undo"></i></button>
+            <button @click="c.redo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Redo"><i class="fas fa-redo"></i></button>
+            <button @click="c.clearCanvas()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-red-500 hover:bg-red-50" title="Bersihkan"><i class="fas fa-trash"></i></button>
+            <hr class="w-5 border-t my-0.5">
+            <button @click="rulerOn=!rulerOn;if(rulerOn){rulerX=c.canvas.width/c.dpr/2-250;rulerY=c.canvas.height/c.dpr/2-35}" :class="rulerOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penggaris"><i class="fas fa-ruler-combined"></i></button>
+            <button @click="protOn=!protOn;if(protOn){protX=c.canvas.width/c.dpr/2-150;protY=c.canvas.height/c.dpr/2-150}" :class="protOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Busur"><i class="fas fa-drafting-compass"></i></button>
+            <button @click="triOn=!triOn;if(triOn){triX=c.canvas.width/c.dpr/2-150;triY=c.canvas.height/c.dpr/2-150}" :class="triOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Segitiga"><i class="fas fa-play"></i></button>
+            <button @click="t='compass';c.setTool('compass')" :class="t==='compass'?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Jangka"><i class="fas fa-circle"></i></button>
+            <button @click="c.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Kalkulator"><i class="fas fa-calculator"></i></button>
+            <hr class="w-5 border-t my-0.5">
+            <button @click="snapshot()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Snapshot"><i class="fas fa-camera"></i></button>
         </div>
 
         <!-- Canvas -->
-        <div class="flex-1 relative bg-gray-100 dark:bg-gray-800 overflow-hidden">
-            <canvas id="whiteboard-canvas" class="absolute inset-0 w-full h-full cursor-crosshair"></canvas>
+        <div class="flex-1 relative bg-gray-100 dark:bg-gray-800 overflow-hidden" id="cw">
+            <canvas id="wb-canvas" class="absolute inset-0 w-full h-full" style="touch-action:none"></canvas>
 
-            <!-- Slide number overlay -->
-            <div class="absolute bottom-16 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
-                Slide <span x-text="currentSlide + 1"></span>/<span x-text="slides.length"></span>
+            <!-- Ruler overlay -->
+            <div x-show="rulerOn" class="absolute" :style="{left:rulerX+'px',top:rulerY+'px',transform:'rotate('+rulerAngle+'deg)',transformOrigin:'20px 35px',zIndex:10}">
+                <svg width="500" height="70" viewBox="0 0 500 70" style="overflow:visible;pointer-events:none">
+                    <rect x="0" y="0" width="500" height="70" rx="6" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
+                    <g id="rm" x-init="rmk($el)"></g>
+                    <circle cx="20" cy="35" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('ruler',$event)" @touchstart.prevent="drg('ruler',$event.touches[0])"/>
+                    <circle cx="475" cy="14" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('ruler',$event)" @touchstart.prevent="rot('ruler',$event.touches[0])"/>
+                    <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="rulerOn=false"/>
+                    <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
+                </svg>
             </div>
+
+            <!-- Protractor -->
+            <div x-show="protOn" class="absolute" :style="{left:protX+'px',top:protY+'px',transform:'rotate('+protAngle+'deg)',transformOrigin:protCX+'px '+protCY+'px',zIndex:10}">
+                <svg width="300" height="300" viewBox="0 0 300 300" style="overflow:visible;pointer-events:none">
+                    <rect x="0" y="0" width="300" height="300" rx="4" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.4)" stroke-width="1"/>
+                    <g id="pm" x-init="pmk($el)"></g>
+                    <circle :cx="protCX" :cy="protCY" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('prot',$event)" @touchstart.prevent="drg('prot',$event.touches[0])"/>
+                    <circle :cx="protCX" cy="20" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('prot',$event)" @touchstart.prevent="rot('prot',$event.touches[0])"/>
+                    <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="protOn=false"/>
+                    <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
+                </svg>
+            </div>
+
+            <!-- Triangle -->
+            <div x-show="triOn" class="absolute" :style="{left:triX+'px',top:triY+'px',transform:'rotate('+triAngle+'deg)',transformOrigin:triRX+'px '+triRY+'px',zIndex:10}">
+                <svg :width="triS" :height="triS" :viewBox="'0 0 '+triS+' '+triS" style="overflow:visible;pointer-events:none">
+                    <polygon :points="'10,'+triS+' 10,10 '+triS+','+triS" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
+                    <circle cx="10" :cy="triS" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('tri',$event)" @touchstart.prevent="drg('tri',$event.touches[0])"/>
+                    <circle cx="10" cy="10" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('tri',$event)" @touchstart.prevent="rot('tri',$event.touches[0])"/>
+                    <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="triOn=false"/>
+                    <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
+                </svg>
+            </div>
+
+            <div class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full pointer-events-none">Slide <span x-text="slideIdx+1"></span>/<span x-text="slides.length"></span></div>
         </div>
 
-        <!-- Right Panel: Students -->
-        <div class="w-60 bg-white dark:bg-gray-900 border-l flex flex-col shrink-0 hidden lg:flex">
-            <div class="p-3 border-b font-semibold text-sm flex items-center justify-between">
+        <!-- Student Panel -->
+        <div class="w-52 bg-white dark:bg-gray-900 border-l flex flex-col shrink-0 hidden lg:flex">
+            <div class="p-2 border-b font-semibold text-xs flex items-center justify-between">
                 <span>Siswa (<span x-text="members.length"></span>)</span>
                 <div class="flex gap-1">
-                    <button @click="bulkApprove()" class="text-xs text-primary-600 hover:underline" title="Ijinkan semua">&#10003;</button>
-                    <button @click="bulkRevoke()" class="text-xs text-red-500 hover:underline" title="Revoke semua">&#10007;</button>
+                    <button @click="bulkApprove()" class="text-[10px] text-primary-600 hover:underline" title="Ijinkan semua">&#10003;</button>
+                    <button @click="bulkRevoke()" class="text-[10px] text-red-500 hover:underline" title="Revoke">&#10007;</button>
                 </div>
             </div>
-            <div class="flex-1 overflow-y-auto p-2 space-y-1 text-sm">
+            <div class="flex-1 overflow-y-auto p-1.5 space-y-0.5 text-xs">
                 <template x-for="m in members" :key="m.student_id">
-                    <div class="flex items-center justify-between p-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <span :class="'w-2 h-2 rounded-full shrink-0 ' + (m.can_annotate ? 'bg-green-500' : 'bg-gray-300')"></span>
-                            <span class="truncate" x-text="m.profiles?.full_name || 'Murid'"></span>
+                    <div class="flex items-center justify-between p-1 rounded hover:bg-gray-50">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                            <span :class="'w-1.5 h-1.5 rounded-full shrink-0 '+(m.can_annotate?'bg-green-500':'bg-gray-300')"></span>
+                            <span class="truncate" x-text="m.profiles?.full_name||'Murid'"></span>
                         </div>
-                        <div class="flex gap-1 shrink-0">
-                            <template x-if="m.awaiting_approval">
-                                <button @click="approveAnnotate(m.student_id)" class="text-primary-600 hover:bg-primary-50 p-1 rounded" title="Setujui">
-                                    <i class="fas fa-check text-xs"></i>
-                                </button>
-                            </template>
-                            <button @click="togglePermission(m)" :title="m.can_annotate ? 'Revoke' : 'Ijinkan'" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700">
-                                <i class="fas" :class="m.can_annotate ? 'fa-user-check text-green-600' : 'fa-user-plus text-gray-400'"></i>
-                            </button>
-                        </div>
+                        <template x-if="m.awaiting_approval">
+                            <button @click="approve(m.student_id)" class="text-primary-600 p-0.5 rounded" title="Setujui"><i class="fas fa-check text-[10px]"></i></button>
+                        </template>
+                        <button @click="togglePerm(m)" :title="m.can_annotate?'Revoke':'Ijinkan'" class="p-0.5 rounded hover:bg-gray-200">
+                            <i class="fas" :class="m.can_annotate?'fa-user-check text-green-600':'fa-user-plus text-gray-400'"></i>
+                        </button>
                     </div>
                 </template>
-                <div x-show="!members.length" class="text-center text-gray-400 py-4 text-xs">
-                    Belum ada siswa
-                </div>
+                <div x-show="!members.length" class="text-center text-gray-400 py-3 text-[10px]">Belum ada siswa</div>
             </div>
-
-            <!-- Reactions display -->
-            <div id="reaction-container" class="p-3 border-t flex gap-2 justify-center">
-                <button @click="sendReaction('\u{1F44D}')" class="reaction-btn text-xl hover:scale-125 transition">&#x1F44D;</button>
-                <button @click="sendReaction('\u2753')" class="reaction-btn text-xl hover:scale-125 transition">&#x2753;</button>
-                <button @click="sendReaction('\u{1F680}')" class="reaction-btn text-xl hover:scale-125 transition">&#x1F680;</button>
+            <div id="reactions" class="p-2 border-t flex gap-1 justify-center">
+                <button @click="sendReact('\u{1F44D}')" class="text-lg hover:scale-125 transition">&#x1F44D;</button>
+                <button @click="sendReact('\u2753')" class="text-lg hover:scale-125 transition">&#x2753;</button>
+                <button @click="sendReact('\u{1F680}')" class="text-lg hover:scale-125 transition">&#x1F680;</button>
             </div>
         </div>
     </div>
 
-    <!-- Bottom slide navigator -->
-    <div class="h-20 bg-white dark:bg-gray-900 border-t flex items-center px-4 gap-2 overflow-x-auto shrink-0" id="slide-container">
-        <button @click="addSlide()" class="btn btn-ghost text-xs py-1 px-2 shrink-0">
-            <i class="fas fa-plus"></i> Slide
-        </button>
-        <template x-for="(slide, i) in slides" :key="i">
-            <div @click="goToSlide(i)" :class="'slide-thumb shrink-0 w-20 h-14 rounded-lg overflow-hidden cursor-pointer border-2 ' + (i === currentSlide ? 'border-primary-500' : 'border-gray-200 dark:border-gray-700')">
-                <img x-show="slide.background_url" :src="slide.background_url" class="w-full h-full object-cover">
-                <div x-show="!slide.background_url" class="w-full h-full flex items-center justify-center text-xs text-gray-400 bg-gray-100 dark:bg-gray-800">
-                    <span x-text="i + 1"></span>
-                </div>
-                <button @click.stop="deleteSlide(i)" class="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white text-xs rounded-full hidden" :class="{'hidden': slides.length <= 1}">&times;</button>
+    <!-- Bottom slide bar -->
+    <div class="h-14 bg-white dark:bg-gray-900 border-t flex items-center px-2 gap-1 overflow-x-auto shrink-0" id="slide-bar">
+        <button @click="addSlide()" class="btn btn-ghost text-[10px] py-0.5 px-1 shrink-0"><i class="fas fa-plus"></i></button>
+        <template x-for="(sl,i) in slides" :key="i">
+            <div @click="goToSlide(i)" :class="'shrink-0 w-14 h-10 rounded overflow-hidden cursor-pointer border-2 '+(i===slideIdx?'border-primary-500':'border-gray-200')">
+                <img x-show="sl.background_url" :src="sl.background_url" class="w-full h-full object-cover">
+                <div x-show="!sl.background_url" class="w-full h-full flex items-center justify-center text-[10px] text-gray-400 bg-gray-100"><span x-text="i+1"></span></div>
+                <button @click.stop="delSlide(i)" class="absolute top-0 right-0 w-3 h-3 bg-red-500 text-white text-[8px] rounded-full hidden" :class="{'hidden':slides.length<=1}">&times;</button>
             </div>
         </template>
     </div>
@@ -194,7 +153,6 @@
 <script src="/static/js/tools.js"></script>
 <script src="/static/js/whiteboard-canvas.js"></script>
 <script src="/static/js/whiteboard-websocket.js"></script>
-<script src="/static/js/whiteboard-slides.js"></script>
 <script src="/static/js/whiteboard-timer.js"></script>
 <script>
 function whiteboardCanvas() {
@@ -202,272 +160,103 @@ function whiteboardCanvas() {
         whiteboardId: "{{ whiteboard.id }}",
         slides: {{ slides | tojson | safe }},
         members: {{ members | tojson | safe }},
-        currentSlide: 0,
-        tool: "pen",
-        color: "#000000",
-        onlineCount: 0,
-        canvas: null,
-        ws: null,
-        slideNav: null,
-        timer: null,
-        heartbeatInterval: null,
-        showDisplay: false,
-        boardMode: "white",
-        gridEnabled: false,
-        gridSpacing: 50,
-        gridLog: false,
-        rulerOn: false,
-        protractorOn: false,
-        triangleOn: false,
+        slideIdx: 0, t: "pen", col: "#000000", pw: 1.5, onlineCount: 0,
+        c: null, ws: null, timer: null, hb: null,
+        boardMode: "white", g: false, gridSpacing: 50, gridLog: false,
+        rulerOn: false, rulerX: 60, rulerY: 80, rulerAngle: 0,
+        protOn: false, protX: 100, protY: 50, protAngle: 0, protCX: 150, protCY: 264,
+        triOn: false, triX: 160, triY: 120, triAngle: 0, triS: 300, triRX: 10, triRY: 10,
+        _drg: null,
 
-        initCanvas() {
-            // Restore display settings from server
-            {% if whiteboard.display_settings %}
-            {% set ds = whiteboard.display_settings if whiteboard.display_settings is mapping else {} %}
-            this.boardMode = "{{ ds.get('board_mode', 'white') }}";
-            this.gridEnabled = {{ 'true' if ds.get('grid_enabled') else 'false' }};
-            this.gridSpacing = {{ ds.get('grid_spacing', 50) }};
+        init() {
+            {% if whiteboard.display_settings and whiteboard.display_settings is mapping %}
+            {% set ds = whiteboard.display_settings %}
+            this.boardMode = "{{ ds.get('board_mode','white') }}";
+            this.g = {{ 'true' if ds.get('grid_enabled') else 'false' }};
+            this.gridSpacing = {{ ds.get('grid_spacing',50) }};
             this.gridLog = {{ 'true' if ds.get('grid_logarithmic') else 'false' }};
             {% endif %}
 
-            this.canvas = new WhiteboardCanvas("whiteboard-canvas", {
+            this.c = new WhiteboardCanvas("wb-canvas", {
                 onDraw: (op) => { this.ws?.sendDraw(op.op_type, op.data); },
                 onCursor: (pos) => { this.ws?.sendCursor(pos.x, pos.y); },
-                onToolState: (type, state) => {
-                    if (this.ws) this.ws.sendToolState(type, state);
-                },
-                onToolToggle: (type, visible) => {
-                    if (type === 'ruler') this.rulerOn = visible;
-                    else if (type === 'protractor') this.protractorOn = visible;
-                    else if (type === 'triangle') this.triangleOn = visible;
-                },
             });
-
-            // Apply restored display settings
-            this.canvas.setBoardMode(this.boardMode);
-            if (this.gridEnabled) { this.canvas.gridEnabled = true; this.canvas.gridSpacing = this.gridSpacing; this.canvas.setGridLogarithmic(this.gridLog); }
-            this.canvas._render();
+            this.c.setBoardMode(this.boardMode);
+            this.c.setWidth(this.pw);
+            if (this.g) { this.c.gridEnabled = true; this.c.gridSpacing = this.gridSpacing; this.c.setGridLogarithmic(this.gridLog); }
+            this.c._render();
 
             this.ws = new WhiteboardSocket(this.whiteboardId, {
-                onConnect: () => { this.startHeartbeat(); },
-                onDrawOp: (data) => { this.canvas.replayOp(data); },
-                onCursorMove: (data) => { /* render remote cursor */ },
-                onAnnotateRequest: (data) => {
-                    const m = this.members.find(x => x.student_id === data.student_id);
-                    if (m) m.awaiting_approval = true;
-                },
-                onAnnotateApproved: (data) => {
-                    const m = this.members.find(x => x.student_id === data.student_id);
-                    if (m) { m.can_annotate = true; m.awaiting_approval = false; }
-                },
-                onAnnotateRevoked: (data) => {
-                    const m = this.members.find(x => x.student_id === data.student_id);
-                    if (m) m.can_annotate = false;
-                },
-                onSlideChanged: (data) => { this.goToSlide(data.slide_number - 1); },
+                onConnect: () => { this.hb=setInterval(()=>this.ws?.sendHeartbeat(),5000); this.onlineCount++; },
+                onDrawOp: (data) => { this.c.replayOp(data); },
+                onSlideChanged: (data) => { this.goToSlide(data.slide_number-1); },
                 onTimerUpdate: (data) => { this.timer?.syncRemote(data.seconds, data.running); },
-                onReaction: (data) => { /* show bubble */ },
-                onUserJoined: () => { this.onlineCount++; },
-                onUserLeft: () => { this.onlineCount = Math.max(0, this.onlineCount - 1); },
+                onDisplaySettingsUpdate: (data) => {
+                    if(data.board_mode){ this.boardMode=data.board_mode; this.c.setBoardMode(data.board_mode); }
+                    if(data.grid_enabled!==undefined){ this.g=data.grid_enabled; this.c.gridEnabled=data.g; }
+                    if(data.grid_spacing){ this.gridSpacing=data.grid_spacing; this.c.gridSpacing=data.grid_spacing; }
+                    if(data.grid_logarithmic!==undefined){ this.gridLog=data.grid_logarithmic; this.c.setGridLogarithmic(data.grid_logarithmic); }
+                    this.c._render();
+                },
             });
             this.ws.connect();
-
-            this.slideNav = new WhiteboardSlides("slide-container", {
-                onChange: (i, slide) => {
-                    this.currentSlide = i;
-                    this.loadSlide(slide);
-                    this.ws?.sendSlideChange(i + 1);
-                },
-            });
-            this.slideNav.setSlides(this.slides);
-
-            this.timer = new WhiteboardTimer("timer-display");
-
-            // Load first slide background
-            if (this.slides.length > 0) {
-                this.loadSlide(this.slides[0]);
-            }
+            this.timer = new WhiteboardTimer("timer");
+            if (this.slides.length > 0) this.loadSlide(this.slides[0]);
         },
 
-        loadSlide(slide) {
-            this.canvas.setBackground(slide.background_url || null);
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/ops?slide=${slide.slide_number}`)
-                .then(r => r.json())
-                .then(d => { if (d.ops) this.canvas.loadOps(d.ops); })
-                .catch(() => {});
+        loadSlide(sl) { this.c.setBackground(sl.background_url||null); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/ops?slide=${sl.slide_number}`).then(r=>r.json()).then(d=>{if(d.ops)this.c.loadOps(d.ops);}).catch(()=>{}); },
+        goToSlide(i) { if(i<0||i>=this.slides.length)return; this.slideIdx=i; this.loadSlide(this.slides[i]); this.ws?.sendSlideChange(i+1); },
+
+        textMode() { this.t="text"; this.c.enableTextMode(); },
+
+        // Tool marks
+        rmk(el) { if(el&&ScanGradeTools) el.innerHTML = ScanGradeTools.rulerSvg(500,70); },
+        pmk(el) { if(el&&ScanGradeTools) el.innerHTML = ScanGradeTools.protractorSvg(150,264,126); },
+
+        // Drag/Rotate
+        drg(which, e) {
+            const st = {ruler:'ruler',prot:'prot',tri:'tri'}[which];
+            const p = which==='ruler'?'ruler':which==='prot'?'prot':which==='tri'?'tri':'';
+            this._drg = {which:p, sx: e.clientX, sy: e.clientY, ox: this[p+(p==='ruler'?'X':p==='prot'?'X':'X')], oy: this[p+(p==='ruler'?'Y':p==='prot'?'Y':'Y')]};
+            this._onDragMove = (ev) => {
+                if(!this._drg)return;
+                const dx=(ev.clientX||ev.touches[0].clientX)-this._drg.sx, dy=(ev.clientY||ev.touches[0].clientY)-this._drg.sy;
+                const p=this._drg.which;
+                this[p+'X']=this._drg.ox+dx; this[p+'Y']=this._drg.oy+dy;
+            };
+            this._onDragEnd = () => { this._drg=null; document.removeEventListener('mousemove',this._onDragMove); document.removeEventListener('mouseup',this._onDragEnd); };
+            document.addEventListener('mousemove',this._onDragMove); document.addEventListener('mouseup',this._onDragEnd);
+        },
+        rot(which, e) {
+            const p = {ruler:'ruler',prot:'prot',tri:'tri'}[which];
+            this._drg = {which:p, sx:e.clientX, sy:e.clientY, sa:Math.atan2(e.clientY-this[p+'Y'],e.clientX-this[p+'X'])*180/Math.PI, oa:this[p+'Angle']};
+            this._onDragMove = (ev) => { if(!this._drg)return; const a=Math.atan2((ev.clientY||ev.touches[0].clientY)-this[p+'Y'],(ev.clientX||ev.touches[0].clientX)-this[p+'X'])*180/Math.PI; this[p+'Angle']=this._drg.oa+(a-this._drg.sa); };
+            this._onDragEnd = () => { this._drg=null; document.removeEventListener('mousemove',this._onDragMove); document.removeEventListener('mouseup',this._onDragEnd); };
+            document.addEventListener('mousemove',this._onDragMove); document.addEventListener('mouseup',this._onDragEnd);
         },
 
-        setTool(t) {
-            this.tool = t;
-            if (t === "laser") { this.canvas.setTool("laser"); return; }
-            if (t === "text") return;
-            if (t === "compass") { this.canvas.setTool("compass"); return; }
-            this.canvas.setTool(t);
-        },
+        sendDisplay() { this.ws?.sendDisplaySettings({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog}); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/display-settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog})}).catch(()=>{}); },
 
-        enableText() {
-            this.tool = "text";
-            this.canvas.enableTextMode();
+        uploadFile(e) {
+            const file = e.target.files[0]; if(!file) return;
+            const fd = new FormData(); fd.append('file', file);
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides/upload`, {method:'POST', body:fd})
+                .then(r=>r.json()).then(d=>{if(d.success)window.location.reload();}).catch(()=>{alert('Upload gagal');});
         },
+        addSlide() { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(d=>{if(d.success)window.location.reload();}).catch(()=>{}); },
+        delSlide(i) { if(this.slides.length<=1)return; const sl=this.slides[i]; fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides/${sl.slide_number}`,{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.success){this.slides.splice(i,1);if(this.slideIdx>=this.slides.length)this.slideIdx=this.slides.length-1;this.loadSlide(this.slides[this.slideIdx]);}}); },
 
-        toggleTool(type) {
-            this.canvas.toggleTool(type);
-            if (type === "ruler") this.rulerOn = !this.rulerOn;
-            else if (type === "protractor") this.protractorOn = !this.protractorOn;
-            else if (type === "triangle") this.triangleOn = !this.triangleOn;
-            if (this.ws) this.ws.sendToolState(type, { visible: this.canvas.toolState[type].visible });
-        },
+        downloadPDF() { window.open(`/wb/teacher/whiteboard/${this.whiteboardId}/download`,'_blank'); },
 
-        sendDisplaySettings() {
-            if (!this.ws) return;
-            this.ws.sendDisplaySettings({
-                board_mode: this.boardMode,
-                grid_enabled: this.gridEnabled,
-                grid_spacing: this.gridSpacing,
-                grid_logarithmic: this.gridLog,
-            });
-            // Persist to server
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/display-settings`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
-                    board_mode: this.boardMode,
-                    grid_enabled: this.gridEnabled,
-                    grid_spacing: this.gridSpacing,
-                    grid_logarithmic: this.gridLog,
-                }),
-            }).catch(() => {});
-        },
+        endSession() { if(!confirm('Akhiri sesi?'))return; fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'ended'})}).then(r=>r.json()).then(d=>{if(d.success)window.location.href='/wb/teacher/whiteboard';}); },
 
-        goToSlide(i) {
-            if (i < 0 || i >= this.slides.length) return;
-            this.currentSlide = i;
-            this.slideNav.goTo(i);
-            this.loadSlide(this.slides[i]);
-            this.ws?.sendSlideChange(i + 1);
-        },
+        snapshot() { const d=this.c.toDataURL(); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/snapshots`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slide_number:this.slideIdx+1,image_data:d})}).then(r=>r.json()).then(d=>{if(d.success)alert('Snapshot tersimpan');}); },
 
-        addSlide() {
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({}),
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.success) window.location.reload();
-            })
-            .catch(() => {});
-        },
-
-        deleteSlide(i) {
-            if (this.slides.length <= 1) return;
-            const slide = this.slides[i];
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides/${slide.slide_number}`, { method: "DELETE" })
-                .then(r => r.json())
-                .then(d => {
-                    if (d.success) {
-                        this.slides.splice(i, 1);
-                        this.slideNav.removeSlide(i);
-                        if (this.currentSlide >= this.slides.length) this.currentSlide = this.slides.length - 1;
-                        this.loadSlide(this.slides[this.currentSlide]);
-                    }
-                });
-        },
-
-        togglePermission(m) {
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ student_id: m.student_id, can_annotate: !m.can_annotate }),
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.success) {
-                    m.can_annotate = !m.can_annotate;
-                    if (m.can_annotate) this.ws?.approveAnnotate(m.student_id);
-                    else this.ws?.revokeAnnotate(m.student_id);
-                }
-            });
-        },
-
-        approveAnnotate(studentId) {
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ student_id: studentId, can_annotate: true }),
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.success) {
-                    const m = this.members.find(x => x.student_id === studentId);
-                    if (m) { m.can_annotate = true; m.awaiting_approval = false; }
-                    this.ws?.approveAnnotate(studentId);
-                }
-            });
-        },
-
-        bulkApprove() {
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ bulk: "all", can_annotate: true }),
-            }).then(r => r.json());
-            this.members.forEach(m => m.can_annotate = true);
-        },
-
-        bulkRevoke() {
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ bulk: "all", can_annotate: false }),
-            }).then(r => r.json());
-            this.members.forEach(m => m.can_annotate = false);
-        },
-
-        sendReaction(emoji) {
-            fetch(`/wb/student/api/whiteboard/${this.whiteboardId}/reaction`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ emoji }),
-            });
-        },
-
-        takeSnapshot() {
-            const dataUrl = this.canvas.toDataURL();
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/snapshots`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ slide_number: this.currentSlide + 1, image_data: dataUrl }),
-            })
-            .then(r => r.json())
-            .then(d => { if (d.success) alert("Snapshot tersimpan"); });
-        },
-
-        startHeartbeat() {
-            this.heartbeatInterval = setInterval(() => this.ws?.sendHeartbeat(), 5000);
-            this.onlineCount++;
-        },
-
-        downloadPDF() {
-            window.open(`/wb/teacher/whiteboard/${this.whiteboardId}/download`, "_blank");
-        },
-
-        endSession() {
-            if (!confirm("Akhiri sesi papan tulis? Semua murid akan kembali ke halaman daftar.")) return;
-            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}`, {
-                method: "PUT",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ status: "ended" }),
-            })
-            .then(r => r.json())
-            .then(d => { if (d.success) window.location.href = "/wb/teacher/whiteboard"; });
-        },
-
-        destroy() {
-            if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-            this.ws?.disconnect();
-        },
+        togglePerm(m) { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({student_id:m.student_id,can_annotate:!m.can_annotate})}).then(r=>r.json()).then(d=>{if(d.success){m.can_annotate=!m.can_annotate;if(m.can_annotate)this.ws?.approveAnnotate(m.student_id);else this.ws?.revokeAnnotate(m.student_id);}}); },
+        approve(sid) { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({student_id:sid,can_annotate:true})}).then(r=>r.json()).then(d=>{if(d.success){const m=this.members.find(x=>x.student_id===sid);if(m){m.can_annotate=true;m.awaiting_approval=false;}this.ws?.approveAnnotate(sid);}}); },
+        bulkApprove() { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bulk:'all',can_annotate:true})}).then(r=>r.json()); this.members.forEach(m=>m.can_annotate=true); },
+        bulkRevoke() { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bulk:'all',can_annotate:false})}).then(r=>r.json()); this.members.forEach(m=>m.can_annotate=false); },
+        sendReact(emoji) { this.ws?.sendReaction(emoji,'Guru'); },
     };
 }
 </script>
