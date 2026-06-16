@@ -136,7 +136,7 @@
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-4 sm:p-6">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                 <h2 class="font-extrabold text-surface-800">Hasil Scan</h2>
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 flex-wrap">
                     <span id="avg-confidence" class="hidden text-xs font-bold text-surface-500"></span>
                     <div id="score-badge" class="hidden bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-extrabold"></div>
                 </div>
@@ -151,11 +151,37 @@
                 <span class="text-sm font-bold text-amber-700">Perlu dicek:</span>
                 <span id="needs-review-list" class="text-sm text-amber-600"></span>
             </div>
-            <div id="answers-grid" class="grid grid-cols-5 sm:grid-cols-10 gap-1.5 text-xs"></div>
-            <div class="mt-4 flex items-center gap-2 text-[10px] text-surface-400">
-                <span class="inline-block w-2.5 h-2.5 rounded bg-emerald-100 border border-emerald-300"></span> Yakin
-                <span class="inline-block w-2.5 h-2.5 rounded bg-amber-100 border border-amber-300 ml-2"></span> Kurang yakin
-                <span class="inline-block w-2.5 h-2.5 rounded bg-stone-100 border border-stone-200 ml-2"></span> Kosong
+            <!-- Search + sort toolbar -->
+            <div class="flex items-center gap-2 mb-3">
+                <div class="relative flex-1">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-300 text-xs"></i>
+                    <input type="text" id="answer-search" placeholder="Cari soal..." class="w-full pl-8 pr-3 py-2 border border-surface-200 rounded-xl text-xs font-bold focus:border-primary-500 transition">
+                </div>
+                <button id="sort-toggle" class="border border-surface-200 px-3 py-2 rounded-xl text-xs font-bold text-surface-500 hover:bg-surface-50 transition whitespace-nowrap" title="Urutkan">
+                    <i class="fas fa-sort-amount-down mr-1"></i>No
+                </button>
+                <span class="text-[10px] font-bold text-surface-400 whitespace-nowrap" id="answer-count"></span>
+            </div>
+            <!-- Editable answers table -->
+            <div class="overflow-x-auto -mx-4 sm:mx-0">
+                <div class="min-w-[500px] px-4 sm:px-0" id="answers-table-wrap">
+                    <table class="w-full text-xs" id="answers-table">
+                        <thead><tr class="text-surface-500 border-b border-surface-200">
+                            <th class="pb-2 font-bold text-left w-10">#</th>
+                            <th class="pb-2 font-bold text-left">Jawaban</th>
+                            <th class="pb-2 font-bold text-center w-16">Yakin</th>
+                            <th class="pb-2 font-bold text-center w-20">Edit</th>
+                        </tr></thead>
+                        <tbody id="answers-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="mt-3 flex items-center gap-3 text-[10px] text-surface-400 flex-wrap">
+                <span class="inline-block w-2.5 h-2.5 rounded bg-emerald-100 border border-emerald-300"></span> Yakin (≥70%)
+                <span class="inline-block w-2.5 h-2.5 rounded bg-amber-100 border border-amber-300 ml-1"></span> Ragu (40-70%)
+                <span class="inline-block w-2.5 h-2.5 rounded bg-red-100 border border-red-300 ml-1"></span> Review (&lt;40%)
+                <span class="inline-block w-2.5 h-2.5 rounded bg-stone-100 border border-stone-200 ml-1"></span> Kosong
+                <span class="ml-auto text-[10px] text-surface-300">Klik jawaban untuk edit</span>
             </div>
         </div>
 
@@ -164,7 +190,7 @@
             <img id="debug-image" class="max-w-full h-auto rounded-xl border border-surface-200" alt="Debug view">
         </div>
 
-        <div class="flex gap-3">
+        <div class="flex flex-wrap gap-3">
             <button id="btn-save" class="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-5 py-2.5 rounded-xl hover:from-primary-600 hover:to-primary-700 text-sm font-extrabold shadow-lg shadow-primary-500/25 transition hidden">
                 <i class="fas fa-save mr-1"></i>Simpan Hasil
             </button>
@@ -631,41 +657,107 @@ function renderScanResult(data) {
         reviewBadge.classList.add('hidden');
     }
 
-    renderAnswers(lastAnswers, data.total || 50, data.confidence || {});
+    renderAnswersTable(lastAnswers, data.total || 50, data.confidence || {});
     if (data.debug_image) showDebug(data.debug_image);
     result.classList.remove('hidden');
     document.getElementById('btn-save').classList.remove('hidden');
 }
 
-function renderAnswers(answers, total, confidence) {
-    const grid = document.getElementById('answers-grid');
-    grid.innerHTML = '';
+// ── Editable answers table with search & sort ──
+let _ansData = []; // {q, answer, conf}
+let _sortAsc = true;
+let _searchVal = '';
+
+function renderAnswersTable(answers, total, confidence) {
+    _ansData = [];
+    const labels = ['A','B','C','D','E','F','G'];
     for (let i = 0; i < total; i++) {
-        const div = document.createElement('div');
-        const hasAnswer = answers[i] !== undefined && answers[i] !== null;
-        const conf = confidence ? (confidence[i] || 0) : 0.5;
-
-        let bg, border, textColor, confLabel;
-        if (!hasAnswer) {
-            bg = 'bg-stone-50'; border = 'border-stone-200'; textColor = 'text-stone-300';
-            confLabel = '';
-        } else if (conf >= 0.7) {
-            bg = 'bg-emerald-50'; border = 'border-emerald-300'; textColor = 'text-emerald-700';
-            confLabel = '';
-        } else if (conf >= 0.4) {
-            bg = 'bg-amber-50'; border = 'border-amber-300'; textColor = 'text-amber-700';
-            confLabel = '<span class="text-[8px] text-amber-400">!</span>';
-        } else {
-            bg = 'bg-red-50'; border = 'border-red-300'; textColor = 'text-red-600';
-            confLabel = '<span class="text-[8px] text-red-400">!!</span>';
-        }
-
-        div.className = 'flex flex-col items-center p-1.5 rounded-xl ' + bg + ' border-2 ' + border;
-        div.innerHTML = '<span class="text-stone-400 font-bold text-[10px]">' + (i + 1) + '</span>' +
-            '<span class="font-extrabold text-sm ' + textColor + '">' + (answers[i] || '-') + '</span>' +
-            confLabel;
-        grid.appendChild(div);
+        const raw = answers[i];
+        _ansData.push({
+            q: i,
+            answer: raw !== undefined && raw !== null ? raw : '',
+            conf: confidence ? (confidence[i] || 0) : 0,
+        });
     }
+    document.getElementById('answer-count').textContent = total + ' soal';
+    _renderTable();
+}
+
+function _renderTable() {
+    const val = _searchVal.toLowerCase();
+    const filtered = _ansData.filter(d => !val || (d.q + 1).toString().includes(val) || d.answer.toLowerCase().includes(val));
+    if (!_sortAsc) filtered.reverse();
+
+    const tbody = document.getElementById('answers-tbody');
+    tbody.innerHTML = '';
+    for (const d of filtered) {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-surface-100 hover:bg-surface-50/50 transition';
+
+        // Color row based on confidence
+        let rowColor = '';
+        if (!d.answer) rowColor = 'text-stone-300';
+        else if (d.conf >= 0.7) rowColor = 'text-emerald-700';
+        else if (d.conf >= 0.4) rowColor = 'text-amber-700';
+        else rowColor = 'text-red-600';
+
+        tr.innerHTML =
+            '<td class="py-2 pr-2 font-bold text-surface-400 text-[11px] align-middle">' + (d.q + 1) + '</td>' +
+            '<td class="py-2 font-extrabold text-sm align-middle"><span class="' + rowColor + ' answer-display" data-q="' + d.q + '">' + (d.answer || '-') + '</span></td>' +
+            '<td class="py-2 text-center align-middle"><span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ' +
+                (d.conf >= 0.7 ? 'bg-emerald-100 text-emerald-700' : d.conf >= 0.4 ? 'bg-amber-100 text-amber-700' : d.conf > 0 ? 'bg-red-100 text-red-600' : 'bg-stone-100 text-stone-400') +
+                '">' + Math.round(d.conf * 100) + '%</span></td>' +
+            '<td class="py-2 text-center align-middle"><button class="edit-btn text-[10px] text-primary-500 hover:text-primary-700 font-bold px-2 py-1 hover:bg-primary-50 rounded-lg transition" data-q="' + d.q + '"><i class="fas fa-pen mr-0.5"></i></button></td>';
+        tbody.appendChild(tr);
+    }
+
+    document.getElementById('answer-count').textContent = filtered.length + '/' + _ansData.length + ' soal';
+
+    // Bind edit buttons
+    tbody.querySelectorAll('.edit-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const q = parseInt(this.dataset.q);
+            const d = _ansData.find(x => x.q === q);
+            if (!d) return;
+            const current = d.answer || '';
+            const labels = ['A','B','C','D','E','F','G'];
+            let opts = labels.slice(0, 5); // default 5 options
+            // Show small popup or inline edit
+            const td = this.closest('tr').querySelector('.answer-display');
+            const orig = td.textContent;
+            const sel = document.createElement('select');
+            sel.className = 'text-xs font-bold p-1 border border-primary-400 rounded-lg bg-white';
+            sel.innerHTML = '<option value="">—</option>' + opts.map(o => '<option value="' + o + '" ' + (o === current ? 'selected' : '') + '>' + o + '</option>').join('');
+            sel.addEventListener('change', function() {
+                const val = this.value;
+                d.answer = val;
+                _renderTable(); // re-render to update colors
+            });
+            sel.addEventListener('blur', function() {
+                // Keep the value, just remove the select if focus lost
+            });
+            td.innerHTML = '';
+            td.appendChild(sel);
+            sel.focus();
+        });
+    });
+}
+
+// Search
+document.getElementById('answer-search').addEventListener('input', function() {
+    _searchVal = this.value;
+    _renderTable();
+});
+
+// Sort toggle
+document.getElementById('sort-toggle').addEventListener('click', function() {
+    _sortAsc = !_sortAsc;
+    this.innerHTML = _sortAsc
+        ? '<i class="fas fa-sort-amount-down mr-1"></i>No'
+        : '<i class="fas fa-sort-amount-up mr-1"></i>No';
+    _renderTable();
+});
+
 }
 
 function showDebug(b64) {
@@ -683,32 +775,29 @@ document.getElementById('btn-scan-again').addEventListener('click', function() {
     document.getElementById('scan-error').classList.add('hidden');
 });
 
-// Save results
+// Save results (use edited answers from table)
 document.getElementById('btn-save').addEventListener('click', async function() {
-    if (!lastAnswers) return;
+    if (!_ansData.length && !lastAnswers) return;
     const examId = document.getElementById('exam-select').value;
     const studentId = document.getElementById('student-select').value;
-    if (examId === '__custom__') {
-        alert('Pilih exam terlebih dahulu untuk menyimpan hasil.');
-        return;
+    if (examId === '__custom__') { alert('Pilih exam terlebih dahulu.'); return; }
+    if (!studentId) { alert('Pilih siswa terlebih dahulu.'); return; }
+
+    // Build final answers from editable table data
+    const finalAnswers = {};
+    for (const d of _ansData) {
+        if (d.answer) finalAnswers[d.q] = d.answer;
     }
-    if (!studentId) {
-        alert('Pilih siswa terlebih dahulu.');
-        return;
-    }
+
     const btn = this;
     btn.disabled = true;
     btn.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>Menyimpan...';
     try {
         const nisnVal = document.getElementById('nisn-value').textContent;
-        // Collect confidence data from last scan result
-        let confData = {};
-        let reviewList = [];
-        if (window._lastScanData && window._lastScanData.confidence) {
-            confData = window._lastScanData.confidence;
-        }
-        if (window._lastScanData && window._lastScanData.needs_review) {
-            reviewList = window._lastScanData.needs_review;
+        let confData = {}, reviewList = [];
+        if (window._lastScanData) {
+            if (window._lastScanData.confidence) confData = window._lastScanData.confidence;
+            if (window._lastScanData.needs_review) reviewList = window._lastScanData.needs_review;
         }
         const resp = await fetch('/api/scan/save', {
             method: 'POST',
@@ -716,7 +805,7 @@ document.getElementById('btn-save').addEventListener('click', async function() {
             body: JSON.stringify({
                 exam_id: examId,
                 student_id: studentId,
-                answers: lastAnswers,
+                answers: finalAnswers,
                 nisn: nisnVal || '',
                 confidence: confData,
                 needs_review: reviewList,
