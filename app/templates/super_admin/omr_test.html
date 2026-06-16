@@ -1,123 +1,134 @@
 {% extends "base.html" %}
 {% block title %}Uji OMR - ScanGrade{% endblock %}
-{% block page_title %}Uji Coba OMR — Dashboard{% endblock %}
+{% block page_title %}Uji Coba OMR{% endblock %}
 {% block content %}
-<div class="max-w-6xl mx-auto space-y-6">
+<div class="max-w-6xl mx-auto space-y-5">
 
-    <!-- Hero -->
-    <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 text-white shadow-2xl">
-        <div class="flex items-center justify-between">
-            <div>
-                <h2 class="text-xl font-extrabold">OMR Test Suite</h2>
-                <p class="text-sm text-slate-300 mt-1">Validasi akurasi scan LJK — single, batch, kalibrasi geometry</p>
-            </div>
-            <div class="flex gap-2">
-                <button onclick="exportChart('chart-pie')" class="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl text-xs font-bold transition"><i class="fas fa-download mr-1"></i>PNG</button>
-                <button onclick="copyTable()" class="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl text-xs font-bold transition"><i class="fas fa-copy mr-1"></i>Copy</button>
-            </div>
-        </div>
+  <!-- Hero -->
+  <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] p-6 text-white shadow-2xl">
+    <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAyNHYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-40"></div>
+    <div class="relative flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-400 flex items-center justify-center shadow-lg shadow-emerald-500/30"><i class="fas fa-microscope text-slate-900 text-lg"></i></div>
+        <div><h2 class="text-xl font-extrabold tracking-tight">OMR Test Suite</h2><p class="text-sm text-slate-400 mt-0.5">Validasi akurasi & performa scanner LJK</p></div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="exportChart('chart-pie')" class="bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-95"><i class="fas fa-download mr-1"></i>PNG</button>
+        <button onclick="copyTable()" class="bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-95"><i class="fas fa-copy mr-1"></i>Copy</button>
+      </div>
     </div>
+  </div>
 
-    <!-- Stats -->
-    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3" id="stats-row">
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 text-center">
-            <div class="text-2xl font-extrabold text-surface-800" id="stat-total">0</div>
-            <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider">Total Diuji</div>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 text-center">
-            <div class="text-2xl font-extrabold text-emerald-600" id="stat-nisn">0%</div>
-            <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider">Akurasi NISN</div>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 text-center">
-            <div class="text-2xl font-extrabold text-primary-600" id="stat-conf">0%</div>
-            <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider">Rata-rata Keyakinan</div>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 text-center">
-            <div class="text-2xl font-extrabold text-amber-600" id="stat-review">0</div>
-            <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider">Perlu Review</div>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 text-center">
-            <div class="text-2xl font-extrabold text-sky-600" id="stat-avg-score">-</div>
-            <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider">Rata-rata Skor</div>
-        </div>
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-2 sm:grid-cols-5 gap-3" id="stats-row">
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+      <div class="text-2xl font-extrabold text-surface-800" id="stat-total">0</div>
+      <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Total Diuji</div>
+      <div class="text-[8px] text-surface-300 mt-0.5">jumlah LJK diproses</div>
     </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+      <div class="text-2xl font-extrabold text-emerald-600" id="stat-nisn">0%</div>
+      <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Akurasi NISN</div>
+      <div class="text-[8px] text-emerald-400 mt-0.5">target &gt;90%</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+      <div class="text-2xl font-extrabold text-primary-600" id="stat-conf">0%</div>
+      <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Rata-rata Keyakinan</div>
+      <div class="text-[8px] text-primary-300 mt-0.5">target &gt;80%</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+      <div class="text-2xl font-extrabold text-amber-600" id="stat-review">0</div>
+      <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Perlu Review</div>
+      <div class="text-[8px] text-amber-400 mt-0.5">confidence &lt;60%</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+      <div class="text-2xl font-extrabold text-sky-600" id="stat-avg-score">-</div>
+      <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Rata-rata Skor</div>
+      <div class="text-[8px] text-sky-400 mt-0.5">jika exam dipilih</div>
+    </div>
+  </div>
 
-    <!-- Charts -->
-    <div id="charts-area" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4">
-            <h4 class="text-xs font-bold text-surface-600 mb-2">Success Rate</h4>
-            <p class="text-[9px] text-surface-400 mb-2">Proporsi scan yang berhasil vs gagal. Target: &gt;95% success.</p>
-            <canvas id="chart-pie" height="160"></canvas>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4">
-            <h4 class="text-xs font-bold text-surface-600 mb-2">Distribusi Keyakinan</h4>
-            <p class="text-[9px] text-surface-400 mb-2">Sebaran confidence score. Semakin ke kanan (hijau) semakin yakin sistem. Target: &gt;70% di bin &ge;0.8</p>
-            <canvas id="chart-histogram" height="160"></canvas>
-        </div>
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4">
-            <h4 class="text-xs font-bold text-surface-600 mb-2">Tingkat Deteksi per File</h4>
-            <p class="text-[9px] text-surface-400 mb-2">Jumlah bubble terdeteksi per file. Garis merah = total soal. Idealnya semua bar mencapai garis merah.</p>
-            <canvas id="chart-detection" height="160"></canvas>
-        </div>
+  <!-- Charts -->
+  <div id="charts-area" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-4 hover:shadow-md transition">
+      <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center"><i class="fas fa-chart-pie text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Success Rate</h4></div>
+      <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Proporsi scan berhasil vs gagal. Idealnya &gt;95% success — jika rendah, periksa pencahayaan atau fokus kamera.</p>
+      <canvas id="chart-pie" height="140"></canvas>
     </div>
+    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-4 hover:shadow-md transition">
+      <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-primary-400 to-blue-500 flex items-center justify-center"><i class="fas fa-chart-bar text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Distribusi Keyakinan</h4></div>
+      <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Sebaran confidence 0-100%. <span class="text-emerald-600 font-bold">Hijau</span> = yakin, <span class="text-amber-600 font-bold">kuning</span> = ragu, <span class="text-red-500 font-bold">merah</span> = perlu review. Target: &gt;70% di &ge;80%.</p>
+      <canvas id="chart-histogram" height="140"></canvas>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-4 hover:shadow-md transition">
+      <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center"><i class="fas fa-layer-group text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Tingkat Deteksi</h4></div>
+      <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Jumlah bubble terdeteksi per file. Semua bar harus mencapai garis total soal — jika tidak, geometry mungkin meleset.</p>
+      <canvas id="chart-detection" height="140"></canvas>
+    </div>
+  </div>
+
+  <!-- 3 Cards: Single | Batch | Calibrate -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
     <!-- Single Test -->
-    <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 sm:p-6">
-        <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20"><i class="fas fa-camera text-white text-sm"></i></div>
-            <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Satu LJK</h3><p class="text-[10px] text-surface-400">Upload 1 gambar, lihat hasil deteksi + debug</p></div>
-        </div>
-        <div class="flex items-center gap-3">
-            <input type="file" id="single-file" accept="image/*" class="text-sm file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100">
-            <button id="btn-test-single" class="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-5 py-2 rounded-xl text-sm font-extrabold shadow-lg shadow-primary-500/25 transition"><i class="fas fa-play mr-1"></i>Test</button>
-        </div>
-        <div id="single-result" class="hidden mt-4 space-y-3">
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold" id="single-metrics"></div>
-            <img id="single-debug" class="max-w-full h-auto rounded-xl border border-surface-200">
-        </div>
+    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-5 hover:shadow-md transition group">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center shadow-lg shadow-sky-200/60 group-hover:scale-110 transition"><i class="fas fa-camera text-white text-sm"></i></div>
+        <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Satu LJK</h3><p class="text-[10px] text-surface-400">Upload 1 gambar, lihat debug</p></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="file" id="single-file" accept="image/*" class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 file:transition flex-1">
+        <button id="btn-test-single" class="shrink-0 bg-gradient-to-r from-sky-500 to-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-extrabold shadow-lg shadow-sky-200/60 transition active:scale-95"><i class="fas fa-play mr-1"></i>Test</button>
+      </div>
+      <div id="single-result" class="hidden mt-4 space-y-3">
+        <div class="grid grid-cols-2 gap-2 text-xs font-bold" id="single-metrics"></div>
+        <img id="single-debug" class="max-w-full h-auto rounded-xl border border-surface-200">
+      </div>
     </div>
 
     <!-- Batch Test -->
-    <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 sm:p-6">
-        <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/20"><i class="fas fa-layer-group text-white text-sm"></i></div>
-            <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Banyak LJK (Batch)</h3><p class="text-[10px] text-surface-400">Upload banyak gambar sekaligus untuk hitung statistik akurasi</p></div>
+    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-5 hover:shadow-md transition group">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-200/60 group-hover:scale-110 transition"><i class="fas fa-layer-group text-white text-sm"></i></div>
+        <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Batch</h3><p class="text-[10px] text-surface-400">Banyak file sekaligus + statistik</p></div>
+      </div>
+      <div class="space-y-2">
+        <input type="file" id="batch-files" accept="image/*" multiple class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 file:transition w-full">
+        <div class="flex items-center gap-2">
+          <select id="batch-exam" class="flex-1 px-2 py-1.5 border border-surface-200 rounded-lg text-xs font-bold bg-surface-50">
+            <option value="">— Tanpa grading —</option>
+          </select>
+          <button id="btn-test-batch" class="shrink-0 bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-1.5 rounded-lg text-xs font-extrabold shadow-lg shadow-violet-200/60 transition active:scale-95"><i class="fas fa-flask mr-1"></i>Run</button>
         </div>
-        <div class="flex items-center gap-3 flex-wrap">
-            <input type="file" id="batch-files" accept="image/*" multiple class="text-sm file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100">
-            <select id="batch-exam" class="px-3 py-2 border-2 border-surface-200 rounded-xl text-sm font-bold">
-                <option value="">— Tanpa grading —</option>
-                {% for e in [] %}<option value="">e</option>{% endfor %}
-            </select>
-            <button id="btn-test-batch" class="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-5 py-2 rounded-xl text-sm font-extrabold shadow-lg shadow-purple-500/25 transition"><i class="fas fa-flask mr-1"></i>Jalankan Batch</button>
+      </div>
+      <div id="batch-progress" class="hidden mt-3 text-xs font-bold text-surface-500"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</div>
+      <div id="batch-results" class="hidden mt-4">
+        <div class="overflow-x-auto max-h-72 overflow-y-auto border border-surface-200 rounded-xl">
+          <table class="w-full text-[10px]">
+            <thead><tr class="bg-surface-50 text-surface-500 font-bold uppercase tracking-wider"><th class="p-2 text-left">File</th><th class="p-2 text-left">NISN</th><th class="p-2 text-center">Deteksi</th><th class="p-2 text-center">Yakin</th><th class="p-2 text-center">Review</th><th class="p-2 text-center">Skor</th><th class="p-2 text-center">Status</th></tr></thead>
+            <tbody id="batch-table-body"></tbody>
+          </table>
         </div>
-        <div id="batch-progress" class="hidden mt-3 text-sm font-bold text-surface-500"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</div>
-        <div id="batch-results" class="hidden mt-4 space-y-3">
-            <div class="overflow-x-auto max-h-80 overflow-y-auto border border-surface-200 rounded-xl">
-                <table class="w-full text-xs">
-                    <thead><tr class="bg-surface-100 text-surface-600 font-bold"><th class="p-2 text-left">File</th><th class="p-2 text-left">NISN</th><th class="p-2 text-center">Terdeteksi</th><th class="p-2 text-center">Keyakinan</th><th class="p-2 text-center">Review</th><th class="p-2 text-center">Skor</th><th class="p-2 text-center">Error</th></tr></thead>
-                    <tbody id="batch-table-body"></tbody>
-                </table>
-            </div>
-        </div>
+      </div>
     </div>
 
     <!-- Calibration -->
-    <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-4 sm:p-6">
-        <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20"><i class="fas fa-crosshairs text-white text-sm"></i></div>
-            <div><h3 class="font-extrabold text-surface-800 text-sm">Kalibrasi Geometry</h3><p class="text-[10px] text-surface-400">Upload LJK referensi + masukkan jawaban yang benar untuk ukur akurasi</p></div>
-        </div>
-        <div class="flex items-center gap-3 flex-wrap">
-            <input type="file" id="cal-file" accept="image/*" class="text-sm file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100">
-            <input type="text" id="cal-total" value="50" placeholder="Jumlah soal" class="w-20 px-3 py-2 border-2 border-surface-200 rounded-xl text-sm font-bold">
-            <button id="btn-calibrate" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-5 py-2 rounded-xl text-sm font-extrabold shadow-lg shadow-amber-500/25 transition"><i class="fas fa-crosshairs mr-1"></i>Kalibrasi</button>
-        </div>
-        <div id="cal-result" class="hidden mt-4 space-y-3">
-            <div class="grid grid-cols-3 gap-2 text-xs font-bold" id="cal-metrics"></div>
-            <div id="cal-mismatches" class="text-xs"></div>
-        </div>
+    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-5 hover:shadow-md transition group">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-200/60 group-hover:scale-110 transition"><i class="fas fa-crosshairs text-white text-sm"></i></div>
+        <div><h3 class="font-extrabold text-surface-800 text-sm">Kalibrasi</h3><p class="text-[10px] text-surface-400">Ukur akurasi geometry terkini</p></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="file" id="cal-file" accept="image/*" class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100 file:transition flex-1">
+        <input type="text" id="cal-total" value="50" class="w-14 px-2 py-1.5 border border-surface-200 rounded-lg text-xs font-bold text-center bg-surface-50">
+        <button id="btn-calibrate" class="shrink-0 bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-1.5 rounded-lg text-xs font-extrabold shadow-lg shadow-amber-200/60 transition active:scale-95"><i class="fas fa-crosshairs mr-1"></i>Ukur</button>
+      </div>
+      <div id="cal-result" class="hidden mt-4 space-y-2">
+        <div class="grid grid-cols-3 gap-2 text-xs font-bold" id="cal-metrics"></div>
+        <div id="cal-mismatches" class="text-[10px]"></div>
+      </div>
     </div>
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -125,222 +136,99 @@
 let chartPie = null, chartHist = null, chartDet = null;
 
 function renderCharts(data) {
-    document.getElementById('charts-area').classList.remove('hidden');
-    const results = data.results || [];
-    const ok = results.filter(r => !r.error);
-    const err = results.filter(r => r.error);
+  document.getElementById('charts-area').classList.remove('hidden');
+  const results = data.results || [];
+  const ok = results.filter(r => !r.error);
+  const err = results.filter(r => r.error);
 
-    // ── Pie: Success vs Error ──
-    if (chartPie) chartPie.destroy();
-    const ctxPie = document.getElementById('chart-pie').getContext('2d');
-    chartPie = new Chart(ctxPie, {
-        type: 'pie',
-        data: {
-            labels: ['Berhasil (' + ok.length + ')', 'Gagal (' + err.length + ')'],
-            datasets: [{
-                data: [ok.length, err.length],
-                backgroundColor: ['#10b981', '#ef4444'],
-                borderWidth: 0,
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
-        }
-    });
+  if (chartPie) chartPie.destroy();
+  chartPie = new Chart(document.getElementById('chart-pie'), {
+    type: 'doughnut',
+    data: { labels: ['Berhasil ('+ok.length+')','Gagal ('+err.length+')'], datasets: [{ data: [ok.length,err.length], backgroundColor: ['#10b981','#ef4444'], borderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'bottom', labels: { font: { size: 9 }, padding: 8 } } } }
+  });
 
-    // ── Histogram: Confidence distribution ──
-    const bins = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
-    const binLabels = ['0-10%','10-20%','20-30%','30-40%','40-50%','50-60%','60-70%','70-80%','80-90%','90-100%'];
-    const binCounts = new Array(10).fill(0);
-    for (const r of ok) {
-        const conf = r.avg_conf || 0;
-        const idx = Math.min(9, Math.floor(conf * 10));
-        binCounts[idx]++;
-    }
-    if (chartHist) chartHist.destroy();
-    const ctxHist = document.getElementById('chart-histogram').getContext('2d');
-    chartHist = new Chart(ctxHist, {
-        type: 'bar',
-        data: {
-            labels: binLabels,
-            datasets: [{
-                label: 'Jumlah File',
-                data: binCounts,
-                backgroundColor: binCounts.map((v, i) =>
-                    i >= 7 ? '#10b981' : i >= 4 ? '#f59e0b' : '#ef4444'),
-                borderRadius: 4,
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { ticks: { font: { size: 8 } } },
-                y: { beginAtZero: true, ticks: { font: { size: 9 }, stepSize: 1 } }
-            }
-        }
-    });
+  const bins = Array(10).fill(0);
+  ok.forEach(r => { const idx = Math.min(9, Math.floor((r.avg_conf||0)*10)); bins[idx]++; });
+  if (chartHist) chartHist.destroy();
+  chartHist = new Chart(document.getElementById('chart-histogram'), {
+    type: 'bar',
+    data: { labels: ['0','10','20','30','40','50','60','70','80','90','100%'], datasets: [{ data: bins, backgroundColor: bins.map((_,i) => i>=7?'#10b981':i>=4?'#f59e0b':'#ef4444'), borderRadius: 3 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { font: { size: 8 }, stepSize: 1 } }, x: { ticks: { font: { size: 7 } } } } }
+  });
 
-    // ── Bar: Detection per file ──
-    const labels = ok.map((_, i) => '#' + (i + 1));
-    const detected = ok.map(r => r.detected || 0);
-    const total = ok.length > 0 ? (ok[0].total || 50) : 50;
-    if (chartDet) chartDet.destroy();
-    const ctxDet = document.getElementById('chart-detection').getContext('2d');
-    chartDet = new Chart(ctxDet, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Terdeteksi',
-                data: detected,
-                backgroundColor: detected.map(v => v >= total ? '#10b981' : v >= total * 0.7 ? '#f59e0b' : '#ef4444'),
-                borderRadius: 2,
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                y: { beginAtZero: true, max: total, ticks: { font: { size: 8 }, stepSize: Math.ceil(total/5) } },
-                x: { ticks: { font: { size: 7 }, maxTicksLimit: 20 } }
-            }
-        }
-    });
-
-    // Auto-scroll to charts
-    document.getElementById('charts-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const detected = ok.map(r => r.detected||0);
+  const total = ok[0]?.total||50;
+  if (chartDet) chartDet.destroy();
+  chartDet = new Chart(document.getElementById('chart-detection'), {
+    type: 'bar',
+    data: { labels: ok.map((_,i)=>'#'+(i+1)), datasets: [{ data: detected, backgroundColor: detected.map(v=>v>=total?'#10b981':v>=total*0.7?'#f59e0b':'#ef4444'), borderRadius: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: total, ticks: { font: { size: 8 } } }, x: { ticks: { font: { size: 6 }, maxTicksLimit: 20 } } } }
+  });
+  document.getElementById('charts-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function exportChart(chartId) {
-    const canvas = document.getElementById(chartId);
-    const link = document.createElement('a');
-    link.download = 'omr_' + chartId + '_' + new Date().toISOString().slice(0,10) + '.png';
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-}
+function exportChart(id) { const c=document.getElementById(id),a=document.createElement('a'); a.download='omr_'+id+'_'+new Date().toISOString().slice(0,10)+'.png'; a.href=c.toDataURL('image/png'); a.click(); }
 
 function copyTable() {
-    const tbody = document.getElementById('batch-table-body');
-    if (!tbody || !tbody.children.length) return;
-    let csv = 'File,NISN,Terdeteksi,Keyakinan,Review,Skor,Error\n';
-    for (const tr of tbody.children) {
-        const cells = tr.querySelectorAll('td');
-        if (cells.length >= 7) {
-            csv += cells[0].textContent.trim() + ',' +
-                   cells[1].textContent.trim() + ',' +
-                   cells[2].textContent.trim() + ',' +
-                   cells[3].textContent.trim() + ',' +
-                   cells[4].textContent.trim() + ',' +
-                   cells[5].textContent.trim() + ',' +
-                   cells[6].textContent.trim() + '\n';
-        }
-    }
-    navigator.clipboard.writeText(csv).then(() => {
-        alert('Tabel dicopy ke clipboard (CSV). Paste di Excel/Google Sheets.');
-    }).catch(() => {
-        // Fallback
-        const ta = document.createElement('textarea'); ta.value = csv;
-        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-        document.body.removeChild(ta);
-        alert('Tabel dicopy (CSV).');
-    });
+  const tbody=document.getElementById('batch-table-body'); if(!tbody?.children.length) return;
+  let csv='File,NISN,Terdeteksi,Keyakinan,Review,Skor,Error\n';
+  tbody.querySelectorAll('tr').forEach(tr=>{const td=tr.querySelectorAll('td'); if(td.length>=7) csv+=Array.from(td).map(c=>c.textContent.trim()).join(',')+'\n';});
+  navigator.clipboard.writeText(csv).then(()=>alert('CSV dicopy — paste di Excel/Sheets')).catch(()=>{const ta=document.createElement('textarea');ta.value=csv;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);alert('CSV dicopy.');});
 }
 
-// Load exams for batch grading
-fetch('/api/exams/list').then(r=>r.json()).then(data => {
-    const sel = document.getElementById('batch-exam');
-    (data.exams || []).forEach(e => {
-        const o = document.createElement('option'); o.value = e.id; o.textContent = e.title + ' (' + (e.total_questions || '?') + ' soal)';
-        sel.appendChild(o);
-    });
-}).catch(() => {});
+fetch('/api/exams/list').then(r=>r.json()).then(d=>{const sel=document.getElementById('batch-exam');(d.exams||[]).forEach(e=>{const o=document.createElement('option');o.value=e.id;o.textContent=e.title+' ('+(e.total_questions||'?')+' soal)';sel.appendChild(o);});}).catch(()=>{});
 
-// Single test
-document.getElementById('btn-test-single').addEventListener('click', async function() {
-    const file = document.getElementById('single-file').files[0];
-    if (!file) return alert('Pilih gambar dulu');
-    const fd = new FormData(); fd.append('image', file);
-    this.disabled = true; this.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>';
-    try {
-        const resp = await fetch('/super-admin/api/omr-test/single', { method: 'POST', body: fd });
-        const data = await resp.json();
-        const div = document.getElementById('single-result'); div.classList.remove('hidden');
-        document.getElementById('single-metrics').innerHTML =
-            '<div class="bg-surface-50 p-2 rounded-lg">NISN: <span class="text-primary-600">' + (data.nisn || '?') + '</span></div>' +
-            '<div class="bg-surface-50 p-2 rounded-lg">Terdeteksi: <span class="text-primary-600">' + (data.detected || 0) + '</span></div>' +
-            '<div class="bg-surface-50 p-2 rounded-lg">Keyakinan: <span class="text-primary-600">' + Math.round((data.avg_confidence||0)*100) + '%</span></div>' +
-            '<div class="bg-surface-50 p-2 rounded-lg">Error: <span class="' + (data.error ? 'text-red-600' : 'text-emerald-600') + '">' + (data.error || 'Tidak ada') + '</span></div>';
-        if (data.debug_image) document.getElementById('single-debug').src = 'data:image/jpeg;base64,' + data.debug_image;
-    } finally { this.disabled = false; this.innerHTML = '<i class="fas fa-play mr-1"></i>Test'; }
-});
+['btn-test-single','btn-test-batch','btn-calibrate'].forEach(id=>{
+  const btn=document.getElementById(id);
+  btn.addEventListener('click', async function() {
+    const isSingle=id==='btn-test-single', isBatch=id==='btn-test-batch', isCal=id==='btn-calibrate';
+    const file=(isSingle?document.getElementById('single-file'):isCal?document.getElementById('cal-file'):null)?.files?.[0];
+    const files=isBatch?document.getElementById('batch-files').files:null;
+    if(isSingle&&!file) return alert('Pilih gambar dulu');
+    if(isBatch&&!files?.length) return alert('Pilih gambar dulu');
+    if(isCal&&!file) return alert('Pilih gambar referensi dulu');
 
-// Batch test
-document.getElementById('btn-test-batch').addEventListener('click', async function() {
-    const files = document.getElementById('batch-files').files;
-    if (!files.length) return alert('Pilih gambar dulu');
-    const fd = new FormData();
-    for (const f of files) fd.append('images', f);
-    fd.append('exam_id', document.getElementById('batch-exam').value);
-    document.getElementById('batch-progress').classList.remove('hidden');
-    this.disabled = true; this.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>';
+    const fd=new FormData();
+    if(isBatch) for(const f of files) fd.append('images',f);
+    else fd.append('image',file);
+    if(isBatch) fd.append('exam_id',document.getElementById('batch-exam').value);
+    if(isCal){const tq=parseInt(document.getElementById('cal-total').value)||50;fd.append('total_questions',tq);const gt={};for(let i=0;i<tq;i++)gt[i]='A';fd.append('ground_truth',JSON.stringify(gt));}
+    if(isBatch) document.getElementById('batch-progress').classList.remove('hidden');
+
+    const url=isSingle?'/super-admin/api/omr-test/single':isBatch?'/super-admin/api/omr-test/batch':'/super-admin/api/omr-test/calibrate';
+    this.disabled=true; this.innerHTML='<span class="loading-spinner inline-block mr-1 align-middle"></span>';
     try {
-        const resp = await fetch('/super-admin/api/omr-test/batch', { method: 'POST', body: fd });
-        const data = await resp.json();
+      const resp=await fetch(url,{method:'POST',body:fd}), data=await resp.json();
+      if(isBatch){
         document.getElementById('batch-progress').classList.add('hidden');
         document.getElementById('batch-results').classList.remove('hidden');
         renderCharts(data);
-
-        // Stats
-        document.getElementById('stat-total').textContent = data.total;
-        document.getElementById('stat-nisn').textContent = (data.nisn_accuracy || 0) + '%';
-        document.getElementById('stat-conf').textContent = Math.round((data.avg_confidence||0) * 100) + '%';
-        document.getElementById('stat-review').textContent = data.needs_review_total || 0;
-        document.getElementById('stat-avg-score').textContent = data.avg_score !== null ? data.avg_score + '%' : '-';
-
-        // Table
-        const tbody = document.getElementById('batch-table-body'); tbody.innerHTML = '';
-        for (const r of data.results || []) {
-            const confPct = Math.round((r.avg_conf || 0) * 100);
-            const tr = document.createElement('tr'); tr.className = 'border-t border-surface-100';
-            tr.innerHTML =
-                '<td class="p-2 font-medium text-surface-700">' + r.filename + '</td>' +
-                '<td class="p-2 font-bold">' + (r.nisn || '?') + '</td>' +
-                '<td class="p-2 text-center font-bold">' + (r.detected || 0) + '/' + r.total + '</td>' +
-                '<td class="p-2 text-center font-bold ' + (confPct >= 70 ? 'text-emerald-600' : confPct >= 40 ? 'text-amber-600' : 'text-red-500') + '">' + confPct + '%</td>' +
-                '<td class="p-2 text-center">' + (r.needs_review > 0 ? '<span class="text-amber-600 font-bold">' + r.needs_review + '</span>' : '<span class="text-emerald-500">✓</span>') + '</td>' +
-                '<td class="p-2 text-center font-bold ' + (r.score !== null ? 'text-primary-600' : 'text-surface-300') + '">' + (r.score !== null ? r.score + '%' : '-') + '</td>' +
-                '<td class="p-2 text-center ' + (r.error ? 'text-red-600' : 'text-emerald-500') + '">' + (r.error ? '⚠' : '✓') + '</td>';
-            tbody.appendChild(tr);
-        }
-    } finally { this.disabled = false; this.innerHTML = '<i class="fas fa-flask mr-1"></i>Jalankan Batch'; }
-});
-
-// Calibration
-document.getElementById('btn-calibrate').addEventListener('click', async function() {
-    const file = document.getElementById('cal-file').files[0];
-    if (!file) return alert('Pilih gambar referensi dulu');
-    const total = parseInt(document.getElementById('cal-total').value) || 50;
-    // Buat ground truth default: semua A (bisa diedit nanti)
-    const gt = {}; for (let i = 0; i < total; i++) gt[i] = 'A';
-    const fd = new FormData(); fd.append('image', file);
-    fd.append('total_questions', total); fd.append('ground_truth', JSON.stringify(gt));
-    this.disabled = true; this.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>';
-    try {
-        const resp = await fetch('/super-admin/api/omr-test/calibrate', { method: 'POST', body: fd });
-        const data = await resp.json();
-        const div = document.getElementById('cal-result'); div.classList.remove('hidden');
-        document.getElementById('cal-metrics').innerHTML =
-            '<div class="bg-amber-50 p-2 rounded-lg text-center">Cocok: <span class="text-amber-700 font-extrabold">' + data.matched + '/' + data.total + '</span></div>' +
-            '<div class="bg-amber-50 p-2 rounded-lg text-center">Akurasi: <span class="text-amber-700 font-extrabold">' + data.accuracy + '%</span></div>' +
-            '<div class="bg-amber-50 p-2 rounded-lg text-center">NISN: <span class="text-amber-700 font-extrabold">' + (data.nisn || '?') + '</span></div>';
-        const mm = document.getElementById('cal-mismatches');
-        if (data.mismatches && data.mismatches.length > 0) {
-            mm.innerHTML = '<p class="text-xs font-bold text-red-600 mt-2">Tidak cocok (' + data.mismatches.length + '):</p>' +
-                '<div class="text-[10px] text-red-500">' + data.mismatches.map(m => 'Soal ' + (parseInt(m.question)+1) + ':期望 ' + m.expected + ' → detected ' + (m.detected || '-')).join('<br>') + '</div>';
-        } else { mm.innerHTML = '<p class="text-xs font-bold text-emerald-600 mt-2">Semua cocok!</p>'; }
-    } finally { this.disabled = false; this.innerHTML = '<i class="fas fa-crosshairs mr-1"></i>Kalibrasi'; }
+        document.getElementById('stat-total').textContent=data.total;
+        document.getElementById('stat-nisn').textContent=(data.nisn_accuracy||0)+'%';
+        document.getElementById('stat-conf').textContent=Math.round((data.avg_confidence||0)*100)+'%';
+        document.getElementById('stat-review').textContent=data.needs_review_total||0;
+        document.getElementById('stat-avg-score').textContent=data.avg_score!=null?data.avg_score+'%':'-';
+        const tb=document.getElementById('batch-table-body'); tb.innerHTML='';
+        (data.results||[]).forEach(r=>{
+          const cp=Math.round((r.avg_conf||0)*100);
+          const tr=document.createElement('tr');tr.className='border-t border-surface-100 hover:bg-surface-50';
+          tr.innerHTML='<td class="p-2 font-medium text-surface-700">'+r.filename+'</td><td class="p-2 font-bold">'+(r.nisn||'?')+'</td><td class="p-2 text-center font-bold">'+(r.detected||0)+'/'+r.total+'</td><td class="p-2 text-center font-bold '+(cp>=70?'text-emerald-600':cp>=40?'text-amber-600':'text-red-500')+'">'+cp+'%</td><td class="p-2 text-center">'+(r.needs_review>0?'<span class="text-amber-600 font-bold">'+r.needs_review+'</span>':'<span class="text-emerald-500">✓</span>')+'</td><td class="p-2 text-center font-bold '+(r.score!=null?'text-primary-600':'text-surface-300')+'">'+(r.score!=null?r.score+'%':'-')+'</td><td class="p-2 text-center '+(r.error?'text-red-500':'text-emerald-500')+'">'+(r.error?'⚠':'✓')+'</td>';
+          tb.appendChild(tr);
+        });
+      } else if(isCal){
+        document.getElementById('cal-result').classList.remove('hidden');
+        document.getElementById('cal-metrics').innerHTML='<div class="bg-amber-50/80 rounded-lg p-2 text-center">Cocok: <span class="text-amber-700 font-extrabold">'+data.matched+'/'+data.total+'</span></div><div class="bg-amber-50/80 rounded-lg p-2 text-center">Akurasi: <span class="text-amber-700 font-extrabold">'+data.accuracy+'%</span></div><div class="bg-amber-50/80 rounded-lg p-2 text-center">NISN: <span class="text-amber-700 font-extrabold">'+(data.nisn||'?')+'</span></div>';
+        const mm=document.getElementById('cal-mismatches');
+        if(data.mismatches?.length) mm.innerHTML='<p class="text-xs font-bold text-red-600 mt-2">Mismatch ('+data.mismatches.length+'):</p><div class="text-[10px] text-red-500">'+data.mismatches.slice(0,20).map(m=>'Soal '+(parseInt(m.question)+1)+': seharusnya '+m.expected+' → terdeteksi '+(m.detected||'-')).join('<br>')+'</div>';
+        else mm.innerHTML='<p class="text-xs font-bold text-emerald-600 mt-2">✅ Semua cocok!</p>';
+      } else {
+        document.getElementById('single-result').classList.remove('hidden');
+        document.getElementById('single-metrics').innerHTML='<div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">NISN</span><br><span class="text-sky-700">'+(data.nisn||'?')+'</span></div><div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Deteksi</span><br><span class="text-sky-700">'+(data.detected||0)+'/'+((data.total)||50)+'</span></div><div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Keyakinan</span><br><span class="text-sky-700">'+Math.round((data.avg_confidence||0)*100)+'%</span></div><div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Status</span><br><span class="'+(data.error?'text-red-600':'text-emerald-600')+'">'+(data.error||'OK')+'</span></div>';
+        if(data.debug_image) document.getElementById('single-debug').src='data:image/jpeg;base64,'+data.debug_image;
+      }
+    } finally { this.disabled=false; this.innerHTML=isSingle?'<i class="fas fa-play mr-1"></i>Test':isBatch?'<i class="fas fa-flask mr-1"></i>Run':'<i class="fas fa-crosshairs mr-1"></i>Ukur'; }
+  });
 });
 </script>
 {% endblock %}
