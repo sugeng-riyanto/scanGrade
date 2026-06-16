@@ -2,12 +2,20 @@
 {% block title %}Papan Tulis - {{ whiteboard.title }}{% endblock %}
 {% block content %}
 <div class="h-screen flex flex-col" x-data="whiteboardCanvas()" x-init="init()">
-    <!-- Top bar — compact -->
+    <!-- Top bar -->
     <div class="flex items-center justify-between px-2 py-1 border-b bg-white dark:bg-gray-900 shrink-0">
         <div class="flex items-center gap-1.5">
             <a href="/wb/teacher/whiteboard" class="text-gray-500 hover:text-gray-700 p-1">&larr;</a>
             <span class="font-bold text-xs truncate max-w-[120px] md:max-w-[200px]">{{ whiteboard.title }}</span>
             <span class="text-[9px] text-gray-400 hidden sm:inline" x-text="onlineCount>0?onlineCount+' online':''"></span>
+            <div x-data="{showPos:false}" class="relative hidden md:block">
+                <button @click="showPos=!showPos" class="text-[9px] text-gray-400 hover:text-gray-600 px-1" title="Posisi Toolbar">&#9881;</button>
+                <div x-show="showPos" @click.outside="showPos=false" class="absolute top-4 left-0 z-30 bg-white rounded-xl shadow-xl border p-1.5 w-28" style="display:none">
+                    <button @click="setToolbarPos('left');showPos=false" :class="toolbarPos==='left'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9664; Kiri</button>
+                    <button @click="setToolbarPos('top');showPos=false" :class="toolbarPos==='top'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9650; Atas</button>
+                    <button @click="setToolbarPos('bottom');showPos=false" :class="toolbarPos==='bottom'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9660; Bawah</button>
+                </div>
+            </div>
         </div>
         <div class="flex items-center gap-0.5">
             <button @click="boardMode='white';c.setBoardMode('white');sendDisplay()" :class="boardMode==='white'?'bg-primary-100 border-primary-400 text-primary-700':'bg-white border-gray-200 text-gray-500'" class="text-[9px] font-bold px-1 py-0.5 rounded border hidden md:block"><i class="far fa-square"></i></button>
@@ -18,104 +26,77 @@
             <input type="file" accept=".pdf,.png,.jpg,.jpeg" id="fu" class="hidden" @change="uploadFile($event)">
             <button @click="document.getElementById('fu').click()" class="btn-ghost-icon" title="Upload PDF"><i class="fas fa-file-upload text-xs"></i></button>
             <button @click="downloadPDF()" class="btn-ghost-icon" title="Download PDF"><i class="fas fa-download text-xs"></i></button>
+            <button @click="printCanvas()" class="btn-ghost-icon" title="Cetak"><i class="fas fa-print text-xs"></i></button>
             <button @click="endSession()" class="text-[10px] font-bold px-1.5 py-0.5 rounded {{ 'bg-red-500 text-white' if whiteboard.status=='active' else 'bg-gray-300 text-gray-500' }}">{{ 'Akhiri' if whiteboard.status=='active' else 'Selesai' }}</button>
         </div>
     </div>
 
-    <!-- Main area: canvas takes all remaining space -->
-    <div class="flex-1 relative bg-gray-100 dark:bg-gray-800 overflow-hidden flex">
-        <!-- Left sidebar toggle (mobile) & toolbar (desktop) -->
-        <div class="hidden md:flex flex-col bg-white dark:bg-gray-900 border-r py-1 px-0.5 gap-0.5 shrink-0 overflow-y-auto w-11" id="toolbar">
-            <button @click="setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Pena"><i class="fas fa-pen"></i></button>
-            <button @click="setTool('line')" :class="t==='line'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Garis Lurus"><i class="fas fa-minus"></i></button>
-            <button @click="setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Penghapus"><i class="fas fa-eraser"></i></button>
-            <button @click="textMode()" :class="t==='text'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Teks"><i class="fas fa-font"></i></button>
-            <button @click="setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Stabilo"><i class="fas fa-highlighter"></i></button>
-            <button @click="setTool('laser')" :class="t==='laser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs" title="Laser"><i class="fas fa-crosshairs"></i></button>
-            <hr class="w-5 border-t my-0.5 mx-auto">
-            <input type="color" x-model="col" @input="c.setColor(col)" class="w-6 h-6 rounded cursor-pointer border-0 p-0 mx-auto" title="Warna">
-            <div x-data="{o:false}" class="relative">
-                <button @click="o=!o" class="w-9 h-9 rounded-lg flex items-center justify-center text-[9px] font-bold text-gray-500 hover:bg-primary-50 mx-auto" title="Ukuran Pena"><span x-text="pw.toFixed(1)"></span></button>
-                <div x-show="o" @click.outside="o=false" class="absolute left-10 bottom-0 z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-2 w-36" style="display:none">
-                    <input type="range" x-model="pw" @input="c.setWidth(pw)" min="0.1" max="20" step="0.1" class="w-full">
-                    <div class="flex flex-wrap gap-0.5 mt-1">
-                        <button @click="pw=0.1;c.setWidth(0.1);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.1</button>
-                        <button @click="pw=0.5;c.setWidth(0.5);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.5</button>
-                        <button @click="pw=0.75;c.setWidth(0.75);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.75</button>
-                        <button @click="pw=1.5;c.setWidth(1.5);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">1.5</button>
-                        <button @click="pw=3;c.setWidth(3);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">3</button>
-                        <button @click="pw=5;c.setWidth(5);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">5</button>
-                        <button @click="pw=8;c.setWidth(8);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">8</button>
-                    </div>
-                </div>
-            </div>
-            <hr class="w-5 border-t my-0.5 mx-auto">
-            <button @click="c.undo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 mx-auto" title="Undo"><i class="fas fa-undo"></i></button>
-            <button @click="c.redo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 mx-auto" title="Redo"><i class="fas fa-redo"></i></button>
-            <button @click="c.clearCanvas()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-red-500 hover:bg-red-50 mx-auto" title="Bersihkan"><i class="fas fa-trash"></i></button>
-            <hr class="w-5 border-t my-0.5 mx-auto">
-            <button @click="rulerOn=!rulerOn;if(rulerOn){rulerX=c.canvas.width/2-250;rulerY=c.canvas.height/2-35}" :class="rulerOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs mx-auto" title="Penggaris"><i class="fas fa-ruler-combined"></i></button>
-            <button @click="protOn=!protOn;if(protOn){protX=c.canvas.width/2-150;protY=c.canvas.height/2-150}" :class="protOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs mx-auto" title="Busur"><i class="fas fa-drafting-compass"></i></button>
-            <button @click="triOn=!triOn;if(triOn){triX=c.canvas.width/2-150;triY=c.canvas.height/2-150}" :class="triOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs mx-auto" title="Segitiga"><i class="fas fa-play"></i></button>
-            <button @click="setTool('compass')" :class="t==='compass'?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs mx-auto" title="Jangka"><i class="fas fa-circle"></i></button>
-            <button @click="c.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 mx-auto" title="Kalkulator"><i class="fas fa-calculator"></i></button>
-            <hr class="w-5 border-t my-0.5 mx-auto">
-            <span class="text-[8px] font-bold text-gray-400 text-center" x-text="zoomPct"></span>
-            <button @click="c.zoomIn()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 mx-auto" title="Perbesar"><i class="fas fa-search-plus"></i></button>
-            <button @click="c.zoomOut()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 mx-auto" title="Perkecil"><i class="fas fa-search-minus"></i></button>
-            <button @click="c.zoomReset()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 mx-auto" title="Reset"><i class="fas fa-expand"></i></button>
-            <hr class="w-5 border-t my-0.5 mx-auto">
-            <button @click="snapshot()" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:bg-primary-50 mx-auto" title="Snapshot"><i class="fas fa-camera"></i></button>
-            <button @click="showSidebar=!showSidebar" :class="showSidebar?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-xs mx-auto" title="Siswa"><i class="fas fa-users"></i></button>
+    <!-- Main area -->
+    <div class="flex-1 relative overflow-hidden flex" :class="toolbarPos==='top'||toolbarPos==='bottom'?'flex-col':'flex-row'">
+        <!-- Toolbar (position based on setting) -->
+        <template x-if="toolbarPos==='left'">
+        <div class="hidden md:flex flex-col bg-white dark:bg-gray-900 border-r py-1 px-0.5 gap-0.5 shrink-0 overflow-y-auto w-11">
+            {% include "teacher/wb_toolbar.html" %}
         </div>
+        </template>
+        <template x-if="toolbarPos==='top'">
+        <div class="hidden md:flex flex-row bg-white dark:bg-gray-900 border-b py-0.5 px-1 gap-0.5 shrink-0 overflow-x-auto h-10 items-center">
+            {% include "teacher/wb_toolbar.html" %}
+        </div>
+        </template>
+        <template x-if="toolbarPos==='bottom'">
+        <div class="hidden md:flex flex-row bg-white dark:bg-gray-900 border-t py-0.5 px-1 gap-0.5 shrink-0 overflow-x-auto h-10 items-center order-last">
+            {% include "teacher/wb_toolbar.html" %}
+        </div>
+        </template>
 
         <!-- Canvas area -->
-        <div class="flex-1 relative" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%);overflow:hidden">
-            <div id="wb-stage" style="width:2000px;height:2000px;position:relative">
-                <canvas id="wb-canvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
-
-                <!-- Tool overlays -->
-                <div x-show="rulerOn" class="absolute" :style="{left:rulerX+'px',top:rulerY+'px',transform:'rotate('+rulerAngle+'deg)',transformOrigin:'20px 35px',zIndex:10}">
-                    <svg width="500" height="70" viewBox="0 0 500 70" style="overflow:visible;pointer-events:none">
-                        <rect x="0" y="0" width="500" height="70" rx="6" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
-                        <g id="rm" x-init="rmk($el)"></g>
-                        <circle cx="20" cy="35" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('ruler',$event)"/>
-                        <circle cx="475" cy="14" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('ruler',$event)"/>
-                        <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="rulerOn=false"/>
-                        <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
-                    </svg>
+        <div class="flex-1 relative overflow-hidden p-2 md:p-3" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%)">
+            <div class="w-full h-full rounded-2xl shadow-xl bg-white overflow-hidden relative" style="box-shadow:0 8px 32px rgba(0,0,0,0.08)">
+                <div id="wb-stage" style="width:2000px;height:2000px;position:relative">
+                    <canvas id="wb-canvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
+                    <!-- Tool overlays -->
+                    <div x-show="rulerOn" class="absolute" :style="{left:rulerX+'px',top:rulerY+'px',transform:'rotate('+rulerAngle+'deg)',transformOrigin:'20px 35px',zIndex:10}">
+                        <svg width="500" height="70" viewBox="0 0 500 70" style="overflow:visible;pointer-events:none">
+                            <rect x="0" y="0" width="500" height="70" rx="6" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
+                            <g id="rm" x-init="rmk($el)"></g>
+                            <circle cx="20" cy="35" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('ruler',$event)"/>
+                            <circle cx="475" cy="14" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('ruler',$event)"/>
+                            <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="rulerOn=false"/>
+                            <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
+                        </svg>
+                    </div>
+                    <div x-show="protOn" class="absolute" :style="{left:protX+'px',top:protY+'px',transform:'rotate('+protAngle+'deg)',transformOrigin:protCX+'px '+protCY+'px',zIndex:10}">
+                        <svg width="300" height="300" viewBox="0 0 300 300" style="overflow:visible;pointer-events:none">
+                            <rect x="0" y="0" width="300" height="300" rx="4" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.4)" stroke-width="1"/>
+                            <g id="pm" x-init="pmk($el)"></g>
+                            <circle :cx="protCX" :cy="protCY" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('prot',$event)"/>
+                            <circle :cx="protCX" cy="20" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('prot',$event)"/>
+                            <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="protOn=false"/>
+                            <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
+                        </svg>
+                    </div>
+                    <div x-show="triOn" class="absolute" :style="{left:triX+'px',top:triY+'px',transform:'rotate('+triAngle+'deg)',transformOrigin:triRX+'px '+triRY+'px',zIndex:10}">
+                        <svg :width="triS" :height="triS" :viewBox="'0 0 '+triS+' '+triS" style="overflow:visible;pointer-events:none">
+                            <polygon :points="'10,'+triS+' 10,10 '+triS+','+triS" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
+                            <circle cx="10" :cy="triS" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('tri',$event)"/>
+                            <circle cx="10" cy="10" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('tri',$event)"/>
+                            <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="triOn=false"/>
+                            <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
+                        </svg>
+                    </div>
+                    <div class="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-full pointer-events-none">Slide <span x-text="slideIdx+1"></span>/<span x-text="slides.length"></span></div>
                 </div>
-                <div x-show="protOn" class="absolute" :style="{left:protX+'px',top:protY+'px',transform:'rotate('+protAngle+'deg)',transformOrigin:protCX+'px '+protCY+'px',zIndex:10}">
-                    <svg width="300" height="300" viewBox="0 0 300 300" style="overflow:visible;pointer-events:none">
-                        <rect x="0" y="0" width="300" height="300" rx="4" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.4)" stroke-width="1"/>
-                        <g id="pm" x-init="pmk($el)"></g>
-                        <circle :cx="protCX" :cy="protCY" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('prot',$event)"/>
-                        <circle :cx="protCX" cy="20" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('prot',$event)"/>
-                        <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="protOn=false"/>
-                        <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
-                    </svg>
-                </div>
-                <div x-show="triOn" class="absolute" :style="{left:triX+'px',top:triY+'px',transform:'rotate('+triAngle+'deg)',transformOrigin:triRX+'px '+triRY+'px',zIndex:10}">
-                    <svg :width="triS" :height="triS" :viewBox="'0 0 '+triS+' '+triS" style="overflow:visible;pointer-events:none">
-                        <polygon :points="'10,'+triS+' 10,10 '+triS+','+triS" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
-                        <circle cx="10" :cy="triS" r="10" fill="rgba(0,80,200,0.8)" stroke="white" stroke-width="1.5" style="cursor:move;pointer-events:auto" @mousedown.prevent="drg('tri',$event)"/>
-                        <circle cx="10" cy="10" r="9" fill="rgba(200,50,0,0.85)" stroke="white" stroke-width="1.5" style="cursor:alias;pointer-events:auto" @mousedown.prevent="rot('tri',$event)"/>
-                        <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer;pointer-events:auto" @click="triOn=false"/>
-                        <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
-                    </svg>
-                </div>
-
-                <div class="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-full pointer-events-none">Slide <span x-text="slideIdx+1"></span>/<span x-text="slides.length"></span></div>
             </div>
         </div>
 
-        <!-- Student sidebar (collapsible) -->
+        <!-- Student sidebar -->
         <div x-show="showSidebar" class="w-44 bg-white dark:bg-gray-900 border-l flex flex-col shrink-0 hidden lg:flex" style="display:none">
             <div class="p-1.5 border-b font-semibold text-[11px] flex items-center justify-between">
                 <span>Siswa (<span x-text="members.length"></span>)</span>
                 <div class="flex gap-0.5">
-                    <button @click="bulkApprove()" class="text-[9px] text-primary-600 hover:underline" title="Ijinkan semua">&#10003;</button>
-                    <button @click="bulkRevoke()" class="text-[9px] text-red-500 hover:underline" title="Revoke">&#10007;</button>
+                    <button @click="bulkApprove()" class="text-[9px] text-primary-600 hover:underline">&#10003;</button>
+                    <button @click="bulkRevoke()" class="text-[9px] text-red-500 hover:underline">&#10007;</button>
                 </div>
             </div>
             <div class="flex-1 overflow-y-auto p-1 space-y-0.5 text-[11px]">
@@ -124,9 +105,9 @@
                         <span :class="'w-1.5 h-1.5 rounded-full shrink-0 '+(m.can_annotate?'bg-green-500':'bg-gray-300')"></span>
                         <span class="truncate flex-1 ml-1.5" x-text="m.profiles?.full_name||'Murid'"></span>
                         <template x-if="m.awaiting_approval">
-                            <button @click="approve(m.student_id)" class="text-primary-600 p-0.5" title="Setujui"><i class="fas fa-check text-[9px]"></i></button>
+                            <button @click="approve(m.student_id)" class="text-primary-600 p-0.5"><i class="fas fa-check text-[9px]"></i></button>
                         </template>
-                        <button @click="togglePerm(m)" :title="m.can_annotate?'Revoke':'Ijinkan'" class="p-0.5 hover:bg-gray-200 rounded">
+                        <button @click="togglePerm(m)" class="p-0.5 hover:bg-gray-200 rounded">
                             <i class="fas text-[9px]" :class="m.can_annotate?'fa-user-check text-green-600':'fa-user-plus text-gray-400'"></i>
                         </button>
                     </div>
@@ -140,18 +121,12 @@
         </div>
     </div>
 
-    <!-- Mobile bottom toolbar (only visible on < 768px) -->
+    <!-- Mobile bottom toolbar -->
     <div class="md:hidden bg-white dark:bg-gray-900 border-t flex items-center justify-around py-1 px-1 shrink-0 overflow-x-auto">
-        <button @click="setTool('pen')" :class="t==='pen'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-pen text-sm"></i><span>Pena</span></button>
-        <button @click="setTool('line')" :class="t==='line'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-minus text-sm"></i><span>Garis</span></button>
-        <button @click="setTool('eraser')" :class="t==='eraser'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-eraser text-sm"></i><span>Hapus</span></button>
-        <button @click="textMode()" :class="t==='text'?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-font text-sm"></i><span>Teks</span></button>
-        <button @click="c.undo()" class="flex flex-col items-center px-2 py-0.5 text-[9px] text-gray-500"><i class="fas fa-undo text-sm"></i><span>Undo</span></button>
-        <button @click="c.redo()" class="flex flex-col items-center px-2 py-0.5 text-[9px] text-gray-500"><i class="fas fa-redo text-sm"></i><span>Redo</span></button>
-        <button @click="showSidebar=!showSidebar" :class="showSidebar?'text-primary-600':'text-gray-500'" class="flex flex-col items-center px-2 py-0.5 text-[9px]"><i class="fas fa-users text-sm"></i><span>Siswa</span></button>
+        {% include "teacher/wb_toolbar.html" %}
     </div>
 
-    <!-- Desktop bottom toolbar: slides -->
+    <!-- Slide navigator -->
     <div class="h-10 bg-white dark:bg-gray-900 border-t flex items-center px-2 gap-1 overflow-x-auto shrink-0">
         <button @click="addSlide()" class="btn-ghost-icon text-[9px] shrink-0"><i class="fas fa-plus"></i></button>
         <template x-for="(sl,i) in slides" :key="i">
@@ -173,6 +148,7 @@
 <style>
 .btn-ghost-icon { display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:#6b7280;transition:all .15s; }
 .btn-ghost-icon:hover { background:#f3f4f6;color:#374151; }
+@media print { body * { visibility:hidden; } #wb-canvas { visibility:visible; position:absolute;left:0;top:0;width:100%; } }
 </style>
 <script>
 function whiteboardCanvas() {
@@ -182,27 +158,24 @@ function whiteboardCanvas() {
         members: {{ members | tojson | safe }},
         slideIdx: 0, t: "pen", col: "#000000", pw: 0.75, onlineCount: 0,
         showSidebar: false, g: false, gridSpacing: 50, gridLog: false,
-        boardMode: "white",
+        boardMode: "white", toolbarPos: "left",
         rulerOn: false, rulerX: 60, rulerY: 80, rulerAngle: 0,
         protOn: false, protX: 100, protY: 50, protAngle: 0, protCX: 150, protCY: 264,
         triOn: false, triX: 160, triY: 120, triAngle: 0, triS: 300, triRX: 10, triRY: 10,
         c: null, ws: null, timer: null,
-        get zoomPct() { const s = this.c?.canvas?.parentElement?.style; return s ? Math.round(parseFloat(s.width||'2000')/2000*100)+'%' : '100%'; },
+        get zoomPct() { const s=this.c?.canvas?.parentElement?.style; return s?Math.round(parseFloat(s.width||'2000')/2000*100)+'%':'100%'; },
 
         init() {
+            this.toolbarPos = localStorage.getItem('wb_toolbar_pos') || 'left';
             {% if whiteboard.display_settings and whiteboard.display_settings is mapping %}
             {% set ds = whiteboard.display_settings %}
             this.boardMode = "{{ ds.get('board_mode','white') }}";
             this.g = {{ 'true' if ds.get('grid_enabled') else 'false' }};
-            this.gridSpacing = {{ ds.get('grid_spacing',50) }};
-            this.gridLog = {{ 'true' if ds.get('grid_logarithmic') else 'false' }};
             {% endif %}
             this.c = new WhiteboardCanvas("wb-canvas", {
                 onDraw: (op) => { this.ws?.sendDraw(op.op_type, op.data); },
-                onCursor: (pos) => { this.ws?.sendCursor(pos.x, pos.y); },
             });
-            this.c.setBoardMode(this.boardMode);
-            this.c.setWidth(this.pw);
+            this.c.setBoardMode(this.boardMode); this.c.setWidth(this.pw);
             if (this.g) { this.c.gridEnabled = true; this.c.gridSpacing = this.gridSpacing; this.c.setGridLogarithmic(this.gridLog); }
             this.ws = new WhiteboardSocket(this.whiteboardId, {
                 onConnect: () => { this.ws?.sendHeartbeat(); this.onlineCount++; },
@@ -212,8 +185,6 @@ function whiteboardCanvas() {
                 onDisplaySettingsUpdate: (data) => {
                     if(data.board_mode){ this.boardMode=data.board_mode; this.c.setBoardMode(data.board_mode); }
                     if(data.grid_enabled!==undefined){ this.g=data.grid_enabled; this.c.gridEnabled=data.g; }
-                    if(data.grid_spacing){ this.gridSpacing=data.grid_spacing; this.c.gridSpacing=data.grid_spacing; }
-                    if(data.grid_logarithmic!==undefined){ this.gridLog=data.grid_logarithmic; this.c.setGridLogarithmic(data.grid_logarithmic); }
                     this.c._render();
                 },
             });
@@ -223,6 +194,7 @@ function whiteboardCanvas() {
         },
         setTool(t) { this.t=t; if(t==='laser'){this.c.setTool('laser');return;} if(t==='text')return; if(t==='compass'){this.c.setTool('compass');return;} this.c.setTool(t); if(t==='line'){this.c.setWidth(this.pw);} },
         textMode() { this.t="text"; this.c.enableTextMode(); },
+        setToolbarPos(p) { this.toolbarPos=p; localStorage.setItem('wb_toolbar_pos',p); },
         loadSlide(sl) { this.c.setBackground(sl.background_url||null); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/ops?slide=${sl.slide_number}`).then(r=>r.json()).then(d=>{if(d.ops)this.c.loadOps(d.ops);}).catch(()=>{}); },
         goToSlide(i) { if(i<0||i>=this.slides.length)return; this.slideIdx=i; this.loadSlide(this.slides[i]); this.ws?.sendSlideChange(i+1); },
         rmk(el) { if(el&&ScanGradeTools) el.innerHTML = ScanGradeTools.rulerSvg(500,70); },
@@ -230,9 +202,10 @@ function whiteboardCanvas() {
         drg(which,e) { const p={ruler:'ruler',prot:'prot',tri:'tri'}[which]; this._drg={which:p,sx:e.clientX,sy:e.clientY,ox:this[p+'X'],oy:this[p+'Y']}; this._onDragMove=(ev)=>{if(!this._drg)return;const dx=(ev.clientX||ev.touches[0].clientX)-this._drg.sx,dy=(ev.clientY||ev.touches[0].clientY)-this._drg.sy;const p=this._drg.which;this[p+'X']=this._drg.ox+dx;this[p+'Y']=this._drg.oy+dy;}; this._onDragEnd=()=>{this._drg=null;document.removeEventListener('mousemove',this._onDragMove);document.removeEventListener('mouseup',this._onDragEnd);}; document.addEventListener('mousemove',this._onDragMove);document.addEventListener('mouseup',this._onDragEnd); },
         rot(which,e) { const p={ruler:'ruler',prot:'prot',tri:'tri'}[which]; this._drg={which:p,sx:e.clientX,sy:e.clientY,sa:Math.atan2(e.clientY-this[p+'Y'],e.clientX-this[p+'X'])*180/Math.PI,oa:this[p+'Angle']}; this._onDragMove=(ev)=>{if(!this._drg)return;const a=Math.atan2((ev.clientY||ev.touches[0].clientY)-this[p+'Y'],(ev.clientX||ev.touches[0].clientX)-this[p+'X'])*180/Math.PI;this[p+'Angle']=this._drg.oa+(a-this._drg.sa);}; this._onDragEnd=()=>{this._drg=null;document.removeEventListener('mousemove',this._onDragMove);document.removeEventListener('mouseup',this._onDragEnd);}; document.addEventListener('mousemove',this._onDragMove);document.addEventListener('mouseup',this._onDragEnd); },
         sendDisplay() { this.ws?.sendDisplaySettings({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog}); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/display-settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({board_mode:this.boardMode,grid_enabled:this.g,grid_spacing:this.gridSpacing,grid_logarithmic:this.gridLog})}).catch(()=>{}); },
-        uploadFile(e) { const file=e.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides/upload`,{method:'POST',body:fd}).then(r=>r.json()).then(d=>{if(d.success)window.location.reload();}).catch(()=>{alert('Upload gagal');}); },
+        uploadFile(e) { const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides/upload`,{method:'POST',body:fd}).then(r=>r.json()).then(d=>{if(d.success)window.location.reload();}).catch(()=>{alert('Upload gagal');}); },
         addSlide() { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(d=>{if(d.success)window.location.reload();}).catch(()=>{}); },
         downloadPDF() { window.open(`/wb/teacher/whiteboard/${this.whiteboardId}/download`,'_blank'); },
+        printCanvas() { window.print(); },
         endSession() { if(!confirm('Akhiri sesi?'))return; fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'ended'})}).then(r=>r.json()).then(d=>{if(d.success)window.location.href='/wb/teacher/whiteboard';}); },
         snapshot() { const d=this.c.toDataURL(); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/snapshots`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slide_number:this.slideIdx+1,image_data:d})}).then(r=>r.json()).then(d=>{if(d.success)alert('Snapshot tersimpan');}); },
         togglePerm(m) { fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({student_id:m.student_id,can_annotate:!m.can_annotate})}).then(r=>r.json()).then(d=>{if(d.success){m.can_annotate=!m.can_annotate;if(m.can_annotate)this.ws?.approveAnnotate(m.student_id);else this.ws?.revokeAnnotate(m.student_id);}}); },
