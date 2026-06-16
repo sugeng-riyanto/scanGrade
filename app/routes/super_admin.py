@@ -1149,3 +1149,148 @@ def download_school_zip(school_id):
     buf.seek(0)
     return send_file(buf, mimetype="application/zip", as_attachment=True,
                      download_name=f"scangrade_{npsn}.zip")
+
+
+# ── OMR Test Suite ──
+
+@super_bp.route("/omr-test")
+@_sa_required
+def omr_test_page():
+    """Super Admin OMR test dashboard."""
+    return render_template("super_admin/omr_test.html")
+
+
+@super_bp.route("/api/omr-test/batch", methods=["POST"])
+@_sa_required
+def omr_test_batch():
+    """Upload multiple LJK images for batch testing."""
+    files = request.files.getlist("images")
+    exam_id = request.form.get("exam_id", "")
+    total_questions = int(request.form.get("total_questions", 50))
+
+    if not files:
+        return jsonify({"error": "Tidak ada file"}), 400
+
+    results = []
+    for f in files:
+        raw = f.read()
+        from app.services.omr_service import process_scan
+        try:
+            result = process_scan(raw, total_questions=total_questions, preprocess=True)
+
+            # Grade if exam_id
+            score = None
+            correct = None
+            if exam_id and "error" not in result:
+                from app.utils.auth import get_supabase
+                exam = get_supabase().table("exams").select("answer_key").eq("id", exam_id).single().execute().data
+                if exam and exam.get("answer_key"):
+                    key = exam["answer_key"]
+                    if isinstance(key, str):
+                        key = json.loads(key)
+                    detected = result.get("answers", {})
+                    c = sum(1 for k, v in key.items() if k in detected and detected[k] == v)
+                    mcq = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
+                    correct = c
+                    score = round((c / max(mcq, 1)) * 100, 2) if mcq > 0 else 0
+
+            results.append({
+                "filename": f.filename,
+                "nisn": result.get("nisn", "?"),
+                "nisn_conf": result.get("nisn_confidence", 0),
+                "detected": result.get("detected", 0),
+                "total": total_questions,
+                "avg_conf": result.get("avg_confidence", 0),
+                "needs_review": len(result.get("needs_review", [])),
+                "score": score,
+                "correct": correct,
+                "error": result.get("error"),
+            })
+        except Exception as e:
+            results.append({"filename": f.filename, "error": str(e)[:200]})
+
+    # Aggregate stats
+    total = len(results)
+    errors = sum(1 for r in results if r.get("error"))
+    ok = [r for r in results if not r.get("error")]
+    avg_conf = round(sum(r.get("avg_conf", 0) for r in ok) / max(len(ok), 1), 3)
+    total_review = sum(r.get("needs_review", 0) for r in ok)
+    nisn_ok = sum(1 for r in ok if r.get("nisn", "?").count("?") == 0)
+    scores = [r.get("score", 0) or 0 for r in ok if r.get("score") is not None]
+
+    return jsonify({
+        "total": total, "errors": errors,
+        "avg_confidence": avg_conf,
+        "needs_review_total": total_review,
+        "nisn_accuracy": round(nisn_ok / max(len(ok), 1) * 100, 1),
+        "avg_score": round(sum(scores) / max(len(scores), 1), 1) if scores else None,
+        "results": results,
+    })
+
+
+@super_bp.route("/api/omr-test/single", methods=["POST"])
+@_sa_required
+def omr_test_single():
+    """Test a single LJK image and return debug visualization."""
+    file = request.files.get("image")
+    total_questions = int(request.form.get("total_questions", 50))
+
+    if not file:
+        return jsonify({"error": "No file"}), 400
+
+    raw = file.read()
+    from app.services.omr_service import process_scan, load_image, find_registration_marks, draw_debug_image
+
+    result = process_scan(raw, total_questions=total_questions, preprocess=True)
+
+    # Debug image
+    img = load_image(raw)
+    if img is not None:
+        corners = find_registration_marks(img)
+        debug = draw_debug_image(img, corners, result.get("answers"))
+        import base64
+        result["debug_image"] = base64.b64encode(debug).decode()
+
+    return jsonify(result)
+
+
+@super_bp.route("/api/omr-test/calibrate", methods=["POST"])
+@_sa_required
+def omr_test_calibrate():
+    """Upload reference LJK with known answers to calibrate geometry."""
+    file = request.files.get("image")
+    ground_truth = request.form.get("ground_truth", "{}")
+    total_questions = int(request.form.get("total_questions", 50))
+
+    if not file:
+        return jsonify({"error": "No file"}), 400
+
+    if isinstance(ground_truth, str):
+        ground_truth = json.loads(ground_truth)
+
+    raw = file.read()
+    from app.services.omr_service import process_scan
+
+    # Test with current geometry
+    result = process_scan(raw, total_questions=total_questions, preprocess=True)
+    answers = result.get("answers", {})
+
+    matched = 0
+    mismatches = []
+    for q, expected in ground_truth.items():
+        detected = answers.get(q)
+        if detected == expected:
+            matched += 1
+        else:
+            mismatches.append({"question": q, "expected": expected, "detected": detected})
+
+    total_gt = len(ground_truth)
+    return jsonify({
+        "matched": matched,
+        "total": total_gt,
+        "accuracy": round(matched / max(total_gt, 1) * 100, 1),
+        "mismatches": mismatches[:20],
+        "nisn": result.get("nisn"),
+        "detected": result.get("detected"),
+        "avg_confidence": result.get("avg_confidence"),
+    })
