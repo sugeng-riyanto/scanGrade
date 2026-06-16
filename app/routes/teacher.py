@@ -756,7 +756,7 @@ def results():
         if user_role == "admin_sekolah" and school_id:
             query = supabase.table("exams").select("id,title").eq("school_id", school_id)
         exams = query.execute().data or []
-        return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams)
+        return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams, exam={})
 
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     query = supabase.table("exams").select("id,title,subject").eq("teacher_id", g.user_id)
