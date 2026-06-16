@@ -134,57 +134,49 @@ document.getElementById('exam-select').addEventListener('change', function() {
     document.getElementById('custom-questions').classList.toggle('hidden', this.value !== '__custom__');
 });
 
-// Enumerate cameras on load
-async function enumerateCameras() {
-    try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        videoDevices = devices.filter(d => d.kind === 'videoinput');
-        const sel = document.getElementById('camera-select');
-        sel.innerHTML = '';
-        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-        if (!isMobile && videoDevices.length > 1) {
-            document.getElementById('camera-selector').classList.remove('hidden');
-            videoDevices.forEach((d, idx) => {
-                const label = d.label || ('Kamera ' + (idx + 1));
-                const opt = document.createElement('option');
-                opt.value = d.deviceId;
-                opt.textContent = label;
-                sel.appendChild(opt);
-            });
-            sel.addEventListener('change', function() {
-                if (stream) {
-                    stopStream();
-                    startCameraWithDevice(this.value);
-                }
-            });
-        }
-    } catch(e) { console.warn('Enumerate failed:', e); }
+function showError(msg) {
+    document.getElementById('error-text').textContent = msg;
+    document.getElementById('scan-error').classList.remove('hidden');
 }
-enumerateCameras();
+function hideError() { document.getElementById('scan-error').classList.add('hidden'); }
 
 function stopStream() {
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
 }
 
-async function startCameraWithDevice(deviceId) {
+async function startCamera() {
+    const startBtn = document.getElementById('btn-start-cam');
+    startBtn.disabled = true;
+    startBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Membuka...';
+    hideError();
     try {
         const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-        const constraints = {
-            video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-                          : { facingMode: isMobile ? { exact: 'environment' } : 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+        // Try back camera first, fallback to any camera
+        let constraints = {
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
         };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+            // Fallback: any camera
+            constraints = { video: { width: { ideal: 1920 }, height: { ideal: 1080 } } };
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+        }
         document.getElementById('camera-preview').srcObject = stream;
-        document.getElementById('btn-start-cam').classList.add('hidden');
+        startBtn.classList.add('hidden');
         document.getElementById('btn-capture').classList.remove('hidden');
         document.getElementById('btn-stop-cam').classList.remove('hidden');
         document.getElementById('btn-flip-cam').classList.remove('hidden');
         document.getElementById('scan-result').classList.add('hidden');
-        document.getElementById('scan-error').classList.add('hidden');
     } catch (err) {
-        alert('Kamera tidak tersedia: ' + err.message);
+        showError('Kamera tidak tersedia: ' + err.message + '. Gunakan upload file sebagai alternatif.');
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<i class="fas fa-camera mr-1"></i>Buka Kamera';
     }
 }
+
+// Start camera (via button)
+document.getElementById('btn-start-cam').addEventListener('click', startCamera);
 
 // Flip camera
 document.getElementById('btn-flip-cam').addEventListener('click', async function() {
