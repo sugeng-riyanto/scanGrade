@@ -339,6 +339,13 @@ def create_app(env=None):
 
     app._start_time = time.time()
 
+    # Start background cleanup scheduler
+    try:
+        from app.services.cleanup_service import start_cleanup_scheduler
+        start_cleanup_scheduler(interval=1800)
+    except Exception as e:
+        app.logger.warning("Failed to start cleanup scheduler: %s", e)
+
     return app
 
 

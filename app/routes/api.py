@@ -517,17 +517,8 @@ def scan_bulk_save():
 
 def _cleanup_scan_tmp(age_hours=1):
     """Remove stale temp scan files older than age_hours."""
-    tmp_dir = os.path.join(UPLOAD_SCAN_DIR, "tmp")
-    if not os.path.isdir(tmp_dir):
-        return
-    now = time.time()
-    for fname in os.listdir(tmp_dir):
-        fpath = os.path.join(tmp_dir, fname)
-        if os.path.isfile(fpath) and now - os.path.getmtime(fpath) > age_hours * 3600:
-            try:
-                os.remove(fpath)
-            except OSError:
-                pass
+    from app.services.cleanup_service import clean_temp_files
+    clean_temp_files(max_age=age_hours * 3600)
 
 
 @api_bp.route("/student/auto-save", methods=["POST"])
