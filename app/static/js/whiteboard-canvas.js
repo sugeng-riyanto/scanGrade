@@ -213,52 +213,38 @@ class WhiteboardCanvas {
         img.crossOrigin = "anonymous";
         img.onload = () => {
             this.currentBg = img;
-            this._calcBgBounds();
-            if (!this.bgBounds) { this._render(); return; }
+            const iw = img.naturalWidth || img.width || 0;
+            const ih = img.naturalHeight || img.height || 0;
+            if (!iw || !ih) { this._render(); return; }
 
-            // Resize stage to PDF actual size, then zoom to fill viewport
+            // PDF rendered at 150 DPI → screen at ~96 DPI → actual paper size
+            const actualW = iw * 96 / 150;
+            const actualH = ih * 96 / 150;
+
+            // Set stage to actual paper size, image draws at (0,0) filling it
             const stage = this.canvas.parentElement;
             if (stage) {
-                const vw = this.canvas.width;  // viewport CSS width
-                const vh = this.canvas.height; // viewport CSS height
-                const pw = this.bgBounds.w;    // PDF display width (actual size)
-                const ph = this.bgBounds.h;    // PDF display height
-
-                // Target: PDF fits viewport with 5% margin on each side
-                const margin = 0.9;
-                const zoomByWidth = (vw * margin) / pw;
-                const zoomByHeight = (vh * margin) / ph;
-                const fitZoom = Math.min(zoomByWidth, zoomByHeight);
-
-                // Set stage = PDF actual size, then zoom to fit
-                stage.style.width = pw + "px";
-                stage.style.height = ph + "px";
-                this.setZoom(fitZoom);
-
-                // Center scroll
-                const container = stage.parentElement;
-                if (container) {
-                    container.scrollTop = 0;
-                    container.scrollLeft = 0;
-                }
+                stage.style.width = actualW + "px";
+                stage.style.height = actualH + "px";
             }
+
+            // Let resize compute new canvas dimensions
+            this._resize();
+
+            // bgBounds = full stage, centered (image fills the stage)
+            const cw = this.canvas.width, ch = this.canvas.height;
+            this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; // image fills canvas 1:1
+
+            // Auto-zoom to fit viewport
+            if (stage) {
+                const vw = this.canvas.width, vh = this.canvas.height;
+                const zoom = Math.min((vw * 0.9) / actualW, (vh * 0.9) / actualH);
+                this.setZoom(Math.max(0.25, Math.min(5, zoom)));
+            }
+
             this._render();
         };
         img.src = url;
-    }
-
-    _calcBgBounds() {
-        if (!this.currentBg) { this.bgBounds = null; return; }
-        const cw = this.canvas.width, ch = this.canvas.height;
-        const iw = this.currentBg.naturalWidth || this.currentBg.width;
-        const ih = this.currentBg.naturalHeight || this.currentBg.height;
-        if (!iw || !ih) { this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; return; }
-        let bw = iw * 96 / 150, bh = ih * 96 / 150;
-        if (bw > cw || bh > ch) {
-            const sc = Math.min(cw / bw, ch / bh);
-            bw *= sc; bh *= sc;
-        }
-        this.bgBounds = { x: (cw - bw) / 2, y: (ch - bh) / 2, w: bw, h: bh };
     }
 
     // ─── Compass ───
