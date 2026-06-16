@@ -1,6 +1,7 @@
 import io
 import os
 import json
+import zipfile
 import uuid
 import time
 import threading
@@ -304,6 +305,184 @@ def scan_process():
             result["scan_file_id"] = scan_file_id
 
     return jsonify(result)
+
+
+@api_bp.route("/scan/bulk", methods=["POST"])
+@_rate_limit("10 per minute")
+@login_required
+def scan_bulk():
+    """Process a ZIP file containing multiple LJK scan images."""
+    if "archive" not in request.files:
+        return jsonify({"error": "Tidak ada file ZIP yang dikirim"}), 400
+
+    archive_file = request.files["archive"]
+    ext = os.path.splitext(archive_file.filename or "")[1].lower()
+    if ext not in (".zip",):
+        return jsonify({"error": "Hanya file ZIP yang didukung"}), 400
+
+    exam_id = request.form.get("exam_id", "")
+    total_questions = int(request.form.get("total_questions", 50))
+
+    from app.services.omr_service import process_scan, load_image, find_registration_marks
+
+    results = []
+    errors = []
+    temp_dir = os.path.join(UPLOAD_SCAN_DIR, "bulk_tmp", str(uuid.uuid4())[:12])
+    os.makedirs(temp_dir, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(archive_file, "r") as zf:
+            image_files = [n for n in zf.namelist() if n.lower().endswith((".jpg", ".jpeg", ".png"))]
+            if not image_files:
+                return jsonify({"error": "Tidak ditemukan file gambar (.jpg/.png) dalam ZIP"}), 422
+
+            for fname in sorted(image_files):
+                try:
+                    raw = zf.read(fname)
+                    image_data = raw
+
+                    # Validate image via Pillow
+                    from PIL import Image
+                    buf = io.BytesIO(raw)
+                    img_pil = Image.open(buf)
+                    img_pil.verify()
+                    buf.seek(0)
+                    img_pil = Image.open(buf)
+                    clean_buf = io.BytesIO()
+                    fmt = "PNG" if fname.lower().endswith(".png") else "JPEG"
+                    if fmt == "JPEG" and img_pil.mode != "RGB":
+                        img_pil = img_pil.convert("RGB")
+                    img_pil.save(clean_buf, format=fmt)
+                    image_data = clean_buf.getvalue()
+
+                    # OMR process
+                    omr_result = process_scan(image_data, total_questions=total_questions, preprocess=True)
+
+                    entry = {
+                        "filename": fname,
+                        "nisn": omr_result.get("nisn", "????????"),
+                        "nisn_confidence": omr_result.get("nisn_confidence", 0),
+                        "answers": omr_result.get("answers", {}),
+                        "detected": omr_result.get("detected", 0),
+                        "confidence": omr_result.get("confidence", {}),
+                        "avg_confidence": omr_result.get("avg_confidence", 0),
+                        "needs_review": omr_result.get("needs_review", []),
+                        "error": omr_result.get("error"),
+                    }
+
+                    # Grade if exam_id provided
+                    if exam_id and "error" not in omr_result:
+                        supabase = get_supabase()
+                        exam = supabase.table("exams").select("answer_key").eq("id", exam_id).single().execute().data
+                        if exam and exam.get("answer_key"):
+                            key = exam["answer_key"]
+                            if isinstance(key, str):
+                                key = json.loads(key)
+                            detected = omr_result.get("answers", {})
+                            correct = 0
+                            for k, v in key.items():
+                                if k in detected and detected[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
+                                    correct += 1
+                            mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
+                            entry["score"] = round((correct / max(mcq_count, 1)) * 100, 2)
+                            entry["correct"] = correct
+                            entry["total"] = mcq_count
+
+                    if omr_result.get("error"):
+                        errors.append(entry)
+                    else:
+                        results.append(entry)
+
+                except Exception as e:
+                    errors.append({"filename": fname, "error": str(e)[:150]})
+
+    except zipfile.BadZipFile:
+        return jsonify({"error": "File ZIP rusak atau tidak valid"}), 422
+    except Exception as e:
+        return jsonify({"error": f"Gagal memproses ZIP: {str(e)[:200]}"}), 500
+    finally:
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return jsonify({
+        "success": True,
+        "total": len(results) + len(errors),
+        "processed": len(results),
+        "failed": len(errors),
+        "results": results,
+        "errors": errors,
+    })
+
+
+@api_bp.route("/scan/bulk-save", methods=["POST"])
+@login_required
+@_rate_limit("10 per minute")
+def scan_bulk_save():
+    """Save multiple scan results as submissions at once."""
+    data = request.get_json()
+    if not data or "submissions" not in data:
+        return jsonify({"error": "No submissions data"}), 400
+
+    exam_id = data.get("exam_id")
+    if not exam_id:
+        return jsonify({"error": "exam_id required"}), 400
+
+    supabase = get_supabase()
+    saved = []
+    failed = []
+
+    for sub in data["submissions"]:
+        student_id = sub.get("student_id")
+        answers = sub.get("answers", {})
+        nisn = sub.get("nisn", "")
+        confidence = sub.get("confidence", {})
+        needs_review = sub.get("needs_review", [])
+
+        if not student_id or not answers:
+            failed.append({"student_id": student_id, "error": "Missing student_id or answers"})
+            continue
+
+        # Grade
+        exam = supabase.table("exams").select("answer_key").eq("id", exam_id).single().execute().data
+        key = exam.get("answer_key", {}) if exam else {}
+        if isinstance(key, str):
+            key = json.loads(key)
+        correct = 0
+        for k, v in key.items():
+            if k in answers and answers[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
+                correct += 1
+        mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
+        score = round((correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
+
+        enriched = {}
+        for k, v in answers.items():
+            entry = {"answer": v}
+            if k in confidence:
+                entry["confidence"] = confidence[k]
+            if k in needs_review:
+                entry["review"] = True
+            enriched[k] = entry
+        if nisn:
+            enriched["_nisn"] = nisn
+
+        try:
+            existing = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", student_id).execute().data
+            update_data = {"answers": enriched, "score": score, "max_score": mcq_count, "status": "graded"}
+            if existing:
+                supabase.table("submissions").update(update_data).eq("id", existing[0]["id"]).execute()
+            else:
+                update_data.update({"exam_id": exam_id, "student_id": student_id})
+                supabase.table("submissions").insert(update_data).execute()
+            saved.append({"student_id": student_id, "score": score, "correct": correct, "nisn": nisn})
+        except Exception as e:
+            failed.append({"student_id": student_id, "error": str(e)[:100]})
+
+    return jsonify({
+        "success": True,
+        "saved": len(saved),
+        "failed": len(failed),
+        "details": {"saved": saved, "failed": failed},
+    })
 
 
 @api_bp.route("/student/auto-save", methods=["POST"])
