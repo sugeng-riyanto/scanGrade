@@ -783,6 +783,7 @@ def results():
         source = "scan" if isinstance(ans, dict) and ans.get("_nisn") else "online"
         key = (sid, source)
         if key not in seen:
+            s["_source"] = source
             seen[key] = s
     subs = list(seen.values())
 
