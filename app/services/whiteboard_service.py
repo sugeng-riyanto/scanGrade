@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from flask import current_app, g
 from app.utils.auth import get_supabase
 
-UPLOAD_DIR = "app/static/uploads/whiteboard"
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'static', 'uploads', 'whiteboard')
 
 
 def _ensure_upload_dir(whiteboard_id: str) -> str:
