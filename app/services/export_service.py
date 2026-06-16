@@ -98,7 +98,7 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
         row_data = [
             i,
             s.get("student_name", s.get("student_id", "")[:12]),
-            s.get("student_id", ""),
+            answers.get("_nisn") or s.get("student_id", ""),
             s.get("score", 0),
             s.get("penalty", 0),
             s.get("final_score", s.get("score", 0)),
@@ -166,6 +166,7 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
                 answers = {}
 
         student_name = s.get("student_name", s.get("student_id", "")[:12])
+        student_nisn = answers.get("_nisn") or ""
         score = s.get("score", 0)
         penalty = s.get("penalty", 0)
         final_score = s.get("final_score", score)
@@ -175,11 +176,16 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
         c.drawString(40, height - 40, exam_title)
         c.setFont("Helvetica", 10)
         c.drawString(40, height - 58, f"Siswa: {student_name}")
-        c.drawString(300, height - 58, f"Final: {final_score}")
-        c.drawString(450, height - 58, f"Penalti: {penalty}")
-        c.line(40, height - 64, width - 40, height - 64)
+        if student_nisn:
+            c.drawString(40, height - 72, f"NISN: {student_nisn}")
+            y_start = 72
+        else:
+            y_start = 58
+        c.drawString(300, height - y_start, f"Final: {final_score}")
+        c.drawString(450, height - y_start, f"Penalti: {penalty}")
+        c.line(40, height - y_start - 6, width - 40, height - y_start - 6)
 
-        y = height - 80
+        y = height - y_start - 20
         c.setFont("Helvetica-Bold", 9)
 
         for qi in range(total_q):
