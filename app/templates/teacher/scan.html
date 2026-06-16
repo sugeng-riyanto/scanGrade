@@ -51,7 +51,7 @@
 
         <!-- Camera area -->
         <div id="camera-area" class="relative bg-surface-800 rounded-xl overflow-hidden mb-4 border-2 border-dashed border-surface-300" style="min-height:300px">
-            <video id="camera-preview" autoplay playsinline class="w-full h-full object-contain" style="transform:scaleX(-1)"></video>
+            <video id="camera-preview" autoplay playsinline class="w-full h-full object-contain"></video>
             <div id="cam-quality-badge" class="absolute top-2 right-2 hidden px-2 py-1 rounded-lg text-[10px] font-bold shadow-lg pointer-events-none"></div>
             <div id="auto-indicator" class="absolute bottom-2 left-1/2 -translate-x-1/2 hidden px-3 py-1 rounded-full text-[10px] font-bold shadow-lg pointer-events-none bg-surface-800/70 text-white whitespace-nowrap">
                 <i class="fas fa-spinner fa-spin mr-1"></i>Mendeteksi...
@@ -198,6 +198,9 @@ async function startCamera() {
             }
         }
         document.getElementById('camera-preview').srcObject = stream;
+        // Mirror preview only for front camera
+        const preview = document.getElementById('camera-preview');
+        preview.style.transform = currentFacing === 'user' ? 'scaleX(-1)' : 'none';
         startBtn.classList.add('hidden');
         document.getElementById('btn-capture').classList.remove('hidden');
         document.getElementById('btn-stop-cam').classList.remove('hidden');
@@ -212,10 +215,42 @@ async function startCamera() {
     }
 }
 
-// Start camera (via button)
-document.getElementById('btn-start-cam').addEventListener('click', startCamera);
+// Start camera (via button) — also handles device selector
+document.getElementById('btn-start-cam').addEventListener('click', async function() {
+    const sel = document.getElementById('camera-select');
+    if (sel.value) {
+        startCameraWithId(sel.value);
+    } else {
+        startCamera();
+    }
+});
 
-// Flip camera
+async function startCameraWithId(deviceId) {
+    const startBtn = document.getElementById('btn-start-cam');
+    startBtn.disabled = true;
+    startBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Membuka...';
+    hideError();
+    stopStream();
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        });
+        document.getElementById('camera-preview').srcObject = stream;
+        document.getElementById('camera-preview').style.transform = 'none';
+        currentFacing = 'environment';
+        startBtn.classList.add('hidden');
+        document.getElementById('btn-capture').classList.remove('hidden');
+        document.getElementById('btn-stop-cam').classList.remove('hidden');
+        document.getElementById('btn-flip-cam').classList.remove('hidden');
+        document.getElementById('btn-auto').classList.remove('hidden');
+        document.getElementById('scan-result').classList.add('hidden');
+        startQualityCheck();
+    } catch (err) {
+        showError('Gagal membuka kamera: ' + err.message);
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<i class="fas fa-camera mr-1"></i>Buka Kamera';
+    }
+}
 document.getElementById('btn-flip-cam').addEventListener('click', async function() {
     currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
     stopStream();
@@ -225,19 +260,10 @@ document.getElementById('btn-flip-cam').addEventListener('click', async function
             video: { facingMode: isMobile ? currentFacing : 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
         });
         document.getElementById('camera-preview').srcObject = stream;
+        document.getElementById('camera-preview').style.transform = currentFacing === 'user' ? 'scaleX(-1)' : 'none';
     } catch (err) {
         alert('Gagal balik kamera: ' + err.message);
         currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
-    }
-});
-
-// Start camera
-document.getElementById('btn-start-cam').addEventListener('click', async function() {
-    const sel = document.getElementById('camera-select');
-    if (sel.value) {
-        await startCameraWithDevice(sel.value);
-    } else {
-        await startCameraWithDevice(null);
     }
 });
 
@@ -373,7 +399,7 @@ function medianBlendFrames(canvases, w, h) {
     return result;
 }
 
-async function captureBlendedFrame(video) {
+async function captureBlendedFrame(video, mirror) {
     const w = video.videoWidth || 1280;
     const h = video.videoHeight || 720;
     const canvases = [];
@@ -382,8 +408,7 @@ async function captureBlendedFrame(video) {
         const c = document.createElement('canvas');
         c.width = w; c.height = h;
         const ctx = c.getContext('2d');
-        ctx.translate(w, 0);
-        ctx.scale(-1, 1);
+        if (mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); }
         ctx.drawImage(video, 0, 0);
         canvases.push(c);
     }
@@ -398,7 +423,7 @@ document.getElementById('btn-capture').addEventListener('click', async function(
     btn.disabled = true;
     btn.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>Mengambil ' + FRAME_COUNT + ' frame...';
     try {
-        const blob = await captureBlendedFrame(video);
+        const blob = await captureBlendedFrame(video, currentFacing === 'user');
         await processScan(blob);
     } catch (err) {
         showError('Gagal mengambil frame: ' + err.message);
