@@ -1,5 +1,5 @@
 import json
-from flask import Blueprint, render_template, g, request, jsonify, send_file
+from flask import Blueprint, render_template, g, request, jsonify, send_file, current_app
 from app.utils.auth import login_required, guru_required
 from app.decorators.security import require_school_access
 from app.services.whiteboard_service import (
@@ -18,7 +18,11 @@ whiteboard_teacher_bp = Blueprint("whiteboard_teacher", __name__)
 @login_required
 @guru_required
 def whiteboard_list():
-    whiteboards = list_whiteboards(role="teacher")
+    whiteboards = []
+    try:
+        whiteboards = list_whiteboards(role="teacher")
+    except Exception as e:
+        current_app.logger.error("whiteboard list failed: %s", e)
     supabase = get_supabase()
     for wb in whiteboards:
         try:
@@ -27,7 +31,6 @@ def whiteboard_list():
         except Exception:
             wb["member_count"] = 0
 
-    # Get classes for create modal
     sid = g.get("user_school_id")
     classes = []
     if sid:
@@ -43,19 +46,22 @@ def whiteboard_list():
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
 def whiteboard_canvas(whiteboard_id):
-    wb = get_whiteboard(whiteboard_id)
-    if not wb:
-        return render_template("errors/404.html"), 404
-    # Parse display_settings JSON field
-    ds = wb.get("display_settings")
-    if isinstance(ds, str):
-        try: wb["display_settings"] = json.loads(ds)
-        except: wb["display_settings"] = {}
-    elif not isinstance(ds, dict):
-        wb["display_settings"] = {}
-    slides = list_slides(whiteboard_id)
-    members = get_members(whiteboard_id)
-    return render_template("teacher/whiteboard_canvas.html", whiteboard=wb, slides=slides, members=members)
+    try:
+        wb = get_whiteboard(whiteboard_id)
+        if not wb:
+            return render_template("errors/404.html"), 404
+        ds = wb.get("display_settings")
+        if isinstance(ds, str):
+            try: wb["display_settings"] = json.loads(ds)
+            except: wb["display_settings"] = {}
+        elif not isinstance(ds, dict):
+            wb["display_settings"] = {}
+        slides = list_slides(whiteboard_id)
+        members = get_members(whiteboard_id)
+        return render_template("teacher/whiteboard_canvas.html", whiteboard=wb, slides=slides, members=members)
+    except Exception as e:
+        current_app.logger.error("whiteboard canvas failed: %s", str(e)[:200])
+        return render_template("errors/500.html"), 500
 
 
 @whiteboard_teacher_bp.route("/whiteboard/<whiteboard_id>/download")
@@ -260,7 +266,7 @@ def api_display_settings(whiteboard_id):
         "grid_spacing": data.get("grid_spacing", 50),
         "grid_logarithmic": data.get("grid_logarithmic", False),
     }
-    get_supabase().table("whiteboards").update({"display_settings": json.dumps(settings)}).eq("id", whiteboard_id).execute()
+    get_supabase().table("whiteboards").update({"display_settings": settings}).eq("id", whiteboard_id).execute()
     return jsonify({"success": True})
 
 
