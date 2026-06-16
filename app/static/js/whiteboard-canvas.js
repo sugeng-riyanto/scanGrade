@@ -41,6 +41,7 @@ class WhiteboardCanvas {
         this.compassRadius = 0;
         this.calcEl = null;
 
+        this._zoom = 1;
         this._ready = false;
         this._init();
     }
@@ -51,25 +52,30 @@ class WhiteboardCanvas {
         window.addEventListener("resize", () => this._resize());
     }
 
-    // ─── Zoom (via stage sizing, keeps canvas pixels at 2000x2000) ───
+    // ─── Zoom (track base size dynamically) ───
+    get _baseW() {
+        // Base width is the stage width before zoom (from bg or 2000 default)
+        const s = this.canvas.parentElement?.style;
+        if (s && s.width && s.width !== '2000px') {
+            return parseFloat(s.width) / this._zoom;
+        }
+        return 2000;
+    }
     setZoom(v) {
         const z = Math.max(0.25, Math.min(5, parseFloat(v) || 1));
         const stage = this.canvas.parentElement;
         if (!stage) return;
-        stage.style.width = (2000 * z) + "px";
-        stage.style.height = (2000 * z) + "px";
-        // Recalculate canvas dimensions from new stage size
+        // Get the current base width (actual content size before zoom)
+        const bw = this._baseW;
+        const bh = this.canvas.parentElement ? parseFloat(stage.style.height) / (this._zoom || 1) : bw;
+        stage.style.width = (bw * z) + "px";
+        stage.style.height = (bh * z) + "px";
+        this._zoom = z;
         this._resize();
         if (this.options.onZoom) this.options.onZoom(z);
     }
-    zoomIn() {
-        const z = parseFloat(this.canvas.parentElement?.style.width) / 2000 || 1;
-        this.setZoom(z * 1.25);
-    }
-    zoomOut() {
-        const z = parseFloat(this.canvas.parentElement?.style.width) / 2000 || 1;
-        this.setZoom(z / 1.25);
-    }
+    zoomIn() { this.setZoom((this._zoom || 1) * 1.25); }
+    zoomOut() { this.setZoom((this._zoom || 1) / 1.25); }
     zoomReset() { this.setZoom(1); }
 
     _waitForSize() {
@@ -217,28 +223,28 @@ class WhiteboardCanvas {
             const ih = img.naturalHeight || img.height || 0;
             if (!iw || !ih) { this._render(); return; }
 
-            // PDF rendered at 150 DPI → screen at ~96 DPI → actual paper size
+            // PDF at 150 DPI → screen ~96 DPI → actual paper size
             const actualW = iw * 96 / 150;
             const actualH = ih * 96 / 150;
 
-            // Set stage to actual paper size, image draws at (0,0) filling it
+            // Reset zoom to 1x, set stage to actual paper size
+            this._zoom = 1;
             const stage = this.canvas.parentElement;
             if (stage) {
                 stage.style.width = actualW + "px";
                 stage.style.height = actualH + "px";
             }
-
-            // Let resize compute new canvas dimensions
             this._resize();
 
-            // bgBounds = full stage, centered (image fills the stage)
-            const cw = this.canvas.width, ch = this.canvas.height;
-            this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; // image fills canvas 1:1
+            // Image fills the canvas 1:1
+            this.bgBounds = { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
 
-            // Auto-zoom to fit viewport
-            if (stage) {
-                const vw = this.canvas.width, vh = this.canvas.height;
-                const zoom = Math.min((vw * 0.9) / actualW, (vh * 0.9) / actualH);
+            // Auto-zoom to fit viewport (90% margin)
+            if (stage && this.canvas.width > 0) {
+                const zoom = Math.min(
+                    (this.canvas.width * 0.9) / actualW,
+                    (this.canvas.height * 0.9) / actualH
+                );
                 this.setZoom(Math.max(0.25, Math.min(5, zoom)));
             }
 
