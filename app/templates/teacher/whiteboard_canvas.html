@@ -32,7 +32,7 @@
     </div>
 
     <!-- Main area -->
-    <div class="flex-1 relative overflow-hidden flex" :class="toolbarPos==='top'||toolbarPos==='bottom'?'flex-col':'flex-row'">
+    <div class="flex-1 relative overflow-auto flex" :class="toolbarPos==='top'||toolbarPos==='bottom'?'flex-col':'flex-row'">
         <!-- Toolbar (position based on setting) -->
         <div x-show="toolbarPos==='left'" class="hidden md:flex flex-col bg-white dark:bg-gray-900 border-r py-1 px-0.5 gap-0.5 shrink-0 overflow-y-auto w-11">
             {% include "teacher/wb_toolbar.html" %}
@@ -45,8 +45,8 @@
         </div>
 
         <!-- Canvas area -->
-        <div class="flex-1 relative overflow-hidden p-2 md:p-3" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%)">
-            <div class="w-full h-full rounded-2xl shadow-xl bg-white overflow-hidden relative" style="box-shadow:0 8px 32px rgba(0,0,0,0.08)">
+        <div class="flex-1 relative p-2 md:p-3" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%)">
+            <div class="w-full h-full rounded-2xl shadow-xl bg-white relative" style="box-shadow:0 8px 32px rgba(0,0,0,0.08);overflow:visible">
                 <div id="wb-stage" style="width:2000px;height:2000px;position:relative">
                     <canvas id="wb-canvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
                     <!-- Tool overlays -->
