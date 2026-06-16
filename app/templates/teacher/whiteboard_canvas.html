@@ -25,11 +25,11 @@
     <div class="flex flex-1 overflow-hidden">
         <!-- Toolbar -->
         <div class="w-12 bg-white dark:bg-gray-900 border-r flex flex-col items-center py-1 gap-0.5 shrink-0 overflow-y-auto">
-            <button @click="t='pen';c.setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Pena"><i class="fas fa-pen"></i></button>
-            <button @click="t='eraser';c.setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penghapus"><i class="fas fa-eraser"></i></button>
+            <button @click="setTool('pen')" :class="t==='pen'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Pena"><i class="fas fa-pen"></i></button>
+            <button @click="setTool('eraser')" :class="t==='eraser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penghapus"><i class="fas fa-eraser"></i></button>
             <button @click="textMode()" :class="t==='text'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Teks"><i class="fas fa-font"></i></button>
-            <button @click="t='highlight';c.setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Stabilo"><i class="fas fa-highlighter"></i></button>
-            <button @click="t='laser';c.setTool('laser')" :class="t==='laser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Laser"><i class="fas fa-crosshairs"></i></button>
+            <button @click="setTool('highlight')" :class="t==='highlight'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Stabilo"><i class="fas fa-highlighter"></i></button>
+            <button @click="setTool('laser')" :class="t==='laser'?'bg-primary-100 text-primary-600':'text-gray-500 hover:bg-primary-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Laser"><i class="fas fa-crosshairs"></i></button>
             <hr class="w-5 border-t my-0.5">
             <input type="color" x-model="col" @input="c.setColor(col)" class="w-6 h-6 rounded cursor-pointer border-0 p-0" title="Warna">
             <div x-data="{o:false}">
@@ -64,15 +64,15 @@
             <button @click="rulerOn=!rulerOn;if(rulerOn){rulerX=c.canvas.width/2-250;rulerY=c.canvas.height/2-35}" :class="rulerOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penggaris"><i class="fas fa-ruler-combined"></i></button>
             <button @click="protOn=!protOn;if(protOn){protX=c.canvas.width/2-150;protY=c.canvas.height/2-150}" :class="protOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Busur"><i class="fas fa-drafting-compass"></i></button>
             <button @click="triOn=!triOn;if(triOn){triX=c.canvas.width/2-150;triY=c.canvas.height/2-150}" :class="triOn?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Segitiga"><i class="fas fa-play"></i></button>
-            <button @click="t='compass';c.setTool('compass')" :class="t==='compass'?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Jangka"><i class="fas fa-circle"></i></button>
+            <button @click="setTool('compass')" :class="t==='compass'?'bg-violet-100 text-violet-700':'text-gray-500 hover:bg-violet-50'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Jangka"><i class="fas fa-circle"></i></button>
             <button @click="c.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Kalkulator"><i class="fas fa-calculator"></i></button>
             <hr class="w-5 border-t my-0.5">
             <button @click="snapshot()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Snapshot"><i class="fas fa-camera"></i></button>
             <hr class="w-5 border-t my-0.5">
             <span class="text-[10px] font-bold text-gray-400" x-text="zoomPct"></span>
-            <button @click="c?.zoomIn()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perbesar"><i class="fas fa-search-plus"></i></button>
-            <button @click="c?.zoomOut()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perkecil"><i class="fas fa-search-minus"></i></button>
-            <button @click="c?.zoomReset()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Reset"><i class="fas fa-expand"></i></button>
+            <button @click="c.zoomIn()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perbesar"><i class="fas fa-search-plus"></i></button>
+            <button @click="c.zoomOut()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Perkecil"><i class="fas fa-search-minus"></i></button>
+            <button @click="c.zoomReset()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-primary-50" title="Reset"><i class="fas fa-expand"></i></button>
         </div>
 
         <!-- Canvas -->
@@ -227,6 +227,7 @@ function whiteboardCanvas() {
         loadSlide(sl) { this.c.setBackground(sl.background_url||null); fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/ops?slide=${sl.slide_number}`).then(r=>r.json()).then(d=>{if(d.ops)this.c.loadOps(d.ops);}).catch(()=>{}); },
         goToSlide(i) { if(i<0||i>=this.slides.length)return; this.slideIdx=i; this.loadSlide(this.slides[i]); this.ws?.sendSlideChange(i+1); },
 
+        setTool(t) { this.t=t; if(t==='laser'){this.c.setTool('laser');return;} if(t==='text')return; if(t==='compass'){this.c.setTool('compass');return;} this.c.setTool(t); },
         textMode() { this.t="text"; this.c.enableTextMode(); },
 
         // Tool marks
