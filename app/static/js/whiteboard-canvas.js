@@ -381,95 +381,90 @@ class WhiteboardCanvas {
 
     _buildToolSvg(type) {
         this._destroyToolSvg(type);
+        if (typeof ScanGradeTools === 'undefined') { console.warn('ScanGradeTools not loaded'); return; }
         const st = this.toolState[type];
+        if (!st) return;
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
         svg.dataset.tool = type;
         svg.style.cssText = "position:absolute;pointer-events:auto;cursor:grab;overflow:visible;user-select:none;";
 
-        let vbW, vbH;
+        let w, h, cx, cy, poly, marks, cont;
+
         if (type === "ruler") {
-            vbW = st.w; vbH = st.h;
-            svg.setAttribute("viewBox", `0 0 ${vbW} ${vbH}`);
-            svg.style.width = vbW + "px";
-            svg.style.height = vbH + "px";
-            svg.style.left = st.x + "px";
-            svg.style.top = st.y + "px";
-            svg.style.transform = `rotate(${st.angle}deg)`;
-            svg.style.transformOrigin = `${st.w * 0.02}px ${st.h * 0.5}px`; // rotation at left edge center
-
-            const marks = ScanGradeTools.rulerSvg(vbW, vbH);
-            svg.innerHTML = `
-                <rect x="0" y="0" width="${vbW}" height="${vbH}" rx="6" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
-                ${marks}
-                <g id="controls">
-                    <rect x="0" y="0" width="${vbW}" height="${vbH}" fill="transparent" style="pointer-events:auto"/>
-                    <circle cx="20" cy="${vbH/2}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
-                    <text x="14" y="${vbH/2+4}" font-size="10" fill="white" font-weight="bold" style="pointer-events:none">⣿</text>
-                    <circle cx="${vbW-20}" cy="14" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
-                    <text x="${vbW-24}" y="18" font-size="9" fill="white" font-weight="bold" style="pointer-events:none">↻</text>
-                    <circle cx="${vbW-10}" cy="${vbH/2}" r="6" fill="rgba(0,40,120,0.6)" stroke="white" stroke-width="1" style="cursor:ew-resize" data-zone="resize"/>
-                    <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer" data-zone="close"/>
-                    <text x="7" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">✕</text>
-                </g>`;
+            w = st.w; h = st.h; cx = st.w * 0.02; cy = st.h / 2;
+            marks = ScanGradeTools.rulerSvg(w, h);
+            cont = `<g>${marks}
+                <circle cx="20" cy="${h/2}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
+                <circle cx="${w-20}" cy="14" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
+                <circle cx="${w-10}" cy="${h/2}" r="6" fill="rgba(0,40,120,0.6)" stroke="white" stroke-width="1" style="cursor:ew-resize" data-zone="resize"/>
+                <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer" data-zone="close"/>
+                <text x="7" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&#x2715;</text></g>`;
+            svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+            svg.style.width = w + "px"; svg.style.height = h + "px";
+            svg.style.transformOrigin = `20px ${cy}px`;
         } else if (type === "protractor") {
-            const s = st.size;
-            vbW = s; vbH = s;
-            const cx = s / 2, cy = s * 0.88;
-            svg.setAttribute("viewBox", `0 0 ${s} ${s}`);
-            svg.style.width = s + "px";
-            svg.style.height = s + "px";
-            svg.style.left = st.x + "px";
-            svg.style.top = st.y + "px";
-            svg.style.transform = `rotate(${st.angle}deg)`;
+            w = st.size; h = st.size; cx = w / 2; cy = h * 0.88;
+            marks = ScanGradeTools.protractorSvg(cx, cy, w * 0.42);
+            cont = `<g>${marks}
+                <circle cx="${cx}" cy="${cy}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
+                <circle cx="${cx}" cy="${h*0.08}" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
+                <circle cx="${w-20}" cy="${h*0.4}" r="7" fill="rgba(0,40,120,0.6)" stroke="white" stroke-width="1" style="cursor:ew-resize" data-zone="resize"/>
+                <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer" data-zone="close"/>
+                <text x="7" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&#x2715;</text></g>`;
+            svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+            svg.style.width = w + "px"; svg.style.height = h + "px";
             svg.style.transformOrigin = `${cx}px ${cy}px`;
-
-            const marks = ScanGradeTools.protractorSvg(cx, cy, s * 0.42);
-            svg.innerHTML = `
-                <rect x="0" y="0" width="${s}" height="${s}" rx="4" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.4)" stroke-width="1"/>
-                ${marks}
-                <g id="controls">
-                    <rect x="0" y="0" width="${s}" height="${s}" fill="transparent" style="pointer-events:auto"/>
-                    <circle cx="${cx}" cy="${cy}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
-                    <text x="${cx-5}" y="${cy+4}" font-size="11" fill="white" font-weight="bold" style="pointer-events:none">+</text>
-                    <circle cx="${cx}" cy="${s*0.08}" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
-                    <circle cx="${s-20}" cy="${s*0.4}" r="7" fill="rgba(0,40,120,0.6)" stroke="white" stroke-width="1" style="cursor:ew-resize" data-zone="resize"/>
-                    <rect x="0" y="0" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" style="cursor:pointer" data-zone="close"/>
-                    <text x="7" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">✕</text>
-                </g>`;
         } else if (type === "triangle") {
-            const s = st.size;
+            w = st.size; h = st.size;
             const pts = this._triVerts(st);
-            const minX = Math.min(pts[0].x, pts[1].x, pts[2].x) - 5;
-            const minY = Math.min(pts[0].y, pts[1].y, pts[2].y) - 5;
-            const maxX = Math.max(pts[0].x, pts[1].x, pts[2].x) + 5;
-            const maxY = Math.max(pts[0].y, pts[1].y, pts[2].y) + 5;
-            const bbW = maxX - minX, bbH = maxY - minY;
-            vbW = bbW; vbH = bbH;
-
-            svg.setAttribute("viewBox", `${minX} ${minY} ${bbW} ${bbH}`);
-            svg.style.width = bbW + "px";
-            svg.style.height = bbH + "px";
-            svg.style.left = st.x + "px";
-            svg.style.top = st.y + "px";
-            svg.style.transform = `rotate(${st.angle}deg)`;
-            svg.style.transformOrigin = `${pts[1].x - minX}px ${pts[1].y - minY}px`; // rotation at right-angle corner
-
-            const poly = pts.map(p => `${p.x},${p.y}`).join(" ");
-            svg.innerHTML = `
-                <polygon points="${poly}" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
-                <g id="controls">
-                    <polygon points="${poly}" fill="transparent" style="pointer-events:auto"/>
-                    <circle cx="${pts[2].x}" cy="${pts[2].y}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
-                    <circle cx="${pts[1].x}" cy="${pts[1].y}" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
-                    <rect x="${pts[0].x-11}" y="${pts[0].y-11}" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" data-zone="close"/>
-                    <text x="${pts[0].x-4}" y="${pts[0].y+4}" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">✕</text>
-                </g>`;
+            poly = pts.map(p => `${p.x},${p.y}`).join(" ");
+            marks = ScanGradeTools.triangleSvg45(w);
+            cont = `<g>${marks}
+                <circle cx="${pts[2].x}" cy="${pts[2].y}" r="10" fill="rgba(0,80,200,0.75)" stroke="white" stroke-width="1.5" style="cursor:move" data-zone="move"/>
+                <circle cx="${pts[1].x}" cy="${pts[1].y}" r="9" fill="rgba(200,50,0,0.8)" stroke="white" stroke-width="1.5" style="cursor:alias" data-zone="rotate"/>
+                <rect x="${pts[0].x-11}" y="${pts[0].y-11}" width="22" height="22" rx="4" fill="rgba(200,50,50,0.7)" stroke="white" stroke-width="1" data-zone="close"/>
+                <text x="${pts[0].x-4}" y="${pts[0].y+4}" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&#x2715;</text></g>`;
+            svg.setAttribute("viewBox", `${Math.min(...pts.map(p=>p.x))-5} ${Math.min(...pts.map(p=>p.y))-5} ${Math.max(...pts.map(p=>p.x))-Math.min(...pts.map(p=>p.x))+10} ${Math.max(...pts.map(p=>p.y))-Math.min(...pts.map(p=>p.y))+10}`);
+            svg.style.width = (Math.max(...pts.map(p=>p.x))-Math.min(...pts.map(p=>p.x))+10) + "px";
+            svg.style.height = (Math.max(...pts.map(p=>p.y))-Math.min(...pts.map(p=>p.y))+10) + "px";
+            svg.style.transformOrigin = `${pts[1].x - Math.min(...pts.map(p=>p.x)) + 5}px ${pts[1].y - Math.min(...pts.map(p=>p.y)) + 5}px`;
         }
+
+        // Build SVG structure using DOM methods for reliability
+        svg.style.left = (st.x || 0) + "px";
+        svg.style.top = (st.y || 0) + "px";
+        svg.style.transform = `rotate(${st.angle || 0}deg)`;
+
+        // Background rect
+        const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        bg.setAttribute("x", "0"); bg.setAttribute("y", "0");
+        bg.setAttribute("width", type === "triangle" ? svg.style.width : (w + "px"));
+        bg.setAttribute("height", type === "triangle" ? svg.style.height : (h + "px"));
+        bg.setAttribute("rx", "6");
+        bg.setAttribute("fill", "rgba(235,242,255,0.4)");
+        bg.setAttribute("stroke", "rgba(0,80,200,0.5)");
+        bg.setAttribute("stroke-width", "1.5");
+        svg.appendChild(bg);
+
+        // Triangle polygon if needed
+        if (type === "triangle") {
+            const pl = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+            pl.setAttribute("points", poly);
+            pl.setAttribute("fill", "rgba(235,242,255,0.4)");
+            pl.setAttribute("stroke", "rgba(0,80,200,0.5)");
+            pl.setAttribute("stroke-width", "1.5");
+            svg.appendChild(pl);
+        }
+
+        // Controls via innerHTML (safe for SVG children)
+        const ctrl = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        ctrl.innerHTML = cont;
+        svg.appendChild(ctrl);
 
         this.toolSvg[type] = svg;
         this.overlayContainer.appendChild(svg);
 
-        // SVG event delegation via pointer-events on <g> and data-zone attributes
         svg.addEventListener("mousedown", (e) => this._onToolSvgDown(type, e));
         svg.addEventListener("touchstart", (e) => { e.preventDefault(); this._onToolSvgDown(type, e.touches[0]); }, { passive: false });
     }
