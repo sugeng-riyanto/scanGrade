@@ -51,9 +51,72 @@
                 <i class="fas fa-trash"></i>
             </button>
             <hr class="w-6 border-t my-1">
+            <!-- Drawing Tools -->
+            <button @click="toggleTool('ruler')" :class="rulerOn ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Penggaris 30cm">
+                <i class="fas fa-ruler-combined"></i>
+            </button>
+            <button @click="toggleTool('protractor')" :class="protractorOn ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Busur 180°">
+                <i class="fas fa-drafting-compass"></i>
+            </button>
+            <button @click="toggleTool('triangle')" :class="triangleOn ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Segitiga Siku">
+                <i class="fas fa-play"></i>
+            </button>
+            <button @click="setTool('compass')" :class="tool === 'compass' ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Jangka">
+                <i class="fas fa-circle"></i>
+            </button>
+            <button @click="canvas?.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Kalkulator Ilmiah">
+                <i class="fas fa-calculator"></i>
+            </button>
+            <hr class="w-6 border-t my-1">
+            <!-- Display Settings -->
+            <button @click="showDisplay = !showDisplay" :class="showDisplay ? 'bg-teal-100 text-teal-700' : 'text-gray-500 hover:bg-gray-100'" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" title="Tampilan">
+                <i class="fas fa-palette"></i>
+            </button>
             <button @click="takeSnapshot()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Snapshot">
                 <i class="fas fa-camera"></i>
             </button>
+        </div>
+
+        <!-- Display Settings Panel -->
+        <div x-show="showDisplay" class="absolute left-14 top-16 z-20 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-4 w-64" style="display:none">
+            <div class="font-bold text-xs text-gray-500 mb-3 uppercase tracking-wider">Tampilan</div>
+            <div class="space-y-3">
+                <div>
+                    <label class="text-xs font-semibold text-gray-600 block mb-1">Mode Papan</label>
+                    <div class="flex gap-2">
+                        <button @click="boardMode='white'; canvas?.setBoardMode('white'); sendDisplaySettings()"
+                                :class="boardMode==='white' ? 'bg-primary-100 border-primary-400 text-primary-700' : 'bg-gray-50 border-gray-200 text-gray-600'"
+                                class="flex-1 text-xs font-bold py-1.5 rounded-lg border-2 transition">
+                            <i class="far fa-square mr-1"></i>Putih
+                        </button>
+                        <button @click="boardMode='black'; canvas?.setBoardMode('black'); sendDisplaySettings()"
+                                :class="boardMode==='black' ? 'bg-gray-800 border-gray-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600'"
+                                class="flex-1 text-xs font-bold py-1.5 rounded-lg border-2 transition">
+                            <i class="fas fa-square mr-1"></i>Hitam
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-gray-600">Grid</span>
+                        <button @click="gridEnabled=!gridEnabled; canvas?.toggleGrid(); sendDisplaySettings()"
+                                :class="gridEnabled ? 'bg-primary-600' : 'bg-gray-300'"
+                                class="w-9 h-5 rounded-full relative transition">
+                            <span :class="gridEnabled ? 'translate-x-4' : 'translate-x-0'" class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform"></span>
+                        </button>
+                    </label>
+                    <div x-show="gridEnabled" class="mt-2 space-y-2">
+                        <div>
+                            <label class="text-xs text-gray-500">Jarak: <span x-text="gridSpacing + 'px'"></span></label>
+                            <input type="range" x-model="gridSpacing" @input="canvas?.setGridSpacing(gridSpacing)" min="10" max="200" step="5" class="w-full">
+                        </div>
+                        <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                            <input type="checkbox" x-model="gridLog" @change="canvas?.setGridLogarithmic(gridLog); sendDisplaySettings()" class="rounded">
+                            Skala Logaritmik (basis 10)
+                        </label>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Canvas -->
@@ -128,6 +191,7 @@
 
 {% block scripts %}
 <script src="/static/vendor/socket.io.min.js"></script>
+<script src="/static/js/tools.js"></script>
 <script src="/static/js/whiteboard-canvas.js"></script>
 <script src="/static/js/whiteboard-websocket.js"></script>
 <script src="/static/js/whiteboard-slides.js"></script>
@@ -147,12 +211,42 @@ function whiteboardCanvas() {
         slideNav: null,
         timer: null,
         heartbeatInterval: null,
+        showDisplay: false,
+        boardMode: "white",
+        gridEnabled: false,
+        gridSpacing: 50,
+        gridLog: false,
+        rulerOn: false,
+        protractorOn: false,
+        triangleOn: false,
 
         initCanvas() {
+            // Restore display settings from server
+            {% if whiteboard.display_settings %}
+            {% set ds = whiteboard.display_settings if whiteboard.display_settings is mapping else {} %}
+            this.boardMode = "{{ ds.get('board_mode', 'white') }}";
+            this.gridEnabled = {{ 'true' if ds.get('grid_enabled') else 'false' }};
+            this.gridSpacing = {{ ds.get('grid_spacing', 50) }};
+            this.gridLog = {{ 'true' if ds.get('grid_logarithmic') else 'false' }};
+            {% endif %}
+
             this.canvas = new WhiteboardCanvas("whiteboard-canvas", {
                 onDraw: (op) => { this.ws?.sendDraw(op.op_type, op.data); },
                 onCursor: (pos) => { this.ws?.sendCursor(pos.x, pos.y); },
+                onToolState: (type, state) => {
+                    if (this.ws) this.ws.sendToolState(type, state);
+                },
+                onToolToggle: (type, visible) => {
+                    if (type === 'ruler') this.rulerOn = visible;
+                    else if (type === 'protractor') this.protractorOn = visible;
+                    else if (type === 'triangle') this.triangleOn = visible;
+                },
             });
+
+            // Apply restored display settings
+            this.canvas.setBoardMode(this.boardMode);
+            if (this.gridEnabled) { this.canvas.gridEnabled = true; this.canvas.gridSpacing = this.gridSpacing; this.canvas.setGridLogarithmic(this.gridLog); }
+            this.canvas._render();
 
             this.ws = new WhiteboardSocket(this.whiteboardId, {
                 onConnect: () => { this.startHeartbeat(); },
@@ -207,12 +301,42 @@ function whiteboardCanvas() {
             this.tool = t;
             if (t === "laser") { this.canvas.setTool("laser"); return; }
             if (t === "text") return;
+            if (t === "compass") { this.canvas.setTool("compass"); return; }
             this.canvas.setTool(t);
         },
 
         enableText() {
             this.tool = "text";
             this.canvas.enableTextMode();
+        },
+
+        toggleTool(type) {
+            this.canvas.toggleTool(type);
+            if (type === "ruler") this.rulerOn = !this.rulerOn;
+            else if (type === "protractor") this.protractorOn = !this.protractorOn;
+            else if (type === "triangle") this.triangleOn = !this.triangleOn;
+            if (this.ws) this.ws.sendToolState(type, { visible: this.canvas.toolState[type].visible });
+        },
+
+        sendDisplaySettings() {
+            if (!this.ws) return;
+            this.ws.sendDisplaySettings({
+                board_mode: this.boardMode,
+                grid_enabled: this.gridEnabled,
+                grid_spacing: this.gridSpacing,
+                grid_logarithmic: this.gridLog,
+            });
+            // Persist to server
+            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/display-settings`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    board_mode: this.boardMode,
+                    grid_enabled: this.gridEnabled,
+                    grid_spacing: this.gridSpacing,
+                    grid_logarithmic: this.gridLog,
+                }),
+            }).catch(() => {});
         },
 
         goToSlide(i) {

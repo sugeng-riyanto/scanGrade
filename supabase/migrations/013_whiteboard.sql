@@ -86,3 +86,6 @@ CREATE TABLE IF NOT EXISTS whiteboard_snapshots (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_wb_snapshots_whiteboard ON whiteboard_snapshots(whiteboard_id);
+
+-- Add display_settings column for white/black board, grid, log scale
+ALTER TABLE whiteboards ADD COLUMN IF NOT EXISTS display_settings JSONB DEFAULT '{"board_mode":"white","grid_enabled":false,"grid_spacing":50,"grid_logarithmic":false}';

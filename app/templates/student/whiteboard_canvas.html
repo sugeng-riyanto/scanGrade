@@ -23,6 +23,11 @@
             <span x-show="canAnnotate" class="text-xs text-green-600 bg-green-50 px-3 py-1 rounded-lg">
                 &#10003; Sedang Menganotasi
             </span>
+            <span class="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full hidden md:inline-flex items-center gap-1">
+                <i class="fas" :class="boardMode === 'black' ? 'fa-square text-gray-800' : 'fa-square text-white'"></i>
+                <span x-text="boardMode === 'white' ? 'Putih' : 'Hitam'"></span>
+                <span x-show="gridEnabled"> | Grid <span x-text="gridLog ? 'Log' : gridSpacing + 'px'"></span></span>
+            </span>
         </div>
     </div>
 
@@ -45,6 +50,22 @@
             </button>
             <button @click="canvas?.redo()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Redo">
                 <i class="fas fa-redo"></i>
+            </button>
+            <hr class="w-6 border-t my-1">
+            <button @click="canvas?.toggleTool('ruler')" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Penggaris">
+                <i class="fas fa-ruler-combined"></i>
+            </button>
+            <button @click="canvas?.toggleTool('protractor')" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Busur">
+                <i class="fas fa-drafting-compass"></i>
+            </button>
+            <button @click="canvas?.toggleTool('triangle')" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Segitiga">
+                <i class="fas fa-play"></i>
+            </button>
+            <button @click="canvas?.setTool('compass')" :class="tool === 'compass' ? 'bg-violet-100' : ''" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Jangka">
+                <i class="fas fa-circle"></i>
+            </button>
+            <button @click="canvas?.toggleCalculator()" class="w-9 h-9 rounded-lg flex items-center justify-center text-sm text-gray-500 hover:bg-gray-100" title="Kalkulator">
+                <i class="fas fa-calculator"></i>
             </button>
         </div>
 
@@ -73,6 +94,7 @@
 
 {% block scripts %}
 <script src="/static/vendor/socket.io.min.js"></script>
+<script src="/static/js/tools.js"></script>
 <script src="/static/js/whiteboard-canvas.js"></script>
 <script src="/static/js/whiteboard-websocket.js"></script>
 <script src="/static/js/whiteboard-timer.js"></script>
@@ -89,6 +111,11 @@ function studentCanvas() {
         canvas: null,
         ws: null,
         timer: null,
+        boardMode: "white",
+        gridEnabled: false,
+        gridSpacing: 50,
+        gridLog: false,
+        tool: "pen",
 
         init() {
             this.canvas = new WhiteboardCanvas("whiteboard-canvas", {
@@ -102,6 +129,19 @@ function studentCanvas() {
             this.ws = new WhiteboardSocket(this.whiteboardId, {
                 onConnect: () => this.startHeartbeat(),
                 onDrawOp: (data) => { this.canvas.replayOp(data); },
+                onToolStateUpdate: (data) => {
+                    if (data.tool && data.state) {
+                        const st = this.canvas.toolState[data.tool];
+                        if (st) Object.assign(st, data.state);
+                    }
+                },
+                onDisplaySettingsUpdate: (data) => {
+                    if (data.board_mode) { this.canvas.setBoardMode(data.board_mode); this.boardMode = data.board_mode; }
+                    if (data.grid_enabled !== undefined) { this.canvas.gridEnabled = data.grid_enabled; this.gridEnabled = data.grid_enabled; }
+                    if (data.grid_spacing) { this.canvas.gridSpacing = data.grid_spacing; this.gridSpacing = data.grid_spacing; }
+                    if (data.grid_logarithmic !== undefined) { this.canvas.gridLog = data.grid_logarithmic; this.canvas.setGridLogarithmic(data.grid_logarithmic); }
+                    this.canvas._render();
+                },
                 onAnnotateApproved: (data) => {
                     if (data.student_id === {{ g.user_id | tojson }}) {
                         this.canAnnotate = true;
@@ -115,6 +155,13 @@ function studentCanvas() {
                 },
                 onSlideChanged: (data) => { this.goToSlide(data.slide_number - 1); },
                 onTimerUpdate: (data) => { this.timer?.syncRemote(data.seconds, data.running); },
+                onDisplaySettingsUpdate: (data) => {
+                    if (data.board_mode) { this.canvas.setBoardMode(data.board_mode); this.boardMode = data.board_mode; }
+                    if (data.grid_enabled !== undefined) { this.canvas.gridEnabled = data.grid_enabled; this.gridEnabled = data.grid_enabled; }
+                    if (data.grid_spacing) { this.canvas.gridSpacing = data.grid_spacing; this.gridSpacing = data.grid_spacing; }
+                    if (data.grid_logarithmic !== undefined) { this.canvas.gridLog = data.grid_logarithmic; this.canvas.setGridLogarithmic(data.grid_logarithmic); }
+                    this.canvas._render();
+                },
             });
             this.ws.connect();
 

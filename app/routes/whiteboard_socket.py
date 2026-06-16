@@ -139,3 +139,29 @@ def register_socket_events(socketio):
                 "seconds": data.get("seconds", 0),
                 "running": data.get("running", True),
             }, room=whiteboard_id, namespace="/whiteboard")
+
+    @socketio.on("tool_state", namespace="/whiteboard")
+    def on_tool_state(data):
+        """Broadcast tool state (position, angle) to all."""
+        if not isinstance(data, dict):
+            return
+        whiteboard_id = data.get("whiteboard_id")
+        if whiteboard_id:
+            socketio.emit("tool_state_update", {
+                "tool": data.get("tool"),
+                "state": data.get("state"),
+            }, room=whiteboard_id, skip_sid=request.sid, namespace="/whiteboard")
+
+    @socketio.on("display_settings", namespace="/whiteboard")
+    def on_display_settings(data):
+        """Broadcast display settings (board mode, grid) to all."""
+        if not isinstance(data, dict):
+            return
+        whiteboard_id = data.get("whiteboard_id")
+        if whiteboard_id:
+            socketio.emit("display_settings_update", {
+                "board_mode": data.get("board_mode"),
+                "grid_enabled": data.get("grid_enabled"),
+                "grid_spacing": data.get("grid_spacing"),
+                "grid_logarithmic": data.get("grid_logarithmic"),
+            }, room=whiteboard_id, skip_sid=request.sid, namespace="/whiteboard")
