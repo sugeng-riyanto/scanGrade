@@ -424,7 +424,7 @@ def process_scan(image_data: bytes, total_questions: int = 50, preprocess: bool 
 
 
 def draw_debug_image(img: np.ndarray, corners=None, answers=None) -> bytes:
-    """Draw debug visualization on the image."""
+    """Draw debug visualization on the image with detected answer overlays."""
     vis = img.copy()
     if corners:
         for i, (x, y) in enumerate(corners):
@@ -432,5 +432,44 @@ def draw_debug_image(img: np.ndarray, corners=None, answers=None) -> bytes:
             cv2.putText(vis, str(i), (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
         pts = np.array(corners, np.int32).reshape((-1, 1, 2))
         cv2.polylines(vis, [pts], True, (0, 255, 0), 2)
+
+    # Draw detected answers on the image
+    if answers:
+        h, w = vis.shape[:2]
+        labels = ["A", "B", "C", "D", "E", "F", "G"]
+        # Compute positions matching the warped image geometry
+        total_q = len(answers)
+        if total_q > 0:
+            cols = max(1, (total_q + LJK_Q_PER_COL - 1) // LJK_Q_PER_COL)
+            q_per_col = min(LJK_Q_PER_COL, max(1, (total_q + cols - 1) // cols))
+            grid_x_mm = LJK_MARGIN + LJK_GRID_X - MARK_MARGIN_MM
+            grid_top_y_mm = LJK_GRID_TOP_Y - MARK_MARGIN_MM
+            scale_x = w / OUT_W
+            scale_y = h / OUT_H
+            grid_x_px = int(grid_x_mm * PX_PER_MM_X * scale_x)
+            grid_top_px = int(grid_top_y_mm * PX_PER_MM_Y * scale_y)
+            b_gap_px = int(LJK_BUBBLE_GAP * PX_PER_MM_X * scale_x)
+            row_h_px = int(LJK_ROW_H * PX_PER_MM_Y * scale_y)
+            b_r_px = int(LJK_BUBBLE_R * PX_PER_MM_X * scale_x)
+            col_width = int((PAGE_W_MM - LJK_MARGIN - LJK_GRID_X - LJK_MARGIN) * PX_PER_MM_X * scale_x / cols)
+
+            remaining = total_q
+            for col in range(cols):
+                col_count = min(remaining, q_per_col)
+                col_start_x = grid_x_px + col * col_width + int((col_width - LJK_BUBBLE_GAP * 5 * PX_PER_MM_X * scale_x) / 2)
+                for row_in_col in range(col_count):
+                    q_idx = str((total_q - remaining) + row_in_col)
+                    if q_idx in answers:
+                        ans = answers[q_idx]
+                        if isinstance(ans, str) and ans in labels:
+                            opt_idx = labels.index(ans)
+                            cx = col_start_x + opt_idx * b_gap_px + b_r_px
+                            cy = grid_top_px + row_in_col * row_h_px
+                            # Green circle around detected answer
+                            cv2.circle(vis, (cx, cy), b_r_px + 4, (0, 200, 0), 2)
+                            cv2.putText(vis, ans, (cx - 4, cy - b_r_px - 4),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 0), 1)
+                remaining -= col_count
+
     _, buf = cv2.imencode(".jpg", vis, [cv2.IMWRITE_JPEG_QUALITY, 85])
     return buf.tobytes()

@@ -601,6 +601,7 @@ document.getElementById('btn-save').addEventListener('click', async function() {
                 nisn: nisnVal || '',
                 confidence: confData,
                 needs_review: reviewList,
+                scan_file_id: window._lastScanData?.scan_file_id || '',
             }),
         });
         const data = await resp.json();

@@ -19,6 +19,7 @@ api_bp = Blueprint("api", __name__)
 # ── Upload security constants ──────────────────────────
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+UPLOAD_SCAN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "uploads", "scans")
 
 _sync_locks = {}
 _sync_lock_mutex = threading.Lock()
@@ -250,6 +251,18 @@ def scan_process():
     exam_id = request.form.get("exam_id", "")
     total_questions = int(request.form.get("total_questions", 50))
 
+    # Save original image to temp
+    scan_file_id = str(uuid.uuid4())[:8]
+    scan_dir = os.path.join(UPLOAD_SCAN_DIR, "tmp")
+    os.makedirs(scan_dir, exist_ok=True)
+    scan_ext = ".png" if mime_type == "image/png" else ".jpg"
+    scan_temp_path = os.path.join(scan_dir, scan_file_id + scan_ext)
+    try:
+        with open(scan_temp_path, "wb") as f:
+            f.write(image_data)
+    except Exception as e:
+        current_app.logger.warning("Failed to save scan temp: %s", e)
+
     from app.services.omr_service import process_scan, draw_debug_image, preprocess_scan
 
     # 5. Preprocess + detect
@@ -288,6 +301,7 @@ def scan_process():
             debug_jpg = draw_debug_image(img, corners, result.get("answers"))
             import base64
             result["debug_image"] = base64.b64encode(debug_jpg).decode()
+            result["scan_file_id"] = scan_file_id
 
     return jsonify(result)
 
@@ -479,6 +493,7 @@ def scan_save():
     nisn = data.get("nisn") or ""
     confidence = data.get("confidence") or {}
     needs_review = data.get("needs_review") or []
+    scan_file_id = data.get("scan_file_id") or ""
 
     if not all([exam_id, student_id, answers]):
         return jsonify({"error": "exam_id, student_id, and answers are required"}), 400
@@ -500,6 +515,8 @@ def scan_save():
 
     # Grade MCQ answers
     key = exam.get("answer_key", {})
+    if isinstance(key, str):
+        key = json.loads(key)
     detected = answers
     correct = 0
     for k, v in key.items():
@@ -521,6 +538,21 @@ def scan_save():
         enriched_answers["_nisn"] = nisn
     if needs_review:
         enriched_answers["_needs_review"] = needs_review
+
+    # Save original scan image permanently
+    if scan_file_id:
+        for ext in (".png", ".jpg"):
+            src = os.path.join(UPLOAD_SCAN_DIR, "tmp", scan_file_id + ext)
+            if os.path.exists(src):
+                dst_dir = os.path.join(UPLOAD_SCAN_DIR, exam_id)
+                os.makedirs(dst_dir, exist_ok=True)
+                dst = os.path.join(dst_dir, student_id + ext)
+                try:
+                    os.rename(src, dst)
+                    enriched_answers["_scan_image"] = f"/static/uploads/scans/{exam_id}/{student_id}{ext}"
+                except Exception as e:
+                    current_app.logger.warning("Failed to move scan image: %s", e)
+                break
 
     # Check for existing submission and update or create
     existing = supabase.table("submissions") \
@@ -555,6 +587,42 @@ def scan_save():
         "needs_review": len(needs_review),
         "submission": sub[0] if sub else None,
     })
+
+
+@api_bp.route("/scan/image/<exam_id>/<student_id>", methods=["GET"])
+@login_required
+def scan_image(exam_id, student_id):
+    """Serve the annotated scan image with answer overlays."""
+    for ext in (".png", ".jpg"):
+        path = os.path.join(UPLOAD_SCAN_DIR, exam_id, student_id + ext)
+        if os.path.exists(path):
+            from app.services.omr_service import load_image, find_registration_marks
+            img = load_image(open(path, "rb").read())
+            if img is not None:
+                # Get answers from submission
+                supabase = get_supabase()
+                sub = supabase.table("submissions").select("answers").eq("exam_id", exam_id).eq("student_id", student_id).limit(1).execute().data
+                answers = {}
+                if sub and sub[0].get("answers"):
+                    raw = sub[0]["answers"]
+                    if isinstance(raw, str):
+                        raw = json.loads(raw)
+                    for k, v in raw.items():
+                        if isinstance(v, dict) and "answer" in v:
+                            answers[k] = v["answer"]
+                        elif not k.startswith("_"):
+                            answers[k] = v
+                # Draw annotated image
+                from app.services.omr_service import draw_debug_image
+                corners = find_registration_marks(img)
+                annotated = draw_debug_image(img, corners, answers)
+                return send_file(
+                    io.BytesIO(annotated),
+                    mimetype="image/jpeg",
+                    as_attachment=False,
+                )
+            return send_file(path, mimetype=f"image/{ext[1:]}")
+    return jsonify({"error": "Scan image not found"}), 404
 
 
 @api_bp.route("/transaction/status", methods=["GET"])
