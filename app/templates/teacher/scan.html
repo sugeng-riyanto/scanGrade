@@ -93,6 +93,10 @@
             <button id="btn-auto" class="border-2 border-surface-200 px-3 py-2.5 rounded-xl text-sm font-bold transition hidden" title="Scan otomatis">
                 <i class="fas fa-magic mr-1"></i>Auto
             </button>
+            <div class="hidden sm:flex items-center gap-2 ml-auto" id="volume-control">
+                <i class="fas fa-volume-up text-xs text-surface-400"></i>
+                <input type="range" id="scan-volume" min="0" max="100" value="80" class="w-16 h-1.5 accent-primary-500 cursor-pointer">
+            </div>
             <span id="scan-status" class="text-sm font-bold text-surface-500 hidden"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</span>
         </div>
     </div>
@@ -183,6 +187,36 @@ let lastAnswers = null;
 let currentFacing = 'environment';
 let videoDevices = [];
 let currentDeviceId = null;
+
+// ── Scan success sound ──
+let _audioCtx = null;
+function getAudioCtx() { if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); return _audioCtx; }
+
+function playScanSound() {
+    try {
+        const vol = parseInt(localStorage.getItem('sg_scan_volume') || '80') / 100;
+        if (vol <= 0) return;
+        const ctx = getAudioCtx();
+        const g = ctx.createGain(); g.gain.value = vol * 0.3; g.connect(ctx.destination);
+        const notes = [523.25, 659.25, 783.99]; // C5, E5, G5 — ascending chime
+        notes.forEach((freq, i) => {
+            const o = ctx.createOscillator(); o.type = 'sine';
+            o.frequency.value = freq;
+            o.connect(g);
+            o.start(ctx.currentTime + i * 0.12);
+            o.stop(ctx.currentTime + i * 0.12 + 0.2);
+        });
+    } catch (e) { /* Audio not supported */ }
+}
+
+// Init volume from localStorage
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('sg_scan_volume');
+    if (saved !== null) document.getElementById('scan-volume').value = saved;
+});
+document.addEventListener('change', (e) => {
+    if (e.target.id === 'scan-volume') localStorage.setItem('sg_scan_volume', e.target.value);
+});
 
 // Exam select toggle
 document.getElementById('exam-select').addEventListener('change', function() {
@@ -580,6 +614,8 @@ function renderScanResult(data) {
         nisnBadge.classList.remove('hidden');
         document.getElementById('nisn-value').textContent = data.nisn;
         document.getElementById('nisn-confidence').textContent = 'keyakinan: ' + (data.nisn_confidence * 100).toFixed(0) + '%';
+        // Play success sound when NISN + answers detected
+        if (data.detected > 0) playScanSound();
     } else {
         nisnBadge.classList.add('hidden');
     }
