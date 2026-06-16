@@ -54,12 +54,16 @@ class WhiteboardCanvas {
 
     _resize() {
         const rect = this.canvas.parentElement.getBoundingClientRect();
-        this.canvas.width = rect.width * this.dpr;
-        this.canvas.height = rect.height * this.dpr;
-        this.canvas.style.width = rect.width + "px";
-        this.canvas.style.height = rect.height + "px";
-        this.ctx.scale(this.dpr, this.dpr);
+        const w = rect.width, h = rect.height;
+        this.canvas.width = w * this.dpr;
+        this.canvas.height = h * this.dpr;
+        this.canvas.style.width = w + "px";
+        this.canvas.style.height = h + "px";
         this._render();
+    }
+
+    _beginFrame() {
+        this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     }
 
     _bindEvents() {
@@ -86,6 +90,7 @@ class WhiteboardCanvas {
 
     // ─── Background + Grid ───
     _drawBackground() {
+        this._beginFrame();
         const w = this.canvas.width / this.dpr;
         const h = this.canvas.height / this.dpr;
         this.ctx.fillStyle = this.boardMode === "white" ? "#FFFFFF" : "#1e293b";
@@ -134,6 +139,8 @@ class WhiteboardCanvas {
         }
         if (this.tool === "compass" && this.isDrawing) { this._compMove(e); return; }
         if (!this.isDrawing) { this._emitCursor(pos); return; }
+
+        this._beginFrame();
 
         if (this.tool === "eraser") {
             this.ctx.globalCompositeOperation = "destination-out";
@@ -337,6 +344,7 @@ class WhiteboardCanvas {
 
     // ─── Replay ───
     replayOp(op) {
+        this._beginFrame();
         const d = op.data || {};
         const ctx = this.ctx;
         if (op.op_type === "line") {
@@ -361,8 +369,11 @@ class WhiteboardCanvas {
 
     loadOps(ops) {
         this._snap();
-        this._restoreBg();
-        if (this.currentBg) this.ctx.drawImage(this.currentBg, 0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
+        this._beginFrame();
+        const w = this.canvas.width / this.dpr, h = this.canvas.height / this.dpr;
+        this.ctx.clearRect(0, 0, w, h);
+        this._drawBackground();
+        if (this.currentBg) this.ctx.drawImage(this.currentBg, 0, 0, w, h);
         for (const op of ops) this.replayOp(op);
     }
 
