@@ -200,6 +200,34 @@ class WhiteboardCanvas {
         img.onload = () => {
             this.currentBg = img;
             this._calcBgBounds();
+            if (!this.bgBounds) { this._render(); return; }
+
+            // Resize stage to PDF actual size, then zoom to fill viewport
+            const stage = this.canvas.parentElement;
+            if (stage) {
+                const vw = this.canvas.width;  // viewport CSS width
+                const vh = this.canvas.height; // viewport CSS height
+                const pw = this.bgBounds.w;    // PDF display width (actual size)
+                const ph = this.bgBounds.h;    // PDF display height
+
+                // Target: PDF fits viewport with 5% margin on each side
+                const margin = 0.9;
+                const zoomByWidth = (vw * margin) / pw;
+                const zoomByHeight = (vh * margin) / ph;
+                const fitZoom = Math.min(zoomByWidth, zoomByHeight);
+
+                // Set stage = PDF actual size, then zoom to fit
+                stage.style.width = pw + "px";
+                stage.style.height = ph + "px";
+                this.setZoom(fitZoom);
+
+                // Center scroll
+                const container = stage.parentElement;
+                if (container) {
+                    container.scrollTop = 0;
+                    container.scrollLeft = 0;
+                }
+            }
             this._render();
         };
         img.src = url;
