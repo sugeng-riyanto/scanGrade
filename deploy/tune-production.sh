@@ -61,4 +61,17 @@ echo ""
 echo "  pip install locust"
 echo "  locust -f locustfile.py --host=https://scangrade.web.id --users=1000 --spawn-rate=50 --run-time=10m --headless --csv=loadtest1000"
 echo ""
+
+# ── 6. Swap file (prevent OOM kills) ──
+if ! swapon --show | grep -q "swapfile"; then
+    echo ""
+    echo "📀 Creating 1GB swap file..."
+    sudo fallocate -l 1G /swapfile
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+    sudo swapon /swapfile
+    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+    echo "✅ Swap created (1GB)"
+fi
+
 echo "=== Done ==="
