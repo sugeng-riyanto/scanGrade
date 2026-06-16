@@ -47,7 +47,11 @@ tr:hover { background:rgba(0,0,0,.02); }
         </div>
         <div style="display:flex;gap:8px;align-items:center">
             <span id="status-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e"></span>
-            <span id="status-text" style="font-size:12px;font-weight:600;color:var(--dim)">Online</span>
+            <span id="status-text" style="font-size:12px;font-weight:600;color:var(--dim)">Sehat</span>
+            <button onclick="toggleDark()" style="background:var(--card);border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--dim);display:flex;align-items:center;gap:4px;transition:all .15s" title="Toggle Dark Mode">
+                <span id="dark-icon">&#9790;</span>
+                <span id="dark-label">Gelap</span>
+            </button>
             <span style="color:var(--dim)">|</span>
             <a href="https://scangrade.web.id/" style="font-size:12px;color:#3b82f6;text-decoration:none;font-weight:600">&larr; Beranda</a>
         </div>
@@ -138,6 +142,22 @@ tr:hover { background:rgba(0,0,0,.02); }
 </div>
 
 <script>
+function toggleDark() {
+    var html = document.documentElement;
+    var isDark = html.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    document.getElementById('dark-icon').textContent = isDark ? '\u2600' : '\u263E';
+    document.getElementById('dark-label').textContent = isDark ? 'Terang' : 'Gelap';
+}
+// Set initial button state
+(function() {
+    var isDark = document.documentElement.classList.contains('dark');
+    var icon = document.getElementById('dark-icon');
+    if (icon) { icon.textContent = isDark ? '\u2600' : '\u263E'; }
+    var label = document.getElementById('dark-label');
+    if (label) label.textContent = isDark ? 'Terang' : 'Gelap';
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
     const lines = {{ log_lines|tojson|safe }};
 
