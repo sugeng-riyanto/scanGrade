@@ -174,30 +174,38 @@
                 <p>Server stabil; kendala hanya mungkin dari jaringan siswa. Setara 1 sesi ujian 2 jam untuk 500 siswa.</p>
             </div>
 
-            <!-- 1000 user result (additional) -->
-            <div class="mt-6 border-t border-slate-100 pt-4">
-                <div class="text-center mb-3">
-                    <span class="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 rounded-full text-slate-500 text-[10px] font-bold">Uji Lanjutan &mdash; 1.000 Siswa Serentak</span>
+            <!-- 1000 user result -->
+            <div class="mt-6 border-t border-slate-100 dark:border-slate-700 pt-6">
+                <div class="text-center mb-4">
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-violet-100 to-fuchsia-100 dark:from-violet-900/40 dark:to-fuchsia-900/40 rounded-full text-violet-700 dark:text-violet-300 text-[10px] font-bold shadow-sm">
+                        <i class="fas fa-rocket text-[9px]"></i> Uji Lanjutan &mdash; 1.000 Siswa Serentak
+                    </span>
                 </div>
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
-                        <div class="text-lg font-extrabold text-slate-600">74.923</div>
-                        <div class="text-[10px] font-semibold text-slate-400">Akses Terproses</div>
+                    <div class="text-center p-4 rounded-2xl border-2 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">74.923</div>
+                        <div class="text-[10px] font-bold text-blue-600 dark:text-blue-400 mt-0.5">Akses Terproses</div>
+                        <div class="text-[8px] text-blue-400 dark:text-blue-500">beban puncak 10 menit</div>
                     </div>
-                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
-                        <div class="text-lg font-extrabold text-slate-600">&lt; 11%</div>
-                        <div class="text-[10px] font-semibold text-slate-400">Tingkat Error</div>
+                    <div class="text-center p-4 rounded-2xl border-2 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-950/30 dark:to-green-950/30 border-emerald-200 dark:border-emerald-800 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-green-600">&lt; 11%</div>
+                        <div class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">Tingkat Error</div>
+                        <div class="text-[8px] text-emerald-400 dark:text-emerald-500">dari total akses</div>
                     </div>
-                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
-                        <div class="text-lg font-extrabold text-slate-600">&lt; 5 dtk</div>
-                        <div class="text-[10px] font-semibold text-slate-400">Waktu Respon</div>
+                    <div class="text-center p-4 rounded-2xl border-2 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border-amber-200 dark:border-amber-800 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-600 to-orange-600">&lt; 5 dtk</div>
+                        <div class="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">Waktu Respon</div>
+                        <div class="text-[8px] text-amber-400 dark:text-amber-500">rata-rata tiap akses</div>
                     </div>
-                    <div class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
-                        <div class="text-lg font-extrabold text-slate-600">1.000</div>
-                        <div class="text-[10px] font-semibold text-slate-400">Siswa Serentak</div>
+                    <div class="text-center p-4 rounded-2xl border-2 bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/30 dark:to-fuchsia-950/30 border-violet-200 dark:border-violet-800 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-fuchsia-600">1.000</div>
+                        <div class="text-[10px] font-bold text-violet-600 dark:text-violet-400 mt-0.5">Siswa Serentak</div>
+                        <div class="text-[8px] text-violet-400 dark:text-violet-500">durasi 10 menit</div>
                     </div>
                 </div>
-                <div class="text-center text-[10px] text-slate-400 mt-2">Uji 1.000 user menunjukkan server tetap responsif; error 11% disebabkan rate limiter keamanan, bukan kegagalan server. Untuk produksi 1.000+ siswa disarankan upgrade VPS ke 2GB RAM.</div>
+                <div class="mt-3 text-center text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed max-w-2xl mx-auto">
+                    Uji 1.000 user menunjukkan server tetap responsif. Error 11% disebabkan <strong class="text-slate-500 dark:text-slate-400">rate limiter keamanan</strong>, bukan kegagalan server. Response time rata-rata &lt;5 detik di bawah beban maksimal. Untuk produksi 1.000+ siswa bersamaan, disarankan upgrade VPS ke 2GB RAM.
+                </div>
             </div>
         </div>
 
