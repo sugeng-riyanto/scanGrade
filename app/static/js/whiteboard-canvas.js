@@ -54,12 +54,13 @@ class WhiteboardCanvas {
     }
 
     _resize() {
-        const p = this.canvas.parentElement;
-        if (!p) return;
-        const w = p.clientWidth, h = p.clientHeight;
-        if (w < 10 || h < 10) return;
-        this.canvas.width = w;
-        this.canvas.height = h;
+        const r = this.canvas.getBoundingClientRect();
+        if (r.width < 10 || r.height < 10) {
+            setTimeout(() => this._resize(), 50);
+            return;
+        }
+        this.canvas.width = r.width;
+        this.canvas.height = r.height;
         this._ready = true;
         if (this.currentBg) this._calcBgBounds();
         this._render();
