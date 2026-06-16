@@ -1,8 +1,3 @@
-/**
- * Whiteboard Canvas Engine v3 — lightweight, exam-inspired
- * Drawing only (pen, eraser, text, highlight, laser, compass).
- * Tool overlays (ruler, protractor, triangle, calculator) handled in Alpine template.
- */
 class WhiteboardCanvas {
     constructor(canvasId, options = {}) {
         this.canvas = document.getElementById(canvasId);
@@ -25,7 +20,8 @@ class WhiteboardCanvas {
         this.laserTimeout = null;
         this.undoStack = [];
         this.redoStack = [];
-        this.currentBg = null;
+        this.currentBg = null;      // Image object
+        this.bgBounds = null;       // {x, y, w, h} for aspect-ratio rendering
         this.remoteOps = [];
 
         // Display settings
@@ -34,12 +30,17 @@ class WhiteboardCanvas {
         this.gridSpacing = 50;
         this.gridLogarithmic = false;
 
-        // Compass (circle drawing)
+        // Zoom & Pan
+        this.zoom = 1;
+        this.panX = 0;
+        this.panY = 0;
+        this._isPanning = false;
+        this._panStart = { x: 0, y: 0 };
+
+        // Compass
         this.compassCenter = null;
         this.compassSnapshot = null;
         this.compassRadius = 0;
-
-        // Calculator
         this.calcEl = null;
 
         this._init();
@@ -63,23 +64,125 @@ class WhiteboardCanvas {
     }
 
     _beginFrame() {
-        this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        // Apply DPR + zoom + pan transform
+        const z = this.zoom, px = this.panX, py = this.panY;
+        this.ctx.setTransform(this.dpr * z, 0, 0, this.dpr * z, this.dpr * px, this.dpr * py);
+    }
+
+    // Convert screen coords to canvas-logical coords (accounting for zoom/pan)
+    _pos(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        return {
+            x: (sx - this.panX) / this.zoom,
+            y: (sy - this.panY) / this.zoom,
+        };
     }
 
     _bindEvents() {
         const c = this.canvas;
-        c.addEventListener("mousedown", (e) => this._down(e));
-        c.addEventListener("mousemove", (e) => this._move(e));
-        c.addEventListener("mouseup", (e) => this._up(e));
-        c.addEventListener("mouseleave", (e) => this._up(e));
-        c.addEventListener("touchstart", (e) => { e.preventDefault(); this._down(e.touches[0]); }, { passive: false });
-        c.addEventListener("touchmove", (e) => { e.preventDefault(); this._move(e.touches[0]); }, { passive: false });
-        c.addEventListener("touchend", (e) => this._up(e), { passive: false });
+        c.addEventListener("mousedown", (e) => {
+            if (e.button === 1 || (e.button === 0 && e.shiftKey)) { this._startPan(e); return; }
+            this._down(e);
+        });
+        c.addEventListener("mousemove", (e) => {
+            if (this._isPanning) { this._doPan(e); return; }
+            this._move(e);
+        });
+        c.addEventListener("mouseup", (e) => { if (this._isPanning) { this._endPan(e); return; } this._up(e); });
+        c.addEventListener("mouseleave", (e) => { if (this._isPanning) { this._endPan(e); return; } this._up(e); });
+        c.addEventListener("wheel", (e) => { e.preventDefault(); this._onWheel(e); }, { passive: false });
+
+        c.addEventListener("touchstart", (e) => {
+            e.preventDefault();
+            if (e.touches.length === 2) { this._pinchStart(e); return; }
+            this._down(e.touches[0]);
+        }, { passive: false });
+        c.addEventListener("touchmove", (e) => {
+            e.preventDefault();
+            if (e.touches.length === 2) { this._pinchMove(e); return; }
+            if (this._isPanning) { this._doPan(e.touches[0]); return; }
+            this._move(e.touches[0]);
+        }, { passive: false });
+        c.addEventListener("touchend", (e) => {
+            if (this._isPanning) { this._endPan(e); return; }
+            this._up(e);
+        }, { passive: false });
+
+        // Keyboard shortcuts
+        document.addEventListener("keydown", (e) => {
+            if (e.ctrlKey && e.key === "0") { e.preventDefault(); this.zoomReset(); }
+            if (e.ctrlKey && e.key === "=") { e.preventDefault(); this.zoomIn(); }
+            if (e.ctrlKey && e.key === "-") { e.preventDefault(); this.zoomOut(); }
+        });
     }
 
-    _pos(e) {
+    // ─── Zoom & Pan ───
+    _onWheel(e) {
+        const delta = -e.deltaY * 0.001;
+        const factor = 1 + delta;
+        const newZoom = Math.max(0.1, Math.min(10, this.zoom * factor));
+        // Zoom toward mouse position
         const rect = this.canvas.getBoundingClientRect();
-        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        this.panX = mx - (mx - this.panX) * (newZoom / this.zoom);
+        this.panY = my - (my - this.panY) * (newZoom / this.zoom);
+        this.zoom = newZoom;
+        this._render();
+        if (this.options.onZoom) this.options.onZoom(this.zoom);
+    }
+
+    zoomIn() { this._onWheel({ deltaY: -120, clientX: 0, clientY: 0 }); }
+    zoomOut() { this._onWheel({ deltaY: 120, clientX: 0, clientY: 0 }); }
+    zoomReset() { this.zoom = 1; this.panX = 0; this.panY = 0; this._render(); if (this.options.onZoom) this.options.onZoom(1); }
+    setZoom(v) { this.zoom = Math.max(0.1, Math.min(10, v)); this._render(); if (this.options.onZoom) this.options.onZoom(this.zoom); }
+
+    _startPan(e) {
+        this._isPanning = true;
+        this._panStart = { x: e.clientX - this.panX, y: e.clientY - this.panY };
+        this.canvas.style.cursor = "grabbing";
+    }
+    _doPan(e) {
+        if (!this._isPanning) return;
+        this.panX = e.clientX - this._panStart.x;
+        this.panY = e.clientY - this._panStart.y;
+        this._render();
+    }
+    _endPan(e) {
+        this._isPanning = false;
+        this.canvas.style.cursor = "crosshair";
+    }
+
+    _pinchStart(e) {
+        const t = e.touches;
+        this._pinchDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        this._pinchZoom = this.zoom;
+        this._pinchCX = (t[0].clientX + t[1].clientX) / 2;
+        this._pinchCY = (t[0].clientY + t[1].clientY) / 2;
+    }
+    _pinchMove(e) {
+        const t = e.touches;
+        const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        const scale = dist / this._pinchDist;
+        const newZoom = Math.max(0.1, Math.min(10, this._pinchZoom * scale));
+        const rect = this.canvas.getBoundingClientRect();
+        const mx = this._pinchCX - rect.left, my = this._pinchCY - rect.top;
+        this.panX = mx - (mx - this.panX) * (newZoom / this.zoom);
+        this.panY = my - (my - this.panY) * (newZoom / this.zoom);
+        this.zoom = newZoom;
+        this._render();
+        if (this.options.onZoom) this.options.onZoom(this.zoom);
+    }
+
+    // ─── Fullscreen ───
+    toggleFullscreen() {
+        const el = this.canvas.parentElement;
+        if (!document.fullscreenElement) {
+            el.requestFullscreen?.() || el.webkitRequestFullscreen?.();
+        } else {
+            document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+        }
     }
 
     // ─── Display Settings ───
@@ -91,11 +194,16 @@ class WhiteboardCanvas {
     // ─── Background + Grid ───
     _drawBackground() {
         this._beginFrame();
-        const w = this.canvas.width / this.dpr;
-        const h = this.canvas.height / this.dpr;
+        const w = this.canvas.width / this.dpr / this.zoom;
+        const h = this.canvas.height / this.dpr / this.zoom;
         this.ctx.fillStyle = this.boardMode === "white" ? "#FFFFFF" : "#1e293b";
-        this.ctx.fillRect(0, 0, w, h);
-        if (this.currentBg) this.ctx.drawImage(this.currentBg, 0, 0, w, h);
+        this.ctx.fillRect(-this.panX / this.zoom, -this.panY / this.zoom, w + 1000, h + 1000);
+
+        // Background image with proper aspect ratio
+        if (this.currentBg && this.bgBounds) {
+            this.ctx.drawImage(this.currentBg, this.bgBounds.x, this.bgBounds.y, this.bgBounds.w, this.bgBounds.h);
+        }
+
         if (!this.gridEnabled) return;
         this.ctx.strokeStyle = this.boardMode === "white" ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)";
         this.ctx.lineWidth = 0.5;
@@ -122,8 +230,7 @@ class WhiteboardCanvas {
         if (this.tool === "compass") { this._compDown(e); return; }
         const pos = this._pos(e);
         this.isDrawing = true;
-        this.lastX = pos.x;
-        this.lastY = pos.y;
+        this.lastX = pos.x; this.lastY = pos.y;
         this.points = [[pos.x, pos.y]];
         if (this.tool === "laser") { this.laserVisible = true; this._render(); return; }
         this._snap();
@@ -131,6 +238,7 @@ class WhiteboardCanvas {
 
     _move(e) {
         const pos = this._pos(e);
+
         if (this.tool === "laser" && this.laserVisible) {
             this.lastX = pos.x; this.lastY = pos.y; this._render();
             clearTimeout(this.laserTimeout);
@@ -166,8 +274,7 @@ class WhiteboardCanvas {
         this.ctx.globalAlpha = 1;
 
         this.points.push([pos.x, pos.y]);
-        this.lastX = pos.x;
-        this.lastY = pos.y;
+        this.lastX = pos.x; this.lastY = pos.y;
         this._emitDraw("line", { points: this.points, color: this.color, width: this.width, dash: this.dash });
     }
 
@@ -269,15 +376,35 @@ class WhiteboardCanvas {
     clearCanvas() {
         this._snap();
         this._restoreBg();
-        if (this.currentBg) { this.ctx.drawImage(this.currentBg, 0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr); }
+        if (this.currentBg && this.bgBounds) {
+            this.ctx.drawImage(this.currentBg, this.bgBounds.x, this.bgBounds.y, this.bgBounds.w, this.bgBounds.h);
+        }
     }
 
     setBackground(url) {
-        if (!url) { this.currentBg = null; this._render(); return; }
+        if (!url) { this.currentBg = null; this.bgBounds = null; this._render(); return; }
         const img = new Image();
         img.crossOrigin = "anonymous";
-        img.onload = () => { this.currentBg = img; this._render(); };
+        img.onload = () => {
+            this.currentBg = img;
+            this._calcBgBounds();
+            this._render();
+        };
         img.src = url;
+    }
+
+    _calcBgBounds() {
+        if (!this.currentBg) { this.bgBounds = null; return; }
+        const cw = this.canvas.width / this.dpr;
+        const ch = this.canvas.height / this.dpr;
+        const iw = this.currentBg.naturalWidth || this.currentBg.width;
+        const ih = this.currentBg.naturalHeight || this.currentBg.height;
+        if (!iw || !ih) { this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; return; }
+
+        const scale = Math.min(cw / iw, ch / ih);
+        const bw = iw * scale;
+        const bh = ih * scale;
+        this.bgBounds = { x: (cw - bw) / 2, y: (ch - bh) / 2, w: bw, h: bh };
     }
 
     setTool(t) { this.tool = t; this.textMode = false; }
@@ -373,7 +500,9 @@ class WhiteboardCanvas {
         const w = this.canvas.width / this.dpr, h = this.canvas.height / this.dpr;
         this.ctx.clearRect(0, 0, w, h);
         this._drawBackground();
-        if (this.currentBg) this.ctx.drawImage(this.currentBg, 0, 0, w, h);
+        if (this.currentBg && this.bgBounds) {
+            this.ctx.drawImage(this.currentBg, this.bgBounds.x, this.bgBounds.y, this.bgBounds.w, this.bgBounds.h);
+        }
         for (const op of ops) this.replayOp(op);
     }
 
