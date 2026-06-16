@@ -853,7 +853,17 @@ document.getElementById('btn-save').addEventListener('click', async function() {
         }
         const data = await resp.json();
         if (data.success) {
-            alert('Hasil scan disimpan! Skor: ' + data.score + '% (' + data.correct + '/' + data.total + ' benar)');
+            // Redirect to grade page if submission ID available
+            const subId = data.submission?.id;
+            if (subId) {
+                window.location.href = '/teacher/grade/' + subId;
+            } else {
+                alert('Disimpan! Skor: ' + data.score + '% (' + data.correct + '/' + data.total + ' benar)');
+                // Reset scan result
+                document.getElementById('scan-result').classList.add('hidden');
+                document.getElementById('btn-save').classList.add('hidden');
+                try { sessionStorage.removeItem('sg_scan_result'); } catch(e) {}
+            }
         } else {
             alert('Gagal menyimpan: ' + (data.error || 'Unknown error'));
         }
