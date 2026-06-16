@@ -40,22 +40,16 @@ class WhiteboardCanvas {
     }
 
     _init() {
-        this._resize();
-        window.addEventListener("resize", () => this._resize());
+        // Set canvas size once from the stage div
+        const stage = document.getElementById("wb-stage");
+        if (stage) {
+            const r = stage.getBoundingClientRect();
+            if (r.width > 1 && r.height > 1) {
+                this.canvas.width = r.width;
+                this.canvas.height = r.height;
+            }
+        }
         this._bindEvents();
-        this._render();
-    }
-
-    _resize() {
-        // Like exam canvas: use parentElement.clientWidth (CSS pixels, no DPR)
-        const p = this.canvas.parentElement;
-        if (!p) return;
-        const w = p.clientWidth, h = p.clientHeight;
-        if (w <= 0 || h <= 0) return;
-        this.canvas.width = w;
-        this.canvas.height = h;
-        // Compute bg bounds at 1:1 canvas pixel = CSS pixel
-        if (this.currentBg) this._calcBgBounds();
         this._render();
     }
 
@@ -65,8 +59,10 @@ class WhiteboardCanvas {
         const iw = this.currentBg.naturalWidth || this.currentBg.width;
         const ih = this.currentBg.naturalHeight || this.currentBg.height;
         if (!iw || !ih) { this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; return; }
+        // Fit image WITHIN canvas, preserving aspect ratio
         const sc = Math.min(cw / iw, ch / ih);
-        this.bgBounds = { x: (cw - iw * sc) / 2, y: (ch - ih * sc) / 2, w: iw * sc, h: ih * sc };
+        const bw = iw * sc, bh = ih * sc;
+        this.bgBounds = { x: (cw - bw) / 2, y: (ch - bh) / 2, w: bw, h: bh };
     }
 
     // ─── Coordinate: 1:1 CSS pixels → canvas pixels (no DPR) ───
@@ -315,6 +311,7 @@ class WhiteboardCanvas {
     }
 
     // ─── Replay (1:1 CSS pixel coordinates) ───
+    replayOp(op) { this._replay(op); }
     _replay(op) {
         const d = op.data || {};
         const ctx = this.ctx;
@@ -351,6 +348,7 @@ class WhiteboardCanvas {
     setBoardMode(m) { this.boardMode = m; this._render(); }
     toggleGrid() { this.gridEnabled = !this.gridEnabled; this._render(); }
     setGridSpacing(v) { this.gridSpacing = Math.max(10, Math.min(500, v)); this._render(); }
+    setGridLogarithmic(v) { this.gridLogarithmic = !!v; this._render(); }
 
     _emitDraw(op_type, data) { if (this.options.onDraw) this.options.onDraw({ op_type, data, timestamp: Date.now() }); }
     toDataURL() { return this.canvas.toDataURL("image/png"); }
