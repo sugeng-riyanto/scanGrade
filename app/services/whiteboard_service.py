@@ -55,14 +55,17 @@ def create_whiteboard(title: str, class_id: str, student_ids: list = None) -> di
 
 def get_whiteboard(whiteboard_id: str) -> dict | None:
     supabase = get_supabase()
-    result = supabase.table("whiteboards").select("*").eq("id", whiteboard_id).single().execute()
+    try:
+        result = supabase.table("whiteboards").select("*").eq("id", whiteboard_id).single().execute()
+    except Exception:
+        return None
     if result.data:
         ds = result.data.get("display_settings")
         if isinstance(ds, str):
             try: result.data["display_settings"] = json.loads(ds)
             except: result.data["display_settings"] = {}
         elif not isinstance(ds, dict):
-            result.data["display_settings"] = {}
+            result.data["display_settings"] = {"board_mode":"white","grid_enabled":False,"grid_spacing":50,"grid_logarithmic":False}
     return result.data if result.data else None
 
 
