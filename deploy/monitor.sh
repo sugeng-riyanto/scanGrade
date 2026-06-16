@@ -19,10 +19,10 @@ RAM=$(free | grep Mem | awk '{printf "%.0f", $3/$2 * 100}')
 # Disk usage (percent)
 DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
 
-# Response time from health endpoint (ms)
+# Response time from health endpoint (ms) — no bc needed
 RT=$(curl -s -o /dev/null -w "%{time_total}" https://scangrade.web.id/health 2>/dev/null)
-RT_MS=$(echo "$RT * 1000" | bc 2>/dev/null | cut -d. -f1)
-[ -z "$RT_MS" ] && RT_MS="-1"
+RT_MS=$(awk "BEGIN {printf \"%d\", $RT * 1000}" 2>/dev/null || echo "-1")
+[ "$RT_MS" = "0" ] && RT_MS="-1"
 
 # Uptime (days)
 UPTIME=$(uptime -p | sed 's/up //')
