@@ -109,15 +109,16 @@ def create_app(env=None):
     app.extensions["supabase"] = supabase
     app.extensions["supabase_auth"] = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY)
 
-    # SocketIO initialization
+    # SocketIO initialization (non-fatal — app works without WebSocket)
+    app.extensions["socketio"] = None
     try:
         socketio.init_app(app, cors_allowed_origins="*")
         from app.routes.whiteboard_socket import register_socket_events
         register_socket_events(socketio)
         app.extensions["socketio"] = socketio
     except Exception as e:
-        app.logger.warning("SocketIO init failed (non-fatal): %s", e)
-        app.extensions["socketio"] = socketio
+        app.logger.warning("SocketIO init failed (non-fatal): %s", str(e)[:100])
+        app.extensions["socketio"] = None
 
     _register_blueprints(app)
     _register_error_handlers(app)
