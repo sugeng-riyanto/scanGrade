@@ -104,16 +104,25 @@ def schools():
 def toggle_school_whiteboard(school_id):
     supabase = get_supabase()
     try:
-        current = supabase.table("schools").select("features").eq("id", school_id).single().execute().data or {}
+        # Handle missing features column gracefully
+        try:
+            current = supabase.table("schools").select("features").eq("id", school_id).single().execute().data or {}
+        except Exception:
+            current = {}
         feat = current.get("features") or {}
         if isinstance(feat, str):
             import json
-            feat = json.loads(feat)
+            try: feat = json.loads(feat)
+            except: feat = {}
         elif not isinstance(feat, dict):
             feat = {}
         new_val = not feat.get("whiteboard_enabled", True)
         feat["whiteboard_enabled"] = new_val
-        supabase.table("schools").update({"features": feat}).eq("id", school_id).execute()
+        try:
+            supabase.table("schools").update({"features": feat}).eq("id", school_id).execute()
+        except Exception:
+            # Fallback: try updating with json.dumps string
+            supabase.table("schools").update({"features": json.dumps(feat)}).eq("id", school_id).execute()
         return jsonify({"success": True, "enabled": new_val})
     except Exception as e:
         return jsonify({"error": str(e)[:80]}), 500
