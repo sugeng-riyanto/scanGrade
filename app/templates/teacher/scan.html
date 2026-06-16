@@ -794,6 +794,7 @@ document.getElementById('btn-bulk-save').addEventListener('click', async functio
             answers: result.answers,
             confidence: result.confidence,
             needs_review: result.needs_review,
+            scan_file_id: result.scan_file_id || '',
         });
     });
 

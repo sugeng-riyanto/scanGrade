@@ -252,6 +252,9 @@ def scan_process():
     exam_id = request.form.get("exam_id", "")
     total_questions = int(request.form.get("total_questions", 50))
 
+    # Clean stale temp files
+    _cleanup_scan_tmp()
+
     # Save original image to temp
     scan_file_id = str(uuid.uuid4())[:8]
     scan_dir = os.path.join(UPLOAD_SCAN_DIR, "tmp")
@@ -323,6 +326,8 @@ def scan_bulk():
     exam_id = request.form.get("exam_id", "")
     total_questions = int(request.form.get("total_questions", 50))
 
+    _cleanup_scan_tmp()
+
     from app.services.omr_service import process_scan, load_image, find_registration_marks
 
     results = []
@@ -355,11 +360,20 @@ def scan_bulk():
                     img_pil.save(clean_buf, format=fmt)
                     image_data = clean_buf.getvalue()
 
+                    # Save original image to temp
+                    scan_file_id = str(uuid.uuid4())[:8]
+                    scan_ext = ".png" if fmt == "PNG" else ".jpg"
+                    scan_tmp = os.path.join(UPLOAD_SCAN_DIR, "tmp", scan_file_id + scan_ext)
+                    os.makedirs(os.path.join(UPLOAD_SCAN_DIR, "tmp"), exist_ok=True)
+                    with open(scan_tmp, "wb") as sf:
+                        sf.write(image_data)
+
                     # OMR process
                     omr_result = process_scan(image_data, total_questions=total_questions, preprocess=True)
 
                     entry = {
                         "filename": fname,
+                        "scan_file_id": scan_file_id,
                         "nisn": omr_result.get("nisn", "????????"),
                         "nisn_confidence": omr_result.get("nisn_confidence", 0),
                         "answers": omr_result.get("answers", {}),
@@ -437,6 +451,7 @@ def scan_bulk_save():
         nisn = sub.get("nisn", "")
         confidence = sub.get("confidence", {})
         needs_review = sub.get("needs_review", [])
+        scan_file_id = sub.get("scan_file_id", "")
 
         if not student_id or not answers:
             failed.append({"student_id": student_id, "error": "Missing student_id or answers"})
@@ -465,6 +480,21 @@ def scan_bulk_save():
         if nisn:
             enriched["_nisn"] = nisn
 
+        # Move scan image from tmp to permanent storage
+        if scan_file_id:
+            for ext in (".png", ".jpg"):
+                src = os.path.join(UPLOAD_SCAN_DIR, "tmp", scan_file_id + ext)
+                if os.path.exists(src):
+                    dst_dir = os.path.join(UPLOAD_SCAN_DIR, exam_id)
+                    os.makedirs(dst_dir, exist_ok=True)
+                    dst = os.path.join(dst_dir, student_id + ext)
+                    try:
+                        os.rename(src, dst)
+                        enriched["_scan_image"] = f"/static/uploads/scans/{exam_id}/{student_id}{ext}"
+                    except Exception as e:
+                        current_app.logger.warning("Failed to move scan image: %s", e)
+                    break
+
         try:
             existing = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", student_id).execute().data
             update_data = {"answers": enriched, "score": score, "max_score": mcq_count, "status": "graded"}
@@ -483,6 +513,21 @@ def scan_bulk_save():
         "failed": len(failed),
         "details": {"saved": saved, "failed": failed},
     })
+
+
+def _cleanup_scan_tmp(age_hours=1):
+    """Remove stale temp scan files older than age_hours."""
+    tmp_dir = os.path.join(UPLOAD_SCAN_DIR, "tmp")
+    if not os.path.isdir(tmp_dir):
+        return
+    now = time.time()
+    for fname in os.listdir(tmp_dir):
+        fpath = os.path.join(tmp_dir, fname)
+        if os.path.isfile(fpath) and now - os.path.getmtime(fpath) > age_hours * 3600:
+            try:
+                os.remove(fpath)
+            except OSError:
+                pass
 
 
 @api_bp.route("/student/auto-save", methods=["POST"])
