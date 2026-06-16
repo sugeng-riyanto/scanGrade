@@ -49,7 +49,7 @@ def whiteboard_canvas(whiteboard_id):
     try:
         wb = get_whiteboard(whiteboard_id)
         if not wb:
-            return render_template("errors/404.html"), 404
+            return "Whiteboard not found", 404
         ds = wb.get("display_settings")
         if isinstance(ds, str):
             try: wb["display_settings"] = json.loads(ds)
@@ -60,8 +60,8 @@ def whiteboard_canvas(whiteboard_id):
         members = get_members(whiteboard_id)
         return render_template("teacher/whiteboard_canvas.html", whiteboard=wb, slides=slides, members=members)
     except Exception as e:
-        current_app.logger.error("whiteboard canvas failed: %s", str(e)[:200])
-        return render_template("errors/500.html"), 500
+        current_app.logger.error("whiteboard canvas error: %s", str(e)[:300])
+        return f"Error loading whiteboard: {str(e)[:100]}", 500
 
 
 @whiteboard_teacher_bp.route("/whiteboard/<whiteboard_id>/download")
