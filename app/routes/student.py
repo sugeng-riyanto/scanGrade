@@ -106,10 +106,25 @@ def dashboard():
             school_info = supabase.table("schools").select("name, npsn, logo_url").eq("id", profile["school_id"]).single().execute().data or {}
     except Exception:
         pass
+    # Active whiteboards for student's class
+    active_whiteboards = []
+    if student_class_id and student_school_id:
+        try:
+            wbs = supabase.table("whiteboards").select("id,title,status,created_at") \
+                .eq("class_id", student_class_id) \
+                .eq("school_id", student_school_id) \
+                .eq("status", "active") \
+                .order("created_at", desc=True) \
+                .limit(5).execute()
+            active_whiteboards = wbs.data or []
+        except Exception:
+            pass
+
     return render_template("student/dashboard.html", available_exams=available_exams,
                            completed_exams=completed_exams[:5], avg_score=avg_score,
                            user_name=user_name, student_class=student_class,
-                           subject_count=subject_count, school_info=school_info)
+                           subject_count=subject_count, school_info=school_info,
+                           active_whiteboards=active_whiteboards)
 
 
 @student_bp.route("/reset-password", methods=["POST"])
