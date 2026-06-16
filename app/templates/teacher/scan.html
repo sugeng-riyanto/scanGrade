@@ -97,6 +97,36 @@
         </div>
     </div>
 
+    <!-- Bulk upload -->
+    <div class="mt-4 bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-4 sm:p-6">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20"><i class="fas fa-file-archive text-white text-sm"></i></div>
+            <div><h3 class="font-extrabold text-surface-800 text-sm">Upload Banyak LJK</h3><p class="text-[10px] text-surface-400 font-medium">Upload file ZIP berisi banyak foto LJK sekaligus</p></div>
+        </div>
+        <div id="bulk-dropzone" class="border-2 border-dashed border-surface-300 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 transition">
+            <i class="fas fa-cloud-upload-alt text-3xl text-surface-300 mb-2"></i>
+            <p class="text-sm font-bold text-surface-500">Seret file ZIP ke sini atau klik untuk upload</p>
+            <p class="text-[10px] text-surface-400 mt-1">Format: ZIP berisi .jpg/.png — foto LJK standar ScanGrade</p>
+            <input type="file" id="bulk-file" accept=".zip" class="hidden">
+        </div>
+        <div id="bulk-progress" class="hidden mt-3">
+            <div class="flex items-center gap-2 text-sm font-bold text-surface-600"><span class="loading-spinner inline-block"></span>Memproses <span id="bulk-count">0</span> file...</div>
+        </div>
+        <div id="bulk-results" class="hidden mt-3 space-y-2">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-extrabold text-surface-700">Hasil Scan <span id="bulk-summary"></span></span>
+                <button id="btn-bulk-save" class="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-4 py-2 rounded-xl text-xs font-extrabold shadow-lg shadow-primary-500/25 transition hidden">
+                    <i class="fas fa-save mr-1"></i>Simpan Semua
+                </button>
+            </div>
+            <div id="bulk-table" class="overflow-x-auto"></div>
+        </div>
+        <div id="bulk-errors" class="hidden mt-3 bg-red-50 border border-red-200 rounded-xl p-3">
+            <p class="text-xs font-bold text-red-700 mb-1">Gagal diproses:</p>
+            <div id="bulk-error-list" class="text-xs text-red-600 space-y-0.5"></div>
+        </div>
+    </div>
+
     <!-- Scan Result -->
     <div id="scan-result" class="hidden mt-6 space-y-4">
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-4 sm:p-6">
@@ -630,11 +660,167 @@ document.getElementById('file-upload').addEventListener('change', async function
     if (!file) return;
     const isPdf = file.type === 'application/pdf';
     if (isPdf) {
-        // PDF → extract first page as image
         alert('PDF akan diproses (halaman pertama).');
     }
     await processScan(file);
     this.value = '';
+});
+
+// ── Bulk ZIP upload ──
+let bulkResults = [];
+const dropzone = document.getElementById('bulk-dropzone');
+const bulkFile = document.getElementById('bulk-file');
+
+dropzone.addEventListener('click', () => bulkFile.click());
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-primary-500', 'bg-primary-50'); });
+dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('border-primary-500', 'bg-primary-50'); });
+dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('border-primary-500', 'bg-primary-50'); if (e.dataTransfer.files[0]) processBulk(e.dataTransfer.files[0]); });
+bulkFile.addEventListener('change', (e) => { if (e.target.files[0]) processBulk(e.target.files[0]); });
+
+async function processBulk(file) {
+    const examSelect = document.getElementById('exam-select');
+    const examId = examSelect.value === '__custom__' ? '' : examSelect.value;
+    const totalQ = examSelect.value === '__custom__'
+        ? (parseInt(document.getElementById('manual-qcount').value) || 50)
+        : parseInt(examSelect.options[examSelect.selectedIndex].dataset.questions) || 50;
+
+    document.getElementById('bulk-progress').classList.remove('hidden');
+    document.getElementById('bulk-results').classList.add('hidden');
+    document.getElementById('bulk-errors').classList.add('hidden');
+
+    const fd = new FormData();
+    fd.append('archive', file);
+    fd.append('exam_id', examId);
+    fd.append('total_questions', totalQ);
+
+    try {
+        const resp = await fetch('/api/scan/bulk', { method: 'POST', body: fd });
+        const data = await resp.json();
+        document.getElementById('bulk-progress').classList.add('hidden');
+
+        if (data.error) {
+            document.getElementById('bulk-error-list').innerHTML = '<p>' + data.error + '</p>';
+            document.getElementById('bulk-errors').classList.remove('hidden');
+            return;
+        }
+
+        bulkResults = data.results || [];
+
+        // Summary
+        document.getElementById('bulk-summary').textContent = '— ' + data.processed + ' berhasil, ' + data.failed + ' gagal';
+
+        // Table
+        const tbl = document.getElementById('bulk-table');
+        if (bulkResults.length === 0) {
+            tbl.innerHTML = '<p class="text-sm text-surface-400">Tidak ada hasil yang terdeteksi.</p>';
+        } else {
+            let html = '<table class="w-full text-xs"><thead><tr class="bg-surface-100">';
+            html += '<th class="p-2 text-left font-bold text-surface-600">File</th>';
+            html += '<th class="p-2 text-left font-bold text-surface-600">NISN</th>';
+            html += '<th class="p-2 text-left font-bold text-surface-600">Siswa</th>';
+            html += '<th class="p-2 text-center font-bold text-surface-600">Terdeteksi</th>';
+            html += '<th class="p-2 text-center font-bold text-surface-600">Keyakinan</th>';
+            html += '<th class="p-2 text-center font-bold text-surface-600">Skor</th>';
+            html += '<th class="p-2 text-center font-bold text-surface-600">Review</th>';
+            html += '</tr>';
+            for (const r of bulkResults) {
+                const confPct = Math.round((r.avg_confidence || 0) * 100);
+                const confColor = confPct >= 70 ? 'text-emerald-600' : confPct >= 40 ? 'text-amber-600' : 'text-red-500';
+                html += '<tr class="border-t border-surface-100">';
+                html += '<td class="p-2 font-medium text-surface-700">' + r.filename + '</td>';
+                html += '<td class="p-2 font-bold text-surface-800">' + r.nisn + '</td>';
+                html += '<td class="p-2">';
+                html += '<select class="student-select text-[10px] p-1 border rounded" data-nisn="' + (r.nisn || '') + '">';
+                html += '<option value="">-- Pilih --</option>';
+                // student options filled below
+                html += '</select></td>';
+                html += '<td class="p-2 text-center font-bold">' + r.detected + '</td>';
+                html += '<td class="p-2 text-center font-bold ' + confColor + '">' + confPct + '%</td>';
+                html += '<td class="p-2 text-center font-bold ' + (r.score !== undefined ? 'text-primary-600' : 'text-surface-300') + '">' + (r.score !== undefined ? r.score + '%' : '-') + '</td>';
+                html += '<td class="p-2 text-center">' + (r.needs_review?.length > 0 ? '<span class="text-amber-600 font-bold">' + r.needs_review.length + '</span>' : '<span class="text-emerald-500">✓</span>') + '</td>';
+                html += '</tr>';
+            }
+            html += '</table>';
+            tbl.innerHTML = html;
+
+            // Populate student dropdowns
+            const studentSelect = document.getElementById('student-select');
+            const studentOpts = studentSelect.querySelectorAll('option[value!=""]');
+            tbl.querySelectorAll('.student-select').forEach(sel => {
+                const nisn = sel.dataset.nisn;
+                studentOpts.forEach(opt => {
+                    const o = document.createElement('option');
+                    o.value = opt.value;
+                    o.textContent = opt.textContent;
+                    sel.appendChild(o);
+                });
+            });
+
+            // Show save button if exam selected
+            document.getElementById('btn-bulk-save').classList.toggle('hidden', !examId);
+        }
+
+        document.getElementById('bulk-results').classList.remove('hidden');
+
+        // Errors
+        if (data.errors && data.errors.length > 0) {
+            const el = document.getElementById('bulk-error-list');
+            el.innerHTML = data.errors.map(e => '<p>• ' + e.filename + ': ' + (e.error || 'Unknown') + '</p>').join('');
+            document.getElementById('bulk-errors').classList.remove('hidden');
+        }
+
+    } catch (err) {
+        document.getElementById('bulk-progress').classList.add('hidden');
+        document.getElementById('bulk-error-list').innerHTML = '<p>Gagal memproses ZIP: ' + err.message + '</p>';
+        document.getElementById('bulk-errors').classList.remove('hidden');
+    }
+}
+
+// Bulk save all
+document.getElementById('btn-bulk-save').addEventListener('click', async function() {
+    const examId = document.getElementById('exam-select').value;
+    if (!examId || examId === '__custom__') { alert('Pilih exam terlebih dahulu.'); return; }
+
+    const subs = [];
+    document.querySelectorAll('.student-select').forEach(sel => {
+        const row = sel.closest('tr');
+        if (!row) return;
+        const idx = Array.from(row.parentNode.children).indexOf(row) - 1; // skip header
+        const result = bulkResults[idx];
+        if (!result || !sel.value) return;
+        subs.push({
+            student_id: sel.value,
+            nisn: result.nisn,
+            answers: result.answers,
+            confidence: result.confidence,
+            needs_review: result.needs_review,
+        });
+    });
+
+    if (subs.length === 0) { alert('Pilih siswa untuk setiap hasil terlebih dahulu.'); return; }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner inline-block mr-1 align-middle"></span>Menyimpan...';
+
+    try {
+        const resp = await fetch('/api/scan/bulk-save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ exam_id: examId, submissions: subs }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            alert(data.saved + ' submission tersimpan. ' + (data.failed > 0 ? data.failed + ' gagal.' : ''));
+        } else {
+            alert('Gagal: ' + (data.error || 'Unknown'));
+        }
+    } catch (err) {
+        alert('Gagal menyimpan: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save mr-1"></i>Simpan Semua';
+    }
 });
 </script>
 {% endblock %}
