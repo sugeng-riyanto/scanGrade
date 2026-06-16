@@ -27,7 +27,7 @@
                     <i class="fas fa-chalkboard"></i>
                 </div>
                 <div>
-                    <a href="/teacher/whiteboard/{{ wb.id }}" class="font-semibold hover:text-primary-600">{{ wb.title }}</a>
+                    <a href="/wb/teacher/whiteboard/{{ wb.id }}" class="font-semibold hover:text-primary-600">{{ wb.title }}</a>
                     <div class="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
                         <span>{{ wb.created_at[:10] }}</span>
                         <span>&middot;</span>
@@ -39,7 +39,7 @@
                 <span class="badge {{ 'bg-green-100 text-green-700' if wb.status == 'active' else 'bg-gray-100 text-gray-500' }}">
                     {{ 'Aktif' if wb.status == 'active' else 'Selesai' }}
                 </span>
-                <a href="/teacher/whiteboard/{{ wb.id }}" class="btn btn-ghost text-sm py-1.5 px-3">
+                <a href="/wb/teacher/whiteboard/{{ wb.id }}" class="btn btn-ghost text-sm py-1.5 px-3">
                     <i class="fas fa-arrow-right"></i>
                 </a>
             </div>
@@ -103,7 +103,7 @@ function whiteboardList() {
         init() {
             this.$watch("form.class_id", (val) => {
                 if (!val) { this.students = []; return; }
-                fetch(`/teacher/api/class/${val}/students`)
+                fetch(`/wb/teacher/api/class/${val}/students`)
                     .then(r => r.json())
                     .then(d => { this.students = d.students || []; })
                     .catch(() => { this.students = []; });
@@ -111,14 +111,14 @@ function whiteboardList() {
         },
         createWhiteboard() {
             this.loading = true;
-            fetch("/teacher/api/whiteboard/create", {
+            fetch("/wb/teacher/api/whiteboard/create", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify(this.form),
             })
             .then(r => r.json())
             .then(d => {
-                if (d.success) window.location.href = `/teacher/whiteboard/${d.whiteboard.id}`;
+                if (d.success) window.location.href = `/wb/teacher/whiteboard/${d.whiteboard.id}`;
                 else alert(d.error || "Gagal membuat papan tulis");
             })
             .catch(() => alert("Terjadi kesalahan"))
