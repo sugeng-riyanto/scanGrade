@@ -550,6 +550,12 @@ async function processScan(blob) {
 
     try {
         const resp = await fetch('/api/scan/process', { method: 'POST', body: formData });
+        if (!resp.ok) {
+            const text = await resp.text();
+            showError('Server error (' + resp.status + '): ' + (text.slice(0,200) || resp.statusText));
+            status.classList.add('hidden');
+            return;
+        }
         const data = await resp.json();
 
         // Handle async task (Celery)
@@ -581,14 +587,15 @@ async function processScan(blob) {
 
 async function pollTaskResult(taskId, scanFileId) {
     const status = document.getElementById('scan-status');
-    const maxAttempts = 120; // 2 menit timeout
+    const maxAttempts = 30; // 30 seconds max
     for (let i = 0; i < maxAttempts; i++) {
         await new Promise(r => setTimeout(r, 1000));
         try {
             const resp = await fetch('/api/scan/task/' + taskId);
+            if (!resp.ok) continue;
             const data = await resp.json();
 
-            if (data.status === 'done') {
+            if (data.status === 'done' && data.result) {
                 renderScanResult(data.result);
                 data.result.scan_file_id = scanFileId;
                 window._lastScanData = data.result;
