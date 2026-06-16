@@ -10,7 +10,7 @@ Group=www-data
 WorkingDirectory=/opt/scangrade
 Environment=FLASK_ENV=production
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/scangrade/.venv/bin/celery -A app.celery_app worker --loglevel=info --concurrency=2
+ExecStart=/opt/scangrade/.venv/bin/celery -A app.celery_app worker --loglevel=info --concurrency=1 --max-memory-per-child=300000
 Restart=always
 RestartSec=5
 StandardOutput=journal
