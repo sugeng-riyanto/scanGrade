@@ -1,37 +1,28 @@
-"""Locust load test — ScanGrade 500 concurrent students.
+"""Locust load test — ScanGrade 1000 concurrent students.
 
-This simulates realistic student behavior:
-- Login as student (demo accounts)
-- Browse exam list
-- Take an exam (view questions)
-- Submit exam with dummy answers
-- View results
+Simulates realistic student behavior during an exam session:
+1. Login as demo student
+2. Browse available exams
+3. Open an exam (load questions)
+4. Submit exam with sample answers
+5. View results
 
-Run from your LOCAL machine (not the VPS):
-
-  pip install locust
-  locust -f locustfile.py --host=https://scangrade.web.id --users=500 --spawn-rate=50 --run-time=10m --headless --csv=loadtest
-
-Or with web UI:
-
-  locust -f locustfile.py --host=https://scangrade.web.id
+Usage:
+  locust -f locustfile.py --host=https://scangrade.web.id --users=1000 --spawn-rate=50 --run-time=10m --headless --csv=loadtest1000
 """
-import json
 import random
 import re
 from locust import HttpUser, task, between
 
 
-# Demo accounts: murid1@scan-grade.app .. murid300@scan-grade.app, password: demo123
-STUDENT_EMAILS = [f"murid{i}@scan-grade.app" for i in range(1, 301)]
+DEMO_EMAILS = [f"siswa{i}_smp@scan-grade.app" for i in range(1, 1001)]
 
 
 class ScanGradeStudent(HttpUser):
-    wait_time = between(2, 8)
+    wait_time = between(1, 3)
 
     def on_start(self):
-        """Login as a random demo student."""
-        self.email = random.choice(STUDENT_EMAILS)
+        self.email = random.choice(DEMO_EMAILS)
         self.password = "demo123"
         self.logged_in = False
         self.exam_ids = []
@@ -39,67 +30,50 @@ class ScanGradeStudent(HttpUser):
         resp = self.client.post(
             "/auth/login-user",
             data={"email": self.email, "password": self.password},
-            name="POST /auth/login-user (student login)",
+            name="POST login-user",
         )
-        if resp.status_code == 200 or resp.status_code == 302:
+        if resp.status_code in (200, 302):
             self.logged_in = True
 
-    @task(3)
-    def view_dashboard(self):
-        """GET /student/dashboard — main student dashboard."""
-        if not self.logged_in:
-            return
-        self.client.get("/student/dashboard", name="GET /student/dashboard")
-
     @task(5)
-    def view_exams(self):
-        """GET /student/exams — list available exams."""
+    def view_dashboard(self):
         if not self.logged_in:
             return
-        resp = self.client.get("/student/exams", name="GET /student/exams")
+        self.client.get("/student/dashboard", name="GET dashboard")
+
+    @task(8)
+    def view_exams(self):
+        if not self.logged_in:
+            return
+        resp = self.client.get("/student/exams", name="GET exams list")
         if resp.status_code == 200:
-            # Extract exam IDs from response for subsequent tasks
             ids = re.findall(r'/student/exams/([a-f0-9\-]{36})', resp.text)
             if ids:
                 self.exam_ids = list(set(ids))
 
-    @task(3)
-    def view_exam_detail(self):
-        """GET /student/exams/<id> — open an exam (question page)."""
+    @task(4)
+    def open_exam(self):
         if not self.logged_in or not self.exam_ids:
             return
         exam_id = random.choice(self.exam_ids)
-        self.client.get(
-            f"/student/exams/{exam_id}",
-            name="GET /student/exams/[id]",
-        )
+        self.client.get(f"/student/exams/{exam_id}", name="GET exam detail")
 
     @task(1)
     def view_results(self):
-        """GET /student/results — student's past results."""
         if not self.logged_in:
             return
-        self.client.get("/student/results", name="GET /student/results")
+        self.client.get("/student/results", name="GET results list")
 
     @task(1)
     def view_result_detail(self):
-        """GET /student/results/<id> — open a result detail (if any)."""
         if not self.logged_in:
             return
-        resp = self.client.get("/student/results", name="GET /student/results (list)")
+        resp = self.client.get("/student/results", name="GET results list (detail)")
         if resp.status_code == 200:
             ids = re.findall(r'/student/results/([a-f0-9\-]{36})', resp.text)
             if ids:
-                self.client.get(
-                    f"/student/results/{ids[0]}",
-                    name="GET /student/results/[id]",
-                )
+                self.client.get(f"/student/results/{ids[0]}", name="GET result detail")
 
-    @task(2)
+    @task(3)
     def health_check(self):
-        """GET /health — verify server is alive."""
-        self.client.get("/health", name="GET /health")
-
-    def on_stop(self):
-        """Logout / cleanup."""
-        pass
+        self.client.get("/health", name="GET health")
