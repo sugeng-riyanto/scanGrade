@@ -45,10 +45,9 @@
         </div>
 
         <!-- Canvas area -->
-        <div class="flex-1 relative p-2 md:p-3" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%)">
-            <div class="w-full h-full rounded-2xl shadow-xl bg-white relative" style="box-shadow:0 8px 32px rgba(0,0,0,0.08);overflow:visible">
-                <div id="wb-stage" style="width:2000px;height:2000px;position:relative">
-                    <canvas id="wb-canvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
+        <div class="flex-1 relative" style="background:linear-gradient(135deg,#eef2ff 0%,#f0f9ff 30%,#faf5ff 70%,#fef2f2 100%);overflow:hidden">
+            <div id="wb-stage" style="width:2000px;height:2000px;position:relative">
+                <canvas id="wb-canvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
                     <!-- Tool overlays -->
                     <div x-show="rulerOn" class="absolute" :style="{left:rulerX+'px',top:rulerY+'px',transform:'rotate('+rulerAngle+'deg)',transformOrigin:'20px 35px',zIndex:10}">
                         <svg width="500" height="70" viewBox="0 0 500 70" style="overflow:visible;pointer-events:none">
@@ -80,8 +79,7 @@
                         </svg>
                     </div>
                     <div class="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-full pointer-events-none">Slide <span x-text="slideIdx+1"></span>/<span x-text="slides.length"></span></div>
-                </div>
-            </div>
+                </div><!-- end wb-stage -->
         </div>
 
         <!-- Student sidebar -->
