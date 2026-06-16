@@ -64,19 +64,22 @@ class WhiteboardCanvas {
     }
 
     _beginFrame() {
-        // Apply DPR + zoom + pan transform
+        // Transform drawing coords → canvas pixel coords (zoom + pan + DPR)
         const z = this.zoom, px = this.panX, py = this.panY;
         this.ctx.setTransform(this.dpr * z, 0, 0, this.dpr * z, this.dpr * px, this.dpr * py);
     }
 
     // Convert screen coords to canvas-logical coords (accounting for zoom/pan)
     _pos(e) {
-        const rect = this.canvas.getBoundingClientRect();
-        const sx = e.clientX - rect.left;
-        const sy = e.clientY - rect.top;
+        // Like exam canvas: CSS coords → canvas pixel coords
+        const src = e.touches ? e.touches[0] : e;
+        const r = this.canvas.getBoundingClientRect();
+        const px = (src.clientX - r.left) * (this.canvas.width / r.width);
+        const py = (src.clientY - r.top) * (this.canvas.height / r.height);
+        // Convert to drawing coords (accounting for zoom + pan)
         return {
-            x: (sx - this.panX) / this.zoom,
-            y: (sy - this.panY) / this.zoom,
+            x: (px - this.dpr * this.panX) / (this.dpr * this.zoom),
+            y: (py - this.dpr * this.panY) / (this.dpr * this.zoom),
         };
     }
 
@@ -123,7 +126,7 @@ class WhiteboardCanvas {
         const delta = -e.deltaY * 0.001;
         const factor = 1 + delta;
         const newZoom = Math.max(0.1, Math.min(10, this.zoom * factor));
-        // Zoom toward mouse position
+        // Zoom toward mouse position (CSS coords)
         const rect = this.canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
         this.panX = mx - (mx - this.panX) * (newZoom / this.zoom);
@@ -194,10 +197,15 @@ class WhiteboardCanvas {
     // ─── Background + Grid ───
     _drawBackground() {
         this._beginFrame();
-        const w = this.canvas.width / this.dpr / this.zoom;
-        const h = this.canvas.height / this.dpr / this.zoom;
+        const vw = this.canvas.width / this.dpr;  // CSS viewport width
+        const vh = this.canvas.height / this.dpr; // CSS viewport height
+        // Fill full visible area in drawing coords
+        const left = -this.panX / this.zoom;
+        const top = -this.panY / this.zoom;
+        const right = left + vw / this.zoom;
+        const bottom = top + vh / this.zoom;
         this.ctx.fillStyle = this.boardMode === "white" ? "#FFFFFF" : "#1e293b";
-        this.ctx.fillRect(-this.panX / this.zoom, -this.panY / this.zoom, w + 1000, h + 1000);
+        this.ctx.fillRect(left - 1000, top - 1000, right - left + 2000, bottom - top + 2000);
 
         // Background image with proper aspect ratio
         if (this.currentBg && this.bgBounds) {
@@ -208,19 +216,21 @@ class WhiteboardCanvas {
         this.ctx.strokeStyle = this.boardMode === "white" ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)";
         this.ctx.lineWidth = 0.5;
         if (this.gridLogarithmic) {
-            const maxD = Math.ceil(Math.log10(Math.max(w, h)));
-            const ppd = Math.max(w, h) / maxD;
+            const maxD = Math.ceil(Math.log10(Math.max(right - left, bottom - top)));
+            const ppd = Math.max(right - left, bottom - top) / maxD;
             for (let d = 0; d < maxD; d++) {
-                const b = d * ppd;
-                this.ctx.lineWidth = 1; this.ctx.beginPath(); this.ctx.moveTo(b, 0); this.ctx.lineTo(b, h); this.ctx.stroke();
+                const b = d * ppd + left;
+                this.ctx.lineWidth = 1; this.ctx.beginPath(); this.ctx.moveTo(b, top); this.ctx.lineTo(b, bottom); this.ctx.stroke();
                 for (let n = 2; n <= 9; n++) {
                     const x = b + Math.log10(n) * ppd;
-                    this.ctx.lineWidth = 0.3; this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, h); this.ctx.stroke();
+                    this.ctx.lineWidth = 0.3; this.ctx.beginPath(); this.ctx.moveTo(x, top); this.ctx.lineTo(x, bottom); this.ctx.stroke();
                 }
             }
         } else {
-            for (let x = 0; x <= w; x += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, h); this.ctx.stroke(); }
-            for (let y = 0; y <= h; y += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(w, y); this.ctx.stroke(); }
+            const startX = Math.floor(left / this.gridSpacing) * this.gridSpacing;
+            const startY = Math.floor(top / this.gridSpacing) * this.gridSpacing;
+            for (let x = startX; x <= right; x += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(x, top); this.ctx.lineTo(x, bottom); this.ctx.stroke(); }
+            for (let y = startY; y <= bottom; y += this.gridSpacing) { this.ctx.beginPath(); this.ctx.moveTo(left, y); this.ctx.lineTo(right, y); this.ctx.stroke(); }
         }
     }
 
@@ -352,31 +362,37 @@ class WhiteboardCanvas {
     }
 
     _restoreBg() {
-        const w = this.canvas.width / this.dpr, h = this.canvas.height / this.dpr;
-        this.ctx.clearRect(0, 0, w, h);
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this._drawBackground();
     }
 
     undo() {
         if (this.undoStack.length === 0) return;
         this.redoStack.push(this.canvas.toDataURL());
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this._restoreBg();
         const img = new Image();
-        img.onload = () => { this._restoreBg(); this.ctx.drawImage(img, 0, 0); };
+        img.onload = () => { this.ctx.setTransform(1, 0, 0, 1, 0, 0); this.ctx.drawImage(img, 0, 0); };
         img.src = this.undoStack.pop();
     }
 
     redo() {
         if (this.redoStack.length === 0) return;
         this.undoStack.push(this.canvas.toDataURL());
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this._restoreBg();
         const img = new Image();
-        img.onload = () => { this._restoreBg(); this.ctx.drawImage(img, 0, 0); };
+        img.onload = () => { this.ctx.setTransform(1, 0, 0, 1, 0, 0); this.ctx.drawImage(img, 0, 0); };
         img.src = this.redoStack.pop();
     }
 
     clearCanvas() {
         this._snap();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this._restoreBg();
         if (this.currentBg && this.bgBounds) {
+            this.ctx.setTransform(1, 0, 0, 1, 0, 0);
             this.ctx.drawImage(this.currentBg, this.bgBounds.x, this.bgBounds.y, this.bgBounds.w, this.bgBounds.h);
         }
     }
@@ -457,15 +473,15 @@ class WhiteboardCanvas {
 
     // ─── Render ───
     _render() {
-        const w = this.canvas.width / this.dpr, h = this.canvas.height / this.dpr;
-        this.ctx.clearRect(0, 0, w, h);
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this._drawBackground();
         for (const op of this.remoteOps) this.replayOp(op);
         if (this.laserVisible) {
-            this.ctx.beginPath(); this.ctx.arc(this.lastX, this.lastY, 10, 0, Math.PI * 2);
-            this.ctx.fillStyle = "rgba(255,0,0,0.6)"; this.ctx.fill();
-            this.ctx.beginPath(); this.ctx.arc(this.lastX, this.lastY, 4, 0, Math.PI * 2);
-            this.ctx.fillStyle = "rgba(255,0,0,0.9)"; this.ctx.fill();
+            this.ctx.strokeStyle = "rgba(255,0,0,0.6)"; this.ctx.lineWidth = 20 / (this.dpr * this.zoom);
+            this.ctx.beginPath(); this.ctx.arc(this.lastX, this.lastY, 10 / (this.dpr * this.zoom), 0, Math.PI * 2); this.ctx.stroke();
+            this.ctx.fillStyle = "rgba(255,0,0,0.9)";
+            this.ctx.beginPath(); this.ctx.arc(this.lastX, this.lastY, 4 / (this.dpr * this.zoom), 0, Math.PI * 2); this.ctx.fill();
         }
     }
 
