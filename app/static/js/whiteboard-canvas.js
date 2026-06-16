@@ -59,9 +59,12 @@ class WhiteboardCanvas {
         const iw = this.currentBg.naturalWidth || this.currentBg.width;
         const ih = this.currentBg.naturalHeight || this.currentBg.height;
         if (!iw || !ih) { this.bgBounds = { x: 0, y: 0, w: cw, h: ch }; return; }
-        // Fit image WITHIN canvas, preserving aspect ratio
-        const sc = Math.min(cw / iw, ch / ih);
-        const bw = iw * sc, bh = ih * sc;
+        // PDF rendered at 150 DPI → screen at ~96 DPI → scale by 96/150
+        // This gives actual paper size (A4 ≈ 794×1123 CSS px)
+        const dpiScale = 96 / 150;
+        const bw = iw * dpiScale;
+        const bh = ih * dpiScale;
+        // Center on canvas
         this.bgBounds = { x: (cw - bw) / 2, y: (ch - bh) / 2, w: bw, h: bh };
     }
 
@@ -121,7 +124,7 @@ class WhiteboardCanvas {
         if (this.tool === "eraser") {
             this.ctx.globalCompositeOperation = "destination-out";
             this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, (this._width + 5), 0, Math.PI * 2);
+            this.ctx.arc(p.x, p.y, Math.max(3, this._width + 2), 0, Math.PI * 2);
             this.ctx.fill();
             this.ctx.globalCompositeOperation = "source-over";
             this.points.push([p.x, p.y]);
@@ -135,7 +138,7 @@ class WhiteboardCanvas {
         this.ctx.moveTo(this.lastX, this.lastY);
         this.ctx.lineTo(p.x, p.y);
         this.ctx.strokeStyle = this.color;
-        this.ctx.lineWidth = Math.max(0.5, this._width);
+        this.ctx.lineWidth = Math.max(0.1, this._width);
         this.ctx.lineCap = "round";
         this.ctx.lineJoin = "round";
         this.ctx.stroke();
@@ -321,7 +324,7 @@ class WhiteboardCanvas {
             ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
             for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
             ctx.strokeStyle = d.color || "#000";
-            ctx.lineWidth = Math.max(0.5, d.width || 3);
+            ctx.lineWidth = Math.max(0.1, d.width || 3);
             ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
         } else if (op.op_type === "text") {
             ctx.font = (d.fontSize || 16) + "px Inter, sans-serif";
