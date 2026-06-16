@@ -10,18 +10,25 @@
 * { margin:0; padding:0; box-sizing:border-box; font-family:'Inter',system-ui,sans-serif; }
 :root { --bg:#f1f5f9; --card:#fff; --text:#1e293b; --dim:#64748b; --border:#e2e8f0; }
 .dark { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --dim:#94a3b8; --border:#334155; }
-body { background:var(--bg); color:var(--text); padding:24px; transition:background .3s,color .3s; }
+body { background:var(--bg); color:var(--text); padding:12px; transition:background .3s,color .3s; }
+@media (min-width:768px) { body { padding:24px; } }
 .container { max-width:1100px; margin:0 auto; }
-.header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-.header h1 { font-size:24px; font-weight:800; }
-.header .sub { font-size:13px; color:var(--dim); margin-top:2px; }
-.grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px; }
-.card { background:var(--card); border-radius:16px; padding:20px; border:1px solid var(--border); box-shadow:0 1px 3px rgba(0,0,0,.04); }
+.header { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+@media (min-width:768px) { .header { flex-direction:row; justify-content:space-between; align-items:center; margin-bottom:24px; } }
+.header h1 { font-size:20px; font-weight:800; }
+@media (min-width:768px) { .header h1 { font-size:24px; } }
+.header .sub { font-size:12px; color:var(--dim); margin-top:2px; }
+.grid4 { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:16px; }
+@media (min-width:768px) { .grid4 { grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px; } }
+.card { background:var(--card); border-radius:12px; padding:14px; border:1px solid var(--border); box-shadow:0 1px 3px rgba(0,0,0,.04); }
+@media (min-width:768px) { .card { border-radius:16px; padding:20px; } }
 .card-center { text-align:center; }
-.card .label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
-.card .value { font-size:28px; font-weight:800; margin-top:4px; }
-.card .desc { font-size:10px; color:var(--dim); margin-top:2px; }
-.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:24px; }
+.card .label { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+.card .value { font-size:22px; font-weight:800; margin-top:4px; }
+@media (min-width:768px) { .card .value { font-size:28px; } }
+.card .desc { font-size:9px; color:var(--dim); margin-top:2px; }
+.grid2 { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px; }
+@media (min-width:768px) { .grid2 { grid-template-columns:1fr 1fr; gap:12px; margin-bottom:24px; } }
 table { width:100%; font-size:11px; border-collapse:collapse; }
 th { text-align:left; padding:8px 12px; font-weight:600; color:var(--dim); background:var(--bg); border-bottom:1px solid var(--border); }
 td { padding:6px 12px; border-bottom:1px solid var(--border); font-family:'Courier New',monospace; }
@@ -45,15 +52,15 @@ tr:hover { background:rgba(0,0,0,.02); }
             <h1>&#128202; Server Monitor</h1>
             <div class="sub">CPU &middot; RAM &middot; Disk &middot; Response Time &mdash; terkini setiap 5 menit</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
-            <span id="status-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e"></span>
-            <span id="status-text" style="font-size:12px;font-weight:600;color:var(--dim)">Sehat</span>
-            <button onclick="toggleDark()" style="background:var(--card);border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--dim);display:flex;align-items:center;gap:4px;transition:all .15s" title="Toggle Dark Mode">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span id="status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0"></span>
+            <span id="status-text" style="font-size:11px;font-weight:600;color:var(--dim)">Sehat</span>
+            <button onclick="toggleDark()" style="background:var(--card);border:1px solid var(--border);border-radius:999px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;color:var(--dim);display:flex;align-items:center;gap:3px;transition:all .15s;white-space:nowrap" title="Toggle Dark Mode">
                 <span id="dark-icon">&#9790;</span>
                 <span id="dark-label">Gelap</span>
             </button>
             <span style="color:var(--dim)">|</span>
-            <a href="https://scangrade.web.id/" style="font-size:12px;color:#3b82f6;text-decoration:none;font-weight:600">&larr; Beranda</a>
+            <a href="https://scangrade.web.id/" style="font-size:11px;color:#3b82f6;text-decoration:none;font-weight:600;white-space:nowrap">&larr; Beranda</a>
         </div>
     </div>
 
@@ -106,8 +113,8 @@ tr:hover { background:rgba(0,0,0,.02); }
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ef4444;margin-right:2px"></span> Critical</span>
             </div>
         </div>
-        <div style="overflow-x:auto;max-height:320px;overflow-y:auto">
-            <table>
+        <div style="overflow-x:auto;max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch">
+            <table style="min-width:600px">
                 <thead><tr>
                     <th>Waktu</th><th>CPU</th><th>RAM</th><th>Disk</th><th>RT</th><th>Uptime</th>
                 </tr></thead>
