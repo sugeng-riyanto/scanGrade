@@ -113,8 +113,11 @@ def api_update(whiteboard_id):
 @guru_required
 @require_school_access("whiteboards", "whiteboard_id")
 def api_delete(whiteboard_id):
-    delete_whiteboard(whiteboard_id)
-    return jsonify({"success": True})
+    try:
+        delete_whiteboard(whiteboard_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
 
 
 @whiteboard_teacher_bp.route("/api/whiteboard/<whiteboard_id>/members", methods=["GET"])
