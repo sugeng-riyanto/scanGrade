@@ -4,7 +4,10 @@
 {% block content %}
 <div class="space-y-4 sm:space-y-6">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h1 class="text-xl sm:text-2xl font-extrabold text-stone-800">Hasil Ujian</h1>
+        <div>
+            <h1 class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ exam.title if exam_id else 'Hasil Ujian' }}</h1>
+            {% if exam_id %}<p class="text-xs font-medium text-stone-500 mt-0.5">{{ exam.subject or '' }} &middot; {{ stats.count }} peserta</p>{% endif %}
+        </div>
         <div class="flex flex-wrap gap-1.5">
             {% if exams and not exam_id %}
             {% elif exam_id %}
@@ -47,6 +50,7 @@
         {% endif %}
     </div>
     {% else %}
+    <!-- Stats Cards -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 sm:p-6 border border-stone-200">
             <p class="text-[10px] sm:text-sm font-bold text-stone-500">Rata-rata</p>
@@ -66,33 +70,39 @@
         </div>
     </div>
 
+    <!-- Submissions List -->
     <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 border border-stone-200">
-        <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-stone-200 flex justify-between items-center">
+        <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-stone-200 flex items-center gap-3">
             <h2 class="text-sm sm:text-lg font-extrabold text-stone-800">Daftar Nilai</h2>
             <span class="text-[11px] sm:text-sm font-bold text-stone-500">{{ submissions|length }} siswa</span>
         </div>
         <div class="p-3 sm:p-6">
             {% if submissions %}
-            <!-- mobile cards -->
+            <!-- Mobile cards -->
             <div class="sm:hidden space-y-3">
                 {% for s in submissions %}
+                {% set is_scan = s.get('answers', {}) is mapping and s.answers.get('_nisn') %}
                 <div class="border border-stone-200 rounded-xl p-3 space-y-2">
-                    <div class="flex items-center justify-between">
-                        <span class="font-extrabold text-stone-800 text-sm">{{ s.student_name or s.student_id[:12] ~ '...' }}</span>
-                        <span class="px-2 py-1 text-[10px] font-bold rounded-full {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700{% elif s.status == 'published' %}bg-sky-100 text-sky-700{% else %}bg-amber-100 text-amber-700{% endif %}">{{ s.status }}</span>
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-extrabold text-stone-800 text-sm truncate">{{ s.student_name or s.student_id[:12] ~ '...' }}</span>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                            {% if is_scan %}<span class="text-[9px] font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full border border-violet-200">Scan</span>{% endif %}
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded-full {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700{% elif s.status == 'published' %}bg-sky-100 text-sky-700{% else %}bg-amber-100 text-amber-700{% endif %}">{{ s.status }}</span>
+                        </div>
                     </div>
-                    <div class="grid grid-cols-3 gap-2 text-center text-[11px]">
-                        <div><span class="text-stone-400">Skor</span><br><span class="font-extrabold text-stone-700">{{ s.score if s.score is not none else '-' }}</span></div>
-                        <div><span class="text-stone-400">Penalti</span><br><span class="font-extrabold text-red-500">{{ s.penalty if s.penalty is not none else 0 }}</span></div>
-                        <div><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
+                    <div class="grid grid-cols-4 gap-1 text-center text-[10px]">
+                        <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Skor</span><br><span class="font-extrabold text-stone-700">{{ s.score if s.score is not none else '-' }}</span></div>
+                        <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Penalti</span><br><span class="font-extrabold text-red-500">{{ s.penalty if s.penalty is not none else 0 }}</span></div>
+                        <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
+                        <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">NISN</span><br><span class="font-extrabold text-violet-600 text-[9px]">{{ s.answers._nisn if is_scan else '-' }}</span></div>
                     </div>
                     <div class="flex items-center justify-between pt-1 border-t border-stone-100">
-                        <span class="text-[10px] text-stone-400">{{ s.submitted_at|tz if s.submitted_at else '-' }}</span>
-                        <div class="flex gap-2">
+                        <span class="text-[9px] text-stone-400">{{ s.submitted_at|tz if s.submitted_at else '-' }}</span>
+                        <div class="flex gap-1.5">
                             <a href="/teacher/grade/{{ s.id }}" class="text-xs font-extrabold text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg hover:bg-orange-100 transition inline-flex items-center gap-1"><i class="fas fa-eye"></i>Detail</a>
                             {% if s.status != 'published' %}
                             <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
-                                <button type="submit" class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition"><i class="fas fa-share"></i></button>
+                                <button type="submit" class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition"><i class="fas fa-share"></i></button>
                             </form>
                             {% endif %}
                         </div>
@@ -100,53 +110,55 @@
                 </div>
                 {% endfor %}
             </div>
-            <!-- desktop table -->
+            <!-- Desktop table -->
             <div class="hidden sm:block overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
-                        <tr class="text-left text-stone-500 border-b border-stone-100">
+                        <tr class="text-left text-stone-500 border-b border-stone-200">
                             <th class="pb-3 font-extrabold">#</th>
                             <th class="pb-3 font-extrabold">Siswa</th>
-                            <th class="pb-3 font-extrabold">Skor</th>
-                            <th class="pb-3 font-extrabold">Penalti</th>
-                            <th class="pb-3 font-extrabold">Final</th>
-                            <th class="pb-3 font-extrabold">Waktu</th>
-                            <th class="pb-3 font-extrabold">Status</th>
-                            <th class="pb-3 font-extrabold">Aksi</th>
+                            <th class="pb-3 font-extrabold text-center">Sumber</th>
+                            <th class="pb-3 font-extrabold text-center">Skor</th>
+                            <th class="pb-3 font-extrabold text-center">Penalti</th>
+                            <th class="pb-3 font-extrabold text-center">Final</th>
+                            <th class="pb-3 font-extrabold text-center">NISN</th>
+                            <th class="pb-3 font-extrabold text-center">Waktu</th>
+                            <th class="pb-3 font-extrabold text-center">Status</th>
+                            <th class="pb-3 font-extrabold text-center">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for s in submissions %}
-                        <tr class="border-b border-stone-100 last:border-0 hover:bg-orange-50/30 transition">
+                        {% set answers_dict = s.get('answers', {}) if s.get('answers') is mapping else {} %}
+                        {% set is_scan = answers_dict.get('_nisn') is not none %}
+                        <tr class="border-b border-stone-200 last:border-0 hover:bg-orange-50/30 transition">
                             <td class="py-3 font-bold text-stone-600">{{ loop.index }}</td>
                             <td class="py-3 font-extrabold text-stone-800">{{ s.student_name or s.student_id[:12] ~ '...' }}</td>
-                            <td class="py-3 font-bold text-stone-600">{{ s.score if s.score is not none else '-' }}</td>
-                            <td class="py-3 font-bold text-red-600">{{ s.penalty if s.penalty is not none else 0 }}</td>
-                            <td class="py-3 font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
+                            <td class="py-3 text-center">{% if is_scan %}<span class="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-1 rounded-full border border-violet-200">Scan LJK</span>{% else %}<span class="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded-full border border-sky-200">Online</span>{% endif %}</td>
+                            <td class="py-3 font-bold text-stone-600 text-center">{{ s.score if s.score is not none else '-' }}</td>
+                            <td class="py-3 font-bold text-red-600 text-center">{{ s.penalty if s.penalty is not none else 0 }}</td>
+                            <td class="py-3 font-extrabold text-center {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
                                 {{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}
                             </td>
-                            <td class="py-3 text-xs font-bold text-stone-500">{{ s.submitted_at|tz if s.submitted_at else '-' }}</td>
-                            <td class="py-3">
-                                <span class="px-3 py-1.5 text-xs font-bold rounded-full
+                            <td class="py-3 text-center font-bold text-violet-600 text-xs">{{ answers_dict.get('_nisn', '-') }}</td>
+                            <td class="py-3 text-xs font-bold text-stone-500 text-center">{{ s.submitted_at|tz if s.submitted_at else '-' }}</td>
+                            <td class="py-3 text-center">
+                                <span class="px-2.5 py-1 text-[10px] font-bold rounded-full
                                     {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700
                                     {% elif s.status == 'published' %}bg-sky-100 text-sky-700
                                     {% else %}bg-amber-100 text-amber-700{% endif %}">
                                     {{ s.status }}
                                 </span>
                             </td>
-                            <td class="py-3">
-                                <div class="flex items-center gap-1">
-                                    <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block">
-                                        <i class="fas fa-eye mr-1"></i>Detail
-                                    </a>
-                                    {% if s.status != 'published' %}
-                                    <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan nilai ke siswa ini?')">
-                                        <button type="submit" class="text-emerald-600 hover:text-emerald-700 font-extrabold text-xs p-2 hover:bg-emerald-50 rounded-xl transition" title="Publish">
-                                            <i class="fas fa-share"></i>
-                                        </button>
-                                    </form>
-                                    {% endif %}
-                                </div>
+                            <td class="py-3 text-center">
+                                <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block">
+                                    <i class="fas fa-eye mr-1"></i>Detail
+                                </a>
+                                {% if s.status != 'published' %}
+                                <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
+                                    <button type="submit" class="text-emerald-600 hover:text-emerald-700 font-extrabold text-xs p-2 hover:bg-emerald-50 rounded-xl transition" title="Publish"><i class="fas fa-share"></i></button>
+                                </form>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}

@@ -759,10 +759,11 @@ def results():
         return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams)
 
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
-    query = supabase.table("exams").select("id,title").eq("teacher_id", g.user_id)
+    query = supabase.table("exams").select("id,title,subject").eq("teacher_id", g.user_id)
     if user_role == "admin_sekolah" and school_id:
-        query = supabase.table("exams").select("id,title").eq("school_id", school_id)
+        query = supabase.table("exams").select("id,title,subject").eq("school_id", school_id)
     exams = query.execute().data or []
+    exam = next((e for e in exams if e["id"] == exam_id), {})
 
     for s in subs:
         if s.get("profiles"):
@@ -779,7 +780,7 @@ def results():
     else:
         stats = {"avg": 0, "max": 0, "min": 0, "count": 0}
 
-    return render_template("teacher/results.html", submissions=subs, stats=stats, exam_id=exam_id, exams=exams)
+    return render_template("teacher/results.html", submissions=subs, stats=stats, exam_id=exam_id, exams=exams, exam=exam)
 
 
 @teacher_bp.route("/grade/<submission_id>")
