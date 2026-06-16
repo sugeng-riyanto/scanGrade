@@ -1,5 +1,17 @@
+<style>
+@media (min-width:640px) {
+  .mobile-only { display: none !important; }
+  .desktop-only { display: block !important; }
+}
+@media (max-width:639px) {
+  .mobile-only { display: block !important; }
+  .desktop-only { display: none !important; }
+}
+</style>
+
 <!-- Mobile cards -->
-<div class="sm:hidden space-y-3">
+<div class="mobile-only">
+    <div class="space-y-3">
     {% for s in sub_list %}
     {% set ans = s.get('answers', {}) if s.get('answers') is mapping else {} %}
     <div class="border border-stone-200 rounded-xl p-3 space-y-2">
@@ -26,10 +38,12 @@
         </div>
     </div>
     {% endfor %}
+    </div>
 </div>
 
 <!-- Desktop table -->
-<div class="hidden sm:block overflow-x-auto">
+<div class="desktop-only">
+    <div class="overflow-x-auto">
     <table class="w-full text-sm">
         <thead>
             <tr class="text-left text-stone-500 border-b border-stone-200">
@@ -52,9 +66,7 @@
                 <td class="py-3 font-extrabold text-stone-800">{{ s.student_name or s.student_id[:12] ~ '...' }}</td>
                 <td class="py-3 font-bold text-stone-600 text-center">{{ s.score if s.score is not none else '-' }}</td>
                 <td class="py-3 font-bold text-red-600 text-center">{{ s.penalty if s.penalty is not none else 0 }}</td>
-                <td class="py-3 font-extrabold text-center {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">
-                    {{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}
-                </td>
+                <td class="py-3 font-extrabold text-center {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</td>
                 {% if is_scan_section %}<td class="py-3 text-center font-bold text-violet-600 text-xs">{{ ans.get('_nisn', '-') }}</td>{% endif %}
                 <td class="py-3 text-xs font-bold text-stone-500 text-center">{{ s.submitted_at|tz if s.submitted_at else '-' }}</td>
                 <td class="py-3 text-center">
@@ -72,4 +84,5 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
