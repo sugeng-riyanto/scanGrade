@@ -315,20 +315,19 @@ def create_app(env=None):
     @app.route("/monitor")
     def monitor_page():
         """Simple server monitoring page — reads /var/log/scangrade-monitor.log."""
+        log_path = "/var/log/scangrade-monitor.log"
+        lines = []
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "r") as f:
+                    raw = f.readlines()
+                lines = [l.strip() for l in raw if l.strip() and "ALERT" not in l][-200:]
+            except Exception:
+                pass
         try:
-            log_path = "/var/log/scangrade-monitor.log"
-            lines = []
-            if os.path.exists(log_path):
-                try:
-                    with open(log_path, "r") as f:
-                        raw = f.readlines()
-                    lines = [l.strip() for l in raw if l.strip() and "ALERT" not in l][-200:]
-                except Exception:
-                    pass
             return render_template("monitor.html", log_lines=lines)
         except Exception as e:
-            app.logger.error("Monitor page error: %s", str(e)[:200])
-            return f"Error loading monitor page: {str(e)[:100]}", 500
+            return f"Template error: {str(e)[:200]}", 500
 
     @app.route("/debug/exam/<exam_id>")
     def debug_exam(exam_id):
