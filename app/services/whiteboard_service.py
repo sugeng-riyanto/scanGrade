@@ -11,7 +11,12 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'
 
 def _ensure_upload_dir(whiteboard_id: str) -> str:
     path = os.path.join(UPLOAD_DIR, whiteboard_id)
-    os.makedirs(path, exist_ok=True)
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception as e:
+        import logging
+        logging.error("Failed to create upload dir %s: %s", path, e)
+        raise
     return path
 
 

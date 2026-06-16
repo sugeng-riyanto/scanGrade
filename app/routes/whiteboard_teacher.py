@@ -194,12 +194,12 @@ def api_upload_slides(whiteboard_id):
 
     try:
         result = upload_slide_background(whiteboard_id, file)
-        # Insert slides into DB
         for page in result["pages"]:
             add_slide(whiteboard_id, page["slide_number"], page["background_url"])
         return jsonify({"success": True, **result})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        current_app.logger.error("Upload slide error: %s", str(e)[:300])
+        return jsonify({"error": str(e)[:150]}), 500
 
 
 @whiteboard_teacher_bp.route("/api/whiteboard/<whiteboard_id>/slides/<int:slide_number>", methods=["DELETE"])
