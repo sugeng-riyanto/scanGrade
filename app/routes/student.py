@@ -106,17 +106,25 @@ def dashboard():
             school_info = supabase.table("schools").select("name, npsn, logo_url").eq("id", profile["school_id"]).single().execute().data or {}
     except Exception:
         pass
-    # Active whiteboards for student's class
+    # Active whiteboards for student's class (only if enabled by super admin)
     active_whiteboards = []
     if student_class_id and student_school_id:
         try:
-            wbs = supabase.table("whiteboards").select("id,title,status,created_at") \
-                .eq("class_id", student_class_id) \
-                .eq("school_id", student_school_id) \
-                .eq("status", "active") \
-                .order("created_at", desc=True) \
-                .limit(5).execute()
-            active_whiteboards = wbs.data or []
+            # Check school feature toggle
+            feat = supabase.table("schools").select("features").eq("id", student_school_id).single().execute().data or {}
+            f = feat.get("features") or {}
+            if isinstance(f, str):
+                f = json.loads(f)
+            if not f.get("whiteboard_enabled", True):
+                pass  # whiteboard disabled for this school
+            else:
+                wbs = supabase.table("whiteboards").select("id,title,status,created_at") \
+                    .eq("class_id", student_class_id) \
+                    .eq("school_id", student_school_id) \
+                    .eq("status", "active") \
+                    .order("created_at", desc=True) \
+                    .limit(5).execute()
+                active_whiteboards = wbs.data or []
         except Exception:
             pass
 
