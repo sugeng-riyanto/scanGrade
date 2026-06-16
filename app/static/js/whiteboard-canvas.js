@@ -64,28 +64,35 @@ class WhiteboardCanvas {
     }
 
     _beginFrame() {
-        const ed = this._effectiveDpr();
+        const ed = this._edpr();
         const z = this.zoom, px = this.panX, py = this.panY;
         this.ctx.setTransform(ed * z, 0, 0, ed * z, ed * px, ed * py);
     }
 
     // Convert screen coords to canvas-logical coords (accounting for zoom/pan)
     _pos(e) {
-        const src = e.touches ? e.touches[0] : e;
+        // Use offsetX/offsetY for MouseEvent (exact position in target)
+        // Use clientX - rect.left for Touch (TouchEvent lacks offsetX)
+        if (e.offsetX !== undefined && e.offsetY !== undefined) {
+            // MouseEvent: offsetX/Y is relative to the canvas element
+            const ed = this._edpr();
+            return {
+                x: (e.offsetX * ed - this.panX * ed) / (this.zoom * ed),
+                y: (e.offsetY * ed - this.panY * ed) / (this.zoom * ed),
+            };
+        }
+        // TouchEvent: compute from clientX - rect.left
         const r = this.canvas.getBoundingClientRect();
-        // Effective DPR from actual canvas vs CSS size (not window.devicePixelRatio)
-        const effectiveDpr = this.canvas.width / r.width;
-        const px = (src.clientX - r.left) * effectiveDpr;
-        const py = (src.clientY - r.top) * effectiveDpr;
-        // Invert the display transform: canvas_pixel = docX * zoom * dpr + panX * dpr
-        // docX = (canvas_pixel - panX * dpr) / (zoom * dpr)
+        const ed = this._edpr();
+        const px = (e.clientX - r.left) * ed;
+        const py = (e.clientY - r.top) * ed;
         return {
-            x: (px - this.panX * effectiveDpr) / (this.zoom * effectiveDpr),
-            y: (py - this.panY * effectiveDpr) / (this.zoom * effectiveDpr),
+            x: (px - this.panX * ed) / (this.zoom * ed),
+            y: (py - this.panY * ed) / (this.zoom * ed),
         };
     }
 
-    _effectiveDpr() {
+    _edpr() {
         const r = this.canvas.getBoundingClientRect();
         return r.width > 0 ? this.canvas.width / r.width : this.dpr;
     }
