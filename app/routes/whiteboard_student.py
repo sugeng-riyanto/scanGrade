@@ -20,18 +20,20 @@ def whiteboard_list():
 @whiteboard_student_bp.route("/whiteboard/<whiteboard_id>")
 @login_required
 def whiteboard_canvas(whiteboard_id):
-    wb = get_whiteboard(whiteboard_id)
-    if not wb:
-        return render_template("errors/404.html"), 404
+    try:
+        wb = get_whiteboard(whiteboard_id)
+        if not wb:
+            return "Whiteboard not found", 404
 
-    # Verify student belongs to this whiteboard's class
-    supabase = get_supabase()
-    profile = supabase.table("profiles").select("class_id").eq("id", g.user_id).single().execute().data
-    if not profile or str(profile.get("class_id")) != str(wb.get("class_id")):
-        return render_template("errors/403.html"), 403
+        supabase = get_supabase()
+        profile = supabase.table("profiles").select("class_id").eq("id", g.user_id).single().execute().data
+        if not profile or str(profile.get("class_id")) != str(wb.get("class_id")):
+            return "Not authorized", 403
 
-    slides = supabase.table("whiteboard_slides").select("*").eq("whiteboard_id", whiteboard_id).order("slide_number").execute().data or []
-    return render_template("student/whiteboard_canvas.html", whiteboard=wb, slides=slides)
+        slides = supabase.table("whiteboard_slides").select("*").eq("whiteboard_id", whiteboard_id).order("slide_number").execute().data or []
+        return render_template("student/whiteboard_canvas.html", whiteboard=wb, slides=slides)
+    except Exception as e:
+        return f"Error: {str(e)[:100]}", 500
 
 
 @whiteboard_student_bp.route("/whiteboard/<whiteboard_id>/download")
