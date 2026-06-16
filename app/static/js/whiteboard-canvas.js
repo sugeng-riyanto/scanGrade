@@ -91,10 +91,14 @@ class WhiteboardCanvas {
         });
         c.addEventListener("mousemove", (e) => {
             if (this._isPanning) { this._doPan(e); return; }
+            // Update pen preview cursor position
+            this._cursorX = e.clientX; this._cursorY = e.clientY;
             this._move(e);
         });
         c.addEventListener("mouseup", (e) => { if (this._isPanning) { this._endPan(e); return; } this._up(e); });
         c.addEventListener("mouseleave", (e) => { if (this._isPanning) { this._endPan(e); return; } this._up(e); });
+        // Track cursor for pen preview
+        this._cursorX = 0; this._cursorY = 0;
         c.addEventListener("wheel", (e) => { e.preventDefault(); this._onWheel(e); }, { passive: false });
 
         c.addEventListener("touchstart", (e) => {
@@ -261,8 +265,9 @@ class WhiteboardCanvas {
         this._beginFrame();
 
         if (this.tool === "eraser") {
+            const erSize = (this.width + 5) / this.zoom;
             this.ctx.globalCompositeOperation = "destination-out";
-            this.ctx.beginPath(); this.ctx.arc(pos.x, pos.y, this.width + 5, 0, Math.PI * 2); this.ctx.fill();
+            this.ctx.beginPath(); this.ctx.arc(pos.x, pos.y, erSize, 0, Math.PI * 2); this.ctx.fill();
             this.ctx.globalCompositeOperation = "source-over";
             this.points.push([pos.x, pos.y]);
             this._emitDraw("erase", { points: [[pos.x, pos.y]], width: this.width + 5 });
@@ -271,11 +276,13 @@ class WhiteboardCanvas {
 
         if (this.tool === "highlight") this.ctx.globalAlpha = 0.3;
 
+        // Scale line width inversely by zoom so it stays consistent in screen pixels
+        const screenWidth = this.width / this.zoom;
         this.ctx.beginPath();
         this.ctx.moveTo(this.lastX, this.lastY);
         this.ctx.lineTo(pos.x, pos.y);
         this.ctx.strokeStyle = this.color;
-        this.ctx.lineWidth = this.width;
+        this.ctx.lineWidth = Math.max(0.05, screenWidth);
         this.ctx.setLineDash(this.dash);
         this.ctx.lineCap = "round";
         this.ctx.lineJoin = "round";
@@ -285,7 +292,7 @@ class WhiteboardCanvas {
 
         this.points.push([pos.x, pos.y]);
         this.lastX = pos.x; this.lastY = pos.y;
-        this._emitDraw("line", { points: this.points, color: this.color, width: this.width, dash: this.dash });
+        this._emitDraw("line", { points: this.points, color: this.color, width: parseFloat(this.width) || 0.75, dash: this.dash });
     }
 
     _up(e) {
@@ -298,7 +305,7 @@ class WhiteboardCanvas {
         this.isDrawing = false;
         if (this.points.length > 0) {
             this._emitDraw(this.tool === "eraser" ? "erase" : "line", {
-                points: this.points, color: this.color, width: this.width, dash: this.dash,
+                points: this.points, color: this.color, width: parseFloat(this.width) || 0.75, dash: this.dash,
             });
         }
     }
@@ -423,7 +430,11 @@ class WhiteboardCanvas {
         this.bgBounds = { x: (cw - bw) / 2, y: (ch - bh) / 2, w: bw, h: bh };
     }
 
-    setTool(t) { this.tool = t; this.textMode = false; }
+    setTool(t) {
+        this.tool = t; this.textMode = false;
+        const cursors = { pen: "default", eraser: "default", text: "text", highlight: "default", laser: "crosshair", compass: "crosshair" };
+        this.canvas.style.cursor = cursors[t] || "default";
+    }
 
     setColor(c) { this.color = c; }
     setWidth(w) { this.width = w; }
@@ -495,7 +506,9 @@ class WhiteboardCanvas {
             if (pts.length < 2) return;
             ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
             for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-            ctx.strokeStyle = d.color || "#000"; ctx.lineWidth = d.width || 3;
+            ctx.strokeStyle = d.color || "#000";
+            const w = (d.width || 3) / this.zoom;
+            ctx.lineWidth = Math.max(0.05, w);
             ctx.setLineDash(d.dash || []); ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke(); ctx.setLineDash([]);
         } else if (op.op_type === "text") {
             ctx.font = `${d.fontSize || 16}px Inter, sans-serif`;
