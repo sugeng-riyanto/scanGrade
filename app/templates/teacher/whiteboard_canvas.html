@@ -5,7 +5,7 @@
     <!-- Top bar -->
     <div class="flex items-center justify-between px-4 py-2 border-b bg-white dark:bg-gray-900 shrink-0">
         <div class="flex items-center gap-3">
-            <a href="/teacher/whiteboard" class="text-gray-500 hover:text-gray-700">&larr;</a>
+            <a href="/wb/teacher/whiteboard" class="text-gray-500 hover:text-gray-700">&larr;</a>
             <h1 class="font-bold text-base truncate max-w-[200px]">{{ whiteboard.title }}</h1>
             <span class="text-xs text-gray-400" x-text="onlineCount + ' online'"></span>
         </div>
@@ -291,7 +291,7 @@ function whiteboardCanvas() {
 
         loadSlide(slide) {
             this.canvas.setBackground(slide.background_url || null);
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/ops?slide=${slide.slide_number}`)
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/ops?slide=${slide.slide_number}`)
                 .then(r => r.json())
                 .then(d => { if (d.ops) this.canvas.loadOps(d.ops); })
                 .catch(() => {});
@@ -327,7 +327,7 @@ function whiteboardCanvas() {
                 grid_logarithmic: this.gridLog,
             });
             // Persist to server
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/display-settings`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/display-settings`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
@@ -348,7 +348,7 @@ function whiteboardCanvas() {
         },
 
         addSlide() {
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/slides`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({}),
@@ -363,7 +363,7 @@ function whiteboardCanvas() {
         deleteSlide(i) {
             if (this.slides.length <= 1) return;
             const slide = this.slides[i];
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/slides/${slide.slide_number}`, { method: "DELETE" })
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/slides/${slide.slide_number}`, { method: "DELETE" })
                 .then(r => r.json())
                 .then(d => {
                     if (d.success) {
@@ -376,7 +376,7 @@ function whiteboardCanvas() {
         },
 
         togglePermission(m) {
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ student_id: m.student_id, can_annotate: !m.can_annotate }),
@@ -392,7 +392,7 @@ function whiteboardCanvas() {
         },
 
         approveAnnotate(studentId) {
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ student_id: studentId, can_annotate: true }),
@@ -408,7 +408,7 @@ function whiteboardCanvas() {
         },
 
         bulkApprove() {
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ bulk: "all", can_annotate: true }),
@@ -417,7 +417,7 @@ function whiteboardCanvas() {
         },
 
         bulkRevoke() {
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/permission`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ bulk: "all", can_annotate: false }),
@@ -426,7 +426,7 @@ function whiteboardCanvas() {
         },
 
         sendReaction(emoji) {
-            fetch(`/student/api/whiteboard/${this.whiteboardId}/reaction`, {
+            fetch(`/wb/student/api/whiteboard/${this.whiteboardId}/reaction`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ emoji }),
@@ -435,7 +435,7 @@ function whiteboardCanvas() {
 
         takeSnapshot() {
             const dataUrl = this.canvas.toDataURL();
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}/snapshots`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}/snapshots`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ slide_number: this.currentSlide + 1, image_data: dataUrl }),
@@ -450,18 +450,18 @@ function whiteboardCanvas() {
         },
 
         downloadPDF() {
-            window.open(`/teacher/whiteboard/${this.whiteboardId}/download`, "_blank");
+            window.open(`/wb/teacher/whiteboard/${this.whiteboardId}/download`, "_blank");
         },
 
         endSession() {
             if (!confirm("Akhiri sesi papan tulis? Semua murid akan kembali ke halaman daftar.")) return;
-            fetch(`/teacher/api/whiteboard/${this.whiteboardId}`, {
+            fetch(`/wb/teacher/api/whiteboard/${this.whiteboardId}`, {
                 method: "PUT",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ status: "ended" }),
             })
             .then(r => r.json())
-            .then(d => { if (d.success) window.location.href = "/teacher/whiteboard"; });
+            .then(d => { if (d.success) window.location.href = "/wb/teacher/whiteboard"; });
         },
 
         destroy() {

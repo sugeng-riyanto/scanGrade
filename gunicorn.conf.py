@@ -6,7 +6,6 @@ worker_class = "sync"
 timeout = 120
 max_requests = 5000
 max_requests_jitter = 500
-preload_app = True
 keepalive = 5
 accesslog = "-"
 errorlog = "-"

@@ -4,15 +4,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from flask import Flask, g, request, jsonify, redirect, render_template
 from flask_cors import CORS
-from flask_socketio import SocketIO
 from supabase import create_client, Client
 
 from app.config import get_config
 
 DEFAULT_TZ_OFFSET = 7
-
-# SocketIO instance (module-level, init_app called in create_app)
-socketio = SocketIO(async_mode='threading')
 
 _lru_cache = {}
 _lru_cache_ttl = {}
@@ -108,17 +104,6 @@ def create_app(env=None):
     supabase: Client = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_SERVICE_KEY)
     app.extensions["supabase"] = supabase
     app.extensions["supabase_auth"] = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY)
-
-    # SocketIO initialization (non-fatal — app works without WebSocket)
-    app.extensions["socketio"] = None
-    try:
-        socketio.init_app(app, cors_allowed_origins="*")
-        from app.routes.whiteboard_socket import register_socket_events
-        register_socket_events(socketio)
-        app.extensions["socketio"] = socketio
-    except Exception as e:
-        app.logger.warning("SocketIO init failed (non-fatal): %s", str(e)[:100])
-        app.extensions["socketio"] = None
 
     _register_blueprints(app)
     _register_error_handlers(app)
@@ -331,8 +316,6 @@ def _register_blueprints(app):
     from app.routes.tools import tools_bp
     from app.routes.super_admin import super_bp
     from app.routes.public import public_bp
-    from app.routes.whiteboard_teacher import whiteboard_teacher_bp
-    from app.routes.whiteboard_student import whiteboard_student_bp
     from app.routes.students import student_bp as students_bp
 
     app.register_blueprint(super_bp)
@@ -348,8 +331,23 @@ def _register_blueprints(app):
     app.register_blueprint(webhook_bp, url_prefix="/webhook")
     app.register_blueprint(admin_sekolah_bp, url_prefix="/admin-sekolah")
     app.register_blueprint(tools_bp, url_prefix="/tools")
-    app.register_blueprint(whiteboard_teacher_bp, url_prefix="/teacher")
-    app.register_blueprint(whiteboard_student_bp, url_prefix="/student")
+
+    # Whiteboard blueprints (lazy — only loaded when first request hits /wb/)
+    try:
+        from app.routes.whiteboard_teacher import whiteboard_teacher_bp
+        from app.routes.whiteboard_student import whiteboard_student_bp
+        app.register_blueprint(whiteboard_teacher_bp, url_prefix="/wb/teacher")
+        app.register_blueprint(whiteboard_student_bp, url_prefix="/wb/student")
+
+        # SocketIO — only inits when first whiteboard page is loaded (non-blocking)
+        from flask_socketio import SocketIO
+        sio = SocketIO(async_mode='threading')
+        sio.init_app(app, cors_allowed_origins="*")
+        from app.routes.whiteboard_socket import register_socket_events
+        register_socket_events(sio)
+        app.extensions["socketio"] = sio
+    except Exception as e:
+        app.logger.warning("Whiteboard init skipped: %s", str(e)[:80])
 
 
 def _register_error_handlers(app):

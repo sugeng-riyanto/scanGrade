@@ -19,7 +19,7 @@
                     <i class="fas fa-chalkboard"></i>
                 </div>
                 <div>
-                    <a href="/student/whiteboard/{{ wb.id }}" class="font-semibold hover:text-primary-600">{{ wb.title }}</a>
+                    <a href="/wb/student/whiteboard/{{ wb.id }}" class="font-semibold hover:text-primary-600">{{ wb.title }}</a>
                     <div class="text-xs text-gray-500 mt-0.5">{{ wb.created_at[:10] }}</div>
                 </div>
             </div>
@@ -28,11 +28,11 @@
                     {{ 'Sedang Berlangsung' if wb.status == 'active' else 'Selesai' }}
                 </span>
                 {% if wb.status == 'active' %}
-                <a href="/student/whiteboard/{{ wb.id }}" class="btn btn-primary text-sm py-1.5 px-3">
+                <a href="/wb/student/whiteboard/{{ wb.id }}" class="btn btn-primary text-sm py-1.5 px-3">
                     <i class="fas fa-arrow-right"></i> Masuk
                 </a>
                 {% else %}
-                <a href="/student/whiteboard/{{ wb.id }}/download" class="btn btn-ghost text-sm py-1.5 px-3">
+                <a href="/wb/student/whiteboard/{{ wb.id }}/download" class="btn btn-ghost text-sm py-1.5 px-3">
                     <i class="fas fa-download"></i>
                 </a>
                 {% endif %}
