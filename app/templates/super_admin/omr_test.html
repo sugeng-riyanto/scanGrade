@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Uji OMR - ScanGrade{% endblock %}
 {% block page_title %}Uji Coba OMR{% endblock %}
+{% block head_extra %}
+<style>
+.stat-card { background: linear-gradient(135deg, #fff 0%, #f8fafc 100%); transition: all 0.2s; }
+.stat-card:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(0,0,0,0.06); }
+.dark .stat-card { background: linear-gradient(135deg, #1e2038 0%, #232540 100%); }
+@media (max-width:640px) { .chart-grid { grid-template-columns: 1fr !important; } }
+</style>
+{% endblock %}
 {% block content %}
 <div class="max-w-6xl mx-auto space-y-5">
 
@@ -21,27 +29,27 @@
 
   <!-- Stats Cards -->
   <div class="grid grid-cols-2 sm:grid-cols-5 gap-3" id="stats-row">
-    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-200 p-4 text-center hover:shadow-md transition">
       <div class="text-2xl font-extrabold text-surface-800" id="stat-total">0</div>
       <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Total Diuji</div>
       <div class="text-[8px] text-surface-300 mt-0.5">jumlah LJK diproses</div>
     </div>
-    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-200 p-4 text-center hover:shadow-md transition">
       <div class="text-2xl font-extrabold text-emerald-600" id="stat-nisn">0%</div>
       <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Akurasi NISN</div>
       <div class="text-[8px] text-emerald-400 mt-0.5">target &gt;90%</div>
     </div>
-    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-200 p-4 text-center hover:shadow-md transition">
       <div class="text-2xl font-extrabold text-primary-600" id="stat-conf">0%</div>
       <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Rata-rata Keyakinan</div>
       <div class="text-[8px] text-primary-300 mt-0.5">target &gt;80%</div>
     </div>
-    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-200 p-4 text-center hover:shadow-md transition">
       <div class="text-2xl font-extrabold text-amber-600" id="stat-review">0</div>
       <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Perlu Review</div>
       <div class="text-[8px] text-amber-400 mt-0.5">confidence &lt;60%</div>
     </div>
-    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-100 p-4 text-center hover:shadow-md transition">
+    <div class="stat-card bg-white rounded-xl shadow-sm border border-surface-200 p-4 text-center hover:shadow-md transition">
       <div class="text-2xl font-extrabold text-sky-600" id="stat-avg-score">-</div>
       <div class="text-[10px] font-bold text-surface-400 uppercase tracking-wider mt-1">Rata-rata Skor</div>
       <div class="text-[8px] text-sky-400 mt-0.5">jika exam dipilih</div>
@@ -50,17 +58,17 @@
 
   <!-- Charts -->
   <div id="charts-area" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-4 hover:shadow-md transition">
+    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center"><i class="fas fa-chart-pie text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Success Rate</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Proporsi scan berhasil vs gagal. Idealnya &gt;95% success — jika rendah, periksa pencahayaan atau fokus kamera.</p>
       <canvas id="chart-pie" height="140"></canvas>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-4 hover:shadow-md transition">
+    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-primary-400 to-blue-500 flex items-center justify-center"><i class="fas fa-chart-bar text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Distribusi Keyakinan</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Sebaran confidence 0-100%. <span class="text-emerald-600 font-bold">Hijau</span> = yakin, <span class="text-amber-600 font-bold">kuning</span> = ragu, <span class="text-red-500 font-bold">merah</span> = perlu review. Target: &gt;70% di &ge;80%.</p>
       <canvas id="chart-histogram" height="140"></canvas>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-4 hover:shadow-md transition">
+    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center"><i class="fas fa-layer-group text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Tingkat Deteksi</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Jumlah bubble terdeteksi per file. Semua bar harus mencapai garis total soal — jika tidak, geometry mungkin meleset.</p>
       <canvas id="chart-detection" height="140"></canvas>
@@ -71,7 +79,7 @@
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
     <!-- Single Test -->
-    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-5 hover:shadow-md transition group">
+    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-5 hover:shadow-md transition group">
       <div class="flex items-center gap-3 mb-4">
         <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center shadow-lg shadow-sky-200/60 group-hover:scale-110 transition"><i class="fas fa-camera text-white text-sm"></i></div>
         <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Satu LJK</h3><p class="text-[10px] text-surface-400">Upload 1 gambar, lihat debug</p></div>
@@ -87,7 +95,7 @@
     </div>
 
     <!-- Batch Test -->
-    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-5 hover:shadow-md transition group">
+    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-5 hover:shadow-md transition group">
       <div class="flex items-center gap-3 mb-4">
         <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-200/60 group-hover:scale-110 transition"><i class="fas fa-layer-group text-white text-sm"></i></div>
         <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Batch</h3><p class="text-[10px] text-surface-400">Banyak file sekaligus + statistik</p></div>
@@ -113,7 +121,7 @@
     </div>
 
     <!-- Calibration -->
-    <div class="bg-white rounded-xl shadow-sm border border-surface-100 p-5 hover:shadow-md transition group">
+    <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-5 hover:shadow-md transition group">
       <div class="flex items-center gap-3 mb-4">
         <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-200/60 group-hover:scale-110 transition"><i class="fas fa-crosshairs text-white text-sm"></i></div>
         <div><h3 class="font-extrabold text-surface-800 text-sm">Kalibrasi</h3><p class="text-[10px] text-surface-400">Ukur akurasi geometry terkini</p></div>
@@ -212,7 +220,7 @@ fetch('/api/exams/list').then(r=>r.json()).then(d=>{const sel=document.getElemen
         const tb=document.getElementById('batch-table-body'); tb.innerHTML='';
         (data.results||[]).forEach(r=>{
           const cp=Math.round((r.avg_conf||0)*100);
-          const tr=document.createElement('tr');tr.className='border-t border-surface-100 hover:bg-surface-50';
+          const tr=document.createElement('tr');tr.className='border-t border-surface-200 hover:bg-surface-50';
           tr.innerHTML='<td class="p-2 font-medium text-surface-700">'+r.filename+'</td><td class="p-2 font-bold">'+(r.nisn||'?')+'</td><td class="p-2 text-center font-bold">'+(r.detected||0)+'/'+r.total+'</td><td class="p-2 text-center font-bold '+(cp>=70?'text-emerald-600':cp>=40?'text-amber-600':'text-red-500')+'">'+cp+'%</td><td class="p-2 text-center">'+(r.needs_review>0?'<span class="text-amber-600 font-bold">'+r.needs_review+'</span>':'<span class="text-emerald-500">✓</span>')+'</td><td class="p-2 text-center font-bold '+(r.score!=null?'text-primary-600':'text-surface-300')+'">'+(r.score!=null?r.score+'%':'-')+'</td><td class="p-2 text-center '+(r.error?'text-red-500':'text-emerald-500')+'">'+(r.error?'⚠':'✓')+'</td>';
           tb.appendChild(tr);
         });
