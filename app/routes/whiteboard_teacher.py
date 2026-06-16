@@ -19,25 +19,26 @@ whiteboard_teacher_bp = Blueprint("whiteboard_teacher", __name__)
 @guru_required
 def whiteboard_list():
     whiteboards = []
-    try:
-        whiteboards = list_whiteboards(role="teacher")
-    except Exception as e:
-        current_app.logger.error("whiteboard list failed: %s", e)
-    supabase = get_supabase()
-    for wb in whiteboards:
-        try:
-            cnt = supabase.table("whiteboard_members").select("id", count="exact").eq("whiteboard_id", wb["id"]).execute()
-            wb["member_count"] = cnt.count if hasattr(cnt, "count") else 0
-        except Exception:
-            wb["member_count"] = 0
-
     sid = g.get("user_school_id")
     classes = []
-    if sid:
-        try:
-            classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
-        except Exception:
-            pass
+
+    try:
+        whiteboards = list_whiteboards(role="teacher")
+        # Get member count (N+1, but safe)
+        supabase = get_supabase()
+        for wb in whiteboards:
+            try:
+                cnt = supabase.table("whiteboard_members").select("id", count="exact").eq("whiteboard_id", wb["id"]).execute()
+                wb["member_count"] = cnt.count if hasattr(cnt, "count") else 0
+            except Exception:
+                wb["member_count"] = 0
+        if sid:
+            classes = supabase.table("classes").select("id,name").eq("school_id", sid).order("name").execute().data or []
+    except Exception as e:
+        current_app.logger.error("whiteboard list error: %s", str(e)[:200])
+        # Return empty list instead of crashing
+        whiteboards = []
+
     return render_template("teacher/whiteboard_list.html", whiteboards=whiteboards, classes=classes)
 
 
