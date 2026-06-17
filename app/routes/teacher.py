@@ -946,6 +946,107 @@ def results():
     return render_template("teacher/results.html", submissions=subs, stats=stats, exam_id=exam_id, exams=exams, exam=exam, scan_subs=scan_subs, online_subs=online_subs)
 
 
+@teacher_bp.route("/grade-question/<exam_id>/<int:question_index>")
+@teacher_or_admin_required
+def grade_question(exam_id, question_index):
+    """Grade a single question across all students."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("title,total_questions,question_types,answer_key").eq("id", exam_id).single().execute().data or {}
+    for f in ("question_types", "answer_key"):
+        v = exam.get(f)
+        if isinstance(v, str):
+            try: exam[f] = json.loads(v)
+            except: exam[f] = {}
+    return render_template("teacher/grade_question.html", exam=exam, exam_id=exam_id)
+
+
+@teacher_bp.route("/api/grade-question/<exam_id>/<int:question_index>")
+@teacher_or_admin_required
+def grade_question_api(exam_id, question_index):
+    """API: return all students' answers for a specific question."""
+    supabase = get_supabase()
+    subs = supabase.table("submissions").select("id,student_id,answers,score,final_score,status,submitted_at,profiles(full_name)").eq("exam_id", exam_id).execute().data or []
+
+    students = []
+    for s in subs:
+        answers = s.get("answers") or {}
+        if isinstance(answers, str):
+            try: answers = json.loads(answers)
+            except: answers = {}
+
+        student_name = (s.get("profiles") or {}).get("full_name", s.get("student_id", "")[:12])
+        qi = str(question_index)
+        ans_data = answers.get(qi)
+
+        # Extract answer text/option
+        answer_val = ""
+        essay_text = ""
+        has_canvas = False
+        feedback = {"score": None, "feedback": None}
+
+        if isinstance(ans_data, dict):
+            answer_val = ans_data.get("answer", "")
+            if ans_data.get("pages"):
+                has_canvas = True
+            if ans_data.get("text"):
+                essay_text = ans_data["text"]
+            feedback["score"] = ans_data.get("ai_score") or ans_data.get("score")
+            feedback["feedback"] = ans_data.get("feedback") or ans_data.get("ai_feedback")
+        elif isinstance(ans_data, str):
+            answer_val = ans_data
+
+        students.append({
+            "submission_id": s["id"],
+            "name": student_name,
+            "answer": answer_val,
+            "essayText": essay_text or answer_val if essay_text else "",
+            "hasCanvas": has_canvas,
+            "status": s.get("status", ""),
+            "score": s.get("score"),
+            "final_score": s.get("final_score"),
+            "submitted_at": str(s.get("submitted_at", ""))[:19],
+            "feedback": feedback,
+        })
+
+    return jsonify({"students": students})
+
+
+@teacher_bp.route("/api/grade-question/<exam_id>/<int:question_index>/save", methods=["POST"])
+@teacher_or_admin_required
+def grade_question_save(exam_id, question_index):
+    """Save a grade update for a specific question on a submission."""
+    data = request.get_json()
+    submission_id = data.get("submission_id")
+    if not submission_id:
+        return jsonify({"error": "No submission_id"}), 400
+
+    supabase = get_supabase()
+    sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
+    if not sub:
+        return jsonify({"error": "Not found"}), 404
+
+    answers = sub.get("answers") or {}
+    if isinstance(answers, str):
+        try: answers = json.loads(answers)
+        except: answers = {}
+
+    qi = str(question_index)
+    current = answers.get(qi, {})
+    if not isinstance(current, dict):
+        current = {"answer": current}
+
+    if "answer" in data:
+        current["answer"] = data["answer"]
+    if "essay_score" in data:
+        current["ai_score"] = float(data["essay_score"]) if data.get("essay_score") else None
+    if "essay_feedback" in data:
+        current["feedback"] = data["essay_feedback"]
+
+    answers[qi] = current
+    supabase.table("submissions").update({"answers": answers}).eq("id", submission_id).execute()
+    return jsonify({"success": True})
+
+
 @teacher_bp.route("/grade/<submission_id>")
 @teacher_or_admin_required
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))

@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Koreksi Soal - ScanGrade{% endblock %}
+{% block page_title %}Koreksi per Soal{% endblock %}
+{% block head_extra %}
+<style>
+.student-card { transition: all 0.2s; }
+.student-card:hover { transform: translateY(-1px); }
+.q-nav-btn { transition: all 0.15s; }
+.q-nav-btn:hover { transform: scale(1.05); }
+.q-nav-btn.active { box-shadow: 0 0 0 2px rgba(99,102,241,0.4); }
+@media (max-width:640px) { .student-canvas { display: none; } }
+</style>
+{% endblock %}
+{% block content %}
+<div x-data="graderApp()" x-init="init()" class="max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-200 p-4 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+            <a href="/teacher/results?exam_id={{ exam_id }}" class="text-surface-400 hover:text-primary-500 text-lg p-1.5 hover:bg-primary-50 rounded-xl transition">
+                <i class="fas fa-arrow-left"></i>
+            </a>
+            <div>
+                <h1 class="font-extrabold text-surface-800 text-sm sm:text-base truncate max-w-[200px] sm:max-w-md">{{ exam.title }}</h1>
+                <p class="text-[10px] text-surface-400">Koreksi per Soal — <span x-text="students.length"></span> siswa</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="text-[10px] font-bold text-surface-500">Soal:</span>
+            <div class="flex gap-1 overflow-x-auto max-w-[200px] sm:max-w-md py-1">
+                <template x-for="i in totalQuestions" :key="i">
+                    <button @click="goToQuestion(i - 1)" class="q-nav-btn w-7 h-7 rounded-lg text-[10px] font-bold border shrink-0 transition"
+                            :class="currentQ === i - 1 ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-surface-500 border-surface-200 hover:border-primary-300'"
+                            x-text="i"></button>
+                </template>
+            </div>
+            <span class="text-[10px] font-bold px-2 py-1 rounded-full"
+                  :class="isMCQ ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'"
+                  x-text="isMCQ ? 'MCQ' : 'Essay'"></span>
+        </div>
+    </div>
+
+    <!-- Question info bar -->
+    <div class="bg-gradient-to-r from-primary-50 to-blue-50 rounded-xl border border-primary-200 p-3 mb-4 flex items-center justify-between">
+        <div class="flex items-center gap-2 text-xs font-bold text-primary-800">
+            <i class="fas fa-question-circle"></i>
+            <span x-text="'Soal ' + (currentQ + 1)"></span>
+            <span class="text-primary-400">|</span>
+            <span class="text-primary-600 font-medium" x-text="'Kunci: ' + (answerKey[currentQ] || '-')"></span>
+        </div>
+        <div class="flex items-center gap-2">
+            <button @click="gradeAllMCQ()" x-show="isMCQ" class="text-[10px] font-bold px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition">
+                <i class="fas fa-check-double mr-0.5"></i>Nilai Semua MCQ
+            </button>
+            <button @click="gradeAllEssay()" x-show="!isMCQ" class="text-[10px] font-bold px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition">
+                <i class="fas fa-robot mr-0.5"></i>Koreksi Semua Essay (AI)
+            </button>
+            <span class="text-[10px] text-surface-400" x-text="correctCount + '/' + totalCorrectable + ' benar'"></span>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div x-show="loading" class="text-center py-12">
+        <div class="w-10 h-10 mx-auto rounded-full border-2 border-primary-200 border-t-primary-600 animate-spin"></div>
+        <p class="text-sm font-bold text-surface-500 mt-3" x-text="loadingText">Memuat data...</p>
+    </div>
+
+    <!-- Student cards -->
+    <div x-show="!loading" class="space-y-3">
+        <template x-for="(s, idx) in displayedStudents" :key="s.submission_id">
+            <div class="student-card bg-white rounded-xl border border-surface-200 overflow-hidden">
+                <!-- Student header -->
+                <div class="flex items-center justify-between px-4 py-2.5 bg-surface-50 border-b border-surface-200">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-6 h-6 rounded-full bg-primary-100 text-primary-700 text-[10px] font-extrabold flex items-center justify-center shrink-0" x-text="idx + 1"></span>
+                        <span class="text-sm font-extrabold text-surface-800 truncate" x-text="s.name"></span>
+                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                              :class="s.status === 'graded' || s.status === 'published' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+                              x-text="s.status"></span>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <a :href="'/teacher/grade/' + s.submission_id" class="text-[10px] font-bold text-primary-600 hover:text-primary-700 hover:bg-primary-50 px-2 py-1 rounded-lg transition" title="Detail lengkap"><i class="fas fa-external-link-alt"></i></a>
+                        <button @click="s.expanded = !s.expanded"
+                                class="text-[10px] font-bold text-surface-500 px-2 py-1 rounded-lg hover:bg-surface-100 transition">
+                            <i class="fas" :class="s.expanded ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Answer body -->
+                <div class="px-4 py-3">
+                    <template x-if="isMCQ">
+                        <div class="flex items-center gap-3">
+                            <div class="flex gap-1.5">
+                                <template x-for="opt in ['A','B','C','D','E']" :key="opt">
+                                    <button @click="setMCQAnswer(s, opt)"
+                                            class="w-9 h-9 rounded-full text-xs font-extrabold border-2 transition-all active:scale-90"
+                                            :class="getMCQClass(s, opt)">
+                                        <span x-text="opt"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <div class="ml-auto flex items-center gap-2">
+                                <span x-show="s.feedback?.score !== undefined" class="text-xs font-bold" :class="s.feedback.score > 0 ? 'text-emerald-600' : 'text-red-500'">
+                                    <span x-text="s.feedback.score"></span>
+                                </span>
+                            </div>
+                        </div>
+                    </template>
+
+                    <template x-if="!isMCQ">
+                        <div>
+                            <div class="text-xs text-surface-500 bg-surface-50 rounded-lg p-3 max-h-32 overflow-y-auto mb-3 whitespace-pre-wrap" x-text="s.essayText || '(Tidak ada jawaban teks)'"></div>
+                            <!-- Canvas thumbnail -->
+                            <div x-show="s.hasCanvas" class="mb-3">
+                                <div class="relative rounded-lg overflow-hidden border border-surface-200 bg-surface-50" style="max-height:200px">
+                                    <div class="student-canvas" x-html="s.canvasThumb"></div>
+                                </div>
+                                <button @click="s.showCanvas = !s.showCanvas" class="text-[9px] text-primary-600 hover:text-primary-700 mt-1 font-bold">
+                                    <i class="fas" :class="s.showCanvas ? 'fa-eye-slash' : 'fa-eye'"></i>
+                                    <span x-text="s.showCanvas ? ' Sembunyikan canvas' : ' Lihat canvas'"></span>
+                                </button>
+                            </div>
+                            <!-- Score + Feedback -->
+                            <div class="flex flex-wrap gap-2">
+                                <div class="flex items-center gap-1">
+                                    <span class="text-[10px] font-bold text-surface-500">Skor:</span>
+                                    <input type="number" x-model="s.scoreVal" @input="saveEssayScore(s)" min="0" max="100"
+                                           class="w-14 px-2 py-1 border border-surface-200 rounded-lg text-xs font-bold text-center">
+                                    <span class="text-[10px] text-surface-400">/ 100</span>
+                                </div>
+                                <div class="flex-1 min-w-0 flex items-center gap-1">
+                                    <span class="text-[10px] font-bold text-surface-500">Feedback:</span>
+                                    <input type="text" x-model="s.feedbackVal" @change="saveEssayScore(s)"
+                                           placeholder="Tulis feedback..." class="flex-1 px-2 py-1 border border-surface-200 rounded-lg text-xs min-w-0">
+                                </div>
+                                <button @click="aiGradeEssay(s)" class="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 transition shrink-0">
+                                    <i class="fas fa-robot mr-0.5"></i>AI
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Expandable: full canvas + detail -->
+                <div x-show="s.expanded" x-collapse class="border-t border-surface-200 p-4 bg-surface-50">
+                    <div class="flex gap-3 text-xs">
+                        <a :href="'/teacher/grade/' + s.submission_id" class="text-primary-600 hover:text-primary-700 font-bold">Lihat halaman koreksi lengkap →</a>
+                        <span class="text-surface-400">|</span>
+                        <span class="text-surface-500">Waktu: <span x-text="s.submitted_at"></span></span>
+                        <span class="text-surface-400">|</span>
+                        <span class="text-surface-500" x-text="'Skor final: ' + (s.final_score || '-')"></span>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <!-- Empty state -->
+    <div x-show="!loading && displayedStudents.length === 0" class="text-center py-12">
+        <i class="fas fa-inbox text-4xl text-surface-300 mb-3"></i>
+        <p class="text-sm font-bold text-surface-500">Belum ada siswa yang mengerjakan soal ini</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function graderApp() {
+    return {
+        currentQ: 0, totalQuestions: {{ exam.total_questions }},
+        questionTypes: {{ (exam.question_types or {}) | tojson | safe }},
+        answerKey: {{ (exam.answer_key or {}) | tojson | safe }},
+        students: [], loading: true, loadingText: 'Memuat data siswa...',
+
+        get displayedStudents() { return this.students; },
+        get isMCQ() { return this.questionTypes[this.currentQ] !== 'essay'; },
+        get correctCount() {
+            return this.students.filter(s => {
+                const k = this.answerKey[this.currentQ];
+                const a = s.answer;
+                return k && a && a === k && k !== 'bonus';
+            }).length;
+        },
+        get totalCorrectable() { return this.isMCQ ? this.students.length : 0; },
+
+        init() {
+            this.loadingText = 'Memuat data siswa...';
+            fetch('/teacher/api/grade-question/{{ exam_id }}/' + this.currentQ)
+                .then(r => r.json())
+                .then(d => {
+                    this.students = (d.students || []).map(s => ({
+                        ...s, expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || ''
+                    }));
+                    this.loading = false;
+                }).catch(() => { this.loading = false; });
+        },
+
+        goToQuestion(qIdx) {
+            this.currentQ = qIdx;
+            this.loading = true;
+            this.loadingText = 'Memuat siswa untuk Soal ' + (qIdx + 1) + '...';
+            fetch('/teacher/api/grade-question/{{ exam_id }}/' + qIdx)
+                .then(r => r.json())
+                .then(d => {
+                    this.students = (d.students || []).map(s => ({
+                        ...s, expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || ''
+                    }));
+                    this.loading = false;
+                }).catch(() => { this.loading = false; });
+        },
+
+        getMCQClass(s, opt) {
+            const k = this.answerKey[this.currentQ];
+            const selected = s.answer === opt;
+            if (selected && k === opt) return 'bg-emerald-500 text-white border-emerald-500';
+            if (selected) return 'bg-red-400 text-white border-red-400';
+            if (k === opt) return 'bg-emerald-100 text-emerald-700 border-emerald-300';
+            return 'bg-white text-surface-400 border-surface-200 hover:border-primary-400';
+        },
+
+        setMCQAnswer(s, opt) {
+            s.answer = opt;
+            // Save via API
+            fetch('/teacher/api/grade-question/{{ exam_id }}/' + this.currentQ + '/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({submission_id: s.submission_id, answer: opt})
+            });
+        },
+
+        saveEssayScore(s) {
+            fetch('/teacher/api/grade-question/{{ exam_id }}/' + this.currentQ + '/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    submission_id: s.submission_id,
+                    essay_score: s.scoreVal,
+                    essay_feedback: s.feedbackVal,
+                })
+            });
+        },
+
+        aiGradeEssay(s) {
+            const btn = event.target;
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-0.5"></i>';
+            fetch('/api/ai/grade-essay', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    submission_id: s.submission_id,
+                    question_index: this.currentQ,
+                    question_text: '',
+                    student_answer: s.essayText || '',
+                    max_score: 100,
+                })
+            })
+            .then(r => r.json())
+            .then(d => {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>AI';
+                if (d.score !== undefined) { s.scoreVal = d.score; }
+                if (d.feedback) { s.feedbackVal = d.feedback; }
+                this.saveEssayScore(s);
+            })
+            .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>AI'; });
+        },
+
+        gradeAllMCQ() {
+            this.students.forEach(s => {
+                const k = this.answerKey[this.currentQ];
+                if (k && k !== 'bonus') {
+                    this.setMCQAnswer(s, k);
+                }
+            });
+        },
+
+        gradeAllEssay() {
+            this.students.forEach(s => { if (s.essayText) this.aiGradeEssay(s); });
+        }
+    };
+}
+</script>
+{% endblock %}
