@@ -63,9 +63,6 @@
     <!-- Top Bar -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex items-center justify-between border border-surface-100">
         <div class="flex items-center gap-3">
-            <button type="button" @click="sidebarOpen = !sidebarOpen" class="text-surface-400 hover:text-primary-500 text-lg p-1.5 hover:bg-primary-50 rounded-xl transition">
-                <i class="fas" :class="sidebarOpen ? 'fa-chevron-left' : 'fa-bars'"></i>
-            </button>
             <div>
                 <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-surface-800">{{ exam.title }}</h1>
                 <span class="text-[10px] text-surface-400 font-semibold">{{ exam.subject }} &middot; {{ exam.total_questions }} soal</span>
@@ -290,8 +287,7 @@
 
     <div class="flex gap-3">
         <!-- Left Sidebar: Question Navigation -->
-        <div class="shrink-0 transition-all duration-300 ease-out flex flex-col items-center gap-1"
-             :style="sidebarOpen ? 'width:150px' : 'width:0;overflow:hidden'">
+        <div class="shrink-0 flex flex-col items-center gap-1" style="width:150px">
             <!-- Scroll Up -->
             <button type="button" @click="scrollSidebar(-60)"
                     class="w-full flex items-center justify-center py-1 text-stone-400 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition disabled:opacity-20"
@@ -299,26 +295,11 @@
                 <i class="fas fa-chevron-up text-xs"></i>
             </button>
             <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-2.5 sticky-questions overflow-y-auto border border-surface-100 scroll-smooth flex-1" style="max-height:calc(100vh - 170px)" x-ref="sidebarScroll">
-                <div x-show="!sidebarOpen" class="flex flex-col items-center gap-1.5 py-2">
-                    <template x-for="(q, i) in questions" :key="i">
-                        <button type="button" @click="currentQ = i"
-                                class="q-btn w-8 h-8 text-xs rounded-xl font-bold border shrink-0 relative"
-                                :class="{
-                                     'bg-primary-500 text-white border-primary-500 shadow-md shadow-primary-200': answered[i],
-                                     'bg-white text-surface-500 border-surface-200 hover:border-primary-300': !answered[i] && currentQ !== i,
-                                     'ring-2 ring-primary-400 ring-offset-1': currentQ === i
-                                }"
-                                x-text="i + 1">
-                        </button>
-                    </template>
-                    <div class="text-[9px] font-bold text-stone-400 mt-2 text-center bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ"></div>
+                <div class="flex items-center justify-between mb-2.5 px-0.5">
+                    <span class="text-xs font-extrabold text-stone-500 uppercase tracking-wider">Soal</span>
+                    <span class="text-[10px] font-bold text-stone-400 bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ + ' terjawab'"></span>
                 </div>
-                <div x-show="sidebarOpen">
-                    <div class="flex items-center justify-between mb-2.5 px-0.5">
-                        <span class="text-xs font-extrabold text-stone-500 uppercase tracking-wider">Soal</span>
-                        <span class="text-[10px] font-bold text-stone-400 bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ + ' terjawab'"></span>
-                    </div>
-                    <div class="grid grid-cols-4 gap-1.5">
+                <div class="grid grid-cols-4 gap-1.5">
                         <template x-for="(q, i) in questions" :key="i">
                             <button type="button" @click="currentQ = i"
                                     class="q-btn w-full aspect-square text-xs rounded-xl font-bold border relative"
@@ -685,7 +666,6 @@ const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
 function examApp(duration, totalQ) {
     return {
         timeLeft: duration,
-        sidebarOpen: false,
         submitted: false,
         page: 1,
         totalPages: {{ (exam.pdf_page_urls or []) | length }},
@@ -2130,7 +2110,6 @@ function examApp(duration, totalQ) {
         },
         agreeExam() {
             this.showExamAgreement = false;
-            this.sidebarOpen = false;
             try { localStorage.setItem('sg_agreed_' + '{{ exam.id }}', '1'); } catch(e) {}
             // Minta fullscreen (tidak wajib, user bisa Esc keluar tanpa penalti)
             if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
