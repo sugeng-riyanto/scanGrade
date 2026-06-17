@@ -332,8 +332,18 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
     if essay_qs:
         chunk = ""
         for q in essay_qs:
-            chunk += f"Q{q['number']}: {q.get('full_text', q.get('text', ''))}\n\n"
-        prompt = f"For each essay, provide a concise model answer (1-2 sentences). Output ONLY JSON.\n\nQuestions:\n{chunk}"
+            chunk += f"Question {q['number']}: {q.get('full_text', q.get('text', ''))}\n\n"
+        prompt = f"""You are a Cambridge examiner. For each essay/structured question below, provide a model answer (1-3 key points, concise).
+Output ONLY a JSON object where keys are question numbers and values are model answers.
+Use English only.
+
+Example:
+{{"1": "Acceleration = force / mass = 20/5 = 4 m/s²", "2": "The gradient represents velocity."}}
+
+Questions:
+{chunk}
+
+Output ONLY JSON:"""
         try:
             from app.services.ai_service import _call_ai
             raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
