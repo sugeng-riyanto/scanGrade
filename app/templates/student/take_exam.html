@@ -1739,11 +1739,27 @@ function examApp(duration, totalQ) {
         },
         saveToLocal() {
             try {
-                const data = this.getAnswers();
+                const data = this.getAnswersLight();
                 const payload = { answers: data, savedAt: Date.now(), examId: '{{ exam.id }}' };
-                localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
+                const json = JSON.stringify(payload);
+                if (json.length > 4 * 1024 * 1024) {
+                    console.warn('localStorage draft too large (' + (json.length/1024/1024).toFixed(1) + 'MB), skipping canvas');
+                    const light = this.getAnswersLight();
+                    payload.answers = light;
+                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
+                } else {
+                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', json);
+                }
             } catch(e) {
-                console.warn('localStorage save failed:', e);
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    console.warn('localStorage quota exceeded, saving light data only');
+                    try {
+                        const light = this.getAnswersLight();
+                        localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify({ answers: light, savedAt: Date.now(), examId: '{{ exam.id }}', light: true }));
+                    } catch(e2) {}
+                } else {
+                    console.warn('localStorage save failed:', e);
+                }
             }
         },
         getAnswersLight() {
