@@ -209,7 +209,7 @@ def exam_parse_pdf():
 
         # Step 1: PDF → Clean Markdown
         try:
-            from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html
+            from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html, generate_answer_key
         except ImportError:
             return jsonify({"error": "Library tidak tersedia. Jalankan: pip install pymupdf"}), 500
 
@@ -241,7 +241,21 @@ def exam_parse_pdf():
         parsed["mcq_count"] = sum(1 for q in questions if q.get("type") == "mcq")
         parsed["essay_count"] = sum(1 for q in questions if q.get("type") == "essay")
 
-        # Step 3: Save PDF for exam canvas
+        # Step 3: Generate answer key via AI (MCQ correct answers)
+        answer_key_generated = False
+        answer_key = {}
+        try:
+            if key and key.get("api_key"):
+                from app.services.pdf_parser import generate_answer_key
+                ak = generate_answer_key(
+                    parsed["markdown"], questions, api_key=key["api_key"])
+                if ak and len(ak) > 0:
+                    answer_key = ak
+                    answer_key_generated = True
+        except Exception as e:
+            current_app.logger.warning("Answer key gen skipped: %s", e)
+
+        # Step 4: Save PDF for exam canvas
         pdf_url = ""
         try:
             import uuid
@@ -269,6 +283,8 @@ def exam_parse_pdf():
         return jsonify({
             "success": True,
             "ai_classified": ai_used,
+            "answer_key_generated": answer_key_generated,
+            "answer_key": answer_key,
             "markdown": parsed["markdown"][:500000],
             "page_count": parsed["page_count"],
             "mcq_count": parsed["mcq_count"],
