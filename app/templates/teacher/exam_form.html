@@ -16,7 +16,16 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2">
-            <div x-data="{ aiMode: {{ 'true' if not exam else 'false' }}, aiLang: 'en' }"
+            <div x-data="{
+                aiMode: {{ 'true' if not exam else 'false' }},
+                aiLang: 'en',
+                languages: [
+                    {code:'en', label:'EN', name:'English', bg:'bg-primary-100', text:'text-primary-700'},
+                    {code:'id', label:'ID', name:'Bahasa Indonesia', bg:'bg-emerald-100', text:'text-emerald-700'},
+                    {code:'zh-Hant', label:'繁', name:'繁體中文', bg:'bg-blue-100', text:'text-blue-700'},
+                    {code:'ar', label:'ع', name:'العربية', bg:'bg-amber-100', text:'text-amber-700'},
+                ],
+            }"
                  x-init="aiLang = localStorage.getItem('sg_ai_lang') || 'en'; $watch('aiLang', v => localStorage.setItem('sg_ai_lang', v))">
             <!-- AI Toggle — modern pill -->
             <div class="flex items-center justify-between mb-5 p-1 bg-surface-100 rounded-2xl shadow-sm border border-surface-200">
@@ -61,15 +70,20 @@
                             <span x-show="aiMode">AI akan baca soal, deteksi MCQ & Essay otomatis</span>
                         </p>
                     </div>
-                    <!-- Language selector (AI mode) -->
-                    <div x-show="aiMode && !pdfUrl" class="shrink-0 flex items-center gap-1">
-                        <select x-model="aiLang"
-                                class="text-[9px] font-bold px-2 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-primary-400 focus:ring-1 focus:ring-primary-400 outline-none">
-                            <option value="en">🇬🇧 English</option>
-                            <option value="id">🇮🇩 Indonesia</option>
-                            <option value="zh-Hant">🇹🇼 繁體中文</option>
-                            <option value="ar">🇸🇦 العربية</option>
-                        </select>
+                    <!-- Language picker (AI mode) — inline buttons -->
+                    <div x-show="aiMode && !pdfUrl" class="shrink-0 flex items-center">
+                        <div class="flex rounded-xl overflow-hidden border border-surface-200 bg-white">
+                            <template x-for="(l, i) in languages" :key="l.code">
+                                <button @click="aiLang = l.code"
+                                        class="px-2.5 py-1.5 text-[10px] font-bold transition-all duration-150"
+                                        :class="aiLang === l.code
+                                            ? l.bg + ' ' + l.text + ' shadow-sm'
+                                            : 'text-surface-500 hover:bg-surface-50'"
+                                        x-text="l.label"
+                                        :title="l.name"></button>
+                            </template>
+                        </div>
+                    </div>
                     </div>
                     <div x-show="aiMode && !pdfUrl" class="shrink-0">
                         <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-bold bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm">
