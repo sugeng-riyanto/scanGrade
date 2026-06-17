@@ -86,14 +86,44 @@ def _call_gemini(api_key, prompt):
     except Exception as e:
         err_msg = str(e)
         if "API_KEY_INVALID" in err_msg or "VALIDATION_ERROR" in err_msg:
+            # Try direct REST API to get real error
+            rest_error = _test_gemini_rest(api_key)
+            if rest_error:
+                raise ValueError(rest_error)
             raise ValueError(
-                "API Key tidak valid. Penyebab umum:\n"
-                "1. Key belum di-copy dengan benar (hapus spasi tambahan)\n"
-                "2. API Generative Language belum diaktifkan — buka https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com dan klik Enable\n"
-                "3. Key dibatasi (IP/HTTP referrer) — di https://console.cloud.google.com/apis/credentials, edit key, set 'None' untuk API restrictions\n\n"
+                "API Key tidak bisa digunakan. Penanganan:\n"
+                "1. Buka https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com\n"
+                "2. Pastikan project yang dipilih sesuai dengan key kamu\n"
+                "3. Klik ENABLE, tunggu 5 menit\n"
+                "4. Coba Test lagi\n\n"
                 f"Detail: {err_msg[:100]}"
             )
         raise
+
+
+def _test_gemini_rest(api_key):
+    """Test Gemini key via direct REST API and return user-friendly error."""
+    try:
+        import requests
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={api_key}"
+        resp = requests.post(url, json={"contents": [{"parts": [{"text": "test"}]}]}, timeout=10)
+        if resp.status_code == 200:
+            return None  # Works fine
+        err = resp.json()
+        error_msg = err.get("error", {}).get("message", "") or err.get("error", {}).get("status", "")
+        if "not found" in error_msg.lower() or "disabled" in error_msg.lower():
+            return (
+                "❌ Gemini API belum diaktifkan untuk project ini.\n\n"
+                "1. Buka: https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com\n"
+                "2. Di pojok atas, pilih project: 'My Project (557976847295)' atau nama project key kamu\n"
+                "3. Klik tombol 'ENABLE'\n"
+                "4. Tunggu 2-5 menit, lalu coba Test lagi"
+            )
+        if "API key not found" in error_msg:
+            return "❌ API Key tidak ditemukan. Copy ulang key dari https://aistudio.google.com/apikey — pastikan tidak ada spasi."
+        return f"❌ Error API: {error_msg[:150]}"
+    except Exception as e:
+        return None  # Fallback to library error
 
 
 def _call_openai_like(api_key, prompt, base_url=None, model=None):
