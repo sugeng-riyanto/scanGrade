@@ -214,6 +214,39 @@
                     </button>
                 </div>
             </div>
+
+            <!-- Saved Keys List -->
+            <div class="mt-5" x-show="savedKeys.length > 0">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs font-bold text-surface-600">Key Tersimpan <span class="font-normal text-surface-400" x-text="'(' + savedKeys.length + ')'"></span></h3>
+                </div>
+                <div class="space-y-1.5">
+                    <template x-for="k in savedKeys" :key="k.id">
+                        <div class="flex items-center justify-between px-3 py-2 rounded-lg border"
+                             :class="k.is_active ? 'bg-emerald-50/50 border-emerald-200' : 'bg-surface-50 border-surface-200'">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="w-2 h-2 rounded-full shrink-0" :class="k.is_active ? 'bg-emerald-500' : 'bg-surface-300'"></span>
+                                <span class="text-xs font-bold text-surface-700 truncate" x-text="k.label || k.provider"></span>
+                                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface-100 text-surface-500 shrink-0" x-text="k.provider"></span>
+                                <span x-show="k.is_active" class="text-[9px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded-full shrink-0">Aktif</span>
+                            </div>
+                            <div class="flex items-center gap-1 shrink-0">
+                                <form method="POST" :action="'/teacher/ai-settings/' + k.id + '/toggle'" class="inline">
+                                    <button type="submit" class="text-[9px] font-bold px-2 py-1 rounded-lg border transition"
+                                            :class="k.is_active ? 'bg-white text-surface-500 border-surface-200 hover:bg-surface-50' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'"
+                                            x-text="k.is_active ? 'Nonaktifkan' : 'Aktifkan'"></button>
+                                </form>
+                                <form method="POST" :action="'/teacher/ai-settings/' + k.id + '/delete'" class="inline" onsubmit="return confirm('Hapus key ini?')">
+                                    <button type="submit" class="text-[9px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+            <div class="mt-3 text-center" x-show="savedKeys.length === 0">
+                <p class="text-[11px] text-surface-400">Belum ada key tersimpan. Tambah key di atas.</p>
+            </div>
         </div>
 
         <div class="flex justify-between">
@@ -306,6 +339,7 @@ function wizardApp() {
         keyLabel: '',
         testResult: '',
         keys: [],
+        savedKeys: [],
         providers: [
             { id: 'gemini', name: 'Gemini', icon: '🔮', badge: '✅ Gratis', badgeClass: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-300', text: 'text-emerald-700', desc: 'Rekomendasi! Gratis, 1500x/hari. Cukup punya akun Google.' },
             { id: 'groq', name: 'Groq', icon: '⚡', badge: '✅ Gratis', badgeClass: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-700', desc: 'Gratis, cepat. Daftar pakai email.' },
@@ -321,16 +355,18 @@ function wizardApp() {
         init() {
             const savedStep = sessionStorage.getItem('ai_wizard_step');
             if (savedStep) { this.step = parseInt(savedStep); sessionStorage.removeItem('ai_wizard_step'); }
+            this.loadKeys();
+        },
+        loadKeys() {
             fetch('/teacher/api/ai/wizard-status').then(r => r.json()).then(d => {
                 if (d.demo_available && !d.has_active) {
                     this.newKey = 'DEMO';
                     this.keyLabel = 'Demo Gratis';
                 }
-            }).catch(() => {});
-        },
-        loadKeys() {
-            fetch('/teacher/api/ai/wizard-status').then(r => r.json()).then(d => {
-                // Keys are loaded from the settings page — refresh page for simplicity
+                // Load saved keys from the page server data
+                const serverKeys = {{ keys | tojson | safe }};
+                this.keys = serverKeys;
+                this.savedKeys = serverKeys;
             }).catch(() => {});
         },
         nextStep() {
