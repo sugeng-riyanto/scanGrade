@@ -560,6 +560,25 @@ def exam_form():
             }).eq("id", exam_id).execute()
         except Exception as e:
             current_app.logger.error(f"PDF upload failed: {e}")
+    # Handle AJAX-uploaded PDF via pdf_preview_url
+    pdf_preview = request.form.get("pdf_preview_url", "")
+    if pdf_preview and not pdf_preview.startswith("http") and not (pdf_file and pdf_file.filename):
+        try:
+            local_path = os.path.join(current_app.root_path, "static", "uploads", "exams", os.path.basename(pdf_preview))
+            if os.path.exists(local_path):
+                with open(local_path, "rb") as f:
+                    pdf_bytes = f.read()
+                from app.services.pdf_service import upload_pdf
+                class _MF:
+                    def __init__(self, d, n): self._d = d; self.filename = n
+                    def read(self): return self._d
+                result = upload_pdf(_MF(pdf_bytes, "exam.pdf"), exam_id)
+                supabase.table("exams").update({
+                    "pdf_url": result["pdf_path"],
+                    "pdf_page_urls": result["page_urls"],
+                }).eq("id", exam_id).execute()
+        except Exception as e:
+            current_app.logger.warning(f"PDF preview processing failed: {e}")
     # If action is publish, also publish scores automatically
     if action == "publish":
         try:
@@ -698,6 +717,30 @@ def exam_detail(exam_id):
         for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
+
+    # Process PDF: upload to Supabase, generate page images for student canvas
+    pdf_preview = request.form.get("pdf_preview_url", "")
+    if pdf_preview and not pdf_preview.startswith("http"):
+        try:
+            local_path = os.path.join(current_app.root_path, "static", "uploads", "exams", os.path.basename(pdf_preview))
+            if os.path.exists(local_path):
+                with open(local_path, "rb") as f:
+                    pdf_bytes = f.read()
+                from app.services.pdf_service import upload_pdf
+                class MockFile:
+                    def __init__(self, data, name):
+                        self._data = data
+                        self.filename = name
+                    def read(self): return self._data
+                result = upload_pdf(MockFile(pdf_bytes, "exam.pdf"), exam_id)
+                supabase.table("exams").update({
+                    "pdf_url": result["pdf_path"],
+                    "pdf_page_urls": result["page_urls"],
+                }).eq("id", exam_id).execute()
+                current_app.logger.info("PDF processed for exam %s: %d pages", exam_id, result["total_pages"])
+        except Exception as e:
+            current_app.logger.warning("PDF processing failed for exam %s: %s", exam_id, e)
+
     _recalculate_scores(exam_id)
     log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
     return redirect(f"/teacher/exams/{exam_id}")
