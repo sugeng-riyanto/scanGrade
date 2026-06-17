@@ -1282,6 +1282,7 @@ def ai_grade_essay():
     max_score = int(data.get("max_score", 100))
     rubric = data.get("rubric", "")
     diagram_context = data.get("diagram_context", "")
+    lang = data.get("lang", "en")
 
     if not student_answer:
         return jsonify({"error": "Tidak ada jawaban siswa"}), 400
@@ -1296,6 +1297,7 @@ def ai_grade_essay():
         max_score=max_score,
         rubric=rubric,
         diagram_context=diagram_context,
+        lang=lang,
     )
     if "error" in result:
         return jsonify(result), 422

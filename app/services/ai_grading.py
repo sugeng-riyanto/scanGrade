@@ -45,9 +45,18 @@ def _save_cache(submission_id: str, question_index: int, score: float, feedback:
         logger.error("Failed to save AI grading cache: %s", e)
 
 
+_LANG_FEEDBACK = {
+    "en": "Provide a score (0-{max_score}) and feedback in English.\nEvaluate based on the rubric.\nFeedback must be specific, mentioning strengths and weaknesses.\n\nFormat JSON:\n{\"score\": <number>, \"feedback\": \"<feedback in English>\"}\n\nOutput ONLY JSON, no other text.",
+    "id": "Berikan skor (0-{max_score}) dan feedback dalam Bahasa Indonesia.\nNilai berdasarkan rubrik yang diberikan.\nFeedback harus spesifik, menyebutkan kelebihan dan kekurangan.\n\nFormat JSON:\n{\"score\": <number>, \"feedback\": \"<feedback dalam Bahasa Indonesia>\"}\n\nHanya output JSON, tanpa teks lain.",
+    "zh": "提供分数（0-{max_score}）和中文反馈。\n根据评分标准评估。\n反馈必须具体，指出优点和缺点。\n\nJSON格式:\n{\"score\": <number>, \"feedback\": \"<中文反馈>\"}\n\n只输出JSON，不要其他文字。",
+    "ar": "قدم درجة (0-{max_score}) وتعليقًا باللغة العربية.\nقيم بناءً على معايير التقييم.\nيجب أن يكون التعليق محددًا، يذكر نقاط القوة والضعف.\n\nتنسيق JSON:\n{\"score\": <number>, \"feedback\": \"<التعليق بالعربية>\"}\n\nأخرج JSON فقط، بدون نص آخر.",
+}
+
+
 def _build_prompt(question_text: str, rubric: str, diagram_context: str,
-                  student_answer: str, max_score: int) -> str:
+                  student_answer: str, max_score: int, lang: str = "en") -> str:
     """Build a smart prompt for AI essay grading."""
+    feedback_template = _LANG_FEEDBACK.get(lang) or _LANG_FEEDBACK["en"]
     parts = ["Koreksi jawaban esai berikut dengan teliti dan adil."]
     if question_text:
         parts.append(f"\nSoal: {question_text}")
@@ -57,22 +66,14 @@ def _build_prompt(question_text: str, rubric: str, diagram_context: str,
         parts.append(f"\nKonteks Diagram/Gambar:\n{diagram_context}")
     parts.append(f"\nJawaban Siswa:\n{student_answer}")
     parts.append(f"\nSkor Maksimal: {max_score}")
-    parts.append("""
-Berikan skor (0-{max_score}) dan feedback dalam Bahasa Indonesia.
-Nilai berdasarkan rubrik yang diberikan.
-Feedback harus spesifik, menyebutkan kelebihan dan kekurangan.
-
-Format JSON:
-{"score": <number>, "feedback": "<feedback dalam Bahasa Indonesia>"}
-
-Hanya output JSON, tanpa teks lain.""")
+    parts.append("\n" + feedback_template.format(max_score=max_score))
     return "\n".join(parts)
 
 
 def grade_essay(teacher_id: str, submission_id: str, question_index: int,
                 question_text: str, student_answer: str, max_score: int,
                 rubric: str = "", diagram_context: str = "",
-                exam_id: str = "") -> dict:
+                exam_id: str = "", lang: str = "en") -> dict:
     """Grade a single essay answer with cache check.
     
     Returns dict with score, feedback, cached flag, provider.
@@ -98,7 +99,7 @@ def grade_essay(teacher_id: str, submission_id: str, question_index: int,
         return {"error": "Belum ada API key aktif. Atur di Pengaturan AI."}
 
     # 3. Build prompt
-    prompt = _build_prompt(question_text, rubric, diagram_context, student_answer, max_score)
+    prompt = _build_prompt(question_text, rubric, diagram_context, student_answer, max_score, lang)
 
     # 4. Call AI
     try:
