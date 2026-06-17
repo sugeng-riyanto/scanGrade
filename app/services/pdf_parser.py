@@ -268,7 +268,88 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
     return "mcq" if score <= 0 else "essay"
 
 
-def _simple_parse(text: str) -> List[Dict]:
+def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None) -> Dict:
+    """Generate answer key from markdown — correct MCQ options + essay rubrics.
+    Returns dict: {question_number: "A"|"B"|"C"|"D"|"essay"}
+    """
+    if not api_key or not questions:
+        return _heuristic_key(questions)
+
+    # Find MCQ questions and extract their text
+    mcq_qs = [q for q in questions if q.get("type") == "mcq"]
+    if not mcq_qs:
+        return {}
+
+    # Build prompt with just the MCQ questions
+    mcq_text = ""
+    for q in mcq_qs:
+        mcq_text += f"{q['number']}. {q.get('full_text', q.get('text', ''))}\n\n"
+
+    # Limit to avoid context overflow
+    mcq_text = mcq_text[:25000]
+
+    prompt = f"""You are an expert Cambridge IGCSE/IAL examiner. 
+For each MCQ question below, determine the SINGLE correct answer (A, B, C, or D).
+Use your subject knowledge and logical reasoning.
+
+Rules:
+- Each question has EXACTLY ONE correct answer
+- Output ONLY a JSON object with question numbers as keys and answers as values
+- No explanations, no extra text
+
+Example:
+{{"1": "A", "2": "C", "3": "B"}}
+
+Questions:
+{mcq_text}
+"""
+
+    try:
+        from app.services.ai_service import _call_ai
+        raw = _call_ai({"api_key": api_key, "provider": "groq"}, prompt)
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+        key = json.loads(cleaned.strip())
+        if isinstance(key, dict) and len(key) > 0:
+            # Validate: only accept A-D answers
+            validated = {}
+            for k, v in key.items():
+                if str(v) in ("A", "B", "C", "D"):
+                    validated[str(k)] = str(v)
+            if validated:
+                return validated
+    except Exception as e:
+        logger.warning("AI answer key generation failed: %s", e)
+
+    return _heuristic_key(questions)
+
+
+def _heuristic_key(questions: List[Dict]) -> Dict:
+    """Guess answer key from markdown — looks for bolded answers or patterns."""
+    # This is a placeholder — heuristic key generation is unreliable
+    # Returns empty dict, teacher must fill manually
+    return {}
+
+
+def _call_ai_direct(api_key: str, prompt: str) -> str:
+    """Direct AI call for answer key generation."""
+    import requests
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+            },
+            timeout=30,
+        )
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.warning("Direct AI call failed: %s", e)
+        raise
     questions, current, parts = [], None, []
     for line in text.strip().split("\n"):
         line = line.strip()
