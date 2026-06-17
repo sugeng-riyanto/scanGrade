@@ -301,16 +301,23 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
     if not api_key or not questions:
         return {}
 
-    # Build question list — just numbers + text, no type info
+    # Build question list — with diagram reference detection
     q_list = ""
     for q in questions:
         num = q.get("number", 0)
         text = (q.get("full_text") or q.get("text", ""))[:500]
-        q_list += f"Q{num}: {text}\n\n"
+        # Detect diagram references
+        has_fig = "fig." in text.lower() or "diagram" in text.lower() or "graph" in text.lower() or "sketch" in text.lower()
+        ref = " [HAS DIAGRAM]" if has_fig else ""
+        q_list += f"Q{num}:{ref} {text}\n\n"
 
     q_list = q_list[:15000]
 
-    prompt = f"""Answer ALL questions below. For each: MCQ → letter (A/B/C/D), Essay → concise answer. Output JSON only.
+    prompt = f"""Answer ALL questions. MCQ→letter (A/B/C/D). Essay→concise answer.
+Questions marked [HAS DIAGRAM] include figures/diagrams not visible here. 
+For those, explain the concept and give the expected answer based on standard Cambridge knowledge.
+
+Output ONLY JSON. Example: {{"1":"A","2":"9.8 m/s²","3":"The force is proportional to extension"}}
 
 Questions:
 {q_list}"""
