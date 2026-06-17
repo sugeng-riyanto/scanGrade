@@ -220,19 +220,26 @@ def exam_parse_pdf():
         return jsonify({"error": f"Gagal menyimpan PDF: {str(e)[:100]}"}), 500
     pdf_url = f"/static/uploads/exams/{pdf_filename}"
 
-    from app.services.pdf_parser import parse_pdf, generate_preview_html
-    parsed = parse_pdf(raw)
-    if parsed.get("error"):
-        # Clean up on error
+    try:
+        from app.services.pdf_parser import parse_pdf, generate_preview_html
+        parsed = parse_pdf(raw)
+        if parsed.get("error"):
+            try: os.remove(pdf_path)
+            except: pass
+            return jsonify({"error": parsed["error"]}), 422
+    except ImportError:
         try: os.remove(pdf_path)
         except: pass
-        return jsonify({"error": parsed["error"]}), 422
+        return jsonify({"error": "PyMuPDF tidak terinstall. Jalankan: pip install pymupdf"}), 500
 
-    # Generate rubric for essay questions via AI
-    from app.services.rubric_generator import generate_rubric
+    # Generate rubric for essay questions (skip gracefully if AI fails)
     for q in parsed.get("questions", []):
         if q["type"] == "essay":
-            q["rubric"] = generate_rubric(q["text"])
+            try:
+                from app.services.rubric_generator import generate_rubric
+                q["rubric"] = generate_rubric(q["text"])
+            except Exception as e:
+                current_app.logger.warning("Rubric gen skipped for Q%s: %s", q.get("number"), e)
 
     preview = generate_preview_html(parsed)
     return jsonify({
