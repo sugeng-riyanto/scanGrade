@@ -345,7 +345,7 @@ def generate_preview_html(parsed: Dict) -> str:
     if parsed.get("error"):
         return f'<p class="text-red-500">{parsed["error"]}</p>'
     html = (f'<p class="text-sm text-surface-600 mb-3">Ditemukan {parsed["page_count"]} halaman, '
-            f'{parsed["mcq_count"]} MCQ, {parsed["essay_count"]} Essay</p>')
+            f'{parsed["mcq_count"] + parsed["essay_count"]} soal</p>')
     html += '<div class="space-y-1 max-h-80 overflow-y-auto">'
     for q in parsed.get("questions", []):
         badge = "MCQ" if q.get("type") == "mcq" else "Essay"
