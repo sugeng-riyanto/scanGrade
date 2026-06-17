@@ -319,13 +319,14 @@ function wizardApp() {
         get keyCount() { return this.keys.length; },
 
         init() {
+            const savedStep = sessionStorage.getItem('ai_wizard_step');
+            if (savedStep) { this.step = parseInt(savedStep); sessionStorage.removeItem('ai_wizard_step'); }
             fetch('/teacher/api/ai/wizard-status').then(r => r.json()).then(d => {
                 if (d.demo_available && !d.has_active) {
                     this.newKey = 'DEMO';
                     this.keyLabel = 'Demo Gratis';
                 }
             }).catch(() => {});
-            this.loadKeys();
         },
         loadKeys() {
             fetch('/teacher/api/ai/wizard-status').then(r => r.json()).then(d => {
@@ -334,7 +335,6 @@ function wizardApp() {
         },
         nextStep() {
             if (this.step < 2) this.step++;
-            if (this.step === 2) location.reload();
         },
         prevStep() { if (this.step > 0) this.step--; },
         testKey() {
@@ -352,14 +352,14 @@ function wizardApp() {
         },
         saveKey() {
             if (!this.newKey) return;
-            const fd = new FormData();
-            fd.append('provider', this.selectedProvider);
-            fd.append('label', this.keyLabel || (this.selectedProvider === 'gemini' ? 'Key Gemini Saya' : 'Key ' + this.selectedLabel));
-            fd.append('api_key', this.newKey === 'DEMO' ? this.newKey : this.newKey);
-            fetch('/teacher/ai-settings/add-key', {method: 'POST', body: fd}).then(r => {
-                if (r.redirected) { location.href = r.url; return; }
-                location.reload();
-            });
+            const p = new URLSearchParams();
+            p.append('provider', this.selectedProvider);
+            p.append('label', this.keyLabel || ('Key ' + this.selectedLabel));
+            p.append('api_key', this.newKey === 'DEMO' ? '' : this.newKey);
+            fetch('/teacher/ai-settings/add-key', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: p.toString()})
+            .then(r => { if (r.redirected) { location.href = r.url; return; } return r.text(); })
+            .then(() => { sessionStorage.setItem('ai_wizard_step', '2'); location.reload(); })
+            .catch(() => { this.testResult = '❌ Gagal menyimpan'; });
         }
     };
 }
