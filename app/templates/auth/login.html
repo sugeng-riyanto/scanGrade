@@ -30,7 +30,7 @@
             <p class="mt-1 text-surface-500 font-medium">Super Admin &amp; Admin Sekolah</p>
         </div>
 
-        <div x-data="{ loading: false, showPw: false, email: '' }">
+        <div x-data="{ loading: false, showPw: false, email: (typeof localStorage !== 'undefined' ? (localStorage.getItem('sg_login_email') || '') : '') }">
             {% if error %}
             <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm font-semibold text-red-700 flex items-center gap-2 shadow-sm" role="alert">
                 <i class="fas fa-exclamation-circle shrink-0"></i><span>{{ error }}</span>
@@ -54,7 +54,7 @@
                     </div>
                     <div class="flex items-center justify-between text-sm">
                         <label class="flex items-center gap-2 cursor-pointer select-none">
-                            <input type="checkbox" class="w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500" @change="if($el.checked) localStorage.setItem('sg_email', email); else localStorage.removeItem('sg_email')">
+                            <input type="checkbox" class="w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500" checked @change="if($el.checked) localStorage.setItem('sg_login_email', email); else localStorage.removeItem('sg_login_email')">
                             <span class="font-medium text-surface-600">Ingat email</span>
                         </label>
                         <a href="{{ url_for('auth.forgot_password') }}" class="text-primary-600 hover:text-primary-700 font-semibold">Lupa password?</a>
