@@ -1,52 +1,130 @@
-"""PDF parser — converts PDF to clean markdown, then classifies questions via AI + heuristic fallback."""
+"""PDF → Quarto-standard markdown. Converts PDF to clean, structured .md with proper formatting."""
 import re
 import json
 import logging
 from typing import List, Dict
+import os
 
 logger = logging.getLogger("app")
 
+# Quarto markdown formatting rules
+MAX_LINE_LEN = 80  # wrap at 80 chars for readability
+
 
 def pdf_to_markdown(file_bytes: bytes) -> Dict:
-    """Convert PDF to clean markdown text. Returns dict with markdown + metadata."""
+    """Convert PDF to Quarto-standard markdown with proper headings, lists, equations."""
     try:
         import fitz
     except ImportError:
         return {"error": "PyMuPDF tidak tersedia"}
 
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
-    pages = []
+    pages_md = []
     raw_text = ""
+    images_data = []
+    img_counter = 0
 
-    for i in range(len(pdf)):
-        page = pdf[i]
-        text = page.get_text()
-        raw_text += f"\n\n--- Page {i+1} ---\n\n{text}"
+    for page_num in range(len(pdf)):
+        page = pdf[page_num]
+        page_rect = page.rect
+        page_width = page_rect.width
+        page_height = page_rect.height
 
-        # Build clean markdown
-        md = f"\n\n--- Page {i+1} ---\n\n"
-        lines = text.strip().split("\n")
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            # Keep original formatting
-            md += line + "\n"
-        pages.append(md)
+        # Get text with position data for better formatting
+        blocks = page.get_text("dict")["blocks"]
+        raw_text += f"\n\n--- Page {page_num + 1} ---\n\n{page.get_text()}"
 
-    images = _extract_images(pdf)
-    page_count = len(pdf)
+        # Page break
+        md = "\n\\newpage\n" if page_num > 0 else ""
+        md += f"## Page {page_num + 1}\n\n"
+
+        for block in blocks:
+            if block.get("type") == 0:  # text block
+                block_text = ""
+                max_font_size = 0
+
+                for line in block.get("lines", []):
+                    line_text = ""
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        font_size = span.get("size", 12)
+                        max_font_size = max(max_font_size, font_size)
+                        # Detect bold
+                        is_bold = span.get("flags", 0) & 2  # Bold flag
+                        if is_bold:
+                            text = f"**{text}**"
+                        line_text += text + " "
+
+                    line_str = line_text.strip()
+                    if line_str:
+                        block_text += line_str + "\n"
+
+                if not block_text.strip():
+                    continue
+
+                # Classify block type based on font size and content
+                lines = block_text.strip().split("\n")
+                formatted_lines = []
+
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    # Heading detection (larger font = higher heading)
+                    if max_font_size >= 18:
+                        formatted_lines.append(f"# {line}")
+                    elif max_font_size >= 14:
+                        formatted_lines.append(f"## {line}")
+                    elif max_font_size >= 12:
+                        formatted_lines.append(f"### {line}")
+                    # Equation detection (contains math symbols)
+                    elif re.search(r'[=×÷±√∑∫∞πθΔλμσΩωαβγ]', line):
+                        formatted_lines.append(f"$$ {line} $$")
+                    # Numbered list item
+                    elif re.match(r'^\d+[\.\)]\s', line):
+                        formatted_lines.append(line)
+                    # Bullet list (starts with - or • or *)
+                    elif line.startswith(("- ", "• ", "* ")):
+                        formatted_lines.append(line)
+                    # MCQ option (A. B. C. D.)
+                    elif re.match(r'^[A-D][\.\)]\s', line):
+                        formatted_lines.append(f"  {line}")  # indent options
+                    # Regular paragraph
+                    else:
+                        # Wrap long lines at MAX_LINE_LEN
+                        while len(line) > MAX_LINE_LEN:
+                            split_at = line.rfind(" ", 0, MAX_LINE_LEN)
+                            if split_at < 1:
+                                split_at = MAX_LINE_LEN
+                            formatted_lines.append(line[:split_at])
+                            line = "  " + line[split_at:].strip()
+                        formatted_lines.append(line)
+
+                md += "\n".join(formatted_lines) + "\n\n"
+
+            elif block.get("type") == 1:  # image block
+                img_counter += 1
+                img_bytes = page.get_pixmap(clip=block["bbox"]).tobytes("png")
+                images_data.append(img_bytes)
+
+                # Reference image in markdown (fig format for Quarto)
+                img_name = f"fig-{page_num + 1}-{img_counter}.png"
+                md += f"![Figure {img_counter}]({img_name}){{#fig-{page_num + 1}-{img_counter}}}\n\n"
+
+        pages_md.append(md)
+
     pdf.close()
 
-    markdown = "\n".join(pages)
+    markdown = "\n".join(pages_md)
 
     return {
         "markdown": markdown,
         "raw_text": raw_text,
-        "pages": pages,
-        "page_count": page_count,
-        "images": images,
-        "questions": [],  # filled by classifier
+        "pages": pages_md,
+        "page_count": len(pages_md),
+        "images": images_data,
+        "questions": [],
         "mcq_count": 0,
         "essay_count": 0,
     }
