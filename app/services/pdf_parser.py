@@ -189,35 +189,30 @@ def classify_with_ai(markdown: str, api_key: str = None, provider: str = "groq")
     if not api_key:
         return classify_heuristic(markdown)
 
-    # Limit to 30k chars for AI (Groq context)
-    md_for_ai = markdown[:30000]
+    md_for_ai = markdown[:20000]  # reduced from 30k
 
-    prompt = f"""Analyze this exam paper. Identify ALL questions.
-For EACH question, classify as "mcq" (multiple choice with A B C D options) or "essay" (written answer).
+    prompt = f"Analyze exam. For each question: classify as 'mcq' or 'essay'. Output JSON.\n\n{md_for_ai}"
 
-Rules:
-- MCQ: has answer choices A. B. C. D.
-- Essay: has sub-parts (a)(b)(c), mark allocations [2] [Total: 8], command words (Explain, Describe, Calculate)
-- CIE Paper 1: 40 questions with A B C D = ALL MCQ
-- CIE Paper 2-5: fewer questions, (a)(b)(c), marks = essays
+    for attempt in range(3):
+        try:
+            from app.services.ai_service import _call_ai
+            raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+            questions = json.loads(cleaned.strip())
+            if isinstance(questions, list) and len(questions) > 0:
+                return questions
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate_limit" in err.lower():
+                logger.warning("Classify rate limited (attempt %d/3), retry 5s", attempt + 1)
+                import time
+                time.sleep(5)
+                continue
+            logger.warning("AI classification failed: %s", err)
+            break
 
-Output ONLY JSON array:
-[{{"number": 1, "type": "mcq", "text": "first 100 chars..."}}, ...]
-
-Exam:
-{md_for_ai}
-"""
-    try:
-        from app.services.ai_service import _call_ai
-        raw = _call_ai({"api_key": api_key, "provider": "groq"}, prompt)
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-        questions = json.loads(cleaned.strip())
-        if isinstance(questions, list) and len(questions) > 0:
-            return questions
-    except Exception as e:
-        logger.warning("AI classification failed: %s", e)
     return classify_heuristic(markdown)
 
 
@@ -297,42 +292,48 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
 
 
 def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq") -> Dict:
-    """Generate answer key — MCQ→letter, Essay→answer. Uses provider-aware _call_ai."""
+    """Generate answer key — MCQ→letter, Essay→answer. Retries on rate limit."""
     if not api_key or not questions:
         return {}
 
-    # Build question list
     q_list = ""
     for q in questions:
         num = q.get("number", 0)
-        text = (q.get("full_text") or q.get("text", ""))[:500]
+        text = (q.get("full_text") or q.get("text", ""))[:300]  # shorter = fewer tokens
         has_fig = any(ref in text.lower() for ref in ["fig.", "diagram", "graph", "sketch", "draw"])
         ref = " [HAS DIAGRAM]" if has_fig else ""
         q_list += f"Q{num}:{ref} {text}\n\n"
-    q_list = q_list[:15000]
+    q_list = q_list[:10000]  # smaller context
 
-    prompt = f"Answer ALL questions. MCQ→letter. Essay→concise answer. [HAS DIAGRAM]=explain concept. Output ONLY JSON.\n\n{q_list}"
+    prompt = f"Answer ALL. MCQ→letter. Essay→concise. Output JSON.\n\n{q_list}"
 
-    try:
-        from app.services.ai_service import _call_ai
-        key_dict = {"api_key": api_key, "provider": provider or "groq"}
-        raw = _call_ai(key_dict, prompt)
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-        parsed = json.loads(cleaned.strip())
-        if isinstance(parsed, dict):
-            # Validate: MCQ answers must be A/B/C/D, essay answers are text
-            result = {}
-            for k, v in parsed.items():
-                sv = str(v).strip()
-                if sv in ("A", "B", "C", "D"):
-                    result[str(k)] = sv  # MCQ: letter only
-                elif sv and len(sv) > 1:
-                    result[str(k)] = sv[:200]  # Essay: truncated text
-            return result
-    except Exception as e:
-        logger.warning("Answer key failed (all-in-one): %s", e)
+    for attempt in range(3):  # retry up to 3 times
+        try:
+            from app.services.ai_service import _call_ai
+            key_dict = {"api_key": api_key, "provider": provider or "groq"}
+            raw = _call_ai(key_dict, prompt)
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+            parsed = json.loads(cleaned.strip())
+            if isinstance(parsed, dict):
+                result = {}
+                for k, v in parsed.items():
+                    sv = str(v).strip()
+                    if sv in ("A", "B", "C", "D"):
+                        result[str(k)] = sv
+                    elif sv and len(sv) > 1:
+                        result[str(k)] = sv[:200]
+                return result
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate_limit" in err.lower():
+                logger.warning("Rate limited (attempt %d/3), retrying in 5s...", attempt + 1)
+                import time
+                time.sleep(5)
+                continue
+            logger.warning("Answer key failed: %s", err)
+            break
 
     return {}
 

@@ -157,7 +157,7 @@ _PROVIDER_MAP = {
     "gemini": {"caller": _call_gemini},
     "openai": {"caller": lambda k, p: _call_openai_like(k, p, None, "gpt-4o-mini")},
     "deepseek": {"caller": lambda k, p: _call_openai_like(k, p, "https://api.deepseek.com", "deepseek-chat")},
-    "groq": {"caller": lambda k, p: _call_openai_like(k, p, "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile")},
+    "groq": {"caller": lambda k, p: _call_openai_like(k, p, "https://api.groq.com/openai/v1", "llama-3.1-8b-instant")},
 }
 
 
