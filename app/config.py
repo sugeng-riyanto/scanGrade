@@ -17,6 +17,7 @@ class Config:
     FONNTE_API_KEY = os.getenv("FONNTE_API_KEY", "")
     REDIS_URL = os.getenv("REDIS_URL", "")
     APP_URL = os.getenv("APP_URL", "http://localhost:5000")
+    DEMO_AI_KEY = os.getenv("DEMO_AI_KEY", "")
 
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"

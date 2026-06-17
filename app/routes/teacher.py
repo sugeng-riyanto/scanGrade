@@ -1144,6 +1144,31 @@ def delete_assignment(assignment_id):
         return jsonify({"error": str(e)}), 400
 
 
+@teacher_bp.route("/api/ai/wizard-status")
+@teacher_or_admin_required
+def ai_wizard_status():
+    from app.services.ai_service import get_teacher_ai_status
+    return jsonify(get_teacher_ai_status(g.user_id))
+
+
+@teacher_bp.route("/api/ai/test-demo", methods=["POST"])
+@teacher_or_admin_required
+def ai_test_demo():
+    from app.services.ai_service import _get_demo_key, _call_ai
+    key = _get_demo_key()
+    if not key:
+        return jsonify({"error": "Demo key tidak tersedia. Hubungi admin."}), 400
+    try:
+        raw = _call_ai(key, 'Jawab dalam satu kata: Berapa 2+2? Format JSON: {"answer": <number>}')
+        import json
+        data = json.loads(raw.strip().replace("```json", "").replace("```", "").strip())
+        if data.get("answer") == 4:
+            return jsonify({"success": True, "message": "✅ Demo AI aktif! Koneksi berhasil."})
+        return jsonify({"success": True, "message": f"✅ Demo AI aktif. Response: {raw[:80]}"})
+    except Exception as e:
+        return jsonify({"error": f"❌ Gagal: {str(e)[:120]}"}), 400
+
+
 @teacher_bp.route("/ai-settings")
 @teacher_or_admin_required
 def ai_settings():
