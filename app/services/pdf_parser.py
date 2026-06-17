@@ -70,6 +70,7 @@ def parse_pdf(file_bytes: bytes) -> Dict:
         full_text += f"\n--- Halaman {page_num + 1} ---\n{text}"
 
     images = _extract_images(pdf)
+    page_count = len(pdf)
     pdf.close()
 
     # Parse questions using numbered pattern
@@ -80,7 +81,7 @@ def parse_pdf(file_bytes: bytes) -> Dict:
         "pages_text": pages_text,
         "questions": questions,
         "images": images,
-        "page_count": len(pdf) if hasattr(pdf, '__len__') else len(pages_text),
+        "page_count": page_count,
         "mcq_count": sum(1 for q in questions if q["type"] == "mcq"),
         "essay_count": sum(1 for q in questions if q["type"] == "essay"),
     }
