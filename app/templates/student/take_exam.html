@@ -1159,6 +1159,9 @@ function examApp(duration, totalQ) {
             canvas.width = targetW;
             canvas.height = targetH;
             canvas.style.height = targetH + 'px';
+            const ctx = canvas.getContext('2d');
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
             ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
             ctx.lineWidth = parseFloat(this.essayLineWidth[i]) || 1.5;
             this.essayCanvasMode[i] = this.essayCanvasMode[i] || 'pen';
