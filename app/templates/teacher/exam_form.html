@@ -275,7 +275,7 @@
                         <div class="relative" x-data="{ open: false }">
                             <button @click="open = !open" @click.outside="open = false"
                                     class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
-                                <i class="fas fa-file-alt text-primary-500 mr-0.5"></i>Hasil Scan
+                                <i class="fas fa-file-alt text-primary-500 mr-0.5"></i>Convert
                                 <i class="fas fa-chevron-down text-[8px] ml-0.5"></i>
                             </button>
                             <div x-show="open" class="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-lg border border-surface-200 overflow-hidden z-20">
@@ -381,11 +381,13 @@
                                 answerKeyGenerated: d.answer_key_generated || false,
                             };
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
-                            // Fire answer key event
-                            window.dispatchEvent(new CustomEvent(
-                                d.answer_key_generated ? 'key-done' : 'key-failed',
-                                { detail: { error: d.answer_key_error || '' } }
-                            ));
+                            // Fire answer key event only in AI mode
+                            if (_scanData.aiClassified) {
+                                window.dispatchEvent(new CustomEvent(
+                                    d.answer_key_generated ? 'key-done' : 'key-failed',
+                                    { detail: { error: d.answer_key_error || '' } }
+                                ));
+                            }
                         } catch(e) { if (this._timer) { clearInterval(this._timer); this._timer = null; } this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
                         finally { this.loading = false; }
                     },
