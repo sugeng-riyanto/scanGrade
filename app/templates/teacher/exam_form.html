@@ -16,9 +16,28 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2">
-            <!-- PDF Upload Card -->
-            {% if not exam %}
-            <div class="card p-5 mb-6" x-data="pdfUpload()">
+            <div x-data="{ aiMode: {{ 'false' if exam else 'true' }} }">
+            <!-- AI Toggle -->
+            <div class="flex items-center gap-3 mb-4 p-3 bg-white rounded-xl shadow-sm border border-surface-200">
+                <div class="flex items-center gap-2 flex-1">
+                    <i class="fas fa-robot text-primary-500 text-sm"></i>
+                    <span class="text-xs font-bold text-surface-700">Bantuan AI</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold" :class="!aiMode ? 'text-surface-700' : 'text-surface-400'" @click="aiMode = false">Manual</span>
+                    <button type="button" @click="aiMode = !aiMode"
+                            class="relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none"
+                            :class="aiMode ? 'bg-primary-600' : 'bg-surface-300'">
+                        <span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200"
+                              :class="aiMode ? 'translate-x-5' : ''"></span>
+                    </button>
+                    <span class="text-[10px] font-bold" :class="aiMode ? 'text-surface-700' : 'text-surface-400'" @click="aiMode = true">AI</span>
+                </div>
+                <div x-show="aiMode" class="text-[9px] text-primary-600 bg-primary-50 px-2 py-1 rounded-full border border-primary-200 whitespace-nowrap">Deteksi otomatis dari PDF</div>
+            </div>
+
+            <!-- PDF Upload Card (AI mode) -->
+            <div x-show="aiMode" class="card p-5 mb-6" x-data="pdfUpload()">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg shadow-rose-200/60"><i class="fas fa-file-pdf text-white text-sm"></i></div>
                     <div><h3 class="font-extrabold text-surface-800 text-sm">Upload PDF Soal</h3><p class="text-[10px] text-surface-400">Upload PDF — AI akan deteksi soal MCQ & Essay otomatis</p></div>
@@ -100,8 +119,9 @@
                 };
             }
             </script>
-            {% endif %}
+            </div><!-- end PDF upload card (AI mode) -->
 
+            <div x-show="!aiMode">
             <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
                 <div class="card p-6 space-y-4">
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -447,6 +467,8 @@
                     </button>
                 </div>
             </form>
+            </div><!-- end !aiMode -->
+            </div><!-- end x-data wrapper (aiMode) -->
         </div>
 
         <div class="lg:col-span-1">
