@@ -312,44 +312,7 @@ Questions:
             return key
     except Exception as e:
         logger.warning("AI answer key generation failed: %s", e)
-
-def _call_ai_direct(api_key: str, prompt: str) -> str:
-    """Direct AI call for answer key generation."""
-    import requests
-    try:
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-            },
-            timeout=30,
-        )
-        return resp.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        logger.warning("Direct AI call failed: %s", e)
-        raise
-    questions, current, parts = [], None, []
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if not line: continue
-        m = re.match(r'^(\d+)[\.\)]\s*(.*)', line)
-        if m:
-            if current is not None:
-                current["type"] = _heuristic_type("\n".join(parts))
-                questions.append(current)
-            current = {"number": int(m.group(1)), "text": m.group(2).strip()[:200],
-                       "type": "mcq", "full_text": m.group(2).strip()}
-            parts = [m.group(2).strip()]
-        elif current is not None:
-            parts.append(line)
-            current["full_text"] = "\n".join(parts)
-    if current is not None:
-        current["type"] = _heuristic_type("\n".join(parts))
-        questions.append(current)
-    return questions
+    return {}
 
 
 def generate_preview_html(parsed: Dict) -> str:
