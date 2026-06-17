@@ -350,11 +350,11 @@
             let _scanData = null;
             window.addEventListener('pdf-uploaded', e => { _scanData = e.detail; });
             function downloadMarkdown() {
-                if (!_scanData || !_scanData.markdown) { alert('Markdown tidak tersedia'); return; }
+                if (!_scanData || !_scanData.markdown) { alert('Upload PDF dulu'); return; }
                 const blob = new Blob([_scanData.markdown], {type: 'text/markdown;charset=utf-8'});
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = `${_scanData.pdfName || 'exam'}.md`;
+                a.download = (_scanData.pdfName || 'exam').replace('.pdf', '.md');
                 a.click();
             }
             </script>
