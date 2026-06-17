@@ -253,11 +253,10 @@
                             <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 truncate max-w-[200px]" x-text="pdfName"></span>
                         </div>
                         <p class="text-[10px] text-emerald-600 mt-0.5">
-                            <span x-show="hasAI"><span x-text="qCount"></span> soal terdeteksi</span>
-                            <span x-show="!hasAI">PDF siap untuk canvas siswa</span>
-                            <span x-show="hasAI && aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-700 border border-primary-200">AI</span>
-                            <span x-show="hasAI && !aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Heuristic</span>
-                            <!-- Answer key generation status -->
+                            <span x-text="qCount > 0 ? qCount + ' soal' : 'PDF siap'"></span>
+                            <span x-show="aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-700 border border-primary-200">AI</span>
+                            <span x-show="!aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-surface-100 text-surface-500 border border-surface-200">Manual</span>
+                            <!-- Answer key generation status (AI mode only) -->
                             <span x-show="generatingKey" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 animate-pulse">
                                 <i class="fas fa-spinner fa-spin mr-0.5"></i>Membuat kunci jawaban...
                             </span>
@@ -272,7 +271,7 @@
                         </p>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <!-- Dropdown: Scan Result (PDF→Markdown) -->
+                        <!-- Dropdown: Scan Result (always) -->
                         <div class="relative" x-data="{ open: false }">
                             <button @click="open = !open" @click.outside="open = false"
                                     class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
@@ -284,15 +283,19 @@
                                     <i class="fas fa-file-alt text-surface-400"></i>.md
                                 </button>
                                 <button @click="open = false; downloadMarkdown('qmd')" class="flex items-center gap-2 w-full px-3 py-2 text-[10px] font-bold text-surface-700 hover:bg-emerald-50 transition">
-                                    <i class="fas fa-file-code text-emerald-500"></i>.qmd (Quarto)
+                                    <i class="fas fa-file-code text-emerald-500"></i>.qmd
                                 </button>
                             </div>
                         </div>
-                        <!-- Dropdown: Answer Key -->
-                        <div class="relative" x-data="{ open: false }">
+                        <!-- Generate Key button (AI mode, not yet generated) -->
+                        <button x-show="aiClassified && !keyGenerated && !generatingKey" @click="generateKeyNow()"
+                                class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition">
+                            <i class="fas fa-key mr-0.5"></i>Generate Key
+                        </button>
+                        <!-- Dropdown: Answer Key (only when generated) -->
+                        <div x-show="keyGenerated" class="relative" x-data="{ open: false }">
                             <button @click="open = !open" @click.outside="open = false"
-                                    class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition"
-                                    :class="keyGenerated ? '' : 'opacity-60'">
+                                    class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition">
                                 <i class="fas fa-key text-amber-600 mr-0.5"></i>Kunci
                                 <i class="fas fa-chevron-down text-[8px] ml-0.5"></i>
                             </button>
@@ -301,7 +304,7 @@
                                     <i class="fas fa-file-alt text-surface-400"></i>.md
                                 </button>
                                 <button @click="open = false; downloadAnswerKey('qmd')" class="flex items-center gap-2 w-full px-3 py-2 text-[10px] font-bold text-surface-700 hover:bg-emerald-50 transition">
-                                    <i class="fas fa-file-code text-emerald-500"></i>.qmd (Quarto)
+                                    <i class="fas fa-file-code text-emerald-500"></i>.qmd
                                 </button>
                             </div>
                         </div>
@@ -340,10 +343,13 @@
                             this.loadingProgress = Math.min(95, this.loadingProgress + 0.5 + Math.random() * 1.5);
                         }, 1000);
                         const fd = new FormData(); fd.append('pdf', file);
-                        // Get AI language from parent scope
+                        // Get AI language and mode from parent scope
                         const parentEl = this.$el.closest('[x-data]');
-                        const lang = parentEl?.__x?.$data?.aiLang || 'en';
+                        const pd = parentEl?.__x?.$data || {};
+                        const lang = pd.aiLang || 'en';
+                        const aiMode = pd.aiMode || false;
                         fd.append('lang', lang);
+                        fd.append('ai_mode', aiMode ? 'true' : 'false');
                         try {
                             this.loadingText = '🤖 Menganalisis soal dengan AI...';
                             this.loadingStep = 2;
@@ -463,6 +469,32 @@
                 a.href = URL.createObjectURL(blob);
                 a.download = (_scanData.pdfName || 'exam').replace('.pdf', '_key' + ext);
                 a.click();
+            }
+            async function generateKeyNow() {
+                if (!_scanData || !_scanData.markdown) { alert('Data belum siap'); return; }
+                const btn = document.querySelector('[x-show="aiClassified && !keyGenerated && !generatingKey"]');
+                const orig = btn ? btn.innerHTML : '';
+                if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-0.5"></i>Generate...';
+                try {
+                    const r = await fetch('/teacher/exams/generate-key', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            markdown: _scanData.markdown,
+                            questions: _scanData._questions || []
+                        })
+                    });
+                    const d = await r.json();
+                    if (d.success) {
+                        _scanData.answerKey = d.answer_key;
+                        _scanData.answerKeyGenerated = true;
+                        if (d.questions) _scanData._questions = d.questions;
+                        window.dispatchEvent(new CustomEvent('key-done'));
+                    } else {
+                        window.dispatchEvent(new CustomEvent('key-failed', {detail: {error: d.error}}));
+                    }
+                } catch(e) { window.dispatchEvent(new CustomEvent('key-failed', {detail: {error: e.message}})); }
+                if (btn) btn.innerHTML = orig;
             }
             </script>
 
