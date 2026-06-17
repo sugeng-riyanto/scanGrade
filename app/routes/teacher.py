@@ -269,7 +269,7 @@ def exam_parse_pdf():
         return jsonify({
             "success": True,
             "ai_classified": ai_used,
-            "markdown": parsed["markdown"][:5000],
+            "markdown": parsed["markdown"][:100000],
             "page_count": parsed["page_count"],
             "mcq_count": parsed["mcq_count"],
             "essay_count": parsed["essay_count"],
