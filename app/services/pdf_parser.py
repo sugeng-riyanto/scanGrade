@@ -189,8 +189,8 @@ def classify_with_ai(markdown: str, api_key: str = None, provider: str = "groq")
     if not api_key:
         return classify_heuristic(markdown)
 
-    # Limit to 20k chars for AI
-    md_for_ai = markdown[:20000]
+    # Limit to 30k chars for AI (Groq context)
+    md_for_ai = markdown[:30000]
 
     prompt = f"""Analyze this exam paper. Identify ALL questions.
 For EACH question, classify as "mcq" (multiple choice with A B C D options) or "essay" (written answer).
