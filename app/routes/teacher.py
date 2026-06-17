@@ -232,11 +232,12 @@ def exam_parse_pdf():
             current_app.logger.warning("PDF save skipped: %s", e)
 
         # Generate rubric for essay questions (skip gracefully if AI fails)
+        lang = request.form.get("lang", "en")
         for q in parsed.get("questions", []):
             if q["type"] == "essay":
                 try:
                     from app.services.rubric_generator import generate_rubric
-                    q["rubric"] = generate_rubric(q["text"])
+                    q["rubric"] = generate_rubric(q["text"], lang=lang)
                 except Exception as e:
                     current_app.logger.warning("Rubric gen skipped: %s", e)
 
