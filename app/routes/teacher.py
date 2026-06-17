@@ -194,6 +194,39 @@ def dashboard():
                            school_info=school_info, exams_no_key=exams_no_key)
 
 
+@teacher_bp.route("/exams/parse-pdf", methods=["POST"])
+@teacher_or_admin_required
+def exam_parse_pdf():
+    """Upload PDF → extract text → detect questions → return preview."""
+    if "pdf" not in request.files:
+        return jsonify({"error": "Tidak ada file PDF"}), 400
+    pdf_file = request.files["pdf"]
+    raw = pdf_file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        return jsonify({"error": "PDF terlalu besar. Maksimal 20MB."}), 413
+
+    from app.services.pdf_parser import parse_pdf, generate_preview_html
+    parsed = parse_pdf(raw)
+    if parsed.get("error"):
+        return jsonify({"error": parsed["error"]}), 422
+
+    # Generate rubric for essay questions via AI
+    from app.services.rubric_generator import generate_rubric
+    for q in parsed.get("questions", []):
+        if q["type"] == "essay":
+            q["rubric"] = generate_rubric(q["text"])
+
+    preview = generate_preview_html(parsed)
+    return jsonify({
+        "success": True,
+        "page_count": parsed["page_count"],
+        "mcq_count": parsed["mcq_count"],
+        "essay_count": parsed["essay_count"],
+        "questions": parsed["questions"],
+        "preview_html": preview,
+    })
+
+
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required
@@ -469,6 +502,35 @@ def exam_detail(exam_id):
     _recalculate_scores(exam_id)
     log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
     return redirect(f"/teacher/exams/{exam_id}")
+
+
+@teacher_bp.route("/exams/<exam_id>/preprocess-essays", methods=["POST"])
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def preprocess_exam_essays(exam_id):
+    """Generate embeddings + rubric for all essay questions in an exam."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("question_types,question_texts,question_rubrics,total_questions").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "Exam not found"}), 404
+
+    qtypes = exam.get("question_types") or {}
+    total_q = exam.get("total_questions", 0)
+    from app.services.ai_embedding import preprocess_exam_questions
+    from app.services.rubric_generator import generate_rubric
+
+    # Build questions list
+    questions = []
+    question_texts = exam.get("question_texts") or {}
+    for i in range(total_q):
+        qi = str(i)
+        if qtypes.get(qi, "mcq") != "mcq":
+            text = question_texts.get(qi, "")
+            rubric = generate_rubric(text)
+            questions.append({"number": i + 1, "type": "essay", "text": text, "rubric": rubric})
+
+    result = preprocess_exam_questions(exam_id, questions, supabase)
+    return jsonify({"success": True, **result})
 
 
 @teacher_bp.route("/preview/<exam_id>")
