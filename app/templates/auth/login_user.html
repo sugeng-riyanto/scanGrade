@@ -13,7 +13,19 @@
 </style>
 {% endblock %}
 {% block content_noauth %}
-<script>try { const e = localStorage.getItem('sg_login_email'); if (e) { document.addEventListener('DOMContentLoaded', function() { var inp = document.querySelector('input[name="email"]'); if (inp) inp.value = e; }); } } catch(ex) {}</script>
+<script>
+try {
+    var saved = localStorage.getItem('sg_login_email');
+    if (saved) {
+        document.addEventListener('DOMContentLoaded', function() {
+            var inp = document.querySelector('input[name="email"]');
+            if (inp) { inp.value = saved; }
+            var cb = document.getElementById('remember-email');
+            if (cb) { cb.checked = true; }
+        });
+    }
+} catch(ex) {}
+</script>
 <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 flex items-center justify-center p-4 lg:p-8 relative overflow-hidden">
     <div class="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-emerald-100/40 blur-3xl"></div>
     <div class="absolute -bottom-40 -left-40 w-80 h-80 rounded-full bg-amber-100/40 blur-3xl"></div>
@@ -48,7 +60,7 @@
                     </div>
                 </div>
 
-                <form method="POST" action="{{ url_for('auth.login_user') }}" class="space-y-5" @submit="loading=true; var em = document.querySelector('input[name=\"email\"]'); if (document.getElementById('remember-email').checked && em) { try { localStorage.setItem('sg_login_email', em.value); } catch(ex) {} }">
+                <form method="POST" action="{{ url_for('auth.login_user') }}" class="space-y-5" @submit.prevent="loading=true; var em = document.querySelector('input[name=\"email\"]'), cb = document.getElementById('remember-email'); if (cb && cb.checked && em && em.value) { try { localStorage.setItem('sg_login_email', em.value); } catch(ex) {} } else { try { localStorage.removeItem('sg_login_email'); } catch(ex) {} } $el.submit()">
                     <div class="input-icon">
                         <i class="fas fa-envelope"></i>
                         <input type="text" name="email" required autocomplete="email" placeholder="Email atau NISN"
