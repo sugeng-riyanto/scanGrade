@@ -12,7 +12,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto px-3 sm:px-0">
+<div class="max-w-3xl mx-auto px-3 sm:px-0 teacher-content">
     <div class="flex items-center gap-3 mb-5 sm:mb-6">
         <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0"><i class="fas fa-camera text-white text-lg"></i></div>
         <div><h1 class="text-xl sm:text-2xl font-extrabold text-surface-800">Scan Lembar Jawaban</h1><p class="text-xs sm:text-sm text-surface-500 font-medium">Scan OMR via kamera atau upload file</p></div>
@@ -73,29 +73,29 @@
 
         <!-- Controls -->
         <div class="flex flex-wrap items-center gap-3">
-            <button id="btn-flip-cam" class="bg-surface-100 text-surface-700 px-3 py-2.5 rounded-xl hover:bg-surface-200 text-sm font-bold transition hidden" title="Balik kamera">
+            <button id="btn-flip-cam" class="bg-surface-100 text-surface-700 px-4 py-3 rounded-xl hover:bg-surface-200 text-sm font-bold transition hidden" title="Balik kamera">
                 <i class="fas fa-sync-alt"></i>
             </button>
-            <button id="btn-start-cam" class="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-5 py-2.5 rounded-xl hover:from-primary-600 hover:to-primary-700 text-sm font-extrabold shadow-lg shadow-primary-500/25 transition">
+            <button id="btn-start-cam" class="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-6 py-3 rounded-xl hover:from-primary-600 hover:to-primary-700 text-sm font-extrabold shadow-lg shadow-primary-500/25 transition">
                 <i class="fas fa-camera mr-1"></i>Buka Kamera
             </button>
-            <button id="btn-capture" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-5 py-2.5 rounded-xl hover:from-emerald-600 hover:to-green-600 text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition hidden">
+            <button id="btn-capture" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-6 py-3 rounded-xl hover:from-emerald-600 hover:to-green-600 text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition hidden">
                 <i class="fas fa-camera-retro mr-1"></i>Ambil Foto
             </button>
-            <button id="btn-stop-cam" class="border-2 border-surface-200 px-5 py-2.5 rounded-xl text-surface-700 hover:bg-surface-50 text-sm font-bold transition hidden">
+            <button id="btn-stop-cam" class="border-2 border-surface-200 px-5 py-3 rounded-xl text-surface-700 hover:bg-surface-50 text-sm font-bold transition hidden">
                 <i class="fas fa-stop mr-1"></i>Stop
             </button>
             <span class="text-surface-300 font-bold text-sm">|</span>
-            <label class="bg-gradient-to-r from-violet-500 to-purple-500 text-white px-5 py-2.5 rounded-xl hover:from-violet-600 hover:to-purple-600 text-sm font-extrabold shadow-lg shadow-violet-500/25 transition cursor-pointer">
+            <label class="bg-gradient-to-r from-violet-500 to-purple-500 text-white px-6 py-3 rounded-xl hover:from-violet-600 hover:to-purple-600 text-sm font-extrabold shadow-lg shadow-violet-500/25 transition cursor-pointer">
                 <i class="fas fa-upload mr-1"></i>Upload File
                 <input type="file" id="file-upload" accept="image/*,.pdf" class="hidden">
             </label>
-            <button id="btn-auto" class="border-2 border-surface-200 px-3 py-2.5 rounded-xl text-sm font-bold transition hidden" title="Scan otomatis">
+            <button id="btn-auto" class="border-2 border-surface-200 px-4 py-3 rounded-xl text-sm font-bold transition hidden" title="Scan otomatis">
                 <i class="fas fa-magic mr-1"></i>Auto
             </button>
             <div class="hidden sm:flex items-center gap-2 ml-auto" id="volume-control">
                 <i class="fas fa-volume-up text-xs text-surface-400"></i>
-                <input type="range" id="scan-volume" min="0" max="100" value="80" class="w-16 h-1.5 accent-primary-500 cursor-pointer">
+                <input type="range" id="scan-volume" min="0" max="100" value="80" class="w-20 h-2 accent-primary-500 cursor-pointer">
             </div>
             <span id="scan-status" class="text-sm font-bold text-surface-500 hidden"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</span>
         </div>

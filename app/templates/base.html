@@ -23,9 +23,36 @@
     <style>
         :root { --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-hover: #f8fafc; --text: #1e293b; --text-dim: #64748b; --text-nav: #94a3b8; --border: #e2e8f0; --input: #ffffff; --input-border: #e2e8f0; --shadow: 0 1px 2px rgba(0,0,0,0.03); }
         .dark { --bg-body: #141626; --bg-card: #1e2038; --bg-hover: #282b45; --text: #e2e8f0; --text-dim: #8892b0; --text-nav: #8892b0; --border: #2d3050; --input: #232540; --input-border: #3d4168; --shadow: 0 1px 3px rgba(0,0,0,0.3); }
-        * { font-family: 'Inter', system-ui, sans-serif; }
-        body { background: var(--bg-body) !important; }
-        html { transition: background-color .3s, color .3s; }
+* { font-family: 'Inter', system-ui, sans-serif; }
+body { background: var(--bg-body) !important; }
+html { transition: background-color .3s, color .3s; }
+/* Teacher page readability — bump 1 size level */
+.teacher-content { font-size: 105%; }
+.teacher-content label { font-size: 0.9rem !important; font-weight: 700; }
+.teacher-content input, .teacher-content select, .teacher-content textarea, .teacher-content button { font-size: 0.95rem !important; }
+.teacher-content .text-xs { font-size: 0.8125rem !important; }
+.teacher-content .text-sm { font-size: 0.925rem !important; }
+.teacher-content .text-lg { font-size: 1.15rem !important; }
+.teacher-content .text-xl { font-size: 1.35rem !important; }
+.teacher-content .text-2xl { font-size: 1.65rem !important; }
+.teacher-content .text-3xl { font-size: 2rem !important; }
+.teacher-content .q-btn { width: 2.5rem !important; height: 2.5rem !important; font-size: 0.9rem !important; }
+.teacher-content .py-2 { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
+.teacher-content .py-3 { padding-top: 0.85rem !important; padding-bottom: 0.85rem !important; }
+.teacher-content .p-2 { padding: 0.65rem !important; }
+.teacher-content .p-3 { padding: 0.9rem !important; }
+.teacher-content .p-4 { padding: 1.2rem !important; }
+.teacher-content .p-5 { padding: 1.5rem !important; }
+.teacher-content .px-4 { padding-left: 1.2rem !important; padding-right: 1.2rem !important; }
+.teacher-content .gap-1 { gap: 0.35rem !important; }
+.teacher-content .gap-2 { gap: 0.55rem !important; }
+.teacher-content .gap-3 { gap: 0.85rem !important; }
+.teacher-content .gap-4 { gap: 1.2rem !important; }
+.teacher-content .w-7, .teacher-content .w-8, .teacher-content .w-9 { width: 2.6rem !important; }
+.teacher-content .h-7, .teacher-content .h-8, .teacher-content .h-9 { height: 2.6rem !important; }
+.teacher-content .w-10 { width: 3rem !important; }
+.teacher-content .h-10 { height: 3rem !important; }
+@media (max-width:640px) { .teacher-content { font-size: 110%; } }
         .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; border-radius: 0.75rem; font-weight: 600; font-size: 0.875rem; transition: all .15s; color: #94a3b8; }
         .nav-item:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
         .nav-item.active { background: rgba(59,130,246,0.15); color: #93c5fd; }
