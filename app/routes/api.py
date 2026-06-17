@@ -948,6 +948,21 @@ def ai_test_key():
     return jsonify(result)
 
 
+@api_bp.route("/ai/test-key-raw", methods=["POST"])
+@login_required
+def ai_test_key_raw():
+    """Test a raw API key (before saving to DB)."""
+    data = request.get_json() or {}
+    api_key = data.get("api_key", "")
+    provider = data.get("provider", "gemini")
+    if not api_key:
+        return jsonify({"error": "API Key tidak boleh kosong"}), 400
+    from app.services.ai_service import _test_key_internal
+    key = {"api_key": api_key, "provider": provider, "label": "Test"}
+    result = _test_key_internal(key)
+    return jsonify(result)
+
+
 @api_bp.route("/grade/ai-suggest", methods=["POST"])
 @login_required
 def ai_suggest():
