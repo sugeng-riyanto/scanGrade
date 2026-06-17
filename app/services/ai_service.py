@@ -77,10 +77,16 @@ def _parse_ai_response(raw_text):
 
 def _call_gemini(api_key, prompt):
     import google.generativeai as genai
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash-lite")
-    resp = model.generate_content(prompt)
-    return resp.text
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
+        resp = model.generate_content(prompt)
+        return resp.text
+    except Exception as e:
+        err_msg = str(e)
+        if "API_KEY_INVALID" in err_msg or "VALIDATION_ERROR" in err_msg:
+            raise ValueError("API Key tidak valid. Pastikan kamu menggunakan Gemini API Key dari aistudio.google.com/apikey (diawali AIzaSy).")
+        raise
 
 
 def _call_openai_like(api_key, prompt, base_url=None, model=None):
@@ -141,6 +147,18 @@ def test_api_key(teacher_id, key_id):
     if not res.data:
         return {"error": "Key tidak ditemukan"}
     key = res.data[0]
+    return _test_key_internal(key)
+
+
+def _test_key_internal(key):
+    """Test an API key and return result with user-friendly messages."""
+    provider = key.get("provider", "")
+    api_key = key.get("api_key", "")
+
+    # Format validation
+    if provider == "gemini" and not api_key.startswith("AIza"):
+        return {"error": "Format Gemini API Key salah. Harus diawali 'AIza...'. Kamu mendapatkan key dari halaman aistudio.google.com/apikey? (bukan Google Cloud Console)"}
+
     sample_prompt = 'Jawab dalam satu kata: Berapa 2+2? Format JSON: {"answer": <number>}'
     try:
         raw = _call_ai(key, sample_prompt)
@@ -149,7 +167,12 @@ def test_api_key(teacher_id, key_id):
             return {"success": True, "message": "✅ API Key aktif! Koneksi berhasil."}
         return {"success": True, "message": f"✅ API Key aktif. Response: {raw[:80]}"}
     except Exception as e:
-        return {"error": f"❌ Gagal: {str(e)[:120]}"}
+        err = str(e)
+        if "API key not found" in err or "API_KEY_INVALID" in err or "VALIDATION_ERROR" in err:
+            return {"error": "❌ API Key tidak valid. Untuk Gemini, gunakan key dari aistudio.google.com/apikey (diawali AIza...). Pastikan juga tidak ada spasi tambahan."}
+        if "quota" in err.lower() or "rate" in err.lower():
+            return {"error": "❌ Kuota API habis. Tunggu beberapa saat atau gunakan key lain."}
+        return {"error": f"❌ Gagal: {err[:120]}"}
 
 
 def _save_log(teacher_id, submission_id, question_index, provider, score, feedback, prompt, raw, tokens):
