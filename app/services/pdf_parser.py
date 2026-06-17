@@ -297,49 +297,26 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
 
 
 def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq") -> Dict:
-    """Generate answer key via direct Groq API call. MCQ→letter, Essay→answer."""
+    """Generate answer key — MCQ→letter, Essay→answer. Uses provider-aware _call_ai."""
     if not api_key or not questions:
         return {}
 
-    # Build question list — with diagram reference detection
+    # Build question list
     q_list = ""
     for q in questions:
         num = q.get("number", 0)
         text = (q.get("full_text") or q.get("text", ""))[:500]
-        # Detect diagram references
-        has_fig = "fig." in text.lower() or "diagram" in text.lower() or "graph" in text.lower() or "sketch" in text.lower()
+        has_fig = any(ref in text.lower() for ref in ["fig.", "diagram", "graph", "sketch", "draw"])
         ref = " [HAS DIAGRAM]" if has_fig else ""
         q_list += f"Q{num}:{ref} {text}\n\n"
-
     q_list = q_list[:15000]
 
-    prompt = f"""Answer ALL questions. MCQ→letter (A/B/C/D). Essay→concise answer.
-Questions marked [HAS DIAGRAM] include figures/diagrams not visible here. 
-For those, explain the concept and give the expected answer based on standard Cambridge knowledge.
-
-Output ONLY JSON. Example: {{"1":"A","2":"9.8 m/s²","3":"The force is proportional to extension"}}
-
-Questions:
-{q_list}"""
+    prompt = f"Answer ALL questions. MCQ→letter. Essay→concise answer. [HAS DIAGRAM]=explain concept. Output ONLY JSON.\n\n{q_list}"
 
     try:
-        import requests
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 2000,
-            },
-            timeout=30,
-        )
-        if resp.status_code != 200:
-            logger.warning("Groq API error: %d %s", resp.status_code, resp.text[:200])
-            return {}
-        data = resp.json()
-        raw = data["choices"][0]["message"]["content"]
+        from app.services.ai_service import _call_ai
+        key_dict = {"api_key": api_key, "provider": provider or "groq"}
+        raw = _call_ai(key_dict, prompt)
         cleaned = raw.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
