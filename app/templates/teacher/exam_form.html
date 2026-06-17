@@ -381,6 +381,39 @@
                                 answerKeyGenerated: d.answer_key_generated || false,
                             };
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
+                            // Auto-save PDF URL to form (always)
+                            if (d.pdf_url) {
+                                let pi = document.querySelector('input[name="pdf_preview_url"]');
+                                if (!pi) {
+                                    pi = document.createElement('input');
+                                    pi.type = 'hidden'; pi.name = 'pdf_preview_url';
+                                    document.querySelector('form').appendChild(pi);
+                                }
+                                pi.value = d.pdf_url;
+                            }
+                            // Auto-set question_types and count if available
+                            if (d.questions && d.questions.length > 0) {
+                                const tq = document.querySelector('input[name="total_questions"]');
+                                if (tq) tq.value = d.questions.length;
+                                const qtypes = {};
+                                d.questions.forEach(q => { qtypes[q.number - 1] = q.type; });
+                                let qi = document.querySelector('input[name="question_types"]');
+                                if (!qi) {
+                                    qi = document.createElement('input');
+                                    qi.type = 'hidden'; qi.name = 'question_types';
+                                    document.querySelector('form').appendChild(qi);
+                                }
+                                qi.value = JSON.stringify(qtypes);
+                                const qtxt = {};
+                                d.questions.forEach(q => { qtxt[q.number - 1] = q.text; });
+                                let qs = document.querySelector('input[name="question_texts"]');
+                                if (!qs) {
+                                    qs = document.createElement('input');
+                                    qs.type = 'hidden'; qs.name = 'question_texts';
+                                    document.querySelector('form').appendChild(qs);
+                                }
+                                qs.value = JSON.stringify(qtxt);
+                            }
                             // Fire answer key event only in AI mode
                             if (_scanData.aiClassified) {
                                 window.dispatchEvent(new CustomEvent(
