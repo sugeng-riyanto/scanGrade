@@ -176,27 +176,109 @@
                 </div>
             </div>
 
+            <!-- 📄 Persistent PDF Status Bar -->
+            <div class="mb-6 p-4 rounded-2xl border-2 transition-all duration-300"
+                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '' }"
+                 x-init="
+                    window.addEventListener('pdf-uploaded', e => {
+                        pdfStatus = 'success';
+                        pdfName = e.detail.pdfName || '';
+                        hasAI = e.detail.hasAI || false;
+                        qCount = e.detail.qCount || 0;
+                        mcqC = e.detail.mcqCount || 0;
+                        essayC = e.detail.essayCount || 0;
+                        pdfUrl = e.detail.pdfUrl || '';
+                    });
+                    window.addEventListener('pdf-error', e => { pdfStatus = 'error'; });
+                    window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; });
+                 "
+                 :class="pdfStatus === 'success' ? 'bg-emerald-50 border-emerald-300' : pdfStatus === 'error' ? 'bg-red-50 border-red-300' : 'bg-surface-50 border-surface-200 border-dashed'">
+
+                <!-- Empty state -->
+                <div x-show="pdfStatus === 'empty'" class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-surface-200 flex items-center justify-center">
+                        <i class="fas fa-file-pdf text-surface-400 text-sm"></i>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-bold text-surface-500">Belum upload PDF</p>
+                        <p class="text-[10px] text-surface-400">Upload PDF soal untuk tampilan ujian siswa</p>
+                    </div>
+                </div>
+
+                <!-- Success state -->
+                <div x-show="pdfStatus === 'success'" class="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                        <i class="fas fa-file-pdf text-emerald-600 text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm font-extrabold text-emerald-800">✅ PDF berhasil diupload</span>
+                            <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 truncate max-w-[200px]" x-text="pdfName"></span>
+                        </div>
+                        <p class="text-[10px] text-emerald-600 mt-0.5">
+                            <span x-show="hasAI"><span x-text="qCount"></span> soal terdeteksi (<span x-text="mcqC"></span> MCQ, <span x-text="essayC"></span> Essay)</span>
+                            <span x-show="!hasAI">PDF siap untuk canvas siswa</span>
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <button @click="downloadTxtFromBar(pdfUrl)" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
+                            <i class="fas fa-file-alt mr-0.5"></i>.txt
+                        </button>
+                        <button @click="downloadXlsxFromBar()" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
+                            <i class="fas fa-file-excel text-emerald-600 mr-0.5"></i>.xlsx
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Error state -->
+                <div x-show="pdfStatus === 'error'" class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+                        <i class="fas fa-exclamation-triangle text-red-500 text-sm"></i>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-bold text-red-700">Gagal upload PDF</p>
+                        <p class="text-[10px] text-red-500">Coba upload ulang atau gunakan format PDF yang valid</p>
+                    </div>
+                </div>
+            </div>
+
             <script>
             function pdfUpload() {
                 return {
                     loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '', applied: false,
                     async uploadPDF(file) {
                         if (!file) return;
-                        if (file.type !== 'application/pdf') { this.errorMsg = 'Hanya file PDF yang didukung'; return; }
+                        if (file.type !== 'application/pdf') { this.errorMsg = 'Hanya file PDF yang didukung'; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
                         this.loading = true; this.preview = ''; this.questions = []; this.errorMsg = '';
                         const fd = new FormData(); fd.append('pdf', file);
                         try {
                             const r = await fetch('/teacher/exams/parse-pdf', { method: 'POST', body: fd });
                             const d = await r.json();
-                            if (d.error) { this.errorMsg = d.error; this.loading = false; return; }
+                            if (d.error) { this.errorMsg = d.error; this.loading = false; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
                             this.preview = d.preview_html;
                             this.questions = d.questions || [];
                             this.mcqCount = d.mcq_count;
                             this.essayCount = d.essay_count;
                             this.pdfUrl = d.pdf_url || '';
                             this.pdfId = d.pdf_id || '';
-                        } catch(e) { this.errorMsg = 'Gagal terhubung ke server: ' + e.message; }
+                            // Broadcast status to persistent bar
+                            _scanData = {
+                                pdfName: file.name,
+                                hasAI: !!(d.questions?.length),
+                                qCount: d.questions?.length || 0,
+                                mcqCount: d.mcq_count || 0,
+                                essayCount: d.essay_count || 0,
+                                pdfUrl: d.pdf_url || '',
+                                _questions: d.questions || [],
+                            };
+                            window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
+                        } catch(e) { this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
                         finally { this.loading = false; }
+                    },
+                    reset() {
+                        this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0;
+                        this.pdfUrl = ''; this.applied = false; this.errorMsg = '';
+                        window.dispatchEvent(new CustomEvent('pdf-reset'));
                     },
                     downloadTxt() {
                         let txt = '=== HASIL SCAN AI ===\n';
@@ -267,11 +349,38 @@
                         }
                         this.applied = true;
                     },
-                    reset() { this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0; this.pdfUrl = ''; this.applied = false; }
+                    reset() { this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0; this.pdfUrl = ''; this.applied = false; this.errorMsg = ''; window.dispatchEvent(new CustomEvent('pdf-reset')); }
                 };
             }
+
+            /* Global download helpers for status bar */
+            let _scanData = null;
+            window.addEventListener('pdf-uploaded', e => { _scanData = e.detail; });
+            function downloadTxtFromBar() {
+                if (!_scanData) return;
+                let txt = '=== HASIL SCAN AI ===\n';
+                txt += `Total: ${_scanData.qCount} soal (${_scanData.mcqCount} MCQ, ${_scanData.essayCount} Essay)\n\n`;
+                txt += 'Hasil deteksi AI. Gunakan file .xlsx untuk data lengkap.\n';
+                const blob = new Blob([txt], {type: 'text/plain'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.txt`;
+                a.click();
+            }
+            function downloadXlsxFromBar() {
+                if (!_scanData) return;
+                fetch('/teacher/exams/export-scan', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({questions: _scanData._questions || [], format: 'xlsx'})
+                }).then(r => r.ok ? r.blob() : Promise.reject()).then(blob => {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.xlsx`;
+                    a.click();
+                }).catch(() => alert('Gagal download XLSX'));
+            }
             </script>
-            </div><!-- end PDF upload card (AI mode) -->
 
             <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
                 <div class="card p-6 space-y-4">
