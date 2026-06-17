@@ -432,6 +432,7 @@
             function downloadMarkdown(fmt) {
                 if (!_scanData || !_scanData.markdown) { alert('Upload PDF dulu'); return; }
                 const ext = fmt === 'qmd' ? '.qmd' : '.md';
+                const base = (_scanData.pdfName || 'exam').replace('.pdf', '');
                 let content = _scanData.markdown;
                 if (fmt === 'qmd') {
                     content = `---\ntitle: "Exam Paper"\nformat:\n  html:\n    toc: true\n  pdf:\n    toc: true\n    papersize: a4\n---\n\n${_scanData.markdown}`;
@@ -439,12 +440,13 @@
                 const blob = new Blob([content], {type: 'text/markdown;charset=utf-8'});
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = (_scanData.pdfName || 'exam').replace('.pdf', ext);
+                a.download = `convert_${base}${ext}`;
                 a.click();
             }
             function downloadAnswerKey(fmt) {
                 if (!_scanData || !_scanData.answerKeyGenerated) { alert('Kunci jawaban belum tersedia'); return; }
                 const ext = fmt === 'qmd' ? '.qmd' : '.md';
+                const base = (_scanData.pdfName || 'exam').replace('.pdf', '');
                 let txt = '# Answer Key\n\n';
                 for (const [q, ans] of Object.entries(_scanData.answerKey)) {
                     txt += `**${q}.** ${ans}\n\n`;
