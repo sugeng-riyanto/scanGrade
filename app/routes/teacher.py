@@ -586,7 +586,7 @@ def exam_form():
             supabase.table("submissions").update({"is_published": True, "status": "published"}).eq("exam_id", exam_id).execute()
         except Exception:
             pass
-    return redirect(f"/teacher/exams/{exam_id}")
+    return redirect("/teacher/exams" if action == "publish" else f"/teacher/exams/{exam_id}")
 
 
 @teacher_bp.route("/exams/<exam_id>", methods=["GET", "POST", "DELETE"])
@@ -743,7 +743,7 @@ def exam_detail(exam_id):
 
     _recalculate_scores(exam_id)
     log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
-    return redirect(f"/teacher/exams/{exam_id}")
+    return redirect("/teacher/exams" if action in ("publish", "save_active") else f"/teacher/exams/{exam_id}")
 
 
 @teacher_bp.route("/exams/<exam_id>/preprocess-essays", methods=["POST"])
