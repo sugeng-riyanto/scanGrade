@@ -220,10 +220,11 @@ def _test_key_internal(key):
         return {"success": True, "message": f"✅ API Key aktif. Response: {raw[:80]}"}
     except Exception as e:
         err = str(e)
-        # Try REST API for better error
-        rest_err = _test_gemini_rest(api_key)
-        if rest_err:
-            return {"error": rest_err}
+        # Try REST API for better error (Gemini only)
+        if provider == "gemini":
+            rest_err = _test_gemini_rest(api_key)
+            if rest_err:
+                return {"error": rest_err}
         if "VALIDATION_ERROR" in err or "API_KEY_INVALID" in err:
             return {"error": "❌ API Key tidak valid. Ikuti langkah Enable di panduan langkah 3."}
         return {"error": f"❌ Gagal: {err[:150]}"}
