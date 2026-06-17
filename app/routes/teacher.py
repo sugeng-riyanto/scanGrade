@@ -1,4 +1,5 @@
 import json
+import io
 from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
@@ -253,6 +254,57 @@ def exam_parse_pdf():
     except Exception as e:
         current_app.logger.error("parse-pdf error: %s", e, exc_info=True)
         return jsonify({"error": f"Gagal memproses PDF: {str(e)[:200]}"}), 500
+
+
+@teacher_bp.route("/exams/export-scan", methods=["POST"])
+@teacher_or_admin_required
+def export_scan_results():
+    """Export AI scan results as XLSX."""
+    data = request.get_json() or {}
+    questions = data.get("questions", [])
+    fmt = data.get("format", "xlsx")
+
+    if not questions:
+        return jsonify({"error": "Tidak ada data"}), 400
+
+    if fmt == "xlsx":
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Scan AI"
+
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+        thin = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+
+        headers = ["No", "Tipe", "Teks Soal", "Rubrik"]
+        for col, h in enumerate(headers, 1):
+            c = ws.cell(row=1, column=col, value=h)
+            c.font = header_font; c.fill = header_fill; c.alignment = Alignment(horizontal="center"); c.border = thin
+
+        for i, q in enumerate(questions, 1):
+            rubric_text = ""
+            if q.get("rubric"):
+                rubric_text = "; ".join(f"{r.get('kriteria','')} ({r.get('bobot',0)}%)" for r in q["rubric"])
+            row = [i, "MCQ" if q.get("type") == "mcq" else "Essay", q.get("text", ""), rubric_text]
+            for col, val in enumerate(row, 1):
+                c = ws.cell(row=i + 1, column=col, value=val)
+                c.border = thin
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+
+        ws.column_dimensions["A"].width = 5
+        ws.column_dimensions["B"].width = 10
+        ws.column_dimensions["C"].width = 60
+        ws.column_dimensions["D"].width = 50
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        as_attachment=True, download_name="scan_ai.xlsx")
+
+    return jsonify({"error": "Format tidak didukung"}), 400
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])

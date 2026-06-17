@@ -124,35 +124,87 @@
                                 class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-primary-300/30 transition-all active:scale-95">
                             <i class="fas fa-check-circle"></i> Terapkan Ke Form
                         </button>
+                        <button @click="downloadTxt()"
+                                class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
+                            <i class="fas fa-file-alt"></i> .txt
+                        </button>
+                        <button @click="downloadXlsx()"
+                                class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
+                            <i class="fas fa-file-excel text-emerald-600"></i> .xlsx
+                        </button>
                         <button @click="reset()"
                                 class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
                             <i class="fas fa-redo"></i> Upload Ulang
                         </button>
                     </div>
                 </div>
+
+                <!-- Error state -->
+                <div x-show="errorMsg" class="mt-4 p-4 rounded-xl bg-red-50 border border-red-200 flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <i class="fas fa-exclamation-circle text-red-500 text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-bold text-red-800">Gagal memproses PDF</p>
+                        <p class="text-xs text-red-600 mt-0.5" x-text="errorMsg"></p>
+                    </div>
+                    <button @click="errorMsg = ''; loading = false" class="text-red-400 hover:text-red-600 shrink-0">&times;</button>
+                </div>
             </div>
 
             <script>
             function pdfUpload() {
                 return {
-                    loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '',
+                    loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '',
                     async uploadPDF(file) {
                         if (!file) return;
-                        if (file.type !== 'application/pdf') { alert('Hanya file PDF'); return; }
-                        this.loading = true; this.preview = ''; this.questions = [];
+                        if (file.type !== 'application/pdf') { this.errorMsg = 'Hanya file PDF yang didukung'; return; }
+                        this.loading = true; this.preview = ''; this.questions = []; this.errorMsg = '';
                         const fd = new FormData(); fd.append('pdf', file);
                         try {
                             const r = await fetch('/teacher/exams/parse-pdf', { method: 'POST', body: fd });
                             const d = await r.json();
-                            if (d.error) { alert(d.error); return; }
+                            if (d.error) { this.errorMsg = d.error; this.loading = false; return; }
                             this.preview = d.preview_html;
                             this.questions = d.questions || [];
                             this.mcqCount = d.mcq_count;
                             this.essayCount = d.essay_count;
                             this.pdfUrl = d.pdf_url || '';
                             this.pdfId = d.pdf_id || '';
-                        } catch(e) { alert('Gagal: ' + e.message); }
+                        } catch(e) { this.errorMsg = 'Gagal terhubung ke server: ' + e.message; }
                         finally { this.loading = false; }
+                    },
+                    downloadTxt() {
+                        let txt = '=== HASIL SCAN AI ===\n';
+                        txt += `Total: ${this.questions.length} soal (${this.mcqCount} MCQ, ${this.essayCount} Essay)\n\n`;
+                        this.questions.forEach(q => {
+                            const label = q.type === 'mcq' ? 'Pilihan Ganda' : 'Esai';
+                            txt += `${q.number}. [${label}] ${q.text}\n`;
+                            if (q.rubric && q.rubric.length) {
+                                txt += `   Rubrik: ${q.rubric.map(r => r.kriteria).join(', ')}\n`;
+                            }
+                            txt += '\n';
+                        });
+                        const blob = new Blob([txt], {type: 'text/plain'});
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.txt`;
+                        a.click();
+                    },
+                    async downloadXlsx() {
+                        try {
+                            const r = await fetch('/teacher/exams/export-scan', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({questions: this.questions, format: 'xlsx'})
+                            });
+                            if (!r.ok) { alert('Gagal download'); return; }
+                            const blob = await r.blob();
+                            const a = document.createElement('a');
+                            a.href = URL.createObjectURL(blob);
+                            a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.xlsx`;
+                            a.click();
+                        } catch(e) { alert('Gagal: ' + e.message); }
                     },
                     applyToForm() {
                         const total = this.questions.length;
