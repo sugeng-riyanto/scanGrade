@@ -760,6 +760,8 @@ def exam_detail(exam_id):
                 current_app.logger.info("PDF processed for exam %s: %d pages", exam_id, result["total_pages"])
             else:
                 current_app.logger.warning("PDF temp file not found for exam %s: %s", exam_id, pdf_preview)
+        except Exception as e:
+            current_app.logger.warning("PDF processing failed for exam %s: %s", exam_id, e)
 
     _recalculate_scores(exam_id)
     log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
