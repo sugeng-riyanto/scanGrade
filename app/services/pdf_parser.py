@@ -297,68 +297,56 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
 
 
 def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq") -> Dict:
-    """Generate answer key — MCQ = A/B/C/D, Essay = model answer. Processed in batches of 25."""
+    """Generate answer key — answers ALL questions from markdown. No classification needed."""
     if not api_key or not questions:
         return {}
 
-    mcq_qs = [q for q in questions if q.get("type") == "mcq"]
-    essay_qs = [q for q in questions if q.get("type") != "mcq"]
-    result = {}
+    # Build question list — just numbers + text, no type info
+    q_list = ""
+    for q in questions:
+        num = q.get("number", 0)
+        text = (q.get("full_text") or q.get("text", ""))[:500]
+        q_list += f"Q{num}: {text}\n\n"
 
-    # Process MCQ in batches of 25
-    for i in range(0, len(mcq_qs), 25):
-        batch = mcq_qs[i:i + 25]
-        chunk = ""
-        for q in batch:
-            chunk += f"Q{q['number']}: {q.get('full_text', q.get('text', ''))}\n\n"
+    q_list = q_list[:25000]
 
-        prompt = f"You are a Cambridge examiner. For EACH MCQ below, output ONLY the correct letter (A/B/C/D). No text, no explanations.\n\nExample:\n{{\"1\": \"A\", \"2\": \"C\", \"3\": \"B\"}}\n\nQuestions:\n{chunk}\n\nOutput ONLY a JSON object."
+    prompt = f"""Answer ALL questions below. 
 
-        try:
-            from app.services.ai_service import _call_ai
-            raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
-            cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-            parsed = json.loads(cleaned.strip())
-            if isinstance(parsed, dict):
-                for k, v in parsed.items():
-                    if str(v) in ("A", "B", "C", "D"):
-                        result[str(k)] = str(v)
-        except Exception as e:
-            logger.warning("MCQ batch %d failed: %s", i, e)
+For EACH question:
+- If it's multiple choice (has A/B/C/D options): answer with ONLY the letter (A, B, C, or D)
+- If it's a written/essay question: provide a concise answer (1-2 lines)
 
-    # Essay in one batch
-    if essay_qs:
-        chunk = ""
-        for q in essay_qs:
-            chunk += f"Question {q['number']}: {q.get('full_text', q.get('text', ''))}\n\n"
-        prompt = f"""You are a Cambridge examiner. For each essay/structured question below, provide a model answer (1-3 key points, concise).
-Output ONLY a JSON object where keys are question numbers and values are model answers.
-Use English only.
+Output ONLY a JSON object with question numbers as keys and answers as values.
 
 Example:
-{{"1": "Acceleration = force / mass = 20/5 = 4 m/s²", "2": "The gradient represents velocity."}}
+{{"1": "A", "2": "C", "3": "Photosynthesis converts light energy to chemical energy."}}
 
 Questions:
-{chunk}
+{q_list}
 
 Output ONLY JSON:"""
-        try:
-            from app.services.ai_service import _call_ai
-            raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
-            cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-            parsed = json.loads(cleaned.strip())
-            if isinstance(parsed, dict):
-                for k, v in parsed.items():
-                    if k not in result:
-                        result[str(k)] = str(v)[:200]
-        except Exception as e:
-            logger.warning("Essay batch failed: %s", e)
 
-    return result
+    try:
+        from app.services.ai_service import _call_ai
+        raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+        parsed = json.loads(cleaned.strip())
+        if isinstance(parsed, dict):
+            # Validate: MCQ answers must be A/B/C/D, essay answers are text
+            result = {}
+            for k, v in parsed.items():
+                sv = str(v).strip()
+                if sv in ("A", "B", "C", "D"):
+                    result[str(k)] = sv  # MCQ: letter only
+                elif sv and len(sv) > 1:
+                    result[str(k)] = sv[:200]  # Essay: truncated text
+            return result
+    except Exception as e:
+        logger.warning("Answer key failed (all-in-one): %s", e)
+
+    return {}
 
 
 def generate_preview_html(parsed: Dict) -> str:
