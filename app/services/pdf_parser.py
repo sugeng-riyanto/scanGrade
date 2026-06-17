@@ -268,7 +268,7 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
     return "mcq" if score <= 0 else "essay"
 
 
-def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None) -> Dict:
+def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq") -> Dict:
     """Generate answer key from full markdown — MCQ correct answers + essay model answers.
     Returns dict: {question_number: "A"|"B"|"C"|"D"|model_answer_text}
     """
@@ -303,7 +303,7 @@ Questions:
 
     try:
         from app.services.ai_service import _call_ai
-        raw = _call_ai({"api_key": api_key, "provider": "groq"}, prompt)
+        raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
         cleaned = raw.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]

@@ -220,6 +220,7 @@ def exam_parse_pdf():
         # Step 2: Try AI classification using teacher's Groq key, then heuristic fallback
         questions = None
         ai_used = False
+        key = None
         try:
             from app.services.ai_service import _get_active_key
             key = _get_active_key(g.user_id)
@@ -241,19 +242,27 @@ def exam_parse_pdf():
         parsed["mcq_count"] = sum(1 for q in questions if q.get("type") == "mcq")
         parsed["essay_count"] = sum(1 for q in questions if q.get("type") == "essay")
 
-        # Step 3: Generate answer key via AI (MCQ correct answers)
+        # Step 3: Generate answer key via AI
         answer_key_generated = False
         answer_key = {}
         try:
             if key and key.get("api_key"):
                 from app.services.pdf_parser import generate_answer_key
+                current_app.logger.info("Generating answer key with provider: %s", key.get("provider"))
                 ak = generate_answer_key(
-                    parsed["markdown"], questions, api_key=key["api_key"])
+                    parsed["markdown"], questions,
+                    api_key=key["api_key"],
+                    provider=key.get("provider", "groq"))
                 if ak and len(ak) > 0:
                     answer_key = ak
                     answer_key_generated = True
+                    current_app.logger.info("Answer key generated: %d answers", len(ak))
+                else:
+                    current_app.logger.warning("Answer key returned empty")
+            else:
+                current_app.logger.warning("No API key available for answer key generation")
         except Exception as e:
-            current_app.logger.warning("Answer key gen skipped: %s", e)
+            current_app.logger.error("Answer key gen error: %s", e, exc_info=True)
 
         # Step 4: Save PDF for exam canvas
         pdf_url = ""
