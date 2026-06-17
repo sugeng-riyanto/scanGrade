@@ -22,3 +22,4 @@ celery_app.conf.update(
 
 # Import task modules to register them with Celery
 import app.services.omr_tasks  # noqa: register OMR tasks
+import app.services.ai_grading  # noqa: register AI grading (for future async tasks)

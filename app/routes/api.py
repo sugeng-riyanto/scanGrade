@@ -1248,3 +1248,63 @@ def _generate_report_excel(exam, students, stats):
         as_attachment=True,
         download_name=f"laporan_{title_slug}.xlsx",
     )
+
+
+# ── AI Essay Grading API ──
+
+@api_bp.route("/ai/grade-essay", methods=["POST"])
+@login_required
+def ai_grade_essay():
+    """Grade a single essay answer."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    submission_id = data.get("submission_id")
+    question_index = data.get("question_index", 0)
+    question_text = data.get("question_text", "")
+    student_answer = data.get("student_answer", "")
+    max_score = int(data.get("max_score", 100))
+    rubric = data.get("rubric", "")
+    diagram_context = data.get("diagram_context", "")
+
+    if not student_answer:
+        return jsonify({"error": "Tidak ada jawaban siswa"}), 400
+
+    from app.services.ai_grading import grade_essay as ai_grade
+    result = ai_grade(
+        teacher_id=g.user_id,
+        submission_id=submission_id,
+        question_index=question_index,
+        question_text=question_text,
+        student_answer=student_answer,
+        max_score=max_score,
+        rubric=rubric,
+        diagram_context=diagram_context,
+    )
+    if "error" in result:
+        return jsonify(result), 422
+    return jsonify(result)
+
+
+@api_bp.route("/ai/grade-bulk", methods=["POST"])
+@login_required
+def ai_grade_bulk():
+    """Grade all pending essay questions for an exam or submission list."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    exam_id = data.get("exam_id")
+    submission_ids = data.get("submission_ids")
+
+    if not exam_id:
+        return jsonify({"error": "exam_id required"}), 400
+
+    from app.services.ai_grading import grade_bulk_essays
+    result = grade_bulk_essays(
+        teacher_id=g.user_id,
+        exam_id=exam_id,
+        submission_ids=submission_ids,
+    )
+    return jsonify(result)
