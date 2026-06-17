@@ -198,7 +198,7 @@
 
             <!-- 📄 Persistent PDF Status Bar -->
             <div class="mb-6 p-4 rounded-2xl border-2 transition-all duration-300"
-                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '', aiClassified: false }"
+                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '', aiClassified: false, generatingKey: false, keyGenerated: false, keyFailed: false }"
                  x-init="
                     window.addEventListener('pdf-uploaded', e => {
                         pdfStatus = 'success';
@@ -209,9 +209,12 @@
                         essayC = e.detail.essayCount || 0;
                         pdfUrl = e.detail.pdfUrl || '';
                         aiClassified = e.detail.aiClassified || false;
+                        if (e.detail.hasAI) { generatingKey = true; keyGenerated = false; keyFailed = false; }
                     });
+                    window.addEventListener('key-done', e => { generatingKey = false; keyGenerated = true; });
+                    window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; });
                     window.addEventListener('pdf-error', e => { pdfStatus = 'error'; });
-                    window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; });
+                    window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; generatingKey = false; keyGenerated = false; keyFailed = false; });
                  "
                  :class="pdfStatus === 'success' ? 'bg-emerald-50 border-emerald-300' : pdfStatus === 'error' ? 'bg-red-50 border-red-300' : 'bg-surface-50 border-surface-200 border-dashed'">
 
@@ -241,11 +244,24 @@
                             <span x-show="!hasAI">PDF siap untuk canvas siswa</span>
                             <span x-show="hasAI && aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-700 border border-primary-200">AI</span>
                             <span x-show="hasAI && !aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Heuristic</span>
+                            <!-- Answer key generation status -->
+                            <span x-show="generatingKey" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 animate-pulse">
+                                <i class="fas fa-spinner fa-spin mr-0.5"></i>Membuat kunci jawaban...
+                            </span>
+                            <span x-show="keyGenerated" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                <i class="fas fa-check mr-0.5"></i>Kunci siap
+                            </span>
+                            <span x-show="keyFailed" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200">
+                                <i class="fas fa-times mr-0.5"></i>Kunci gagal
+                            </span>
                         </p>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <button @click="downloadMarkdown()" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
-                            <i class="fas fa-file-alt mr-0.5"></i>.md
+                        <button @click="downloadMarkdown()" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition" title="Download Markdown (.md)">
+                            <i class="fas fa-file-alt mr-0.5"></i><span class="hidden sm:inline">.md</span>
+                        </button>
+                        <button @click="downloadQmd()" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition" title="Download Quarto (.qmd)">
+                            <i class="fas fa-file-code mr-0.5"></i><span class="hidden sm:inline">.qmd</span>
                         </button>
                     </div>
                 </div>
@@ -296,8 +312,14 @@
                                 _questions: d.questions || [],
                                 aiClassified: d.ai_classified || false,
                                 markdown: d.markdown || '',
+                                answerKey: d.answer_key || {},
+                                answerKeyGenerated: d.answer_key_generated || false,
                             };
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
+                            // Fire answer key event
+                            window.dispatchEvent(new CustomEvent(
+                                d.answer_key_generated ? 'key-done' : 'key-failed'
+                            ));
                         } catch(e) { this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
                         finally { this.loading = false; }
                     },
@@ -355,6 +377,15 @@
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
                 a.download = (_scanData.pdfName || 'exam').replace('.pdf', '.md');
+                a.click();
+            }
+            function downloadQmd() {
+                if (!_scanData || !_scanData.markdown) { alert('Upload PDF dulu'); return; }
+                const qmd = `---\ntitle: "Exam Paper"\nformat:\n  html:\n    toc: true\n  pdf:\n    toc: true\n    papersize: a4\n---\n\n${_scanData.markdown}`;
+                const blob = new Blob([qmd], {type: 'text/markdown;charset=utf-8'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = (_scanData.pdfName || 'exam').replace('.pdf', '.qmd');
                 a.click();
             }
             </script>
