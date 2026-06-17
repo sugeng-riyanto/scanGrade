@@ -11,17 +11,24 @@ logger = logging.getLogger("app")
 
 
 def pdf_to_markdown(file_bytes: bytes) -> Dict:
-    """Extract ALL text from PDF using pdftotext -layout (best quality)."""
+    """Extract ALL text from PDF using pdftotext -layout. Verifies page count vs PyMuPDF."""
+    expected_pages = 0
+    try:
+        import fitz
+        pdf_check = fitz.open(stream=file_bytes, filetype="pdf")
+        expected_pages = len(pdf_check)
+        pdf_check.close()
+    except:
+        pass
+
     pages_raw = []
     total_pages = 0
 
-    # Save PDF to temp file for pdftotext
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(file_bytes)
         pdf_path = tmp.name
 
     try:
-        # Use pdftotext with -layout to preserve structure
         result = subprocess.run(
             ["pdftotext", "-layout", pdf_path, "-"],
             capture_output=True, text=True, timeout=30
@@ -29,24 +36,30 @@ def pdf_to_markdown(file_bytes: bytes) -> Dict:
         if result.returncode == 0:
             full_text = result.stdout
         else:
-            raise RuntimeError(f"pdftotext error: {result.stderr}")
+            raise RuntimeError("pdftotext error: " + str(result.stderr))
     except FileNotFoundError:
         logger.warning("pdftotext not installed, falling back to PyMuPDF")
+        os.unlink(pdf_path)
         return _fallback_fitz(file_bytes)
     except Exception as e:
-        logger.error("pdftotext failed: %s", e)
+        logger.warning("pdftotext failed: %s, falling back to PyMuPDF", e)
+        os.unlink(pdf_path)
         return _fallback_fitz(file_bytes)
-    finally:
-        try:
-            os.unlink(pdf_path)
-        except:
-            pass
 
-    # Split into pages by form feed character
+    try:
+        os.unlink(pdf_path)
+    except:
+        pass
+
     pages_raw = full_text.split("\f")
-
-    # Count actual pages (pdftotext separates with \f)
     total_pages = len(pages_raw)
+
+    # Verify page count
+    if expected_pages and total_pages < expected_pages:
+        logger.warning(
+            "pdftotext: %d pages vs PyMuPDF: %d — using fallback",
+            total_pages, expected_pages)
+        return _fallback_fitz(file_bytes)
     pages_md = []
 
     for idx, page_text in enumerate(pages_raw):
