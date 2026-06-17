@@ -308,7 +308,7 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
         text = (q.get("full_text") or q.get("text", ""))[:500]
         q_list += f"Q{num}: {text}\n\n"
 
-    q_list = q_list[:25000]
+    q_list = q_list[:15000]
 
     prompt = f"""Answer ALL questions below. For each: MCQ → letter (A/B/C/D), Essay → concise answer. Output JSON only.
 
@@ -324,11 +324,15 @@ Questions:
                 "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 4000,
+                "max_tokens": 2000,
             },
-            timeout=60,
+            timeout=30,
         )
-        raw = resp.json()["choices"][0]["message"]["content"]
+        if resp.status_code != 200:
+            logger.warning("Groq API error: %d %s", resp.status_code, resp.text[:200])
+            return {}
+        data = resp.json()
+        raw = data["choices"][0]["message"]["content"]
         cleaned = raw.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
