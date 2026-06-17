@@ -128,14 +128,13 @@ def pdf_to_markdown(file_bytes: bytes) -> Dict:
             md_lines.append(f"$$ {eq} $$")
             md_lines.append("")
 
-        # Build page markdown
+        # Build clean page text
         page_md = "\n".join(md_lines)
         page_md = re.sub(r'\n{4,}', '\n\n\n', page_md)
 
-        sep = "\\newpage\n" if idx > 0 else ""
-        pages_md.append(f"{sep}## Page {idx + 1}\n\n{page_md}")
+        pages_md.append(page_md)
 
-    markdown = "# Exam Paper\n\n" + "\n".join(pages_md)
+    markdown = "\n\n---\n\n".join(pages_md)
 
     return {
         "markdown": markdown,
@@ -174,10 +173,10 @@ def _fallback_fitz(file_bytes: bytes) -> Dict:
                 md.append(s)
             else:
                 md.append(s)
-        pages_md.append(("\\newpage\n" if i > 0 else "") + f"## Page {i+1}\n\n" + "\n".join(md))
+        pages_md.append("\n".join(md))
     pdf.close()
     return {
-        "markdown": "# Exam Paper\n\n" + "\n".join(pages_md),
+        "markdown": "\n\n---\n\n".join(pages_md),
         "raw_text": raw_text, "pages": pages_md,
         "page_count": len(pdf), "images": [],
         "questions": [], "mcq_count": 0, "essay_count": 0,
