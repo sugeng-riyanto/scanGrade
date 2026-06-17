@@ -211,7 +211,7 @@
 
             <!-- 📄 Persistent PDF Status Bar -->
             <div class="mb-6 p-4 rounded-2xl border-2 transition-all duration-300"
-                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '', aiClassified: false, generatingKey: false, keyGenerated: false, keyFailed: false, keyError: '' }"
+                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, pdfUrl: '', aiClassified: false, generatingKey: false, keyGenerated: false, keyFailed: false, keyError: '' }"
                  x-init="
                     window.addEventListener('pdf-uploaded', e => {
                         pdfStatus = 'success';
@@ -253,7 +253,7 @@
                             <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 truncate max-w-[200px]" x-text="pdfName"></span>
                         </div>
                         <p class="text-[10px] text-emerald-600 mt-0.5">
-                            <span x-show="hasAI"><span x-text="qCount"></span> soal terdeteksi (<span x-text="mcqC"></span> MCQ, <span x-text="essayC"></span> Essay)</span>
+                            <span x-show="hasAI"><span x-text="qCount"></span> soal terdeteksi</span>
                             <span x-show="!hasAI">PDF siap untuk canvas siswa</span>
                             <span x-show="hasAI && aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-700 border border-primary-200">AI</span>
                             <span x-show="hasAI && !aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Heuristic</span>
