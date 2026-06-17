@@ -1,5 +1,6 @@
 import json
 import io
+import os
 from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
@@ -565,9 +566,17 @@ def exam_form():
     if pdf_preview and not pdf_preview.startswith("http") and not (pdf_file and pdf_file.filename):
         try:
             local_path = os.path.join(current_app.root_path, "static", "uploads", "exams", os.path.basename(pdf_preview))
+            pdf_bytes = None
             if os.path.exists(local_path):
                 with open(local_path, "rb") as f:
                     pdf_bytes = f.read()
+            else:
+                # Try alternative: maybe root_path is project root, not app/
+                alt_path = os.path.join(os.path.dirname(current_app.root_path), "static", "uploads", "exams", os.path.basename(pdf_preview))
+                if os.path.exists(alt_path):
+                    with open(alt_path, "rb") as f:
+                        pdf_bytes = f.read()
+            if pdf_bytes:
                 from app.services.pdf_service import upload_pdf
                 class _MF:
                     def __init__(self, d, n): self._d = d; self.filename = n
@@ -577,8 +586,12 @@ def exam_form():
                     "pdf_url": result["pdf_path"],
                     "pdf_page_urls": result["page_urls"],
                 }).eq("id", exam_id).execute()
+                current_app.logger.info("PDF processed for exam %s: %d pages", exam_id, result["total_pages"])
+            else:
+                current_app.logger.warning("PDF temp file not found for exam %s: %s", exam_id, pdf_preview)
         except Exception as e:
             current_app.logger.warning(f"PDF preview processing failed: {e}")
+            flash("PDF gagal diproses untuk canvas siswa. Upload ulang PDF setelah menyimpan.", "warning")
     # If action is publish, also publish scores automatically
     if action == "publish":
         try:
@@ -723,9 +736,16 @@ def exam_detail(exam_id):
     if pdf_preview and not pdf_preview.startswith("http"):
         try:
             local_path = os.path.join(current_app.root_path, "static", "uploads", "exams", os.path.basename(pdf_preview))
+            pdf_bytes = None
             if os.path.exists(local_path):
                 with open(local_path, "rb") as f:
                     pdf_bytes = f.read()
+            else:
+                alt_path = os.path.join(os.path.dirname(current_app.root_path), "static", "uploads", "exams", os.path.basename(pdf_preview))
+                if os.path.exists(alt_path):
+                    with open(alt_path, "rb") as f:
+                        pdf_bytes = f.read()
+            if pdf_bytes:
                 from app.services.pdf_service import upload_pdf
                 class MockFile:
                     def __init__(self, data, name):
@@ -738,8 +758,8 @@ def exam_detail(exam_id):
                     "pdf_page_urls": result["page_urls"],
                 }).eq("id", exam_id).execute()
                 current_app.logger.info("PDF processed for exam %s: %d pages", exam_id, result["total_pages"])
-        except Exception as e:
-            current_app.logger.warning("PDF processing failed for exam %s: %s", exam_id, e)
+            else:
+                current_app.logger.warning("PDF temp file not found for exam %s: %s", exam_id, pdf_preview)
 
     _recalculate_scores(exam_id)
     log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
@@ -1783,3 +1803,93 @@ def teacher_classes():
         except: pass
     return render_template("teacher/classes.html", assignments=assignments,
                            school_info=school_info, active_year=active_year)
+
+
+@teacher_bp.route("/tools/exam/<exam_id>/check-pdf", methods=["GET"])
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def exam_check_pdf(exam_id):
+    """Diagnostic endpoint: returns exam's PDF fields and file status."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("id,pdf_url,pdf_page_urls,title,status,answer_key").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "not found"}), 404
+    page_urls = exam.get("pdf_page_urls") or []
+    pdf_url = exam.get("pdf_url") or ""
+    exam_dir = os.path.join(current_app.root_path, "static", "uploads", "exams", exam_id)
+    files_on_disk = []
+    if os.path.isdir(exam_dir):
+        files_on_disk = os.listdir(exam_dir)
+    return jsonify({
+        "exam_id": exam_id,
+        "title": exam.get("title"),
+        "status": exam.get("status"),
+        "pdf_url": pdf_url,
+        "pdf_page_urls_count": len(page_urls),
+        "pdf_page_urls": page_urls[:3],
+        "has_valid_pages": len(page_urls) > 0,
+        "files_in_exam_dir": files_on_disk,
+        "exam_dir": exam_dir,
+        "root_path": current_app.root_path,
+    })
+
+
+@teacher_bp.route("/tools/exam/<exam_id>/reprocess-pdf", methods=["POST"])
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def exam_reprocess_pdf(exam_id):
+    """Reprocess PDF for existing exam: regenerate local page images."""
+    from app.services.pdf_service import upload_pdf
+
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("pdf_url,pdf_page_urls,title").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "not found"}), 404
+
+    # Strategy 1: local exam.pdf already exists → regenerate from that
+    local_pdf = os.path.join(current_app.root_path, "static", "uploads", "exams", exam_id, "exam.pdf")
+    if os.path.exists(local_pdf):
+        try:
+            with open(local_pdf, "rb") as f:
+                raw = f.read()
+            if raw[:4] == b'%PDF':
+                class _MF:
+                    def __init__(self, d, n): self._d = d; self.filename = n
+                    def read(self): return self._d
+                result = upload_pdf(_MF(raw, "exam.pdf"), exam_id)
+                supabase.table("exams").update({
+                    "pdf_url": result["pdf_path"],
+                    "pdf_page_urls": result["page_urls"],
+                }).eq("id", exam_id).execute()
+                return jsonify({"success": True, "source": "local_pdf", "pages": result["total_pages"]})
+        except Exception as e:
+            current_app.logger.warning("Reprocess from local PDF failed: %s", e)
+
+    # Strategy 2: look for temp files in uploads/exams
+    upload_dir = os.path.join(current_app.root_path, "static", "uploads", "exams")
+    if os.path.isdir(upload_dir):
+        temp_files = sorted(
+            [os.path.join(upload_dir, f) for f in os.listdir(upload_dir)
+             if f.startswith("temp_") and f.endswith(".pdf")],
+            key=os.path.getmtime, reverse=True
+        )
+        for fp in temp_files:
+            try:
+                with open(fp, "rb") as f:
+                    raw = f.read()
+                if raw[:4] != b'%PDF':
+                    continue
+                class _MF:
+                    def __init__(self, d, n): self._d = d; self.filename = n
+                    def read(self): return self._d
+                result = upload_pdf(_MF(raw, "exam.pdf"), exam_id)
+                supabase.table("exams").update({
+                    "pdf_url": result["pdf_path"],
+                    "pdf_page_urls": result["page_urls"],
+                }).eq("id", exam_id).execute()
+                return jsonify({"success": True, "source": "temp_file", "file": os.path.basename(fp), "pages": result["total_pages"]})
+            except Exception as e:
+                current_app.logger.warning("Reprocess from temp file failed: %s", e)
+                continue
+
+    return jsonify({"error": "No PDF source found (no local PDF, no temp files)"}), 404

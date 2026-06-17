@@ -1,5 +1,6 @@
 import io
 import json
+import os
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response
 from app.utils.auth import login_required, get_supabase
@@ -250,6 +251,8 @@ def take_exam(exam_id):
         flash("Ujian tidak ditemukan", "error")
         return redirect("/student/exams")
 
+    current_app.logger.info("Student exam %s: pdf_page_urls=%s, pdf_url=%s",
+                            exam_id, exam.get("pdf_page_urls"), exam.get("pdf_url"))
     # Check if exam is scheduled for the future
     start_at = exam.get("start_at")
     if start_at:

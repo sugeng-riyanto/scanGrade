@@ -100,7 +100,7 @@
                         </div>
                         <p class="text-sm font-bold text-surface-600">Seret PDF ke sini atau <span class="text-primary-600 underline underline-offset-2">klik untuk upload</span></p>
                         <p class="text-[10px] text-surface-400 mt-1">PDF soal ujian — maksimal 20MB</p>
-                        <input type="file" accept=".pdf" x-ref="pdfInput" @change="uploadPDF($event.target.files[0])" class="hidden">
+                        <input type="file" name="pdf" accept=".pdf" x-ref="pdfInput" @change="uploadPDF($event.target.files[0])" class="hidden">
                     </div>
                 </div>
 
