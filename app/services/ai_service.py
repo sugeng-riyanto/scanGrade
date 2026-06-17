@@ -205,6 +205,12 @@ def _test_key_internal(key):
     provider = key.get("provider", "")
     api_key = key.get("api_key", "")
 
+    # For Gemini keys, try REST API test first for better diagnostics
+    if provider == "gemini":
+        rest_result = _test_gemini_rest(api_key)
+        if rest_result:
+            return {"error": rest_result}
+
     sample_prompt = 'Jawab dalam satu kata: Berapa 2+2? Format JSON: {"answer": <number>}'
     try:
         raw = _call_ai(key, sample_prompt)
@@ -214,10 +220,13 @@ def _test_key_internal(key):
         return {"success": True, "message": f"✅ API Key aktif. Response: {raw[:80]}"}
     except Exception as e:
         err = str(e)
-        if "API key not found" in err or "API_KEY_INVALID" in err or "VALIDATION_ERROR" in err:
-            return {"error": "❌ API Key tidak bisa digunakan. Penyebab:\n1. Buka https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com → klik Enable\n2. Kalau sudah Enable, tunggu 5 menit lalu coba lagi\n3. Pastikan key tidak ada spasi tambahan"}
-        if "permission" in err.lower():
-            return {"error": "❌ API Key tidak punya akses ke Gemini. Buka https://console.cloud.google.com/apis/credentials → edit key → set 'Gemini API' sebagai API restriction."}
+        # Try REST API for better error
+        rest_err = _test_gemini_rest(api_key)
+        if rest_err:
+            return {"error": rest_err}
+        if "VALIDATION_ERROR" in err or "API_KEY_INVALID" in err:
+            return {"error": "❌ API Key tidak valid. Ikuti langkah Enable di panduan langkah 3."}
+        return {"error": f"❌ Gagal: {err[:150]}"}
         if "quota" in err.lower() or "rate" in err.lower():
             return {"error": "❌ Kuota API habis. Tunggu beberapa saat atau gunakan key lain."}
         return {"error": f"❌ Gagal: {err[:120]}"}

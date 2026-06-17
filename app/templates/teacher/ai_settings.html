@@ -342,7 +342,7 @@ function wizardApp() {
             const body = this.newKey === 'DEMO'
                 ? JSON.stringify({})  // will use demo key endpoint
                 : JSON.stringify({api_key: this.newKey, provider: this.selectedProvider});
-            const url = this.newKey === 'DEMO' ? '/teacher/api/ai/test-demo' : '/api/ai/test-key';
+            const url = this.newKey === 'DEMO' ? '/teacher/api/ai/test-demo' : '/api/ai/test-key-raw';
             fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body})
                 .then(r => r.json()).then(d => {
                     this.testResult = d.success ? '✅ ' + (d.message || 'Koneksi berhasil!') : '❌ ' + (d.error || 'Gagal');
