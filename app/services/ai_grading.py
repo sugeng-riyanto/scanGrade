@@ -46,10 +46,74 @@ def _save_cache(submission_id: str, question_index: int, score: float, feedback:
 
 
 _LANG_FEEDBACK = {
-    "en": "Provide a score (0-{max_score}) and feedback in English.\nEvaluate based on the rubric.\nFeedback must be specific, mentioning strengths and weaknesses.\n\nFormat JSON:\n{\"score\": <number>, \"feedback\": \"<feedback in English>\"}\n\nOutput ONLY JSON, no other text.",
-    "id": "Berikan skor (0-{max_score}) dan feedback dalam Bahasa Indonesia.\nNilai berdasarkan rubrik yang diberikan.\nFeedback harus spesifik, menyebutkan kelebihan dan kekurangan.\n\nFormat JSON:\n{\"score\": <number>, \"feedback\": \"<feedback dalam Bahasa Indonesia>\"}\n\nHanya output JSON, tanpa teks lain.",
-    "zh": "提供分数（0-{max_score}）和中文反馈。\n根据评分标准评估。\n反馈必须具体，指出优点和缺点。\n\nJSON格式:\n{\"score\": <number>, \"feedback\": \"<中文反馈>\"}\n\n只输出JSON，不要其他文字。",
-    "ar": "قدم درجة (0-{max_score}) وتعليقًا باللغة العربية.\nقيم بناءً على معايير التقييم.\nيجب أن يكون التعليق محددًا، يذكر نقاط القوة والضعف.\n\nتنسيق JSON:\n{\"score\": <number>, \"feedback\": \"<التعليق بالعربية>\"}\n\nأخرج JSON فقط، بدون نص آخر.",
+    "en": (
+        "Evaluate this answer at IELTS 7.5+ standard.\n\n"
+        "Scoring Guidelines:\n"
+        "- 85-100: Exceptional — demonstrates mastery beyond expectations\n"
+        "- 70-84: Proficient — solid understanding with minor gaps\n"
+        "- 55-69: Developing — adequate but needs improvement\n"
+        "- 40-54: Emerging — significant gaps in understanding\n"
+        "- Below 40: Insufficient — major revision needed\n\n"
+        "Requirements:\n"
+        "1. Be encouraging — start with what the student did well\n"
+        "2. Provide specific, actionable feedback for improvement\n"
+        "3. Use professional academic language (IELTS 7.5+ vocabulary)\n"
+        "4. Score must be a number (0-{max_score})\n"
+        "5. Feedback must be in English\n\n"
+        "Output ONLY JSON:\n"
+        '{{"score": <number>, "feedback": "<constructive feedback in English>"}}'
+    ),
+    "id": (
+        "Evaluasi jawaban ini dengan standar UKBI/EYD.\n\n"
+        "Pedoman Penskoran:\n"
+        "- 85-100: Istimewa — menguasai materi melebihi ekspektasi\n"
+        "- 70-84: Baik — pemahaman solid dengan sedikit kekurangan\n"
+        "- 55-69: Cukup — memadai namun perlu peningkatan\n"
+        "- 40-54: Kurang — kesenjangan pemahaman yang signifikan\n"
+        "- Di bawah 40: Sangat Kurang — perlu perbaikan mendasar\n\n"
+        "Ketentuan:\n"
+        "1. Mulai dengan apresiasi — sebutkan kelebihan jawaban\n"
+        "2. Berikan saran perbaikan yang spesifik dan membangun\n"
+        "3. Gunakan Bahasa Indonesia baku sesuai EYD\n"
+        "4. Skor berupa angka (0-{max_score})\n"
+        "5. Feedback dalam Bahasa Indonesia yang memotivasi\n\n"
+        "Output HANYA JSON:\n"
+        '{{"score": <number>, "feedback": "<feedback membangun dalam Bahasa Indonesia>"}}'
+    ),
+    "zh-Hant": (
+        "根據HSK 5級標準評估此答案。\n\n"
+        "評分指南：\n"
+        "- 85-100：優秀 — 掌握程度超出預期\n"
+        "- 70-84：良好 — 理解扎實，略有不足\n"
+        "- 55-69：一般 — 尚可但需加強\n"
+        "- 40-54：不足 — 有明顯理解差距\n"
+        "- 低於40：急需加強 — 需要大幅改進\n\n"
+        "要求：\n"
+        "1. 先肯定學生的優點\n"
+        "2. 提供具體可行的改進建議\n"
+        "3. 用正向積極的語氣\n"
+        "4. 分數為數字（0-{max_score}）\n"
+        "5. 反饋使用繁體中文\n\n"
+        "僅輸出JSON：\n"
+        '{{"score": <number>, "feedback": "<建設性反饋，使用繁體中文>"}}'
+    ),
+    "ar": (
+        "قم بتقييم هذه الإجابة بمستوى مناسب للمرحلة المتوسطة والثانوية.\n\n"
+        "مبادئ التقييم:\n"
+        "- 85-100: ممتاز — يُظهر إتقانًا يتجاوز التوقعات\n"
+        "- 70-84: جيد جدًا — فهم قوي مع بعض النواقص البسيطة\n"
+        "- 55-69: مقبول — إجابة مناسبة لكنها تحتاج تحسينًا\n"
+        "- 40-54: ضعيف — فجوات واضحة في الفهم\n"
+        "- أقل من 40: غير كافٍ — يحتاج مراجعة جوهرية\n\n"
+        "المتطلبات:\n"
+        "1. ابدأ بالإيجابيات — اذكر ما أجاد الطالب\n"
+        "2. قدم اقتراحات محددة للتحسين\n"
+        "3. استخدم لغة عربية فصيحة ومشجعة\n"
+        "4. الدرجة تكون رقمًا (0-{max_score})\n"
+        "5. التعليق باللغة العربية\n\n"
+        "أخرج JSON فقط:\n"
+        '{{"score": <number>, "feedback": "<تعليق بناء باللغة العربية>"}}'
+    ),
 }
 
 
