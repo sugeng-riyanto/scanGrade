@@ -172,13 +172,9 @@
                                 <i class="fas fa-check-circle"></i> Sudah diterapkan ke form
                             </span>
                         </template>
-                        <button @click="downloadTxt()"
+                        <button @click="downloadMarkdown()"
                                 class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
-                            <i class="fas fa-file-alt"></i> .txt
-                        </button>
-                        <button @click="downloadXlsx()"
-                                class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
-                            <i class="fas fa-file-excel text-emerald-600"></i> .xlsx
+                            <i class="fas fa-file-alt"></i> .md
                         </button>
                         <button @click="reset()"
                                 class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
@@ -248,11 +244,8 @@
                         </p>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <button @click="downloadTxtFromBar(pdfUrl)" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
-                            <i class="fas fa-file-alt mr-0.5"></i>.txt
-                        </button>
-                        <button @click="downloadXlsxFromBar()" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
-                            <i class="fas fa-file-excel text-emerald-600 mr-0.5"></i>.xlsx
+                        <button @click="downloadMarkdown()" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white text-surface-600 hover:bg-surface-50 transition">
+                            <i class="fas fa-file-alt mr-0.5"></i>.md
                         </button>
                     </div>
                 </div>
@@ -302,6 +295,7 @@
                                 pdfUrl: d.pdf_url || '',
                                 _questions: d.questions || [],
                                 aiClassified: d.ai_classified || false,
+                                markdown: d.markdown || '',
                             };
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
                         } catch(e) { this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
@@ -311,38 +305,6 @@
                         this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0;
                         this.pdfUrl = ''; this.applied = false; this.errorMsg = '';
                         window.dispatchEvent(new CustomEvent('pdf-reset'));
-                    },
-                    downloadTxt() {
-                        let txt = '=== HASIL SCAN AI ===\n';
-                        txt += `Total: ${this.questions.length} soal (${this.mcqCount} MCQ, ${this.essayCount} Essay)\n\n`;
-                        this.questions.forEach(q => {
-                            const label = q.type === 'mcq' ? 'Pilihan Ganda' : 'Esai';
-                            txt += `${q.number}. [${label}] ${q.text}\n`;
-                            if (q.rubric && q.rubric.length) {
-                                txt += `   Rubrik: ${q.rubric.map(r => r.kriteria).join(', ')}\n`;
-                            }
-                            txt += '\n';
-                        });
-                        const blob = new Blob([txt], {type: 'text/plain'});
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.txt`;
-                        a.click();
-                    },
-                    async downloadXlsx() {
-                        try {
-                            const r = await fetch('/teacher/exams/export-scan', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({questions: this.questions, format: 'xlsx'})
-                            });
-                            if (!r.ok) { alert('Gagal download'); return; }
-                            const blob = await r.blob();
-                            const a = document.createElement('a');
-                            a.href = URL.createObjectURL(blob);
-                            a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.xlsx`;
-                            a.click();
-                        } catch(e) { alert('Gagal: ' + e.message); }
                     },
                     // Apply to form
                     applied: false,
@@ -381,36 +343,19 @@
                         }
                         this.applied = true;
                     },
-                    reset() { this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0; this.pdfUrl = ''; this.applied = false; this.errorMsg = ''; window.dispatchEvent(new CustomEvent('pdf-reset')); }
                 };
             }
 
             /* Global download helpers for status bar */
             let _scanData = null;
             window.addEventListener('pdf-uploaded', e => { _scanData = e.detail; });
-            function downloadTxtFromBar() {
-                if (!_scanData) return;
-                let txt = '=== HASIL SCAN AI ===\n';
-                txt += `Total: ${_scanData.qCount} soal (${_scanData.mcqCount} MCQ, ${_scanData.essayCount} Essay)\n\n`;
-                txt += 'Hasil deteksi AI. Gunakan file .xlsx untuk data lengkap.\n';
-                const blob = new Blob([txt], {type: 'text/plain'});
+            function downloadMarkdown() {
+                if (!_scanData || !_scanData.markdown) { alert('Markdown tidak tersedia'); return; }
+                const blob = new Blob([_scanData.markdown], {type: 'text/markdown;charset=utf-8'});
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.txt`;
+                a.download = `${_scanData.pdfName || 'exam'}.md`;
                 a.click();
-            }
-            function downloadXlsxFromBar() {
-                if (!_scanData) return;
-                fetch('/teacher/exams/export-scan', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({questions: _scanData._questions || [], format: 'xlsx'})
-                }).then(r => r.ok ? r.blob() : Promise.reject()).then(blob => {
-                    const a = document.createElement('a');
-                    a.href = URL.createObjectURL(blob);
-                    a.download = `scan_ai_${new Date().toISOString().slice(0,10)}.xlsx`;
-                    a.click();
-                }).catch(() => alert('Gagal download XLSX'));
             }
             </script>
 
