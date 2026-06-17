@@ -120,10 +120,17 @@
 
                     <!-- Actions -->
                     <div class="flex flex-wrap gap-2">
-                        <button @click="applyToForm()"
-                                class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-primary-300/30 transition-all active:scale-95">
-                            <i class="fas fa-check-circle"></i> Terapkan Ke Form
-                        </button>
+                        <template x-if="!applied">
+                            <button @click="applyToForm()"
+                                    class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-primary-300/30 transition-all active:scale-95">
+                                <i class="fas fa-check-circle"></i> Terapkan Ke Form
+                            </button>
+                        </template>
+                        <template x-if="applied">
+                            <span class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-extrabold border border-emerald-200">
+                                <i class="fas fa-check-circle"></i> Sudah diterapkan ke form
+                            </span>
+                        </template>
                         <button @click="downloadTxt()"
                                 class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
                             <i class="fas fa-file-alt"></i> .txt
@@ -155,7 +162,7 @@
             <script>
             function pdfUpload() {
                 return {
-                    loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '',
+                    loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '', applied: false,
                     async uploadPDF(file) {
                         if (!file) return;
                         if (file.type !== 'application/pdf') { this.errorMsg = 'Hanya file PDF yang didukung'; return; }
@@ -206,6 +213,8 @@
                             a.click();
                         } catch(e) { alert('Gagal: ' + e.message); }
                     },
+                    // Apply to form
+                    applied: false,
                     applyToForm() {
                         const total = this.questions.length;
                         const tq = document.querySelector('input[name="total_questions"]');
@@ -230,9 +239,8 @@
                             document.querySelector('form').appendChild(qsInput);
                         }
                         qsInput.value = JSON.stringify(qtexts);
-                        // Set PDF URL for exam canvas
                         if (this.pdfUrl) {
-                            let pdfInput = document.querySelector('input[name="pdf_url_hidden"]');
+                            let pdfInput = document.querySelector('input[name="pdf_preview_url"]');
                             if (!pdfInput) {
                                 pdfInput = document.createElement('input');
                                 pdfInput.type = 'hidden'; pdfInput.name = 'pdf_preview_url';
@@ -240,10 +248,9 @@
                             }
                             pdfInput.value = this.pdfUrl;
                         }
-                        alert('✅ ' + total + ' soal diterapkan (' + this.mcqCount + ' MCQ, ' + this.essayCount + ' Essay)' + (this.pdfUrl ? '\n📄 PDF siap untuk canvas ujian' : ''));
-                        this.reset();
+                        this.applied = true;
                     },
-                    reset() { this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0; this.pdfUrl = ''; }
+                    reset() { this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0; this.pdfUrl = ''; this.applied = false; }
                 };
             }
             </script>
