@@ -3,7 +3,16 @@ import re
 from flask import current_app
 
 
+def _get_demo_key():
+    """Return demo key config if available."""
+    key = current_app.config.get("DEMO_AI_KEY", "")
+    if not key:
+        return None
+    return {"id": "demo", "provider": "gemini", "api_key": key, "label": "Demo (gratis)", "is_active": True, "is_demo": True}
+
+
 def _get_active_key(teacher_id):
+    """Get active API key for teacher, falling back to demo key."""
     supabase = current_app.extensions["supabase"]
     res = supabase.table("teacher_ai_keys") \
         .select("*") \
@@ -11,7 +20,10 @@ def _get_active_key(teacher_id):
         .eq("is_active", True) \
         .limit(1) \
         .execute()
-    return res.data[0] if res.data else None
+    if res.data:
+        return res.data[0]
+    # Fallback to demo key
+    return _get_demo_key()
 
 
 def _get_ai_settings(teacher_id):
@@ -156,3 +168,45 @@ def _save_log(teacher_id, submission_id, question_index, provider, score, feedba
         }).execute()
     except Exception:
         pass
+
+
+def get_teacher_ai_status(teacher_id):
+    """Return teacher's AI setup status for the wizard."""
+    supabase = current_app.extensions["supabase"]
+    keys = supabase.table("teacher_ai_keys") \
+        .select("id,provider,label,is_active") \
+        .eq("teacher_id", teacher_id) \
+        .execute().data or []
+    active = supabase.table("teacher_ai_keys") \
+        .select("id,provider,label") \
+        .eq("teacher_id", teacher_id) \
+        .eq("is_active", True) \
+        .limit(1) \
+        .execute().data or []
+    settings = supabase.table("teacher_ai_settings") \
+        .select("*") \
+        .eq("teacher_id", teacher_id) \
+        .limit(1) \
+        .execute().data or []
+    demo_available = bool(_get_demo_key())
+    demo_used = 0
+    if demo_available:
+        from datetime import datetime, timezone, timedelta
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        logs = supabase.table("ai_grading_logs") \
+            .select("id", count="exact") \
+            .eq("ai_provider", "demo") \
+            .gte("created_at", today.isoformat()) \
+            .execute()
+        demo_used = logs.count or 0
+    return {
+        "has_keys": len(keys) > 0,
+        "has_active": len(active) > 0,
+        "active_key": active[0] if active else None,
+        "keys_count": len(keys),
+        "demo_available": demo_available,
+        "demo_used": demo_used,
+        "demo_limit": 10,
+        "daily_grading_count": demo_used,
+        "has_prompts": bool(settings and settings[0].get("prompts")),
+    }
