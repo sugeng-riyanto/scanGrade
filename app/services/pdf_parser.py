@@ -226,9 +226,9 @@ def classify_heuristic(markdown: str) -> List[Dict]:
     # Remove page markers and formatting
     clean = re.sub(r'\\newpage|## Page \d+|# Exam Paper', '', markdown)
     questions = []
-    # Match "1." or "1)" at start of line, capture text until next number
+    # Match "1." or "1)" or "1 (a)" at start of line, capture text until next question number
     pattern = re.compile(
-        r'(?:^|\n)\s*(\d+)[\.\)]\s*(.*?)(?=\n\s*\d+[\.\)]|\Z)',
+        r'(?:^|\n)\s*(\d+)[\.\)\s]\s*(?:\([a-fA-F]\)\s*)?(.*?)(?=\n\s*\d+\s*[\.\)\s(]|\Z)',
         re.DOTALL)
     matches = pattern.findall(clean)
 
@@ -250,6 +250,34 @@ def classify_heuristic(markdown: str) -> List[Dict]:
             "full_text": q_text,
         })
 
+    return questions
+
+
+def _simple_parse(text: str) -> List[Dict]:
+    """Line-by-line fallback for question detection."""
+    questions, current, parts = [], None, []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r'^(\d+)\s*(?:\([a-fA-F]\)\s*)?(.*)', line)
+        if m:
+            if current is not None:
+                current["type"] = _heuristic_type("\n".join(parts))
+                questions.append(current)
+            current = {
+                "number": int(m.group(1)),
+                "text": m.group(2).strip()[:200],
+                "type": "mcq",
+                "full_text": m.group(2).strip(),
+            }
+            parts = [m.group(2).strip()]
+        elif current is not None:
+            parts.append(line)
+            current["full_text"] = "\n".join(parts)
+    if current is not None:
+        current["type"] = _heuristic_type("\n".join(parts))
+        questions.append(current)
     return questions
 
 
