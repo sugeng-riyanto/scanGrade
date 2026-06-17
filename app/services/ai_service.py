@@ -76,29 +76,42 @@ def _parse_ai_response(raw_text):
 
 
 def _call_gemini(api_key, prompt):
-    """Call Gemini API — supports both AIzaSy and AQ. format keys."""
-    import google.generativeai as genai
+    """Call Gemini API — supports AIzaSy (standard) and AQ. (auth) keys."""
+    # Auth keys (AQ.) require the new genai.Client() API
+    # Standard keys (AIzaSy) work with both old and new API
+    if api_key.startswith("AQ"):
+        return _call_gemini_client(api_key, prompt)
+    # Standard keys: try old API first, fallback to new API
     try:
+        import google.generativeai as genai
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.0-flash-lite")
         resp = model.generate_content(prompt)
         return resp.text
+    except Exception:
+        return _call_gemini_client(api_key, prompt)
+
+
+def _call_gemini_client(api_key, prompt):
+    """Call Gemini API using the new genai.Client() — works with auth keys (AQ.)."""
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=prompt,
+        )
+        return resp.text
     except Exception as e:
         err_msg = str(e)
-        if "API_KEY_INVALID" in err_msg or "VALIDATION_ERROR" in err_msg:
-            # Try direct REST API to get real error
-            rest_error = _test_gemini_rest(api_key)
-            if rest_error:
-                raise ValueError(rest_error)
-            raise ValueError(
-                "API Key tidak bisa digunakan. Penanganan:\n"
-                "1. Buka https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com\n"
-                "2. Pastikan project yang dipilih sesuai dengan key kamu\n"
-                "3. Klik ENABLE, tunggu 5 menit\n"
-                "4. Coba Test lagi\n\n"
-                f"Detail: {err_msg[:100]}"
-            )
-        raise
+        # Try REST API for better error diagnostics
+        rest_error = _test_gemini_rest(api_key)
+        if rest_error:
+            raise ValueError(rest_error)
+        raise ValueError(
+            "Gagal terhubung ke Gemini API.\n\n"
+            f"Pesan error: {err_msg[:150]}"
+        )
 
 
 def _test_gemini_rest(api_key):
