@@ -197,61 +197,62 @@ def dashboard():
 @teacher_bp.route("/exams/parse-pdf", methods=["POST"])
 @teacher_or_admin_required
 def exam_parse_pdf():
-    """Upload PDF → extract text → detect questions → save PDF for canvas."""
-    if "pdf" not in request.files:
-        return jsonify({"error": "Tidak ada file PDF"}), 400
-    pdf_file = request.files["pdf"]
-    raw = pdf_file.read()
-    if len(raw) > 20 * 1024 * 1024:
-        return jsonify({"error": "PDF terlalu besar. Maksimal 20MB."}), 413
-
-    # Save PDF to uploads for exam canvas use
-    import uuid
-    pdf_id = str(uuid.uuid4())[:8]
-    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "uploads", "exams")
-    os.makedirs(upload_dir, exist_ok=True)
-    pdf_filename = f"temp_{pdf_id}.pdf"
-    pdf_path = os.path.join(upload_dir, pdf_filename)
+    """Upload PDF → extract text → detect questions → return preview."""
     try:
-        with open(pdf_path, "wb") as f:
-            f.write(raw)
-    except Exception as e:
-        current_app.logger.error("Failed to save PDF: %s", e)
-        return jsonify({"error": f"Gagal menyimpan PDF: {str(e)[:100]}"}), 500
-    pdf_url = f"/static/uploads/exams/{pdf_filename}"
+        if "pdf" not in request.files:
+            return jsonify({"error": "Tidak ada file PDF"}), 400
+        pdf_file = request.files["pdf"]
+        raw = pdf_file.read()
+        if len(raw) > 50 * 1024 * 1024:
+            return jsonify({"error": "PDF terlalu besar. Maksimal 50MB"}), 413
 
-    try:
-        from app.services.pdf_parser import parse_pdf, generate_preview_html
+        # Parse PDF for AI question detection
+        try:
+            from app.services.pdf_parser import parse_pdf, generate_preview_html
+        except ImportError:
+            return jsonify({"error": "Library tidak tersedia. Jalankan: pip install pymupdf"}), 500
+
         parsed = parse_pdf(raw)
         if parsed.get("error"):
-            try: os.remove(pdf_path)
-            except: pass
             return jsonify({"error": parsed["error"]}), 422
-    except ImportError:
-        try: os.remove(pdf_path)
-        except: pass
-        return jsonify({"error": "PyMuPDF tidak terinstall. Jalankan: pip install pymupdf"}), 500
 
-    # Generate rubric for essay questions (skip gracefully if AI fails)
-    for q in parsed.get("questions", []):
-        if q["type"] == "essay":
-            try:
-                from app.services.rubric_generator import generate_rubric
-                q["rubric"] = generate_rubric(q["text"])
-            except Exception as e:
-                current_app.logger.warning("Rubric gen skipped for Q%s: %s", q.get("number"), e)
+        # Try to save PDF locally for exam canvas (ignore failure)
+        pdf_url = ""
+        try:
+            import uuid
+            upload_dir = os.path.join(current_app.root_path, "static", "uploads", "exams")
+            os.makedirs(upload_dir, exist_ok=True)
+            pdf_filename = f"temp_{str(uuid.uuid4())[:12]}.pdf"
+            pdf_path = os.path.join(upload_dir, pdf_filename)
+            with open(pdf_path, "wb") as f:
+                f.write(raw)
+            pdf_url = f"/static/uploads/exams/{pdf_filename}"
+        except Exception as e:
+            current_app.logger.warning("PDF save skipped: %s", e)
 
-    preview = generate_preview_html(parsed)
-    return jsonify({
-        "success": True,
-        "page_count": parsed["page_count"],
-        "mcq_count": parsed["mcq_count"],
-        "essay_count": parsed["essay_count"],
-        "questions": parsed["questions"],
-        "preview_html": preview,
-        "pdf_url": pdf_url,
-        "pdf_id": pdf_id,
-    })
+        # Generate rubric for essay questions (skip gracefully if AI fails)
+        for q in parsed.get("questions", []):
+            if q["type"] == "essay":
+                try:
+                    from app.services.rubric_generator import generate_rubric
+                    q["rubric"] = generate_rubric(q["text"])
+                except Exception as e:
+                    current_app.logger.warning("Rubric gen skipped: %s", e)
+
+        preview = generate_preview_html(parsed)
+        return jsonify({
+            "success": True,
+            "page_count": parsed["page_count"],
+            "mcq_count": parsed["mcq_count"],
+            "essay_count": parsed["essay_count"],
+            "questions": parsed["questions"],
+            "preview_html": preview,
+            "pdf_url": pdf_url,
+            "pdf_id": pdf_url.split("/")[-1].replace(".pdf", "").replace("temp_", "") if pdf_url else "",
+        })
+    except Exception as e:
+        current_app.logger.error("parse-pdf error: %s", e, exc_info=True)
+        return jsonify({"error": f"Gagal memproses PDF: {str(e)[:200]}"}), 500
 
 
 @teacher_bp.route("/exams/new", methods=["GET", "POST"])
