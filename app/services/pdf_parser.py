@@ -1,18 +1,173 @@
-"""PDF → Quarto-standard markdown. Converts PDF to clean, structured .md with proper formatting."""
+"""PDF → Quarto-standard markdown. Thorough page-by-page conversion preserving all content."""
 import re
 import json
 import logging
-from typing import List, Dict
-import os
+from typing import List, Dict, Tuple
+from collections import defaultdict
 
 logger = logging.getLogger("app")
 
-# Quarto markdown formatting rules
-MAX_LINE_LEN = 80  # wrap at 80 chars for readability
+QUARTO_HEADER = """---
+title: "Exam Paper"
+format: 
+  html:
+    toc: true
+  pdf:
+    toc: true
+    papersize: a4
+---
+
+"""
+
+
+def _analyze_font_sizes(blocks: list) -> Tuple[float, float]:
+    """Analyze font sizes across all blocks to determine body and heading sizes."""
+    sizes = defaultdict(int)
+    for block in blocks:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                sz = round(span.get("size", 12) * 2) / 2  # round to 0.5
+                sizes[sz] += len(span.get("text", ""))
+    if not sizes:
+        return 12, 14
+    # Most common = body text
+    body_size = max(sizes, key=sizes.get)
+    return body_size, body_size + 2
+
+
+def _blocks_to_markdown(blocks: list, page_num: int, body_size: float) -> str:
+    """Convert PDF blocks to Quarto markdown, preserving structure."""
+    md_parts = []
+    img_counter = [0]  # mutable counter for closure
+
+    # Sort blocks: top-to-bottom, then left-to-right
+    sorted_blocks = sorted(blocks, key=lambda b: (b.get("bbox", [0, 0, 0, 0])[1],
+                                                   b.get("bbox", [0, 0, 0, 0])[0]))
+
+    for block in sorted_blocks:
+        if block.get("type") == 0:  # text
+            text = _text_block_to_md(block, body_size)
+            if text:
+                md_parts.append(text)
+
+        elif block.get("type") == 1:  # image block
+            img_counter[0] += 1
+            md_parts.append(f"\n![Figure {page_num}-{img_counter[0]}](fig-{page_num}-{img_counter[0]}.png){{#fig-{img_counter[0]}}}\n")
+
+    return "\n".join(md_parts)
+
+
+def _text_block_to_md(block: dict, body_size: float) -> str:
+    """Convert a single text block to markdown with proper formatting."""
+    lines_out = []
+    bbox = block.get("bbox", [0, 0, 0, 0])
+    block_x0 = bbox[0]
+
+    # First pass: collect spans and detect formatting
+    formatted_lines = []
+    max_font = body_size
+    has_bold = False
+    has_italic = False
+    is_equation_block = False
+    all_math = True
+
+    for line in block.get("lines", []):
+        line_y = line.get("bbox", [0, 0, 0, 0])[1]
+        spans = line.get("spans", [])
+        line_parts = []
+        line_max_font = body_size
+
+        for span in spans:
+            text = span.get("text", "")
+            font_size = span.get("size", body_size)
+            flags = span.get("flags", 0)
+            is_bold = bool(flags & 2)
+            is_italic = bool(flags & 1)
+
+            line_max_font = max(line_max_font, font_size)
+            max_font = max(max_font, font_size)
+
+            if is_bold:
+                has_bold = True
+                text = f"**{text}**"
+            if is_italic:
+                has_italic = True
+
+            # Check for math
+            if not re.search(r'[\d=+\-×÷±√∑∫∞πθΔλμσΩωαβγ\^_{}\[\]]', text):
+                all_math = False
+
+            line_parts.append(text)
+
+        line_text = " ".join(line_parts).strip()
+        if line_text:
+            # Check indent level for list detection
+            indent = (block_x0 - 20) / 20  # approximate indent depth
+            indent_str = "  " * max(0, int(indent))
+
+            formatted_lines.append({
+                "text": line_text,
+                "font": line_max_font,
+                "indent": int(indent),
+                "y": line_y,
+            })
+
+    if not formatted_lines:
+        return ""
+
+    # Determine block type
+    # 1. Check if heading
+    is_heading = max_font >= body_size + 3
+
+    # 2. Check if equation block
+    if all_math and len(formatted_lines) <= 5:
+        is_equation_block = True
+
+    # 3. Check if list item
+    first_text = formatted_lines[0]["text"]
+    is_numbered = bool(re.match(r'^\d+[\.\)]\s', first_text))
+    is_bullet = first_text.startswith(("- ", "• ", "* "))
+    is_option = bool(re.match(r'^[A-D][\.\)]\s', first_text))
+
+    # Format output
+    if is_heading:
+        if max_font >= body_size + 8:
+            prefix = "# "
+        elif max_font >= body_size + 5:
+            prefix = "## "
+        else:
+            prefix = "### "
+        text = prefix + " ".join(fl["text"] for fl in formatted_lines)
+        return f"\n{text}\n"
+
+    if is_equation_block:
+        eq_text = "\n".join(fl["text"] for fl in formatted_lines)
+        return f"\n$$\n{eq_text}\n$$\n"
+
+    # Normal paragraph / list
+    result_lines = []
+    for fl in formatted_lines:
+        t = fl["text"]
+        idt = "  " * fl["indent"]
+
+        if re.match(r'^\d+[\.\)]\s', t):
+            # Numbered list
+            result_lines.append(f"{idt}{t}")
+        elif t.startswith(("- ", "• ", "* ")):
+            result_lines.append(f"{idt}- {t[2:]}")
+        elif re.match(r'^[A-D][\.\)]\s', t):
+            # MCQ option — indent more
+            result_lines.append(f"    {t}")
+        else:
+            result_lines.append(f"{idt}{t}")
+
+    return "\n".join(result_lines) + "\n"
 
 
 def pdf_to_markdown(file_bytes: bytes) -> Dict:
-    """Convert PDF to Quarto-standard markdown with proper headings, lists, equations."""
+    """Convert PDF to Quarto-standard markdown. Processes ALL pages thoroughly."""
     try:
         import fitz
     except ImportError:
@@ -22,101 +177,45 @@ def pdf_to_markdown(file_bytes: bytes) -> Dict:
     pages_md = []
     raw_text = ""
     images_data = []
-    img_counter = 0
+    all_blocks = []
 
+    # First pass: analyze all font sizes to determine body text
+    total_blocks = []
     for page_num in range(len(pdf)):
         page = pdf[page_num]
-        page_rect = page.rect
-        page_width = page_rect.width
-        page_height = page_rect.height
-
-        # Get text with position data for better formatting
-        blocks = page.get_text("dict")["blocks"]
+        page_dict = page.get_text("dict")
+        total_blocks.extend(page_dict["blocks"])
         raw_text += f"\n\n--- Page {page_num + 1} ---\n\n{page.get_text()}"
+
+    body_size, heading_min = _analyze_font_sizes(total_blocks)
+    logger.info("PDF: %d pages, body size %.1f", len(pdf), body_size)
+
+    # Second pass: convert each page
+    for page_num in range(len(pdf)):
+        page = pdf[page_num]
+        page_dict = page.get_text("dict")
 
         # Page break
         md = "\n\\newpage\n" if page_num > 0 else ""
         md += f"## Page {page_num + 1}\n\n"
 
-        for block in blocks:
-            if block.get("type") == 0:  # text block
-                block_text = ""
-                max_font_size = 0
+        # Extract images from this page
+        for img_index, img in enumerate(page.get_images(full=True)):
+            xref = img[0]
+            base = pdf.extract_image(xref)
+            if base:
+                images_data.append(base["image"])
+                md += f"\n![Figure {page_num + 1}-{img_index + 1}](fig-{page_num + 1}-{img_index + 1}.png){{#fig-{img_index + 1}}}\n"
 
-                for line in block.get("lines", []):
-                    line_text = ""
-                    for span in line.get("spans", []):
-                        text = span.get("text", "").strip()
-                        font_size = span.get("size", 12)
-                        max_font_size = max(max_font_size, font_size)
-                        # Detect bold
-                        is_bold = span.get("flags", 0) & 2  # Bold flag
-                        if is_bold:
-                            text = f"**{text}**"
-                        line_text += text + " "
-
-                    line_str = line_text.strip()
-                    if line_str:
-                        block_text += line_str + "\n"
-
-                if not block_text.strip():
-                    continue
-
-                # Classify block type based on font size and content
-                lines = block_text.strip().split("\n")
-                formatted_lines = []
-
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    # Heading detection (larger font = higher heading)
-                    if max_font_size >= 18:
-                        formatted_lines.append(f"# {line}")
-                    elif max_font_size >= 14:
-                        formatted_lines.append(f"## {line}")
-                    elif max_font_size >= 12:
-                        formatted_lines.append(f"### {line}")
-                    # Equation detection (contains math symbols)
-                    elif re.search(r'[=×÷±√∑∫∞πθΔλμσΩωαβγ]', line):
-                        formatted_lines.append(f"$$ {line} $$")
-                    # Numbered list item
-                    elif re.match(r'^\d+[\.\)]\s', line):
-                        formatted_lines.append(line)
-                    # Bullet list (starts with - or • or *)
-                    elif line.startswith(("- ", "• ", "* ")):
-                        formatted_lines.append(line)
-                    # MCQ option (A. B. C. D.)
-                    elif re.match(r'^[A-D][\.\)]\s', line):
-                        formatted_lines.append(f"  {line}")  # indent options
-                    # Regular paragraph
-                    else:
-                        # Wrap long lines at MAX_LINE_LEN
-                        while len(line) > MAX_LINE_LEN:
-                            split_at = line.rfind(" ", 0, MAX_LINE_LEN)
-                            if split_at < 1:
-                                split_at = MAX_LINE_LEN
-                            formatted_lines.append(line[:split_at])
-                            line = "  " + line[split_at:].strip()
-                        formatted_lines.append(line)
-
-                md += "\n".join(formatted_lines) + "\n\n"
-
-            elif block.get("type") == 1:  # image block
-                img_counter += 1
-                img_bytes = page.get_pixmap(clip=block["bbox"]).tobytes("png")
-                images_data.append(img_bytes)
-
-                # Reference image in markdown (fig format for Quarto)
-                img_name = f"fig-{page_num + 1}-{img_counter}.png"
-                md += f"![Figure {img_counter}]({img_name}){{#fig-{page_num + 1}-{img_counter}}}\n\n"
+        # Convert text blocks to markdown
+        md += _blocks_to_markdown(page_dict["blocks"], page_num + 1, body_size)
 
         pages_md.append(md)
 
+    all_blocks.clear()
     pdf.close()
 
-    markdown = "\n".join(pages_md)
+    markdown = QUARTO_HEADER + "\n".join(pages_md)
 
     return {
         "markdown": markdown,
