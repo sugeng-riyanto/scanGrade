@@ -297,7 +297,7 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
 
 
 def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq") -> Dict:
-    """Generate answer key — answers ALL questions from markdown. No classification needed."""
+    """Generate answer key via direct Groq API call. MCQ→letter, Essay→answer."""
     if not api_key or not questions:
         return {}
 
@@ -310,25 +310,25 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
 
     q_list = q_list[:25000]
 
-    prompt = f"""Answer ALL questions below. 
-
-For EACH question:
-- If it's multiple choice (has A/B/C/D options): answer with ONLY the letter (A, B, C, or D)
-- If it's a written/essay question: provide a concise answer (1-2 lines)
-
-Output ONLY a JSON object with question numbers as keys and answers as values.
-
-Example:
-{{"1": "A", "2": "C", "3": "Photosynthesis converts light energy to chemical energy."}}
+    prompt = f"""Answer ALL questions below. For each: MCQ → letter (A/B/C/D), Essay → concise answer. Output JSON only.
 
 Questions:
-{q_list}
-
-Output ONLY JSON:"""
+{q_list}"""
 
     try:
-        from app.services.ai_service import _call_ai
-        raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
+        import requests
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 4000,
+            },
+            timeout=60,
+        )
+        raw = resp.json()["choices"][0]["message"]["content"]
         cleaned = raw.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
