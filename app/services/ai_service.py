@@ -76,6 +76,7 @@ def _parse_ai_response(raw_text):
 
 
 def _call_gemini(api_key, prompt):
+    """Call Gemini API — supports both AIzaSy and AQ. format keys."""
     import google.generativeai as genai
     try:
         genai.configure(api_key=api_key)
@@ -85,7 +86,13 @@ def _call_gemini(api_key, prompt):
     except Exception as e:
         err_msg = str(e)
         if "API_KEY_INVALID" in err_msg or "VALIDATION_ERROR" in err_msg:
-            raise ValueError("API Key tidak valid. Pastikan kamu menggunakan Gemini API Key dari aistudio.google.com/apikey (diawali AIzaSy).")
+            raise ValueError(
+                "API Key tidak valid. Penyebab umum:\n"
+                "1. Key belum di-copy dengan benar (hapus spasi tambahan)\n"
+                "2. API Generative Language belum diaktifkan — buka https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com dan klik Enable\n"
+                "3. Key dibatasi (IP/HTTP referrer) — di https://console.cloud.google.com/apis/credentials, edit key, set 'None' untuk API restrictions\n\n"
+                f"Detail: {err_msg[:100]}"
+            )
         raise
 
 
@@ -155,10 +162,6 @@ def _test_key_internal(key):
     provider = key.get("provider", "")
     api_key = key.get("api_key", "")
 
-    # Format validation
-    if provider == "gemini" and not api_key.startswith("AIza"):
-        return {"error": "Format Gemini API Key salah. Harus diawali 'AIza...'. Kamu mendapatkan key dari halaman aistudio.google.com/apikey? (bukan Google Cloud Console)"}
-
     sample_prompt = 'Jawab dalam satu kata: Berapa 2+2? Format JSON: {"answer": <number>}'
     try:
         raw = _call_ai(key, sample_prompt)
@@ -169,7 +172,9 @@ def _test_key_internal(key):
     except Exception as e:
         err = str(e)
         if "API key not found" in err or "API_KEY_INVALID" in err or "VALIDATION_ERROR" in err:
-            return {"error": "❌ API Key tidak valid. Untuk Gemini, gunakan key dari aistudio.google.com/apikey (diawali AIza...). Pastikan juga tidak ada spasi tambahan."}
+            return {"error": "❌ API Key tidak bisa digunakan. Penyebab:\n1. Buka https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com → klik Enable\n2. Kalau sudah Enable, tunggu 5 menit lalu coba lagi\n3. Pastikan key tidak ada spasi tambahan"}
+        if "permission" in err.lower():
+            return {"error": "❌ API Key tidak punya akses ke Gemini. Buka https://console.cloud.google.com/apis/credentials → edit key → set 'Gemini API' sebagai API restriction."}
         if "quota" in err.lower() or "rate" in err.lower():
             return {"error": "❌ Kuota API habis. Tunggu beberapa saat atau gunakan key lain."}
         return {"error": f"❌ Gagal: {err[:120]}"}
