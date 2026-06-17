@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timedelta
-from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
 from app.decorators.security import require_school_access
 from app.decorators.subscription import require_subscription
@@ -208,12 +208,16 @@ def exam_parse_pdf():
     # Save PDF to uploads for exam canvas use
     import uuid
     pdf_id = str(uuid.uuid4())[:8]
-    upload_dir = os.path.join(current_app.static_folder, "uploads", "exams")
+    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "uploads", "exams")
     os.makedirs(upload_dir, exist_ok=True)
     pdf_filename = f"temp_{pdf_id}.pdf"
     pdf_path = os.path.join(upload_dir, pdf_filename)
-    with open(pdf_path, "wb") as f:
-        f.write(raw)
+    try:
+        with open(pdf_path, "wb") as f:
+            f.write(raw)
+    except Exception as e:
+        current_app.logger.error("Failed to save PDF: %s", e)
+        return jsonify({"error": f"Gagal menyimpan PDF: {str(e)[:100]}"}), 500
     pdf_url = f"/static/uploads/exams/{pdf_filename}"
 
     from app.services.pdf_parser import parse_pdf, generate_preview_html
