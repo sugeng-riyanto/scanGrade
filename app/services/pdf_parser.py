@@ -307,7 +307,7 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
 
     prompt = f"Answer ALL. MCQ→letter. Essay→concise. Output JSON.\n\n{q_list}"
 
-    for attempt in range(3):  # retry up to 3 times
+    for attempt in range(3):
         try:
             from app.services.ai_service import _call_ai
             key_dict = {"api_key": api_key, "provider": provider or "groq"}
@@ -328,12 +328,15 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
         except Exception as e:
             err = str(e)
             if "429" in err or "rate_limit" in err.lower():
-                logger.warning("Rate limited (attempt %d/3), retrying in 5s...", attempt + 1)
+                logger.warning("Rate limit (attempt %d/3), retry 5s...", attempt + 1)
                 import time
                 time.sleep(5)
                 continue
             logger.warning("Answer key failed: %s", err)
             break
+    else:
+        # All retries exhausted — rate limited
+        return {"_error": "Kuota Groq API habis. Tunggu beberapa saat atau ganti provider AI di Pengaturan AI."}
 
     return {}
 

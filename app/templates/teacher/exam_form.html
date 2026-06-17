@@ -211,7 +211,7 @@
 
             <!-- 📄 Persistent PDF Status Bar -->
             <div class="mb-6 p-4 rounded-2xl border-2 transition-all duration-300"
-                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '', aiClassified: false, generatingKey: false, keyGenerated: false, keyFailed: false }"
+                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '', aiClassified: false, generatingKey: false, keyGenerated: false, keyFailed: false, keyError: '' }"
                  x-init="
                     window.addEventListener('pdf-uploaded', e => {
                         pdfStatus = 'success';
@@ -222,12 +222,12 @@
                         essayC = e.detail.essayCount || 0;
                         pdfUrl = e.detail.pdfUrl || '';
                         aiClassified = e.detail.aiClassified || false;
-                        if (e.detail.hasAI) { generatingKey = true; keyGenerated = false; keyFailed = false; }
+                        if (e.detail.hasAI) { generatingKey = true; keyGenerated = false; keyFailed = false; keyError = ''; }
                     });
                     window.addEventListener('key-done', e => { generatingKey = false; keyGenerated = true; });
-                    window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; });
+                    window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; keyError = e.detail?.error || ''; });
                     window.addEventListener('pdf-error', e => { pdfStatus = 'error'; });
-                    window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; generatingKey = false; keyGenerated = false; keyFailed = false; });
+                    window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; generatingKey = false; keyGenerated = false; keyFailed = false; keyError = ''; });
                  "
                  :class="pdfStatus === 'success' ? 'bg-emerald-50 border-emerald-300' : pdfStatus === 'error' ? 'bg-red-50 border-red-300' : 'bg-surface-50 border-surface-200 border-dashed'">
 
@@ -264,9 +264,11 @@
                             <span x-show="keyGenerated" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
                                 <i class="fas fa-check mr-0.5"></i>Kunci siap
                             </span>
-                            <span x-show="keyFailed" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200">
+                            <span x-show="keyFailed" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200" title="Klik untuk atur API key">
                                 <i class="fas fa-times mr-0.5"></i>Kunci gagal
                             </span>
+                            <span x-show="keyError && keyFailed" class="ml-2 text-[9px] text-red-500 max-w-[300px] truncate" x-text="keyError"></span>
+                            <a x-show="keyFailed && keyError.includes('Kuota')" href="/teacher/ai-settings" class="ml-1 text-[9px] font-bold text-primary-600 hover:text-primary-700 underline">Ganti Provider AI →</a>
                         </p>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
@@ -375,7 +377,8 @@
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
                             // Fire answer key event
                             window.dispatchEvent(new CustomEvent(
-                                d.answer_key_generated ? 'key-done' : 'key-failed'
+                                d.answer_key_generated ? 'key-done' : 'key-failed',
+                                { detail: { error: d.answer_key_error || '' } }
                             ));
                         } catch(e) { if (this._timer) { clearInterval(this._timer); this._timer = null; } this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
                         finally { this.loading = false; }

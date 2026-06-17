@@ -245,6 +245,7 @@ def exam_parse_pdf():
         # Step 3: Generate answer key via AI
         answer_key_generated = False
         answer_key = {}
+        answer_key_error = ""
         try:
             if key and key.get("api_key"):
                 from app.services.pdf_parser import generate_answer_key
@@ -254,14 +255,20 @@ def exam_parse_pdf():
                     api_key=key["api_key"],
                     provider=key.get("provider", "groq"))
                 if ak and len(ak) > 0:
-                    answer_key = ak
-                    answer_key_generated = True
-                    current_app.logger.info("Answer key generated: %d answers", len(ak))
+                    if "_error" in ak:
+                        answer_key_error = ak["_error"]
+                        current_app.logger.warning("Answer key error: %s", answer_key_error)
+                    else:
+                        answer_key = ak
+                        answer_key_generated = True
+                        current_app.logger.info("Answer key generated: %d answers", len(ak))
                 else:
                     current_app.logger.warning("Answer key returned empty")
             else:
+                answer_key_error = "Belum ada API key aktif. Atur di Pengaturan AI."
                 current_app.logger.warning("No API key available for answer key generation")
         except Exception as e:
+            answer_key_error = f"Gagal: {str(e)[:100]}"
             current_app.logger.error("Answer key gen error: %s", e, exc_info=True)
 
         # Step 4: Save PDF for exam canvas
@@ -294,6 +301,7 @@ def exam_parse_pdf():
             "ai_classified": ai_used,
             "answer_key_generated": answer_key_generated,
             "answer_key": answer_key,
+            "answer_key_error": answer_key_error,
             "markdown": parsed["markdown"][:500000],
             "page_count": parsed["page_count"],
             "mcq_count": parsed["mcq_count"],
