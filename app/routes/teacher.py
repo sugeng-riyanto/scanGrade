@@ -207,6 +207,8 @@ def exam_parse_pdf():
         if len(raw) > 50 * 1024 * 1024:
             return jsonify({"error": "PDF terlalu besar. Maksimal 50MB"}), 413
 
+        ai_mode = request.form.get("ai_mode", "false") == "true"
+
         # Step 1: PDF → Clean Markdown
         try:
             from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html, generate_answer_key
@@ -217,59 +219,69 @@ def exam_parse_pdf():
         if parsed.get("error"):
             return jsonify({"error": parsed["error"]}), 422
 
-        # Step 2: Try AI classification using teacher's Groq key, then heuristic fallback
         questions = None
         ai_used = False
-        key = None
-        try:
-            from app.services.ai_service import _get_active_key
-            key = _get_active_key(g.user_id)
-            if key and key.get("api_key"):
-                questions = classify_with_ai(
-                    parsed["markdown"],
-                    api_key=key["api_key"],
-                    provider=key.get("provider", "groq"),
-                )
-                if questions and len(questions) > 0:
-                    ai_used = True
-        except Exception as e:
-            current_app.logger.warning("AI classification failed: %s", e)
-
-        if not questions:
-            questions = classify_heuristic(parsed["markdown"])
-
-        parsed["questions"] = questions
-        parsed["mcq_count"] = sum(1 for q in questions if q.get("type") == "mcq")
-        parsed["essay_count"] = sum(1 for q in questions if q.get("type") == "essay")
-
-        # Step 3: Generate answer key via AI
         answer_key_generated = False
         answer_key = {}
         answer_key_error = ""
-        try:
-            if key and key.get("api_key"):
-                from app.services.pdf_parser import generate_answer_key
-                current_app.logger.info("Generating answer key with provider: %s", key.get("provider"))
-                ak = generate_answer_key(
-                    parsed["markdown"], questions,
-                    api_key=key["api_key"],
-                    provider=key.get("provider", "groq"))
-                if ak and len(ak) > 0:
-                    if "_error" in ak:
-                        answer_key_error = ak["_error"]
-                        current_app.logger.warning("Answer key error: %s", answer_key_error)
+        key = None
+
+        # Step 2 & 3: AI processing (only in AI mode)
+        if ai_mode:
+            try:
+                from app.services.ai_service import _get_active_key
+                key = _get_active_key(g.user_id)
+            except Exception as e:
+                current_app.logger.warning("Failed to get AI key: %s", e)
+
+            # Step 2: Classify questions
+            try:
+                if key and key.get("api_key"):
+                    questions = classify_with_ai(
+                        parsed["markdown"],
+                        api_key=key["api_key"],
+                        provider=key.get("provider", "groq"),
+                    )
+                    if questions and len(questions) > 0:
+                        ai_used = True
+            except Exception as e:
+                current_app.logger.warning("AI classification failed: %s", e)
+
+            if not questions:
+                questions = classify_heuristic(parsed["markdown"])
+
+            parsed["questions"] = questions
+            parsed["mcq_count"] = sum(1 for q in questions if q.get("type") == "mcq")
+            parsed["essay_count"] = sum(1 for q in questions if q.get("type") == "essay")
+
+            # Step 3: Generate answer key
+            try:
+                if key and key.get("api_key"):
+                    current_app.logger.info("Generating answer key with provider: %s", key.get("provider"))
+                    ak = generate_answer_key(
+                        parsed["markdown"], questions,
+                        api_key=key["api_key"],
+                        provider=key.get("provider", "groq"))
+                    if ak and len(ak) > 0:
+                        if "_error" in ak:
+                            answer_key_error = ak["_error"]
+                        else:
+                            answer_key = ak
+                            answer_key_generated = True
+                            current_app.logger.info("Answer key generated: %d answers", len(ak))
                     else:
-                        answer_key = ak
-                        answer_key_generated = True
-                        current_app.logger.info("Answer key generated: %d answers", len(ak))
+                        current_app.logger.warning("Answer key returned empty")
                 else:
-                    current_app.logger.warning("Answer key returned empty")
-            else:
-                answer_key_error = "Belum ada API key aktif. Atur di Pengaturan AI."
-                current_app.logger.warning("No API key available for answer key generation")
-        except Exception as e:
-            answer_key_error = f"Gagal: {str(e)[:100]}"
-            current_app.logger.error("Answer key gen error: %s", e, exc_info=True)
+                    answer_key_error = "Belum ada API key aktif. Atur di Pengaturan AI."
+            except Exception as e:
+                answer_key_error = f"Gagal: {str(e)[:100]}"
+                current_app.logger.error("Answer key gen error: %s", e, exc_info=True)
+        else:
+            # Manual mode: no AI, just empty questions
+            questions = parsed.get("questions", [])
+            parsed["questions"] = questions
+            parsed["mcq_count"] = 0
+            parsed["essay_count"] = 0
 
         # Step 4: Save PDF for exam canvas
         pdf_url = ""
@@ -314,6 +326,39 @@ def exam_parse_pdf():
     except Exception as e:
         current_app.logger.error("parse-pdf error: %s", e, exc_info=True)
         return jsonify({"error": f"Gagal memproses PDF: {str(e)[:200]}"}), 500
+
+
+@teacher_bp.route("/exams/generate-key", methods=["POST"])
+@teacher_or_admin_required
+def exam_generate_key():
+    """Generate answer key for already-uploaded PDF (on-demand). Also classifies if needed."""
+    from app.services.pdf_parser import generate_answer_key, classify_heuristic
+    data = request.get_json() or {}
+    markdown = data.get("markdown", "")
+    questions = data.get("questions", [])
+    if not markdown:
+        return jsonify({"error": "No markdown provided"}), 400
+
+    # Classify questions if not provided
+    if not questions:
+        questions = classify_heuristic(markdown)
+        if not questions:
+            return jsonify({"error": "Tidak dapat mendeteksi soal dari PDF"}), 422
+
+    from app.services.ai_service import _get_active_key
+    key = _get_active_key(g.user_id)
+    if not key or not key.get("api_key"):
+        return jsonify({"error": "Belum ada API key aktif. Atur di Pengaturan AI."}), 400
+
+    try:
+        ak = generate_answer_key(markdown, questions, api_key=key["api_key"], provider=key.get("provider", "groq"))
+        if ak and "_error" in ak:
+            return jsonify({"error": ak["_error"]}), 429
+        if ak and len(ak) > 0:
+            return jsonify({"success": True, "answer_key": ak, "answer_key_generated": True, "questions": questions})
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+    return jsonify({"error": "Gagal generate key"}), 500
 
 
 @teacher_bp.route("/exams/parse-pdf/markdown", methods=["POST"])
