@@ -53,6 +53,9 @@
         <div class="flex items-center gap-2 no-print">
             <span id="auto-save-status" class="text-[10px] font-bold text-stone-400"><i class="fas fa-circle text-stone-300 mr-1 text-[8px]"></i>Auto-save</span>
             <button @click="showCalculator=!showCalculator" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition" title="Kalkulator Ilmiah"><i class="fas fa-calculator mr-1"></i></button>
+            <button type="button" @click="gradeAllEssays()" class="text-sm font-bold text-emerald-600 hover:text-emerald-700 px-3 py-1.5 hover:bg-emerald-50 rounded-xl transition" title="Koreksi semua essay dengan AI">
+                <i class="fas fa-robot mr-1"></i>✨ Essay
+            </button>
             <button onclick="window.print()" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition"><i class="fas fa-print mr-1"></i>Print</button>
             <button type="button" @click="saveAll()" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-bold shadow-lg shadow-orange-200/50 transition">
                 <i class="fas fa-save mr-1.5"></i>Simpan
@@ -67,10 +70,18 @@
         <div class="flex gap-3">
             <div class="shrink-0 flex flex-col items-center gap-1">
                 <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-2.5 sticky-questions border border-stone-100" style="max-height:calc(100vh - 170px)">
+                    <!-- Tab: MCQ / Essay -->
+                    <div class="flex gap-1 mb-2 px-0.5">
+                        <button type="button" @click="tab='mcq'" class="flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg transition"
+                                :class="tab === 'mcq' ? 'bg-primary-600 text-white shadow-sm' : 'bg-surface-100 text-surface-500 hover:bg-surface-200'">MCQ</button>
+                        <button type="button" @click="tab='essay'" class="flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg transition"
+                                :class="tab === 'essay' ? 'bg-amber-500 text-white shadow-sm' : 'bg-surface-100 text-surface-500 hover:bg-surface-200'">Essay</button>
+                    </div>
                     <div class="flex flex-col items-center gap-1.5 py-2">
                         {% for i in range(exam.total_questions) %}
                         {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
                         <button type="button" @click="currentQ = {{ i }}"
+                                x-show="tab === 'all' || (tab === 'mcq' && '{{ qtype }}' === 'mcq') || (tab === 'essay' && '{{ qtype }}' !== 'mcq')"
                                 class="q-btn w-8 h-8 text-xs rounded-xl font-bold border shrink-0 relative"
                                 :class="{
                                     'bg-white text-stone-500 border-stone-200 hover:border-orange-300': currentQ !== {{ i }},
@@ -480,7 +491,7 @@ function compressCanvas(canvas, maxW) {
 
 function gradeApp() {
     return {
-        currentQ: 0,
+        currentQ: 0, tab: 'mcq',
         // Calculator state (shared across all questions)
         showCalculator: false, calcInput: '0', calcResult: 0, calcOp: null, calcPrev: 0,
         calcNew: true, calcExpression: '', calcAngleMode: 'DEG', calcMemVal: 0,
@@ -1127,16 +1138,28 @@ function calcFinal() {
 function aiSuggest(qIdx) {
     const qTypes = {{ (exam.question_types or {}) | tojson | safe }};
     const studentAns = {{ submission.answers | tojson | safe }};
-    const questionText = ""; // question text not stored in DB currently
-    const ans = studentAns[qIdx];
-    if (!ans || !ans.text) { alert('Tidak ada jawaban teks siswa untuk dikoreksi AI'); return; }
-    const maxScore = parseFloat({{ (exam.question_weights or {}) | tojson | safe }}[qIdx] || 0);
+    const questionTexts = {{ (exam.question_texts or {}) | tojson | safe }};
+    const questionText = questionTexts[qIdx] || '';
+    const ansData = studentAns[qIdx];
+    let studentAnswer = '';
+    if (typeof ansData === 'string') studentAnswer = ansData;
+    else if (ansData && ansData.text) studentAnswer = ansData.text;
+    else if (ansData && ansData.answer) studentAnswer = ansData.answer;
+    if (!studentAnswer) { alert('Tidak ada jawaban siswa untuk dikoreksi AI'); return; }
+    const maxScore = parseFloat({{ (exam.question_weights or {}) | tojson | safe }}[qIdx] || 100);
     const btn = event.target;
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-0.5"></i>Mengoreksi...';
-    fetch('/api/grade/ai-suggest', {
+    fetch('/api/ai/grade-essay', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({question: questionText, answer: ans.text, max_score: maxScore, rubric: ''})
+        body: JSON.stringify({
+            submission_id: '{{ submission.id }}',
+            question_index: qIdx,
+            question_text: questionText,
+            student_answer: studentAnswer,
+            max_score: maxScore,
+            rubric: '',
+        })
     })
     .then(r => r.json())
     .then(d => {
@@ -1150,6 +1173,28 @@ function aiSuggest(qIdx) {
         }
     })
     .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>Koreksi AI'; alert('Gagal terhubung ke server AI'); });
+}
+
+function gradeAllEssays() {
+    if (!confirm('Koreksi semua essay dengan AI?')) return;
+    const btn = event.target;
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Mengoreksi...';
+    fetch('/api/ai/grade-bulk', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            exam_id: '{{ exam_id }}',
+            submission_ids: ['{{ submission.id }}'],
+        })
+    })
+    .then(r => r.json())
+    .then(d => {
+        btn.innerHTML = '✅ ' + (d.processed || 0) + ' baru, ' + (d.cached || 0) + ' cache';
+        setTimeout(() => { btn.disabled = false; btn.innerHTML = orig; }, 2000);
+        if (d.processed > 0 || d.cached > 0) calcFinal();
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = orig; alert('Gagal'); });
 }
 
 setInterval(() => { calcFinal(); }, 2000);
