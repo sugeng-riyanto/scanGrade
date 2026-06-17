@@ -197,7 +197,7 @@ def dashboard():
 @teacher_bp.route("/exams/parse-pdf", methods=["POST"])
 @teacher_or_admin_required
 def exam_parse_pdf():
-    """Upload PDF → extract text → detect questions → return preview."""
+    """Upload PDF → extract text → detect questions → save PDF for canvas."""
     if "pdf" not in request.files:
         return jsonify({"error": "Tidak ada file PDF"}), 400
     pdf_file = request.files["pdf"]
@@ -205,9 +205,23 @@ def exam_parse_pdf():
     if len(raw) > 20 * 1024 * 1024:
         return jsonify({"error": "PDF terlalu besar. Maksimal 20MB."}), 413
 
+    # Save PDF to uploads for exam canvas use
+    import uuid
+    pdf_id = str(uuid.uuid4())[:8]
+    upload_dir = os.path.join(current_app.static_folder, "uploads", "exams")
+    os.makedirs(upload_dir, exist_ok=True)
+    pdf_filename = f"temp_{pdf_id}.pdf"
+    pdf_path = os.path.join(upload_dir, pdf_filename)
+    with open(pdf_path, "wb") as f:
+        f.write(raw)
+    pdf_url = f"/static/uploads/exams/{pdf_filename}"
+
     from app.services.pdf_parser import parse_pdf, generate_preview_html
     parsed = parse_pdf(raw)
     if parsed.get("error"):
+        # Clean up on error
+        try: os.remove(pdf_path)
+        except: pass
         return jsonify({"error": parsed["error"]}), 422
 
     # Generate rubric for essay questions via AI
@@ -224,6 +238,8 @@ def exam_parse_pdf():
         "essay_count": parsed["essay_count"],
         "questions": parsed["questions"],
         "preview_html": preview,
+        "pdf_url": pdf_url,
+        "pdf_id": pdf_id,
     })
 
 
@@ -344,7 +360,7 @@ def exam_form():
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -496,7 +512,7 @@ def exam_detail(exam_id):
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     _recalculate_scores(exam_id)
@@ -857,7 +873,9 @@ def results():
             "max": max(scores),
             "min": min(scores),
             "count": len(scores),
-        }
+        "question_texts": request.form.get("question_texts", "{}"),
+        "pdf_url": request.form.get("pdf_preview_url", ""),
+    }
     else:
         stats = {"avg": 0, "max": 0, "min": 0, "count": 0}
 

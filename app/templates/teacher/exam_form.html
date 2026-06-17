@@ -40,7 +40,7 @@
             <script>
             function pdfUpload() {
                 return {
-                    loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0,
+                    loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '',
                     async uploadPDF(file) {
                         if (!file) return;
                         if (file.type !== 'application/pdf') { alert('Hanya file PDF'); return; }
@@ -54,22 +54,21 @@
                             this.questions = d.questions || [];
                             this.mcqCount = d.mcq_count;
                             this.essayCount = d.essay_count;
+                            this.pdfUrl = d.pdf_url || '';
+                            this.pdfId = d.pdf_id || '';
                         } catch(e) { alert('Gagal: ' + e.message); }
                         finally { this.loading = false; }
                     },
                     applyToForm() {
-                        // Set total_questions
                         const total = this.questions.length;
                         const tq = document.querySelector('input[name="total_questions"]');
                         if (tq) tq.value = total;
-                        // Build question_types JSON
                         const qtypes = {};
                         const qtexts = {};
                         this.questions.forEach(q => {
                             qtypes[q.number - 1] = q.type;
                             qtexts[q.number - 1] = q.text;
                         });
-                        // Set hidden fields
                         let qtInput = document.querySelector('input[name="question_types"]');
                         if (!qtInput) {
                             qtInput = document.createElement('input');
@@ -77,7 +76,6 @@
                             document.querySelector('form').appendChild(qtInput);
                         }
                         qtInput.value = JSON.stringify(qtypes);
-                        // Also store question texts for rubric generation
                         let qsInput = document.querySelector('input[name="question_texts"]');
                         if (!qsInput) {
                             qsInput = document.createElement('input');
@@ -85,10 +83,20 @@
                             document.querySelector('form').appendChild(qsInput);
                         }
                         qsInput.value = JSON.stringify(qtexts);
-                        alert('✅ ' + total + ' soal diterapkan (' + this.mcqCount + ' MCQ, ' + this.essayCount + ' Essay)');
+                        // Set PDF URL for exam canvas
+                        if (this.pdfUrl) {
+                            let pdfInput = document.querySelector('input[name="pdf_url_hidden"]');
+                            if (!pdfInput) {
+                                pdfInput = document.createElement('input');
+                                pdfInput.type = 'hidden'; pdfInput.name = 'pdf_preview_url';
+                                document.querySelector('form').appendChild(pdfInput);
+                            }
+                            pdfInput.value = this.pdfUrl;
+                        }
+                        alert('✅ ' + total + ' soal diterapkan (' + this.mcqCount + ' MCQ, ' + this.essayCount + ' Essay)' + (this.pdfUrl ? '\n📄 PDF siap untuk canvas ujian' : ''));
                         this.reset();
                     },
-                    reset() { this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0; }
+                    reset() { this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0; this.pdfUrl = ''; }
                 };
             }
             </script>
@@ -406,19 +414,21 @@
                     </div>
                 </div>
 
-                <div class="card p-5 border border-dashed border-slate-300 bg-slate-50/50">
-                    <h3 class="font-extrabold text-slate-700 text-sm flex items-center gap-2">
-                        <i class="fas fa-file-pdf text-orange-500"></i>Upload PDF Soal (wajib)
-                    </h3>
-                    <p class="text-xs text-slate-400 mt-1">Upload file PDF berisi soal. Setiap halaman dikonversi ke gambar untuk siswa.</p>
-                    <div class="mt-3 flex items-center gap-4">
-                        {% if exam and exam.pdf_url %}
-                        <div class="flex items-center gap-2 text-emerald-700 font-bold text-sm">
-                            <i class="fas fa-check-circle"></i>PDF sudah diupload
-                            <a href="{{ exam.pdf_url }}" target="_blank" class="text-primary-600 underline text-xs">Lihat</a>
+                <!-- PDF upload status (single) -->
+                <div class="card p-4 border border-dashed border-slate-300 bg-slate-50/50" id="pdf-status-section">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg shadow-rose-200/60"><i class="fas fa-file-pdf text-white text-sm"></i></div>
+                        <div class="flex-1">
+                            <h3 class="font-extrabold text-slate-700 text-sm">PDF Soal</h3>
+                            <p class="text-xs text-slate-400">Upload PDF untuk AI deteksi soal & tampilan ujian siswa.</p>
                         </div>
-                        {% endif %}
-                        <input type="file" name="pdf" accept=".pdf" class="text-sm font-medium file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-extrabold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100">
+                        <div id="pdf-status-badge" class="text-xs font-bold {% if exam and exam.pdf_url %}text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200{% endif %}">
+                            {% if exam and exam.pdf_url %}
+                            ✅ PDF siap
+                            {% else %}
+                            <span class="text-slate-400">Belum upload</span>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
 
