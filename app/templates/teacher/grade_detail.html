@@ -210,8 +210,8 @@
                                      src="{{ pdf_pages[p] }}" alt="PDF page {{ p+1 }}">
                                 {% endfor %}
 
-                                <canvas :id="'student-canvas-' + qIdx" class="absolute inset-0 w-full h-full" style="pointer-events:none; opacity:0.65;"></canvas>
-                                <canvas :id="'teacher-canvas-' + qIdx" class="absolute inset-0 w-full h-full"></canvas>
+                                <canvas :id="'student-canvas-' + qIdx" class="absolute inset-0 w-full" style="pointer-events:none; opacity:0.65;"></canvas>
+                                <canvas :id="'teacher-canvas-' + qIdx" class="absolute inset-0 w-full"></canvas>
 
                                 <!-- Ruler overlay -->
                                 <div x-show="showRuler" class="tool-overlay absolute" style="pointer-events:none">
@@ -596,8 +596,13 @@ function gradeQuestion(qIdx) {
                 this.redrawOverlays();
                 return;
             }
-            el.width = el.offsetWidth;
-            el.height = el.offsetHeight;
+            const imgEl = wrap.querySelector('img');
+            const natW = imgEl && imgEl.naturalWidth > 0 ? imgEl.naturalWidth : el.offsetWidth;
+            const natH = imgEl && imgEl.naturalHeight > 0 ? imgEl.naturalHeight : el.offsetHeight;
+            el.width = natW;
+            el.height = natH;
+            el.style.width = el.offsetWidth + 'px';
+            el.style.height = el.offsetHeight + 'px';
             const ctx = el.getContext('2d');
             ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             ctx.strokeStyle = this.color; ctx.lineWidth = 2.5;
@@ -634,10 +639,13 @@ function gradeQuestion(qIdx) {
             if (!pd || !pd.canvas) return;
             const sc = document.getElementById('student-canvas-' + this.qIdx);
             if (!sc) return;
-            sc.width = this.canvas.width; sc.height = this.canvas.height;
             const sCtx = sc.getContext('2d');
             const img = new Image();
             img.onload = () => {
+                sc.width = img.naturalWidth;
+                sc.height = img.naturalHeight;
+                sc.style.width = (sc.parentElement?.offsetWidth || sc.width) + 'px';
+                sc.style.height = (sc.parentElement?.offsetHeight || sc.height) + 'px';
                 sCtx.clearRect(0, 0, sc.width, sc.height);
                 sCtx.drawImage(img, 0, 0, sc.width, sc.height);
                 if (pd.canvas.startsWith('data:image/jpeg')) {
