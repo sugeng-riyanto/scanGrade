@@ -189,6 +189,10 @@ def _fallback_fitz(file_bytes: bytes) -> Dict:
 def classify_with_ai(markdown: str, api_key: str = None, provider: str = "groq") -> List[Dict]:
     if not api_key:
         return classify_heuristic(markdown)
+
+    # Limit to 20k chars for AI
+    md_for_ai = markdown[:20000]
+
     prompt = f"""Analyze this exam paper. Identify ALL questions.
 For EACH question, classify as "mcq" (multiple choice with A B C D options) or "essay" (written answer).
 
@@ -202,7 +206,7 @@ Output ONLY JSON array:
 [{{"number": 1, "type": "mcq", "text": "first 100 chars..."}}, ...]
 
 Exam:
-{markdown[:15000]}
+{md_for_ai}
 """
     try:
         from app.services.ai_service import _call_ai
@@ -219,14 +223,26 @@ Exam:
 
 
 def classify_heuristic(markdown: str) -> List[Dict]:
+    """Classify questions from markdown. Strips Quarto formatting first."""
+    # Remove page markers and formatting
+    clean = re.sub(r'\\newpage|## Page \d+|# Exam Paper', '', markdown)
     questions = []
-    pattern = re.compile(r'(?:^|\n)\s*(\d+)[\.\)]\s*(.*?)(?=\n\s*\d+[\.\)]|\Z)', re.DOTALL)
-    matches = pattern.findall(markdown)
+    # Match "1." or "1)" at start of line, capture text until next number
+    pattern = re.compile(
+        r'(?:^|\n)\s*(\d+)[\.\)]\s*(.*?)(?=\n\s*\d+[\.\)]|\Z)',
+        re.DOTALL)
+    matches = pattern.findall(clean)
+
     if not matches:
-        return _simple_parse(markdown)
+        return _simple_parse(clean)
+
     for num_str, q_text in matches:
         q_text = q_text.strip()
         if len(q_text) < 5:
+            continue
+        # Skip if this is actually a page number like "Page 2"
+        if q_text.replace(" ", "").lower().startswith("page") or \
+           re.match(r'^\d+\s*$', q_text):
             continue
         questions.append({
             "number": int(num_str),
@@ -234,6 +250,7 @@ def classify_heuristic(markdown: str) -> List[Dict]:
             "type": _heuristic_type(q_text, len(matches)),
             "full_text": q_text,
         })
+
     return questions
 
 
