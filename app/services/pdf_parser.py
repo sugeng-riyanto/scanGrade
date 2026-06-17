@@ -269,50 +269,58 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
 
 
 def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq") -> Dict:
-    """Generate answer key from full markdown — MCQ correct answers + essay model answers.
-    Returns dict: {question_number: "A"|"B"|"C"|"D"|model_answer_text}
-    """
+    """Generate answer key — MCQ = A/B/C/D, Essay = model answer. Processed in batches of 25."""
     if not api_key or not questions:
         return {}
 
-    # Build full question list with full text from markdown
-    q_list = ""
-    for q in questions:
-        q_list += f"Question {q['number']} ({q.get('type', 'mcq').upper()}): {q.get('full_text', q.get('text', ''))}\n\n"
+    mcq_qs = [q for q in questions if q.get("type") == "mcq"]
+    essay_qs = [q for q in questions if q.get("type") != "mcq"]
+    result = {}
 
-    q_list = q_list[:30000]
+    # Process MCQ in batches of 25
+    for i in range(0, len(mcq_qs), 25):
+        batch = mcq_qs[i:i + 25]
+        chunk = ""
+        for q in batch:
+            chunk += f"Q{q['number']}: {q.get('full_text', q.get('text', ''))}\n\n"
 
-    prompt = f"""You are an expert Cambridge IGCSE/IAL examiner. 
-For EACH question below, provide the correct answer.
+        prompt = f"You are a Cambridge examiner. For EACH MCQ below, output ONLY the correct letter (A/B/C/D). No text, no explanations.\n\nExample:\n{{\"1\": \"A\", \"2\": \"C\", \"3\": \"B\"}}\n\nQuestions:\n{chunk}\n\nOutput ONLY a JSON object."
 
-Rules:
-- For MCQ (multiple choice): answer is A, B, C, or D ONLY
-- For Essay: provide a concise model answer (2-3 sentences max)
-- Output ONLY a JSON object with question numbers as keys and answers as values
-- No explanations, no extra text
+        try:
+            from app.services.ai_service import _call_ai
+            raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+            parsed = json.loads(cleaned.strip())
+            if isinstance(parsed, dict):
+                for k, v in parsed.items():
+                    if str(v) in ("A", "B", "C", "D"):
+                        result[str(k)] = str(v)
+        except Exception as e:
+            logger.warning("MCQ batch %d failed: %s", i, e)
 
-Example for MCQ paper:
-{{"1": "A", "2": "C", "3": "B"}}
+    # Essay in one batch
+    if essay_qs:
+        chunk = ""
+        for q in essay_qs:
+            chunk += f"Q{q['number']}: {q.get('full_text', q.get('text', ''))}\n\n"
+        prompt = f"For each essay, provide a concise model answer (1-2 sentences). Output ONLY JSON.\n\nQuestions:\n{chunk}"
+        try:
+            from app.services.ai_service import _call_ai
+            raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+            parsed = json.loads(cleaned.strip())
+            if isinstance(parsed, dict):
+                for k, v in parsed.items():
+                    if k not in result:
+                        result[str(k)] = str(v)[:200]
+        except Exception as e:
+            logger.warning("Essay batch failed: %s", e)
 
-Example for mixed paper:
-{{"1": "A", "2": "Photosynthesis is the process by which plants convert light energy into chemical energy.", "3": "D"}}
-
-Questions:
-{q_list}
-"""
-
-    try:
-        from app.services.ai_service import _call_ai
-        raw = _call_ai({"api_key": api_key, "provider": provider or "groq"}, prompt)
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-        key = json.loads(cleaned.strip())
-        if isinstance(key, dict) and len(key) > 0:
-            return key
-    except Exception as e:
-        logger.warning("AI answer key generation failed: %s", e)
-    return {}
+    return result
 
 
 def generate_preview_html(parsed: Dict) -> str:
