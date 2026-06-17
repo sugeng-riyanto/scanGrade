@@ -202,7 +202,7 @@
 
             <!-- 📄 Persistent PDF Status Bar -->
             <div class="mb-6 p-4 rounded-2xl border-2 transition-all duration-300"
-                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '' }"
+                 x-data="{ pdfStatus: 'empty', pdfName: '', hasAI: false, qCount: 0, mcqC: 0, essayC: 0, pdfUrl: '', aiClassified: false }"
                  x-init="
                     window.addEventListener('pdf-uploaded', e => {
                         pdfStatus = 'success';
@@ -212,6 +212,7 @@
                         mcqC = e.detail.mcqCount || 0;
                         essayC = e.detail.essayCount || 0;
                         pdfUrl = e.detail.pdfUrl || '';
+                        aiClassified = e.detail.aiClassified || false;
                     });
                     window.addEventListener('pdf-error', e => { pdfStatus = 'error'; });
                     window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; });
@@ -242,6 +243,8 @@
                         <p class="text-[10px] text-emerald-600 mt-0.5">
                             <span x-show="hasAI"><span x-text="qCount"></span> soal terdeteksi (<span x-text="mcqC"></span> MCQ, <span x-text="essayC"></span> Essay)</span>
                             <span x-show="!hasAI">PDF siap untuk canvas siswa</span>
+                            <span x-show="hasAI && aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-700 border border-primary-200">AI</span>
+                            <span x-show="hasAI && !aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Heuristic</span>
                         </p>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
@@ -298,6 +301,7 @@
                                 essayCount: d.essay_count || 0,
                                 pdfUrl: d.pdf_url || '',
                                 _questions: d.questions || [],
+                                aiClassified: d.ai_classified || false,
                             };
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
                         } catch(e) { this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }

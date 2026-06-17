@@ -198,7 +198,7 @@ def dashboard():
 @teacher_bp.route("/exams/parse-pdf", methods=["POST"])
 @teacher_or_admin_required
 def exam_parse_pdf():
-    """Upload PDF → extract text → detect questions → return preview."""
+    """Upload PDF → markdown → AI classification (MCQ vs Essay) → preview."""
     try:
         if "pdf" not in request.files:
             return jsonify({"error": "Tidak ada file PDF"}), 400
@@ -207,17 +207,41 @@ def exam_parse_pdf():
         if len(raw) > 50 * 1024 * 1024:
             return jsonify({"error": "PDF terlalu besar. Maksimal 50MB"}), 413
 
-        # Parse PDF for AI question detection
+        # Step 1: PDF → Clean Markdown
         try:
-            from app.services.pdf_parser import parse_pdf, generate_preview_html
+            from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html
         except ImportError:
             return jsonify({"error": "Library tidak tersedia. Jalankan: pip install pymupdf"}), 500
 
-        parsed = parse_pdf(raw)
+        parsed = pdf_to_markdown(raw)
         if parsed.get("error"):
             return jsonify({"error": parsed["error"]}), 422
 
-        # Try to save PDF locally for exam canvas (ignore failure)
+        # Step 2: Try AI classification using teacher's Groq key, then heuristic fallback
+        questions = None
+        ai_used = False
+        try:
+            from app.services.ai_service import _get_active_key
+            key = _get_active_key(g.user_id)
+            if key and key.get("api_key"):
+                questions = classify_with_ai(
+                    parsed["markdown"],
+                    api_key=key["api_key"],
+                    provider=key.get("provider", "groq"),
+                )
+                if questions and len(questions) > 0:
+                    ai_used = True
+        except Exception as e:
+            current_app.logger.warning("AI classification failed: %s", e)
+
+        if not questions:
+            questions = classify_heuristic(parsed["markdown"])
+
+        parsed["questions"] = questions
+        parsed["mcq_count"] = sum(1 for q in questions if q.get("type") == "mcq")
+        parsed["essay_count"] = sum(1 for q in questions if q.get("type") == "essay")
+
+        # Step 3: Save PDF for exam canvas
         pdf_url = ""
         try:
             import uuid
@@ -231,23 +255,25 @@ def exam_parse_pdf():
         except Exception as e:
             current_app.logger.warning("PDF save skipped: %s", e)
 
-        # Generate rubric for essay questions (skip gracefully if AI fails)
+        # Step 4: Generate rubrics for essay questions
         lang = request.form.get("lang", "en")
-        for q in parsed.get("questions", []):
-            if q["type"] == "essay":
+        for q in questions or []:
+            if q.get("type") == "essay":
                 try:
                     from app.services.rubric_generator import generate_rubric
-                    q["rubric"] = generate_rubric(q["text"], lang=lang)
+                    q["rubric"] = generate_rubric(q.get("text", ""), lang=lang)
                 except Exception as e:
-                    current_app.logger.warning("Rubric gen skipped: %s", e)
+                    current_app.logger.warning("Rubric skipped: %s", e)
 
         preview = generate_preview_html(parsed)
         return jsonify({
             "success": True,
+            "ai_classified": ai_used,
+            "markdown": parsed["markdown"][:5000],
             "page_count": parsed["page_count"],
             "mcq_count": parsed["mcq_count"],
             "essay_count": parsed["essay_count"],
-            "questions": parsed["questions"],
+            "questions": questions,
             "preview_html": preview,
             "pdf_url": pdf_url,
             "pdf_id": pdf_url.split("/")[-1].replace(".pdf", "").replace("temp_", "") if pdf_url else "",
@@ -255,6 +281,20 @@ def exam_parse_pdf():
     except Exception as e:
         current_app.logger.error("parse-pdf error: %s", e, exc_info=True)
         return jsonify({"error": f"Gagal memproses PDF: {str(e)[:200]}"}), 500
+
+
+@teacher_bp.route("/exams/parse-pdf/markdown", methods=["POST"])
+@teacher_or_admin_required
+def exam_pdf_markdown():
+    """Return PDF as clean markdown text for download."""
+    if "pdf" not in request.files:
+        return jsonify({"error": "No PDF"}), 400
+    raw = request.files["pdf"].read()
+    from app.services.pdf_parser import pdf_to_markdown
+    result = pdf_to_markdown(raw)
+    if result.get("error"):
+        return jsonify({"error": result["error"]}), 422
+    return result["markdown"], 200, {"Content-Type": "text/markdown; charset=utf-8"}
 
 
 @teacher_bp.route("/exams/export-scan", methods=["POST"])
