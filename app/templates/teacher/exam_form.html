@@ -104,7 +104,7 @@
                     </div>
                 </div>
 
-                <!-- Loading animation -->
+                <!-- Loading animation with timed steps -->
                 <div x-show="loading" class="mt-4 p-5 rounded-xl bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-100">
                     <div class="flex items-center gap-4">
                         <div class="relative w-10 h-10 shrink-0">
@@ -113,13 +113,26 @@
                             <div class="absolute inset-0 flex items-center justify-center"><i class="fas fa-file-pdf text-primary-500 text-sm"></i></div>
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-bold text-primary-700">AI sedang memproses PDF...</p>
-                            <p class="text-[10px] text-primary-500 mt-0.5">Membaca teks, mendeteksi soal, menganalisis tipe</p>
+                            <p class="text-sm font-bold text-primary-700" x-text="loadingText">AI sedang memproses PDF...</p>
+                            <p class="text-[10px] text-primary-500 mt-0.5 flex items-center gap-2">
+                                <span x-text="loadingStep"></span>
+                                <span class="text-primary-300">|</span>
+                                <span x-text="loadingTime + 's'"></span>
+                            </p>
                         </div>
                     </div>
-                    <!-- Animated progress bar -->
-                    <div class="mt-3 h-1.5 rounded-full bg-primary-100 overflow-hidden">
-                        <div class="h-full rounded-full bg-gradient-to-r from-primary-500 to-primary-400 animate-pulse" style="width:60%"></div>
+                    <!-- Progress bar with step indicator -->
+                    <div class="mt-3 flex items-center gap-2">
+                        <div class="flex-1 h-1.5 rounded-full bg-primary-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-gradient-to-r from-primary-500 to-primary-400 transition-all duration-500" :style="'width:' + loadingProgress + '%'"></div>
+                        </div>
+                        <span class="text-[9px] font-bold text-primary-500" x-text="Math.round(loadingProgress) + '%'"></span>
+                    </div>
+                    <!-- Step labels -->
+                    <div class="mt-2 flex justify-between text-[8px] font-bold text-primary-400">
+                        <span :class="loadingStep >= 1 ? 'text-primary-700' : ''">📄 PDF → Markdown</span>
+                        <span :class="loadingStep >= 2 ? 'text-primary-700' : ''">🤖 Klasifikasi</span>
+                        <span :class="loadingStep >= 3 ? 'text-primary-700' : ''">🔑 Kunci Jawaban</span>
                     </div>
                 </div>
 
@@ -310,18 +323,34 @@
             function pdfUpload() {
                 return {
                     loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '', applied: false,
+                    loadingText: 'AI sedang memproses PDF...',
+                    loadingStep: 0, loadingTime: 0, loadingProgress: 0, _timer: null,
                     async uploadPDF(file) {
                         if (!file) return;
                         if (file.type !== 'application/pdf') { this.errorMsg = 'Hanya file PDF yang didukung'; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
                         this.loading = true; this.preview = ''; this.questions = []; this.errorMsg = '';
+                        this.loadingStep = 0; this.loadingTime = 0; this.loadingProgress = 0;
+                        // Start timed progress
+                        this.loadingText = '📄 Mengkonversi PDF ke Markdown...';
+                        this.loadingStep = 1;
+                        this._timer = setInterval(() => {
+                            this.loadingTime++;
+                            this.loadingProgress = Math.min(95, this.loadingProgress + 0.5 + Math.random() * 1.5);
+                        }, 1000);
                         const fd = new FormData(); fd.append('pdf', file);
                         // Get AI language from parent scope
                         const parentEl = this.$el.closest('[x-data]');
                         const lang = parentEl?.__x?.$data?.aiLang || 'en';
                         fd.append('lang', lang);
                         try {
+                            this.loadingText = '🤖 Menganalisis soal dengan AI...';
+                            this.loadingStep = 2;
                             const r = await fetch('/teacher/exams/parse-pdf', { method: 'POST', body: fd });
+                            this.loadingText = '🔑 Membuat kunci jawaban...';
+                            this.loadingStep = 3;
                             const d = await r.json();
+                            if (this._timer) { clearInterval(this._timer); this._timer = null; }
+                            this.loadingProgress = 100;
                             if (d.error) { this.errorMsg = d.error; this.loading = false; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
                             this.preview = d.preview_html;
                             this.questions = d.questions || [];
@@ -348,10 +377,11 @@
                             window.dispatchEvent(new CustomEvent(
                                 d.answer_key_generated ? 'key-done' : 'key-failed'
                             ));
-                        } catch(e) { this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
+                        } catch(e) { if (this._timer) { clearInterval(this._timer); this._timer = null; } this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
                         finally { this.loading = false; }
                     },
                     reset() {
+                        if (this._timer) { clearInterval(this._timer); this._timer = null; }
                         this.preview = ''; this.questions = []; this.mcqCount = 0; this.essayCount = 0;
                         this.pdfUrl = ''; this.applied = false; this.errorMsg = '';
                         window.dispatchEvent(new CustomEvent('pdf-reset'));

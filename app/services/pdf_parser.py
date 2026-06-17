@@ -269,39 +269,36 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
 
 
 def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None) -> Dict:
-    """Generate answer key from markdown — correct MCQ options + essay rubrics.
-    Returns dict: {question_number: "A"|"B"|"C"|"D"|"essay"}
+    """Generate answer key from full markdown — MCQ correct answers + essay model answers.
+    Returns dict: {question_number: "A"|"B"|"C"|"D"|model_answer_text}
     """
     if not api_key or not questions:
-        return _heuristic_key(questions)
-
-    # Find MCQ questions and extract their text
-    mcq_qs = [q for q in questions if q.get("type") == "mcq"]
-    if not mcq_qs:
         return {}
 
-    # Build prompt with just the MCQ questions
-    mcq_text = ""
-    for q in mcq_qs:
-        mcq_text += f"{q['number']}. {q.get('full_text', q.get('text', ''))}\n\n"
+    # Build full question list with full text from markdown
+    q_list = ""
+    for q in questions:
+        q_list += f"Question {q['number']} ({q.get('type', 'mcq').upper()}): {q.get('full_text', q.get('text', ''))}\n\n"
 
-    # Limit to avoid context overflow
-    mcq_text = mcq_text[:25000]
+    q_list = q_list[:30000]
 
     prompt = f"""You are an expert Cambridge IGCSE/IAL examiner. 
-For each MCQ question below, determine the SINGLE correct answer (A, B, C, or D).
-Use your subject knowledge and logical reasoning.
+For EACH question below, provide the correct answer.
 
 Rules:
-- Each question has EXACTLY ONE correct answer
+- For MCQ (multiple choice): answer is A, B, C, or D ONLY
+- For Essay: provide a concise model answer (2-3 sentences max)
 - Output ONLY a JSON object with question numbers as keys and answers as values
 - No explanations, no extra text
 
-Example:
+Example for MCQ paper:
 {{"1": "A", "2": "C", "3": "B"}}
 
+Example for mixed paper:
+{{"1": "A", "2": "Photosynthesis is the process by which plants convert light energy into chemical energy.", "3": "D"}}
+
 Questions:
-{mcq_text}
+{q_list}
 """
 
     try:
@@ -312,25 +309,9 @@ Questions:
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
         key = json.loads(cleaned.strip())
         if isinstance(key, dict) and len(key) > 0:
-            # Validate: only accept A-D answers
-            validated = {}
-            for k, v in key.items():
-                if str(v) in ("A", "B", "C", "D"):
-                    validated[str(k)] = str(v)
-            if validated:
-                return validated
+            return key
     except Exception as e:
         logger.warning("AI answer key generation failed: %s", e)
-
-    return _heuristic_key(questions)
-
-
-def _heuristic_key(questions: List[Dict]) -> Dict:
-    """Guess answer key from markdown — looks for bolded answers or patterns."""
-    # This is a placeholder — heuristic key generation is unreliable
-    # Returns empty dict, teacher must fill manually
-    return {}
-
 
 def _call_ai_direct(api_key: str, prompt: str) -> str:
     """Direct AI call for answer key generation."""
