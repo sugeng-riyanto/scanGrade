@@ -33,4 +33,4 @@ locust==2.32.0
 pandas==2.2.3
 midtransclient==1.4.2
 openai==2.41.0
-google-generativeai==0.8.6
+google-generativeai>=0.8.6
