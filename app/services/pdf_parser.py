@@ -161,7 +161,7 @@ def _fallback_fitz(file_bytes: bytes) -> Dict:
                 md.append(s)
             else:
                 md.append(s)
-        pages_md.append(f"{'\\newpage\n' if i > 0 else ''}## Page {i+1}\n\n" + "\n".join(md))
+        pages_md.append(("\\newpage\n" if i > 0 else "") + f"## Page {i+1}\n\n" + "\n".join(md))
     pdf.close()
     return {
         "markdown": "# Exam Paper\n\n" + "\n".join(pages_md),
