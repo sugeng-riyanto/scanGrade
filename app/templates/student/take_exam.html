@@ -389,7 +389,7 @@
                                     </div>
                                 </div>
                                 <canvas :id="'ec-canvas-' + i"
-                                        class="absolute inset-0 w-full h-full"
+                                        class="absolute inset-0 w-full"
                                         :style="'cursor:' + (essayCanvasMode[i]==='line' ? 'crosshair' : essayCanvasMode[i]==='eraser' ? 'cell' : essayCanvasMode[i]==='text' ? 'text' : 'crosshair') + ';touch-action:none'"></canvas>
                                 <!-- Ruler overlay -->
                                   <div x-show="showRuler[i]" class="tool-overlay" :id="'ruler-overlay-' + i">
@@ -1136,6 +1136,7 @@ function examApp(duration, totalQ) {
                     const oldData = canvas.toDataURL();
                     canvas.width = targetW;
                     canvas.height = targetH;
+                    canvas.style.height = targetH + 'px';
                     const ctx = canvas.getContext('2d');
                     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
                     const img = new Image();
@@ -1150,6 +1151,7 @@ function examApp(duration, totalQ) {
             const targetH = imgEl && imgEl.offsetHeight > 0 ? imgEl.offsetHeight : (rect.height || 500);
             canvas.width = targetW;
             canvas.height = targetH;
+            canvas.style.height = targetH + 'px';
             const ctx = canvas.getContext('2d');
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
@@ -1361,6 +1363,7 @@ function examApp(duration, totalQ) {
                         const old = c.toDataURL();
                         c.width = r.width || 700;
                         c.height = r.height || 400;
+                        c.style.height = c.height + 'px';
                         const cx = c.getContext('2d');
                         cx.lineCap = 'round'; cx.lineJoin = 'round';
                         const img = new Image();
