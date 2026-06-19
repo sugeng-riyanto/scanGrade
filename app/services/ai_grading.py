@@ -59,9 +59,11 @@ _LANG_FEEDBACK = {
         "2. Provide specific, actionable feedback for improvement\n"
         "3. Use professional academic language (IELTS 7.5+ vocabulary)\n"
         "4. Score must be a number (0-{max_score})\n"
-        "5. Feedback must be in English\n\n"
+        "5. Feedback must be in English\n"
+        "6. Include a brief 'reasoning' explaining why the score was given\n"
+        "7. Include a 'confidence' score from 0.0 to 1.0 indicating how sure you are\n\n"
         "Output ONLY JSON:\n"
-        '{{"score": <number>, "feedback": "<constructive feedback in English>"}}'
+        '{{"score": <number>, "feedback": "<constructive feedback>", "reasoning": "<1-2 sentence reasoning>", "confidence": <0.0-1.0>}}'
     ),
     "id": (
         "Evaluasi jawaban ini dengan standar UKBI/EYD.\n\n"
@@ -76,9 +78,11 @@ _LANG_FEEDBACK = {
         "2. Berikan saran perbaikan yang spesifik dan membangun\n"
         "3. Gunakan Bahasa Indonesia baku sesuai EYD\n"
         "4. Skor berupa angka (0-{max_score})\n"
-        "5. Feedback dalam Bahasa Indonesia yang memotivasi\n\n"
+        "5. Feedback dalam Bahasa Indonesia yang memotivasi\n"
+        "6. Sertakan 'reasoning' singkat menjelaskan alasan skor\n"
+        "7. Sertakan 'confidence' 0.0-1.0 seberapa yakin Anda\n\n"
         "Output HANYA JSON:\n"
-        '{{"score": <number>, "feedback": "<feedback membangun dalam Bahasa Indonesia>"}}'
+        '{{"score": <number>, "feedback": "<feedback membangun>", "reasoning": "<alasan 1-2 kalimat>", "confidence": <0.0-1.0>}}'
     ),
     "zh-Hant": (
         "根據HSK 5級標準評估此答案。\n\n"
@@ -93,9 +97,11 @@ _LANG_FEEDBACK = {
         "2. 提供具體可行的改進建議\n"
         "3. 用正向積極的語氣\n"
         "4. 分數為數字（0-{max_score}）\n"
-        "5. 反饋使用繁體中文\n\n"
+        "5. 反饋使用繁體中文\n"
+        "6. 包含簡短'reasoning'解釋給分原因\n"
+        "7. 包含'confidence' 0.0-1.0 表示確定程度\n\n"
         "僅輸出JSON：\n"
-        '{{"score": <number>, "feedback": "<建設性反饋，使用繁體中文>"}}'
+        '{{"score": <number>, "feedback": "<建設性反饋>", "reasoning": "<1-2句理由>", "confidence": <0.0-1.0>}}'
     ),
     "ar": (
         "قم بتقييم هذه الإجابة بمستوى مناسب للمرحلة المتوسطة والثانوية.\n\n"
@@ -110,9 +116,11 @@ _LANG_FEEDBACK = {
         "2. قدم اقتراحات محددة للتحسين\n"
         "3. استخدم لغة عربية فصيحة ومشجعة\n"
         "4. الدرجة تكون رقمًا (0-{max_score})\n"
-        "5. التعليق باللغة العربية\n\n"
+        "5. التعليق باللغة العربية\n"
+        "6. تضمين 'reasoning' موجز يشرح سبب الدرجة\n"
+        "7. تضمين 'confidence' 0.0-1.0 لمدى الثقة\n\n"
         "أخرج JSON فقط:\n"
-        '{{"score": <number>, "feedback": "<تعليق بناء باللغة العربية>"}}'
+        '{{"score": <number>, "feedback": "<تعليق بناء>", "reasoning": "<سبب 1-2 جملة>", "confidence": <0.0-1.0>}}'
     ),
 }
 
@@ -169,7 +177,7 @@ def grade_essay(teacher_id: str, submission_id: str, question_index: int,
     try:
         from app.services.ai_service import _call_ai, _parse_ai_response
         raw = _call_ai(key, prompt)
-        score, feedback = _parse_ai_response(raw)
+        score, feedback, reasoning, confidence = _parse_ai_response(raw)
 
         # 5. Save to cache
         _save_cache(submission_id, question_index, score, feedback,
@@ -186,6 +194,8 @@ def grade_essay(teacher_id: str, submission_id: str, question_index: int,
         return {
             "score": round(score, 1),
             "feedback": feedback,
+            "reasoning": reasoning,
+            "confidence": round(confidence, 2),
             "provider": key.get("provider", "ai"),
             "cached": False,
         }

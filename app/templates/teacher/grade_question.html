@@ -151,6 +151,18 @@
                                     <i class="fas fa-robot mr-0.5"></i>AI
                                 </button>
                             </div>
+                            <!-- AI Reasoning + Confidence -->
+                            <div x-show="s.aiReasoning" class="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div class="flex items-start gap-2">
+                                    <div class="flex-1 min-w-0">
+                                        <p class="text-[10px] font-bold text-blue-700 mb-0.5">Alasan AI <span x-show="s.aiConfidence !== undefined" class="font-normal text-blue-500" x-text="'— keyakinan ' + (s.aiConfidence * 100).toFixed(0) + '%'"></span></p>
+                                        <p class="text-[10px] text-blue-600" x-text="s.aiReasoning"></p>
+                                    </div>
+                                    <div x-show="s.aiConfidence !== undefined" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-xs font-extrabold border-2"
+                                         :class="s.aiConfidence >= 0.7 ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : s.aiConfidence >= 0.4 ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-red-50 text-red-600 border-red-300'"
+                                         x-text="Math.round(s.aiConfidence * 100)"></div>
+                                </div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -212,7 +224,7 @@ function graderApp() {
                 .then(r => r.json())
                 .then(d => {
                     this.students = (d.students || []).map(s => ({
-                        ...s, expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || ''
+                        ...s, expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || '', aiReasoning: '', aiConfidence: undefined
                     }));
                     this.loading = false;
                     this.focusedIdx = 0;
@@ -321,6 +333,8 @@ function graderApp() {
                 btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>AI';
                 if (d.score !== undefined) { s.scoreVal = d.score; }
                 if (d.feedback) { s.feedbackVal = d.feedback; }
+                if (d.reasoning) { s.aiReasoning = d.reasoning; }
+                if (d.confidence !== undefined) { s.aiConfidence = d.confidence; }
                 this.saveEssayScore(s);
             })
             .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>AI'; });
