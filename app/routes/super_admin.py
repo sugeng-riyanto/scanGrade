@@ -157,12 +157,43 @@ def api_extend_trial(school_id):
 @_sa_required
 def api_reset_admin_pw(school_id):
     supabase = get_supabase()
-    admin = supabase.table("profiles").select("id").eq("school_id", school_id).eq("role", "admin_sekolah").limit(1).execute().data
-    if admin:
-        new_pw = secrets.token_hex(6)
-        supabase.auth.admin.update_user_by_id(admin[0]["id"], {"password": new_pw})
-        return jsonify({"success": True, "password": new_pw})
-    return jsonify({"error": "Admin not found"}), 404
+    admin = supabase.table("profiles").select("id, full_name").eq("school_id", school_id).eq("role", "admin_sekolah").limit(1).execute().data
+    if not admin:
+        return jsonify({"error": "Admin not found"}), 404
+    new_pw = secrets.token_hex(8)
+    supabase.auth.admin.update_user_by_id(admin[0]["id"], {"password": new_pw})
+    # Send email via SMTP
+    try:
+        import smtplib, ssl
+        from email.mime.text import MIMEText
+        admin_email = supabase.auth.admin.get_user_by_id(admin[0]["id"]).user.email
+        if admin_email:
+            msg = MIMEText(f"""Yth. Bpk/Ibu {admin[0].get('full_name', 'Admin Sekolah')},
+
+Dengan hormat,
+
+Kami informasikan bahwa kata sandi akun ScanGrade Anda telah berhasil diatur ulang oleh Super Admin.
+
+Berikut adalah kata sandi baru Anda:
+{new_pw}
+
+Untuk keamanan, silakan masuk menggunakan kata sandi di atas dan segera ubah kata sandi Anda setelah berhasil login.
+
+Jika ada pertanyaan, jangan ragu untuk menghubungi tim dukungan kami.
+
+Hormat kami,
+Tim ScanGrade
+https://scangrade.web.id""", "plain", "utf-8")
+            msg["Subject"] = "🔐 ScanGrade — Kata Sandi Berhasil Diatur Ulang"
+            msg["From"] = "ScanGrade <scangrade9@gmail.com>"
+            msg["To"] = admin_email
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
+                server.sendmail("scangrade9@gmail.com", admin_email, msg.as_string())
+    except Exception as e:
+        pass  # Email is best-effort; password is returned in response
+    return jsonify({"success": True, "password": new_pw, "email_sent": bool(admin_email if 'admin_email' in dir() else False)})
 
 
 @super_bp.route("/users")
