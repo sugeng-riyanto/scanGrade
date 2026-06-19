@@ -30,21 +30,19 @@
                     </select>
                 </div>
                 <button type="submit" class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition"
-                        :disabled="sending">{ sending ? 'Mengirim...' : 'Kirim Pengumuman' }</button>
+                        :disabled="sending"><span x-text="sending ? 'Mengirim...' : 'Kirim Pengumuman'"></span></button>
                 <p x-show="sendMsg" class="text-xs font-bold text-emerald-600" x-text="sendMsg"></p>
             </form>
         </div>
     </div>
-    <div class="space-y-6" x-data="{ showBroadcast: false, formTitle: '', formMessage: '', formTarget: 'admin_sekolah', sending: false, sendMsg: '' }">
+    <div class="space-y-6">
     <!-- Stats -->
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <div class="bg-gradient-to-br from-purple-50 to-purple-100/30 rounded-2xl p-4 border border-purple-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-purple-700">{{ total_schools }}</p>
             <p class="text-xs font-bold text-purple-500 mt-1">Sekolah</p>
         
-    <button @click="showBroadcast=true" class="px-4 py-2 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition shadow-lg">
-        <i class="fas fa-bullhorn mr-1"></i>Pengumuman
-    </button>
+    
     </div>
         <div class="bg-gradient-to-br from-blue-50 to-blue-100/30 rounded-2xl p-4 border border-blue-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-blue-700">{{ total_users }}</p>
