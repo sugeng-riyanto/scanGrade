@@ -92,45 +92,77 @@ def preprocess_scan(img: np.ndarray) -> np.ndarray:
 
 # ── Registration marks ──
 
-def find_registration_marks(img: np.ndarray):
-    """Find 4 corner registration marks with better contour filtering."""
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+def _adaptive_inverse(gray: np.ndarray, block_size: int = 15) -> np.ndarray:
+    """Gaussian adaptive threshold (inverse binary) — fast, handles uneven lighting."""
+    return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                 cv2.THRESH_BINARY_INV, block_size, 3)
 
+
+def _otsu_inverse(gray: np.ndarray) -> np.ndarray:
+    """OTSU threshold (inverse binary)."""
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    return thresh
+
+
+def find_registration_marks(img: np.ndarray):
+    """Find 4 corner registration marks with robust multi-method detection."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = img.shape[:2]
-    min_area = (w * MARK_SIZE_RATIO) ** 2 * 0.25
+
+    # Try multiple thresholding methods and combine contours
+    candidates = set()
+    min_area = (w * MARK_SIZE_RATIO) ** 2 * 0.2
     max_area = (w * MARK_SIZE_RATIO * 4) ** 2
 
-    candidates = []
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < min_area or area > max_area:
+    for method_fn in [_otsu_inverse, _adaptive_inverse]:
+        try:
+            thresh = method_fn(gray)
+        except Exception:
             continue
-        x, y, bw, bh = cv2.boundingRect(cnt)
-        aspect = bw / bh if bh > 0 else 0
-        if 0.4 < aspect < 2.5:
-            M = cv2.moments(cnt)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                candidates.append((cx, cy))
+
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < min_area or area > max_area:
+                continue
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            aspect = bw / bh if bh > 0 else 0
+            if 0.3 < aspect < 3.0:
+                M = cv2.moments(cnt)
+                if M["m00"] > 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    candidates.add((cx // 5 * 5, cy // 5 * 5))  # quantize to 5px grid
+
+    if len(candidates) < 4:
+        # Fallback: try edge-based detection (Canny + Hough)
+        edges = cv2.Canny(gray, 50, 150)
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100, minLineLength=min(h,w)//4, maxLineGap=20)
+        if lines is not None:
+            corners = []
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                corners.append((x1, y1))
+                corners.append((x2, y2))
+            if len(corners) >= 4:
+                candidates = set((p[0]//10*10, p[1]//10*10) for p in corners)
 
     if len(candidates) < 4:
         return None
 
-    min_x = min(p[0] for p in candidates)
-    max_x = max(p[0] for p in candidates)
-    min_y = min(p[1] for p in candidates)
-    max_y = max(p[1] for p in candidates)
+    cand_list = list(candidates)
+    min_x = min(p[0] for p in cand_list)
+    max_x = max(p[0] for p in cand_list)
+    min_y = min(p[1] for p in cand_list)
+    max_y = max(p[1] for p in cand_list)
 
     def dist_to(p, tx, ty):
         return abs(p[0] - tx) + abs(p[1] - ty)
 
-    tl = min(candidates, key=lambda p: dist_to(p, min_x, min_y))
-    tr = min(candidates, key=lambda p: dist_to(p, max_x, min_y))
-    br = min(candidates, key=lambda p: dist_to(p, max_x, max_y))
-    bl = min(candidates, key=lambda p: dist_to(p, min_x, max_y))
+    tl = min(cand_list, key=lambda p: dist_to(p, min_x, min_y))
+    tr = min(cand_list, key=lambda p: dist_to(p, max_x, min_y))
+    br = min(cand_list, key=lambda p: dist_to(p, max_x, max_y))
+    bl = min(cand_list, key=lambda p: dist_to(p, min_x, max_y))
     return [tl, tr, br, bl]
 
 
@@ -172,12 +204,22 @@ def _bubble_stats(roi: np.ndarray) -> dict:
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     fill_ratio_otsu = cv2.countNonZero(thresh) / (h * w) if h * w > 0 else 0
 
-    # Adaptive threshold (catches faint marks)
+    # Gaussian adaptive threshold (catches faint marks, handles uneven lighting)
     bs = max(3, min(h, w) // 3)
     bs = bs + 1 if bs % 2 == 0 else bs
     adapt = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                   cv2.THRESH_BINARY_INV, bs, 3)
     fill_adapt = cv2.countNonZero(adapt) / (h * w) if h * w > 0 else 0
+
+    # Sauvola-style: smaller block for fine detail
+    try:
+        bs2 = max(3, min(h, w) // 5)
+        bs2 = bs2 if bs2 % 2 == 1 else bs2 + 1
+        sauvola = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                        cv2.THRESH_BINARY_INV, bs2, 5)
+        fill_sauvola = cv2.countNonZero(sauvola) / (h * w) if h * w > 0 else 0
+    except Exception:
+        fill_sauvola = fill_adapt
 
     # Dark pixel ratio: pixels darker than (median - some threshold)
     dark_thresh = max(50, median_val - 20)
@@ -195,7 +237,7 @@ def _bubble_stats(roi: np.ndarray) -> dict:
         "mean_dark": mean_dark,
         "median_dark": median_dark,
         "p25_dark": p25_dark,
-        "fill_ratio": max(fill_ratio_otsu, fill_adapt),
+        "fill_ratio": max(fill_ratio_otsu, fill_adapt, fill_sauvola),
         "std": std_val,
         "dark_pixel_ratio": dark_pixel_ratio,
         "hist_valley": float(hist_valley),
