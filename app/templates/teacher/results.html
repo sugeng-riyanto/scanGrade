@@ -29,6 +29,9 @@
             <a href="/teacher/exams/{{ exam_id }}/proctoring" class="border-2 border-violet-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-violet-50 text-[11px] sm:text-sm font-bold text-violet-700 transition whitespace-nowrap">
                 <i class="fas fa-desktop mr-1"></i><span class="hidden sm:inline">Proctoring</span>
             </a>
+            <button onclick="generateRemedial('{{ exam_id }}')" class="border-2 border-emerald-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-emerald-50 text-[11px] sm:text-sm font-bold text-emerald-700 transition whitespace-nowrap">
+                <i class="fas fa-book-open mr-1"></i><span class="hidden sm:inline">Remedial</span>
+            </button>
             {% if exam.get('is_published') %}
             <form method="POST" action="/teacher/publish/{{ exam_id }}/unpublish" class="inline">
                 <button type="submit" class="border-2 border-amber-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-amber-50 text-[11px] sm:text-sm font-bold text-amber-700 transition whitespace-nowrap"
@@ -115,4 +118,22 @@
     {% endif %}
     {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function generateRemedial(examId) {
+    if (!confirm('Generate soal remedial berdasarkan soal yang paling banyak salah?')) return;
+    const btn = event.target.closest('button');
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Generate...';
+    fetch('/teacher/exams/' + examId + '/generate-remedial', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-book-open mr-1"></i>Remedial';
+            if (d.redirect) { window.location.href = d.redirect; }
+            else { alert(d.error || 'Gagal generate'); }
+        })
+        .catch(e => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-book-open mr-1"></i>Remedial'; alert('Error: ' + e.message); });
+}
+</script>
 {% endblock %}

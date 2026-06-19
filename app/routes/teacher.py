@@ -2052,3 +2052,151 @@ def exam_proctoring_data(exam_id):
         "started": sum(1 for r in result if r["status"] != "not_started"),
         "submitted": sum(1 for r in result if r["status"] in ("submitted", "graded", "published")),
     })
+
+
+@teacher_bp.route("/exams/<exam_id>/generate-remedial", methods=["POST"])
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def generate_remedial(exam_id):
+    """Analyze exam results and generate remedial questions via AI."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "Exam not found"}), 404
+
+    # Get submissions with answers
+    subs = supabase.table("submissions").select("id,student_id,answers,final_score").eq("exam_id", exam_id).execute().data or []
+
+    # Analyze MCQ scores per question
+    qtypes = exam.get("question_types") or {}
+    if isinstance(qtypes, str):
+        try: qtypes = json.loads(qtypes)
+        except: qtypes = {}
+    answer_key = exam.get("answer_key") or {}
+    if isinstance(answer_key, str):
+        try: answer_key = json.loads(answer_key)
+        except: answer_key = {}
+    question_texts = exam.get("question_texts") or {}
+    if isinstance(question_texts, str):
+        try: question_texts = json.loads(question_texts)
+        except: question_texts = {}
+    total_q = exam.get("total_questions", 0)
+
+    # Count correct/wrong per MCQ question
+    q_correct = {}
+    q_total = {}
+    for sub in subs:
+        answers = sub.get("answers") or {}
+        if isinstance(answers, str):
+            try: answers = json.loads(answers)
+            except: answers = {}
+        for qi in range(total_q):
+            qi_str = str(qi)
+            if qtypes.get(qi_str) == "mcq":
+                q_total[qi_str] = q_total.get(qi_str, 0) + 1
+                if qi_str in answer_key and qi_str in answers:
+                    stu_ans = answers[qi_str]
+                    if isinstance(stu_ans, dict):
+                        stu_ans = stu_ans.get("answer", "")
+                    if stu_ans == answer_key[qi_str]:
+                        q_correct[qi_str] = q_correct.get(qi_str, 0) + 1
+
+    # Find top 3 most-failed MCQ questions
+    fail_rate = []
+    for qi in range(total_q):
+        qi_str = str(qi)
+        if q_total.get(qi_str, 0) > 0:
+            correct = q_correct.get(qi_str, 0)
+            total = q_total[qi_str]
+            rate = (total - correct) / total
+            fail_rate.append((qi, rate, q_total[qi_str]))
+
+    fail_rate.sort(key=lambda x: x[1], reverse=True)
+    worst_q = fail_rate[:3]
+
+    # Build prompt for AI
+    prompt_parts = ["Buat 5 soal remedial tipe MCQ berdasarkan analisis berikut:\n"]
+    prompt_parts.append(f"Ujian: {exam.get('title', '')}\n")
+    prompt_parts.append(f"Mata Pelajaran: {exam.get('subject', '')}\n\n")
+
+    if worst_q:
+        prompt_parts.append("Soal dengan tingkat kesalahan tertinggi:\n")
+        for qi, rate, total in worst_q:
+            q_text = question_texts.get(str(qi), f"Soal {qi+1}")
+            q_key = answer_key.get(str(qi), "-")
+            prompt_parts.append(f"Soal {qi+1} (salah {total - q_correct.get(str(qi), 0)}/{total} siswa): {q_text} (kunci: {q_key})")
+
+    prompt_parts.append("""
+    \nBuat 5 soal pilihan ganda dengan 5 opsi (A-E) yang mirip dengan soal-soal di atas.
+    Setiap soal harus memiliki: nomor, pertanyaan, 5 opsi (A-E), dan kunci jawaban.
+
+    Format output JSON:
+    {"questions": [{"number": 1, "question": "teks soal", "options": {"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}, "answer": "A"}]}
+    """)
+
+    prompt = "\n".join(prompt_parts)
+
+    # Call AI
+    from app.services.ai_service import _get_active_key, _call_ai
+    key = _get_active_key(g.user_id)
+    if not key:
+        return jsonify({"error": "Belum ada API key AI. Atur di Pengaturan AI."}), 400
+
+    try:
+        raw = _call_ai(key, prompt)
+        import re
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|```$", "", cleaned, flags=re.DOTALL).strip()
+        data = json.loads(cleaned)
+        questions = data.get("questions", [])
+    except Exception as e:
+        return jsonify({"error": f"AI gagal generate: {str(e)[:150]}"}), 500
+
+    if not questions:
+        return jsonify({"error": "AI tidak menghasilkan soal"}), 500
+
+    # Create a new exam draft with remedial questions
+    title = f"Remedial - {exam.get('title', 'Ujian')}"
+    new_qtypes = {}
+    new_answer_key = {}
+    new_qtexts = {}
+    for q in questions:
+        qi = q["number"] - 1
+        new_qtypes[str(qi)] = "mcq"
+        new_answer_key[str(qi)] = q.get("answer", "A")
+        opts = q.get("options", {})
+        txt = q["question"]
+        for k, v in opts.items():
+            txt += f"\n{k}. {v}"
+        new_qtexts[str(qi)] = txt
+
+    total_new = len(questions)
+    new_exam = {
+        "teacher_id": g.user_id,
+        "school_id": g.get("user_school_id"),
+        "title": title,
+        "subject": exam.get("subject", ""),
+        "class_ids": exam.get("class_ids", []),
+        "total_questions": total_new,
+        "duration_minutes": min(exam.get("duration_minutes", 60) // 2, 30),
+        "description": f"Soal remedial otomatis dari ujian {exam.get('title', '')}",
+        "status": "draft",
+        "is_published": False,
+        "publish_mode": "manual",
+        "question_types": new_qtypes,
+        "answer_key": new_answer_key,
+        "question_texts": new_qtexts,
+    }
+
+    try:
+        res = supabase.table("exams").insert(new_exam).execute()
+        new_id = res.data[0]["id"]
+        return jsonify({"success": True, "redirect": f"/teacher/exams/{new_id}"})
+    except Exception:
+        # Fallback: try without newer fields
+        for key in ["question_texts", "publish_mode"]:
+            new_exam.pop(key, None)
+        res = supabase.table("exams").insert(new_exam).execute()
+        new_id = res.data[0]["id"]
+        return jsonify({"success": True, "redirect": f"/teacher/exams/{new_id}"})
