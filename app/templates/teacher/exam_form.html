@@ -536,7 +536,7 @@
             }
             </script>
 
-            <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
+            <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" enctype="multipart/form-data">
 
             <!-- Step Indicator -->
             <div class="mb-6">
@@ -912,15 +912,15 @@
 
 
                 <div class="flex justify-end gap-3 flex-wrap">
-                    <button type="submit" name="action" value="save_draft"
+                    <button type="button" onclick="var f=this.closest('form');var h=document.createElement('input');h.type='hidden';h.name='action';h.value='save_draft';f.appendChild(h);f.submit()"
                             class="px-6 py-3 border-2 border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 font-extrabold text-sm transition">
                         <i class="fas fa-save mr-1"></i>Simpan Draft
                     </button>
-                    <button type="submit" name="action" value="save_active"
+                    <button type="button" onclick="var f=this.closest('form');var h=document.createElement('input');h.type='hidden';h.name='action';h.value='save_active';f.appendChild(h);f.submit()"
                             class="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg transition">
                         <i class="fas fa-check mr-1"></i>Simpan
                     </button>
-                    <button type="submit" name="action" value="publish"
+                    <button type="button" onclick="var f=this.closest('form');var h=document.createElement('input');h.type='hidden';h.name='action';h.value='publish';f.appendChild(h);f.submit()"
                             class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition">
                         <i class="fas fa-paper-plane mr-1"></i>Publish & Kirim ke Kelas
                     </button>
