@@ -96,7 +96,9 @@ def dashboard():
         "student_count": students.count or 0,
         "teacher_count": teachers.count or 0,
         "class_count": classes.count or 0,
+        "subject_count": len(supabase.table("subjects").select("id", count="exact").eq("school_id", sid).execute().data or []),
         "active_year": active_year,
+        "setup_done": bool(active_year and (classes.count or 0) > 0),
     }
     return render_template("admin_sekolah/dashboard.html", **ctx)
 
