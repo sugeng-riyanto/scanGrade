@@ -39,7 +39,7 @@
     <!-- Stats -->
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <div class="bg-gradient-to-br from-purple-50 to-purple-100/30 rounded-2xl p-4 border border-purple-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-purple-700"><span x-text="total_schools"></span></p>
+            <p class="text-2xl font-extrabold text-purple-700">{{ total_schools }}</p>
             <p class="text-xs font-bold text-purple-500 mt-1">Sekolah</p>
         
     <button @click="showBroadcast=true" class="px-4 py-2 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition shadow-lg">
@@ -47,23 +47,23 @@
     </button>
     </div>
         <div class="bg-gradient-to-br from-blue-50 to-blue-100/30 rounded-2xl p-4 border border-blue-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-blue-700"><span x-text="total_users"></span></p>
+            <p class="text-2xl font-extrabold text-blue-700">{{ total_users }}</p>
             <p class="text-xs font-bold text-blue-500 mt-1">Total User</p>
         </div>
         <div class="bg-gradient-to-br from-emerald-50 to-emerald-100/30 rounded-2xl p-4 border border-emerald-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-emerald-700"><span x-text="total_teachers"></span></p>
+            <p class="text-2xl font-extrabold text-emerald-700">{{ total_teachers }}</p>
             <p class="text-xs font-bold text-emerald-500 mt-1">Guru</p>
         </div>
         <div class="bg-gradient-to-br from-amber-50 to-amber-100/30 rounded-2xl p-4 border border-amber-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-amber-700"><span x-text="total_students"></span></p>
+            <p class="text-2xl font-extrabold text-amber-700">{{ total_students }}</p>
             <p class="text-xs font-bold text-amber-500 mt-1">Siswa</p>
         </div>
         <div class="bg-gradient-to-br from-orange-50 to-orange-100/30 rounded-2xl p-4 border border-orange-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-orange-700"><span x-text="total_exams"></span></p>
+            <p class="text-2xl font-extrabold text-orange-700">{{ total_exams }}</p>
             <p class="text-xs font-bold text-orange-500 mt-1">Ujian</p>
         </div>
         <div class="bg-gradient-to-br from-rose-50 to-rose-100/30 rounded-2xl p-4 border border-rose-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-rose-700"><span x-text="total_subs"></span></p>
+            <p class="text-2xl font-extrabold text-rose-700">{{ total_subs }}</p>
             <p class="text-xs font-bold text-rose-500 mt-1">Submission</p>
         </div>
     </div>
@@ -82,7 +82,7 @@
                         <i class="fas fa-clock text-amber-600"></i>
                     </div>
                     <div>
-                        <p class="text-sm font-bold text-amber-800"><span x-text="pending_requests"></span> registrasi menunggu</p>
+                        <p class="text-sm font-bold text-amber-800">{{ pending_requests }} registrasi menunggu</p>
                         <p class="text-xs font-medium text-amber-600">Perlu approval dari Super Admin</p>
                     </div>
                     <a href="/admin/registration-requests" class="ml-auto px-4 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition">Proses</a>
@@ -125,7 +125,7 @@
                 <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition">
                     <div>
                         <p class="text-sm font-bold text-slate-800">{{ s.name }}</p>
-                        <p class="text-xs text-slate-400"><span x-text="s.npsn or '-'"></span> · dibuat <span x-text="s.created_at[:10]"></span></p>
+                        <p class="text-xs text-slate-400">{{ s.npsn or "-" }} · dibuat <span x-text="s.created_at[:10]"></span></p>
                     </div>
                     <span class="badge text-xs {% if s.status == 'active' %}bg-emerald-100 text-emerald-700{% else %}bg-red-100 text-red-700{% endif %}"><span x-text="s.status"></span></span>
                 </div>
@@ -155,10 +155,10 @@
                 <tbody class="divide-y divide-slate-50">
                     {% for log in recent_logs %}
                     <tr class="hover:bg-slate-50">
-                        <td class="px-5 py-2 text-xs text-slate-500"><span x-text="log.created_at[:19]"></span></td>
+                        <td class="px-5 py-2 text-xs text-slate-500">{{ log.created_at[:19] }}</td>
                         <td class="px-5 py-2 text-sm font-medium text-slate-700"><span x-text="(log.get('profiles') or {}).get('full_name', (log.user_id[:8] if log.user_id else '-'))"></span></td>
-                        <td class="px-5 py-2"><span class="badge bg-slate-100 text-slate-700 text-xs"><span x-text="log.action"></span></span></td>
-                        <td class="px-5 py-2 text-xs text-slate-400"><span x-text="log.entity_type"></span> <span x-text="log.entity_id[:8] if log.entity_id else ''"></span></td>
+                        <td class="px-5 py-2"><span class="badge bg-slate-100 text-slate-700 text-xs">{{ log.action }}</span></td>
+                        <td class="px-5 py-2 text-xs text-slate-400">{{ log.entity_type }} {{ log.entity_id[:8] if log.entity_id else "" }}</td>
                     </tr>
                     {% else %}
                     <tr><td colspan="4" class="text-center py-8 text-slate-400">Belum ada aktivitas</td></tr>
