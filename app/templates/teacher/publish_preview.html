@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Publikasi Nilai - {{ exam.title }}{% endblock %}
+{% block page_title %}Preview Publikasi{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="card p-6 mb-6">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-200/60">
+                <i class="fas fa-share text-white text-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-extrabold text-surface-800">{{ exam.title }}</h1>
+                <p class="text-sm text-surface-500">Tinjau nilai sebelum dipublikasikan ke siswa</p>
+            </div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 mb-6">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-info-circle text-amber-600 mt-0.5"></i>
+                <div>
+                    <p class="text-sm font-bold text-amber-800">Perhatian</p>
+                    <p class="text-xs text-amber-700">Nilai yang sudah dipublikasikan bisa dilihat siswa. Pastikan semua koreksi sudah benar. Kamu bisa unpublish jika diperlukan.</p>
+                </div>
+            </div>
+        </div>
+
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-surface-200">
+                    <th class="text-left py-3 px-2 font-extrabold text-surface-600">Nama</th>
+                    <th class="text-center py-3 px-2 font-extrabold text-surface-600">Nilai</th>
+                    <th class="text-center py-3 px-2 font-extrabold text-surface-600">Status</th>
+                    <th class="text-center py-3 px-2 font-extrabold text-surface-600">KKM</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sub in submissions %}
+                {% set score = sub.final_score or 0 %}
+                {% set kkm = exam.passing_score or 70 %}
+                <tr class="border-b border-surface-100">
+                    <td class="py-2.5 px-2 font-bold text-surface-700">{{ sub.profiles.full_name if sub.profiles else '-' }}</td>
+                    <td class="text-center py-2.5 px-2 font-extrabold {% if score >= kkm %}text-emerald-700{% else %}text-red-600{% endif %}">{{ score }}</td>
+                    <td class="text-center py-2.5 px-2">
+                        {% if sub.status == 'published' %}
+                        <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">Published</span>
+                        {% elif sub.status == 'graded' %}
+                        <span class="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full">Siap</span>
+                        {% else %}
+                        <span class="text-xs font-bold text-surface-400 bg-surface-100 px-2 py-1 rounded-full">{{ sub.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center py-2.5 px-2">
+                        {% if score < kkm %}
+                        <span class="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-full">Di Bawah KKM</span>
+                        {% else %}
+                        <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">Lulus</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="flex items-center gap-3 mt-8 pt-4 border-t border-surface-200">
+            <a href="/teacher/results?exam_id={{ exam.id }}" class="flex-1 px-4 py-2.5 border-2 border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition text-center">
+                <i class="fas fa-arrow-left mr-1.5"></i>Kembali
+            </a>
+            <form method="POST" action="/teacher/publish/{{ exam.id }}" class="flex-1">
+                <button type="submit" class="w-full px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-bold text-sm hover:from-emerald-600 hover:to-green-700 shadow-lg shadow-emerald-200/60 transition"
+                        onclick="return confirm('Yakin ingin mempublikasikan {{ submissions|length }} nilai?')">
+                    <i class="fas fa-check mr-1.5"></i>Publikasikan {{ submissions|length }} Nilai
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

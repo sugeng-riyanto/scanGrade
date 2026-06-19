@@ -92,6 +92,20 @@
         </div>
     </div>
 
+    <!-- Progress Bar -->
+    <div x-show="!submitted && !showExamAgreement && totalQ > 0"
+         class="mb-2 px-1">
+        <div class="flex items-center justify-between text-[10px] font-bold text-surface-500 mb-1">
+            <span x-text="'Terjawab: ' + answeredCount + '/' + totalQ + ' (' + Math.round(answeredCount/totalQ*100) + '%)'"></span>
+            <span x-text="totalQ - answeredCount + ' soal belum'"></span>
+        </div>
+        <div class="w-full h-2 bg-surface-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300"
+                 :style="'width:' + (answeredCount/totalQ*100) + '%'"
+                 :class="answeredCount === totalQ ? 'bg-emerald-500' : 'bg-primary-500'"></div>
+        </div>
+    </div>
+
     <!-- Device Status Bar -->
     <div x-show="!submitted && !showExamAgreement"
          class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex items-center gap-3 text-[10px] font-bold text-surface-500 border border-surface-100 shadow-sm pointer-events-none select-none">
@@ -772,6 +786,10 @@ function examApp(duration, totalQ) {
         lastSyncHash: '',
         _syncInFlight: false,
         _canvasSyncInFlight: false,
+        // Review & submit state
+        showReview: false,
+        submitConfirmDisabled: true,
+        submitConfirmTimer: 3,
         // Anti-cheat state
         violationCount: 0,
         totalPenalty: 0,
@@ -1918,8 +1936,22 @@ function examApp(duration, totalQ) {
         },
         submitExam(auto) {
             if (this.submitted) return;
-            if (!auto && !confirm('Yakin ingin mengumpulkan? Soal terjawab: ' + this.answeredCount + '/' + this.totalQ)) return;
-            this.submitted = true;
+            if (auto) {
+                this._doFinalSubmit();
+                return;
+            }
+            this.showReview = true;
+            this.submitConfirmDisabled = true;
+            this.submitConfirmTimer = 3;
+            let counter = setInterval(() => {
+                this.submitConfirmTimer--;
+                if (this.submitConfirmTimer <= 0) {
+                    this.submitConfirmDisabled = false;
+                    clearInterval(counter);
+                }
+            }, 1000);
+        },
+        _doFinalSubmit() {
             clearInterval(this.timer);
             clearInterval(this.autoSaveTimer);
             this.saveToLocal();
@@ -2694,13 +2726,57 @@ function examApp(duration, totalQ) {
         },
     };
 }
-</script>
 <script>
 (function(){
     if (!{{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }}) return;
     var v=0,p=0,t=0,d=0,eid='{{ exam.id }}',b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }},m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }},a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
     function h(){v++;var msg='',cp=0;if(v===1)msg='PERHATIAN! Anda berpindah tab.';else{cp=v===2?b:(v===3?b*2:b*3);p+=cp;msg='PELANGGARAN #'+v+'! Penalti: -'+cp+' poin';}alert(msg);try{fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:cp}}]),keepalive:true});}catch(ex){}if(m>0&&v>=m&&a&&!d){d=1;alert('Pelanggaran maksimal! Ujian dikumpulkan.');try{fetch('/api/student/force-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:eid}),keepalive:true});}catch(ex){}setTimeout(function(){window.location.href='/student/dashboard';},1500);}}
-    document.addEventListener('visibilitychange',function(){if(d)return;if(document.hidden){t=setTimeout(function(){if(!d)h();},1500);}else{if(t){clearTimeout(t);t=0;}}});
+    document.addEventListener('visibilitychange',function(){if(d)return;if(document.hidden){t=setTimeout(function(){if(!d)h();},1500);}else{if(t){clearInterval(t);t=0;}}});
 })();
+</script>
+
+<!-- Review Modal -->
+<div x-show="showReview" class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+     @click.self="showReview = false">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white rounded-t-2xl border-b px-5 py-4 flex items-center justify-between z-10">
+            <div>
+                <h3 class="font-extrabold text-surface-800">Review Jawaban</h3>
+                <p class="text-[11px] text-surface-500" x-text="answeredCount + '/' + totalQ + ' terjawab'"></p>
+            </div>
+            <button @click="showReview = false" class="text-surface-400 hover:text-surface-600 p-1">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+        <div class="p-5 space-y-2">
+            <template x-for="(q, i) in questions" :key="i">
+                <div class="flex items-center justify-between p-3 rounded-xl text-sm"
+                     :class="answered[i] ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'">
+                    <div class="flex items-center gap-3">
+                        <span class="font-extrabold text-surface-600 w-8" x-text="'#' + (i+1)"></span>
+                        <span class="text-surface-700 font-semibold" x-text="q.type === 'mcq' ? 'Pilihan Ganda' : 'Esai'"></span>
+                    </div>
+                    <div>
+                        <span x-show="answered[i]" class="text-emerald-700 font-bold text-xs"><i class="fas fa-check-circle mr-1"></i>Terjawab</span>
+                        <span x-show="!answered[i]" class="text-red-600 font-bold text-xs"><i class="fas fa-exclamation-circle mr-1"></i>Belum</span>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <div class="sticky bottom-0 bg-white rounded-b-2xl border-t px-5 py-4 flex items-center gap-3">
+            <button @click="showReview = false" class="flex-1 px-4 py-2.5 border-2 border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition">
+                <i class="fas fa-arrow-left mr-1.5"></i>Kembali ke Ujian
+            </button>
+            <button @click="showReview = false; _doFinalSubmit()"
+                    :disabled="submitConfirmDisabled"
+                    class="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white transition"
+                    :class="submitConfirmDisabled ? 'bg-surface-300 cursor-not-allowed' : 'bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 shadow-lg shadow-primary-500/25'">
+                <i class="fas fa-check mr-1.5"></i>
+                <span x-text="submitConfirmDisabled ? 'Konfirmasi dalam ' + submitConfirmTimer + 's' : 'Ya, Kumpulkan!'"></span>
+            </button>
+        </div>
+    </div>
+</div>
+
 </script>
 {% endblock %}

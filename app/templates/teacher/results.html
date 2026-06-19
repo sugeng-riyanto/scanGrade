@@ -26,12 +26,20 @@
             <a href="/teacher/grade-question/{{ exam_id }}/0" class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
                 <i class="fas fa-tasks mr-1"></i><span class="hidden sm:inline">Koreksi per Soal</span>
             </a>
-            <form method="POST" action="/teacher/publish/{{ exam_id }}" class="inline">
-                <button type="submit" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:from-emerald-600 hover:to-green-600 text-[11px] sm:text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition whitespace-nowrap"
-                        onclick="return confirm('Publikasikan nilai ke semua siswa?')">
+            {% if exam.get('is_published') %}
+            <form method="POST" action="/teacher/publish/{{ exam_id }}/unpublish" class="inline">
+                <button type="submit" class="border-2 border-amber-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-amber-50 text-[11px] sm:text-sm font-bold text-amber-700 transition whitespace-nowrap"
+                        onclick="return confirm('Sembunyikan nilai dari siswa?')">
+                    <i class="fas fa-undo mr-1"></i><span class="hidden sm:inline">Unpublish</span>
+                </button>
+            </form>
+            {% else %}
+            <form method="GET" action="/teacher/publish/{{ exam_id }}" class="inline">
+                <button type="submit" class="bg-gradient-to-r from-emerald-500 to-green-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:from-emerald-600 hover:to-green-600 text-[11px] sm:text-sm font-extrabold shadow-lg shadow-emerald-200/60 transition whitespace-nowrap">
                     <i class="fas fa-share mr-1"></i><span class="hidden sm:inline">Publish</span>
                 </button>
             </form>
+            {% endif %}
             {% endif %}
         </div>
     </div>
