@@ -457,9 +457,9 @@ html { transition: background-color .3s, color .3s; }
         <div class="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1 -m-1">
             {% for h in range(-12, 15) %}
             <label class="cursor-pointer">
-                <input type="radio" name="tz_val" value="<span x-text="h"></span>" class="peer sr-only" {% if h == g.tz_offset %}checked{% endif %}>
+                <input type="radio" name="tz_val" value="{{ h }}" class="peer sr-only" {% if h == g.tz_offset %}checked{% endif %}>
                 <div class="text-center py-2 rounded-lg border-2 border-surface-200 text-xs font-bold text-surface-600 peer-checked:border-primary-500 peer-checked:bg-primary-50 peer-checked:text-primary-700 hover:bg-surface-50 transition">
-                    UTC<span x-text="'+%d'|format(h) if h >= 0 else h"></span>
+                    UTC<span x-text="(h >= 0 ? '+' : '') + h"></span>
                 </div>
             </label>
             {% endfor %}
