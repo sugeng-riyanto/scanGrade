@@ -1317,14 +1317,30 @@ def override_score(submission_id):
     return redirect(request.referrer or "/teacher/results")
 
 
-@teacher_bp.route("/publish/<exam_id>", methods=["POST"])
+@teacher_bp.route("/publish/<exam_id>", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required
 def publish_scores(exam_id):
     supabase = get_supabase()
+    if request.method == "GET":
+        exam = supabase.table("exams").select("id,title,passing_score").eq("id", exam_id).single().execute().data
+        subs = supabase.table("submissions").select("id,student_id,final_score,status,profiles(full_name)").eq("exam_id", exam_id).order("profiles.full_name").execute().data or []
+        return render_template("teacher/publish_preview.html", exam=exam, submissions=subs)
     _recalculate_scores(exam_id)
     supabase.table("submissions") \
         .update({"is_published": True, "status": "published"}) \
+        .eq("exam_id", exam_id) \
+        .execute()
+    return redirect("/teacher/results?exam_id=" + exam_id)
+
+
+@teacher_bp.route("/publish/<exam_id>/unpublish", methods=["POST"])
+@subscription_write_required
+@teacher_or_admin_required
+def unpublish_scores(exam_id):
+    supabase = get_supabase()
+    supabase.table("submissions") \
+        .update({"is_published": False, "status": "graded"}) \
         .eq("exam_id", exam_id) \
         .execute()
     return redirect("/teacher/results?exam_id=" + exam_id)
