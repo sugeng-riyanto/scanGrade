@@ -1417,13 +1417,17 @@ def api_broadcast_list():
             .order("notifications.created_at", desc=True) \
             .limit(50) \
             .execute().data or []
+        uid = g.user_id
+        role = g.get("user_role")
         for d in direct:
             n = d.get("notifications") or {}
             notifs.append({
                 "id": n.get("id"), "title": n.get("title"),
                 "message": n.get("message"), "sender_role": n.get("sender_role"),
+                "sender_id": n.get("sender_id"),
                 "created_at": str(n.get("created_at", ""))[:19].replace("T", " "),
                 "read": d.get("read_at") is not None,
+                "can_edit": role == "super_admin" or n.get("sender_id") == uid,
             })
     except Exception:
         pass
