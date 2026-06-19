@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Konfirmasi Naik Kelas - ScanGrade{% endblock %}
+{% block page_title %}Konfirmasi Naik Kelas{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="card p-6">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fas fa-eye text-xl"></i></div>
+            <div>
+                <h3 class="font-extrabold text-stone-800">Preview Kenaikan Kelas</h3>
+                <p class="text-sm text-stone-500">Tinjau daftar murid yang akan dipindahkan</p>
+            </div>
+        </div>
+
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <i class="fas fa-arrow-right text-amber-600 text-xl"></i>
+            <div>
+                <p class="font-bold text-amber-800">{{ source_name }} <span class="text-amber-400 mx-2">→</span> {{ target_name }}</p>
+                <p class="text-xs text-amber-600">{{ students|length }} murid akan dipindahkan</p>
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <p class="font-bold text-stone-700 mb-3">Daftar Murid:</p>
+            <div class="space-y-1 max-h-64 overflow-y-auto">
+                {% for s in students %}
+                <div class="flex items-center gap-2 p-2 rounded-lg bg-stone-50 text-sm">
+                    <i class="fas fa-user-graduate text-stone-400 text-xs"></i>
+                    <span class="font-medium text-stone-700">{{ s.name }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <form method="POST" action="/admin-sekolah/promote">
+            <input type="hidden" name="source_class_id" value="{{ source_class_id }}">
+            <input type="hidden" name="target_class_id" value="{{ target_class_id }}">
+            <input type="hidden" name="confirmed" value="1">
+            {% if create_new == "1" %}
+            <input type="hidden" name="create_new" value="1">
+            <input type="hidden" name="new_class_name" value="{{ new_class_name }}">
+            <input type="hidden" name="school_year_id" value="{{ school_year_id }}">
+            {% endif %}
+            <div class="flex gap-3">
+                <a href="/admin-sekolah/promote" class="flex-1 px-4 py-3 border-2 border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-50 transition text-center">Batal</a>
+                <button type="submit" class="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-xl font-bold hover:from-emerald-600 hover:to-green-600 shadow-lg transition"
+                        onclick="return confirm('Yakin ingin memindahkan {{ students|length }} murid?')">
+                    <i class="fas fa-check mr-1"></i>Konfirmasi & Pindahkan
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

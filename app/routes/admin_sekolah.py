@@ -688,12 +688,38 @@ def promote():
         source_class_id = request.form.get("source_class_id")
         target_class_id = request.form.get("target_class_id")
         create_new = request.form.get("create_new") == "1"
+        confirmed = request.form.get("confirmed") == "1"
 
         if not source_class_id:
             flash("Pilih kelas asal", "error")
             return redirect("/admin-sekolah/promote")
 
-        # Get source class info for level inference
+        # Preview mode: show students before executing
+        if not confirmed:
+            src_class = supabase.table("classes").select("name,grade_level").eq("id", source_class_id).single().execute().data or {}
+            students_to_move = supabase.table("students").select("id, profiles!inner(full_name)").eq("class_id", source_class_id).eq("status", "active").execute().data or []
+            preview_students = []
+            for s in students_to_move:
+                prof = s.get("profiles") or {}
+                preview_students.append({"name": prof.get("full_name", "?"), "id": s["id"]})
+            # Get target class info
+            target_info = {"name": "Kelas Baru", "id": ""}
+            if create_new:
+                target_info["name"] = request.form.get("new_class_name", "Kelas Baru")
+            elif target_class_id:
+                tc = supabase.table("classes").select("name").eq("id", target_class_id).single().execute().data or {}
+                target_info = {"name": tc.get("name", "?"), "id": target_class_id}
+            return render_template("admin_sekolah/promote_confirm.html",
+                                   source_name=src_class.get("name", "?"),
+                                   target_name=target_info["name"],
+                                   students=preview_students,
+                                   source_class_id=source_class_id,
+                                   target_class_id=target_class_id,
+                                   create_new="1" if create_new else "0",
+                                   new_class_name=request.form.get("new_class_name", ""),
+                                   school_year_id=request.form.get("school_year_id", ""))
+
+        # Confirmed: execute the promotion
         src = supabase.table("classes").select("*").eq("id", source_class_id).single().execute().data
 
         if create_new:
