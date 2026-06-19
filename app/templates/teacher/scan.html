@@ -5,6 +5,7 @@
 <style>
 #camera-preview { width: 100%; max-height: 70vh; object-fit: contain; background: #000; border-radius: 12px; transform: scaleX(-1); }
 #alignment-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+#detection-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 .align-box { fill: none; stroke: #4ade80; stroke-width: 3; stroke-dasharray: 8, 4; }
 .align-corner { fill: #4ade80; }
 .loading-spinner { border: 3px solid #e5e7eb; border-top: 3px solid #f97316; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; }
@@ -63,6 +64,7 @@
                 <circle class="align-corner" cx="92%" cy="94%" r="4"/>
                 <circle class="align-corner" cx="8%" cy="94%" r="4"/>
             </svg>
+            <canvas id="detection-overlay" class="absolute inset-0 w-full h-full pointer-events-none" style="display:none"></canvas>
         </div>
 
         <!-- Camera selector (desktop only) -->
@@ -576,6 +578,7 @@ async function processScan(blob) {
         if (data.error) {
             showError(data.error);
             if (data.debug_image) showDebug(data.debug_image);
+    drawDetectionOverlay(data);
             return;
         }
 
@@ -1104,5 +1107,60 @@ document.getElementById('btn-bulk-save').addEventListener('click', async functio
         btn.innerHTML = '<i class="fas fa-save mr-1"></i>Simpan Semua';
     }
 });
+function drawDetectionOverlay(data) {
+    const canvas = document.getElementById('detection-overlay');
+    if (!canvas || !data.answers) return;
+    const area = document.getElementById('camera-area');
+    if (!area) return;
+    canvas.style.display = 'block';
+    canvas.width = area.offsetWidth;
+    canvas.height = area.offsetHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const video = document.getElementById('camera-preview');
+    const vw = video.videoWidth || 1;
+    const vh = video.videoHeight || 1;
+    const scaleX = canvas.width / area.offsetWidth;
+    const scaleY = canvas.height / area.offsetHeight;
+    const imgScaleX = area.offsetWidth / vw;
+    const imgScaleY = area.offsetHeight / vh;
+    const scale = Math.min(imgScaleX, imgScaleY);
+    const offsetX = (area.offsetWidth - vw * scale) / 2;
+    const offsetY = (area.offsetHeight - vh * scale) / 2;
+
+    // Draw detected answers as circles
+    const total = data.total || 50;
+    const cols = Math.ceil(total / 25);
+    const qPerCol = Math.min(25, Math.ceil(total / cols));
+    const boxW = (area.offsetWidth * 0.84) / 5;
+    const boxH = (area.offsetHeight * 0.88) / qPerCol;
+    const gridX = area.offsetWidth * 0.08;
+    const gridY = area.offsetHeight * 0.06;
+
+    for (let q = 0; q < total; q++) {
+        const col = Math.floor(q / qPerCol);
+        const row = q % qPerCol;
+        const cx = gridX + col * (boxW * 5 + 10) + boxW * 2;
+        const cy = gridY + row * boxH + boxH / 2;
+        const ans = data.answers ? data.answers[q] : null;
+        const conf = data.confidence ? (data.confidence[q] || 0) : 0;
+        if (ans) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+            ctx.fillStyle = conf >= 0.7 ? 'rgba(16,185,129,0.8)' : conf >= 0.4 ? 'rgba(245,158,11,0.8)' : 'rgba(239,68,68,0.8)';
+            ctx.fill();
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 7px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(ans, cx, cy);
+        }
+    }
+}
+
 </script>
 {% endblock %}

@@ -463,6 +463,35 @@ def detect_answers(warped: np.ndarray, total_questions: int = 50, options: int =
             # No filled bubble detected — leave unanswered
             confidence_map[str(q_idx)] = 0.0
 
+    # Second-pass verification: adaptive threshold cross-validation
+    gray_cache = None
+    for q_idx in range(total_questions):
+        qi = str(q_idx)
+        if qi not in questions:
+            continue
+        bubbles = questions[q_idx]
+        if gray_cache is None:
+            gray_cache = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY) if len(warped.shape) == 3 else warped
+        verif_scores = []
+        for opt_idx, cx, cy in bubbles:
+            roi = _get_roi(warped, cx, cy, b_r)
+            if roi.size >= 4:
+                g = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi
+                adapt = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 7, 3)
+                fill = cv2.countNonZero(adapt) / max(g.size, 1)
+                verif_scores.append(fill)
+            else:
+                verif_scores.append(0)
+        if verif_scores:
+            max_v = max(verif_scores)
+            if max_v > 0.2:
+                best_v = verif_scores.index(max_v)
+                if confidence_map.get(qi, 0) < 0.6:
+                    gap_v = max_v - sorted(verif_scores)[-2] if len(verif_scores) > 1 else max_v
+                    if gap_v > 0.3:
+                        answers[qi] = opt_labels[best_v]
+                        confidence_map[qi] = 0.5 + gap_v * 0.3
+
     high_conf = sum(1 for c in confidence_map.values() if c >= 0.7)
     avg_conf = round(sum(confidence_map.values()) / max(len(confidence_map), 1), 3)
     needs_review = {k for k, v in confidence_map.items() if v < 0.6 or k in ambiguous}
