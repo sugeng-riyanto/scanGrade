@@ -533,12 +533,21 @@
                                                 <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
                                             </select>
                                              <select x-model="box.fontFamily" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
-                                                 <option value="Nunito, sans-serif">Nunito</option>
-                                                 <option value="Arial, sans-serif">Arial</option>
-                                                 <option value="Georgia, serif">Georgia</option>
-                                                 <option value="Courier New, monospace">Courier</option>
-                                                 <option value="Times New Roman, serif">Times NR</option>
-                                             </select>
+                                                  <option value="Nunito, sans-serif">Nunito</option>
+                                                  <option value="Arial, sans-serif">Arial</option>
+                                                  <option value="Georgia, serif">Georgia</option>
+                                                  <option value="Courier New, monospace">Courier</option>
+                                                  <option value="Times New Roman, serif">Times NR</option>
+                                              </select>
+                                              <button type="button" @click="box.bold = !box.bold; applyBoxFont(box); textBoxes={...(textBoxes||{})}"
+                                                      class="text-white text-[10px] w-5 h-5 rounded font-bold"
+                                                      :class="box.bold ? 'bg-orange-500' : 'bg-slate-600'"><b>B</b></button>
+                                              <button type="button" @click="box.italic = !box.italic; applyBoxFont(box); textBoxes={...(textBoxes||{})}"
+                                                      class="text-white text-[10px] w-5 h-5 rounded font-bold italic"
+                                                      :class="box.italic ? 'bg-orange-500' : 'bg-slate-600'"><i>I</i></button>
+                                              <button type="button" @click="box.underline = !box.underline; applyBoxFont(box); textBoxes={...(textBoxes||{})}"
+                                                      class="text-white text-[10px] w-5 h-5 rounded font-bold"
+                                                      :class="box.underline ? 'bg-orange-500' : 'bg-slate-600'"><u>U</u></button>
                                              <button type="button" @click="box.orient = box.orient === 'vertical' ? 'horizontal' : 'vertical'; textBoxes={...(textBoxes||{})}"
                                                      class="text-white text-[10px] px-1.5 py-0.5 rounded font-bold"
                                                      :class="box.orient === 'vertical' ? 'bg-orange-500' : 'bg-slate-600'"
@@ -548,8 +557,8 @@
                                         </div>
                                         <div class="box-handle"><i class="fas fa-grip-lines text-white text-[8px]"></i></div>
                                         <button type="button" class="box-del" @click="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
-                                         <textarea x-model="box.text"
-                                                  :style="'font-size:' + (box.fontSize || 16) + 'px; font-family:' + (box.fontFamily || 'Times New Roman, serif') + '; writing-mode:' + (box.orient === 'vertical' ? 'vertical-rl' : 'horizontal-tb') + ';'"
+                                          <textarea x-model="box.text"
+                                                   :style="'font-size:' + (box.fontSize || 16) + 'px; font-family:' + (box.fontFamily || 'Times New Roman, serif') + '; writing-mode:' + (box.orient === 'vertical' ? 'vertical-rl' : 'horizontal-tb') + ';' + (box.bold ? 'font-weight:bold;' : '') + (box.italic ? 'font-style:italic;' : '') + (box.underline ? 'text-decoration:underline;' : '')"
                                                   @input="onTextBoxInput(i); textBoxes = {...(textBoxes || {})}"
                                                   @copy.prevent @paste.prevent @cut.prevent @contextmenu.prevent
                                                   placeholder="Ketik..."
@@ -1142,7 +1151,43 @@ function examApp(duration, totalQ) {
         },
         setEssayCanvasMode(i, mode) {
             this.essayCanvasMode[i] = mode;
-            this.$nextTick(() => this._updateCanvasCursor(i));
+            this.$nextTick(() => {
+                this._updateCanvasCursor(i);
+                if (mode === 'text') this._addTextBox(i);
+            });
+        },
+        _addTextBox(i) {
+            const p_idx = this.page - 1;
+            if (!this.textBoxes[i]) this.textBoxes[i] = {};
+            if (!this.textBoxes[i][p_idx]) this.textBoxes[i][p_idx] = [];
+            const existing = this.textBoxes[i][p_idx];
+            // If there's already a text box on this page, just focus the last one
+            if (existing.length > 0 && existing[existing.length - 1].text === '') {
+                this.$nextTick(() => {
+                    const area = document.getElementById('ec-area-' + i);
+                    if (area) {
+                        const t = area.querySelector('.text-box:last-child textarea');
+                        if (t) { t.focus(); t.select(); }
+                    }
+                });
+                return;
+            }
+            existing.push({
+                x_pct: 0.35 + Math.random() * 0.3,
+                y_pct: 0.08 + (existing.length % 10) * 0.06,
+                text: '',
+                fontSize: this.textFontSize[i] || 16,
+                fontFamily: this.textFontFamily[i] || 'Times New Roman, serif',
+                orient: 'horizontal'
+            });
+            this.onTextBoxInput(i);
+            this.$nextTick(() => {
+                const area = document.getElementById('ec-area-' + i);
+                if (area) {
+                    const t = area.querySelector('.text-box:last-child textarea');
+                    if (t) { t.focus(); t.select(); }
+                }
+            });
         },
         _updateCanvasCursor(i) {
             const el = document.getElementById('ec-canvas-' + i);
