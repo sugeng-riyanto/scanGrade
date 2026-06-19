@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import time
 from flask import Blueprint, request, jsonify, g, render_template, redirect, url_for, make_response, current_app
 from app.utils.auth import login_required, get_supabase, get_auth_client
 from app.services.audit_service import log_activity
@@ -326,7 +327,63 @@ def login_user():
         return render_template("auth/login_user.html", error="Email atau password salah")
 
 
-# ─── FORGOT PASSWORD ─────────────────────────────────
+# ─── FORGOT PASSWORD — 6-digit code flow ────────────
+
+_RESET_CODES = {}  # fallback: in-memory (single worker)
+
+def _store_reset_code(email: str, code: str, ttl: int = 600):
+    """Store reset code in Redis (or memory fallback)."""
+    try:
+        from redis import Redis
+        r = Redis.from_url(current_app.config.get("REDIS_URL", "redis://localhost:6379/0"))
+        r.setex(f"reset_code:{email}", ttl, code)
+        return
+    except Exception:
+        pass
+    _RESET_CODES[email] = {"code": code, "expires": time.time() + ttl}
+
+
+def _get_reset_code(email: str) -> str | None:
+    """Retrieve stored reset code."""
+    try:
+        from redis import Redis
+        r = Redis.from_url(current_app.config.get("REDIS_URL", "redis://localhost:6379/0"))
+        code = r.get(f"reset_code:{email}")
+        if code:
+            return code.decode() if isinstance(code, bytes) else code
+        return None
+    except Exception:
+        pass
+    entry = _RESET_CODES.get(email)
+    if entry and entry["expires"] > time.time():
+        return entry["code"]
+    return None
+
+
+def _delete_reset_code(email: str):
+    try:
+        from redis import Redis
+        r = Redis.from_url(current_app.config.get("REDIS_URL", "redis://localhost:6379/0"))
+        r.delete(f"reset_code:{email}")
+        return
+    except Exception:
+        pass
+    _RESET_CODES.pop(email, None)
+
+
+def _send_email(to_email: str, subject: str, body: str):
+    """Send email via SMTP (scangrade9@gmail.com)."""
+    import smtplib, ssl
+    from email.mime.text import MIMEText
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = "ScanGrade <scangrade9@gmail.com>"
+    msg["To"] = to_email
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+        server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
+        server.sendmail("scangrade9@gmail.com", to_email, msg.as_string())
+
 
 @auth_bp.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
@@ -335,85 +392,203 @@ def forgot_password():
 
     email = request.form.get("email", "").strip().lower()
     if not email:
-        return render_template("auth/forgot_password.html", error="Email atau NISN wajib diisi")
+        return render_template("auth/forgot_password.html", error="Email aktif atau NISN wajib diisi")
 
     supabase = get_supabase()
-    auth_client = get_auth_client()
-    recovery_email = ""
-    auth_email = email
 
+    # Find user by: recovery email (phone), auth email, or NISN
+    user_data = None  # {auth_email, recovery_email, user_id}
+    target_email = email  # where to send the code
+
+    # 1. Search profiles by phone (recovery email)
     try:
-        # Try to find user by NISN (student) or employee_id (teacher)
-        nisn = email
-        user_id = None
+        prof = supabase.table("profiles").select("id, phone, full_name, role").eq("phone", email).maybe_single().execute()
+        if prof.data:
+            auth_client = get_auth_client()
+            au = auth_client.admin.get_user_by_id(prof.data["id"])
+            user_data = {
+                "auth_email": au.user.email,
+                "recovery_email": email,
+                "user_id": prof.data["id"],
+                "role": prof.data.get("role", "murid"),
+                "full_name": prof.data.get("full_name", ""),
+            }
+            target_email = email  # send to the recovery email they entered
+    except Exception:
+        pass
+
+    # 2. Search by NISN
+    if not user_data:
         for table_name in ("students", "teachers"):
             try:
-                rec = supabase.table(table_name).select("id, profiles!inner(phone, full_name)").eq("nisn" if table_name == "students" else "employee_id", nisn).maybe_single().execute()
+                rec = supabase.table(table_name).select("id, profiles!inner(phone, full_name, role)").eq(
+                    "nisn" if table_name == "students" else "employee_id", email
+                ).maybe_single().execute()
                 if rec.data:
                     prof = rec.data.get("profiles") or {}
-                    user_id = rec.data["id"]
-                    # Get auth email from auth.users
-                    try:
-                        au = auth_client.admin.get_user_by_id(user_id)
-                        auth_email = au.user.email
-                    except:
-                        pass
-                    recovery_email = prof.get("phone", "")
+                    auth_client = get_auth_client()
+                    au = auth_client.admin.get_user_by_id(rec.data["id"])
+                    recovery = prof.get("phone", "")
+                    target_email = recovery if "@" in recovery else au.user.email
+                    user_data = {
+                        "auth_email": au.user.email,
+                        "recovery_email": recovery if "@" in recovery else "",
+                        "user_id": rec.data["id"],
+                        "role": prof.get("role", "murid"),
+                        "full_name": prof.get("full_name", ""),
+                    }
                     break
-            except:
+            except Exception:
                 pass
 
-        # If not found by NISN, treat email as auth email and look up profile
-        if not user_id:
-            try:
-                prof = supabase.table("profiles").select("phone").eq("id", email).maybe_single().execute()
-                if not prof.data:
-                    prof = supabase.table("profiles").select("id, phone").eq("email", email).maybe_single().execute()
-                if prof.data:
-                    recovery_email = prof.data.get("phone", "")
-            except:
-                pass
-
-        # Send reset email via Supabase (ke auth email)
+    # 3. Search by auth email directly
+    if not user_data:
         try:
-            auth_client.auth.reset_password_email(
-                auth_email,
-                {"redirect_to": request.host_url.rstrip("/") + "/auth/reset-password"}
-            )
-        except Exception as e:
-            current_app.logger.error(f"Supabase reset email failed: {e}")
+            auth_client = get_auth_client()
+            users = auth_client.admin.list_users()
+            for u in users:
+                if u.email and u.email.lower() == email:
+                    prof = supabase.table("profiles").select("phone, full_name, role").eq("id", u.id).maybe_single().execute()
+                    p = prof.data or {}
+                    recovery = p.get("phone", "")
+                    target_email = recovery if "@" in recovery else u.email
+                    user_data = {
+                        "auth_email": u.email,
+                        "recovery_email": recovery if "@" in recovery else "",
+                        "user_id": u.id,
+                        "role": p.get("role", "murid"),
+                        "full_name": p.get("full_name", ""),
+                    }
+                    break
+        except Exception:
+            pass
 
-        # Also send via our SMTP to recovery email if available
-        if recovery_email and "@" in recovery_email and recovery_email != auth_email:
-            try:
-                import smtplib, ssl
-                from email.mime.text import MIMEText
-                msg = MIMEText(f"""Yth. Pengguna ScanGrade,
+    if not user_data:
+        return render_template("auth/forgot_password.html", error="Email atau NISN tidak ditemukan. Hubungi admin sekolah.")
 
-Kami menerima permintaan reset password untuk akun Anda.
+    # Generate 6-digit code (uppercase + digits)
+    import random, string
+    code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    _store_reset_code(target_email, code)
 
-Email login Anda: {auth_email}
-Silakan cek email tersebut untuk link reset password.
+    # Send code via SMTP
+    name = user_data.get("full_name", "Pengguna")
+    try:
+        _send_email(
+            target_email,
+            "🔐 ScanGrade — Kode Verifikasi Reset Password",
+            f"""Yth. {name},
+
+Kami menerima permintaan reset password untuk akun ScanGrade Anda.
+
+Kode verifikasi Anda (6 digit):
+┌─────────────────────┐
+│     {code}     │
+└─────────────────────┘
+
+Kode ini berlaku selama 10 menit.
+
+Masukkan kode di atas pada halaman verifikasi untuk membuat password baru.
 
 Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini.
 
 Hormat kami,
 Tim ScanGrade
-https://scangrade.web.id""", "plain", "utf-8")
-                msg["Subject"] = "🔐 ScanGrade — Permintaan Reset Password"
-                msg["From"] = "ScanGrade <scangrade9@gmail.com>"
-                msg["To"] = recovery_email
-                context = ssl.create_default_context()
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-                    server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
-                    server.sendmail("scangrade9@gmail.com", recovery_email, msg.as_string())
-            except Exception as e:
-                current_app.logger.error(f"Recovery email send failed: {e}")
-
-        return render_template("auth/forgot_password.html", sent=True, email=auth_email, recovery_email=recovery_email if "@" in recovery_email else "")
+https://scangrade.web.id"""
+        )
     except Exception as e:
-        current_app.logger.error(f"Forgot password error: {e}")
-        return render_template("auth/forgot_password.html", error="Gagal memproses. Coba lagi nanti.")
+        current_app.logger.error(f"Failed to send reset code: {e}")
+        return render_template("auth/forgot_password.html", error="Gagal mengirim email. Coba lagi nanti.")
+
+    return render_template("auth/verify_code.html", email=target_email, auth_email=user_data["auth_email"])
+
+
+@auth_bp.route("/verify-reset-code", methods=["GET", "POST"])
+def verify_reset_code():
+    if request.method == "GET":
+        email = request.args.get("email", "")
+        if not email:
+            return redirect(url_for("auth.forgot_password"))
+        return render_template("auth/verify_code.html", email=email)
+
+    email = request.form.get("email", "").strip().lower()
+    code = request.form.get("code", "").strip().upper()
+
+    if not email or not code:
+        return render_template("auth/verify_code.html", email=email, error="Kode wajib diisi")
+
+    stored = _get_reset_code(email)
+    if not stored:
+        return render_template("auth/verify_code.html", email=email, error="Kode tidak valid atau sudah kedaluwarsa. Minta kode baru.")
+
+    if stored != code:
+        return render_template("auth/verify_code.html", email=email, error="Kode salah. Coba lagi.")
+
+    # Code OK — show password reset form
+    return render_template("auth/set_new_password.html", email=email)
+
+
+@auth_bp.route("/set-new-password", methods=["POST"])
+def set_new_password():
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm_password", "")
+
+    if not password or not confirm:
+        return render_template("auth/set_new_password.html", email=email, error="Semua field wajib diisi")
+    if password != confirm:
+        return render_template("auth/set_new_password.html", email=email, error="Password tidak cocok")
+    if len(password) < 6:
+        return render_template("auth/set_new_password.html", email=email, error="Password minimal 6 karakter")
+
+    # Verify code still valid
+    stored = _get_reset_code(email)
+    if not stored:
+        return render_template("auth/set_new_password.html", email=email, error="Sesi kedaluwarsa. Ulangi proses reset.")
+
+    # Find user and update password
+    supabase = get_supabase()
+    auth_client = get_auth_client()
+    user_id = None
+    role = "murid"
+
+    try:
+        # Find by recovery email (phone)
+        prof = supabase.table("profiles").select("id, role").eq("phone", email).maybe_single().execute()
+        if not prof.data:
+            # Find by auth email
+            users = auth_client.admin.list_users()
+            for u in users:
+                if u.email and u.email.lower() == email:
+                    user_id = u.id
+                    p2 = supabase.table("profiles").select("role").eq("id", u.id).maybe_single().execute()
+                    role = p2.data.get("role", "murid") if p2.data else "murid"
+                    break
+        else:
+            user_id = prof.data["id"]
+            role = prof.data.get("role", "murid")
+    except Exception:
+        pass
+
+    if not user_id:
+        return render_template("auth/set_new_password.html", email=email, error="User tidak ditemukan")
+
+    try:
+        auth_client.admin.update_user_by_id(user_id, {"password": password})
+        _delete_reset_code(email)
+
+        # Role-based redirect
+        role_redirects = {
+            "super_admin": "/super-admin/dashboard",
+            "admin_sekolah": "/admin-sekolah/dashboard",
+            "guru": "/teacher/dashboard",
+            "murid": "/student/dashboard",
+        }
+        redirect_url = role_redirects.get(role, "/auth/login-user")
+        return render_template("auth/reset_success.html", redirect_url=redirect_url, role=role)
+    except Exception as e:
+        current_app.logger.error(f"Reset password error: {e}")
+        return render_template("auth/set_new_password.html", email=email, error="Gagal mereset password. Coba lagi.")
 
 
 # ─── RESET PASSWORD ──────────────────────────────────
