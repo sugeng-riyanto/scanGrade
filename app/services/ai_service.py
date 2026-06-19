@@ -66,13 +66,19 @@ def _parse_ai_response(raw_text):
         data = json.loads(cleaned)
         score = float(data.get("score", 0))
         feedback = str(data.get("feedback", ""))
-        return score, feedback
+        reasoning = str(data.get("reasoning", ""))
+        confidence = float(data.get("confidence", 0.5))
+        return score, feedback, reasoning, confidence
     except (json.JSONDecodeError, ValueError, TypeError):
         match = re.search(r'"score"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
         score = float(match.group(1)) if match else 0
         fb_match = re.search(r'"feedback"\s*:\s*"([^"]+)"', raw_text)
         feedback = fb_match.group(1) if fb_match else raw_text[:200]
-        return score, feedback
+        rc_match = re.search(r'"reasoning"\s*:\s*"([^"]+)"', raw_text)
+        reasoning = rc_match.group(1) if rc_match else ""
+        cf_match = re.search(r'"confidence"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
+        confidence = float(cf_match.group(1)) if cf_match else 0.5
+        return score, feedback, reasoning, confidence
 
 
 def _call_gemini(api_key, prompt):
@@ -183,9 +189,9 @@ def suggest_grade(teacher_id, question_text, student_answer, max_score, rubric="
 
     try:
         raw = _call_ai(key, prompt)
-        score, feedback = _parse_ai_response(raw)
+        score, feedback, reasoning, confidence = _parse_ai_response(raw)
         _save_log(teacher_id, None, 0, key["provider"], score, feedback, prompt, raw, 0)
-        return {"score": round(score, 1), "feedback": feedback, "provider": key["provider"], "prompt": prompt}
+        return {"score": round(score, 1), "feedback": feedback, "reasoning": reasoning, "confidence": round(confidence, 2), "provider": key["provider"], "prompt": prompt}
     except Exception as e:
         current_app.logger.error(f"AI suggest_grade error: {e}")
         return {"error": f"Gagal: {str(e)[:120]}"}
