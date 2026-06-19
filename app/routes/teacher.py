@@ -236,6 +236,22 @@ def dashboard():
                            grading_progress=grading_progress)
 
 
+@teacher_bp.route("/templates")
+@teacher_or_admin_required
+def exam_templates():
+    """Exam template marketplace — browse and copy templates."""
+    supabase = get_supabase()
+    school_id = g.get("user_school_id")
+    templates = []
+    if school_id:
+        templates = supabase.table("exams") \
+            .select("id,title,subject,total_questions,question_types,description,teacher_id,created_at") \
+            .eq("is_template", True) \
+            .order("created_at", desc=True) \
+            .execute().data or []
+    return render_template("teacher/templates.html", templates=templates, school_id=school_id)
+
+
 @teacher_bp.route("/exams/parse-pdf", methods=["POST"])
 @teacher_or_admin_required
 def exam_parse_pdf():

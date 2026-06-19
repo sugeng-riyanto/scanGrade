@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Template Ujian - ScanGrade{% endblock %}
+{% block page_title %}Template Ujian{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <div class="flex items-center gap-3 mb-6">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+            <i class="fas fa-copy text-white text-lg"></i>
+        </div>
+        <div>
+            <h1 class="text-2xl font-extrabold text-surface-800">Template Ujian</h1>
+            <p class="text-sm text-surface-500">Gunakan template dari guru lain untuk mempercepat pembuatan ujian</p>
+        </div>
+        <a href="/teacher/exams" class="ml-auto text-sm font-bold text-primary-600 hover:text-primary-700">
+            <i class="fas fa-arrow-left mr-1"></i>Kembali
+        </a>
+    </div>
+
+    {% if templates %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for t in templates %}
+        {% set qtypes = t.question_types or {} %}
+        {% set has_essay = qtypes.values()|select('in', ['essay_text','essay_canvas','essay'])|list|length > 0 %}
+        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div class="p-5">
+                <div class="flex items-center gap-3 mb-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-sm">
+                        <i class="fas fa-copy text-white text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <h3 class="font-bold text-surface-800 truncate">{{ t.title }}</h3>
+                        <p class="text-xs text-surface-500">{{ t.subject or '-' }}</p>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2 text-[10px] text-surface-500 font-semibold mb-4">
+                    <span class="px-2 py-1 bg-surface-100 rounded-full">{{ t.total_questions }} soal</span>
+                    {% if has_essay %}<span class="px-2 py-1 bg-amber-50 text-amber-700 rounded-full">Essay</span>{% endif %}
+                    <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-full">MCQ</span>
+                    {% if t.description %}<span class="w-full text-[9px] text-surface-400 mt-1 truncate">{{ t.description[:60] }}</span>{% endif %}
+                </div>
+                <form method="POST" action="/teacher/exams/{{ t.id }}/duplicate" class="inline">
+                    <button type="submit" class="w-full bg-primary-600 hover:bg-primary-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition">
+                        <i class="fas fa-copy mr-1.5"></i>Gunakan Template
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-12 text-center">
+        <div class="w-16 h-16 mx-auto rounded-full bg-surface-100 flex items-center justify-center mb-4">
+            <i class="fas fa-copy text-surface-300 text-3xl"></i>
+        </div>
+        <p class="text-lg font-bold text-surface-500">Belum ada template</p>
+        <p class="text-sm text-surface-400 mt-1">Guru bisa menyimpan ujian sebagai template dari halaman edit ujian.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
