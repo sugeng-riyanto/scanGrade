@@ -4,7 +4,6 @@ import json
 import zipfile
 import uuid
 import time
-import threading
 from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file, current_app
 from app.utils.auth import login_required, get_supabase
 from app.services.anti_cheat_service import validate_violation_log
@@ -22,17 +21,29 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 UPLOAD_SCAN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "uploads", "scans")
 
-_sync_locks = {}
-_sync_lock_mutex = threading.Lock()
+def _redis_lock(key, timeout=10):
+    """Redis-based cross-worker lock (SETNX pattern)."""
+    try:
+        from redis import Redis
+        r = Redis.from_url(current_app.config.get("REDIS_URL", "redis://localhost:6379/0"))
+        lock_key = f"scan_grade:lock:{key}"
+        # SETNX: only set if key doesn't exist, with expiry
+        if r.setnx(lock_key, "1"):
+            r.expire(lock_key, timeout)
+            return r
+        return None
+    except Exception:
+        return None
+
+def _release_lock(redis_conn, key):
+    """Release a Redis lock."""
+    try:
+        if redis_conn:
+            redis_conn.delete(f"scan_grade:lock:{key}")
+    except Exception:
+        pass
+
 _sync_last = {}
-
-
-def _get_sync_lock(user_id, exam_id):
-    key = f"{user_id}:{exam_id}"
-    with _sync_lock_mutex:
-        if key not in _sync_locks:
-            _sync_locks[key] = threading.Lock()
-        return _sync_locks[key]
 
 
 def _check_rate_limit(user_id, exam_id, min_interval=5):
@@ -513,8 +524,9 @@ def student_sync_draft():
         return jsonify({"saved": True, "at": int(time.time())})
     if not _check_rate_limit(g.user_id, exam_id, min_interval=3 if is_light else 10):
         return jsonify({"saved": True, "at": int(time.time()), "throttled": True})
-    lock = _get_sync_lock(g.user_id, exam_id)
-    if not lock.acquire(blocking=False):
+    lock_key = f"sync:{g.user_id}:{exam_id}"
+    rlock = _redis_lock(lock_key)
+    if not rlock:
         return jsonify({"saved": True, "at": int(time.time()), "busy": True})
     try:
         from app.utils.auth import get_supabase
@@ -539,7 +551,7 @@ def student_sync_draft():
     except Exception:
         pass
     finally:
-        lock.release()
+        _release_lock(rlock, lock_key)
     return jsonify({"saved": True, "at": int(time.time())})
 
 
