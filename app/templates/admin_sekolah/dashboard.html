@@ -24,6 +24,61 @@
     </div>
     {% endif %}
 
+    <!-- Onboarding Wizard -->
+    {% if not setup_done %}
+    <div class="bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200 rounded-2xl p-6 shadow-sm" x-data="{ step: 1 }">
+        <div class="flex items-center gap-3 mb-5">
+            <div class="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600"><i class="fas fa-rocket"></i></div>
+            <div>
+                <h2 class="font-extrabold text-primary-800">Selamat Datang! Siapkan Sekolah Anda</h2>
+                <p class="text-xs text-primary-600">Ikuti 3 langkah mudah untuk memulai ScanGrade</p>
+            </div>
+        </div>
+        <div class="flex items-center justify-between mb-6">
+            <template x-for="(s, i) in ['Tahun Ajaran', 'Kelas', 'Data Guru & Murid']" :key="i">
+                <div class="flex items-center flex-1">
+                    <div class="flex flex-col items-center">
+                        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2"
+                             :class="step > i+1 ? 'bg-emerald-500 text-white border-emerald-500' : step === i+1 ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-surface-400 border-surface-200'">
+                            <i x-show="step > i+1" class="fas fa-check text-[8px]"></i>
+                            <span x-show="step <= i+1" x-text="i+1"></span>
+                        </div>
+                        <span class="text-[9px] font-bold mt-1 text-surface-500" x-text="s"></span>
+                    </div>
+                    <div x-show="i < 2" class="flex-1 h-0.5 mx-2 rounded" :class="step > i+1 ? 'bg-emerald-400' : 'bg-surface-200'"></div>
+                </div>
+            </template>
+        </div>
+        <!-- Step 1: Academic Year -->
+        <div x-show="step === 1">
+            <p class="text-sm font-bold text-surface-700 mb-3">Langkah 1: Atur Tahun Ajaran</p>
+            <p class="text-xs text-surface-500 mb-4">Tahun ajaran digunakan untuk mengelompokkan data per semester.</p>
+            <a href="/admin-sekolah/school-years" class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition">Atur Tahun Ajaran <i class="fas fa-arrow-right"></i></a>
+            <button @click="step=2" class="ml-2 px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition">Lewati</button>
+        </div>
+        <!-- Step 2: Classes -->
+        <div x-show="step === 2">
+            <p class="text-sm font-bold text-surface-700 mb-3">Langkah 2: Buat Kelas</p>
+            <p class="text-xs text-surface-500 mb-4">Buat kelas seperti VII-A, VIII-B, atau sesuai kebutuhan sekolah.</p>
+            {% if class_count == 0 %}
+            <a href="/admin-sekolah/classes" class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition">Buat Kelas <i class="fas fa-arrow-right"></i></a>
+            {% endif %}
+            <a href="/admin-sekolah/import" class="ml-2 inline-flex items-center gap-2 px-4 py-2.5 border border-primary-200 text-primary-700 rounded-xl font-bold text-sm hover:bg-primary-50 transition"><i class="fas fa-file-excel"></i> Import dari Excel</a>
+            <button @click="step=3" class="ml-2 px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition">Lewati</button>
+        </div>
+        <!-- Step 3: Teachers & Students -->
+        <div x-show="step === 3">
+            <p class="text-sm font-bold text-surface-700 mb-3">Langkah 3: Tambah Guru & Murid</p>
+            <p class="text-xs text-surface-500 mb-4">Tambahkan data guru dan murid secara manual atau import dari Excel.</p>
+            <div class="flex flex-wrap gap-2">
+                <a href="/admin-sekolah/import" class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition"><i class="fas fa-file-excel"></i> Import Excel</a>
+                <a href="/admin-sekolah/teachers" class="px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition"><i class="fas fa-chalkboard-teacher mr-1"></i>Tambah Guru</a>
+                <a href="/admin-sekolah/students" class="px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition"><i class="fas fa-user-graduate mr-1"></i>Tambah Murid</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Stat Cards -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <a href="/admin-sekolah/students" class="card stat-card hover:shadow-md transition block animate-slide-up">
