@@ -5,19 +5,19 @@
 <div class="space-y-6" x-data="{
     lang: localStorage.getItem('sg_lang') || 'id',
     showAssignForm: false, assigningClassId: null, assigningSubjectId: null, assignLoading: false
-}">
+, showBroadcast: false, formTitle: "", formMessage: "", formTarget: "murid", sending: false, sendMsg: "",}">
     {% if exams_no_key %}
     <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4 flex items-start gap-3">
         <i class="fas fa-exclamation-triangle text-amber-600 mt-0.5"></i>
         <div class="flex-1">
             <p class="font-bold text-amber-800 text-sm">Kunci jawaban belum diatur</p>
-            <p class="text-xs text-amber-700 mt-1">{{ exams_no_key|length }} ujian belum memiliki kunci jawaban — skor siswa akan 0.</p>
+            <p class="text-xs text-amber-700 mt-1"><span x-text="exams_no_key|length"></span> ujian belum memiliki kunci jawaban — skor siswa akan 0.</p>
             <div class="flex flex-wrap gap-2 mt-2">
                 {% for e in exams_no_key[:3] %}
-                <a href="/teacher/exams/{{ e.id }}/answer-keys" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition">{{ e.title[:30] }}</a>
+                <a href="/teacher/exams/<span x-text="e.id"></span>/answer-keys" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition"><span x-text="e.title[:30]"></span></a>
                 {% endfor %}
                 {% if exams_no_key|length > 3 %}
-                <a href="/teacher/exams" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition">+{{ exams_no_key|length - 3 }} lainnya</a>
+                <a href="/teacher/exams" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition">+<span x-text="exams_no_key|length - 3"></span> lainnya</a>
                 {% endif %}
             </div>
         </div>
@@ -31,7 +31,7 @@
         <div class="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
                 <h2 class="text-2xl lg:text-3xl font-extrabold text-white">
-                    Selamat {{ greeting() }}{% if user_name %}, <span class="text-primary-200">{{ user_name }}</span>{% endif %}
+                    Selamat <span x-text="greeting()"></span>{% if user_name %}, <span class="text-primary-200"><span x-text="user_name"></span></span>{% endif %}
                 </h2>
                 <p class="text-primary-200/80 font-medium mt-1">Ringkasan aktivitas mengajar Anda</p>
             </div>
@@ -52,7 +52,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Perlu Dikoreksi</p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ pending_grading }}</p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="pending_grading"></span></p>
                 </div>
             </div>
             {% if pending_grading > 0 %}
@@ -70,13 +70,13 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Akan Datang (7 Hari)</p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ upcoming_exams|length }}</p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="upcoming_exams|length"></span></p>
                 </div>
             </div>
             {% if upcoming_exams %}
             <div class="mt-2 space-y-1">
                 {% for e in upcoming_exams[:3] %}
-                <a href="/teacher/exams/{{ e.id }}" class="block text-xs font-medium text-surface-600 hover:text-primary-600 truncate">{{ e.title }}</a>
+                <a href="/teacher/exams/<span x-text="e.id"></span>" class="block text-xs font-medium text-surface-600 hover:text-primary-600 truncate"><span x-text="e.title"></span></a>
                 {% endfor %}
             </div>
             {% endif %}
@@ -90,7 +90,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Kunci Jawaban</p>
-                    <p class="text-2xl font-extrabold text-surface-800">{{ exams_no_key|length }}</p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="exams_no_key|length"></span></p>
                 </div>
             </div>
             {% if exams_no_key %}
@@ -110,7 +110,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Total Ujian</p>
-                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ exams|length }}</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="exams|length"></span></p>
                 </div>
             </div>
         </div>
@@ -121,7 +121,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Aktif</p>
-                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ exams|selectattr('status', 'equalto', 'active')|list|length }}</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="exams|selectattr('status', 'equalto', 'active')|list|length"></span></p>
                 </div>
             </div>
         </div>
@@ -132,7 +132,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Siswa</p>
-                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ total_students }}</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="total_students"></span></p>
                 </div>
             </div>
         </div>
@@ -143,7 +143,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Rata-rata</p>
-                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5">{{ avg_score }}</p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="avg_score"></span></p>
                 </div>
             </div>
         </div>
@@ -158,12 +158,12 @@
             {% set pct = (prog.graded / prog.total * 100)|round %}
             <div>
                 <div class="flex items-center justify-between text-xs font-bold text-surface-600 mb-1">
-                    <span class="truncate">{{ exams|selectattr('id', 'equalto', eid)|map(attribute='title')|first|default('') }}</span>
-                    <span>{{ prog.graded }}/{{ prog.total }} ({{ pct }}%)</span>
+                    <span class="truncate"><span x-text="exams|selectattr('id', 'equalto', eid)|map(attribute='title')|first|default('')"></span></span>
+                    <span><span x-text="prog.graded"></span>/<span x-text="prog.total"></span> (<span x-text="pct"></span>%)</span>
                 </div>
                 <div class="w-full h-2 bg-surface-100 rounded-full overflow-hidden">
                     <div class="h-full rounded-full bg-gradient-to-r from-amber-400 to-emerald-500 transition-all"
-                         style="width: {{ pct }}%"></div>
+                         style="width: <span x-text="pct"></span>%"></div>
                 </div>
             </div>
             {% endfor %}
@@ -196,13 +196,13 @@
                 </div>
                 <div class="divide-y divide-surface-50">
                     {% for e in exams[:5] %}
-                    <a href="/teacher/exams/{{ e.id }}" class="flex items-center gap-4 px-5 py-3.5 hover:bg-surface-50 transition group">
+                    <a href="/teacher/exams/<span x-text="e.id"></span>" class="flex items-center gap-4 px-5 py-3.5 hover:bg-surface-50 transition group">
                         <div class="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center text-primary-600 group-hover:scale-110 transition-transform shrink-0">
                             <i class="fas {% if e.is_published %}fa-globe{% else %}fa-file{% endif %}"></i>
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="font-bold text-surface-700 text-sm truncate">{{ e.title }}</p>
-                            <p class="text-xs text-surface-400">{{ e.subject or '-' }}</p>
+                            <p class="font-bold text-surface-700 text-sm truncate"><span x-text="e.title"></span></p>
+                            <p class="text-xs text-surface-400"><span x-text="e.subject or '-'"></span></p>
                         </div>
                         <div class="text-right shrink-0">
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold
@@ -210,7 +210,7 @@
                                 {% elif e.status == 'active' %}bg-amber-50 text-amber-700
                                 {% else %}bg-surface-100 text-surface-500{% endif %}">
                                 <span class="w-1.5 h-1.5 rounded-full {% if e.status == 'active' and e.is_published %}bg-emerald-500{% elif e.status == 'active' %}bg-amber-500{% else %}bg-surface-400{% endif %}"></span>
-                                {{ e.status }}
+                                <span x-text="e.status"></span>
                             </span>
                         </div>
                     </a>
@@ -239,13 +239,13 @@
                     {% for a in assignments %}
                     <div class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition group border border-transparent hover:border-surface-200">
                         <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-sm shrink-0 shadow-sm">
-                            {{ a.subjects.name[:2] if a.subjects else '?' }}
+                            <span x-text="a.subjects.name[:2] if a.subjects else '?'"></span>
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="font-bold text-sm text-surface-800">{{ a.subjects.name if a.subjects else '-' }}</p>
-                            <p class="text-xs text-surface-500 font-medium">{{ a.classes.name if a.classes else '-' }}</p>
+                            <p class="font-bold text-sm text-surface-800"><span x-text="a.subjects.name if a.subjects else '-'"></span></p>
+                            <p class="text-xs text-surface-500 font-medium"><span x-text="a.classes.name if a.classes else '-'"></span></p>
                         </div>
-                        <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus?"
+                        <button hx-delete="/teacher/assignments/<span x-text="a.id"></span>" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus?"
                                 class="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-red-500 transition p-1"><i class="fas fa-times text-xs"></i></button>
                     </div>
                     {% endfor %}
@@ -300,7 +300,7 @@
                     <select name="subject_id" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white">
                         <option value="">- Pilih Mapel -</option>
                         {% for s in subjects %}
-                        <option value="{{ s.id }}">{{ s.name }}</option>
+                        <option value="<span x-text="s.id"></span>"><span x-text="s.name"></span></option>
                         {% endfor %}
                     </select>
                 </div>
@@ -309,7 +309,7 @@
                     <select name="class_id" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white">
                         <option value="">- Pilih Kelas -</option>
                         {% for c in classes %}
-                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        <option value="<span x-text="c.id"></span>"><span x-text="c.name"></span></option>
                         {% endfor %}
                     </select>
                 </div>
@@ -324,6 +324,30 @@
             </form>
         </div>
     </div>
+
+    <!-- Broadcast Modal -->
+    <div x-show="showBroadcast" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+         @click.self="showBroadcast=false">
+        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg" @click.outside="showBroadcast=false">
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Kirim Pengumuman ke Murid</h3>
+                <button @click="showBroadcast=false" class="text-surface-400 hover:text-surface-600">&times;</button>
+            </div>
+            <form @submit.prevent="sending=true; fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:formTitle,message:formMessage,target_role:'murid'})}).then(r=>r.json()).then(d=>{sending=false;if(d.success){sendMsg='Terkirim ke '+d.recipients+' murid';formTitle='';formMessage=''}else{sendMsg='Gagal: '+d.error}}).catch(()=>{sending=false;sendMsg='Error'})" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
+                    <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Pesan</label>
+                    <textarea x-model="formMessage" required rows="3" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></textarea>
+                </div>
+                <button type="submit" class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition"
+                        :disabled="sending"><span x-text="sending ? 'Mengirim...' : 'Kirim ke Murid'"></span></button>
+                <p x-show="sendMsg" class="text-xs font-bold" :class="sendMsg.includes('Terkirim') ? 'text-emerald-600' : 'text-red-600'" x-text="sendMsg"></p>
+            </form>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -333,7 +357,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     var ctx = document.getElementById('scoreChart');
     if (!ctx) return;
-    var scores = {{ all_scores | tojson | safe }};
+    var scores = <span x-text="all_scores | tojson | safe"></span>;
     var bins = [0,0,0,0,0];
     scores.forEach(function(s) { if(s<20)bins[0]++; else if(s<40)bins[1]++; else if(s<60)bins[2]++; else if(s<80)bins[3]++; else bins[4]++; });
     new Chart(ctx, {

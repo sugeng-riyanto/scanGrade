@@ -10,7 +10,7 @@
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
     <script src="/static/vendor/chart.umd.min.js"></script>
-    <link rel="icon" type="image/svg+xml" href="{{ school_favicon(g.get('school_info', {})) }}">
+    <link rel="icon" type="image/svg+xml" href="<span x-text="school_favicon(g.get('school_info', {}))"></span>">
     <link rel="stylesheet" href="/static/vendor/inter/inter.css">
     <link rel="stylesheet" href="/static/vendor/font-awesome/all.min.css">
     <link rel="manifest" href="/static/manifest.json">
@@ -111,7 +111,7 @@ html { transition: background-color .3s, color .3s; }
         .dark .border-surface-300 { border-color: #334155 !important; }
         .dark .bg-surface-200 { background: #2d3050 !important; }
     </style>
-    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="csrf-token" content="<span x-text="csrf_token()"></span>">
     {% block head_extra %}{% endblock %}
 </head>
 <body class="h-full antialiased"
@@ -251,11 +251,11 @@ html { transition: background-color .3s, color .3s; }
         <div class="border-t border-white/[0.06] p-3">
             <div class="flex items-center gap-3 px-2 py-1.5">
                 <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white font-bold text-sm shadow-lg shrink-0">
-                    {{ (g.user_name or g.user_email or "U")[:1]|upper }}
+                    <span x-text="(g.user_name or g.user_email or "U")[:1]|upper"></span>
                 </div>
                 <div class="flex-1 min-w-0">
-                    <p class="text-sm font-semibold text-white truncate">{{ g.user_name or g.user_email[:20] }}</p>
-                    <p class="text-[10px] font-medium text-white/40 uppercase tracking-wider">{{ g.user_role|replace('_', ' ') }}</p>
+                    <p class="text-sm font-semibold text-white truncate"><span x-text="g.user_name or g.user_email[:20]"></span></p>
+                    <p class="text-[10px] font-medium text-white/40 uppercase tracking-wider"><span x-text="g.user_role|replace('_', ' ')"></span></p>
                 </div>
                 <a href="/auth/logout" class="text-white/30 hover:text-red-400 transition p-1.5 rounded-lg hover:bg-white/5" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
             </div>
@@ -285,7 +285,7 @@ html { transition: background-color .3s, color .3s; }
                     </a>
                     {% for p in parts %}
                     <i class="fas fa-chevron-right text-[8px] text-surface-300 shrink-0"></i>
-                    <span class="text-surface-600 font-semibold truncate max-w-[120px] sm:max-w-[200px]">{{ p|replace('-',' ')|title }}</span>
+                    <span class="text-surface-600 font-semibold truncate max-w-[120px] sm:max-w-[200px]"><span x-text="p|replace('-',' ')|title"></span></span>
                     {% endfor %}
                 </nav>
             </div>
@@ -296,7 +296,7 @@ html { transition: background-color .3s, color .3s; }
                 <!-- Timezone -->
                 <button @click="$refs.tzDialog.showModal()"
                         class="hidden sm:inline-flex text-xs font-bold px-2.5 py-1.5 rounded-lg border border-surface-200 text-surface-500 hover:bg-surface-50 hover:text-surface-700 transition items-center gap-1">
-                    <i class="fas fa-globe text-[10px]"></i><span>UTC{{ '+%d'|format(g.tz_offset) if g.tz_offset >= 0 else g.tz_offset }}</span>
+                    <i class="fas fa-globe text-[10px]"></i><span>UTC<span x-text="'+%d'|format(g.tz_offset) if g.tz_offset >= 0 else g.tz_offset"></span></span>
                 </button>
 
                 <!-- Language -->
@@ -319,17 +319,17 @@ html { transition: background-color .3s, color .3s; }
                     <button @click="userMenuOpen = !userMenuOpen"
                             class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-surface-100 transition">
                         <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
-                            {{ (g.user_name or g.user_email or "U")[:1]|upper }}
+                            <span x-text="(g.user_name or g.user_email or "U")[:1]|upper"></span>
                         </div>
-                        <span class="hidden sm:block text-sm font-semibold text-surface-700 max-w-[120px] truncate">{{ g.user_name or g.user_email[:15] }}</span>
+                        <span class="hidden sm:block text-sm font-semibold text-surface-700 max-w-[120px] truncate"><span x-text="g.user_name or g.user_email[:15]"></span></span>
                         <i class="fas fa-chevron-down text-[10px] text-surface-400" :class="userMenuOpen && 'rotate-180'"></i>
                     </button>
                     <div x-show="userMenuOpen" x-cloak x-transition:enter="animate-fade-in"
                          @click="userMenuOpen = false"
                          class="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-surface-200 py-1.5 z-50">
                         <div class="px-4 py-2 border-b border-surface-100">
-                            <p class="text-sm font-bold text-surface-800 truncate">{{ g.user_name or g.user_email }}</p>
-                            <p class="text-[10px] font-medium text-surface-400 uppercase tracking-wider">{{ g.user_role|replace('_', ' ') }}</p>
+                            <p class="text-sm font-bold text-surface-800 truncate"><span x-text="g.user_name or g.user_email"></span></p>
+                            <p class="text-[10px] font-medium text-surface-400 uppercase tracking-wider"><span x-text="g.user_role|replace('_', ' ')"></span></p>
                         </div>
                         <a href="/auth/logout" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 transition">
                             <i class="fas fa-sign-out-alt text-xs"></i> Logout
@@ -457,9 +457,9 @@ html { transition: background-color .3s, color .3s; }
         <div class="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1 -m-1">
             {% for h in range(-12, 15) %}
             <label class="cursor-pointer">
-                <input type="radio" name="tz_val" value="{{ h }}" class="peer sr-only" {% if h == g.tz_offset %}checked{% endif %}>
+                <input type="radio" name="tz_val" value="<span x-text="h"></span>" class="peer sr-only" {% if h == g.tz_offset %}checked{% endif %}>
                 <div class="text-center py-2 rounded-lg border-2 border-surface-200 text-xs font-bold text-surface-600 peer-checked:border-primary-500 peer-checked:bg-primary-50 peer-checked:text-primary-700 hover:bg-surface-50 transition">
-                    UTC{{ "+%d"|format(h) if h >= 0 else h }}
+                    UTC<span x-text=""+%d"|format(h) if h >= 0 else h"></span>
                 </div>
             </label>
             {% endfor %}
