@@ -253,6 +253,54 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
         "activation_code": code,
     }).execute()
 
+    # Activate school
+    supabase.table("schools").update({"status": "active"}).eq("id", school_id).execute()
+
+    # Send activation email to admin
+    try:
+        import smtplib, ssl
+        from email.mime.text import MIMEText
+        admin = supabase.table("profiles").select("id, full_name, phone").eq("school_id", school_id).eq("role", "admin_sekolah").limit(1).execute().data
+        if admin:
+            admin_email = None
+            try:
+                au = current_app.extensions["supabase_auth"].admin.get_user_by_id(admin[0]["id"])
+                admin_email = au.user.email
+            except:
+                pass
+            recovery_email = admin[0].get("phone", "")
+            recipient = recovery_email if "@" in recovery_email else admin_email
+            if recipient:
+                msg = MIMEText(f"""Yth. {admin[0].get('full_name', 'Admin Sekolah')},
+
+Selamat! Pembayaran langganan ScanGrade Anda telah berhasil dikonfirmasi.
+
+Kode Aktivasi: {code}
+
+Akun sekolah Anda sekarang sudah aktif. Silakan login dan mulai menggunakan ScanGrade.
+
+Detail:
+- Paket: {plan.get('name', 'Langganan') if plan else 'Langganan'}
+- Masa Aktif: {now.strftime('%d %B %Y')} - {sub_end.strftime('%d %B %Y') if sub_end else 'Selamanya'}
+
+Link Login: https://scangrade.web.id/admin-sekolah/dashboard
+
+Hormat kami,
+Tim ScanGrade
+https://scangrade.web.id""", "plain", "utf-8")
+                msg["Subject"] = "🎉 ScanGrade — Pembayaran Berhasil! Akun Aktif"
+                msg["From"] = "ScanGrade <scangrade9@gmail.com>"
+                msg["To"] = recipient
+                context = ssl.create_default_context()
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                    server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
+                    server.sendmail("scangrade9@gmail.com", recipient, msg.as_string())
+                current_app.logger.info(f"Activation email sent to {recipient}")
+    except Exception as e:
+        current_app.logger.error(f"Failed to send activation email: {e}")
+
+    return code
+
     # Generate invoice
     try:
         _generate_invoice(supabase, school_id, plan_id, order_id, now, duration_days)

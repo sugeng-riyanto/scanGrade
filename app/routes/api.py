@@ -1337,3 +1337,112 @@ def ai_grade_bulk():
         submission_ids=submission_ids,
     )
     return jsonify(result)
+
+@api_bp.route("/broadcast/send", methods=["POST"])
+@login_required
+def api_send_broadcast():
+    """Send broadcast notification."""
+    data = request.get_json() or {}
+    title = str(data.get("title", "")).strip()
+    message = str(data.get("message", "")).strip()
+    target_role = data.get("target_role", "")
+    target_school_id = data.get("school_id", None)
+
+    if not title or not message:
+        return jsonify({"error": "Judul dan pesan wajib diisi"}), 400
+
+    supabase = get_supabase()
+    role = g.get("user_role")
+    school_id = g.get("user_school_id")
+
+    if role == "guru":
+        if target_role not in ("murid",):
+            return jsonify({"error": "Guru hanya bisa kirim ke murid"}), 403
+        target_school_id = school_id
+    elif role == "admin_sekolah":
+        if target_role not in ("guru", "murid"):
+            return jsonify({"error": "Admin hanya bisa kirim ke guru/murid"}), 403
+        target_school_id = school_id
+    elif role != "super_admin":
+        return jsonify({"error": "Unauthorized"}), 403
+
+    notif = {
+        "sender_id": g.user_id, "sender_role": role,
+        "title": title, "message": message,
+        "target_role": target_role if target_role != "all" else None,
+        "target_school_id": target_school_id,
+    }
+    try:
+        res = supabase.table("notifications").insert(notif).execute()
+        notif_id = res.data[0]["id"]
+    except Exception as e:
+        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+
+    recipients = []
+    query = supabase.table("profiles").select("id").eq("status", "active")
+    if target_role and target_role != "all":
+        query = query.eq("role", target_role)
+    if target_school_id:
+        query = query.eq("school_id", target_school_id)
+    try:
+        recipients = query.execute().data or []
+    except Exception:
+        pass
+
+    if recipients:
+        rec_data = [{"notification_id": notif_id, "recipient_id": r["id"]} for r in recipients]
+        for i in range(0, len(rec_data), 100):
+            try:
+                supabase.table("notification_recipients").upsert(rec_data[i:i+100], ignore_duplicates=True).execute()
+            except Exception:
+                pass
+
+    return jsonify({"success": True, "recipients": len(recipients)})
+
+
+@api_bp.route("/broadcast/list", methods=["GET"])
+@login_required
+def api_broadcast_list():
+    """Get notifications for current user."""
+    supabase = get_supabase()
+    user_id = g.user_id
+    role = g.get("user_role")
+    school_id = g.get("user_school_id")
+
+    notifs = []
+    try:
+        direct = supabase.table("notification_recipients") \
+            .select("notification_id, read_at, notifications!inner(id, sender_id, sender_role, title, message, created_at)") \
+            .eq("recipient_id", user_id) \
+            .order("notifications.created_at", desc=True) \
+            .limit(50) \
+            .execute().data or []
+        for d in direct:
+            n = d.get("notifications") or {}
+            notifs.append({
+                "id": n.get("id"), "title": n.get("title"),
+                "message": n.get("message"), "sender_role": n.get("sender_role"),
+                "created_at": str(n.get("created_at", ""))[:19].replace("T", " "),
+                "read": d.get("read_at") is not None,
+            })
+    except Exception:
+        pass
+    try:
+        role_notifs = supabase.table("notifications") \
+            .select("id, title, message, sender_role, created_at") \
+            .in_("target_role", [role, None]) \
+            .eq("target_school_id", school_id) \
+            .order("created_at", desc=True) \
+            .limit(50) \
+            .execute().data or []
+        existing_ids = {n["id"] for n in notifs}
+        for n in role_notifs:
+            if n["id"] not in existing_ids:
+                n["read"] = False
+                n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
+                notifs.append(n)
+    except Exception:
+        pass
+
+    notifs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return jsonify({"notifications": notifs[:20]})
