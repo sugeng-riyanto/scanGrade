@@ -195,7 +195,9 @@ def activate():
 @_rate_limit("5 per minute")
 def login():
     if request.method == "GET":
-        return render_template("auth/login.html")
+        resp = make_response(render_template("auth/login.html"))
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return resp
 
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
@@ -252,7 +254,9 @@ def login():
 def login_user():
     if request.method == "GET":
         role_hint = request.args.get("role", "")
-        return render_template("auth/login_user.html", role_hint=role_hint)
+        resp = make_response(render_template("auth/login_user.html", role_hint=role_hint))
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return resp
 
     login_input = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
