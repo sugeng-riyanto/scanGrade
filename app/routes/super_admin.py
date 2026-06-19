@@ -103,8 +103,15 @@ def schools():
 @_sa_required
 def toggle_school_whiteboard(school_id):
     supabase = get_supabase()
+    # ... existing toggle code ...
+    (existing toggle function code stays here)
+
+
+@super_bp.route("/api/school/<school_id>/toggle-whiteboard", methods=["POST"])
+@_sa_required
+def toggle_school_whiteboard(school_id):
+    supabase = get_supabase()
     try:
-        # Handle missing features column gracefully
         try:
             current = supabase.table("schools").select("features").eq("id", school_id).single().execute().data or {}
         except Exception:
@@ -121,11 +128,41 @@ def toggle_school_whiteboard(school_id):
         try:
             supabase.table("schools").update({"features": feat}).eq("id", school_id).execute()
         except Exception:
-            # Fallback: try updating with json.dumps string
             supabase.table("schools").update({"features": json.dumps(feat)}).eq("id", school_id).execute()
         return jsonify({"success": True, "enabled": new_val})
     except Exception as e:
         return jsonify({"error": str(e)[:80]}), 500
+
+
+@super_bp.route("/api/school/<school_id>/suspend", methods=["POST"])
+@_sa_required
+def api_suspend_school(school_id):
+    supabase = get_supabase()
+    supabase.table("schools").update({"status": "suspended"}).eq("id", school_id).execute()
+    supabase.table("profiles").update({"status": "suspended"}).eq("school_id", school_id).execute()
+    return jsonify({"success": True})
+
+
+@super_bp.route("/api/school/<school_id>/extend-trial", methods=["POST"])
+@_sa_required
+def api_extend_trial(school_id):
+    supabase = get_supabase()
+    from datetime import datetime, timedelta, timezone
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    supabase.table("schools").update({"trial_expires_at": new_expiry, "status": "active"}).eq("id", school_id).execute()
+    return jsonify({"success": True, "expires": new_expiry})
+
+
+@super_bp.route("/api/school/<school_id>/reset-admin-pw", methods=["POST"])
+@_sa_required
+def api_reset_admin_pw(school_id):
+    supabase = get_supabase()
+    admin = supabase.table("profiles").select("id").eq("school_id", school_id).eq("role", "admin_sekolah").limit(1).execute().data
+    if admin:
+        new_pw = secrets.token_hex(6)
+        supabase.auth.admin.update_user_by_id(admin[0]["id"], {"password": new_pw})
+        return jsonify({"success": True, "password": new_pw})
+    return jsonify({"error": "Admin not found"}), 404
 
 
 @super_bp.route("/users")
