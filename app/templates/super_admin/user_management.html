@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Manajemen User - ScanGrade{% endblock %}
+{% block page_title %}Manajemen User{% endblock %}
+{% block content %}
+<div class="space-y-4" x-data="{ showPw: null, editEmail: null }">
+    <form class="flex gap-3" method="GET">
+        <input type="text" name="q" value="{{ q }}" placeholder="Cari email atau ID user..." class="flex-1 px-4 py-2.5 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500">
+        <button type="submit" class="px-5 py-2.5 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition"><i class="fas fa-search mr-1"></i>Cari</button>
+    </form>
+
+    <div class="card overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-surface-50 border-b">
+                <tr>
+                    <th class="text-left px-4 py-3 font-bold text-surface-600 text-xs">Nama</th>
+                    <th class="text-left px-4 py-3 font-bold text-surface-600 text-xs">Email</th>
+                    <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">Role</th>
+                    <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">Status</th>
+                    <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">Aksi</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-surface-50">
+                {% for u in users %}
+                <tr class="hover:bg-surface-50 transition">
+                    <td class="px-4 py-3 font-bold text-surface-700">{{ u.full_name }}</td>
+                    <td class="px-4 py-3">
+                        <template x-if="editEmail !== '{{ u.id }}'">
+                            <span class="text-surface-500">{{ u.email }}</span>
+                        </template>
+                        <template x-if="editEmail === '{{ u.id }}'">
+                            <form @submit.prevent="fetch('/super-admin/api/user/{{ u.id }}/update-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$event.target.email.value})}).then(r=>r.json()).then(d=>{if(d.success){editEmail=null;location.reload()}else{alert(d.error)}})" class="flex gap-1">
+                                <input type="email" name="email" value="{{ u.email }}" class="flex-1 px-2 py-1 border rounded text-xs">
+                                <button type="submit" class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-bold">Simpan</button>
+                                <button type="button" @click="editEmail=null" class="px-2 py-1 bg-surface-100 rounded text-xs">Batal</button>
+                            </form>
+                        </template>
+                    </td>
+                    <td class="px-4 py-3 text-center"><span class="text-xs font-bold px-2 py-1 rounded-full bg-primary-50 text-primary-700">{{ u.role }}</span></td>
+                    <td class="px-4 py-3 text-center">
+                        <span class="text-xs font-bold px-2 py-1 rounded-full {{ 'bg-emerald-100 text-emerald-700' if u.status == 'active' else 'bg-red-100 text-red-700' }}">{{ u.status }}</span>
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        <div class="flex items-center justify-center gap-1">
+                            <button @click="editEmail = '{{ u.id }}'" class="px-2 py-1 text-xs font-bold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition" title="Ganti Email"><i class="fas fa-envelope"></i></button>
+                            <button @click="fetch('/super-admin/api/user/{{ u.id }}/reset-password',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>{if(d.password)showPw=d.password})" class="px-2 py-1 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition" title="Reset Password"><i class="fas fa-key"></i></button>
+                            <button @click="if(confirm('Suspend user {{ u.full_name }}?'))fetch('/super-admin/api/user/{{ u.id }}/suspend',{method:'POST'}).then(r=>{if(r.ok)location.reload()})" class="px-2 py-1 text-xs font-bold bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition" title="Suspend"><i class="fas fa-ban"></i></button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center py-8 text-surface-400">Tidak ada user ditemukan</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div class="flex items-center justify-center gap-2">
+        {% for p in range(1, total_pages + 1) %}
+        <a href="?q={{ q }}&page={{ p }}" class="px-3 py-1.5 rounded-lg text-sm font-bold {{ 'bg-purple-600 text-white' if p == page else 'bg-surface-100 text-surface-600 hover:bg-surface-200' }}">{{ p }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Password Modal -->
+    <div x-show="showPw" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showPw=null">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl">
+            <div class="text-center">
+                <div class="w-14 h-14 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3"><i class="fas fa-key text-2xl"></i></div>
+                <h3 class="font-extrabold text-surface-800 mb-2">Password Baru</h3>
+                <div class="bg-surface-50 rounded-xl p-4 mb-4">
+                    <code class="text-lg font-bold text-surface-800 select-all" x-text="showPw"></code>
+                </div>
+                <button @click="showPw=null" class="px-6 py-2.5 bg-primary-600 text-white rounded-xl font-bold">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

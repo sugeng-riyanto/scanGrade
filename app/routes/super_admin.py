@@ -1362,3 +1362,111 @@ def omr_test_calibrate():
         "detected": result.get("detected"),
         "avg_confidence": result.get("avg_confidence"),
     })
+
+
+# ─── Feature Flags ───
+
+@super_bp.route("/feature-flags")
+@_sa_required
+def feature_flags():
+    supabase = get_supabase()
+    flags = []
+    try:
+        flags = supabase.table("feature_flags").select("*").order("name").execute().data or []
+    except Exception:
+        flash("Tabel feature_flags belum ada. Jalankan migrasi 016.", "warning")
+    return render_template("super_admin/feature_flags.html", flags=flags)
+
+
+@super_bp.route("/api/feature-flags/<flag_id>/toggle", methods=["POST"])
+@_sa_required
+def toggle_feature_flag(flag_id):
+    supabase = get_supabase()
+    flag = supabase.table("feature_flags").select("id,enabled,name").eq("id", flag_id).single().execute().data
+    if not flag:
+        return jsonify({"error": "Flag not found"}), 404
+    new_val = not flag["enabled"]
+    supabase.table("feature_flags").update({"enabled": new_val}).eq("id", flag_id).execute()
+    return jsonify({"success": True, "enabled": new_val, "name": flag["name"]})
+
+
+# ─── User Management ───
+
+@super_bp.route("/users/manage")
+@_sa_required
+def user_management():
+    supabase = get_supabase()
+    q = request.args.get("q", "").strip()
+    page = int(request.args.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
+
+    # Get auth users
+    all_users = []
+    try:
+        auth_users = supabase.auth.admin.list_users()
+        for u in auth_users:
+            if q and q.lower() not in (u.email or "").lower() and q.lower() not in (str(u.id)[:12]).lower():
+                continue
+            all_users.append({"id": u.id, "email": u.email, "created_at": str(u.created_at)[:19] if u.created_at else ""})
+    except Exception:
+        pass
+
+    # Get profiles for these users
+    user_ids = [u["id"] for u in all_users]
+    profiles = []
+    if user_ids:
+        try:
+            profiles = supabase.table("profiles").select("id,full_name,role,phone,status,school_id").in_("id", user_ids).execute().data or []
+        except Exception:
+            pass
+    prof_map = {p["id"]: p for p in profiles}
+
+    results = []
+    for u in all_users:
+        p = prof_map.get(u["id"], {})
+        results.append({
+            "id": u["id"],
+            "email": u["email"],
+            "full_name": p.get("full_name", "-"),
+            "role": p.get("role", "-"),
+            "phone": p.get("phone", ""),
+            "status": p.get("status", "active"),
+        })
+
+    total_pages = max(1, -(-len(results) // per_page))
+    page_results = results[offset:offset + per_page]
+
+    return render_template("super_admin/user_management.html", users=page_results,
+                           q=q, page=page, total=len(results), total_pages=total_pages)
+
+
+@super_bp.route("/api/user/<user_id>/reset-password", methods=["POST"])
+@_sa_required
+def api_user_reset_password(user_id):
+    supabase = get_supabase()
+    data = request.get_json() or {}
+    new_pw = data.get("password") or secrets.token_hex(8)
+    supabase.auth.admin.update_user_by_id(user_id, {"password": new_pw})
+    return jsonify({"success": True, "password": new_pw})
+
+
+@super_bp.route("/api/user/<user_id>/update-email", methods=["POST"])
+@_sa_required
+def api_user_update_email(user_id):
+    data = request.get_json() or {}
+    new_email = data.get("email", "").strip().lower()
+    if not new_email or "@" not in new_email:
+        return jsonify({"error": "Email tidak valid"}), 400
+    supabase = get_supabase()
+    supabase.auth.admin.update_user_by_id(user_id, {"email": new_email})
+    return jsonify({"success": True, "email": new_email})
+
+
+@super_bp.route("/api/user/<user_id>/suspend", methods=["POST"])
+@_sa_required
+def api_user_suspend(user_id):
+    supabase = get_supabase()
+    supabase.auth.admin.update_user_by_id(user_id, {"ban_duration": "365d"})
+    supabase.table("profiles").update({"status": "suspended"}).eq("id", user_id).execute()
+    return jsonify({"success": True})
