@@ -301,7 +301,34 @@ def take_exam(exam_id):
             except (json.JSONDecodeError, TypeError):
                 exam[_field] = {}
     anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
-    resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config))
+
+    # Generate or retrieve recovery code for draft resume
+    recovery_code = ""
+    try:
+        existing_draft = supabase.table("submissions").select("id,answers").eq("exam_id", exam_id).eq("student_id", g.user_id).eq("status", "draft").execute().data
+        if existing_draft:
+            ans = existing_draft[0].get("answers") or {}
+            if isinstance(ans, str):
+                try: ans = json.loads(ans)
+                except: ans = {}
+            recovery_code = (ans if isinstance(ans, dict) else {}).get("_recovery_code", "")
+        if not recovery_code:
+            import random
+            recovery_code = str(random.randint(100000, 999999))
+            # Store code in a lightweight table or session
+            try:
+                supabase.table("exam_recovery_codes").upsert({
+                    "exam_id": exam_id,
+                    "student_id": g.user_id,
+                    "code": recovery_code,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }, on_conflict=["exam_id", "student_id"]).execute()
+            except Exception:
+                pass  # table may not exist — that's ok, code still shown
+    except Exception:
+        pass
+
+    resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config, recovery_code=recovery_code))
     # Allow short browser caching for exam page (exam data is static once started)
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
@@ -814,3 +841,59 @@ def delete_submission(submission_id):
         return jsonify({"error": "Cannot delete this submission"}), 403
     supabase.table("submissions").delete().eq("id", submission_id).execute()
     return jsonify({"success": True})
+
+
+@student_bp.route("/recover")
+@login_required
+def recover_exam():
+    """Page to enter recovery code and resume exam."""
+    return render_template("student/recover.html")
+
+
+@student_bp.route("/api/recover-exam", methods=["POST"])
+@login_required
+def api_recover_exam():
+    """Validate recovery code and return exam URL."""
+    data = request.get_json() or {}
+    code = str(data.get("code", "")).strip()
+
+    if not code or len(code) != 6 or not code.isdigit():
+        return jsonify({"error": "Kode recovery tidak valid. Masukkan 6 digit angka."}), 400
+
+    supabase = get_supabase()
+    try:
+        rec = supabase.table("exam_recovery_codes") \
+            .select("exam_id, student_id, code, created_at") \
+            .eq("code", code) \
+            .eq("student_id", g.user_id) \
+            .single().execute().data
+    except Exception:
+        return jsonify({"error": "Kode tidak ditemukan atau sudah kedaluwarsa."}), 404
+
+    if not rec:
+        return jsonify({"error": "Kode tidak ditemukan."}), 404
+
+    exam_id = rec.get("exam_id", "")
+
+    # Check exam is still accessible
+    exam = supabase.table("exams").select("id,status,is_published,duration_minutes,start_at").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "Ujian tidak ditemukan."}), 404
+
+    # Check time window
+    from datetime import datetime, timezone, timedelta
+    start_at = exam.get("start_at")
+    if start_at:
+        if isinstance(start_at, str):
+            start_dt = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+        else:
+            start_dt = start_at
+        if start_dt > datetime.now(timezone.utc):
+            return jsonify({"error": "Ujian belum dimulai."}), 403
+
+    # Check if already submitted
+    sub = supabase.table("submissions").select("id,status").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute().data
+    if sub:
+        return jsonify({"error": "Ujian sudah dikumpulkan. Tidak bisa melanjutkan."}), 403
+
+    return jsonify({"success": True, "redirect": url_for("student.take_exam", exam_id=exam_id)})
