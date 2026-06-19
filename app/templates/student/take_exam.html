@@ -131,6 +131,16 @@
         <span class="ml-auto text-surface-300 text-[8px]">Status perangkat</span>
     </div>
 
+    <!-- Recovery Code Banner -->
+    {% if recovery_code %}
+    <div class="mb-2 px-1 py-1.5 rounded-lg bg-primary-50 border border-primary-200 flex items-center gap-2 text-[10px] font-bold text-primary-700">
+        <i class="fas fa-shield-alt text-primary-500"></i>
+        <span>Kode Recovery:</span>
+        <span class="text-base tracking-[0.3em] font-extrabold text-primary-800 bg-white px-2 py-0.5 rounded border border-primary-200">{{ recovery_code }}</span>
+        <span class="text-primary-400 font-normal">— Simpan kode ini untuk melanjutkan jika browser crash</span>
+    </div>
+    {% endif %}
+
     <!-- Violation Banner -->
     <div x-show="showViolationBanner && !submitted" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 -translate-y-4" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-lg w-[90%] rounded-2xl p-4 shadow-2xl border-2"
