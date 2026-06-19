@@ -87,6 +87,21 @@
 - Load test with 500 concurrent simulated connections ✅
 - Whiteboard iteration: WebSocket reconnect, mobile responsive, drag-drop slide reorder
 
+## Prioritas RICE
+Setiap task dinilai dengan formula:
+**Score = (Reach × Impact × Confidence) / Effort**
+
+| Parameter | Skala | Contoh |
+|-----------|-------|--------|
+| Reach (R) | 1-5 | 1=few users, 5=all users |
+| Impact (I) | 1-5 | 1=minor, 5=transformative |
+| Confidence (C) | 0.5-1.0 | 0.5=unsure, 1.0=certain |
+| Effort (E) | hari kerja | Estimasi waktu |
+
+**70-20-10 Rule:** 70% fitur berdampak langsung, 20% tech debt/refactoring, 10% eksplorasi.
+
+**Weekly Review:** Setiap Jumat — review progress, update prioritas, tulis di AGENTS.md.
+
 ## Critical Context
 - Alpine.js v3.14.8 — `el.__x` does NOT exist. Must use `QUESTION_INSTANCES` global map pattern. NOTE: admin templates use `Alpine.raw(root).__x.$data` for import forms.
 - `xhtml2pdf` does NOT support: `display: flex`, `position: absolute/relative`, `border-radius` (limited), `gap` — use tables for layout, floats for positioning

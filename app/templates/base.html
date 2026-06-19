@@ -228,7 +228,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
             <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span>Mata Pelajaran</span></a>
             {% set _feat = get_school_features() %}
-            {% if _feat.get('whiteboard_enabled', True) %}
+            {% if False and _feat.get('whiteboard_enabled', True) %}
             <div class="nav-section-title pt-2">Belajar</div>
             <a href="/wb/teacher/whiteboard" class="nav-item {% if '/wb/' in request.path %}active{% endif %}"><i class="fas fa-chalkboard"></i><span>Whiteboard</span></a>
             {% endif %}
@@ -240,7 +240,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/student/exams" class="nav-item {% if request.path == '/student/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian Saya</span></a>
             <a href="/student/results" class="nav-item {% if request.path == '/student/results' %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Nilai Saya</span></a>
             {% set _feat = get_school_features() %}
-            {% if _feat.get('whiteboard_enabled', True) %}
+            {% if False and _feat.get('whiteboard_enabled', True) %}
             <div class="nav-section-title pt-2">Belajar</div>
             <a href="/wb/student/whiteboard" class="nav-item {% if '/wb/' in request.path %}active{% endif %}"><i class="fas fa-chalkboard"></i><span>Whiteboard</span></a>
             {% endif %}
@@ -367,7 +367,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/teacher/results" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path.startswith('/teacher/results') %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chart-bar text-lg mb-0.5"></i><span x-text="lang==='en'?'Results':'Hasil'"></span>
             </a>
-            {% if get_school_features().get('whiteboard_enabled', True) %}
+            {% if get_school_features().get('whiteboard_enabled', False) %}
             <a href="/wb/teacher/whiteboard" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if '/wb/' in request.path %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chalkboard text-lg mb-0.5"></i><span x-text="lang==='en'? 'Board':'Whiteboard'"></span>
             </a>
@@ -382,7 +382,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/student/results" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if request.path == '/student/results' %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chart-bar text-lg mb-0.5"></i><span x-text="lang==='en'?'Scores':'Nilai'"></span>
             </a>
-            {% if get_school_features().get('whiteboard_enabled', True) %}
+            {% if get_school_features().get('whiteboard_enabled', False) %}
             <a href="/wb/student/whiteboard" class="flex-1 flex flex-col items-center py-1.5 text-[10px] font-semibold {% if '/wb/' in request.path %}text-primary-600{% else %}text-surface-400{% endif %} transition">
                 <i class="fas fa-chalkboard text-lg mb-0.5"></i><span x-text="lang==='en'? 'Board':'Whiteboard'"></span>
             </a>
