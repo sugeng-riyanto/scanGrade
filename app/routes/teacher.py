@@ -2200,3 +2200,106 @@ def generate_remedial(exam_id):
         res = supabase.table("exams").insert(new_exam).execute()
         new_id = res.data[0]["id"]
         return jsonify({"success": True, "redirect": f"/teacher/exams/{new_id}"})
+
+
+@teacher_bp.route("/exams/<exam_id>/cheat-analysis")
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def cheat_analysis(exam_id):
+    """Cheat pattern detection dashboard."""
+    return render_template("teacher/cheat_analysis.html", exam_id=exam_id)
+
+
+@teacher_bp.route("/api/exams/<exam_id>/cheat-data")
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def cheat_analysis_data(exam_id):
+    """API: analyze submissions for cheating patterns."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("title,question_types,answer_key,total_questions").eq("id", exam_id).single().execute().data or {}
+
+    answer_key = exam.get("answer_key") or {}
+    if isinstance(answer_key, str):
+        try: answer_key = json.loads(answer_key)
+        except: answer_key = {}
+    qtypes = exam.get("question_types") or {}
+    if isinstance(qtypes, str):
+        try: qtypes = json.loads(qtypes)
+        except: qtypes = {}
+
+    subs = supabase.table("submissions") \
+        .select("id,student_id,answers,submitted_at,created_at,profiles(full_name)") \
+        .eq("exam_id", exam_id) \
+        .in_("status", ["submitted", "graded", "published"]) \
+        .execute().data or []
+
+    parsed = []
+    for s in subs:
+        answers = s.get("answers") or {}
+        if isinstance(answers, str):
+            try: answers = json.loads(answers)
+            except: answers = {}
+        profile = s.get("profiles") or {}
+        parsed.append({
+            "id": s["id"],
+            "student_id": s["student_id"],
+            "name": profile.get("full_name", s["student_id"][:12]),
+            "answers": answers,
+            "submitted_at": s.get("submitted_at") or s.get("created_at") or "",
+        })
+
+    # 1. Identical Wrong Answer Detection
+    total_q = exam.get("total_questions", 0)
+    wrong_answers = {}
+    for p in parsed:
+        ans = p["answers"]
+        wrong_pattern = []
+        for qi in range(total_q):
+            qi_str = str(qi)
+            stu_ans = ans.get(qi_str, "")
+            if isinstance(stu_ans, dict):
+                stu_ans = stu_ans.get("answer", "")
+            key = answer_key.get(qi_str, "")
+            if key and stu_ans and stu_ans != key:
+                wrong_pattern.append(f"{qi}:{stu_ans}")
+        if wrong_pattern:
+            pattern = "|".join(wrong_pattern)
+            if pattern not in wrong_answers:
+                wrong_answers[pattern] = []
+            wrong_answers[pattern].append(p["name"])
+
+    identical_groups = [{"students": v, "count": len(v), "pattern": k[:100]}
+                        for k, v in wrong_answers.items() if len(v) >= 2]
+    identical_groups.sort(key=lambda x: x["count"], reverse=True)
+
+    # 2. Submission Timing Cluster
+    from collections import defaultdict
+    time_clusters = []
+    timestamps = [(p["name"], p["submitted_at"]) for p in parsed if p.get("submitted_at")]
+    import datetime
+    from datetime import timezone
+    for i, (n1, t1) in enumerate(timestamps):
+        cluster = [n1]
+        for j, (n2, t2) in enumerate(timestamps):
+            if i != j and t1 and t2:
+                try:
+                    dt1 = datetime.datetime.fromisoformat(t1.replace("Z", "+00:00").split(".")[0])
+                    dt2 = datetime.datetime.fromisoformat(t2.replace("Z", "+00:00").split(".")[0])
+                    diff = abs((dt1 - dt2).total_seconds())
+                    if diff < 3:
+                        cluster.append(n2)
+                except: pass
+        if len(cluster) >= 3:
+            cluster.sort()
+            key = ",".join(cluster)
+            if not any(key == c.get("key") for c in time_clusters):
+                time_clusters.append({"key": key, "students": list(set(cluster)), "count": len(set(cluster))})
+
+    time_clusters.sort(key=lambda x: x["count"], reverse=True)
+
+    return jsonify({
+        "exam_title": exam.get("title", ""),
+        "identical_groups": identical_groups[:10],
+        "time_clusters": time_clusters[:10],
+        "total_students": len(parsed),
+    })

@@ -32,6 +32,9 @@
             <button onclick="generateRemedial('{{ exam_id }}')" class="border-2 border-emerald-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-emerald-50 text-[11px] sm:text-sm font-bold text-emerald-700 transition whitespace-nowrap">
                 <i class="fas fa-book-open mr-1"></i><span class="hidden sm:inline">Remedial</span>
             </button>
+            <a href="/teacher/exams/{{ exam_id }}/cheat-analysis" class="border-2 border-red-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-red-50 text-[11px] sm:text-sm font-bold text-red-700 transition whitespace-nowrap">
+                <i class="fas fa-shield-alt mr-1"></i><span class="hidden sm:inline">Deteksi Curang</span>
+            </a>
             {% if exam.get('is_published') %}
             <form method="POST" action="/teacher/publish/{{ exam_id }}/unpublish" class="inline">
                 <button type="submit" class="border-2 border-amber-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-amber-50 text-[11px] sm:text-sm font-bold text-amber-700 transition whitespace-nowrap"
