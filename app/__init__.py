@@ -412,6 +412,10 @@ def _register_performance_middleware(app):
             response.cache_control.public = True
         elif request.path.startswith("/api/") or request.path.startswith("/health"):
             response.cache_control.no_cache = True
+        else:
+            response.cache_control.no_cache = True
+            response.cache_control.no_store = True
+            response.cache_control.must_revalidate = True
         return response
 
 
