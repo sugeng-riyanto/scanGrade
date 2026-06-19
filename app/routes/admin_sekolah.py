@@ -831,6 +831,7 @@ def create_teacher():
     nama = request.form.get("name", request.form.get("full_name", "")).strip()
     email = request.form.get("email", "").strip().lower()
     hp = request.form.get("phone", "").strip()
+    recovery_email = request.form.get("recovery_email", "").strip().lower()
     subject_id = request.form.get("subject_id") or None
     password = request.form.get("password", "").strip() or _gen_password()
 
@@ -847,8 +848,12 @@ def create_teacher():
         })
         uid = res.user.id
         supabase.table("profiles").upsert({
-            "id": uid, "full_name": nama, "phone": hp, "role": "guru",
+            "id": uid, "full_name": nama, "phone": recovery_email or hp, "role": "guru",
             "status": "active", "school_id": sid,
+        }).execute()
+        supabase.table("teachers").upsert({
+            "id": uid, "school_id": sid, "employee_id": nip, "subject_id": subject_id,
+            "status": "active",
         }).execute()
         supabase.table("teachers").upsert({
             "id": uid, "school_id": sid, "employee_id": nip, "subject_id": subject_id,
@@ -985,6 +990,7 @@ def create_student():
     nisn = request.form.get("nisn", "").strip()
     nama = request.form.get("name", request.form.get("full_name", "")).strip()
     email = request.form.get("email", "").strip().lower()
+    recovery_email = request.form.get("phone", "").strip().lower()
     class_id = request.form.get("class_id") or None
     password = request.form.get("password", "").strip() or _gen_password()
 
@@ -1002,6 +1008,7 @@ def create_student():
         uid = res.user.id
         supabase.table("profiles").upsert({
             "id": uid, "full_name": nama, "role": "murid",
+            "phone": recovery_email,
             "class_id": class_id, "status": "active", "school_id": sid,
         }).execute()
         supabase.table("students").upsert({
