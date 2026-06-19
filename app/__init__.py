@@ -3,7 +3,7 @@ import logging
 import math as _math
 import time
 from datetime import datetime, timedelta, timezone
-from flask import Flask, g, request, jsonify, redirect, render_template
+from flask import Flask, g, request, jsonify, redirect, render_template, make_response
 from flask_cors import CORS
 from supabase import create_client, Client
 
