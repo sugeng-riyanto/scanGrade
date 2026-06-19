@@ -255,7 +255,7 @@ html { transition: background-color .3s, color .3s; }
                 </div>
                 <div class="flex-1 min-w-0">
                     <p class="text-sm font-semibold text-white truncate"><span x-text="g.user_name or g.user_email[:20]"></span></p>
-                    <p class="text-[10px] font-medium text-white/40 uppercase tracking-wider"><span x-text="g.user_role|replace('_', ' ')"></span></p>
+                    <p class="text-[10px] font-medium text-white/40 uppercase tracking-wider"><span x-text="'{{ g.user_role|replace('_', ' ') }}'"></span></p>
                 </div>
                 <a href="/auth/logout" class="text-white/30 hover:text-red-400 transition p-1.5 rounded-lg hover:bg-white/5" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
             </div>
@@ -285,7 +285,7 @@ html { transition: background-color .3s, color .3s; }
                     </a>
                     {% for p in parts %}
                     <i class="fas fa-chevron-right text-[8px] text-surface-300 shrink-0"></i>
-                    <span class="text-surface-600 font-semibold truncate max-w-[120px] sm:max-w-[200px]"><span x-text="p|replace('-',' ')|title"></span></span>
+                    <span class="text-surface-600 font-semibold truncate max-w-[120px] sm:max-w-[200px]"><span x-text="'{{ p|replace('-',' ')|title }}'"></span></span>
                     {% endfor %}
                 </nav>
             </div>
@@ -329,7 +329,7 @@ html { transition: background-color .3s, color .3s; }
                          class="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-surface-200 py-1.5 z-50">
                         <div class="px-4 py-2 border-b border-surface-100">
                             <p class="text-sm font-bold text-surface-800 truncate"><span x-text="g.user_name or g.user_email"></span></p>
-                            <p class="text-[10px] font-medium text-surface-400 uppercase tracking-wider"><span x-text="g.user_role|replace('_', ' ')"></span></p>
+                            <p class="text-[10px] font-medium text-surface-400 uppercase tracking-wider"><span x-text="'{{ g.user_role|replace('_', ' ') }}'"></span></p>
                         </div>
                         <a href="/auth/logout" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 transition">
                             <i class="fas fa-sign-out-alt text-xs"></i> Logout
@@ -459,7 +459,7 @@ html { transition: background-color .3s, color .3s; }
             <label class="cursor-pointer">
                 <input type="radio" name="tz_val" value="{{ h }}" class="peer sr-only" {% if h == g.tz_offset %}checked{% endif %}>
                 <div class="text-center py-2 rounded-lg border-2 border-surface-200 text-xs font-bold text-surface-600 peer-checked:border-primary-500 peer-checked:bg-primary-50 peer-checked:text-primary-700 hover:bg-surface-50 transition">
-                    UTC<span x-text="(h >= 0 ? '+' : '') + h"></span>
+                    UTC<span x-text="({{ h }} >= 0 ? '+' : '') + {{ h }}"></span>
                 </div>
             </label>
             {% endfor %}
