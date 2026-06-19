@@ -113,6 +113,8 @@ def create_app(env=None):
     _register_rate_limiter(app)
 
     from app.template_filters import register_template_filters
+    register_template_filters(app)
+
     @app.route("/")
     def index():
         token = request.cookies.get("access_token")
