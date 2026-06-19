@@ -1,48 +1,44 @@
-"""Generate embeddings for essay questions (local, free)."""
+"""Generate embeddings for essay questions via API (no local PyTorch)."""
 import json
 import logging
-from typing import Optional, List
+from typing import Optional
 
 logger = logging.getLogger("app")
 
-_model = None
+OPENAI_EMBEDDING_URL = "https://api.openai.com/v1/embeddings"
 
 
-def _load_model():
-    """Lazy-load sentence-transformers model (downloaded once)."""
-    global _model
-    if _model is not None:
-        return _model
+def _call_embedding_api(text: str) -> Optional[list]:
+    """Call OpenAI embedding API. Cheap: $0.02/1M tokens."""
     try:
-        from sentence_transformers import SentenceTransformer
-        logger.info("Loading embedding model... (first load ~30s)")
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-        logger.info("Embedding model loaded")
-    except ImportError:
-        logger.warning("sentence-transformers not installed. Embedding disabled.")
-        _model = False
-    return _model
-
-
-def generate_embedding(text: str) -> Optional[List[float]]:
-    """Generate embedding vector for a text. Returns None if unavailable."""
-    model = _load_model()
-    if not model:
+        from app.services.ai_service import _get_active_key
+        key = _get_active_key(None)
+        api_key = (key or {}).get("api_key", "")
+        if not api_key:
+            logger.warning("No AI API key for embedding — skipping")
+            return None
+        import requests
+        resp = requests.post(OPENAI_EMBEDDING_URL,
+                             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                             json={"model": "text-embedding-3-small", "input": text[:2048]},
+                             timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["data"][0]["embedding"]
+        logger.warning("Embedding API error: %s", resp.status_code)
         return None
-    try:
-        emb = model.encode(text[:512])  # Truncate to 512 chars
-        return emb.tolist()
     except Exception as e:
-        logger.error("Embedding error: %s", e)
+        logger.warning("Embedding API failed: %s", e)
         return None
+
+
+def generate_embedding(text: str) -> Optional[list]:
+    """Generate embedding vector for a text via API. Returns None if unavailable."""
+    return _call_embedding_api(text)
 
 
 def preprocess_exam_questions(exam_id: str, questions: list, supabase) -> dict:
-    """Preprocess all essay questions for an exam:
-    - Generate embeddings
-    - Save to question_embeddings table
-    Returns count of processed questions.
-    """
+    """Preprocess all essay questions for an exam via API embedding."""
     processed = 0
     for q in questions:
         if q.get("type") != "essay":
