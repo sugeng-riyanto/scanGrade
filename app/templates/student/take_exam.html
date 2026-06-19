@@ -186,7 +186,7 @@
     <!-- Scientific Calculator (standar matematika/fisika) — draggable + resizable -->
     <div x-show="showCalculator && !submitted && !showExamAgreement" x-transition x-cloak
          x-data="{ cx: 0, cy: 0, dragging: false, startX: 0, startY: 0, calcBig: false }"
-         :style="'position:fixed;bottom:0;right:0;margin:0 ' + (-cx) + 'px ' + (-cy) + 'px 0;z-index:50;width:' + (calcBig?'96':'18') + 'rem'"
+         :style="'position:fixed;bottom:0;right:0;margin:0 ' + (-cx) + 'px ' + (-cy) + 'px 0;z-index:50;transform:scale(' + (calcBig?'1.35':'1') + ');transform-origin:bottom right"
          class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none transition-all duration-200"
          @click.outside="showCalculator = false">
         <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700 cursor-grab active:cursor-grabbing select-none"
