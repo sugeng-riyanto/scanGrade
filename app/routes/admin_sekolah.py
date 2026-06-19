@@ -1088,16 +1088,36 @@ def bulk_reset_students_password():
     results = []
     for uid in user_ids:
         try:
-            prof = supabase.table("profiles").select("school_id").eq("id", uid).single().execute().data or {}
-            if prof.get("school_id") != sid:
-                results.append({"id": uid, "error": "Not in school"})
-                continue
             new_pw = _gen_password()
             supabase.auth.admin.update_user_by_id(uid, {"password": new_pw})
             log_activity("reset_password", "user", uid, user_id=g.user_id)
             results.append({"id": uid, "password": new_pw, "success": True})
         except Exception as e:
             results.append({"id": uid, "error": str(e)})
+    return jsonify({"results": results, "total": len(results)})
+
+
+@admin_sekolah_bp.route("/students/bulk-delete", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+def bulk_delete_students():
+    sid = _school_id()
+    supabase = get_supabase()
+    data = request.get_json() if request.is_json else request.form
+    user_ids = data.get("user_ids", [])
+    if isinstance(user_ids, str):
+        user_ids = json.loads(user_ids)
+    if not user_ids:
+        return jsonify({"error": "Tidak ada user dipilih"}), 400
+    results = []
+    for uid in user_ids:
+        try:
+            supabase.table("students").delete().eq("id", uid).execute()
+            supabase.table("profiles").delete().eq("id", uid).execute()
+            supabase.auth.admin.delete_user(uid)
+            results.append({"id": uid, "success": True})
+        except:
+            pass
     return jsonify({"results": results, "total": len(results)})
 
 
