@@ -388,13 +388,21 @@
             </div>
         </div>
     </form>
-    <!-- Scientific Calculator -->
+    <!-- Scientific Calculator — draggable + resizable -->
     <div x-show="showCalculator" x-transition
-         class="fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
+         x-data="{ calcBig: false, cx2: 0, cy2: 0, dragging2: false, sx2: 0, sy2: 0 }"
+         :style="calcBig ? 'position:fixed;bottom:0;right:0;margin:0 ' + (-cx2) + 'px ' + (-cy2) + 'px 0;z-index:50;transform:scale(1.35);transform-origin:bottom right' : 'position:fixed;bottom:0;right:0;margin:0 ' + (-cx2) + 'px ' + (-cy2) + 'px 0;z-index:50'"
+         class="w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
          @click.outside="showCalculator = false">
-        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
+        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700 cursor-grab active:cursor-grabbing select-none"
+             @mousedown="dragging2=true; sx2=$event.clientX; sy2=$event.clientY"
+             @touchstart="dragging2=true; sx2=$event.touches[0].clientX; sy2=$event.touches[0].clientY"
+             @mousemove="if(dragging2){cx2=sx2-$event.clientX;cy2=sy2-$event.clientY}"
+             @touchmove="if(dragging2){cx2=sx2-$event.touches[0].clientX;cy2=sy2-$event.touches[0].clientY}"
+             @mouseup="dragging2=false" @touchend="dragging2=false" @mouseleave="dragging2=false">
             <span class="text-[11px] font-extrabold text-slate-200 flex items-center gap-1.5"><i class="fas fa-calculator text-orange-400"></i> Scientific</span>
             <div class="flex items-center gap-2">
+                <button @click="calcBig = !calcBig" class="text-slate-400 hover:text-white text-xs px-1" :title="calcBig?'Persempit':'Perbesar'"><i class="fas" :class="calcBig?'fa-compress':'fa-expand'"></i></button>
                 <button @click="calcAngleMode = calcAngleMode === 'DEG' ? 'RAD' : 'DEG'"
                         class="text-[9px] font-extrabold px-1.5 py-0.5 rounded"
                         :class="calcAngleMode === 'DEG' ? 'bg-orange-500/30 text-orange-300' : 'bg-slate-700 text-slate-300'"
