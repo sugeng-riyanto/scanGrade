@@ -345,10 +345,78 @@ def detect_nisn(warped: np.ndarray) -> dict:
 
 # ── Answer Detection ──
 
+def _auto_calibrate_grid(warped: np.ndarray, total_questions: int = 50, options: int = 5) -> list:
+    """Auto-detect grid row positions from image using horizontal projection.
+    Returns list of (q_idx, opt_idx, cx, cy) with calibrated positions.
+    Falls back to hardcoded geometry if detection fails.
+    """
+    h, w = warped.shape[:2]
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY) if len(warped.shape) == 3 else warped
+
+    # Horizontal projection: sum of dark pixels per row
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    proj = np.sum(thresh, axis=1) / 255  # 0-255 → 0-1 scale
+
+    # Smooth projection
+    proj_smooth = cv2.GaussianBlur(proj.reshape(-1, 1).astype(np.float32), (1, 7), 0).ravel()
+
+    # Find row peaks: look for local maxima in projection (without scipy)
+    peaks = []
+    for i in range(2, len(proj_smooth) - 2):
+        if proj_smooth[i] > proj_smooth[i-1] and proj_smooth[i] > proj_smooth[i+1] and proj_smooth[i] > np.mean(proj_smooth) * 0.5:
+            # Check it's a significant peak in a window
+            window = proj_smooth[max(0,i-3):min(len(proj_smooth),i+4)]
+            if proj_smooth[i] == max(window):
+                peaks.append(i)
+    peaks = sorted(peaks)
+
+    # Filter to expected number of question rows
+    cols = max(1, (total_questions + LJK_Q_PER_COL - 1) // LJK_Q_PER_COL)
+    q_per_col = min(LJK_Q_PER_COL, max(1, (total_questions + cols - 1) // cols))
+    expected_rows = q_per_col * cols
+
+    if len(peaks) >= expected_rows * 0.5:
+        # Use detected peaks, spaced evenly within detected range
+        if len(peaks) > expected_rows:
+            # Keep evenly spaced peaks
+            step = len(peaks) / expected_rows
+            peaks = [peaks[int(i * step)] for i in range(expected_rows)]
+    else:
+        # Fallback to hardcoded geometry
+        return _get_grid_positions(total_questions, options)
+
+    # Build positions using calibrated rows
+    col_step = _mm_to_px_x((PAGE_W_MM - LJK_MARGIN - LJK_GRID_X - LJK_MARGIN) / cols)
+    b_r_px = _mm_to_px_y(LJK_BUBBLE_R)
+    b_gap_px = _mm_to_px_x(LJK_BUBBLE_GAP)
+    grid_x_mm = LJK_MARGIN + LJK_GRID_X - MARK_MARGIN_MM
+    col_start_x = _mm_to_px_x(grid_x_mm)
+
+    positions = []
+    for col in range(cols):
+        col_off = col_start_x + col * col_step + (col_step - b_gap_px * options) / 2
+        for row_idx, y_pos in enumerate(peaks):
+            q_idx = row_idx * cols + col
+            if q_idx >= total_questions:
+                break
+            for opt_idx in range(options):
+                cx = int(col_off + opt_idx * b_gap_px + b_r_px)
+                cy = int(y_pos)
+                positions.append((q_idx, opt_idx, cx, cy))
+    return positions
+
+
 def detect_answers(warped: np.ndarray, total_questions: int = 50, options: int = 5) -> dict:
     h, w = warped.shape[:2]
     opt_labels = ["A", "B", "C", "D", "E", "F", "G"][:options]
-    positions, b_r = _get_grid_positions(total_questions, options)
+
+    # Try auto-calibration first, fallback to hardcoded geometry
+    positions = _auto_calibrate_grid(warped, total_questions, options)
+    # Compute bubble radius from positions
+    b_r = _mm_to_px_y(LJK_BUBBLE_R)
+    if len(positions) > 1:
+        # Estimate from first two options in first question
+        b_r = max(abs(positions[1][2] - positions[0][2]), b_r)
 
     # Group by question
     questions = {}
