@@ -215,3 +215,131 @@ def test_bubble_sheet_total_questions():
     for n in [5, 20, 50]:
         buf = generate_bubble_sheet_pdf("Test", n, "Math")
         assert buf.getvalue()[:4] == b'%PDF'
+
+
+# ─── Test: OMR Service ───
+
+def test_omr_zscore_single_filled():
+    """z-score should detect 1 filled bubble among unfilled (default threshold)."""
+    from app.services.omr_service import _zscore_bubble_detection
+    # Unfilled = very bright; Filled = very dark — extreme contrast
+    stats = [
+        {"mean_dark": 1, "median_dark": 1, "fill_ratio": 0.005, "dark_pixel_ratio": 0.002},
+        {"mean_dark": 1, "median_dark": 1, "fill_ratio": 0.005, "dark_pixel_ratio": 0.002},
+        {"mean_dark": 1, "median_dark": 1, "fill_ratio": 0.005, "dark_pixel_ratio": 0.002},
+        {"mean_dark": 1, "median_dark": 1, "fill_ratio": 0.005, "dark_pixel_ratio": 0.002},
+        {"mean_dark": 250, "median_dark": 248, "fill_ratio": 0.98, "dark_pixel_ratio": 0.99},
+    ]
+    result = _zscore_bubble_detection(stats, z_threshold=1.2)
+    assert len(result) >= 1
+    assert result[0][0] == 4  # index 4 is the filled bubble
+
+
+def test_omr_zscore_all_empty():
+    """z-score should return empty when all bubbles are empty."""
+    from app.services.omr_service import _zscore_bubble_detection
+    stats = [
+        {"mean_dark": 8, "median_dark": 7, "fill_ratio": 0.03, "dark_pixel_ratio": 0.02},
+        {"mean_dark": 10, "median_dark": 8, "fill_ratio": 0.05, "dark_pixel_ratio": 0.03},
+        {"mean_dark": 9, "median_dark": 7, "fill_ratio": 0.04, "dark_pixel_ratio": 0.02},
+    ]
+    result = _zscore_bubble_detection(stats, z_threshold=2.0)
+    assert len(result) == 0
+
+
+def test_omr_zscore_all_filled():
+    """z-score should return empty (no outlier) when all bubbles equally filled."""
+    from app.services.omr_service import _zscore_bubble_detection
+    stats = [
+        {"mean_dark": 140, "median_dark": 130, "fill_ratio": 0.80, "dark_pixel_ratio": 0.85},
+        {"mean_dark": 145, "median_dark": 135, "fill_ratio": 0.82, "dark_pixel_ratio": 0.87},
+        {"mean_dark": 150, "median_dark": 140, "fill_ratio": 0.85, "dark_pixel_ratio": 0.90},
+    ]
+    result = _zscore_bubble_detection(stats, z_threshold=2.0)
+    assert len(result) == 0
+
+
+def test_omr_zscore_few_options():
+    """z-score with only 2 options (satu/tidak)."""
+    from app.services.omr_service import _zscore_bubble_detection
+    stats = [
+        {"mean_dark": 10, "median_dark": 8, "fill_ratio": 0.04, "dark_pixel_ratio": 0.03},
+        {"mean_dark": 160, "median_dark": 150, "fill_ratio": 0.88, "dark_pixel_ratio": 0.92},
+    ]
+    result = _zscore_bubble_detection(stats, z_threshold=1.2)
+    assert len(result) >= 1
+
+
+def test_omr_bubble_stats_basic():
+    """_bubble_stats should return valid metrics for a small ROI."""
+    import numpy as np
+    from app.services.omr_service import _bubble_stats
+    roi = np.zeros((10, 10, 3), dtype=np.uint8)  # black square
+    stats = _bubble_stats(roi)
+    assert "mean_dark" in stats
+    assert "median_dark" in stats
+    assert "fill_ratio" in stats
+    assert stats["mean_dark"] > 200  # near-black has high darkness
+
+
+def test_omr_bubble_stats_white():
+    """White bubble should have low darkness."""
+    import numpy as np
+    from app.services.omr_service import _bubble_stats
+    roi = np.full((10, 10, 3), 255, dtype=np.uint8)  # white square
+    stats = _bubble_stats(roi)
+    assert stats["mean_dark"] < 50
+
+
+def test_omr_bubble_stats_partial():
+    """Partially filled bubble (half black, half white)."""
+    import numpy as np
+    from app.services.omr_service import _bubble_stats
+    roi = np.zeros((10, 10, 3), dtype=np.uint8)
+    roi[5:, :] = 255  # bottom half white
+    stats = _bubble_stats(roi)
+    assert 50 < stats["mean_dark"] < 200
+
+
+def test_omr_process_scan_none_image():
+    """process_scan should return error for invalid bytes."""
+    from app.services.omr_service import process_scan
+    result = process_scan(b"not an image")
+    assert "error" in result
+
+
+# ─── Test: Grading Service ───
+
+def test_grade_essay_no_api_key():
+    """grade_essay should return fallback score when no API key."""
+    from app.services.grading_service import grade_essay
+    result = grade_essay("some answer", teacher_id="test")
+    assert result is not None
+
+
+def test_extract_mcq_answer_string():
+    """MCQ answer as plain string."""
+    from app.routes.teacher import _extract_mcq_answer
+    assert _extract_mcq_answer("A") == "A"
+    assert _extract_mcq_answer("") == ""
+
+
+def test_extract_mcq_answer_dict():
+    """MCQ answer as dict."""
+    from app.routes.teacher import _extract_mcq_answer
+    assert _extract_mcq_answer({"answer": "B"}) == "B"
+    assert _extract_mcq_answer({}) == ""
+
+
+def test_is_mcq_correct_bonus():
+    """Bonus key should match any non-empty answer."""
+    from app.routes.teacher import _is_mcq_correct
+    assert _is_mcq_correct("A", "bonus") is True
+    assert _is_mcq_correct({"answer": "B"}, "bonus") is True
+
+
+def test_is_mcq_correct_list_key():
+    """Answer key as list (multiple correct)."""
+    from app.routes.teacher import _is_mcq_correct
+    assert _is_mcq_correct("A", ["A", "B"]) is True
+    assert _is_mcq_correct("C", ["A", "B"]) is False
