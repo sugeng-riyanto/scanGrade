@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Feature Flags - ScanGrade{% endblock %}
+{% block page_title %}Feature Flags{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="card p-6">
+        <p class="text-sm text-surface-500 mb-6">Toggle fitur di seluruh platform. Perubahan berlaku langsung tanpa deploy ulang.</p>
+        <div class="space-y-3">
+            {% for f in flags %}
+            <div class="flex items-center justify-between p-4 rounded-xl border border-surface-200 hover:bg-surface-50 transition">
+                <div>
+                    <p class="font-bold text-surface-800">{{ f.name|replace('_', ' ')|title }}</p>
+                    <p class="text-xs text-surface-400">{{ f.description or '-' }}</p>
+                </div>
+                <button hx-post="/super-admin/api/feature-flags/{{ f.id }}/toggle" hx-swap="none"
+                        class="relative w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none"
+                        :class="{{ 'true' if f.enabled else 'false' }} ? 'bg-emerald-500' : 'bg-surface-300'"
+                        onclick="this.classList.toggle('bg-emerald-500');this.classList.toggle('bg-surface-300')">
+                    <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200"
+                          :class="{{ 'true' if f.enabled else 'false' }} ? 'translate-x-6' : ''"></span>
+                </button>
+            </div>
+            {% else %}
+            <p class="text-center text-surface-400 py-8">Belum ada feature flags. Jalankan migrasi 016.</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

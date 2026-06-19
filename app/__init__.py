@@ -413,6 +413,10 @@ def _register_performance_middleware(app):
 
 
 def _register_request_logging(app):
+    # Metrics counters
+    _metrics = {"requests": 0, "errors": 0, "response_times": []}
+    _max_times = 1000  # keep last 1000 for stats
+
     @app.before_request
     def init_request():
         g.start = time.time()
@@ -428,4 +432,44 @@ def _register_request_logging(app):
             duration = time.time() - g.start
             extra = {"user_id": g.get("user_id"), "duration": f"{duration:.3f}s"}
             app.logger.info("%s %s %s", request.method, request.path, response.status_code, extra=extra)
+            _metrics["requests"] += 1
+            if response.status_code >= 500:
+                _metrics["errors"] += 1
+            _metrics["response_times"].append(duration * 1000)
+            if len(_metrics["response_times"]) > _max_times:
+                _metrics["response_times"] = _metrics["response_times"][-500:]
         return response
+
+    @app.route("/metrics")
+    def metrics():
+        import psutil
+        _metrics["active_users"] = len(_metrics.get("response_times", [])) or 0
+        rt = _metrics["response_times"]
+        p50 = sorted(rt)[len(rt)//2] if rt else 0
+        p95 = sorted(rt)[int(len(rt)*0.95)] if rt else 0
+        cpu = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        return f"""# HELP scangrade_requests_total Total requests
+# TYPE scangrade_requests_total counter
+scangrade_requests_total {_metrics["requests"]}
+# HELP scangrade_errors_total Total errors (5xx)
+# TYPE scangrade_errors_total counter
+scangrade_errors_total {_metrics["errors"]}
+# HELP scangrade_response_time_ms Response time in ms
+# TYPE scangrade_response_time_ms gauge
+scangrade_response_time_p50_ms {p50}
+scangrade_response_time_p95_ms {p95}
+# HELP scangrade_cpu_percent CPU usage percent
+# TYPE scangrade_cpu_percent gauge
+scangrade_cpu_percent {cpu}
+# HELP scangrade_memory_usage_bytes Memory usage
+# TYPE scangrade_memory_usage_bytes gauge
+scangrade_memory_used_bytes {mem.used}
+scangrade_memory_total_bytes {mem.total}
+scangrade_memory_percent {mem.percent}
+# HELP scangrade_disk_usage_bytes Disk usage
+# TYPE scangrade_disk_usage_bytes gauge
+scangrade_disk_free_bytes {disk.free}
+scangrade_disk_total_bytes {disk.total}
+""", 200, {"Content-Type": "text/plain; charset=utf-8"}

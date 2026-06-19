@@ -167,7 +167,9 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Data</div>
             <a href="/super-admin/users" class="nav-item {% if request.path == '/super-admin/users' %}active{% endif %}"><i class="fas fa-users-cog"></i><span>Semua User</span></a>
             <a href="/super-admin/exams" class="nav-item {% if request.path == '/super-admin/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Semua Ujian</span></a>
-            <a href="/super-admin/logs" class="nav-item {% if request.path == '/super-admin/logs' %}active{% endif %}"><i class="fas fa-history"></i><span>Audit Log</span></a>
+             <a href="/super-admin/logs" class="nav-item {% if request.path == '/super-admin/logs' %}active{% endif %}"><i class="fas fa-history"></i><span>Audit Log</span></a>
+             <a href="/super-admin/users/manage" class="nav-item {% if request.path == '/super-admin/users/manage' %}active{% endif %}"><i class="fas fa-user-cog"></i><span>Manajemen User</span></a>
+             <a href="/super-admin/feature-flags" class="nav-item {% if request.path == '/super-admin/feature-flags' %}active{% endif %}"><i class="fas fa-toggle-on"></i><span>Feature Flags</span></a>
             <div class="nav-section-title pt-2">Demo</div>
             <a href="/super-admin/demo-settings" class="nav-item {% if request.path == '/super-admin/demo-settings' %}active{% endif %}"><i class="fas fa-flask"></i><span>Pengaturan Demo</span></a>
             <div class="nav-section-title pt-2">Langganan</div>
