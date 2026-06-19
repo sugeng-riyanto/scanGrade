@@ -116,36 +116,72 @@ def _recalculate_scores(exam_id):
 @teacher_or_admin_required
 def dashboard():
     supabase = get_supabase()
-    res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).execute()
+    res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
     exams = res.data or []
 
     exam_ids = [e["id"] for e in exams]
     total_students = 0
     all_scores = []
+    pending_grading = 0
+    upcoming_exams = []
+    grading_progress = {}
+
     if exam_ids:
-        subs = supabase.table("submissions").select("student_id,score,final_score").in_("exam_id", exam_ids).execute().data or []
+        subs = supabase.table("submissions").select("student_id,score,final_score,status,exam_id").in_("exam_id", exam_ids).execute().data or []
         unique_students = set(s["student_id"] for s in subs)
         total_students = len(unique_students)
         all_scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs if s.get("final_score") or s.get("score")]
 
-    avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
+        # Count submissions that need manual grading (submitted/draft but exam has essay questions)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        for e in exams:
+            eid = e["id"]
+            exam_subs = [s for s in subs if s.get("exam_id") == eid]
+            graded = sum(1 for s in exam_subs if s.get("status") in ("graded", "published"))
+            total = len(exam_subs)
+            if total > 0:
+                grading_progress[eid] = {"graded": graded, "total": total}
 
-    # Detect exams with missing answer keys
-    exams_no_key = []
-    for e in exams:
-        ak = e.get("answer_key")
-        if not ak or ak == "{}" or ak == {}:
-            # Check if exam has MCQ questions
+            # Check if exam has essay questions that need grading
             qt = e.get("question_types")
             if isinstance(qt, str):
                 try: qt = json.loads(qt)
                 except: qt = {}
-            if qt:
-                has_mcq = any(v == "mcq" for v in (qt.values() if isinstance(qt, dict) else []))
-                if has_mcq:
-                    exams_no_key.append(e)
-                elif not qt:
-                    exams_no_key.append(e)
+            has_essay = any(v != "mcq" for v in (qt.values() if isinstance(qt, dict) else [])) if qt else False
+            if has_essay:
+                ungraded = [s for s in exam_subs if s.get("status") in ("submitted", "draft")]
+                pending_grading += len(ungraded)
+
+            # Upcoming exams (start in future but within 7 days)
+            start_at = e.get("start_at")
+            if start_at:
+                try:
+                    if isinstance(start_at, str):
+                        start_dt = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+                    else:
+                        start_dt = start_at
+                    days_until = (start_dt - now).days
+                    if 0 <= days_until <= 7 and e.get("status") == "active":
+                        upcoming_exams.append(e)
+                except:
+                    pass
+
+        # Exams with missing answer keys and MCQ
+        exams_no_key = []
+        for e in exams:
+            ak = e.get("answer_key")
+            if not ak or ak == "{}" or ak == {}:
+                qt = e.get("question_types")
+                if isinstance(qt, str):
+                    try: qt = json.loads(qt)
+                    except: qt = {}
+                if qt:
+                    has_mcq = any(v == "mcq" for v in (qt.values() if isinstance(qt, dict) else []))
+                    if has_mcq:
+                        exams_no_key.append(e)
+                    elif not qt:
+                        exams_no_key.append(e)
 
     # Get teacher's school_id (column may not exist in older schema)
     school_id = None
@@ -190,10 +226,14 @@ def dashboard():
             school_info = supabase.table("schools").select("name, npsn, logo_url").eq("id", school_id).single().execute().data or {}
         except Exception:
             pass
+    avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
+
     return render_template("teacher/dashboard.html", exams=exams, total_students=total_students,
                            avg_score=avg_score, all_scores=all_scores, user_name=user_name,
                            assignments=assignments, classes=classes, subjects=subjects,
-                           school_info=school_info, exams_no_key=exams_no_key)
+                           school_info=school_info, exams_no_key=exams_no_key,
+                           pending_grading=pending_grading, upcoming_exams=upcoming_exams,
+                           grading_progress=grading_progress)
 
 
 @teacher_bp.route("/exams/parse-pdf", methods=["POST"])
