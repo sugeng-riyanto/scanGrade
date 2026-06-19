@@ -335,18 +335,85 @@ def forgot_password():
 
     email = request.form.get("email", "").strip().lower()
     if not email:
-        return render_template("auth/forgot_password.html", error="Email wajib diisi")
+        return render_template("auth/forgot_password.html", error="Email atau NISN wajib diisi")
 
-    supabase = get_auth_client()
+    supabase = get_supabase()
+    auth_client = get_auth_client()
+    recovery_email = ""
+    auth_email = email
+
     try:
-        supabase.auth.reset_password_email(
-            email,
-            {"redirect_to": request.host_url.rstrip("/") + "/auth/reset-password"}
-        )
-        return render_template("auth/forgot_password.html", sent=True, email=email)
+        # Try to find user by NISN (student) or employee_id (teacher)
+        nisn = email
+        user_id = None
+        for table_name in ("students", "teachers"):
+            try:
+                rec = supabase.table(table_name).select("id, profiles!inner(phone, full_name)").eq("nisn" if table_name == "students" else "employee_id", nisn).maybe_single().execute()
+                if rec.data:
+                    prof = rec.data.get("profiles") or {}
+                    user_id = rec.data["id"]
+                    # Get auth email from auth.users
+                    try:
+                        au = auth_client.admin.get_user_by_id(user_id)
+                        auth_email = au.user.email
+                    except:
+                        pass
+                    recovery_email = prof.get("phone", "")
+                    break
+            except:
+                pass
+
+        # If not found by NISN, treat email as auth email and look up profile
+        if not user_id:
+            try:
+                prof = supabase.table("profiles").select("phone").eq("id", email).maybe_single().execute()
+                if not prof.data:
+                    prof = supabase.table("profiles").select("id, phone").eq("email", email).maybe_single().execute()
+                if prof.data:
+                    recovery_email = prof.data.get("phone", "")
+            except:
+                pass
+
+        # Send reset email via Supabase (ke auth email)
+        try:
+            auth_client.auth.reset_password_email(
+                auth_email,
+                {"redirect_to": request.host_url.rstrip("/") + "/auth/reset-password"}
+            )
+        except Exception as e:
+            current_app.logger.error(f"Supabase reset email failed: {e}")
+
+        # Also send via our SMTP to recovery email if available
+        if recovery_email and "@" in recovery_email and recovery_email != auth_email:
+            try:
+                import smtplib, ssl
+                from email.mime.text import MIMEText
+                msg = MIMEText(f"""Yth. Pengguna ScanGrade,
+
+Kami menerima permintaan reset password untuk akun Anda.
+
+Email login Anda: {auth_email}
+Silakan cek email tersebut untuk link reset password.
+
+Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini.
+
+Hormat kami,
+Tim ScanGrade
+https://scangrade.web.id""", "plain", "utf-8")
+                msg["Subject"] = "🔐 ScanGrade — Permintaan Reset Password"
+                msg["From"] = "ScanGrade <scangrade9@gmail.com>"
+                msg["To"] = recovery_email
+                context = ssl.create_default_context()
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                    server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
+                    server.sendmail("scangrade9@gmail.com", recovery_email, msg.as_string())
+            except Exception as e:
+                current_app.logger.error(f"Recovery email send failed: {e}")
+
+        return render_template("auth/forgot_password.html", sent=True, email=auth_email, recovery_email=recovery_email if "@" in recovery_email else "")
     except Exception as e:
         current_app.logger.error(f"Forgot password error: {e}")
-        return render_template("auth/forgot_password.html", error="Gagal mengirim email reset. Coba lagi nanti.")
+        return render_template("auth/forgot_password.html", error="Gagal memproses. Coba lagi nanti.")
 
 
 # ─── RESET PASSWORD ──────────────────────────────────
