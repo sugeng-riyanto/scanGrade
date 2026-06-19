@@ -99,11 +99,21 @@
         </form>
     </div>
 
-    <div class="card overflow-hidden">
+    <div class="card overflow-hidden" x-data="{ selected: [], selectAll: false }">
+        <!-- Bulk Actions -->
+        <div x-show="selected.length > 0" class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center gap-3 text-sm">
+            <span class="font-bold text-amber-800" x-text="selected.length + ' dipilih'"></span>
+            <button @click="if(confirm('Reset password ' + selected.length + ' murid?')){fetch('/admin-sekolah/students/bulk-reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_ids:selected})}).then(r=>r.json()).then(d=>{alert(d.total + ' password direset');selected=[]})}"
+                    class="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg font-bold hover:bg-blue-200 transition text-xs">Reset PW</button>
+            <button @click="if(confirm('Hapus ' + selected.length + ' murid?')){fetch('/admin-sekolah/students/bulk-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_ids:selected})}).then(r=>r.json()).then(d=>{alert(d.total + ' dihapus');location.reload()})}"
+                    class="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition text-xs">Hapus</button>
+            <button @click="selected=[]" class="px-3 py-1.5 bg-white text-stone-600 rounded-lg font-bold hover:bg-stone-100 transition text-xs">Batal</button>
+        </div>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead class="bg-stone-50 text-xs font-bold text-stone-500 uppercase">
                     <tr>
+                        <th class="w-10 px-2 py-3"><input type="checkbox" @click="selectAll = !selectAll; selected = selectAll ? {{ students|map(attribute='id')|list|tojson }} : []" class="w-4 h-4"></th>
                         <th class="text-left px-4 py-3">NISN</th>
                         <th class="text-left px-4 py-3">Nama</th>
                         <th class="text-left px-4 py-3">Kelas</th>
@@ -113,8 +123,8 @@
                 </thead>
                 <tbody class="divide-y divide-stone-50">
                     {% for s in students %}
-                    <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }">
-                        <td class="px-4 py-3 font-mono font-bold text-stone-700">{{ s.nisn }}</td>
+                    <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }" :class="selected.includes('{{ s.id }}') ? 'bg-amber-50/50' : ''">
+                        <td class="px-2 py-3"><input type="checkbox" :checked="selected.includes('{{ s.id }}')" @click="selected.includes('{{ s.id }}') ? selected = selected.filter(x => x !== '{{ s.id }}') : selected.push('{{ s.id }}')" class="w-4 h-4"></td>
                         <td class="px-4 py-3 font-bold text-stone-700">{{ s.name }}</td>
                         <td class="px-4 py-3"><span class="badge bg-violet-50 text-violet-700 border border-violet-200">{{ s.class_name or '-' }}</span></td>
                         <td class="px-4 py-3 text-stone-500">{{ s.email or '-' }}</td>
