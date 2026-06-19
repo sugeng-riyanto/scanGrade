@@ -183,11 +183,18 @@
         </div>
     </template>
 
-    <!-- Scientific Calculator (standar matematika/fisika) -->
+    <!-- Scientific Calculator (standar matematika/fisika) — draggable -->
     <div x-show="showCalculator && !submitted && !showExamAgreement" x-transition x-cloak
-         class="fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
+         x-data="{ cx: 0, cy: 0, dragging: false, startX: 0, startY: 0 }"
+         :style="'position:fixed;bottom:0;right:0;margin:0 ' + (-cx) + 'px ' + (-cy) + 'px 0;z-index:50'"
+         class="w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
          @click.outside="showCalculator = false">
-        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
+        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700 cursor-grab active:cursor-grabbing select-none"
+             @mousedown="dragging=true; startX=$event.clientX; startY=$event.clientY"
+             @touchstart="dragging=true; startX=$event.touches[0].clientX; startY=$event.touches[0].clientY"
+             @mousemove="if(dragging){cx=startX-$event.clientX;cy=startY-$event.clientY}"
+             @touchmove="if(dragging){cx=startX-$event.touches[0].clientX;cy=startY-$event.touches[0].clientY}"
+             @mouseup="dragging=false" @touchend="dragging=false" @mouseleave="dragging=false">
             <span class="text-[11px] font-extrabold text-slate-200 flex items-center gap-1.5"><i class="fas fa-calculator text-orange-400"></i> Scientific</span>
             <div class="flex items-center gap-2">
                 <button @click="calcAngleMode = calcAngleMode === 'DEG' ? 'RAD' : 'DEG'"
