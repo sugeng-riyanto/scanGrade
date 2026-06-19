@@ -272,7 +272,10 @@ def create_app(env=None):
                 return redirect(redirect_map.get(role, "/student/dashboard"))
             except Exception:
                 pass
-        return render_template("landing.html")
+        resp = make_response(render_template("landing.html"))
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        return resp
 
     @app.route("/demo")
     def demo_page():
