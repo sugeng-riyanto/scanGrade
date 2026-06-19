@@ -52,7 +52,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Perlu Dikoreksi</p>
-                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="pending_grading"></span></p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="{{ pending_grading }}"></span></p>
                 </div>
             </div>
             {% if pending_grading > 0 %}
@@ -70,7 +70,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Akan Datang (7 Hari)</p>
-                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="upcoming_exams|length"></span></p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="{{ upcoming_exams|length }}"></span></p>
                 </div>
             </div>
             {% if upcoming_exams %}
@@ -110,7 +110,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Total Ujian</p>
-                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="exams|length"></span></p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="{{ exams|length }}"></span></p>
                 </div>
             </div>
         </div>
@@ -132,7 +132,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Siswa</p>
-                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="total_students"></span></p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="{{ total_students }}"></span></p>
                 </div>
             </div>
         </div>
@@ -143,7 +143,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Rata-rata</p>
-                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="avg_score"></span></p>
+                    <p class="text-2xl font-extrabold text-surface-800 mt-0.5"><span x-text="{{ avg_score }}"></span></p>
                 </div>
             </div>
         </div>
@@ -202,7 +202,7 @@
                         </div>
                         <div class="flex-1 min-w-0">
                             <p class="font-bold text-surface-700 text-sm truncate">{{ e.title }}</p>
-                            <p class="text-xs text-surface-400"><span x-text="e.subject or '-'"></span></p>
+                            <p class="text-xs text-surface-400"><span x-text="{{ e.subject or '-' }}"></span></p>
                         </div>
                         <div class="text-right shrink-0">
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold
