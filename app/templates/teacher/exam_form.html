@@ -920,7 +920,7 @@
                             class="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg transition">
                         <i class="fas fa-check mr-1"></i>Simpan
                     </button>
-                    <button type="button" onclick="alert('Publish clicked');var f=this.closest('form');if(!f){alert('Form not found!');return}var h=document.createElement('input');h.type='hidden';h.name='action';h.value='publish';f.appendChild(h);f.submit()"
+                    <button type="submit" name="action" value="publish"
                             class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition">
                         <i class="fas fa-paper-plane mr-1"></i>Publish & Kirim ke Kelas
                     </button>
