@@ -103,14 +103,6 @@ def schools():
 @_sa_required
 def toggle_school_whiteboard(school_id):
     supabase = get_supabase()
-    # ... existing toggle code ...
-    (existing toggle function code stays here)
-
-
-@super_bp.route("/api/school/<school_id>/toggle-whiteboard", methods=["POST"])
-@_sa_required
-def toggle_school_whiteboard(school_id):
-    supabase = get_supabase()
     try:
         try:
             current = supabase.table("schools").select("features").eq("id", school_id).single().execute().data or {}
