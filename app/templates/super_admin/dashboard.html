@@ -2,31 +2,68 @@
 {% block title %}Super Admin - ScanGrade{% endblock %}
 {% block page_title %}Dashboard Super Admin{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{}">
+<div class="space-y-6" x-data="{ showBroadcast: false, formTitle: '', formMessage: '', formTarget: 'admin_sekolah', sending: false, sendMsg: '' }">
+    <!-- Broadcast Modal -->
+    <div x-show="showBroadcast" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+         @click.self="showBroadcast=false">
+        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg" @click.outside="showBroadcast=false">
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Kirim Pengumuman</h3>
+                <button @click="showBroadcast=false" class="text-surface-400 hover:text-surface-600">&times;</button>
+            </div>
+            <form @submit.prevent="sendBroadcast(formTitle, formMessage, formTarget)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
+                    <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Pesan</label>
+                    <textarea x-model="formMessage" required rows="3" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Kirim ke</label>
+                    <select x-model="formTarget" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white">
+                        <option value="admin_sekolah">Admin Sekolah</option>
+                        <option value="guru">Guru</option>
+                        <option value="murid">Murid</option>
+                        <option value="all">Semua Pengguna</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition"
+                        :disabled="sending">{ sending ? 'Mengirim...' : 'Kirim Pengumuman' }</button>
+                <p x-show="sendMsg" class="text-xs font-bold text-emerald-600" x-text="sendMsg"></p>
+            </form>
+        </div>
+    </div>
+    <div class="space-y-6" x-data="{ showBroadcast: false, formTitle: '', formMessage: '', formTarget: 'admin_sekolah', sending: false, sendMsg: '' }">
     <!-- Stats -->
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <div class="bg-gradient-to-br from-purple-50 to-purple-100/30 rounded-2xl p-4 border border-purple-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-purple-700">{{ total_schools }}</p>
+            <p class="text-2xl font-extrabold text-purple-700"><span x-text="total_schools"></span></p>
             <p class="text-xs font-bold text-purple-500 mt-1">Sekolah</p>
-        </div>
+        
+    <button @click="showBroadcast=true" class="px-4 py-2 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition shadow-lg">
+        <i class="fas fa-bullhorn mr-1"></i>Pengumuman
+    </button>
+    </div>
         <div class="bg-gradient-to-br from-blue-50 to-blue-100/30 rounded-2xl p-4 border border-blue-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-blue-700">{{ total_users }}</p>
+            <p class="text-2xl font-extrabold text-blue-700"><span x-text="total_users"></span></p>
             <p class="text-xs font-bold text-blue-500 mt-1">Total User</p>
         </div>
         <div class="bg-gradient-to-br from-emerald-50 to-emerald-100/30 rounded-2xl p-4 border border-emerald-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-emerald-700">{{ total_teachers }}</p>
+            <p class="text-2xl font-extrabold text-emerald-700"><span x-text="total_teachers"></span></p>
             <p class="text-xs font-bold text-emerald-500 mt-1">Guru</p>
         </div>
         <div class="bg-gradient-to-br from-amber-50 to-amber-100/30 rounded-2xl p-4 border border-amber-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-amber-700">{{ total_students }}</p>
+            <p class="text-2xl font-extrabold text-amber-700"><span x-text="total_students"></span></p>
             <p class="text-xs font-bold text-amber-500 mt-1">Siswa</p>
         </div>
         <div class="bg-gradient-to-br from-orange-50 to-orange-100/30 rounded-2xl p-4 border border-orange-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-orange-700">{{ total_exams }}</p>
+            <p class="text-2xl font-extrabold text-orange-700"><span x-text="total_exams"></span></p>
             <p class="text-xs font-bold text-orange-500 mt-1">Ujian</p>
         </div>
         <div class="bg-gradient-to-br from-rose-50 to-rose-100/30 rounded-2xl p-4 border border-rose-200/50 shadow-sm">
-            <p class="text-2xl font-extrabold text-rose-700">{{ total_subs }}</p>
+            <p class="text-2xl font-extrabold text-rose-700"><span x-text="total_subs"></span></p>
             <p class="text-xs font-bold text-rose-500 mt-1">Submission</p>
         </div>
     </div>
@@ -45,7 +82,7 @@
                         <i class="fas fa-clock text-amber-600"></i>
                     </div>
                     <div>
-                        <p class="text-sm font-bold text-amber-800">{{ pending_requests }} registrasi menunggu</p>
+                        <p class="text-sm font-bold text-amber-800"><span x-text="pending_requests"></span> registrasi menunggu</p>
                         <p class="text-xs font-medium text-amber-600">Perlu approval dari Super Admin</p>
                     </div>
                     <a href="/admin/registration-requests" class="ml-auto px-4 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition">Proses</a>
@@ -55,10 +92,10 @@
                     {% for r in requests[:5] %}
                     <div class="flex items-center justify-between p-3 rounded-xl {% if r.status == 'pending' %}bg-amber-50{% elif r.status == 'approved' %}bg-emerald-50{% else %}bg-red-50{% endif %}">
                         <div>
-                            <p class="text-sm font-bold text-slate-800">{{ r.school_name }}</p>
-                            <p class="text-xs text-slate-500">{{ r.requester_email }} · {{ r.created_at[:10] }}</p>
+                            <p class="text-sm font-bold text-slate-800"><span x-text="r.school_name"></span></p>
+                            <p class="text-xs text-slate-500"><span x-text="r.requester_email"></span> · <span x-text="r.created_at[:10]"></span></p>
                         </div>
-                        <span class="badge text-xs {% if r.status == 'pending' %}bg-amber-200 text-amber-800{% elif r.status == 'approved' %}bg-emerald-200 text-emerald-800{% else %}bg-red-200 text-red-800{% endif %}">{{ r.status }}</span>
+                        <span class="badge text-xs {% if r.status == 'pending' %}bg-amber-200 text-amber-800{% elif r.status == 'approved' %}bg-emerald-200 text-emerald-800{% else %}bg-red-200 text-red-800{% endif %}"><span x-text="r.status"></span></span>
                     </div>
                     {% else %}
                     <p class="text-sm text-slate-400 text-center py-4">Tidak ada registrasi</p>
@@ -87,10 +124,10 @@
                 {% for s in schools %}
                 <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition">
                     <div>
-                        <p class="text-sm font-bold text-slate-800">{{ s.name }}</p>
-                        <p class="text-xs text-slate-400">{{ s.npsn or '-' }} · dibuat {{ s.created_at[:10] }}</p>
+                        <p class="text-sm font-bold text-slate-800"><span x-text="s.name"></span></p>
+                        <p class="text-xs text-slate-400"><span x-text="s.npsn or '-'"></span> · dibuat <span x-text="s.created_at[:10]"></span></p>
                     </div>
-                    <span class="badge text-xs {% if s.status == 'active' %}bg-emerald-100 text-emerald-700{% else %}bg-red-100 text-red-700{% endif %}">{{ s.status }}</span>
+                    <span class="badge text-xs {% if s.status == 'active' %}bg-emerald-100 text-emerald-700{% else %}bg-red-100 text-red-700{% endif %}"><span x-text="s.status"></span></span>
                 </div>
                 {% else %}
                 <p class="text-sm text-slate-400 text-center py-4">Belum ada sekolah</p>
@@ -118,10 +155,10 @@
                 <tbody class="divide-y divide-slate-50">
                     {% for log in recent_logs %}
                     <tr class="hover:bg-slate-50">
-                        <td class="px-5 py-2 text-xs text-slate-500">{{ log.created_at[:19] }}</td>
-                        <td class="px-5 py-2 text-sm font-medium text-slate-700">{{ (log.get('profiles') or {}).get('full_name', (log.user_id[:8] if log.user_id else '-')) }}</td>
-                        <td class="px-5 py-2"><span class="badge bg-slate-100 text-slate-700 text-xs">{{ log.action }}</span></td>
-                        <td class="px-5 py-2 text-xs text-slate-400">{{ log.entity_type }} {{ log.entity_id[:8] if log.entity_id else '' }}</td>
+                        <td class="px-5 py-2 text-xs text-slate-500"><span x-text="log.created_at[:19]"></span></td>
+                        <td class="px-5 py-2 text-sm font-medium text-slate-700"><span x-text="(log.get('profiles') or {}).get('full_name', (log.user_id[:8] if log.user_id else '-'))"></span></td>
+                        <td class="px-5 py-2"><span class="badge bg-slate-100 text-slate-700 text-xs"><span x-text="log.action"></span></span></td>
+                        <td class="px-5 py-2 text-xs text-slate-400"><span x-text="log.entity_type"></span> <span x-text="log.entity_id[:8] if log.entity_id else ''"></span></td>
                     </tr>
                     {% else %}
                     <tr><td colspan="4" class="text-center py-8 text-slate-400">Belum ada aktivitas</td></tr>
