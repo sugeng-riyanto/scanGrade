@@ -36,6 +36,11 @@
             <span class="text-[10px] font-bold px-2 py-1 rounded-full"
                   :class="isMCQ ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'"
                   x-text="isMCQ ? 'MCQ' : 'Essay'"></span>
+            <template x-if="!isMCQ">
+                <span class="text-[10px] font-bold text-surface-500 bg-surface-100 px-2 py-1 rounded-full">
+                    <span x-text="doneCount + '/' + students.length"></span> dinilai
+                </span>
+            </template>
         </div>
     </div>
 
@@ -56,6 +61,15 @@
             </button>
             <span class="text-[10px] text-surface-400" x-text="correctCount + '/' + totalCorrectable + ' benar'"></span>
         </div>
+    </div>
+
+    <!-- Keyboard shortcuts hint -->
+    <div x-show="!isMCQ && !loading" class="text-[9px] text-surface-400 mb-2 px-1 flex items-center gap-3">
+        <span><i class="fas fa-arrow-up mr-0.5"></i><i class="fas fa-arrow-down mr-0.5"></i> Navigasi</span>
+        <span><kbd class="px-1 bg-surface-100 rounded text-[8px] font-bold">1</kbd>-<kbd class="px-1 bg-surface-100 rounded text-[8px] font-bold">9</kbd> Skor 10-90</span>
+        <span><kbd class="px-1 bg-surface-100 rounded text-[8px] font-bold">0</kbd> Skor 100</span>
+        <span><kbd class="px-1 bg-surface-100 rounded text-[8px] font-bold">Enter</kbd> Simpan & lanjut</span>
+    </div>
     </div>
 
     <!-- Loading -->
@@ -171,6 +185,7 @@ function graderApp() {
         questionTypes: {{ (exam.question_types or {}) | tojson | safe }},
         answerKey: {{ (exam.answer_key or {}) | tojson | safe }},
         students: [], loading: true, loadingText: 'Memuat data siswa...',
+        focusedIdx: 0,
 
         get displayedStudents() { return this.students; },
         get isMCQ() { return this.questionTypes[this.currentQ] !== 'essay'; },
@@ -182,9 +197,17 @@ function graderApp() {
             }).length;
         },
         get totalCorrectable() { return this.isMCQ ? this.students.length : 0; },
+        get doneCount() {
+            return this.students.filter(s => s.scoreVal !== '' && s.scoreVal !== undefined && s.scoreVal !== null).length;
+        },
 
         init() {
             this.loadingText = 'Memuat data siswa...';
+            this._loadStudents();
+            document.addEventListener('keydown', e => this._onKey(e));
+        },
+
+        _loadStudents() {
             fetch('/teacher/api/grade-question/{{ exam_id }}/' + this.currentQ)
                 .then(r => r.json())
                 .then(d => {
@@ -192,21 +215,60 @@ function graderApp() {
                         ...s, expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || ''
                     }));
                     this.loading = false;
+                    this.focusedIdx = 0;
+                    this.$nextTick(() => this._focusCurrent());
                 }).catch(() => { this.loading = false; });
+        },
+
+        _focusCurrent() {
+            const el = document.querySelector('.student-card:nth-child(' + (this.focusedIdx + 1) + ') input[type="number"]');
+            if (el) { el.focus(); el.select(); }
+        },
+
+        _onKey(e) {
+            if (this.loading || this.students.length === 0) return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this._nextStudent();
+                }
+                if (e.key === 'Escape') {
+                    e.target.blur();
+                }
+                return;
+            }
+            if (e.key === 'ArrowDown' || e.key === 'j') {
+                e.preventDefault();
+                this.focusedIdx = Math.min(this.focusedIdx + 1, this.students.length - 1);
+                this.$nextTick(() => this._focusCurrent());
+            }
+            if (e.key === 'ArrowUp' || e.key === 'k') {
+                e.preventDefault();
+                this.focusedIdx = Math.max(this.focusedIdx - 1, 0);
+                this.$nextTick(() => this._focusCurrent());
+            }
+            if (!this.isMCQ && e.key >= '1' && e.key <= '9') {
+                const s = this.students[this.focusedIdx];
+                if (s) { s.scoreVal = parseInt(e.key) * 10; this.saveEssayScore(s); this._nextStudent(); }
+            }
+            if (!this.isMCQ && e.key === '0') {
+                const s = this.students[this.focusedIdx];
+                if (s) { s.scoreVal = 100; this.saveEssayScore(s); this._nextStudent(); }
+            }
+        },
+
+        _nextStudent() {
+            if (this.focusedIdx < this.students.length - 1) {
+                this.focusedIdx++;
+                this.$nextTick(() => this._focusCurrent());
+            }
         },
 
         goToQuestion(qIdx) {
             this.currentQ = qIdx;
             this.loading = true;
             this.loadingText = 'Memuat siswa untuk Soal ' + (qIdx + 1) + '...';
-            fetch('/teacher/api/grade-question/{{ exam_id }}/' + qIdx)
-                .then(r => r.json())
-                .then(d => {
-                    this.students = (d.students || []).map(s => ({
-                        ...s, expanded: false, scoreVal: s.feedback?.score || '', feedbackVal: s.feedback?.feedback || ''
-                    }));
-                    this.loading = false;
-                }).catch(() => { this.loading = false; });
+            this._loadStudents();
         },
 
         getMCQClass(s, opt) {
