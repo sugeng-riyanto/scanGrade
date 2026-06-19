@@ -2303,3 +2303,91 @@ def cheat_analysis_data(exam_id):
         "time_clusters": time_clusters[:10],
         "total_students": len(parsed),
     })
+
+
+@teacher_bp.route("/exams/<exam_id>/accreditation-report")
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def accreditation_report(exam_id):
+    """Generate school accreditation report as PDF."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("title,subject,teacher_id,total_questions,passing_score").eq("id", exam_id).single().execute().data or {}
+    subs = supabase.table("submissions").select("score,final_score,status,student_id,profiles(full_name)").eq("exam_id", exam_id).in_("status", ["graded", "published"]).execute().data or []
+
+    from app.services.export_service import _wrap_text
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    import io
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Title
+    story.append(Paragraph(f"Laporan Hasil Ujian", styles["Title"]))
+    story.append(Paragraph(f"{exam.get('title', '')} - {exam.get('subject', '')}", styles["Heading2"]))
+    story.append(Spacer(1, 12))
+
+    # Stats
+    scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs]
+    avg = sum(scores) / len(scores) if scores else 0
+    passed = sum(1 for s in scores if s >= (exam.get("passing_score", 70)))
+    story.append(Paragraph(f"Jumlah Siswa: {len(subs)}", styles["Normal"]))
+    story.append(Paragraph(f"Rata-rata: {avg:.1f}", styles["Normal"]))
+    story.append(Paragraph(f"KKM: {exam.get('passing_score', 70)}", styles["Normal"]))
+    story.append(Paragraph(f"Lulus: {passed}/{len(subs)} ({passed*100//len(subs) if subs else 0}%)", styles["Normal"]))
+    story.append(Spacer(1, 20))
+
+    # Score distribution table
+    bins = {"0-39": 0, "40-59": 0, "60-79": 0, "80-100": 0}
+    for s in scores:
+        if s < 40: bins["0-39"] += 1
+        elif s < 60: bins["40-59"] += 1
+        elif s < 80: bins["60-79"] += 1
+        else: bins["80-100"] += 1
+
+    dist_data = [["Rentang Nilai", "Jumlah Siswa"]]
+    for k, v in bins.items():
+        dist_data.append([k, str(v)])
+    dist_data.append(["Total", str(len(subs))])
+
+    t = Table(dist_data, colWidths=[150, 100])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3b82f6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 20))
+
+    # Student list
+    story.append(Paragraph("Daftar Nilai Siswa:", styles["Heading3"]))
+    student_data = [["No", "Nama", "Nilai", "Status"]]
+    for i, s in enumerate(subs, 1):
+        profile = s.get("profiles") or {}
+        name = profile.get("full_name", s["student_id"][:12])
+        score = float(s.get("final_score") or s.get("score") or 0)
+        passed_txt = "Lulus" if score >= (exam.get("passing_score", 70)) else "Remedial"
+        student_data.append([str(i), name, f"{score:.0f}", passed_txt])
+
+    t2 = Table(student_data, colWidths=[30, 200, 60, 80])
+    t2.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3b82f6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("ALIGN", (2, 0), (3, -1), "CENTER"),
+    ]))
+    story.append(t2)
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph(f"Dicetak: {datetime.now(timezone.utc).strftime('%d %B %Y')}", styles["Normal"]))
+
+    doc.build(story)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", as_attachment=True,
+                     download_name=f"Laporan_{exam.get('title', 'Ujian')[:30]}.pdf")
