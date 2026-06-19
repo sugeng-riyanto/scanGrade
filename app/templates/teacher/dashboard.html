@@ -42,6 +42,65 @@
         </div>
     </div>
 
+    <!-- Action Center -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Todo: Pending Grading -->
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-200/40">
+                    <i class="fas fa-pen text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Perlu Dikoreksi</p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ pending_grading }}</p>
+                </div>
+            </div>
+            {% if pending_grading > 0 %}
+            <a href="/teacher/grading" class="text-xs font-bold text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-2">
+                <i class="fas fa-arrow-right"></i> Koreksi sekarang
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Todo: Upcoming Exams -->
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-blue-600 flex items-center justify-center shadow-lg shadow-primary-200/40">
+                    <i class="fas fa-calendar-alt text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Akan Datang (7 Hari)</p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ upcoming_exams|length }}</p>
+                </div>
+            </div>
+            {% if upcoming_exams %}
+            <div class="mt-2 space-y-1">
+                {% for e in upcoming_exams[:3] %}
+                <a href="/teacher/exams/{{ e.id }}" class="block text-xs font-medium text-surface-600 hover:text-primary-600 truncate">{{ e.title }}</a>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Todo: Answer Keys -->
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-pink-500 flex items-center justify-center shadow-lg shadow-red-200/40">
+                    <i class="fas fa-key text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Kunci Jawaban</p>
+                    <p class="text-2xl font-extrabold text-surface-800">{{ exams_no_key|length }}</p>
+                </div>
+            </div>
+            {% if exams_no_key %}
+            <a href="/teacher/exams" class="text-xs font-bold text-red-600 hover:text-red-700 flex items-center gap-1 mt-2">
+                <i class="fas fa-arrow-right"></i> Atur kunci jawaban
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
     <!-- Stats -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
@@ -89,6 +148,28 @@
             </div>
         </div>
     </div>
+
+    <!-- Grading Progress -->
+    {% if grading_progress %}
+    <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+        <h3 class="font-extrabold text-surface-800 mb-4 flex items-center gap-2"><i class="fas fa-tasks text-primary-500"></i>Progress Koreksi</h3>
+        <div class="space-y-3">
+            {% for eid, prog in grading_progress.items() %}
+            {% set pct = (prog.graded / prog.total * 100)|round %}
+            <div>
+                <div class="flex items-center justify-between text-xs font-bold text-surface-600 mb-1">
+                    <span class="truncate">{{ exams|selectattr('id', 'equalto', eid)|map(attribute='title')|first|default('') }}</span>
+                    <span>{{ prog.graded }}/{{ prog.total }} ({{ pct }}%)</span>
+                </div>
+                <div class="w-full h-2 bg-surface-100 rounded-full overflow-hidden">
+                    <div class="h-full rounded-full bg-gradient-to-r from-amber-400 to-emerald-500 transition-all"
+                         style="width: {{ pct }}%"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Main Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
