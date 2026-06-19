@@ -26,6 +26,9 @@
             <a href="/teacher/grade-question/{{ exam_id }}/0" class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
                 <i class="fas fa-tasks mr-1"></i><span class="hidden sm:inline">Koreksi per Soal</span>
             </a>
+            <a href="/teacher/exams/{{ exam_id }}/proctoring" class="border-2 border-violet-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-violet-50 text-[11px] sm:text-sm font-bold text-violet-700 transition whitespace-nowrap">
+                <i class="fas fa-desktop mr-1"></i><span class="hidden sm:inline">Proctoring</span>
+            </a>
             {% if exam.get('is_published') %}
             <form method="POST" action="/teacher/publish/{{ exam_id }}/unpublish" class="inline">
                 <button type="submit" class="border-2 border-amber-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-amber-50 text-[11px] sm:text-sm font-bold text-amber-700 transition whitespace-nowrap"

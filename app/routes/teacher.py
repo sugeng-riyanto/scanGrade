@@ -1,7 +1,7 @@
 import json
 import io
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
 from app.decorators.security import require_school_access
@@ -1951,3 +1951,104 @@ def exam_reprocess_pdf(exam_id):
                 continue
 
     return jsonify({"error": "No PDF source found (no local PDF, no temp files)"}), 404
+
+
+@teacher_bp.route("/exams/<exam_id>/proctoring")
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def exam_proctoring(exam_id):
+    """Proctoring dashboard — live view of student exam progress."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("id,title,subject,total_questions,duration_minutes,start_at,status").eq("id", exam_id).single().execute().data or {}
+    return render_template("teacher/proctoring.html", exam=exam, exam_id=exam_id)
+
+
+@teacher_bp.route("/api/exams/<exam_id>/proctoring-data")
+@teacher_or_admin_required
+@require_school_access("exams", "exam_id")
+def exam_proctoring_data(exam_id):
+    """API: return live proctoring data (submissions + violations) for an exam."""
+    supabase = get_supabase()
+
+    # Get all students for this exam's class(es)
+    exam = supabase.table("exams").select("class_ids,total_questions").eq("id", exam_id).single().execute().data or {}
+    class_ids = exam.get("class_ids") or []
+    total_q = exam.get("total_questions", 0)
+
+    students = []
+    if class_ids:
+        profile_ids = supabase.table("student_classes") \
+            .select("student_id") \
+            .in_("class_id", class_ids) \
+            .execute().data or []
+        sids = [p["student_id"] for p in profile_ids]
+        if sids:
+            profiles = supabase.table("profiles") \
+                .select("id,full_name") \
+                .in_("id", sids) \
+                .execute().data or []
+            students = profiles
+
+    # Get submissions for this exam
+    subs = supabase.table("submissions") \
+        .select("student_id,status,answers,submitted_at,updated_at") \
+        .eq("exam_id", exam_id) \
+        .execute().data or []
+
+    sub_map = {s["student_id"]: s for s in subs}
+
+    # Get violation counts
+    try:
+        viols = supabase.table("violation_logs") \
+            .select("user_id") \
+            .eq("exam_id", exam_id) \
+            .execute().data or []
+    except Exception:
+        viols = []
+
+    viol_count = {}
+    for v in viols:
+        uid = v.get("user_id", "")
+        viol_count[uid] = viol_count.get(uid, 0) + 1
+
+    now = datetime.now(timezone.utc)
+
+    result = []
+    for s in students:
+        sid = s["id"]
+        sub = sub_map.get(sid)
+        answers = sub.get("answers") or {} if sub else {}
+        if isinstance(answers, str):
+            try:
+                answers = json.loads(answers)
+            except Exception:
+                answers = {}
+
+        # Count how many questions have answers
+        ans_count = 0
+        if isinstance(answers, dict):
+            for v in answers.values():
+                if isinstance(v, dict) and v.get("answer"):
+                    ans_count += 1
+                elif isinstance(v, str) and v:
+                    ans_count += 1
+                elif isinstance(v, dict):
+                    ans_count += 1
+
+        result.append({
+            "id": sid,
+            "name": s.get("full_name", sid[:12]),
+            "status": sub.get("status", "not_started") if sub else "not_started",
+            "answers_count": ans_count,
+            "total_questions": total_q,
+            "violations": viol_count.get(sid, 0),
+            "updated_at": (sub.get("updated_at") or sub.get("submitted_at") or "").split(".")[0].replace("T", " ") if sub else "",
+        })
+
+    return jsonify({
+        "students": result,
+        "timestamp": now.isoformat(),
+        "total_students": len(result),
+        "started": sum(1 for r in result if r["status"] != "not_started"),
+        "submitted": sum(1 for r in result if r["status"] in ("submitted", "graded", "published")),
+    })

@@ -934,6 +934,10 @@
                        class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
                         <i class="fas fa-chart-bar mr-1"></i>Hasil
                     </a>
+                    <a href="/teacher/exams/{{ exam.id }}/proctoring"
+                       class="block text-sm font-extrabold text-violet-600 hover:bg-violet-50 px-3 py-2 rounded-xl transition">
+                        <i class="fas fa-desktop mr-1"></i>Proctoring
+                    </a>
                     <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
                        class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
                         <i class="fas fa-upload mr-1"></i>{{ 'Ganti PDF' if exam.pdf_url else 'Upload PDF' }}
