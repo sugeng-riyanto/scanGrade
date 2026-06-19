@@ -119,7 +119,7 @@
             <table class="w-full text-sm">
                 <thead class="bg-stone-50 text-xs font-bold text-stone-500 uppercase">
                     <tr>
-                        <th class="w-10 px-2 py-3"><input type="checkbox" @click="selectAll = !selectAll; selected = selectAll ? {{ students|map(attribute='id')|list|tojson }} : []" class="w-4 h-4"></th>
+                        <th class="w-10 px-2 py-3"><input type="checkbox" @click='selectAll = !selectAll; selected = selectAll ? {{ students|map(attribute="id")|list|tojson }} : []' class="w-4 h-4"></th>
                         <th class="text-left px-4 py-3">NISN</th>
                         <th class="text-left px-4 py-3">Nama</th>
                         <th class="text-left px-4 py-3">Kelas</th>
