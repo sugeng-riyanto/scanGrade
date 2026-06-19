@@ -111,7 +111,7 @@ html { transition: background-color .3s, color .3s; }
         .dark .border-surface-300 { border-color: #334155 !important; }
         .dark .bg-surface-200 { background: #2d3050 !important; }
     </style>
-    <meta name="csrf-token" content="<span x-text="csrf_token()"></span>">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     {% block head_extra %}{% endblock %}
 </head>
 <body class="h-full antialiased"
