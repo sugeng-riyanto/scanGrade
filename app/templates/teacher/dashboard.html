@@ -245,7 +245,7 @@
                             <p class="font-bold text-sm text-surface-800">{{ a.subjects.name if a.subjects else "-" }}</p>
                             <p class="text-xs text-surface-500 font-medium">{{ a.classes.name if a.classes else "-" }}</p>
                         </div>
-                        <button hx-delete="/teacher/assignments/<span x-text="a.id"></span>" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus?"
+                        <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus?"
                                 class="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-red-500 transition p-1"><i class="fas fa-times text-xs"></i></button>
                     </div>
                     {% endfor %}
