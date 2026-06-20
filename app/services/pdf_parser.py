@@ -300,12 +300,10 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
     for q in questions:
         num = q.get("number", 0)
         text = (q.get("full_text") or q.get("text", ""))[:500]
-        has_fig = any(ref in text.lower() for ref in ["fig.", "diagram", "graph", "sketch", "draw"])
-        ref = " [HAS DIAGRAM]" if has_fig else ""
         q_list += f"Q{num}: {text}\n\n"
     q_list = q_list[:30000]
 
-    prompt = f"Answer ALL. MCQ→letter. Essay→concise. Output JSON.\n\n{q_list}"
+    prompt = f"Answer ALL questions. Output JSON with question numbers as keys. For MCQ, answer with letter (A/B/C/D). For essay, answer with key points. Only output valid JSON.\n\n{q_list}"
 
     for attempt in range(3):
         try:
