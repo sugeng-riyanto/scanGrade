@@ -675,7 +675,7 @@
                                 placeholder="Tulis jawaban esai Anda di sini..."></textarea>
                         </div>
                     </template>
-                    <template x-if="q.type === 'essay_canvas'">
+                    <template x-if="q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas'">
                         <div class="">
                             <div class="flex items-center gap-2 mb-2 flex-wrap">
                                 <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>

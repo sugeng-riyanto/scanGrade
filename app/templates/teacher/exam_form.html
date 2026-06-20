@@ -1004,7 +1004,7 @@ function questionManager() {
             this._mcqPct = 70; this._essayPct = 30;
         },
         addEssay() {
-            this.questions.push({_id: ++this._cid, type:'essay', pages:'', audio:'', youtube:'', _showMedia:false});
+            this.questions.push({_id: ++this._cid, type:'essay_canvas', pages:'', audio:'', youtube:'', _showMedia:false});
             this._mcqPct = 70; this._essayPct = 30;
         },
         removeQuestion(i) { this.questions.splice(i, 1); },
