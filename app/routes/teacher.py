@@ -266,14 +266,32 @@ def exam_parse_pdf():
             return jsonify({"error": "PDF terlalu besar. Maksimal 50MB"}), 413
 
         ai_mode = request.form.get("ai_mode", "false") == "true"
+        use_vision = request.form.get("use_vision", "false") == "true"
 
         # Step 1: PDF → Clean Markdown
         try:
-            from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html, generate_answer_key
+            from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html, generate_answer_key, is_scanned_pdf
         except ImportError:
             return jsonify({"error": "Library tidak tersedia. Jalankan: pip install pymupdf"}), 500
 
-        parsed = pdf_to_markdown(raw)
+        # Get API key for Gemini Vision if needed
+        vision_api_key = ""
+        if use_vision:
+            try:
+                from app.services.ai_service import _get_active_key
+                vision_key = _get_active_key(g.user_id)
+                if vision_key and vision_key.get("provider") == "gemini":
+                    vision_api_key = vision_key.get("api_key", "")
+                elif vision_key:
+                    # Try to find a gemini key
+                    supabase = get_supabase()
+                    gemini_keys = supabase.table("teacher_ai_keys").select("*").eq("teacher_id", g.user_id).eq("provider", "gemini").limit(1).execute().data
+                    if gemini_keys:
+                        vision_api_key = gemini_keys[0].get("api_key", "")
+            except:
+                pass
+
+        parsed = pdf_to_markdown(raw, use_vision=use_vision, vision_api_key=vision_api_key, lang=request.form.get("lang", "en"))
         if parsed.get("error"):
             return jsonify({"error": parsed["error"]}), 422
 
