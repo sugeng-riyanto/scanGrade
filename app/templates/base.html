@@ -251,7 +251,7 @@ html { transition: background-color .3s, color .3s; }
         <div class="border-t border-white/[0.06] p-3">
             <div class="flex items-center gap-3 px-2 py-1.5">
                 <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white font-bold text-sm shadow-lg shrink-0">
-                    <span x-text="{{ (g.user_name or g.user_email or "")[:1]|upper }}"></span>
+                    <span>{{ (g.user_name or g.user_email or "")[:1]|upper }}</span>
                 </div>
                 <div class="flex-1 min-w-0">
                     <p class="text-sm font-semibold text-white truncate">{{ g.user_name or g.user_email[:20] }}</p>
@@ -319,7 +319,7 @@ html { transition: background-color .3s, color .3s; }
                     <button @click="userMenuOpen = !userMenuOpen"
                             class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-surface-100 transition">
                         <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
-                            <span x-text="{{ (g.user_name or g.user_email or "")[:1]|upper }}"></span>
+                            <span>{{ (g.user_name or g.user_email or "")[:1]|upper }}</span>
                         </div>
                         <span class="hidden sm:block text-sm font-semibold text-surface-700 max-w-[120px] truncate">{{ g.user_name or g.user_email[:15] }}</span>
                         <i class="fas fa-chevron-down text-[10px] text-surface-400" :class="userMenuOpen && 'rotate-180'"></i>
