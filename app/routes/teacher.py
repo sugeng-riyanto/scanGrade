@@ -125,6 +125,7 @@ def dashboard():
     pending_grading = 0
     upcoming_exams = []
     grading_progress = {}
+    exams_no_key = []
 
     if exam_ids:
         subs = supabase.table("submissions").select("student_id,score,final_score,status,exam_id").in_("exam_id", exam_ids).execute().data or []
