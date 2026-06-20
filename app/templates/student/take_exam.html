@@ -60,7 +60,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<div x-data="examApp()" data-exam-id="{{ exam.id }}">
+<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
     <!-- Top Bar -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex items-center justify-between border border-surface-100">
         <div class="flex items-center gap-3">
@@ -675,7 +675,7 @@
                                 placeholder="Tulis jawaban esai Anda di sini..."></textarea>
                         </div>
                     </template>
-                    <template x-if="q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas'">
+                    <template x-if="q.type === 'essay_canvas'">
                         <div class="">
                             <div class="flex items-center gap-2 mb-2 flex-wrap">
                                 <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
@@ -703,40 +703,32 @@
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
-const EXAM_TOTAL_Q = {{ exam.total_questions or 0 }};
-const EXAM_DURATION = {{ (exam.duration_minutes or 120) * 60 }};
-const EXAM_QTYPES = {{ (exam.question_types or {}) | tojson | safe }};
-const EXAM_PAGES = {{ (exam.pdf_page_urls or []) | tojson | safe }};
-const EXAM_PAGE_COUNT = {{ (exam.pdf_page_urls or []) | length }};
 
-function examApp() {
-    try {
-        return {
-        timeLeft: EXAM_DURATION,
+function examApp(duration, totalQ) {
+    return {
+        timeLeft: duration,
         submitted: false,
         page: 1,
-        totalPages: EXAM_PAGE_COUNT,
-        pages: EXAM_PAGES,
+        totalPages: {{ (exam.pdf_page_urls or []) | length }},
+        pages: {{ (exam.pdf_page_urls or []) | tojson | safe }},
         currentQ: 0,
-        totalQ: EXAM_TOTAL_Q,
+        totalQ: totalQ,
         answered: {},
         answersText: {},
         _qOrder: null,
         _shuffledOpts: {},
         _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
-        questions: (function() { try {
-            return Array.from({length: EXAM_TOTAL_Q}, (_, i) => {
-                const rawMedia = QUESTION_AUDIO[i] || {};
-                return {
-                    type: EXAM_QTYPES[i] || 'mcq',
-                    origIdx: i,
-                    answer: null,
-                    audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
-                    youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
-                    canvas: QUESTION_CANVAS[i] || EXAM_QTYPES[i] === 'essay' || false,
-                };
-            });
-        } catch(e) { console.error('questions error:', e); return []; } })(),
+        questions: Array.from({length: totalQ}, (_, i) => {
+            const rawMedia = QUESTION_AUDIO[i] || {};
+            return {
+                type: ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] || 'mcq',
+                origIdx: i,
+                answer: null,
+                audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
+                youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
+                canvas: QUESTION_CANVAS[i] || ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] === 'essay' || false,
+            };
+        }),
         // Per-question page range from question_pages
         get qPages() { return QUESTION_PAGES[this.currentQ] || ''; },
         get pageLabel() {
@@ -2809,7 +2801,6 @@ function examApp() {
             return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
         },
     };
-    } catch(e) { console.error('examApp error:', e); return { timeLeft: EXAM_DURATION, submitted: false, page: 1, totalPages: 0, pages: [], currentQ: 0, totalQ: EXAM_TOTAL_Q, answered: {}, questions: [], showReview: false, submitConfirmDisabled: true, submitConfirmTimer: 3, showExamAgreement: false, syncStatus: '', syncLabel: '', answering: false, autoSaving: false, autoSaveStatus: '', showAgreement: false }; }
 }
 <script>
 (function(){
