@@ -5,13 +5,93 @@ import subprocess
 import tempfile
 import os
 import logging
+import io
 from typing import List, Dict
 
 logger = logging.getLogger("app")
 
 
-def pdf_to_markdown(file_bytes: bytes) -> Dict:
-    """Extract ALL text from PDF using pdftotext -layout. Verifies page count vs PyMuPDF."""
+def is_scanned_pdf(file_bytes: bytes) -> bool:
+    """Detect if PDF is scanned (image-only) by checking text extractability."""
+    try:
+        import fitz
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        total_chars = 0
+        for page in doc:
+            total_chars += len(page.get_text().strip())
+        doc.close()
+        # If less than 100 chars total for the whole PDF, it's scanned/image-based
+        return total_chars < 100
+    except:
+        return False
+
+
+def pdf_to_markdown_vision(file_bytes: bytes, api_key: str = "", lang: str = "en") -> Dict:
+    """OCR scanned PDF using Gemini Vision API. Returns same dict as pdf_to_markdown()."""
+    try:
+        import fitz
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        total_pages = len(doc)
+        pages_md = []
+
+        for page_num in range(total_pages):
+            page = doc.load_page(page_num)
+            # Render page to PNG at 200 DPI
+            mat = fitz.Matrix(200 / 72, 200 / 72)
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+
+            try:
+                from google import genai
+                client = genai.Client(api_key=api_key)
+                prompt = "Extract ALL text from this image. Preserve layout. Use markdown format. Keep all question numbers, options (A/B/C/D), and math symbols."
+                if lang and not lang.startswith("en"):
+                    prompt += f" The document is in {lang}. Answer in {lang}."
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=[prompt, genai.types.Part.from_bytes(data=img_bytes, mime_type="image/png")]
+                )
+                page_text = response.text.strip()
+            except ImportError:
+                return {"error": "google-genai tidak terinstall. Install: pip install google-genai"}
+            except Exception as e:
+                err = str(e)
+                if "API_KEY" in err or "not found" in err.lower() or "unauthorized" in err.lower():
+                    return {"error": "API Key Gemini Vision tidak valid. Setup di Pengaturan AI."}
+                if "quota" in err.lower() or "429" in err or "RATE_LIMIT" in err.upper():
+                    return {"error": "Kuota Gemini Vision habis. Tunggu sebentar atau ganti provider AI."}
+                logger.warning("Gemini Vision page %d failed: %s", page_num + 1, err)
+                page_text = f"*Page {page_num + 1}: OCR failed*"
+
+            pages_md.append(page_text)
+        doc.close()
+
+        full_markdown = "\n\n---\n\n".join(pages_md)
+        word_count = len(full_markdown.split())
+        logger.info("Gemini Vision OCR: %d pages, %d words", total_pages, word_count)
+
+        return {
+            "markdown": full_markdown,
+            "page_count": total_pages,
+            "total_pages": total_pages,
+            "mcq_count": 0,
+            "essay_count": 0,
+            "questions": [],
+            "page_urls": [],
+            "_vision": True,
+        }
+    except Exception as e:
+        return {"error": f"Vision OCR gagal: {str(e)[:200]}"}
+
+
+def pdf_to_markdown(file_bytes: bytes, use_vision: bool = False, vision_api_key: str = "", lang: str = "en") -> Dict:
+    """Extract ALL text from PDF. If use_vision=True and PDF is scanned, uses Gemini Vision OCR."""
+    if use_vision and vision_api_key:
+        if is_scanned_pdf(file_bytes):
+            logger.info("Scanned PDF detected, using Gemini Vision OCR")
+            return pdf_to_markdown_vision(file_bytes, api_key=vision_api_key, lang=lang)
+        logger.info("Digital PDF detected, using pdftotext")
+
     expected_pages = 0
     try:
         import fitz

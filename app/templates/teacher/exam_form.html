@@ -93,6 +93,18 @@
 
                 <!-- Drop zone -->
                 <div x-show="!pdfUrl" class="relative">
+                    <!-- Vision OCR Toggle -->
+                    <div class="mb-3 p-3 rounded-xl bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-200">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" x-model="useVision" name="use_vision" value="true" class="w-4 h-4 text-violet-600 rounded border-violet-300">
+                            <div class="flex-1">
+                                <span class="text-xs font-extrabold text-violet-800 flex items-center gap-1.5">
+                                    <i class="fas fa-eye"></i>Gunakan Gemini Vision OCR
+                                </span>
+                                <p class="text-[9px] text-violet-600 mt-0.5">Untuk PDF scan / gambar / tulisan tangan. Membutuhkan API Key Gemini aktif.</p>
+                            </div>
+                        </label>
+                    </div>
                     <div class="border-2 border-dashed border-surface-300 rounded-xl p-7 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-all duration-200 group"
                          @click="$refs.pdfInput.click()" @dragover.prevent="$el.classList.add('border-primary-400','bg-primary-50')" @dragleave.prevent="$el.classList.remove('border-primary-400','bg-primary-50')" @drop.prevent="uploadPDF($event.dataTransfer.files[0])">
                         <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-rose-50 to-pink-50 flex items-center justify-center group-hover:scale-110 transition-transform mb-3 border border-rose-100">
@@ -333,6 +345,7 @@
                     loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '', applied: false,
                     loadingText: 'AI sedang memproses PDF...',
                     loadingStep: 0, loadingTime: 0, loadingProgress: 0, _timer: null,
+                    useVision: false,
                     async uploadPDF(file) {
                         if (!file) return;
                         if (file.type !== 'application/pdf') { this.errorMsg = 'Hanya file PDF yang didukung'; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
@@ -351,6 +364,7 @@
                         const pd = parentEl?.__x?.$data || {};
                         const lang = pd.aiLang || 'en';
                         const aiMode = pd.aiMode || false;
+                        fd.append('use_vision', this.useVision ? 'true' : 'false');
                         fd.append('lang', lang);
                         fd.append('ai_mode', aiMode ? 'true' : 'false');
                         try {
