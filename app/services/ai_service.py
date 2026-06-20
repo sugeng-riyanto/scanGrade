@@ -155,6 +155,7 @@ def _call_openai_like(api_key, prompt, base_url=None, model=None):
         model=model or "gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
+        max_tokens=4096,
     )
     return resp.choices[0].message.content or ""
 
