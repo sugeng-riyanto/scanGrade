@@ -520,21 +520,20 @@ def exam_form():
         classes = []
         if sid:
             # Get teacher's assigned subjects and classes
-            teacher_assignments = supabase.table("teacher_assignments") \
-                .select("*, subjects(id, name, code), classes(id, name, grade_level)") \
-                .eq("teacher_id", g.user_id) \
-                .execute().data or []
-            assigned_subject_ids = set()
-            assigned_class_ids = set()
-            for a in teacher_assignments:
-                if a.get("subjects"):
-                    assigned_subject_ids.add(a["subjects"]["id"])
-                    if a["subjects"] not in subjects:
-                        subjects.append(a["subjects"])
-                if a.get("classes"):
-                    assigned_class_ids.add(a["classes"]["id"])
-                    if a["classes"] not in classes:
-                        classes.append(a["classes"])
+            try:
+                teacher_assignments = supabase.table("teacher_assignments") \
+                    .select("*, subjects(id, name, code), classes(id, name, grade_level)") \
+                    .eq("teacher_id", g.user_id) \
+                    .execute().data or []
+                for a in teacher_assignments:
+                    if a.get("subjects"):
+                        if a["subjects"] not in subjects:
+                            subjects.append(a["subjects"])
+                    if a.get("classes"):
+                        if a["classes"] not in classes:
+                            classes.append(a["classes"])
+            except Exception:
+                current_app.logger.warning("Failed to fetch teacher assignments, falling back to all")
             # Fallback: if no assignments, show all school subjects/classes
             if not subjects:
                 subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
