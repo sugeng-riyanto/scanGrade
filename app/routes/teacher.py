@@ -319,7 +319,8 @@ def exam_parse_pdf():
                     ak = generate_answer_key(
                         parsed["markdown"], questions,
                         api_key=key["api_key"],
-                        provider=key.get("provider", "groq"))
+                        provider=key.get("provider", "groq"),
+                        lang=request.form.get("lang", "en"))
                     if ak and len(ak) > 0:
                         if "_error" in ak:
                             answer_key_error = ak["_error"]
@@ -394,6 +395,7 @@ def exam_generate_key():
     data = request.get_json() or {}
     markdown = data.get("markdown", "")
     questions = data.get("questions", [])
+    lang = data.get("lang", "en")
     if not markdown:
         return jsonify({"error": "No markdown provided"}), 400
 
@@ -409,7 +411,7 @@ def exam_generate_key():
         return jsonify({"error": "Belum ada API key aktif. Atur di Pengaturan AI."}), 400
 
     try:
-        ak = generate_answer_key(markdown, questions, api_key=key["api_key"], provider=key.get("provider", "groq"))
+        ak = generate_answer_key(markdown, questions, api_key=key["api_key"], provider=key.get("provider", "groq"), lang=lang)
         if ak and "_error" in ak:
             return jsonify({"error": ak["_error"]}), 429
         if ak and len(ak) > 0:
