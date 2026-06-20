@@ -519,8 +519,27 @@ def exam_form():
         subjects = []
         classes = []
         if sid:
-            subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
-            classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+            # Get teacher's assigned subjects and classes
+            teacher_assignments = supabase.table("teacher_assignments") \
+                .select("*, subjects(id, name, code), classes(id, name, grade_level)") \
+                .eq("teacher_id", g.user_id) \
+                .execute().data or []
+            assigned_subject_ids = set()
+            assigned_class_ids = set()
+            for a in teacher_assignments:
+                if a.get("subjects"):
+                    assigned_subject_ids.add(a["subjects"]["id"])
+                    if a["subjects"] not in subjects:
+                        subjects.append(a["subjects"])
+                if a.get("classes"):
+                    assigned_class_ids.add(a["classes"]["id"])
+                    if a["classes"] not in classes:
+                        classes.append(a["classes"])
+            # Fallback: if no assignments, show all school subjects/classes
+            if not subjects:
+                subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
+            if not classes:
+                classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
         return render_template("teacher/exam_form.html", exam=None, subjects=subjects, classes=classes)
 
     title = request.form.get("title")
@@ -679,6 +698,9 @@ def exam_form():
             supabase.table("submissions").update({"is_published": True, "status": "published"}).eq("exam_id", exam_id).execute()
         except Exception:
             pass
+        flash("✅ Ujian berhasil dipublikasikan! Siswa sekarang bisa mengerjakan.", "success")
+    else:
+        flash("✅ Ujian berhasil disimpan.", "success")
     return redirect("/teacher/exams" if action == "publish" else f"/teacher/exams/{exam_id}")
 
 

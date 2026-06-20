@@ -559,17 +559,12 @@
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Mata Pelajaran</label>
-                            {% if subjects %}
-                            <select name="subject_id" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
-                                <option value="">-- Pilih --</option>
+                            <select name="subject_id" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 text-slate-600 font-bold transition pointer-events-none">
                                 {% for s in subjects %}
                                 <option value="{{ s.id }}" {% if exam and exam.subject_id == s.id %}selected{% endif %}>{{ s.name }}</option>
                                 {% endfor %}
                             </select>
-                            {% else %}
-                            <input type="text" name="subject" value="{{ exam.subject if exam else '' }}" placeholder="Ketik manual"
-                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
-                            {% endif %}
+                            <p class="text-[10px] text-slate-400 mt-1"><i class="fas fa-info-circle mr-0.5"></i>Diatur oleh admin sekolah. Hubungi admin jika perlu perubahan.</p>
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Durasi</label>
@@ -608,10 +603,10 @@
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Mulai (jadwal)</label>
-                            <input type="datetime-local" name="start_at"
+                            <input type="datetime-local" name="start_at" id="start_at_input"
                                    value="{% if exam.start_at %}{{ (exam.start_at[:19] + '+00:00') | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
-                            <p class="text-xs text-slate-400 mt-1">Kosongkan jika langsung aktif</p>
+                            <p class="text-xs text-slate-400 mt-1">Kosongkan = langsung aktif</p>
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Max Attempt</label>
@@ -908,25 +903,42 @@
             </div>
             {% else %}
             <div class="card p-6 sticky top-20">
-                <h3 class="font-extrabold text-slate-800 mb-4">Langkah</h3>
+                <h3 class="font-extrabold text-slate-800 mb-4 flex items-center gap-2">
+                    <i class="fas fa-tasks text-primary-500"></i>Langkah
+                </h3>
                 <ol class="space-y-3 text-sm font-bold text-slate-600">
-                    <li class="flex items-start gap-2">
-                        <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">1</span>
-                        <span>Isi data & soal, klik <strong class="text-slate-800">Simpan</strong></span>
+                    <li class="flex items-start gap-2 p-2 rounded-xl bg-emerald-50 border border-emerald-200">
+                        <span class="bg-emerald-500 text-white rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">
+                            <i class="fas fa-check text-[8px]"></i>
+                        </span>
+                        <div><span>Isi data & soal</span>
+                        <p class="text-[10px] font-medium text-emerald-700 mt-0.5">Judul, mapel, durasi, kelas</p></div>
                     </li>
                     <li class="flex items-start gap-2">
                         <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">2</span>
-                        <span>Upload <strong class="text-slate-800">PDF</strong> soal (opsional)</span>
+                        <div><span>Upload <strong class="text-slate-800">PDF</strong> soal</span>
+                        <p class="text-[10px] font-medium text-slate-400 mt-0.5">Opsional — untuk tampilan ujian siswa</p></div>
                     </li>
                     <li class="flex items-start gap-2">
                         <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">3</span>
-                        <span><strong class="text-slate-800">Publikasikan</strong> ke kelas</span>
+                        <div><span><strong class="text-slate-800">Publikasikan</strong> ke kelas</span>
+                        <p class="text-[10px] font-medium text-slate-400 mt-0.5">Siswa langsung terima notifikasi</p></div>
                     </li>
                     <li class="flex items-start gap-2">
                         <span class="bg-primary-50 text-primary-700 rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5">4</span>
-                        <span>Siswa kerjakan, guru <strong class="text-slate-800">koreksi</strong></span>
+                        <div><span>Siswa kerjakan, guru <strong class="text-slate-800">koreksi</strong></span>
+                        <p class="text-[10px] font-medium text-slate-400 mt-0.5">MCQ auto, Essay AI + review</p></div>
                     </li>
                 </ol>
+                <div class="mt-4 p-3 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200">
+                    <p class="text-[10px] font-bold text-emerald-800 flex items-center gap-1">
+                        <i class="fas fa-lightbulb"></i>Setelah publish:
+                    </p>
+                    <p class="text-[9px] text-emerald-700 mt-1 leading-relaxed">
+                        Siswa di kelas tujuan akan melihat ujian ini di dashboard mereka. 
+                        Nilai MCQ otomatis terkoreksi. Essay bisa dikoreksi AI.
+                    </p>
+                </div>
             </div>
             {% endif %}
         </div>
