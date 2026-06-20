@@ -331,6 +331,65 @@ def scan_process():
         return jsonify(result)
 
 
+def _scan_essay_vision(image_bytes, api_key="", lang="en"):
+    try:
+        from google import genai
+        import PIL.Image
+        client = genai.Client(api_key=api_key)
+        prompt = "Extract ALL handwritten text from this exam answer sheet. Preserve the original language. Output only the text content."
+        if lang and not lang.startswith("en"):
+            prompt += " The handwriting is in " + lang + "."
+        buf = io.BytesIO(image_bytes)
+        img = PIL.Image.open(buf)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[prompt, img]
+        )
+        return response.text.strip()
+    except ImportError:
+        raise ImportError("google-genai tidak terinstall. Install: pip install google-genai")
+    except ValueError:
+        raise
+    except Exception as e:
+        err = str(e)
+        if "API_KEY" in err or "not found" in err.lower() or "unauthorized" in err.lower():
+            raise ValueError("API Key Gemini tidak valid. Setup di Pengaturan AI.")
+        if "quota" in err.lower() or "429" in err or "RATE_LIMIT" in err.upper():
+            raise ValueError("Kuota Gemini habis. Tunggu sebentar.")
+        raise
+
+
+@api_bp.route("/scan/essay", methods=["POST"])
+@login_required
+def scan_essay():
+    if "image" not in request.files:
+        return jsonify({"error": "Tidak ada gambar"}), 400
+    image_file = request.files["image"]
+    raw = image_file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        return jsonify({"error": "Gambar terlalu besar. Maksimal 20MB"}), 413
+    from app.services.ai_service import _get_active_key
+    key_data = _get_active_key(g.user_id)
+    api_key = ""
+    if key_data and key_data.get("provider") == "gemini":
+        api_key = key_data.get("api_key", "")
+    elif key_data:
+        supabase = get_supabase()
+        gemini_keys = supabase.table("teacher_ai_keys").select("*").eq("teacher_id", g.user_id).eq("provider", "gemini").limit(1).execute().data
+        if gemini_keys:
+            api_key = gemini_keys[0].get("api_key", "")
+    if not api_key:
+        return jsonify({"error": "API Key Gemini tidak ditemukan. Setup Gemini di Pengaturan AI."}), 400
+    try:
+        text = _scan_essay_vision(raw, api_key=api_key)
+        return jsonify({"success": True, "text": text})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": "Gagal OCR: " + str(e)[:200]}), 500
+
+
+
 @api_bp.route("/scan/task/<task_id>", methods=["GET"])
 @login_required
 def scan_task_status(task_id):
