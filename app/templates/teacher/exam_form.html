@@ -28,11 +28,12 @@
                 examTitle: '{{ exam.title if exam else '' }}',
                 hasClasses: {{ 'true' if exam and exam.class_ids else 'false' }},
                 pdfUrl: '{{ exam.pdf_url if exam else '' }}',
+                qCount: 0,
                 get step1Done() { return this.examTitle.trim().length > 0 && this.hasClasses; },
                 get step2Done() { return false; },
                 get step3Done() { return false; },
             }"
-                 x-init="aiLang = localStorage.getItem('sg_ai_lang') || 'en'; $watch('aiLang', v => localStorage.setItem('sg_ai_lang', v)); window.addEventListener('pdf-uploaded', e => { pdfUrl = e.detail?.pdfUrl || ''; }); window.addEventListener('pdf-reset', () => { pdfUrl = ''; }); window.addEventListener('classes-selected', () => { hasClasses = true; });">
+                 x-init="aiLang = localStorage.getItem('sg_ai_lang') || 'en'; $watch('aiLang', v => localStorage.setItem('sg_ai_lang', v)); window.addEventListener('pdf-uploaded', e => { pdfUrl = e.detail?.pdfUrl || ''; qCount = e.detail?.qCount || 0; }); window.addEventListener('pdf-reset', () => { pdfUrl = ''; qCount = 0; }); window.addEventListener('classes-selected', () => { hasClasses = true; });">
             <!-- AI Toggle — modern pill -->
             <div class="flex items-center justify-between mb-5 p-1 bg-surface-100 rounded-2xl shadow-sm border border-surface-200">
                 <button type="button" @click="aiMode = false"
@@ -306,15 +307,15 @@
                                 </button>
                             </div>
                         </div>
-                        <!-- Generate Key button -->
-                        <button x-show="!generatingKey" @click="generateKeyNow()"
+                        <!-- Generate Key button (AI mode only) -->
+                        <button x-show="aiMode && !generatingKey" @click="generateKeyNow()"
                                 class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition">
                             <i class="fas fa-key mr-0.5"></i>Generate Key
                         </button>
-                        <div x-show="generatingKey" class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700">
+                        <div x-show="aiMode && generatingKey" class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700">
                             <i class="fas fa-spinner fa-spin mr-0.5"></i>Generate...
                         </div>
-                        <div x-show="keyGenerated" class="relative" x-data="{ open: false }">
+                        <div x-show="aiMode && keyGenerated" class="relative" x-data="{ open: false }">
                             <button @click="open = !open" @click.outside="open = false"
                                     class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition">
                                 <i class="fas fa-key text-amber-600 mr-0.5"></i>Kunci
@@ -869,16 +870,16 @@
 
 
                 <div class="flex justify-end gap-3 flex-wrap">
-                    <button type="submit" name="action" value="save_draft"
-                            class="px-6 py-3 border-2 border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 font-extrabold text-sm transition">
-                        <i class="fas fa-save mr-1"></i>Simpan Draft
-                    </button>
                     <button type="submit" name="action" value="save_active"
-                            class="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg transition">
-                        <i class="fas fa-check mr-1"></i>Simpan
+                            class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-3 rounded-xl font-extrabold text-sm transition flex items-center gap-2"
+                            title="Simpan sebagai draft — siswa belum bisa lihat">
+                        <i class="fas fa-save"></i>Simpan
                     </button>
                     <button type="submit" name="action" value="publish"
-                            class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-6 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition">
+                            class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-5 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition flex items-center gap-2"
+                            title="Publikasikan sekarang — siswa langsung bisa kerjakan">
+                        <i class="fas fa-paper-plane"></i>Publish &amp; Kirim ke Kelas
+                    </button>
                         <i class="fas fa-paper-plane mr-1"></i>Publish & Kirim ke Kelas
                     </button>
                 </div>
@@ -949,15 +950,6 @@
                         <p class="text-[9px] lg:text-[10px] font-medium text-slate-400 mt-0.5">MCQ auto, Essay AI + review</p></div>
                     </li>
                 </ol>
-                <div class="mt-4 p-3 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200">
-                    <p class="text-[10px] font-bold text-emerald-800 flex items-center gap-1">
-                        <i class="fas fa-lightbulb"></i>Setelah publish:
-                    </p>
-                    <p class="text-[9px] text-emerald-700 mt-1 leading-relaxed">
-                        Siswa di kelas tujuan akan melihat ujian ini di dashboard mereka. 
-                        Nilai MCQ otomatis terkoreksi. Essay bisa dikoreksi AI.
-                    </p>
-                </div>
                 <div class="mt-4 p-3 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200">
                     <p class="text-[10px] font-bold text-emerald-800 flex items-center gap-1">
                         <i class="fas fa-lightbulb"></i>Setelah publish:
