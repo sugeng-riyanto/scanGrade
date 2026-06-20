@@ -331,10 +331,13 @@ def scan_process():
         return jsonify(result)
 
 
+
+
 def _scan_essay_vision(image_bytes, api_key="", lang="en"):
     try:
         from google import genai
         import PIL.Image
+        import io
         client = genai.Client(api_key=api_key)
         prompt = "Extract ALL handwritten text from this exam answer sheet. Preserve the original language. Output only the text content."
         if lang and not lang.startswith("en"):
@@ -389,10 +392,6 @@ def scan_essay():
         return jsonify({"error": "Gagal OCR: " + str(e)[:200]}), 500
 
 
-
-@api_bp.route("/scan/task/<task_id>", methods=["GET"])
-@login_required
-
 @api_bp.route("/grade/vision-canvas", methods=["POST"])
 @login_required
 def vision_canvas_ocr():
@@ -437,6 +436,8 @@ def vision_canvas_ocr():
         return jsonify({"error": "Gagal OCR: " + str(e)[:200]}), 500
 
 
+@api_bp.route("/scan/task/<task_id>", methods=["GET"])
+@login_required
 def scan_task_status(task_id):
     """Poll Celery task status and get result when done."""
     from app.celery_app import celery_app
