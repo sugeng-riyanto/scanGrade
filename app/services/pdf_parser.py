@@ -313,16 +313,18 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
             key_dict = {"api_key": api_key, "provider": provider or "groq"}
             raw = _call_ai(key_dict, prompt)
             cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-            cleaned = cleaned.strip()
+            import re
+            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw)
+            if json_match:
+                cleaned = json_match.group(1).strip()
+            else:
+                cleaned = raw.strip()
             if not cleaned:
                 raise ValueError("AI returned empty response")
-            try:
-                parsed = json.loads(cleaned)
-            except json.JSONDecodeError as je:
-                logger.error("JSON parse failed. Raw response (first 300): %s", cleaned[:300])
-                raise ValueError(f"AI returned invalid JSON: {cleaned[:200]}") from je
+            parsed = json.loads(cleaned)
+            if not isinstance(parsed, dict):
+                raise ValueError("AI response is not a JSON object")
+
             if isinstance(parsed, dict):
                 result = {}
                 for k, v in parsed.items():
