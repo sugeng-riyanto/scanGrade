@@ -225,6 +225,7 @@
                         if (e.detail.hasAI) { generatingKey = true; keyGenerated = false; keyFailed = false; keyError = ''; }
                     });
                     window.addEventListener('key-done', e => { generatingKey = false; keyGenerated = true; });
+                    window.addEventListener('key-start', e => { generatingKey = true; keyGenerated = false; keyFailed = false; keyError = ''; });
                     window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; keyError = e.detail?.error || ''; });
                     window.addEventListener('pdf-error', e => { pdfStatus = 'error'; });
                     window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; generatingKey = false; keyGenerated = false; keyFailed = false; keyError = ''; });
@@ -509,9 +510,7 @@
             }
             async function generateKeyNow() {
                 if (!_scanData || !_scanData.markdown) { alert('Data belum siap'); return; }
-                const btn = document.querySelector('[x-show="aiClassified && !keyGenerated && !generatingKey"]');
-                const orig = btn ? btn.innerHTML : '';
-                if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-0.5"></i>Generate...';
+                window.dispatchEvent(new CustomEvent('key-start'));
                 try {
                     const r = await fetch('/teacher/exams/generate-key', {
                         method: 'POST',
@@ -531,7 +530,6 @@
                         window.dispatchEvent(new CustomEvent('key-failed', {detail: {error: d.error}}));
                     }
                 } catch(e) { window.dispatchEvent(new CustomEvent('key-failed', {detail: {error: e.message}})); }
-                if (btn) btn.innerHTML = orig;
             }
             </script>
 
