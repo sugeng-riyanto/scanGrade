@@ -705,7 +705,8 @@ const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
 
 function examApp(duration, totalQ) {
-    return {
+    try {
+        return {
         timeLeft: duration,
         submitted: false,
         page: 1,
@@ -718,17 +719,19 @@ function examApp(duration, totalQ) {
         _qOrder: null,
         _shuffledOpts: {},
         _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
-        questions: Array.from({length: totalQ}, (_, i) => {
-            const rawMedia = QUESTION_AUDIO[i] || {};
-            return {
-                type: ({{ (exam.question_types or {}) | tojson | safe }})[i] || 'mcq',
-                origIdx: i,
-                answer: null,
-                audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
-                youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
-                canvas: QUESTION_CANVAS[i] || ({{ (exam.question_types or {}) | tojson | safe }})[i] === 'essay' || false,
-            };
-        }),
+        questions: (function() { try {
+            return Array.from({length: totalQ}, (_, i) => {
+                const rawMedia = QUESTION_AUDIO[i] || {};
+                return {
+                    type: ({{ (exam.question_types or {}) | tojson | safe }})[i] || 'mcq',
+                    origIdx: i,
+                    answer: null,
+                    audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
+                    youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
+                    canvas: QUESTION_CANVAS[i] || ({{ (exam.question_types or {}) | tojson | safe }})[i] === 'essay' || false,
+                };
+            });
+        } catch(e) { console.error('questions error:', e); return []; } })(),
         // Per-question page range from question_pages
         get qPages() { return QUESTION_PAGES[this.currentQ] || ''; },
         get pageLabel() {
@@ -2801,6 +2804,7 @@ function examApp(duration, totalQ) {
             return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
         },
     };
+    } catch(e) { console.error('examApp error:', e); return { timeLeft: duration || 3600, submitted: false, page: 1, totalPages: 0, pages: [], currentQ: 0, totalQ: totalQ || 0, answered: {}, questions: [], showReview: false, submitConfirmDisabled: true, submitConfirmTimer: 3, showExamAgreement: false, syncStatus: '', syncLabel: '', answering: false, autoSaving: false, autoSaveStatus: '', showAgreement: false }; }
 }
 <script>
 (function(){
