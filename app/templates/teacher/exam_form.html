@@ -709,11 +709,6 @@
                                         </span>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                        <select :name="'qtype_' + i" class="qtype-select text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1"
-                                                x-model="q.type">
-                                            <option value="mcq">MCQ</option>
-                                            <option value="essay">Esai</option>
-                                        </select>
                                         <button type="button" @click="removeQuestion(i)" class="text-slate-400 hover:text-red-500 p-1 transition">
                                             <i class="fas fa-times-circle text-sm"></i>
                                         </button>
@@ -952,6 +947,28 @@
                         <p class="text-[9px] lg:text-[10px] font-medium text-slate-400 mt-0.5">MCQ auto, Essay AI + review</p></div>
                     </li>
                 </ol>
+                <!-- Step navigation guide -->
+                <div class="mt-4 p-3 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200">
+                    <p class="text-[10px] font-bold text-blue-800 flex items-center gap-1" x-show="step === 1">
+                        <i class="fas fa-pen"></i>Isi judul, pilih mapel & kelas, lalu klik <strong>Simpan</strong>
+                    </p>
+                    <p class="text-[10px] font-bold text-blue-800 flex items-center gap-1" x-show="step === 2">
+                        <i class="fas fa-file-pdf"></i>Upload PDF atau atur soal manual, lalu klik <strong>Simpan</strong>
+                    </p>
+                    <p class="text-[10px] font-bold text-blue-800 flex items-center gap-1" x-show="step === 3">
+                        <i class="fas fa-paper-plane"></i>Klik <strong>Publish &amp; Kirim ke Kelas</strong> untuk mengirim ke siswa
+                    </p>
+                    <div class="flex gap-2 mt-2">
+                        <button type="button" @click="step = Math.max(1, step - 1)" x-show="step > 1"
+                                class="flex-1 px-3 py-1.5 border border-blue-200 rounded-lg text-[9px] font-bold text-blue-700 hover:bg-blue-100 transition">
+                            <i class="fas fa-arrow-left mr-0.5"></i>Kembali
+                        </button>
+                        <button type="button" @click="step = Math.min(3, step + 1)" x-show="step < 3"
+                                class="flex-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[9px] font-bold hover:bg-blue-700 transition shadow-sm">
+                            Selanjutnya <i class="fas fa-arrow-right ml-0.5"></i>
+                        </button>
+                    </div>
+                </div>
                 <div class="mt-4 p-3 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200">
                     <p class="text-[10px] font-bold text-emerald-800 flex items-center gap-1">
                         <i class="fas fa-lightbulb"></i>Setelah publish:
