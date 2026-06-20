@@ -226,7 +226,7 @@
                     });
                     window.addEventListener('key-done', e => { generatingKey = false; keyGenerated = true; });
                     window.addEventListener('key-start', e => { generatingKey = true; keyGenerated = false; keyFailed = false; keyError = ''; });
-                    window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; keyError = e.detail?.error || ''; });
+                    window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; keyError = (e.detail?.error || '') + '. Cek API key di Pengaturan AI, atau upload PDF dengan mode AI aktif.'; });
                     window.addEventListener('pdf-error', e => { pdfStatus = 'error'; });
                     window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; generatingKey = false; keyGenerated = false; keyFailed = false; keyError = ''; });
                  "
@@ -268,7 +268,7 @@
                                 <i class="fas fa-times mr-0.5"></i>Kunci gagal
                             </span>
                             <span x-show="keyError && keyFailed" class="ml-2 text-[9px] text-red-500 max-w-[300px] truncate" x-text="keyError"></span>
-                            <a x-show="keyFailed && keyError.includes('Kuota')" href="/teacher/ai-settings" class="ml-1 text-[9px] font-bold text-primary-600 hover:text-primary-700 underline">Ganti Provider AI →</a>
+                            <a x-show="keyFailed" href="/teacher/ai-settings" class="ml-1 text-[9px] font-bold text-primary-600 hover:text-primary-700 underline">Atur API Key →</a>
                         </p>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
