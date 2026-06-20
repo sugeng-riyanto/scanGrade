@@ -392,6 +392,51 @@ def scan_essay():
 
 @api_bp.route("/scan/task/<task_id>", methods=["GET"])
 @login_required
+
+@api_bp.route("/grade/vision-canvas", methods=["POST"])
+@login_required
+def vision_canvas_ocr():
+    data = request.get_json() or {}
+    image_data = data.get("image", "")
+    if not image_data or not image_data.startswith("data:image/"):
+        return jsonify({"error": "Data URL gambar tidak valid"}), 400
+    try:
+        import base64
+        header, encoded = image_data.split(",", 1)
+        img_bytes = base64.b64decode(encoded)
+    except Exception as e:
+        return jsonify({"error": "Gagal decode: " + str(e)[:100]}), 400
+    from app.services.ai_service import _get_active_key
+    key_data = _get_active_key(g.user_id)
+    api_key = ""
+    if key_data and key_data.get("provider") == "gemini":
+        api_key = key_data.get("api_key", "")
+    elif key_data:
+        supabase = get_supabase()
+        gemini_keys = supabase.table("teacher_ai_keys").select("*").eq("teacher_id", g.user_id).eq("provider", "gemini").limit(1).execute().data
+        if gemini_keys:
+            api_key = gemini_keys[0].get("api_key", "")
+    if not api_key:
+        return jsonify({"error": "API Key Gemini tidak ditemukan. Setup Gemini di Pengaturan AI."}), 400
+    try:
+        from google import genai
+        import PIL.Image
+        import io
+        client = genai.Client(api_key=api_key)
+        prompt = "Extract ALL handwritten text, formulas, equations, and diagram labels from this student exam drawing. Output only the text."
+        buf = io.BytesIO(img_bytes)
+        img = PIL.Image.open(buf)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=[prompt, img])
+        text = response.text.strip()
+        return jsonify({"success": True, "text": text})
+    except ImportError:
+        return jsonify({"error": "google-genai tidak terinstall. Install: pip install google-genai"}), 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": "Gagal OCR: " + str(e)[:200]}), 500
+
+
 def scan_task_status(task_id):
     """Poll Celery task status and get result when done."""
     from app.celery_app import celery_app
