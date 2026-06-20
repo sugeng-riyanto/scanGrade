@@ -382,6 +382,7 @@
                                 markdown: d.markdown || '',
                                 answerKey: d.answer_key || {},
                                 answerKeyGenerated: d.answer_key_generated || false,
+                                lang: d.lang || lang,
                             };
                             window.dispatchEvent(new CustomEvent('pdf-uploaded', { detail: _scanData }));
                             // Auto-save PDF URL to form (always)
@@ -517,7 +518,8 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             markdown: _scanData.markdown,
-                            questions: _scanData._questions || []
+                            questions: _scanData._questions || [],
+                            lang: _scanData.lang || 'en'
                         })
                     });
                     const d = await r.json();

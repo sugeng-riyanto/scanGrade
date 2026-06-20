@@ -291,7 +291,7 @@ def _heuristic_type(text: str, total_q: int = None) -> str:
     return "mcq" if score <= 0 else "essay"
 
 
-def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq") -> Dict:
+def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = None, provider: str = "groq", lang: str = "en") -> Dict:
     """Generate answer key — MCQ→letter, Essay→answer. Retries on rate limit."""
     if not api_key or not questions:
         return {}
@@ -303,7 +303,8 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
         q_list += f"Q{num}: {text}\n\n"
     q_list = q_list[:30000]
 
-    prompt = f"Answer ALL questions. Output JSON with question numbers as keys. For MCQ, answer with letter (A/B/C/D). For essay, answer with key points. Only output valid JSON.\n\n{q_list}"
+    lang_hint = "Answer in English." if lang.startswith("en") else f"Answer in {lang}."
+    prompt = f"{lang_hint} Output JSON with question numbers as keys. For MCQ, answer with letter (A/B/C/D). Only output valid JSON.\n\n{q_list}"
 
     for attempt in range(3):
         try:
