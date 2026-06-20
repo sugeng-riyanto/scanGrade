@@ -344,7 +344,7 @@
                         }, 1000);
                         const fd = new FormData(); fd.append('pdf', file);
                         // Get AI language and mode from parent scope
-                        const parentEl = this.$el.closest('[x-data]');
+                        const parentEl = this.$el.parentElement?.closest('[x-data]');
                         const pd = parentEl?.__x?.$data || {};
                         const lang = pd.aiLang || 'en';
                         const aiMode = pd.aiMode || false;
