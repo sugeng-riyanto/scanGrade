@@ -363,11 +363,28 @@
                                 <div class="flex-1 p-3 bg-blue-50 rounded-lg border border-blue-200">
                                     <div class="flex items-center justify-between mb-1">
                                         <span class="text-[10px] font-extrabold text-blue-700"><i class="fas fa-align-left mr-1"></i>Jawaban Siswa:</span>
-                                        <button type="button" class="px-2 py-1 text-[10px] font-bold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition" onclick="aiSuggest({{ i }})">
-                                            <i class="fas fa-robot mr-0.5"></i>Koreksi AI
-                                        </button>
+                                        <div class="flex gap-1">
+                                            <button type="button" class="px-2 py-1 text-[10px] font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition" onclick="ocrCanvas({{ i }})" title="Baca tulisan di canvas siswa via Gemini Vision">
+                                                <i class="fas fa-eye mr-0.5"></i>Baca Canvas
+                                            </button>
+                                            <button type="button" class="px-2 py-1 text-[10px] font-bold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition" onclick="aiSuggest({{ i }})">
+                                                <i class="fas fa-robot mr-0.5"></i>Koreksi AI
+                                            </button>
+                                        </div>
                                     </div>
                                     <p class="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">{{ student_text[:300] }}{% if student_text|length > 300 %}...{% endif %}</p>
+                                    <!-- OCR Canvas Result Area (hidden by default) -->
+                                    <div :id="'ocr-area-' + {{ i }}" class="hidden mt-2">
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-[10px] font-extrabold text-violet-700"><i class="fas fa-eye mr-0.5"></i>Hasil OCR Canvas:</span>
+                                            <span :id="'ocr-spinner-' + {{ i }}" class="hidden loading-spinner inline-block"></span>
+                                        </div>
+                                        <textarea :id="'ocr-text-' + {{ i }}" rows="3" class="w-full px-3 py-2 border-2 border-violet-200 rounded-xl text-xs font-medium focus:border-violet-500 transition resize-y mb-1" placeholder="Klik 'Baca Canvas' untuk OCR..."></textarea>
+                                        <div class="flex gap-1">
+                                            <button type="button" class="text-[9px] font-bold px-2 py-1 bg-violet-100 text-violet-700 rounded-lg hover:bg-violet-200 transition" onclick="useOcrForAi({{ i }})">Gunakan untuk AI</button>
+                                            <button type="button" class="text-[9px] font-bold px-2 py-1 bg-surface-100 text-surface-600 rounded-lg hover:bg-surface-200 transition" onclick="clearOcr({{ i }})">Tutup</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             {% endif %}
@@ -1189,6 +1206,93 @@ function aiSuggest(qIdx) {
         }
     })
     .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot mr-0.5"></i>Koreksi AI'; alert('Gagal terhubung ke server AI'); });
+}
+
+// Vision OCR for student canvas
+function ocrCanvas(qIdx) {
+    const sc = document.getElementById('student-canvas-' + qIdx);
+    if (!sc) { alert('Canvas siswa tidak ditemukan'); return; }
+    const ocrArea = document.getElementById('ocr-area-' + qIdx);
+    const spinner = document.getElementById('ocr-spinner-' + qIdx);
+    const textarea = document.getElementById('ocr-text-' + qIdx);
+    ocrArea.classList.remove('hidden');
+    spinner.classList.remove('hidden');
+    textarea.value = 'Memproses...';
+
+    // Capture canvas as PNG data URL
+    const dataUrl = sc.toDataURL('image/png');
+
+    fetch('/api/grade/vision-canvas', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ image: dataUrl })
+    })
+    .then(r => r.json())
+    .then(d => {
+        spinner.classList.add('hidden');
+        if (d.success) {
+            textarea.value = d.text;
+        } else {
+            textarea.value = 'Error: ' + (d.error || 'Gagal OCR');
+        }
+    })
+    .catch(err => {
+        spinner.classList.add('hidden');
+        textarea.value = 'Gagal: ' + err.message;
+    });
+}
+
+function useOcrForAi(qIdx) {
+    const textarea = document.getElementById('ocr-text-' + qIdx);
+    const ocrText = textarea.value.trim();
+    if (!ocrText || ocrText.startsWith('Error') || ocrText.startsWith('Memproses')) {
+        alert('OCR belum selesai atau gagal. Klik "Baca Canvas" dulu.');
+        return;
+    }
+    // Fill OCR text into student answer and trigger AI grading
+    const studentAns = {{ submission.answers | tojson | safe }};
+    const ansData = studentAns[qIdx];
+    let origAnswer = '';
+    if (typeof ansData === 'string') origAnswer = ansData;
+    else if (ansData && ansData.text) origAnswer = ansData.text;
+    else if (ansData && ansData.answer) origAnswer = ansData.answer;
+
+    const combined = (origAnswer ? origAnswer + '\n\n---[OCR Canvas]---\n' : '') + ocrText;
+    // Temporarily override and call aiSuggest with combined text
+    const qTypes = {{ (exam.question_types or {}) | tojson | safe }};
+    const questionTexts = {{ (exam.question_texts or {}) | tojson | safe }};
+    const questionText = questionTexts[qIdx] || '';
+    const maxScore = parseFloat({{ (exam.question_weights or {}) | tojson | safe }}[qIdx] || 100);
+
+    fetch('/api/ai/grade-essay', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            submission_id: '{{ submission.id }}',
+            question_index: qIdx,
+            question_text: questionText,
+            student_answer: combined,
+            max_score: maxScore,
+            rubric: '',
+            diagram_context: ocrText,
+        })
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.error) { alert(d.error); return; }
+        const inst = QUESTION_INSTANCES[qIdx];
+        if (inst) {
+            if (d.score !== undefined) { inst.scoreVal = d.score; }
+            if (d.feedback) { inst.commentVal = d.feedback; }
+            calcFinal();
+        }
+    })
+    .catch(() => alert('Gagal terhubung ke server AI'));
+}
+
+function clearOcr(qIdx) {
+    document.getElementById('ocr-area-' + qIdx).classList.add('hidden');
+    document.getElementById('ocr-text-' + qIdx).value = '';
 }
 
 function gradeAllEssays() {
