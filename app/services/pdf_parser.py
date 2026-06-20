@@ -304,7 +304,7 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
     q_list = q_list[:30000]
 
     lang_hint = "Answer in English." if lang.startswith("en") else f"Answer in {lang}."
-    prompt = f"{lang_hint} Output JSON with question numbers as keys. For MCQ, answer with letter (A/B/C/D). Only output valid JSON.\n\n{q_list}"
+    prompt = f"{lang_hint} For each question, output JSON with: answer (MCQ→letter, Essay→text), reasoning (brief why), alternatives (if any).\n\n{q_list}"
 
     for attempt in range(3):
         try:
@@ -327,11 +327,22 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
             if isinstance(parsed, dict):
                 result = {}
                 for k, v in parsed.items():
-                    sv = str(v).strip()
-                    if sv in ("A", "B", "C", "D"):
-                        result[str(k)] = sv
-                    elif sv and len(sv) > 1:
-                        result[str(k)] = sv[:200]
+                    if isinstance(v, dict):
+                        ans = v.get("answer", "")
+                        reasoning = v.get("reasoning", "")
+                        alt = v.get("alternatives", "")
+                        if ans in ("A", "B", "C", "D"):
+                            result[str(k)] = ans
+                        elif ans:
+                            result[str(k)] = ans[:200]
+                        if reasoning or alt:
+                            result[f"{k}_note"] = f"{reasoning}{' | Alt: ' + alt if alt else ''}"[:300]
+                    else:
+                        sv = str(v).strip()
+                        if sv in ("A", "B", "C", "D"):
+                            result[str(k)] = sv
+                        elif sv and len(sv) > 1:
+                            result[str(k)] = sv[:200]
                 return result
         except Exception as e:
             err = str(e)
