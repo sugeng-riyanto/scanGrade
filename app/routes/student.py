@@ -293,7 +293,7 @@ def take_exam(exam_id):
         if k not in exam or exam[k] is None:
             exam[k] = v
     # Parse JSON fields that may come as strings from Supabase
-    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
+    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls", "question_canvas", "question_audio", "question_texts"):
         _val = exam.get(_field)
         if isinstance(_val, str):
             try:
