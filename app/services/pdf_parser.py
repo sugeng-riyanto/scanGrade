@@ -315,7 +315,14 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
             cleaned = raw.strip()
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-            parsed = json.loads(cleaned.strip())
+            cleaned = cleaned.strip()
+            if not cleaned:
+                raise ValueError("AI returned empty response")
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError as je:
+                logger.error("JSON parse failed. Raw response (first 300): %s", cleaned[:300])
+                raise ValueError(f"AI returned invalid JSON: {cleaned[:200]}") from je
             if isinstance(parsed, dict):
                 result = {}
                 for k, v in parsed.items():
