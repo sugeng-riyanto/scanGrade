@@ -333,7 +333,7 @@ def generate_answer_key(markdown: str, questions: List[Dict], api_key: str = Non
                 time.sleep(5)
                 continue
             logger.warning("Answer key failed: %s", err)
-            break
+            return {"_error": f"AI gagal: {err[:150]}"}
     else:
         # All retries exhausted — rate limited
         return {"_error": "Kuota Groq API habis. Tunggu beberapa saat atau ganti provider AI di Pengaturan AI."}

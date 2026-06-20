@@ -414,7 +414,10 @@ def exam_generate_key():
             return jsonify({"error": ak["_error"]}), 429
         if ak and len(ak) > 0:
             return jsonify({"success": True, "answer_key": ak, "answer_key_generated": True, "questions": questions})
+        current_app.logger.error("generate_answer_key returned empty for user %s. questions=%d, markdown=%d chars, provider=%s",
+                                 g.user_id, len(questions), len(markdown), key.get("provider", "groq"))
     except Exception as e:
+        current_app.logger.error("generate_answer_key exception: %s", str(e)[:500])
         return jsonify({"error": str(e)[:200]}), 500
     return jsonify({"error": "Gagal generate key"}), 500
 
