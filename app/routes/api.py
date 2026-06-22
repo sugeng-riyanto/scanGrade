@@ -1496,14 +1496,20 @@ def api_send_broadcast():
         return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
 
     # Create individual recipient entries for read tracking
+    recipient_ids = data.get("recipient_ids")
     recipients = []
-    try:
-        query = supabase.table("profiles").select("id").eq("status", "active")
-        if target_role and target_role != "all":
-            query = query.eq("role", target_role)
-        recipients = query.execute().data or []
-    except Exception:
-        pass
+    if recipient_ids and isinstance(recipient_ids, list) and len(recipient_ids) > 0:
+        # Selective sending — use provided IDs
+        recipients = [{"id": uid} for uid in recipient_ids]
+    else:
+        # Broadcast to all matching role
+        try:
+            query = supabase.table("profiles").select("id").eq("status", "active")
+            if target_role and target_role != "all":
+                query = query.eq("role", target_role)
+            recipients = query.execute().data or []
+        except Exception:
+            pass
 
     if recipients:
         rec_data = [{"notification_id": notif_id, "recipient_id": r["id"]} for r in recipients]
@@ -1514,6 +1520,53 @@ def api_send_broadcast():
                 pass
 
     return jsonify({"success": True, "recipients": len(recipients)})
+
+
+@api_bp.route("/broadcast/update", methods=["POST"])
+@login_required
+def api_update_broadcast():
+    """Edit notification title/message."""
+    data = request.get_json() or {}
+    notif_id = data.get("id")
+    title = str(data.get("title", "")).strip()
+    message = str(data.get("message", "")).strip()
+    if not notif_id or not title or not message:
+        return jsonify({"error": "Data tidak lengkap"}), 400
+    supabase = get_supabase()
+    role = g.get("user_role")
+    try:
+        existing = supabase.table("notifications").select("id,sender_id").eq("id", notif_id).single().execute().data
+        if not existing:
+            return jsonify({"error": "Notifikasi tidak ditemukan"}), 404
+        if role != "super_admin" and existing.get("sender_id") != g.user_id:
+            return jsonify({"error": "Tidak berhak mengedit"}), 403
+        supabase.table("notifications").update({"title": title, "message": message}).eq("id", notif_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+
+
+@api_bp.route("/broadcast/delete", methods=["POST"])
+@login_required
+def api_delete_broadcast():
+    """Delete a notification."""
+    data = request.get_json() or {}
+    notif_id = data.get("id")
+    if not notif_id:
+        return jsonify({"error": "ID notifikasi diperlukan"}), 400
+    supabase = get_supabase()
+    role = g.get("user_role")
+    try:
+        existing = supabase.table("notifications").select("id,sender_id").eq("id", notif_id).single().execute().data
+        if not existing:
+            return jsonify({"error": "Notifikasi tidak ditemukan"}), 404
+        if role != "super_admin" and existing.get("sender_id") != g.user_id:
+            return jsonify({"error": "Tidak berhak menghapus"}), 403
+        supabase.table("notification_recipients").delete().eq("notification_id", notif_id).execute()
+        supabase.table("notifications").delete().eq("id", notif_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
 
 
 @api_bp.route("/broadcast/list", methods=["GET"])
@@ -1549,15 +1602,17 @@ def api_broadcast_list():
         pass
     try:
         role_notifs_query = supabase.table("notifications") \
-            .select("id, title, message, sender_role, created_at") \
+            .select("id, title, message, sender_role, sender_id, created_at") \
             .in_("target_role", [role, None])
         if school_id:
             role_notifs_query = role_notifs_query.eq("target_school_id", school_id)
         role_notifs = role_notifs_query.order("created_at", desc=True).limit(50).execute().data or []
         existing_ids = {n["id"] for n in notifs}
+        uid = g.user_id
         for n in role_notifs:
             if n["id"] not in existing_ids:
                 n["read"] = False
+                n["can_edit"] = role == "super_admin" or n.get("sender_id") == uid
                 n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
                 notifs.append(n)
     except Exception:
@@ -1565,3 +1620,20 @@ def api_broadcast_list():
 
     notifs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return jsonify({"notifications": notifs[:20]})
+
+
+@api_bp.route("/broadcast/students", methods=["GET"])
+@login_required
+def api_broadcast_students():
+    """Get list of students for selective broadcast."""
+    supabase = get_supabase()
+    role = g.get("user_role")
+    school_id = g.get("user_school_id")
+
+    if role == "super_admin":
+        students = supabase.table("profiles").select("id, full_name").eq("role", "murid").eq("status", "active").order("full_name").execute().data or []
+    elif school_id:
+        students = supabase.table("profiles").select("id, full_name").eq("role", "murid").eq("status", "active").order("full_name").execute().data or []
+    else:
+        students = []
+    return jsonify({"students": students})
