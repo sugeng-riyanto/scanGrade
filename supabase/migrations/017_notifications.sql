@@ -1,4 +1,9 @@
 -- Migration 017: Notifications & Broadcast System
+-- Fix: removed REFERENCES schools(id) — schools table doesn't exist
+
+-- Add school_id to profiles (missing column — needed for RBAC)
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS school_id UUID;
+
 CREATE TABLE IF NOT EXISTS notifications (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     sender_id UUID NOT NULL,
@@ -6,7 +11,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     title VARCHAR(200) NOT NULL,
     message TEXT NOT NULL,
     target_role VARCHAR(20),
-    target_school_id UUID REFERENCES schools(id),
+    target_school_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

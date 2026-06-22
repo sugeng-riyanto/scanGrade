@@ -1495,13 +1495,12 @@ def api_send_broadcast():
     except Exception as e:
         return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
 
+    # Create individual recipient entries for read tracking
     recipients = []
-    query = supabase.table("profiles").select("id").eq("status", "active")
-    if target_role and target_role != "all":
-        query = query.eq("role", target_role)
-    if target_school_id:
-        query = query.eq("school_id", target_school_id)
     try:
+        query = supabase.table("profiles").select("id").eq("status", "active")
+        if target_role and target_role != "all":
+            query = query.eq("role", target_role)
         recipients = query.execute().data or []
     except Exception:
         pass
@@ -1549,13 +1548,12 @@ def api_broadcast_list():
     except Exception:
         pass
     try:
-        role_notifs = supabase.table("notifications") \
+        role_notifs_query = supabase.table("notifications") \
             .select("id, title, message, sender_role, created_at") \
-            .in_("target_role", [role, None]) \
-            .eq("target_school_id", school_id) \
-            .order("created_at", desc=True) \
-            .limit(50) \
-            .execute().data or []
+            .in_("target_role", [role, None])
+        if school_id:
+            role_notifs_query = role_notifs_query.eq("target_school_id", school_id)
+        role_notifs = role_notifs_query.order("created_at", desc=True).limit(50).execute().data or []
         existing_ids = {n["id"] for n in notifs}
         for n in role_notifs:
             if n["id"] not in existing_ids:

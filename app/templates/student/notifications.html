@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Pengumuman - ScanGrade{% endblock %}
+{% block page_title %}Pengumuman{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{
+    lang: localStorage.getItem('sg_lang') || 'id',
+    notifs: [], loading: true,
+    fetchNotifs() {
+        this.loading = true;
+        fetch('/api/broadcast/list').then(r=>r.json()).then(d => { this.notifs = d.notifications || []; }).catch(()=>{}).finally(()=>{ this.loading = false; });
+    }
+}" x-init="fetchNotifs()">
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Pengumuman</h3>
+        <template x-if="loading">
+            <div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div>
+        </template>
+        <template x-if="!loading && notifs.length === 0">
+            <div class="text-center py-8 text-surface-400">Belum ada pengumuman</div>
+        </template>
+        <div class="space-y-3">
+            <template x-for="n in notifs" :key="n.id">
+                <div class="p-4 rounded-xl bg-surface-50 border border-surface-100" :class="n.read ? '' : 'border-l-4 border-l-primary-500 bg-primary-50/30'">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2">
+                                <template x-if="!n.read">
+                                    <span class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span>
+                                </template>
+                                <p class="font-bold text-surface-800" x-text="n.title"></p>
+                            </div>
+                            <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-text="n.message"></p>
+                        </div>
+                        <span class="text-[10px] font-medium text-surface-400 whitespace-nowrap ml-3" x-text="n.created_at"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+{% endblock %}

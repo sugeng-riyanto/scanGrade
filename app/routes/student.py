@@ -822,3 +822,9 @@ def delete_submission(submission_id):
         return jsonify({"error": "Cannot delete this submission"}), 403
     supabase.table("submissions").delete().eq("id", submission_id).execute()
     return jsonify({"success": True})
+
+
+@student_bp.route("/notifications")
+@login_required
+def student_notifications():
+    return render_template("student/notifications.html")
