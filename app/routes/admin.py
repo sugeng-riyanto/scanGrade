@@ -715,3 +715,9 @@ def audit_logs_view():
         logs=logs, page=page, per_page=per_page, total=total,
         action=action or "", entity=entity or "", days=days or 0,
     )
+
+
+@admin_bp.route("/notifications")
+@admin_required
+def admin_notifications():
+    return render_template("admin_sekolah/notifications.html")
