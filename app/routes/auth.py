@@ -192,7 +192,7 @@ def activate():
 # ─── LOGIN (Admin & Super Admin) ─────────────────────
 
 @auth_bp.route("/login", methods=["GET", "POST"])
-@_rate_limit("5 per minute")
+@_rate_limit("30 per minute")
 def login():
     if request.method == "GET":
         resp = make_response(render_template("auth/login.html"))
