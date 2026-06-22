@@ -3,6 +3,7 @@ import logging
 import math as _math
 import time
 from datetime import datetime, timedelta, timezone
+import click
 from flask import Flask, g, request, jsonify, redirect, render_template, make_response
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -348,6 +349,30 @@ def create_app(env=None):
         start_cleanup_scheduler(interval=1800)
     except Exception as e:
         app.logger.warning("Failed to start cleanup scheduler: %s", e)
+
+    # Start data retention scheduler (daily purge)
+    try:
+        from app.services.data_retention_service import start_retention_scheduler
+        start_retention_scheduler(interval=86400)
+    except Exception as e:
+        app.logger.warning("Failed to start retention scheduler: %s", e)
+
+    # CLI commands
+    @app.cli.command("purge-data")
+    def purge_data_command():
+        """Manual trigger for data retention purge (soft-delete old records)."""
+        from app.services.data_retention_service import purge_all
+        result = purge_all()
+        click.echo(f"Purge complete: {result}")
+
+    @app.cli.command("export-user")
+    @click.argument("user_id")
+    def export_user_command(user_id):
+        """Export all data for a given user_id."""
+        from app.services.data_retention_service import export_user_data
+        import json
+        data = export_user_data(user_id)
+        click.echo(json.dumps(data, indent=2, default=str))
 
     return app
 

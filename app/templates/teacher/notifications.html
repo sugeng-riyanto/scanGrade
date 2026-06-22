@@ -140,7 +140,7 @@
                             <div class="flex items-start justify-between">
                                 <div class="flex-1 min-w-0">
                                     <p class="font-bold text-surface-800" x-text="n.title"></p>
-                                    <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-text="n.message"></p>
+                                    <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
                                 </div>
                                 <div class="flex items-center gap-2 ml-3 shrink-0">
                                     <template x-if="n.can_edit">

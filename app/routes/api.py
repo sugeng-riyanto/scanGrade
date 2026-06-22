@@ -1480,6 +1480,10 @@ def api_send_broadcast():
         if target_role not in ("guru", "murid"):
             return jsonify({"error": "Admin hanya bisa kirim ke guru/murid"}), 403
         target_school_id = school_id
+    elif role == "murid":
+        if target_role not in ("guru",):
+            return jsonify({"error": "Murid hanya bisa kirim ke guru"}), 403
+        target_school_id = school_id
     elif role != "super_admin":
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -1499,14 +1503,26 @@ def api_send_broadcast():
     recipient_ids = data.get("recipient_ids")
     recipients = []
     if recipient_ids and isinstance(recipient_ids, list) and len(recipient_ids) > 0:
-        # Selective sending — use provided IDs
-        recipients = [{"id": uid} for uid in recipient_ids]
+        # Selective one-on-one — use provided IDs, scope by school
+        if target_school_id:
+            try:
+                valid = supabase.table("profiles").select("id").eq("status", "active").in_("id", recipient_ids).eq("school_id", target_school_id).execute().data or []
+                recipients = [{"id": r["id"]} for r in valid]
+            except Exception:
+                recipients = [{"id": uid} for uid in recipient_ids]
+        else:
+            recipients = [{"id": uid} for uid in recipient_ids]
     else:
-        # Broadcast to all matching role
+        # Broadcast to all matching role + school
         try:
             query = supabase.table("profiles").select("id").eq("status", "active")
             if target_role and target_role != "all":
                 query = query.eq("role", target_role)
+            if target_school_id:
+                try:
+                    query = query.eq("school_id", target_school_id)
+                except Exception:
+                    pass
             recipients = query.execute().data or []
         except Exception:
             pass
@@ -1668,6 +1684,11 @@ def api_broadcast_students():
         query = supabase.table("profiles").select("id, full_name").eq("status", "active")
         if target_role != "all":
             query = query.eq("role", target_role)
+        if school_id:
+            try:
+                query = query.eq("school_id", school_id)
+            except Exception:
+                pass
         users = query.order("full_name").execute().data or []
     except Exception:
         users = []
@@ -1679,8 +1700,56 @@ def api_broadcast_students():
 def api_broadcast_teachers():
     """Get list of teachers for student one-on-one messaging."""
     supabase = get_supabase()
+    school_id = g.get("user_school_id")
     try:
-        teachers = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("status", "active").order("full_name").execute().data or []
+        query = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("status", "active")
+        if school_id:
+            try:
+                query = query.eq("school_id", school_id)
+            except Exception:
+                pass
+        teachers = query.order("full_name").execute().data or []
     except Exception:
         teachers = []
     return jsonify({"teachers": teachers})
+
+
+@api_bp.route("/account/export-data", methods=["GET"])
+@login_required
+def api_export_data():
+    """Export all personal data (UU PDP right to data portability)."""
+    from app.services.data_retention_service import export_user_data
+    data = export_user_data(g.user_id)
+    return jsonify(data)
+
+
+@api_bp.route("/account/delete-request", methods=["POST"])
+@login_required
+def api_delete_request():
+    """Submit account deletion request (UU PDP right to erasure)."""
+    from app.services.data_retention_service import request_deletion
+    data = request.get_json() or {}
+    reason = str(data.get("reason", "")).strip()
+    result, status = request_deletion(g.user_id, reason)
+    return jsonify(result), status
+
+
+@api_bp.route("/account/delete-request/cancel", methods=["POST"])
+@login_required
+def api_cancel_delete_request():
+    """Cancel a pending deletion request."""
+    from app.services.data_retention_service import cancel_deletion_request
+    result, status = cancel_deletion_request(g.user_id)
+    return jsonify(result), status
+
+
+@api_bp.route("/account/deletion-status", methods=["GET"])
+@login_required
+def api_deletion_status():
+    """Check if user has a pending deletion request."""
+    supabase = get_supabase()
+    try:
+        res = supabase.table("deletion_requests").select("id, status, reason, requested_at").eq("user_id", g.user_id).order("requested_at", desc=True).limit(1).execute().data
+        return jsonify({"request": res[0] if res else None})
+    except Exception:
+        return jsonify({"request": None})

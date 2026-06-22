@@ -80,7 +80,7 @@
                                     <template x-if="!n.read"><span class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span></template>
                                     <p class="font-bold text-surface-800" x-text="n.title"></p>
                                 </div>
-                                <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-text="n.message"></p>
+                                <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
                                 <p class="text-[10px] font-medium text-surface-400 mt-1" x-text="'Dari: ' + (n.sender_role || '-')"></p>
                             </div>
                             <span class="text-[10px] font-medium text-surface-400 whitespace-nowrap ml-3" x-text="n.created_at"></span>
@@ -114,7 +114,7 @@
                             <div class="flex items-start justify-between">
                                 <div class="flex-1 min-w-0">
                                     <p class="font-bold text-surface-800" x-text="n.title"></p>
-                                    <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-text="n.message"></p>
+                                    <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
                                 </div>
                                 <div class="flex items-center gap-2 ml-3 shrink-0">
                                     <button @click="startEdit(n)" class="text-xs text-primary-600 hover:text-primary-800 font-bold"><i class="fas fa-edit"></i></button>
