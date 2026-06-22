@@ -45,6 +45,7 @@
 .tool-ctrl-btn .range-wrap { position: absolute; top: 0; left: 26px; width: 60px; height: 22px; background: rgba(30,41,59,0.85); border-radius: 0 4px 4px 0; display: flex; align-items: center; padding: 0 6px; pointer-events: none; }
 .tool-ctrl-btn .range-wrap input { width: 100%; height: 3px; pointer-events: auto; cursor: ew-resize; }
 .essay-canvas-area { position: relative; }
+.ec-canvas-layer { touch-action: none; }
 [x-cloak] { display: none !important; }
 @media (max-width: 768px) {
     .sticky-questions { position: static !important; }
@@ -389,8 +390,7 @@
                                     </div>
                                 </div>
                                 <canvas :id="'ec-canvas-' + i"
-                                        class="absolute inset-0 w-full h-full"
-                                        :style="'cursor:' + (essayCanvasMode[i]==='line' ? 'crosshair' : essayCanvasMode[i]==='eraser' ? 'cell' : essayCanvasMode[i]==='text' ? 'text' : 'crosshair') + ';touch-action:none'"></canvas>
+                                        class="absolute inset-0 w-full ec-canvas-layer"></canvas>
                                 <!-- Ruler overlay -->
                                   <div x-show="showRuler[i]" class="tool-overlay" :id="'ruler-overlay-' + i">
                                      <svg :id="'ruler-svg-' + i" style="overflow:visible;pointer-events:none"
@@ -1101,6 +1101,14 @@ function examApp(duration, totalQ) {
         },
         setEssayCanvasMode(i, mode) {
             this.essayCanvasMode[i] = mode;
+            this.$nextTick(() => this._updateCanvasCursor(i));
+        },
+        _updateCanvasCursor(i) {
+            const el = document.getElementById('ec-canvas-' + i);
+            if (!el) return;
+            const m = this.essayCanvasMode[i];
+            const cursors = { pen: 'crosshair', line: 'crosshair', eraser: 'cell', text: 'text', compass: 'crosshair' };
+            el.style.cursor = cursors[m] || 'crosshair';
         },
         initEcCanvas(i) {
             const areas = document.querySelectorAll('[id^="ec-area-' + i + '"]');
@@ -1130,12 +1138,16 @@ function examApp(duration, totalQ) {
             if (this.ecCanvasInited[i]) {
                 const rect = area.getBoundingClientRect();
                 const imgEl = area.querySelector('img');
-                const targetW = imgEl ? imgEl.offsetWidth : rect.width;
-                const targetH = imgEl ? imgEl.offsetHeight : rect.height;
-                if (targetW > 0 && (canvas.width !== Math.round(targetW) || canvas.height !== Math.round(targetH))) {
+                const natW = imgEl ? imgEl.naturalWidth : rect.width;
+                const natH = imgEl ? imgEl.naturalHeight : rect.height;
+                const cssW = imgEl ? imgEl.offsetWidth : rect.width;
+                const cssH = imgEl ? imgEl.offsetHeight : rect.height;
+                if (cssW > 0 && natW > 0 && (canvas.width !== natW || canvas.height !== natH)) {
                     const oldData = canvas.toDataURL();
-                    canvas.width = targetW;
-                    canvas.height = targetH;
+                    canvas.width = natW;
+                    canvas.height = natH;
+                    canvas.style.width = cssW + 'px';
+                    canvas.style.height = cssH + 'px';
                     const ctx = canvas.getContext('2d');
                     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
                     const img = new Image();
@@ -1146,15 +1158,19 @@ function examApp(duration, totalQ) {
             }
             const imgEl = area.querySelector('img');
             const rect = area.getBoundingClientRect();
-            const targetW = imgEl && imgEl.offsetWidth > 0 ? imgEl.offsetWidth : (rect.width || 700);
-            const targetH = imgEl && imgEl.offsetHeight > 0 ? imgEl.offsetHeight : (rect.height || 500);
-            canvas.width = targetW;
-            canvas.height = targetH;
+            const cssW = imgEl && imgEl.offsetWidth > 0 ? imgEl.offsetWidth : (rect.width || 700);
+            const cssH = imgEl && imgEl.offsetHeight > 0 ? imgEl.offsetHeight : (rect.height || 500);
+            const natW = imgEl && imgEl.naturalWidth > 0 ? imgEl.naturalWidth : cssW;
+            const natH = imgEl && imgEl.naturalHeight > 0 ? imgEl.naturalHeight : cssH;
+            canvas.width = natW;
+            canvas.height = natH;
+            canvas.style.width = cssW + 'px';
+            canvas.style.height = cssH + 'px';
             const ctx = canvas.getContext('2d');
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = parseFloat(this.essayLineWidth[i]) || 1.5;
             this.essayCanvasMode[i] = this.essayCanvasMode[i] || 'pen';
             this.essayCanvasColor[i] = this.essayCanvasColor[i] || '#0000ff';
             this.essayLineWidth[i] = this.essayLineWidth[i] || '1.5';
@@ -1299,6 +1315,9 @@ function examApp(duration, totalQ) {
                     ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
                 } else {
+                    ctx.lineWidth = parseFloat(this.essayLineWidth[i]) || 1;
+                    ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
+                    ctx.setLineDash([]);
                     ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(p.x, p.y); ctx.stroke();
                 }
                 lx = p.x; ly = p.y;
@@ -1351,16 +1370,24 @@ function examApp(duration, totalQ) {
             document.addEventListener('keydown', onKey);
             this.ecCanvasInited[i] = true;
             this.canvasDraw[i] = { el: canvas, ctx };
+            this._updateCanvasCursor(i);
             // Observe resize so canvas dimensions stay correct when element becomes visible
             if (area._ecResizeObserver) area._ecResizeObserver.disconnect();
             const ro = new ResizeObserver(() => {
                 if (this.ecCanvasInited[i] && document.getElementById('ec-canvas-' + i)) {
                     const r = area.getBoundingClientRect();
+                    const imgEl2 = area.querySelector('img');
                     const c = document.getElementById('ec-canvas-' + i);
-                    if (c && (c.width !== Math.round(r.width) || c.height !== Math.round(r.height))) {
+                    const nnatW = imgEl2 && imgEl2.naturalWidth > 0 ? imgEl2.naturalWidth : r.width;
+                    const nnatH = imgEl2 && imgEl2.naturalHeight > 0 ? imgEl2.naturalHeight : r.height;
+                    const ncssW = r.width;
+                    const ncssH = r.height;
+                    if (c && ncssW > 0 && nnatW > 0 && (c.width !== nnatW || c.height !== nnatH)) {
                         const old = c.toDataURL();
-                        c.width = r.width || 700;
-                        c.height = r.height || 400;
+                        c.width = nnatW;
+                        c.height = nnatH;
+                        c.style.width = ncssW + 'px';
+                        c.style.height = ncssH + 'px';
                         const cx = c.getContext('2d');
                         cx.lineCap = 'round'; cx.lineJoin = 'round';
                         const img = new Image();
@@ -1591,6 +1618,8 @@ function examApp(duration, totalQ) {
                     ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
                 } else {
+                    ctx.lineWidth = parseFloat(this.canvasWidth[i]) || 2;
+                    ctx.strokeStyle = this.canvasColor[i] || '#000';
                     ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(p.x, p.y); ctx.stroke();
                 }
                 lx = p.x; ly = p.y;
@@ -1710,11 +1739,27 @@ function examApp(duration, totalQ) {
         },
         saveToLocal() {
             try {
-                const data = this.getAnswers();
+                const data = this.getAnswersLight();
                 const payload = { answers: data, savedAt: Date.now(), examId: '{{ exam.id }}' };
-                localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
+                const json = JSON.stringify(payload);
+                if (json.length > 4 * 1024 * 1024) {
+                    console.warn('localStorage draft too large (' + (json.length/1024/1024).toFixed(1) + 'MB), skipping canvas');
+                    const light = this.getAnswersLight();
+                    payload.answers = light;
+                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
+                } else {
+                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', json);
+                }
             } catch(e) {
-                console.warn('localStorage save failed:', e);
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    console.warn('localStorage quota exceeded, saving light data only');
+                    try {
+                        const light = this.getAnswersLight();
+                        localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify({ answers: light, savedAt: Date.now(), examId: '{{ exam.id }}', light: true }));
+                    } catch(e2) {}
+                } else {
+                    console.warn('localStorage save failed:', e);
+                }
             }
         },
         getAnswersLight() {
