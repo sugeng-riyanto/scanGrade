@@ -18,7 +18,7 @@
         fetch('/api/broadcast/list').then(r=>r.json()).then(d => { this.notifs = d.notifications || []; }).catch(()=>{}).finally(()=>{ this.loading = false; });
     },
     fetchStudents() {
-        fetch('/api/broadcast/students').then(r=>r.json()).then(d => { this.students = d.students || []; }).catch(()=>{});
+        fetch('/api/broadcast/students?role=murid').then(r=>r.json()).then(d => { this.students = d.users || []; }).catch(()=>{});
     },
     toggleStudent(id) {
         var idx = this.selectedStudents.indexOf(id);

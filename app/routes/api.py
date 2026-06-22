@@ -1625,15 +1625,17 @@ def api_broadcast_list():
 @api_bp.route("/broadcast/students", methods=["GET"])
 @login_required
 def api_broadcast_students():
-    """Get list of students for selective broadcast."""
+    """Get list of users for selective broadcast by role."""
     supabase = get_supabase()
     role = g.get("user_role")
     school_id = g.get("user_school_id")
+    target_role = request.args.get("role", "murid")
 
-    if role == "super_admin":
-        students = supabase.table("profiles").select("id, full_name").eq("role", "murid").eq("status", "active").order("full_name").execute().data or []
-    elif school_id:
-        students = supabase.table("profiles").select("id, full_name").eq("role", "murid").eq("status", "active").order("full_name").execute().data or []
-    else:
-        students = []
-    return jsonify({"students": students})
+    try:
+        query = supabase.table("profiles").select("id, full_name").eq("status", "active")
+        if target_role != "all":
+            query = query.eq("role", target_role)
+        users = query.order("full_name").execute().data or []
+    except Exception:
+        users = []
+    return jsonify({"users": users})

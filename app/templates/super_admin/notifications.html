@@ -18,8 +18,8 @@
         fetch('/api/broadcast/list').then(r=>r.json()).then(d => { this.notifs = d.notifications || []; }).catch(()=>{}).finally(()=>{ this.loading = false; });
     },
     fetchRecipients() {
-        fetch('/api/broadcast/students').then(r=>r.json()).then(d => {
-            this.recipients = d.students || [];
+        fetch('/api/broadcast/students?role=' + (this.sendMode === 'select' ? this.formTarget : 'all')).then(r=>r.json()).then(d => {
+            this.recipients = d.users || []; this.selectedRecipients = [];
         }).catch(()=>{});
     },
     toggleRecipient(id) {
@@ -66,7 +66,7 @@
             body: JSON.stringify({id: n.id})
         }).then(r=>r.json()).then(d => { if (d.success) this.fetchNotifs(); });
     }
-}" x-init="fetchNotifs(); fetchRecipients()">
+}" x-init="fetchNotifs(); fetchRecipients()" x-effect="fetchRecipients()">
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
         <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Kirim Pengumuman</h3>
         <form @submit.prevent="sendBroadcast()" class="space-y-4">
