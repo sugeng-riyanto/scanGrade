@@ -1535,10 +1535,158 @@ def api_send_broadcast():
             except Exception:
                 pass
 
+    # For one-on-one messages, create/update a conversation
+    if recipient_ids and len(recipient_ids) == 1 and target_role and target_role != "all":
+        other_id = recipient_ids[0]
+        try:
+            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
+            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
+            conv = conv1 + conv2
+            if conv:
+                conv_id = conv[0]["id"]
+                supabase.table("conversations").update({
+                    "last_message_at": "now()",
+                    "title": title
+                }).eq("id", conv_id).execute()
+            else:
+                conv_res = supabase.table("conversations").insert({
+                    "participant_1": g.user_id, "participant_2": other_id,
+                    "title": title, "status": "open",
+                }).execute()
+                conv_id = conv_res.data[0]["id"]
+            supabase.table("notifications").update({"conversation_id": conv_id}).eq("id", notif_id).execute()
+            return jsonify({"success": True, "recipients": len(recipients), "conversation_id": conv_id})
+        except Exception:
+            pass
+
     return jsonify({"success": True, "recipients": len(recipients)})
 
 
-@api_bp.route("/broadcast/update", methods=["POST"])
+@api_bp.route("/broadcast/reply", methods=["POST"])
+@login_required
+def api_reply_broadcast():
+    """Reply to a conversation thread."""
+    data = request.get_json() or {}
+    conversation_id = data.get("conversation_id")
+    title = str(data.get("title", "")).strip()
+    message = str(data.get("message", "")).strip()
+    if not conversation_id or not title or not message:
+        return jsonify({"error": "Data tidak lengkap"}), 400
+
+    supabase = get_supabase()
+    try:
+        # Verify user is a participant
+        conv = supabase.table("conversations").select("id, participant_1, participant_2, status").eq("id", conversation_id).single().execute().data
+        if not conv:
+            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
+        if conv["status"] != "open":
+            return jsonify({"error": "Percakapan sudah selesai"}), 400
+        uid = g.user_id
+        if uid != conv["participant_1"] and uid != conv["participant_2"]:
+            return jsonify({"error": "Anda bukan peserta percakapan ini"}), 403
+
+        other_id = conv["participant_1"] if uid == conv["participant_2"] else conv["participant_2"]
+        role = g.get("user_role")
+
+        # Create notification
+        notif = {
+            "sender_id": uid, "sender_role": role,
+            "title": title, "message": message,
+            "target_role": None, "target_school_id": None,
+            "conversation_id": conversation_id,
+        }
+        res = supabase.table("notifications").insert(notif).execute()
+        notif_id = res.data[0]["id"]
+
+        # Add recipient = the other participant
+        supabase.table("notification_recipients").insert({
+            "notification_id": notif_id, "recipient_id": other_id
+        }).execute()
+
+        # Update conversation
+        supabase.table("conversations").update({
+            "last_message_at": "now()", "title": title
+        }).eq("id", conversation_id).execute()
+
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+
+
+@api_bp.route("/broadcast/complete", methods=["POST"])
+@login_required
+def api_complete_conversation():
+    """Mark a conversation as complete."""
+    data = request.get_json() or {}
+    conversation_id = data.get("conversation_id")
+    if not conversation_id:
+        return jsonify({"error": "conversation_id diperlukan"}), 400
+    supabase = get_supabase()
+    try:
+        conv = supabase.table("conversations").select("id, participant_1, participant_2, status").eq("id", conversation_id).single().execute().data
+        if not conv:
+            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
+        uid = g.user_id
+        if uid != conv["participant_1"] and uid != conv["participant_2"]:
+            return jsonify({"error": "Anda bukan peserta percakapan ini"}), 403
+        if conv["status"] != "open":
+            return jsonify({"error": "Percakapan sudah selesai"}), 400
+        supabase.table("conversations").update({
+            "status": "completed", "completed_at": "now()", "completed_by": uid
+        }).eq("id", conversation_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/broadcast/conversations", methods=["GET"])
+@login_required
+def api_conversations():
+    """Get conversation threads for current user."""
+    supabase = get_supabase()
+    uid = g.user_id
+    try:
+        convs = supabase.table("conversations").select("id, participant_1, participant_2, title, status, last_message_at, created_at, completed_at, completed_by") \
+            .or_("participant_1.eq." + uid + ",participant_2.eq." + uid) \
+            .order("last_message_at", desc=True).limit(50).execute().data or []
+
+        # Enrich with notifications for each conversation
+        result = []
+        for c in convs:
+            other_id = c["participant_1"] if uid == c["participant_2"] else c["participant_2"]
+            other_name = other_id[:8]
+            try:
+                p = supabase.table("profiles").select("full_name").eq("id", other_id).single().execute().data
+                other_name = p.get("full_name", other_id[:8]) if p else other_id[:8]
+            except Exception:
+                pass
+            # Get messages in this conversation
+            msgs = []
+            try:
+                msgs_data = supabase.table("notifications").select("id, sender_id, sender_role, title, message, created_at") \
+                    .eq("conversation_id", c["id"]).order("created_at", asc=True).limit(100).execute().data or []
+                for m in msgs_data:
+                    msgs.append({
+                        "id": m["id"], "sender_id": m.get("sender_id"),
+                        "sender_role": m.get("sender_role"),
+                        "title": m.get("title"), "message": m.get("message"),
+                        "is_mine": m.get("sender_id") == uid,
+                        "created_at": str(m.get("created_at", ""))[:19].replace("T", " "),
+                    })
+            except Exception:
+                pass
+            result.append({
+                "id": c["id"], "title": c["title"], "status": c["status"],
+                "other_name": other_name, "other_id": other_id,
+                "last_message_at": str(c.get("last_message_at", ""))[:19].replace("T", " "),
+                "created_at": str(c.get("created_at", ""))[:19].replace("T", " "),
+                "completed_at": str(c.get("completed_at", ""))[:19].replace("T", " ") if c.get("completed_at") else None,
+                "messages": msgs,
+                "unread": any(not m.get("is_mine") for m in msgs[-3:]) if msgs else False,
+            })
+        return jsonify({"conversations": result})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "conversations": []}), 500
 @login_required
 def api_update_broadcast():
     """Edit notification title/message."""
