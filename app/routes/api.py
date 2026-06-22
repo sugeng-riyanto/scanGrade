@@ -4,6 +4,7 @@ import json
 import zipfile
 import uuid
 import time
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file, current_app
 from app.utils.auth import login_required, get_supabase
 from app.services.anti_cheat_service import validate_violation_log
@@ -645,6 +646,10 @@ def student_sync_draft():
                     answers = merged
             supabase.table("submissions").update({"answers": answers}).eq("id", existing[0]["id"]).execute()
         elif not existing:
+            client_started = data.get("started_at")
+            started_at_ts = client_started if client_started else int(time.time())
+            # Use client's started_at if earlier than now (more accurate to when user opened exam)
+            started_at_dt = datetime.fromtimestamp(started_at_ts / 1000 if started_at_ts > 1e10 else started_at_ts, tz=timezone.utc).isoformat()
             supabase.table("submissions").insert({
                 "exam_id": exam_id,
                 "student_id": g.user_id,
@@ -652,7 +657,14 @@ def student_sync_draft():
                 "score": 0,
                 "max_score": 100,
                 "status": "draft",
+                "started_at": started_at_dt,
             }).execute()
+        elif existing and existing[0].get("started_at") is None:
+            # Backfill started_at if missing (e.g. old drafts before this fix)
+            client_started = data.get("started_at")
+            if client_started:
+                started_at_dt = datetime.fromtimestamp(client_started / 1000 if client_started > 1e10 else client_started, tz=timezone.utc).isoformat()
+                supabase.table("submissions").update({"started_at": started_at_dt}).eq("id", existing[0]["id"]).execute()
     except Exception:
         pass
     finally:
