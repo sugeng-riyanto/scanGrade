@@ -828,3 +828,10 @@ def delete_submission(submission_id):
 @login_required
 def student_notifications():
     return render_template("student/notifications.html")
+
+
+@student_bp.route("/settings")
+@login_required
+def student_settings():
+    """Student settings page (password, data export, deletion request)."""
+    return render_template("student/settings.html")

@@ -55,10 +55,15 @@
 - **Auto-submit bypass confirm**: `submitExam(auto)` — anti-cheat auto-submit & waktu habis langsung submit tanpa konfirmasi
 - **SQL migrations 003 + 011**: `is_hidden`, `retracted`, `question_weights` JSONB, dan 11 anti-cheat columns sudah dijalankan di Supabase
 - **Load test 500 concurrent**: 0% errors, avg 147ms response time — semua endpoint stabil
+- **Data retention & PDP compliance**: Migration 018 (soft-delete + deletion_requests), auto-purge scheduler, export/delete API, student settings page `/student/settings`, CLI `flask purge-data`
+- **Broadcast murid fix**: `murid` role added to `api_send_broadcast` authorization (was `Unauthorized`)
+- **School_id filter**: broadcast API endpoints scope by `profiles.school_id` with try/except
+- **Linkify**: global `linkify()` function in base.html — URLs in messages become clickable `<a target="_blank">`
 
 ### In Progress
 - Many exams (Sejarah, Agama, PPKN, AD) masih punya answer key `None` — guru perlu isi via halaman baru answer keys
 - Whiteboard iteration: WebSocket reconnect handling, mobile responsive toolbar, drag-drop slide reorder
+- **Migration 018 not yet executed** — `supabase/migrations/018_data_retention.sql` must be run in Supabase SQL Editor for soft-delete columns + `deletion_requests` table
 
 ### Blocked
 - Tidak ada — semua DDL migrations sudah dijalankan di Supabase SQL Editor
@@ -78,14 +83,14 @@
 - **MCQ answer format**: Use dict `{answer, pages}` only when canvas/text data exists; keep string for backward compatibility
 
 ## Next Steps
-- Execute migrations `003_submission_hidden_retracted.sql` and `011_anti_cheat_settings.sql` in Supabase SQL Editor ✅
+- **Deploy latest commit** on VPS: `git pull origin main && systemctl restart scangrade`
+- **Run migration 017** in Supabase SQL Editor (`supabase/migrations/017_notifications.sql`) — creates notification tables + adds `school_id` to profiles
+- **Run migration 018** in Supabase SQL Editor (`supabase/migrations/018_data_retention.sql`) — soft-delete columns, `deletion_requests` table
+- **Backfill `profiles.school_id`**: `UPDATE profiles SET school_id = (au.raw_user_meta_data->>'school_id')::uuid FROM auth.users au WHERE profiles.id = au.id AND au.raw_user_meta_data->>'school_id' IS NOT NULL;`
 - Teachers need to set answer keys for exams that show score=0 (Sejarah, Agama, PPKN, AD have `None` keys)
 - Implement `randomize_questions` and `randomize_options` in take_exam frontend ✅
 - Test full anti-cheat flow: tab switch → graduated penalty → auto-submit
 - Test PDF download with MCQ canvas overlays
-- Test MCQ drawing tools (ruler, protractor, compass, triangle) now that canvas init works
-- Load test with 500 concurrent simulated connections ✅
-- Whiteboard iteration: WebSocket reconnect, mobile responsive, drag-drop slide reorder
 
 ## Prioritas RICE
 Setiap task dinilai dengan formula:
@@ -119,6 +124,7 @@ Setiap task dinilai dengan formula:
 - Jawaban guru untuk komentar: mulai dari huruf besar setelah titik dan spasi — `calcFinal()` panggil 50ms setelah input berubah
 - `_saveCurrentPage()` dan `getAnswersLight()`/`getAnswersWithCanvas()` sudah diupdate untuk MCQ — canvas di `ec-canvas-{i}` di-init melalui `initEcCanvas(i)`
 - Essay section's SVG overlay drag/rotate handles: use `startToolRotate(i,'ruler',$event)` — 3-arg form (was `startToolRotate('ruler',$event)` broken)
+- **Data retention**: auto-purge 24h scheduler + manual `flask purge-data`. Soft-delete (90d grace) then hard-delete. Deletion requests need 14-day cooldown (PSE Kominfo). Export returns JSON with all user data.
 
 ## Relevant Files
 - `app/__init__.py`: Flask app factory, two supabase clients, `from_json`/`tz`/`tz_short` filters, `greeting()`/`greeting_en()` globals, `cos`/`sin` globals, `DEFAULT_TZ_OFFSET=7`
@@ -158,6 +164,9 @@ Setiap task dinilai dengan formula:
 - `supabase/migrations/003_submission_hidden_retracted.sql`: ✅ EXECUTED
 - `supabase/migrations/011_anti_cheat_settings.sql`: ✅ EXECUTED
 - `supabase/migrations/013_whiteboard.sql`: Whiteboard tables (7 new tables)
+- `supabase/migrations/018_data_retention.sql`: Soft-delete columns, `deletion_requests` table — **not yet executed**
+- `app/services/data_retention_service.py`: Data retention logic, purge scheduler, deletion request handling, data export
+- `app/templates/student/settings.html`: Student settings page (password, data export, deletion request)
 - `locustfile.py`: Load test suite for 500 concurrent users
 - `deploy/tune-production.sh`: Production tuning (NGINX, kernel, file limits)
 - `seed.py`: seed script with super_admin + 2 schools (SMP/SMA)
