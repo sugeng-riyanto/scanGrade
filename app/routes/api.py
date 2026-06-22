@@ -1914,3 +1914,46 @@ def api_deletion_status():
         return jsonify({"request": res[0] if res else None})
     except Exception:
         return jsonify({"request": None})
+
+
+@api_bp.route("/admin/deletion-requests", methods=["GET"])
+@login_required
+def api_admin_deletion_requests():
+    """List all deletion requests (admin only)."""
+    role = g.get("user_role")
+    if role not in ("super_admin", "admin_sekolah"):
+        return jsonify({"error": "Forbidden"}), 403
+    supabase = get_supabase()
+    try:
+        res = supabase.table("deletion_requests").select("id, user_id, reason, status, requested_at, notes").order("requested_at", desc=True).limit(100).execute().data or []
+        enriched = []
+        for r in res:
+            uname = r["user_id"][:8]
+            try:
+                p = supabase.table("profiles").select("full_name").eq("id", r["user_id"]).single().execute().data
+                if p:
+                    uname = p.get("full_name", r["user_id"][:8])
+            except Exception:
+                pass
+            enriched.append({**r, "user_name": uname})
+        return jsonify({"requests": enriched})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "requests": []}), 500
+
+
+@api_bp.route("/admin/deletion-requests/process", methods=["POST"])
+@login_required
+def api_admin_process_deletion():
+    """Approve or reject a deletion request (admin only)."""
+    role = g.get("user_role")
+    if role not in ("super_admin", "admin_sekolah"):
+        return jsonify({"error": "Forbidden"}), 403
+    data = request.get_json() or {}
+    request_id = data.get("id")
+    action = data.get("action")
+    notes = str(data.get("notes", "")).strip()
+    if not request_id or action not in ("approve", "reject"):
+        return jsonify({"error": "Data tidak lengkap"}), 400
+    from app.services.data_retention_service import process_deletion_request
+    result, status = process_deletion_request(request_id, g.user_id, action, notes)
+    return jsonify(result), status

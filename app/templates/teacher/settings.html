@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Pengaturan - ScanGrade{% endblock %}
+{% block page_title %}Pengaturan{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="{
+    lang: localStorage.getItem('sg_lang') || 'id',
+    pwNew: '', pwConfirm: '', pwMsg: '',
+    exportLoading: false, exportData: null,
+    sending: false,
+    changePassword() {
+        if (!this.pwNew) { this.pwMsg = 'Isi password baru'; return; }
+        if (this.pwNew.length < 6) { this.pwMsg = 'Password minimal 6 karakter'; return; }
+        if (this.pwNew !== this.pwConfirm) { this.pwMsg = 'Password tidak cocok'; return; }
+        this.pwMsg = ''; this.sending = true;
+        var fd = new FormData();
+        fd.append('password', this.pwNew);
+        fetch('/teacher/reset-password', {method:'POST', body: fd})
+        .then(r=>r.json()).then(d => {
+            this.pwMsg = d.success ? 'Password berhasil diubah' : 'Gagal: ' + (d.error||'');
+            if (d.success) { this.pwNew = ''; this.pwConfirm = ''; }
+        }).catch(()=>{ this.pwMsg = 'Error koneksi'; }).finally(()=>{ this.sending = false; });
+    },
+    exportData() {
+        this.exportLoading = true; this.exportData = null;
+        fetch('/api/account/export-data').then(r=>r.json()).then(d => { this.exportData = d; }).catch(()=>{ alert('Gagal export'); }).finally(()=>{ this.exportLoading = false; });
+    }
+}">
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-lock text-primary-500 mr-2"></i>Ubah Password</h3>
+        <form @submit.prevent="changePassword()" class="space-y-4 max-w-md">
+            <div><label class="block text-sm font-bold text-surface-700 mb-1">Password Baru</label><input type="password" x-model="pwNew" required minlength="6" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700"></div>
+            <div><label class="block text-sm font-bold text-surface-700 mb-1">Konfirmasi Password Baru</label><input type="password" x-model="pwConfirm" required class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700"></div>
+            <button type="submit" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="sending"><span x-text="sending ? 'Menyimpan...' : 'Simpan Password'"></span></button>
+            <p x-show="pwMsg" class="text-xs font-bold" :class="pwMsg.includes('berhasil') ? 'text-emerald-600' : 'text-red-600'" x-text="pwMsg"></p>
+        </form>
+    </div>
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-download text-primary-500 mr-2"></i>Ekspor Data Pribadi</h3>
+        <p class="text-sm text-surface-600 mb-4">Unduh seluruh data Anda dalam format JSON.</p>
+        <button @click="exportData()" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="exportLoading"><span x-text="exportLoading ? 'Mengumpulkan...' : 'Ekspor Data Saya'"></span></button>
+        <template x-if="exportData">
+            <div class="mt-4">
+                <p class="text-xs font-bold text-emerald-600 mb-2">Data siap.</p>
+                <button @click="(function(){ var a=document.createElement('a'); a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(exportData,null,2)); a.download='scangrade-data-{{ g.user_id[:8] }}.json'; a.click(); })()" class="px-4 py-2 border-2 border-emerald-600 text-emerald-700 rounded-xl font-bold text-xs hover:bg-emerald-50 transition"><i class="fas fa-save mr-1"></i>Simpan File JSON</button>
+            </div>
+        </template>
+    </div>
+</div>
+{% endblock %}
