@@ -346,7 +346,13 @@ def demo_settings():
                     supabase.table("school_settings").insert({"id": 1, "demo_settings": settings}).execute()
             except Exception:
                 pass
-        return jsonify({"success": True})
+    return jsonify({"success": True})
+
+
+@super_bp.route("/notifications")
+@_sa_required
+def super_admin_notifications():
+    return render_template("super_admin/notifications.html")
 
     current = {}
     try:
