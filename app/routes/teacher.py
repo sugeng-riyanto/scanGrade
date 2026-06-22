@@ -2455,6 +2455,13 @@ def accreditation_report(exam_id):
 
 
 @teacher_bp.route("/notifications")
-@teacher_or_admin_required
+@login_required
 def teacher_notifications():
     return render_template("teacher/notifications.html")
+
+
+@teacher_bp.route("/settings")
+@login_required
+def teacher_settings():
+    """Teacher settings page (password, data export, deletion request)."""
+    return render_template("teacher/settings.html")

@@ -4,6 +4,7 @@
 {% block content %}
 <div class="space-y-6" x-data="{
     lang: localStorage.getItem('sg_lang') || 'id',
+    activeTab: 'send',
     formTitle: '', formMessage: '', formTarget: 'guru', sendMode: 'all', selectedRecipients: [], recipients: [],
     sending: false, sendMsg: '',
     notifs: [], loading: true,
@@ -64,8 +65,27 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({id: n.id})
         }).then(r=>r.json()).then(d => { if (d.success) this.fetchNotifs(); });
+    },
+    // Deletion requests
+    delReqs: [], delReqsLoading: true,
+    fetchDelReqs() {
+        this.delReqsLoading = true;
+        fetch('/api/admin/deletion-requests').then(r=>r.json()).then(d => { this.delReqs = d.requests || []; }).catch(()=>{}).finally(()=>{ this.delReqsLoading = false; });
+    },
+    processDelReq(id, action) {
+        if (!confirm(action==='approve' ? 'Setujui hapus akun ini? Data akan dihapus permanen.' : 'Tolak permintaan ini?')) return;
+        fetch('/api/admin/deletion-requests/process', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, action})})
+        .then(r=>r.json()).then(d => { if (d.success) this.fetchDelReqs(); });
     }
 }" x-init="fetchNotifs()" x-effect="fetchRecipients()">
+    <!-- Tab Navigation -->
+    <div class="flex gap-1 bg-surface-100 rounded-xl p-1">
+        <button @click="activeTab='send'" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition" :class="activeTab==='send' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-bullhorn mr-1.5"></i>Kirim & Riwayat</button>
+        <button @click="activeTab='delreqs'; fetchDelReqs()" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition" :class="activeTab==='delreqs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-user-slash mr-1.5"></i>Hapus Akun</button>
+    </div>
+
+    <template x-if="activeTab === 'send'">
+    <div>
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
         <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Kirim Pengumuman</h3>
         <form @submit.prevent="sendBroadcast()" class="space-y-4">
@@ -165,5 +185,36 @@
             </template>
         </div>
     </div>
+    </template>
+
+    <!-- Deletion Requests -->
+    <template x-if="activeTab === 'delreqs'">
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-user-slash text-red-500 mr-2"></i>Permintaan Hapus Akun</h3>
+        <template x-if="delReqsLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
+        <template x-if="!delReqsLoading && delReqs.length === 0"><div class="text-center py-8 text-surface-400">Tidak ada permintaan</div></template>
+        <div class="space-y-3" x-show="!delReqsLoading">
+            <template x-for="r in delReqs" :key="r.id">
+                <div class="p-4 rounded-xl bg-surface-50 border border-surface-100">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-surface-800" x-text="r.user_name"></p>
+                            <p class="text-xs text-surface-500 mt-0.5" x-text="'ID: ' + r.user_id.slice(0,8)"></p>
+                            <p class="text-sm text-surface-600 mt-1" x-show="r.reason"><span class="font-medium">Alasan:</span> <span x-text="r.reason"></span></p>
+                            <p class="text-[10px] text-surface-400 mt-1" x-text="'Diajukan: ' + r.requested_at"></p>
+                            <span class="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-bold" :class="r.status==='pending' ? 'bg-amber-100 text-amber-700' : r.status==='approved' ? 'bg-red-100 text-red-700' : 'bg-surface-200 text-surface-500'" x-text="r.status"></span>
+                        </div>
+                        <template x-if="r.status==='pending'">
+                            <div class="flex gap-2 ml-3 shrink-0">
+                                <button @click="processDelReq(r.id, 'approve')" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-xs transition">Setujui</button>
+                                <button @click="processDelReq(r.id, 'reject')" class="px-3 py-1.5 border border-surface-300 text-surface-600 hover:bg-surface-100 rounded-lg font-bold text-xs transition">Tolak</button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+    </template>
 </div>
 {% endblock %}

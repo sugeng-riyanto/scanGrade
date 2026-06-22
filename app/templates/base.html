@@ -234,6 +234,8 @@ html { transition: background-color .3s, color .3s; }
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
             <a href="/teacher/notifications" class="nav-item {% if request.path == '/teacher/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pengumuman</span><template x-if="unreadCount > 0"><span class="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="unreadCount"></span></template></a>
+            <div class="nav-section-title pt-2">Pengaturan</div>
+            <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan Akun</span></a>
             <div class="nav-section-title pt-2">Tools</div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
             <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span>Mata Pelajaran</span></a>
@@ -532,11 +534,13 @@ function linkify(text) {
     <a href="/admin-sekolah/teachers" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/teachers' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chalkboard-teacher text-lg mb-0.5"></i><span>Guru</span></a>
     <a href="/admin-sekolah/students" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/students' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-user-graduate text-lg mb-0.5"></i><span>Murid</span></a>
     <a href="/admin-sekolah/subscription" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/subscription' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-credit-card text-lg mb-0.5"></i><span>Langganan</span></a>
+    <a href="/admin-sekolah/notifications" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/notifications' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-bullhorn text-lg mb-0.5"></i><span>Info</span></a>
     {% elif role == 'guru' %}
     <a href="/teacher/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span></a>
     <a href="/teacher/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.startswith('/teacher/exams') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span>Ujian</span></a>
     <a href="/teacher/grading" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/grading' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-pen-alt text-lg mb-0.5"></i><span>Koreksi</span></a>
     <a href="/teacher/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.startswith('/teacher/results') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-bar text-lg mb-0.5"></i><span>Nilai</span></a>
+    <a href="/teacher/settings" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/settings' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-cog text-lg mb-0.5"></i><span>Akun</span></a>
     {% elif role == 'murid' %}
     <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-home text-lg mb-0.5"></i><span>Beranda</span></a>
     <a href="/student/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/exams' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span>Ujian</span></a>
