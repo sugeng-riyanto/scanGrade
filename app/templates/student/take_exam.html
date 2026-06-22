@@ -662,10 +662,24 @@
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
+const EXAM_DURATION = {{ (exam.duration_minutes or 120) * 60 }};
+const EXAM_STARTED_AT = {{ (exam_started_at or '') | tojson }};
 
 function examApp(duration, totalQ) {
+    // Timer recovery: server started_at > localStorage > duration
+    var serverStart = EXAM_STARTED_AT ? new Date(EXAM_STARTED_AT).getTime() : null;
+    var localStart = parseInt(localStorage.getItem('exam_started_' + '{{ exam.id }}'));
+    var effectiveStart = serverStart || localStart || null;
+    var elapsed = effectiveStart ? Math.floor((Date.now() - effectiveStart) / 1000) : 0;
+    var initialTime = Math.max(0, EXAM_DURATION - elapsed);
+    if (!localStart && serverStart) {
+        localStorage.setItem('exam_started_' + '{{ exam.id }}', String(effectiveStart));
+    } else if (!localStart && !serverStart) {
+        // First load ever — save now as starting point
+        localStorage.setItem('exam_started_' + '{{ exam.id }}', String(Date.now()));
+    }
     return {
-        timeLeft: duration,
+        timeLeft: initialTime,
         submitted: false,
         page: 1,
         totalPages: {{ (exam.pdf_page_urls or []) | length }},
@@ -1834,10 +1848,13 @@ function examApp(duration, totalQ) {
             this._syncInFlight = true;
             this.syncStatus = 'saving';
             this.syncLabel = 'Menyinkronkan...';
+            var body = { exam_id: '{{ exam.id }}', answers: lightData, light: true };
+            var ls = localStorage.getItem('exam_started_' + '{{ exam.id }}');
+            if (ls) body.started_at = parseInt(ls);
             fetch('/api/student/sync-draft', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ exam_id: '{{ exam.id }}', answers: lightData, light: true })
+                body: JSON.stringify(body)
             })
             .then(r => { if (r.ok) { this.lastSyncHash = hash; this.dirty = false; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
             .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; this.pendingSync = true; })
@@ -1848,10 +1865,13 @@ function examApp(duration, totalQ) {
             this._saveCurrentPage();
             const data = this.getAnswersWithCanvas();
             this._canvasSyncInFlight = true;
+            var body = { exam_id: '{{ exam.id }}', answers: data, light: false };
+            var ls = localStorage.getItem('exam_started_' + '{{ exam.id }}');
+            if (ls) body.started_at = parseInt(ls);
             fetch('/api/student/sync-draft', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ exam_id: '{{ exam.id }}', answers: data, light: false })
+                body: JSON.stringify(body)
             })
             .then(r => { if (r.ok) { this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
             .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; })

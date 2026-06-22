@@ -301,7 +301,15 @@ def take_exam(exam_id):
             except (json.JSONDecodeError, TypeError):
                 exam[_field] = {}
     anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
-    resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config))
+    # Cek existing draft submission untuk timer persist across devices
+    exam_started_at = None
+    try:
+        draft = supabase.table("submissions").select("started_at").eq("exam_id", exam_id).eq("student_id", g.user_id).eq("status", "draft").limit(1).execute()
+        if draft.data and draft.data[0].get("started_at"):
+            exam_started_at = draft.data[0]["started_at"]
+    except Exception:
+        pass
+    resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at))
     # Allow short browser caching for exam page (exam data is static once started)
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
