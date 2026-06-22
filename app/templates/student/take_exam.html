@@ -45,7 +45,6 @@
 .tool-ctrl-btn .range-wrap { position: absolute; top: 0; left: 26px; width: 60px; height: 22px; background: rgba(30,41,59,0.85); border-radius: 0 4px 4px 0; display: flex; align-items: center; padding: 0 6px; pointer-events: none; }
 .tool-ctrl-btn .range-wrap input { width: 100%; height: 3px; pointer-events: auto; cursor: ew-resize; }
 .essay-canvas-area { position: relative; }
-.ec-canvas-layer { touch-action: none; }
 [x-cloak] { display: none !important; }
 @media (max-width: 768px) {
     .sticky-questions { position: static !important; }
@@ -92,20 +91,6 @@
         </div>
     </div>
 
-    <!-- Progress Bar -->
-    <div x-show="!submitted && !showExamAgreement && totalQ > 0"
-         class="mb-2 px-1">
-        <div class="flex items-center justify-between text-[10px] font-bold text-surface-500 mb-1">
-            <span x-text="'Terjawab: ' + answeredCount + '/' + totalQ + ' (' + Math.round(answeredCount/totalQ*100) + '%)'"></span>
-            <span x-text="totalQ - answeredCount + ' soal belum'"></span>
-        </div>
-        <div class="w-full h-2 bg-surface-100 rounded-full overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-300"
-                 :style="'width:' + (answeredCount/totalQ*100) + '%'"
-                 :class="answeredCount === totalQ ? 'bg-emerald-500' : 'bg-primary-500'"></div>
-        </div>
-    </div>
-
     <!-- Device Status Bar -->
     <div x-show="!submitted && !showExamAgreement"
          class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex items-center gap-3 text-[10px] font-bold text-surface-500 border border-surface-100 shadow-sm pointer-events-none select-none">
@@ -130,16 +115,6 @@
         </div>
         <span class="ml-auto text-surface-300 text-[8px]">Status perangkat</span>
     </div>
-
-    <!-- Recovery Code Banner -->
-    {% if recovery_code %}
-    <div class="mb-2 px-1 py-1.5 rounded-lg bg-primary-50 border border-primary-200 flex items-center gap-2 text-[10px] font-bold text-primary-700">
-        <i class="fas fa-shield-alt text-primary-500"></i>
-        <span>Kode Recovery:</span>
-        <span class="text-base tracking-[0.3em] font-extrabold text-primary-800 bg-white px-2 py-0.5 rounded border border-primary-200">{{ recovery_code }}</span>
-        <span class="text-primary-400 font-normal">— Simpan kode ini untuk melanjutkan jika browser crash</span>
-    </div>
-    {% endif %}
 
     <!-- Violation Banner -->
     <div x-show="showViolationBanner && !submitted" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 -translate-y-4" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
@@ -183,21 +158,13 @@
         </div>
     </template>
 
-    <!-- Scientific Calculator (standar matematika/fisika) — draggable + resizable -->
+    <!-- Scientific Calculator (standar matematika/fisika) -->
     <div x-show="showCalculator && !submitted && !showExamAgreement" x-transition x-cloak
-         x-data="{ cx: 0, cy: 0, dragging: false, startX: 0, startY: 0, calcBig: false }"
-         :style="'position:fixed;bottom:0;right:0;margin:0 ' + (-cx) + 'px ' + (-cy) + 'px 0;z-index:50;transform:scale(' + (calcBig?'1.35':'1') + ');transform-origin:bottom right"
-         class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none transition-all duration-200"
+         class="fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
          @click.outside="showCalculator = false">
-        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700 cursor-grab active:cursor-grabbing select-none"
-             @mousedown="dragging=true; startX=$event.clientX; startY=$event.clientY"
-             @touchstart="dragging=true; startX=$event.touches[0].clientX; startY=$event.touches[0].clientY"
-             @mousemove="if(dragging){cx=startX-$event.clientX;cy=startY-$event.clientY}"
-             @touchmove="if(dragging){cx=startX-$event.touches[0].clientX;cy=startY-$event.touches[0].clientY}"
-             @mouseup="dragging=false" @touchend="dragging=false" @mouseleave="dragging=false">
+        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
             <span class="text-[11px] font-extrabold text-slate-200 flex items-center gap-1.5"><i class="fas fa-calculator text-orange-400"></i> Scientific</span>
             <div class="flex items-center gap-2">
-                <button @click="calcBig = !calcBig" class="text-slate-400 hover:text-white text-xs px-1" :title="calcBig?'Persempit':'Perbesar'"><i class="fas" :class="calcBig?'fa-compress':'fa-expand'"></i></button>
                 <button @click="calcAngleMode = calcAngleMode === 'DEG' ? 'RAD' : 'DEG'"
                         class="text-[9px] font-extrabold px-1.5 py-0.5 rounded"
                         :class="calcAngleMode === 'DEG' ? 'bg-orange-500/30 text-orange-300' : 'bg-slate-700 text-slate-300'"
@@ -422,7 +389,8 @@
                                     </div>
                                 </div>
                                 <canvas :id="'ec-canvas-' + i"
-                                        class="absolute inset-0 w-full ec-canvas-layer"></canvas>
+                                        class="absolute inset-0 w-full h-full"
+                                        :style="'cursor:' + (essayCanvasMode[i]==='line' ? 'crosshair' : essayCanvasMode[i]==='eraser' ? 'cell' : essayCanvasMode[i]==='text' ? 'text' : 'crosshair') + ';touch-action:none'"></canvas>
                                 <!-- Ruler overlay -->
                                   <div x-show="showRuler[i]" class="tool-overlay" :id="'ruler-overlay-' + i">
                                      <svg :id="'ruler-svg-' + i" style="overflow:visible;pointer-events:none"
@@ -541,21 +509,12 @@
                                                 <template x-for="sz in [12,14,16,18,20,24,28,32]"><option :value="sz" x-text="sz+'pt'"></option></template>
                                             </select>
                                              <select x-model="box.fontFamily" @change="applyBoxFont(box); textBoxes={...(textBoxes||{})}" class="text-[9px]">
-                                                  <option value="Nunito, sans-serif">Nunito</option>
-                                                  <option value="Arial, sans-serif">Arial</option>
-                                                  <option value="Georgia, serif">Georgia</option>
-                                                  <option value="Courier New, monospace">Courier</option>
-                                                  <option value="Times New Roman, serif">Times NR</option>
-                                              </select>
-                                              <button type="button" @click="box.bold = !box.bold; applyBoxFont(box); textBoxes={...(textBoxes||{})}"
-                                                      class="text-white text-[10px] w-5 h-5 rounded font-bold"
-                                                      :class="box.bold ? 'bg-orange-500' : 'bg-slate-600'"><b>B</b></button>
-                                              <button type="button" @click="box.italic = !box.italic; applyBoxFont(box); textBoxes={...(textBoxes||{})}"
-                                                      class="text-white text-[10px] w-5 h-5 rounded font-bold italic"
-                                                      :class="box.italic ? 'bg-orange-500' : 'bg-slate-600'"><i>I</i></button>
-                                              <button type="button" @click="box.underline = !box.underline; applyBoxFont(box); textBoxes={...(textBoxes||{})}"
-                                                      class="text-white text-[10px] w-5 h-5 rounded font-bold"
-                                                      :class="box.underline ? 'bg-orange-500' : 'bg-slate-600'"><u>U</u></button>
+                                                 <option value="Nunito, sans-serif">Nunito</option>
+                                                 <option value="Arial, sans-serif">Arial</option>
+                                                 <option value="Georgia, serif">Georgia</option>
+                                                 <option value="Courier New, monospace">Courier</option>
+                                                 <option value="Times New Roman, serif">Times NR</option>
+                                             </select>
                                              <button type="button" @click="box.orient = box.orient === 'vertical' ? 'horizontal' : 'vertical'; textBoxes={...(textBoxes||{})}"
                                                      class="text-white text-[10px] px-1.5 py-0.5 rounded font-bold"
                                                      :class="box.orient === 'vertical' ? 'bg-orange-500' : 'bg-slate-600'"
@@ -565,8 +524,8 @@
                                         </div>
                                         <div class="box-handle"><i class="fas fa-grip-lines text-white text-[8px]"></i></div>
                                         <button type="button" class="box-del" @click="removeTextBox(i, bi)" @mousedown.stop @touchstart.stop>&times;</button>
-                                          <textarea x-model="box.text"
-                                                   :style="'font-size:' + (box.fontSize || 16) + 'px; font-family:' + (box.fontFamily || 'Times New Roman, serif') + '; writing-mode:' + (box.orient === 'vertical' ? 'vertical-rl' : 'horizontal-tb') + ';' + (box.bold ? 'font-weight:bold;' : '') + (box.italic ? 'font-style:italic;' : '') + (box.underline ? 'text-decoration:underline;' : '')"
+                                         <textarea x-model="box.text"
+                                                  :style="'font-size:' + (box.fontSize || 16) + 'px; font-family:' + (box.fontFamily || 'Times New Roman, serif') + '; writing-mode:' + (box.orient === 'vertical' ? 'vertical-rl' : 'horizontal-tb') + ';'"
                                                   @input="onTextBoxInput(i); textBoxes = {...(textBoxes || {})}"
                                                   @copy.prevent @paste.prevent @cut.prevent @contextmenu.prevent
                                                   placeholder="Ketik..."
@@ -813,15 +772,10 @@ function examApp(duration, totalQ) {
         lastSyncHash: '',
         _syncInFlight: false,
         _canvasSyncInFlight: false,
-        // Review & submit state
-        showReview: false,
-        submitConfirmDisabled: true,
-        submitConfirmTimer: 3,
         // Anti-cheat state
         violationCount: 0,
         totalPenalty: 0,
         showViolationBanner: false,
-        showViolationModal: false,
         violationMessage: '',
         violationType: 'warning',
         antiCheat: {{ {
@@ -954,7 +908,6 @@ function examApp(duration, totalQ) {
                 if (this.submitted) return;
                 if (document.hidden) {
                     console.log('[AntiCheat] Tab hidden, starting 1.5s timer');
-                    this._hiddenAt = Date.now();
                     this._blurTimer = setTimeout(() => { this.handleViolation(); }, 1500);
                 } else {
                     console.log('[AntiCheat] Tab visible, clearing timer');
@@ -1004,24 +957,13 @@ function examApp(duration, totalQ) {
             });
         },
         handleViolation() {
-            // Grace period: < 3 detik dianggap accidental (notifikasi, dll)
-            if (this._hiddenAt && Date.now() - this._hiddenAt < 3000) {
-                console.log('[AntiCheat] Grace period — under 3s, skipped');
-                this.showViolationBanner = true;
-                this.violationMessage = 'Kembali tepat waktu. Perpindahan singkat diabaikan.';
-                this.violationType = 'warning';
-                setTimeout(() => { this.showViolationBanner = false; }, 3000);
-                return;
-            }
             console.log('[AntiCheat] Violation #' + (this.violationCount + 1));
             this.violationCount++;
             const base = this.antiCheat.penalty_per_violation || 5;
             let currentPenalty = 0;
             if (this.violationCount === 1) {
-                this.violationMessage = 'PERHATIAN! Anda meninggalkan halaman ujian. Ini tercatat oleh sistem. Pelanggaran berikutnya akan dikenakan penalti.';
+                this.violationMessage = 'PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';
                 this.violationType = 'warning';
-                this.showViolationModal = true;
-                return;
             } else if (this.violationCount === 2) {
                 currentPenalty = base;
                 this.violationMessage = 'PELANGGARAN #' + this.violationCount + '! Penalti: -' + base + ' poin';
@@ -1159,50 +1101,6 @@ function examApp(duration, totalQ) {
         },
         setEssayCanvasMode(i, mode) {
             this.essayCanvasMode[i] = mode;
-            this.$nextTick(() => {
-                this._updateCanvasCursor(i);
-                if (mode === 'text') this._addTextBox(i);
-            });
-        },
-        _addTextBox(i) {
-            const p_idx = this.page - 1;
-            if (!this.textBoxes[i]) this.textBoxes[i] = {};
-            if (!this.textBoxes[i][p_idx]) this.textBoxes[i][p_idx] = [];
-            const existing = this.textBoxes[i][p_idx];
-            // If there's already a text box on this page, just focus the last one
-            if (existing.length > 0 && existing[existing.length - 1].text === '') {
-                this.$nextTick(() => {
-                    const area = document.getElementById('ec-area-' + i);
-                    if (area) {
-                        const t = area.querySelector('.text-box:last-child textarea');
-                        if (t) { t.focus(); t.select(); }
-                    }
-                });
-                return;
-            }
-            existing.push({
-                x_pct: 0.35 + Math.random() * 0.3,
-                y_pct: 0.08 + (existing.length % 10) * 0.06,
-                text: '',
-                fontSize: this.textFontSize[i] || 16,
-                fontFamily: this.textFontFamily[i] || 'Times New Roman, serif',
-                orient: 'horizontal'
-            });
-            this.onTextBoxInput(i);
-            this.$nextTick(() => {
-                const area = document.getElementById('ec-area-' + i);
-                if (area) {
-                    const t = area.querySelector('.text-box:last-child textarea');
-                    if (t) { t.focus(); t.select(); }
-                }
-            });
-        },
-        _updateCanvasCursor(i) {
-            const el = document.getElementById('ec-canvas-' + i);
-            if (!el) return;
-            const m = this.essayCanvasMode[i];
-            const cursors = { pen: 'crosshair', line: 'crosshair', eraser: 'cell', text: 'text', compass: 'crosshair' };
-            el.style.cursor = cursors[m] || 'crosshair';
         },
         initEcCanvas(i) {
             const areas = document.querySelectorAll('[id^="ec-area-' + i + '"]');
@@ -1232,16 +1130,12 @@ function examApp(duration, totalQ) {
             if (this.ecCanvasInited[i]) {
                 const rect = area.getBoundingClientRect();
                 const imgEl = area.querySelector('img');
-                const natW = imgEl ? imgEl.naturalWidth : rect.width;
-                const natH = imgEl ? imgEl.naturalHeight : rect.height;
-                const cssW = imgEl ? imgEl.offsetWidth : rect.width;
-                const cssH = imgEl ? imgEl.offsetHeight : rect.height;
-                if (cssW > 0 && natW > 0 && (canvas.width !== natW || canvas.height !== natH)) {
+                const targetW = imgEl ? imgEl.offsetWidth : rect.width;
+                const targetH = imgEl ? imgEl.offsetHeight : rect.height;
+                if (targetW > 0 && (canvas.width !== Math.round(targetW) || canvas.height !== Math.round(targetH))) {
                     const oldData = canvas.toDataURL();
-                    canvas.width = natW;
-                    canvas.height = natH;
-                    canvas.style.width = cssW + 'px';
-                    canvas.style.height = cssH + 'px';
+                    canvas.width = targetW;
+                    canvas.height = targetH;
                     const ctx = canvas.getContext('2d');
                     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
                     const img = new Image();
@@ -1252,19 +1146,15 @@ function examApp(duration, totalQ) {
             }
             const imgEl = area.querySelector('img');
             const rect = area.getBoundingClientRect();
-            const cssW = imgEl && imgEl.offsetWidth > 0 ? imgEl.offsetWidth : (rect.width || 700);
-            const cssH = imgEl && imgEl.offsetHeight > 0 ? imgEl.offsetHeight : (rect.height || 500);
-            const natW = imgEl && imgEl.naturalWidth > 0 ? imgEl.naturalWidth : cssW;
-            const natH = imgEl && imgEl.naturalHeight > 0 ? imgEl.naturalHeight : cssH;
-            canvas.width = natW;
-            canvas.height = natH;
-            canvas.style.width = cssW + 'px';
-            canvas.style.height = cssH + 'px';
+            const targetW = imgEl && imgEl.offsetWidth > 0 ? imgEl.offsetWidth : (rect.width || 700);
+            const targetH = imgEl && imgEl.offsetHeight > 0 ? imgEl.offsetHeight : (rect.height || 500);
+            canvas.width = targetW;
+            canvas.height = targetH;
             const ctx = canvas.getContext('2d');
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
-            ctx.lineWidth = parseFloat(this.essayLineWidth[i]) || 1.5;
+            ctx.lineWidth = 2;
             this.essayCanvasMode[i] = this.essayCanvasMode[i] || 'pen';
             this.essayCanvasColor[i] = this.essayCanvasColor[i] || '#0000ff';
             this.essayLineWidth[i] = this.essayLineWidth[i] || '1.5';
@@ -1409,9 +1299,6 @@ function examApp(duration, totalQ) {
                     ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
                 } else {
-                    ctx.lineWidth = parseFloat(this.essayLineWidth[i]) || 1;
-                    ctx.strokeStyle = this.essayCanvasColor[i] || '#0000ff';
-                    ctx.setLineDash([]);
                     ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(p.x, p.y); ctx.stroke();
                 }
                 lx = p.x; ly = p.y;
@@ -1464,24 +1351,16 @@ function examApp(duration, totalQ) {
             document.addEventListener('keydown', onKey);
             this.ecCanvasInited[i] = true;
             this.canvasDraw[i] = { el: canvas, ctx };
-            this._updateCanvasCursor(i);
             // Observe resize so canvas dimensions stay correct when element becomes visible
             if (area._ecResizeObserver) area._ecResizeObserver.disconnect();
             const ro = new ResizeObserver(() => {
                 if (this.ecCanvasInited[i] && document.getElementById('ec-canvas-' + i)) {
                     const r = area.getBoundingClientRect();
-                    const imgEl2 = area.querySelector('img');
                     const c = document.getElementById('ec-canvas-' + i);
-                    const nnatW = imgEl2 && imgEl2.naturalWidth > 0 ? imgEl2.naturalWidth : r.width;
-                    const nnatH = imgEl2 && imgEl2.naturalHeight > 0 ? imgEl2.naturalHeight : r.height;
-                    const ncssW = r.width;
-                    const ncssH = r.height;
-                    if (c && ncssW > 0 && nnatW > 0 && (c.width !== nnatW || c.height !== nnatH)) {
+                    if (c && (c.width !== Math.round(r.width) || c.height !== Math.round(r.height))) {
                         const old = c.toDataURL();
-                        c.width = nnatW;
-                        c.height = nnatH;
-                        c.style.width = ncssW + 'px';
-                        c.style.height = ncssH + 'px';
+                        c.width = r.width || 700;
+                        c.height = r.height || 400;
                         const cx = c.getContext('2d');
                         cx.lineCap = 'round'; cx.lineJoin = 'round';
                         const img = new Image();
@@ -1712,8 +1591,6 @@ function examApp(duration, totalQ) {
                     ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
                 } else {
-                    ctx.lineWidth = parseFloat(this.canvasWidth[i]) || 2;
-                    ctx.strokeStyle = this.canvasColor[i] || '#000';
                     ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(p.x, p.y); ctx.stroke();
                 }
                 lx = p.x; ly = p.y;
@@ -1833,27 +1710,11 @@ function examApp(duration, totalQ) {
         },
         saveToLocal() {
             try {
-                const data = this.getAnswersLight();
+                const data = this.getAnswers();
                 const payload = { answers: data, savedAt: Date.now(), examId: '{{ exam.id }}' };
-                const json = JSON.stringify(payload);
-                if (json.length > 4 * 1024 * 1024) {
-                    console.warn('localStorage draft too large (' + (json.length/1024/1024).toFixed(1) + 'MB), skipping canvas');
-                    const light = this.getAnswersLight();
-                    payload.answers = light;
-                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
-                } else {
-                    localStorage.setItem('exam_draft_' + '{{ exam.id }}', json);
-                }
+                localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
             } catch(e) {
-                if (e.name === 'QuotaExceededError' || e.code === 22) {
-                    console.warn('localStorage quota exceeded, saving light data only');
-                    try {
-                        const light = this.getAnswersLight();
-                        localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify({ answers: light, savedAt: Date.now(), examId: '{{ exam.id }}', light: true }));
-                    } catch(e2) {}
-                } else {
-                    console.warn('localStorage save failed:', e);
-                }
+                console.warn('localStorage save failed:', e);
             }
         },
         getAnswersLight() {
@@ -2012,22 +1873,8 @@ function examApp(duration, totalQ) {
         },
         submitExam(auto) {
             if (this.submitted) return;
-            if (auto) {
-                this._doFinalSubmit();
-                return;
-            }
-            this.showReview = true;
-            this.submitConfirmDisabled = true;
-            this.submitConfirmTimer = 3;
-            let counter = setInterval(() => {
-                this.submitConfirmTimer--;
-                if (this.submitConfirmTimer <= 0) {
-                    this.submitConfirmDisabled = false;
-                    clearInterval(counter);
-                }
-            }, 1000);
-        },
-        _doFinalSubmit() {
+            if (!auto && !confirm('Yakin ingin mengumpulkan? Soal terjawab: ' + this.answeredCount + '/' + this.totalQ)) return;
+            this.submitted = true;
             clearInterval(this.timer);
             clearInterval(this.autoSaveTimer);
             this.saveToLocal();
@@ -2802,72 +2649,13 @@ function examApp(duration, totalQ) {
         },
     };
 }
+</script>
 <script>
 (function(){
     if (!{{ 'true' if (exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True) else 'false' }}) return;
-    var v=0,p=0,t=0,d=0,ht=0,eid='{{ exam.id }}',b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }},m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }},a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
-    function h(){ht=Date.now();t=setTimeout(function(){if(Date.now()-ht<3000)return;v++;var msg='',cp=0;if(v===1)msg='PERHATIAN! Anda berpindah tab.';else{cp=v===2?b:(v===3?b*2:b*3);p+=cp;msg='PELANGGARAN #'+v+'! Penalti: -'+cp+' poin';}alert(msg);try{fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:cp}}]),keepalive:true});}catch(ex){}if(m>0&&v>=m&&a&&!d){d=1;alert('Pelanggaran maksimal! Ujian dikumpulkan.');try{fetch('/api/student/force-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:eid}),keepalive:true});}catch(ex){}setTimeout(function(){window.location.href='/student/dashboard';},1500);}},1500);}
-    document.addEventListener('visibilitychange',function(){if(d)return;if(document.hidden){h();}else{if(t){clearTimeout(t);t=0;}}});
+    var v=0,p=0,t=0,d=0,eid='{{ exam.id }}',b={{ exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5 }},m={{ exam.get('max_violations', 5) if exam.get('max_violations') is not none else 5 }},a={{ 'true' if (exam.get('auto_submit_on_max', True) if exam.get('auto_submit_on_max') is not none else True) else 'false' }};
+    function h(){v++;var msg='',cp=0;if(v===1)msg='PERHATIAN! Anda berpindah tab.';else{cp=v===2?b:(v===3?b*2:b*3);p+=cp;msg='PELANGGARAN #'+v+'! Penalti: -'+cp+' poin';}alert(msg);try{fetch('/api/violation/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([{exam_id:eid,violation_type:'tab_switch',timestamp:Date.now()/1000,metadata:{violation_count:v,penalty:cp}}]),keepalive:true});}catch(ex){}if(m>0&&v>=m&&a&&!d){d=1;alert('Pelanggaran maksimal! Ujian dikumpulkan.');try{fetch('/api/student/force-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exam_id:eid}),keepalive:true});}catch(ex){}setTimeout(function(){window.location.href='/student/dashboard';},1500);}}
+    document.addEventListener('visibilitychange',function(){if(d)return;if(document.hidden){t=setTimeout(function(){if(!d)h();},1500);}else{if(t){clearTimeout(t);t=0;}}});
 })();
-</script>
-
-<!-- Anti-Cheat Warning Modal -->
-<div x-show="showViolationModal" class="fixed inset-0 z-[10001] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center" @click.outside="showViolationModal = false">
-        <div class="w-16 h-16 mx-auto rounded-full bg-amber-100 flex items-center justify-center mb-4">
-            <i class="fas fa-exclamation-triangle text-2xl text-amber-600"></i>
-        </div>
-        <h3 class="text-lg font-extrabold text-surface-800 mb-2">Perhatian!</h3>
-        <p class="text-sm text-surface-600 mb-6">Anda meninggalkan halaman ujian. Ini tercatat oleh sistem. Pelanggaran berikutnya akan dikenakan penalti.</p>
-        <button @click="showViolationModal = false"
-                class="w-full px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold transition shadow-lg">
-            <i class="fas fa-check mr-1.5"></i>Lanjutkan Ujian
-        </button>
-    </div>
-</div>
-
-<!-- Review Modal -->
-<div x-show="showReview" class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm"
-     @click.self="showReview = false">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto">
-        <div class="sticky top-0 bg-white rounded-t-2xl border-b px-5 py-4 flex items-center justify-between z-10">
-            <div>
-                <h3 class="font-extrabold text-surface-800">Review Jawaban</h3>
-                <p class="text-[11px] text-surface-500" x-text="answeredCount + '/' + totalQ + ' terjawab'"></p>
-            </div>
-            <button @click="showReview = false" class="text-surface-400 hover:text-surface-600 p-1">
-                <i class="fas fa-times text-lg"></i>
-            </button>
-        </div>
-        <div class="p-5 space-y-2">
-            <template x-for="(q, i) in questions" :key="i">
-                <div class="flex items-center justify-between p-3 rounded-xl text-sm"
-                     :class="answered[i] ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'">
-                    <div class="flex items-center gap-3">
-                        <span class="font-extrabold text-surface-600 w-8" x-text="'#' + (i+1)"></span>
-                        <span class="text-surface-700 font-semibold" x-text="q.type === 'mcq' ? 'Pilihan Ganda' : 'Esai'"></span>
-                    </div>
-                    <div>
-                        <span x-show="answered[i]" class="text-emerald-700 font-bold text-xs"><i class="fas fa-check-circle mr-1"></i>Terjawab</span>
-                        <span x-show="!answered[i]" class="text-red-600 font-bold text-xs"><i class="fas fa-exclamation-circle mr-1"></i>Belum</span>
-                    </div>
-                </div>
-            </template>
-        </div>
-        <div class="sticky bottom-0 bg-white rounded-b-2xl border-t px-5 py-4 flex items-center gap-3">
-            <button @click="showReview = false" class="flex-1 px-4 py-2.5 border-2 border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition">
-                <i class="fas fa-arrow-left mr-1.5"></i>Kembali ke Ujian
-            </button>
-            <button @click="showReview = false; _doFinalSubmit()"
-                    :disabled="submitConfirmDisabled"
-                    class="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white transition"
-                    :class="submitConfirmDisabled ? 'bg-surface-300 cursor-not-allowed' : 'bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 shadow-lg shadow-primary-500/25'">
-                <i class="fas fa-check mr-1.5"></i>
-                <span x-text="submitConfirmDisabled ? 'Konfirmasi dalam ' + submitConfirmTimer + 's' : 'Ya, Kumpulkan!'"></span>
-            </button>
-        </div>
-    </div>
-</div>
-
 </script>
 {% endblock %}
