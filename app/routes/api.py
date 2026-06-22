@@ -1598,23 +1598,36 @@ def api_broadcast_list():
     try:
         # Notifications sent TO this user (direct recipients)
         direct = supabase.table("notification_recipients") \
-            .select("notification_id, read_at, created_at, notifications!inner(id, sender_id, sender_role, title, message, created_at)") \
+            .select("notification_id, read_at") \
             .eq("recipient_id", user_id) \
             .order("notification_id", desc=True) \
             .limit(50) \
             .execute().data or []
         uid = g.user_id
         urole = g.get("user_role")
-        for d in direct:
-            n = d.get("notifications") or {}
-            notifs.append({
-                "id": n.get("id"), "title": n.get("title"),
-                "message": n.get("message"), "sender_role": n.get("sender_role"),
-                "sender_id": n.get("sender_id"),
-                "created_at": str(d.get("created_at", ""))[:19].replace("T", " "),
-                "read": d.get("read_at") is not None,
-                "can_edit": urole == "super_admin" or n.get("sender_id") == uid,
-            })
+        if direct:
+            nids = [d["notification_id"] for d in direct]
+            notif_map = {}
+            try:
+                ndata = supabase.table("notifications") \
+                    .select("id, sender_id, sender_role, title, message, created_at") \
+                    .in_("id", nids) \
+                    .execute().data or []
+                for n in ndata:
+                    notif_map[n["id"]] = n
+            except Exception:
+                pass
+            for d in direct:
+                nid = d["notification_id"]
+                n = notif_map.get(nid, {})
+                notifs.append({
+                    "id": nid, "title": n.get("title"),
+                    "message": n.get("message"), "sender_role": n.get("sender_role"),
+                    "sender_id": n.get("sender_id"),
+                    "created_at": str(n.get("created_at", ""))[:19].replace("T", " "),
+                    "read": d.get("read_at") is not None,
+                    "can_edit": urole == "super_admin" or n.get("sender_id") == uid,
+                })
     except Exception:
         pass
     try:
