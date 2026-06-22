@@ -1598,9 +1598,9 @@ def api_broadcast_list():
     try:
         # Notifications sent TO this user (direct recipients)
         direct = supabase.table("notification_recipients") \
-            .select("notification_id, read_at, notifications!inner(id, sender_id, sender_role, title, message, created_at)") \
+            .select("notification_id, read_at, created_at, notifications!inner(id, sender_id, sender_role, title, message, created_at)") \
             .eq("recipient_id", user_id) \
-            .order("notifications.created_at", desc=True) \
+            .order("notification_id", desc=True) \
             .limit(50) \
             .execute().data or []
         uid = g.user_id
@@ -1611,7 +1611,7 @@ def api_broadcast_list():
                 "id": n.get("id"), "title": n.get("title"),
                 "message": n.get("message"), "sender_role": n.get("sender_role"),
                 "sender_id": n.get("sender_id"),
-                "created_at": str(n.get("created_at", ""))[:19].replace("T", " "),
+                "created_at": str(d.get("created_at", ""))[:19].replace("T", " "),
                 "read": d.get("read_at") is not None,
                 "can_edit": urole == "super_admin" or n.get("sender_id") == uid,
             })
