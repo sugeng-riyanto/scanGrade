@@ -1580,6 +1580,7 @@ def api_broadcast_list():
 
     notifs = []
     try:
+        # Notifications sent TO this user (direct recipients)
         direct = supabase.table("notification_recipients") \
             .select("notification_id, read_at, notifications!inner(id, sender_id, sender_role, title, message, created_at)") \
             .eq("recipient_id", user_id) \
@@ -1587,7 +1588,7 @@ def api_broadcast_list():
             .limit(50) \
             .execute().data or []
         uid = g.user_id
-        role = g.get("user_role")
+        urole = g.get("user_role")
         for d in direct:
             n = d.get("notifications") or {}
             notifs.append({
@@ -1596,11 +1597,29 @@ def api_broadcast_list():
                 "sender_id": n.get("sender_id"),
                 "created_at": str(n.get("created_at", ""))[:19].replace("T", " "),
                 "read": d.get("read_at") is not None,
-                "can_edit": role == "super_admin" or n.get("sender_id") == uid,
+                "can_edit": urole == "super_admin" or n.get("sender_id") == uid,
             })
     except Exception:
         pass
     try:
+        # Notifications SENT BY this user
+        sent = supabase.table("notifications") \
+            .select("id, title, message, sender_role, sender_id, created_at") \
+            .eq("sender_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(50) \
+            .execute().data or []
+        sent_ids = {n["id"] for n in notifs}
+        for n in sent:
+            if n["id"] not in sent_ids:
+                n["read"] = True
+                n["can_edit"] = True
+                n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
+                notifs.append(n)
+    except Exception:
+        pass
+    try:
+        # Role-based notifications (broadcasts to this role)
         role_notifs_query = supabase.table("notifications") \
             .select("id, title, message, sender_role, sender_id, created_at") \
             .in_("target_role", [role, None])
@@ -1608,11 +1627,10 @@ def api_broadcast_list():
             role_notifs_query = role_notifs_query.eq("target_school_id", school_id)
         role_notifs = role_notifs_query.order("created_at", desc=True).limit(50).execute().data or []
         existing_ids = {n["id"] for n in notifs}
-        uid = g.user_id
         for n in role_notifs:
             if n["id"] not in existing_ids:
                 n["read"] = False
-                n["can_edit"] = role == "super_admin" or n.get("sender_id") == uid
+                n["can_edit"] = urole == "super_admin" or n.get("sender_id") == uid
                 n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
                 notifs.append(n)
     except Exception:
@@ -1620,6 +1638,21 @@ def api_broadcast_list():
 
     notifs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return jsonify({"notifications": notifs[:20]})
+
+
+@api_bp.route("/broadcast/unread", methods=["GET"])
+@login_required
+def api_broadcast_unread():
+    """Get unread notification count."""
+    supabase = get_supabase()
+    user_id = g.user_id
+    count = 0
+    try:
+        res = supabase.table("notification_recipients").select("id", count="exact").eq("recipient_id", user_id).is_("read_at", "null").execute()
+        count = res.count or 0
+    except Exception:
+        pass
+    return jsonify({"unread": count})
 
 
 @api_bp.route("/broadcast/students", methods=["GET"])
@@ -1639,3 +1672,15 @@ def api_broadcast_students():
     except Exception:
         users = []
     return jsonify({"users": users})
+
+
+@api_bp.route("/broadcast/teachers", methods=["GET"])
+@login_required
+def api_broadcast_teachers():
+    """Get list of teachers for student one-on-one messaging."""
+    supabase = get_supabase()
+    try:
+        teachers = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("status", "active").order("full_name").execute().data or []
+    except Exception:
+        teachers = []
+    return jsonify({"teachers": teachers})
