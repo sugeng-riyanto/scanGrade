@@ -1581,7 +1581,7 @@ def api_reply_broadcast():
     supabase = get_supabase()
     try:
         # Verify user is a participant
-        conv = supabase.table("conversations").select("id, participant_1, participant_2, status").eq("id", conversation_id).single().execute().data
+        conv = supabase.table("conversations").select("id, participant_1, participant_2, status, title").eq("id", conversation_id).single().execute().data
         if not conv:
             return jsonify({"error": "Percakapan tidak ditemukan"}), 404
         if conv["status"] != "open":
@@ -1594,7 +1594,7 @@ def api_reply_broadcast():
         role = g.get("user_role")
 
         # Use original conversation title, not reply title
-        orig_title = conv.get("title", title)
+        orig_title = conv.get("title", "")
         notif = {
             "sender_id": uid, "sender_role": role,
             "title": orig_title, "message": message,
