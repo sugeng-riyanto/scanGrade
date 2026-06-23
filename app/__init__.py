@@ -441,6 +441,16 @@ def _register_performance_middleware(app):
             response.cache_control.no_cache = True
             response.cache_control.no_store = True
             response.cache_control.must_revalidate = True
+        # Add security headers (PSE Kominfo & UU PDP compliance)
+        if not response.headers.get("Content-Security-Policy"):
+            csp = (
+                "frame-ancestors 'self';"
+            )
+            response.headers["Content-Security-Policy"] = csp
+        if not response.headers.get("X-Content-Type-Options"):
+            response.headers["X-Content-Type-Options"] = "nosniff"
+        if not response.headers.get("X-Frame-Options"):
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
         return response
 
 
