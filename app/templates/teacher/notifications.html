@@ -6,8 +6,11 @@
     lang: localStorage.getItem('sg_lang') || 'id',
     notifs: [], loading: true,
     formTitle: '', formMessage: '', sending: false, sendMsg: '',
-    selectedRole: 'murid', selectedStudents: [],
-    studentList: [], editingId: null, editTitle: '', editMessage: '',
+    toGuru: false, toMurid: true,
+    guruOpt: 'all', muridOpt: 'all', kelasOpt: 'all',
+    guruList: [], muridList: [], classList: [],
+    selectedGuruIds: [], selectedMuridIds: [], selectedClass: '',
+    editingId: null, editTitle: '', editMessage: '',
     conversations: [], convsLoading: true,
     activeConv: null, replyMessage: '', replying: false, replyError: '',
     editingMsgId: null, editMsgText: '',
@@ -105,40 +108,59 @@
             this.$nextTick(() => { this.markReadHistory(); });
         }).catch(()=>{}).finally(()=>{ this.loading = false; });
     },
-    classList: [], selectedClass: '',
     fetchClasses() {
         fetch('/api/broadcast/classes').then(r=>r.json()).then(d => { this.classList = d.classes || []; }).catch(()=>{});
     },
-    fetchUsers() {
-        var r = this.selectedRole;
-        var url = '/api/broadcast/students?role=' + r;
-        if (this.selectedRole === 'guru') { url = '/api/broadcast/students?role=guru'; }
-        if (this.selectedRole === 'class') { url = '/api/broadcast/students?role=murid&class_id=' + this.selectedClass; }
-        fetch(url).then(r=>r.json()).then(d => { this.studentList = d.users || []; }).catch(()=>{});
+    fetchGuruList() {
+        fetch('/api/broadcast/students?role=guru').then(r=>r.json()).then(d => { this.guruList = d.users || []; }).catch(()=>{});
     },
-    toggleStudent(id) {
-        var idx = this.selectedStudents.indexOf(id);
-        if (idx > -1) this.selectedStudents.splice(idx,1); else this.selectedStudents.push(id);
+    fetchMuridList() {
+        var url = '/api/broadcast/students?role=murid';
+        if (this.selectedClass) url += '&class_id=' + this.selectedClass;
+        fetch(url).then(r=>r.json()).then(d => { this.muridList = d.users || []; }).catch(()=>{});
     },
-    toggleAllStudents() {
-        if (this.selectedStudents.length === this.studentList.length) this.selectedStudents = [];
-        else this.selectedStudents = this.studentList.map(s => s.id);
+    toggleArray(arr, id) {
+        var idx = arr.indexOf(id);
+        if (idx > -1) arr.splice(idx,1); else arr.push(id);
+    },
+    toggleAll(arr, list) {
+        if (arr.length === list.length) arr.splice(0);
+        else { arr.splice(0); list.forEach(s => arr.push(s.id)); }
     },
     sendBroadcast() {
+        if (!this.toGuru && !this.toMurid) { this.sendMsg = 'Pilih minimal Guru atau Murid'; return; }
         if (!this.formTitle || !this.formMessage) { this.sendMsg = 'Isi judul dan pesan'; return; }
         this.sending = true; this.sendMsg = '';
-        var target = this.selectedRole;
-        var recipients = [];
-        if (this.selectedRole === 'select') { target = this.selectedTargetRole; recipients = this.selectedStudents; }
-        else if (this.selectedRole === 'class') { target = 'murid'; }
-        var body = {title: this.formTitle, message: this.formMessage, target_role: target};
-        if (recipients.length > 0) body.recipient_ids = recipients;
-        fetch('/api/broadcast/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
-        .then(r=>r.json()).then(d => {
+        var self = this;
+        var promises = [];
+        // Send to Guru
+        if (this.toGuru) {
+            var body = {title: this.formTitle, message: this.formMessage, target_role: 'guru'};
+            if (this.guruOpt === 'select' && this.selectedGuruIds.length > 0) body.recipient_ids = this.selectedGuruIds;
+            promises.push(fetch('/api/broadcast/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r=>r.json()));
+        }
+        // Send to Murid
+        if (this.toMurid) {
+            var body2 = {title: this.formTitle, message: this.formMessage, target_role: 'murid'};
+            if (this.muridOpt === 'class' && this.selectedClass) {
+                if (this.kelasOpt === 'select' && this.selectedMuridIds.length > 0) body2.recipient_ids = this.selectedMuridIds;
+                else body2.target_role = 'murid';
+            }
+            promises.push(fetch('/api/broadcast/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body2)}).then(r=>r.json()));
+        }
+        Promise.all(promises).then(results => {
             this.sending = false;
-            if (d.success) { this.sendMsg = 'Terkirim ke ' + d.recipients + ' penerima'; this.formTitle = ''; this.formMessage = ''; this.selectedStudents = []; this.fetchNotifs(); this.fetchConversations(); }
-            else { this.sendMsg = 'Gagal: ' + (d.error||''); }
-        }).catch(()=>{ this.sending = false; this.sendMsg = 'Error koneksi'; });
+            var ok = results.every(r => r.success);
+            if (ok) {
+                var total = results.reduce((s, r) => s + (r.recipients || 0), 0);
+                this.sendMsg = 'Terkirim ke ' + total + ' penerima';
+                this.formTitle = ''; this.formMessage = '';
+                this.fetchNotifs(); this.fetchConversations();
+            } else {
+                var err = results.find(r => !r.success);
+                this.sendMsg = 'Gagal: ' + (err ? (err.error||'') : '');
+            }
+        }).catch(() => { this.sending = false; this.sendMsg = 'Error koneksi'; });
     },
     startEdit(n) { this.editingId = n.id; this.editTitle = n.title; this.editMessage = n.message; },
     cancelEdit() { this.editingId = null; this.editTitle = ''; this.editMessage = ''; },
@@ -167,8 +189,7 @@
             if (d.total > 0) { this.statsMap[n.id] = d; }
         }).catch(()=>{});
     },
-    showInfo: false,
-    selectedTargetRole: 'murid'
+    showInfo: false
 }" x-init="fetchConversations(); fetchNotifs(); fetchClasses(); $watch('activeTab', val => { if (val === 'history') { this.markReadHistory(); } })">
     <!-- Info Panel -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-4 border border-surface-100">
@@ -185,7 +206,7 @@
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-bullhorn text-primary-500 mr-1 w-4"></i>Tab Kirim Pengumuman</p>
-                    <p>Broadcast ke semua murid atau pilih murid tertentu. Pengumuman hanya bisa dibaca (tidak bisa dibalas). Edit/hapus pengumuman di tab Riwayat.</p>
+                    <p>Broadcast ke Guru dan/atau Murid. Pilih all, per kelas, atau selektif. Pengumuman hanya bisa dibaca. Edit/hapus/statistik di tab Riwayat.</p>
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-history text-primary-500 mr-1 w-4"></i>Tab Riwayat</p>
@@ -315,44 +336,103 @@
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
             <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Kirim Pengumuman</h3>
             <form @submit.prevent="sendBroadcast()" class="space-y-4">
+                <!-- Target checkboxes -->
                 <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Kirim ke</label>
-                    <select x-model="selectedRole" @change="selectedStudents=[]; selectedClass=''; selectedTargetRole='murid'" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white">
-                        <option value="murid">Semua Murid</option>
-                        <option value="guru">Semua Guru</option>
-                        <option value="class">Per Kelas</option>
-                        <option value="select">Pilih Tertentu</option>
-                    </select>
+                    <label class="block text-sm font-bold text-surface-700 mb-2">Kirim ke</label>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition" :class="toGuru ? 'bg-primary-50 border-primary-300' : 'bg-surface-50 border-surface-200'">
+                            <input type="checkbox" x-model="toGuru" @change="if(toGuru)fetchGuruList()" class="rounded text-primary-600 focus:ring-primary-500">
+                            <span class="text-sm font-bold text-surface-700">Guru</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition" :class="toMurid ? 'bg-primary-50 border-primary-300' : 'bg-surface-50 border-surface-200'">
+                            <input type="checkbox" x-model="toMurid" class="rounded text-primary-600 focus:ring-primary-500">
+                            <span class="text-sm font-bold text-surface-700">Murid</span>
+                        </label>
+                    </div>
                 </div>
-                <template x-if="selectedRole === 'select'">
-                    <div>
-                        <div class="flex gap-2 mb-3">
-                            <button @click="selectedTargetRole='murid'; selectedStudents=[]; fetchUsers()" type="button" class="px-3 py-1.5 text-xs font-bold rounded-lg" :class="selectedTargetRole==='murid' ? 'bg-primary-100 text-primary-700' : 'bg-surface-100 text-surface-600'">Murid</button>
-                            <button @click="selectedTargetRole='guru'; selectedStudents=[]; fetchUsers()" type="button" class="px-3 py-1.5 text-xs font-bold rounded-lg" :class="selectedTargetRole==='guru' ? 'bg-primary-100 text-primary-700' : 'bg-surface-100 text-surface-600'">Guru</button>
-                        </div>
-                        <label class="block text-sm font-bold text-surface-700 mb-1.5">Pilih</label>
-                        <button @click="toggleAllStudents()" type="button" class="text-xs font-bold text-primary-600 hover:text-primary-700 mb-2" x-text="selectedStudents.length === studentList.length ? 'Unselect Semua' : 'Pilih Semua'"></button>
-                        <div class="max-h-48 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1">
-                            <template x-for="s in studentList" :key="s.id">
-                                <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-50 cursor-pointer">
-                                    <input type="checkbox" :checked="selectedStudents.includes(s.id)" @change="toggleStudent(s.id)" class="rounded text-primary-600 focus:ring-primary-500">
-                                    <span class="text-sm font-medium text-surface-700" x-text="s.full_name"></span>
-                                </label>
+
+                <!-- Guru options -->
+                <template x-if="toGuru">
+                    <div class="p-3 bg-surface-50 rounded-xl border border-surface-200">
+                        <label class="block text-sm font-bold text-surface-700 mb-2">Opsi Guru</label>
+                        <div class="space-y-2">
+                            <label class="flex items-center gap-2">
+                                <input type="radio" x-model="guruOpt" value="all" class="text-primary-600 focus:ring-primary-500">
+                                <span class="text-sm text-surface-700">Semua Guru</span>
+                            </label>
+                            <label class="flex items-center gap-2">
+                                <input type="radio" x-model="guruOpt" value="select" class="text-primary-600 focus:ring-primary-500">
+                                <span class="text-sm text-surface-700">Pilih Guru Tertentu</span>
+                            </label>
+                            <template x-if="guruOpt === 'select'">
+                                <div class="ml-5 mt-2">
+                                    <button @click="toggleAll(selectedGuruIds, guruList)" type="button" class="text-xs font-bold text-primary-600 hover:text-primary-700 mb-1.5" x-text="selectedGuruIds.length === guruList.length ? 'Unselect Semua' : 'Pilih Semua'"></button>
+                                    <div class="max-h-40 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1 bg-white">
+                                        <template x-for="g in guruList" :key="g.id">
+                                            <label class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-surface-50 cursor-pointer">
+                                                <input type="checkbox" :checked="selectedGuruIds.includes(g.id)" @change="toggleArray(selectedGuruIds, g.id)" class="rounded text-primary-600 focus:ring-primary-500">
+                                                <span class="text-sm text-surface-700" x-text="g.full_name"></span>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </div>
                             </template>
                         </div>
                     </div>
                 </template>
-                <template x-if="selectedRole === 'class'">
-                    <div>
-                        <label class="block text-sm font-bold text-surface-700 mb-1.5">Pilih Kelas</label>
-                        <select x-model="selectedClass" @change="selectedStudents=[]; fetchUsers()" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium bg-white">
-                            <option value="">- Pilih Kelas -</option>
-                            <template x-for="cls in classList" :key="cls.id">
-                                <option :value="cls.id" x-text="cls.name + (cls.grade_level ? ' (' + cls.grade_level + ')' : '')"></option>
+
+                <!-- Murid options -->
+                <template x-if="toMurid">
+                    <div class="p-3 bg-surface-50 rounded-xl border border-surface-200">
+                        <label class="block text-sm font-bold text-surface-700 mb-2">Opsi Murid</label>
+                        <div class="space-y-2">
+                            <label class="flex items-center gap-2">
+                                <input type="radio" x-model="muridOpt" value="all" class="text-primary-600 focus:ring-primary-500">
+                                <span class="text-sm text-surface-700">Semua Kelas</span>
+                            </label>
+                            <label class="flex items-center gap-2">
+                                <input type="radio" x-model="muridOpt" value="class" class="text-primary-600 focus:ring-primary-500">
+                                <span class="text-sm text-surface-700">Pilih Kelas Tertentu</span>
+                            </label>
+                            <template x-if="muridOpt === 'class'">
+                                <div class="ml-5 mt-2 space-y-2">
+                                    <select x-model="selectedClass" @change="selectedMuridIds=[]; kelasOpt='all'; fetchMuridList()" class="w-full px-3 py-2 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 text-sm bg-white">
+                                        <option value="">- Pilih Kelas -</option>
+                                        <template x-for="cls in classList" :key="cls.id">
+                                            <option :value="cls.id" x-text="cls.name + (cls.grade_level ? ' (' + cls.grade_level + ')' : '')"></option>
+                                        </template>
+                                    </select>
+                                    <template x-if="selectedClass">
+                                        <div>
+                                            <label class="flex items-center gap-2 mb-1">
+                                                <input type="radio" x-model="kelasOpt" value="all" class="text-primary-600 focus:ring-primary-500">
+                                                <span class="text-sm text-surface-700">Semua Murid di kelas ini</span>
+                                            </label>
+                                            <label class="flex items-center gap-2">
+                                                <input type="radio" x-model="kelasOpt" value="select" class="text-primary-600 focus:ring-primary-500">
+                                                <span class="text-sm text-surface-700">Pilih Murid Tertentu</span>
+                                            </label>
+                                            <template x-if="kelasOpt === 'select'">
+                                                <div class="mt-2">
+                                                    <button @click="toggleAll(selectedMuridIds, muridList)" type="button" class="text-xs font-bold text-primary-600 hover:text-primary-700 mb-1.5" x-text="selectedMuridIds.length === muridList.length ? 'Unselect Semua' : 'Pilih Semua'"></button>
+                                                    <div class="max-h-40 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1 bg-white">
+                                                        <template x-for="m in muridList" :key="m.id">
+                                                            <label class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-surface-50 cursor-pointer">
+                                                                <input type="checkbox" :checked="selectedMuridIds.includes(m.id)" @change="toggleArray(selectedMuridIds, m.id)" class="rounded text-primary-600 focus:ring-primary-500">
+                                                                <span class="text-sm text-surface-700" x-text="m.full_name"></span>
+                                                            </label>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
                             </template>
-                        </select>
+                        </div>
                     </div>
                 </template>
+
                 <div>
                     <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
                     <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium">
