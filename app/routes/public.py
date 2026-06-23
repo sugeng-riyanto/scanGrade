@@ -73,4 +73,12 @@ def privacy():
 @public_bp.route("/terms")
 def terms():
     """Syarat dan Ketentuan — PSE Kominfo compliance."""
-    return render_template("compliance/terms.html")
+    supabase = get_supabase()
+    dpo_contact = None
+    try:
+        dpo = supabase.table("system_settings").select("value").eq("key", "dpo_contact").single().execute().data
+        if dpo:
+            dpo_contact = dpo.get("value")
+    except Exception:
+        pass
+    return render_template("compliance/terms.html", dpo_contact=dpo_contact)

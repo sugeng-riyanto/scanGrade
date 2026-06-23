@@ -45,37 +45,43 @@
 
 | Aspek | Status | Lokasi |
 |-------|--------|--------|
-| **Kebijakan Privasi** (Pasal 5, 14, 19) | ✅ 11 pasal lengkap | `/privacy`, `templates/compliance/privacy.html` |
-| **Syarat & Ketentuan** | ✅ 11 pasal lengkap | `/terms`, `templates/compliance/terms.html` |
+| **Kebijakan Privasi** (Pasal 5, 14, 19) | ✅ 13 pasal lengkap (Eksplisit: NO birth date, NO sensitive data) | `/privacy`, `templates/compliance/privacy.html` |
+| **Syarat & Ketentuan** | ✅ 11 pasal lengkap (Eksplisit: NO birth date) + RBAC matrix table | `/terms`, `templates/compliance/terms.html` |
 | **Persetujuan Eksplisit** (Pasal 6) | ✅ Consent checkbox di registrasi | `templates/auth/register.html`, `routes/auth.py` |
 | **Tujuan Pemrosesan** (Pasal 7) | ✅ Didokumentasikan di halaman privasi | `privacy.html §3` |
+| **Penarikan Persetujuan** (Pasal 11) | ✅ Dijelaskan mekanisme penarikan + konsekuensi | `privacy.html §6` |
 | **Hak Subjek Data** (Pasal 8-15) | ✅ Panel hak di settings + privacy page | `student/settings.html`, `privacy.html §5` |
+| **Keputusan Otomatis/Profiling** (Pasal 21) | ✅ Diungkap (anti-cheat, auto-correct, weighted scoring) | `privacy.html §7` |
+| **Data Sensitif** (Pasal 26) | ✅ Eksplisit: tidak mengumpulkan data sensitif (agama, biometrik, kesehatan, politik) | `privacy.html §2` |
 | **Hak Akses & Portabilitas** | ✅ Ekspor data JSON via API | `api.py: /api/account/export-data` |
-| **Hak Penghapusan** | ✅ Deletion request flow dengan admin approval | `api.py: /api/account/delete-request` |
+| **Hak Penghapusan** | ✅ Deletion request flow dengan admin approval, tenggang 90 hari | `api.py: /api/account/delete-request` |
 | **Retensi Data** (Pasal 16) | ✅ Jadwal auto-purge + periode ditampilkan ke user | `data_retention_service.py`, `student/settings.html` |
-| **Keamanan Data** (Pasal 17-18) | ✅ CSP, X-Frame-Options, X-Content-Type-Options, HTTPS, bcrypt, RBAC | `__init__.py` after_request handler |
+| **Keamanan Data** (Pasal 17-18) | ✅ CSP, X-Frame-Options, X-Content-Type-Options, HTTPS, bcrypt, RBAC, backup, anomaly detection | `__init__.py` after_request handler |
 | **Kewajiban Pengendali Data** (Pasal 20-24) | ✅ DPO configurable via super admin, respon 7 hari | `super_admin/privacy_settings.html` |
-| **Transfer Lintas Batas** (Pasal 27) | ✅ Diungkapkan (Supabase Singapura) | `privacy.html §6` |
-| **Pelanggaran Data** (Pasal 30-32) | ✅ Kebijakan notifikasi 14 hari | `privacy.html §8` |
+| **Transfer Lintas Batas** (Pasal 27) | ✅ Diungkapkan (Supabase Singapura) | `privacy.html §8` |
+| **Pelanggaran Data** (Pasal 30-32) | ✅ Kebijakan notifikasi 14 hari + lapor ke PSE Kominfo | `privacy.html §10` |
+| **Penyelesaian Sengketa** | ✅ Musyawarah → Mediasi 30 hari → Pengadilan RI | `terms.html §9` |
 | **LocalStorage Consent** | ✅ Banner persetujuan pada kunjungan pertama | `base.html`, cookie banner |
-| **Persetujuan Orang Tua** | ✅ Logika untuk siswa < 18 tahun | `routes/student.py`, `student/settings.html` |
-| **DPO Contact** | ✅ Dapat dikonfigurasi via super admin | `system_settings key: dpo_contact` |
-| **PSE Registration Number** | ✅ Dapat dikonfigurasi, ditampilkan di footer | `system_settings key: pse_reg_number` |
-| **RBAC Pesan** | ✅ 3-layer inter-student restriction | `api.py`, `api_conversations`, `api_send_broadcast` |
+| **DPO Contact** | ✅ Dapat dikonfigurasi via super admin, tampil di privacy + terms + footer | `system_settings key: dpo_contact` |
+| **PSE Registration Number** | ✅ Dapat dikonfigurasi, ditampilkan di footer + terms | `system_settings key: pse_reg_number` |
+| **RBAC Pesan** | ✅ 3-layer inter-student restriction + full matrix di terms | `api.py`, `api_conversations`, `api_send_broadcast`, `terms.html §5` |
 | **Cookie/LocalStorage Banner** | ✅ Muncul sekali, disimpan di localStorage | `base.html` |
-| **Email Kontak** | ✅ scangrade9@gmail.com | `privacy.html`, `terms.html` |
+| **Email Kontak** | ✅ scangrade9@gmail.com, 7 hari kerja respon | `privacy.html §13`, `terms.html §11` |
 
 ## Progress
 ### Done (Latest)
-- **UU PDP compliance pages**: `/privacy` (11 sections), `/terms` (11 sections) with `content_noauth` block for unauthenticated access
+- **UU PDP compliance pages**: `/privacy` (13 sections), `/terms` (11 sections with RBAC matrix) with `content_noauth` block for unauthenticated access — EYD-corrected, PSE Kominfo + UU PDP compliant
+- **Privacy policy expanded**: Added Penarikan Persetujuan (§6), Keputusan Otomatis/Profiling (§7), Data Sensitif disclosure (§2 explicit Pasal 26 UU PDP — NO birth date, NO sensitive data)
+- **Terms updated with RBAC matrix**: Full communication RBAC table in §5 matching AGENTS.md + dispute resolution (§9: musyawarah → mediasi 30 hari → pengadilan)
+- **Teks diperbaiki EYD**: Seluruh dokumen compliance menggunakan bahasa Indonesia baku sesuai EYD
 - **Contact email updated** to `scangrade9@gmail.com` with 7-day response policy
 - **Security headers added**: CSP (`frame-ancestors 'self'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`
 - **DPO/PSE configuration**: Super admin page at `/super-admin/privacy-settings` with save API
 - **Footer**: Dynamic DPO/PSE display from system_settings via `/api/public/privacy-info`
 - **Cookie/localStorage consent banner**: Fixed bottom bar on first visit
 - **Login page**: Privacy/Terms links added
-- **Student settings**: Rights panel (8 UU PDP rights), parental consent section (conditional for <18), PDP settings form with birth date, consent checkboxes, parent info
-- **Parental consent API**: `POST /student/settings/pdp-update` with age validation
+- **Student settings**: Rights panel (8 UU PDP rights), retention data card, simplified PDP consent checkbox
+- **Parental consent API**: `POST /student/settings/pdp-update` with age validation (simplified to only pdp_agreed)
 - **Consent at registration**: Required checkbox with `consent_at` timestamp
 - **Inter-student restriction**: 3-layer (send-time role verification, list-time filter, FE tab restriction)
 - **Data export + deletion**: Full API endpoints with RBAC verification
@@ -110,6 +116,10 @@
 - **Inter-student restriction**: Three-layer defense — (1) `api_send_broadcast` memverifikasi role setiap recipient, (2) `api_conversations` server-side skip conv antar-murid untuk role murid, (3) FE hanya menampilkan guru di "Pesan Guru" tab
 - **CSP/security headers**: Added to `_register_performance_headers` after_request for all responses
 - **Content blocks**: Privacy/terms templates define BOTH `block content` (authenticated) and `block content_noauth` (public)
+- **No birth date collected**: Privacy policy explicitly states NO birth date collected or stored. Terms also state no birth date required for registration. Student PDP settings simplified to consent checkbox only.
+- **Privacy policy expanded**: 13 sections covering UU PDP + PSE Kominfo — added Penarikan Persetujuan (§6), Keputusan Otomatis/Profiling (§7), Data Sensitif (§2 explicit Pasal 26 disclosure).
+- **Terms updated with RBAC matrix**: Full communication RBAC table in §5 matching AGENTS.md matrix, plus dispute resolution (§9: musyawarah → mediasi 30 hari → pengadilan).
+- **Terms route now passes dpo_contact**: Both `/privacy` and `/terms` fetch DPO from system_settings.
 
 ## Next Steps
 1. **Run migration 018** in Supabase SQL Editor (`supabase/migrations/018_data_retention.sql`)
@@ -121,12 +131,12 @@
 
 ## Key Files (Compliance)
 - `app/routes/public.py`: `/privacy` and `/terms` routes with DPO fetch
-- `app/templates/compliance/privacy.html`: Full Kebijakan Privasi (both `block content` and `block content_noauth`)
-- `app/templates/compliance/terms.html`: Full Syarat & Ketentuan (both `block content` and `block content_noauth`)
+- `app/templates/compliance/privacy.html`: Full Kebijakan Privasi — 13 sections (both `block content` and `block content_noauth`)
+- `app/templates/compliance/terms.html`: Full Syarat & Ketentuan — 11 sections with RBAC matrix (both `block content` and `block content_noauth`)
 - `app/templates/super_admin/privacy_settings.html`: DPO/PSE/controller configuration
 - `app/routes/super_admin.py`: `/privacy-settings` route + save API
-- `app/routes/student.py`: PDP settings endpoint with parental consent validation
-- `app/templates/student/settings.html`: Rights panel, parental consent, PDP settings form
+- `app/routes/student.py`: PDP settings endpoint (simplified — only pdp_agreed)
+- `app/templates/student/settings.html`: Rights panel, retention data card, simplified PDP consent checkbox
 - `app/__init__.py`: CSP + security headers in after_request
 - `app/routes/api.py`: `/api/public/privacy-info`, broadcast RBAC, conversation filtering
 - `app/templates/auth/login.html`: Privacy/Terms links
