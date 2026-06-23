@@ -11,6 +11,8 @@
 - Offline-first: localStorage first, sync to server when online
 - `MAX_CONTENT_LENGTH = 50MB`
 - Canvas data saved as PNG (not JPEG — was causing black overlay bug)
+- **Tailwind CSS**: Local compiled CSS (`npm run css:build` after template changes). NOT CDN — users have spotty WiFi.
+- **Inter font**: Local TTF files in `/static/vendor/inter/`, NOT Google Fonts CDN
 - Default timezone UTC+7 (WIB), configurable per-user and per-school
 - UI language: Indonesian (default) with English toggle (`localStorage.sg_lang`)
 - Color theme: `primary` (blue) defined in Tailwind config — `brand-*` was previously undefined (invisible buttons/text), now aliased to `primary` palette
@@ -118,6 +120,7 @@
 - **NISN**: fill from LEFT if < 10 digits (most significant first, trailing cells empty) — standard OMR convention
 - **MCQ answer format**: Use dict `{answer, pages}` only when canvas/text data exists; keep string for backward compatibility
 - **Inter-student restriction**: Three-layer defense — (1) `api_send_broadcast` memverifikasi role setiap recipient, (2) `api_conversations` server-side skip conv antar-murid untuk role murid, (3) FE hanya menampilkan guru di "Pesan Guru" tab
+- **Tailwind CSS rebuild**: `npm run css:build` after every template change; `npm run css:watch` for dev auto-rebuild
 - **CSP/security headers**: Added to `_register_performance_headers` after_request for all responses
 - **Content blocks**: Privacy/terms templates define BOTH `block content` (authenticated) and `block content_noauth` (public)
 - **No birth date collected**: Privacy policy explicitly states NO birth date collected or stored. Terms also state no birth date required for registration. Student PDP settings simplified to consent checkbox only.
