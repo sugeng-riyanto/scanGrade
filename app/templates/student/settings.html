@@ -4,27 +4,17 @@
 {% block content %}
 <div class="space-y-6" x-data="{
     profile: {{ profile | tojson | safe }},
-    age: {{ age | tojson | safe }},
     lang: localStorage.getItem('sg_lang') || 'id',
     loading: true, deletionRequest: null,
     exportLoading: false, exportData: null,
     pwOld: '', pwNew: '', pwConfirm: '', pwMsg: '',
     delReason: '', delMsg: '', sending: false,
-    pdpSettings: { birth_date: '', pdp_agreed: false, parent_pdp_agreed: false, parent_name: '', parent_contact: '' },
+    pdpSettings: { pdp_agreed: false },
     pdpMsg: '',
     savingPdp: false,
-
-    loading: true, deletionRequest: null,
-    exportLoading: false, exportData: null,
-    pwOld: '', pwNew: '', pwConfirm: '', pwMsg: '',
-    delReason: '', delMsg: '', sending: false,
     initPdpSettings() {
         if (this.profile) {
-            this.pdpSettings.birth_date = this.profile.birth_date || '';
             this.pdpSettings.pdp_agreed = this.profile.pdp_agreed === true;
-            this.pdpSettings.parent_pdp_agreed = this.profile.parent_pdp_agreed === true;
-            this.pdpSettings.parent_name = this.profile.parent_name || '';
-            this.pdpSettings.parent_contact = this.profile.parent_contact || '';
         }
     },
     savePdpSettings() {
@@ -33,33 +23,13 @@
         fetch('/student/settings/pdp-update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.pdpSettings)
+            body: JSON.stringify({ pdp_agreed: this.pdpSettings.pdp_agreed })
         })
         .then(r => r.json())
         .then(d => {
             if (d.status === 'success') {
                 this.pdpMsg = d.message;
-                // Optionally update local profile data to reflect changes immediately
-                this.profile.birth_date = this.pdpSettings.birth_date;
                 this.profile.pdp_agreed = this.pdpSettings.pdp_agreed;
-                this.profile.parent_pdp_agreed = this.pdpSettings.parent_pdp_agreed;
-                this.profile.parent_name = this.pdpSettings.parent_name;
-                this.profile.parent_contact = this.pdpSettings.parent_contact;
-                // Re-calculate age if birth date changed (for conditional rendering)
-                // This is a simplified re-calculation, actual age calculation might need a backend call or more robust JS logic
-                if (this.pdpSettings.birth_date) {
-                    const dob = new Date(this.pdpSettings.birth_date);
-                    const today = new Date();
-                    let a = today.getFullYear() - dob.getFullYear();
-                    const m = today.getMonth() - dob.getMonth();
-                    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
-                        a--;
-                    }
-                    this.age = a;
-                }
-
-            } else if (d.status === 'requires_parental_consent') {
-                this.pdpMsg = d.message;
             } else {
                 this.pdpMsg = 'Gagal: ' + (d.message || 'unknown error');
             }
@@ -109,7 +79,7 @@
         .then(r=>r.json()).then(d => { this.deletionRequest = d.request; })
         .catch(()=>{});
     }
-}" x-init="checkStatus()">
+}" x-init="initPdpSettings(); checkStatus()">
     <!-- Tab Navigation -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1">
         <a href="/student/notifications" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition text-surface-500 hover:text-surface-700">
@@ -189,42 +159,73 @@
     </div>
     <!-- Pengaturan Privasi Data Pribadi (PDP) -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-primary-100">
-        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-fingerprint text-primary-500 mr-2"></i>Pengaturan Privasi Data Pribadi (PDP)</h3>
-        <p class="text-sm text-surface-600 mb-4">Kelola persetujuan Anda dan informasi orang tua/wali sesuai UU PDP.</p>
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-fingerprint text-primary-500 mr-2"></i>Persetujuan PDP (UU No. 27/2022)</h3>
+        <p class="text-sm text-surface-600 mb-4">Kelola persetujuan pemrosesan data pribadi Anda sesuai Undang-Undang Perlindungan Data Pribadi.</p>
         <div class="space-y-4 max-w-md">
-            <div>
-                <label class="block text-sm font-bold text-surface-700 mb-1">Tanggal Lahir</label>
-                <input type="date" x-model="pdpSettings.birth_date" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700">
+            <div class="flex items-start gap-3">
+                <input id="pdp_agreed" type="checkbox" x-model="pdpSettings.pdp_agreed" class="mt-1 form-checkbox h-4 w-4 text-primary-600 rounded focus:ring-primary-500 border-surface-300">
+                <label for="pdp_agreed" class="text-sm text-surface-700 leading-relaxed">Saya menyetujui pemrosesan data pribadi saya sesuai dengan <a href="/privacy" target="_blank" class="text-primary-600 hover:underline font-bold">Kebijakan Privasi</a> dan <a href="/terms" target="_blank" class="text-primary-600 hover:underline font-bold">Syarat &amp; Ketentuan</a> ScanGrade.</label>
             </div>
-            <div class="flex items-center">
-                <input id="pdp_agreed" type="checkbox" x-model="pdpSettings.pdp_agreed" class="form-checkbox h-4 w-4 text-primary-600 rounded focus:ring-primary-500 border-surface-300">
-                <label for="pdp_agreed" class="ml-2 block text-sm text-surface-700">Saya menyetujui <a href="/privacy" target="_blank" class="text-primary-600 hover:underline">Kebijakan Privasi</a> dan <a href="/terms" target="_blank" class="text-primary-600 hover:underline">Syarat &amp; Ketentuan</a></label>
-            </div>
-
-            <!-- Parental Consent Section (Conditional) -->
-            <template x-if="age !== null && age < 18">
-                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-                    <p class="text-sm font-bold text-amber-800 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> Persetujuan Orang Tua/Wali (Wajib)</p>
-                    <p class="text-xs text-amber-700">Sebagai siswa di bawah 18 tahun, persetujuan dari orang tua/wali wajib dicentang dan detail kontak mereka perlu diisi sesuai UU PDP.</p>
-                    <div class="flex items-center">
-                        <input id="parent_pdp_agreed" type="checkbox" x-model="pdpSettings.parent_pdp_agreed" class="form-checkbox h-4 w-4 text-amber-600 rounded focus:ring-amber-500 border-surface-300">
-                        <label for="parent_pdp_agreed" class="ml-2 block text-sm text-amber-700">Orang tua/wali saya menyetujui pemrosesan data pribadi</label>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-bold text-amber-700 mb-1">Nama Orang Tua/Wali</label>
-                        <input type="text" x-model="pdpSettings.parent_name" class="w-full px-4 py-2.5 border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 text-amber-700" placeholder="Nama Lengkap Orang Tua/Wali">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-bold text-amber-700 mb-1">Kontak Orang Tua/Wali (HP/Email)</label>
-                        <input type="text" x-model="pdpSettings.parent_contact" class="w-full px-4 py-2.5 border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 text-amber-700" placeholder="Nomor Telepon atau Email">
-                    </div>
-                </div>
-            </template>
 
             <button @click="savePdpSettings()" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="savingPdp">
-                <span x-text="savingPdp ? 'Menyimpan...' : 'Simpan Pengaturan PDP'"></span>
+                <span x-text="savingPdp ? 'Menyimpan...' : 'Simpan Persetujuan'"></span>
             </button>
             <p x-show="pdpMsg" class="text-xs font-bold" :class="pdpMsg.includes('berhasil') ? 'text-emerald-600' : 'text-red-600'" x-text="pdpMsg"></p>
+        </div>
+    </div>
+
+    <!-- Kebijakan Retensi Data -->
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-clock text-primary-500 mr-2"></i>Kebijakan Retensi Data</h3>
+        <div class="bg-surface-50 border border-surface-200 rounded-xl p-4 text-xs text-surface-600 space-y-1">
+            <p>ScanGrade mematuhi <strong>UU No. 27/2022 tentang Perlindungan Data Pribadi</strong> dan <strong>PSE Kominfo</strong>.</p>
+            <p class="mt-2 font-bold text-surface-700">Periode Penyimpanan Data:</p>
+            <p>&bull; <strong>Profil &amp; Akun</strong>: Disimpan selama akun aktif. Dihapus 90 hari setelah permintaan penghapusan.</p>
+            <p>&bull; <strong>Hasil Ujian &amp; Jawaban</strong>: Disimpan 5 tahun untuk keperluan akademik.</p>
+            <p>&bull; <strong>Pesan &amp; Percakapan</strong>: Disimpan 2 tahun untuk keperluan komunikasi.</p>
+            <p>&bull; <strong>Log Pelanggaran</strong>: Disimpan 2 tahun untuk audit.</p>
+            <p>&bull; <strong>Draft Ujian</strong>: Dihapus otomatis setelah 30 hari.</p>
+        </div>
+    </div>
+
+    <!-- Hak Subjek Data (UU PDP) -->
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600"><i class="fas fa-balance-scale"></i></div>
+            <div>
+                <h3 class="font-extrabold text-surface-800">Hak Subjek Data UU PDP</h3>
+                <p class="text-xs text-surface-500">Undang-Undang No. 27 Tahun 2022</p>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-info-circle text-primary-500 text-xs"></i> Hak Informasi</p>
+                <p class="text-xs text-surface-500 mt-1">Ketahui data apa yang kami kumpulkan di <a href="/privacy" class="text-primary-600 underline">Kebijakan Privasi</a></p>
+            </div>
+            <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-download text-primary-500 text-xs"></i> Hak Akses &amp; Portabilitas</p>
+                <p class="text-xs text-surface-500 mt-1">Unduh data Anda via "Ekspor Data Saya" di atas</p>
+            </div>
+            <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-edit text-primary-500 text-xs"></i> Hak Perbaikan</p>
+                <p class="text-xs text-surface-500 mt-1">Update profil Anda atau hubungi guru</p>
+            </div>
+            <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-trash-alt text-primary-500 text-xs"></i> Hak Penghapusan</p>
+                <p class="text-xs text-surface-500 mt-1">Ajukan via form "Hapus Akun" di atas</p>
+            </div>
+            <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-pause-circle text-primary-500 text-xs"></i> Hak Pembatasan</p>
+                <p class="text-xs text-surface-500 mt-1">Hubungi <a href="/privacy#kontak" class="text-primary-600 underline">pengendali data</a></p>
+            </div>
+            <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-times-circle text-primary-500 text-xs"></i> Hak Keberatan</p>
+                <p class="text-xs text-surface-500 mt-1">Hubungi kami jika keberatan dengan pemrosesan data</p>
+            </div>
+        </div>
+        <div class="mt-3 flex items-center gap-4 text-xs text-surface-400">
+            <a href="/privacy" class="text-primary-600 hover:underline font-medium"><i class="fas fa-external-link-alt mr-1"></i>Kebijakan Privasi</a>
+            <a href="/terms" class="text-primary-600 hover:underline font-medium"><i class="fas fa-external-link-alt mr-1"></i>Syarat &amp; Ketentuan</a>
         </div>
     </div>
 
