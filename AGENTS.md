@@ -1,7 +1,7 @@
 # ScanGrade - AI Agent Context
 
 ## Goal
-- Build and optimize ScanGrade (Flask+Supabase exam/grading app) for 500 concurrent students with offline-first auto-save, teacher grading, student results, anti-cheat graduated penalties, PDF download with server-side compositing, and professional ZipGrade-style UI with role-based navigation.
+- Complete notification system with WhatsApp-like percakapan (threaded 1-on-1 chat), pengumuman (broadcast), and UU PDP data retention compliance, with strict RBAC separating student↔teacher messaging (no inter-student conversations or broadcasts).
 
 ## Constraints & Preferences
 - Supabase project: `roshkbkbzgfedowozfo` (region: ap-southeast-1)
@@ -15,7 +15,7 @@
 - UI language: Indonesian (default) with English toggle (`localStorage.sg_lang`)
 - Color theme: `primary` (blue) defined in Tailwind config — `brand-*` was previously undefined (invisible buttons/text), now aliased to `primary` palette
 - No direct DB DDL access — migrations must be run manually in Supabase SQL Editor
-- `profiles` table columns: `['id', 'full_name', 'phone', 'role', 'created_at', 'updated_at']` — **no `school_id`, `class_id`, `nisn`, `nis`, `email` columns exist**
+- `profiles` table columns: `['id', 'full_name', 'phone', 'role', 'created_at', 'updated_at']` — **no `school_id`, `class_id`, `nisn`, `nis`, `email` columns exist** (unless migration 017 added `school_id`)
 - `schools` table **does NOT exist** in `public` schema
 - MCQ answer keys: single value (`"A"`), multiple (`["A","B"]`), or `"bonus"` (all correct)
 - Weighted scoring: Teacher sets MCQ% + Essay% (total must = 100), distributed equally per question within each group
@@ -23,6 +23,23 @@
 - PDF generation uses `xhtml2pdf` (pure Python) — WeasyPrint requires GTK/Pango not available on Windows
 - Anti-cheat: graduated penalty (1st=warning, 2nd=-base, 3rd=-2×base, 4th+=-3×base), auto-submit on max violations
 - Router / security: 404 catch-all `/tools` for admin functions; CSP `frame-ancestors 'self'` in response headers
+
+## Pertukaran Pesan — RBAC Matrix
+
+| Fitur | super_admin | admin_sekolah | guru | murid |
+|-------|-------------|---------------|------|-------|
+| **Kirim Pengumuman** (broadcast) | ✅ All roles | ✅ Guru & Murid di sekolahnya | ✅ Hanya Murid | ❌ Dilarang |
+| **Lihat Pengumuman** | ✅ Semua | ✅ Semua | ✅ Semua | ✅ Semua |
+| **Kirim Pesan 1-on-1** (Percakapan) | ✅ Siapa saja | ✅ Guru/Murid di sekolahnya | ✅ Murid | ✅ Hanya Guru/Admin (diverifikasi role) |
+| **Lihat Percakapan** | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Semua partisipasi | ✅ Hanya dgn Guru/Admin (filter server-side) |
+| **Edit/Hapus Broadcast** | ✅ Semua | ✅ Milik sendiri | ✅ Milik sendiri | ❌ |
+| **Setujui Hapus Akun** | ✅ Semua | ✅ Di sekolahnya | ❌ | ❌ |
+
+**Aturan Kunci:**
+- **Tidak ada percakapan atau pengumuman antar-murid (inter-student)** — backend memverifikasi role setiap penerima
+- Murid yang mengirim pesan 1-on-1 (`target_role: "guru"` atau `"admin_sekolah"`) akan diverifikasi: setiap `recipient_id` harus memiliki role guru/admin_sekolah/super_admin
+- Conversations API menyaring (skip) percakapan antar-murid untuk user role `murid` di server-side
+- Broadcast (`target_role`) tidak bisa `"murid"` jika sender `murid` — di-restrict di `api_send_broadcast`
 
 ## Progress
 ### Done
@@ -59,6 +76,17 @@
 - **Broadcast murid fix**: `murid` role added to `api_send_broadcast` authorization (was `Unauthorized`)
 - **School_id filter**: broadcast API endpoints scope by `profiles.school_id` with try/except
 - **Linkify**: global `linkify()` function in base.html — URLs in messages become clickable `<a target="_blank">`
+- **Added `POST /api/broadcast/mark-read`** — timestamps unread messages via `notification_recipients.read_at`
+- **Auto-polling** (5s) for teacher conversations — `startPolling()`/`stopPolling()` sama seperti student
+- **Unread indicators** — red dot + `ring-2 ring-primary-300` highlight pada conversation cards yang punya unread
+- **Compliance notice** — kartu kebijakan retensi data (UU PDP) di settings student dan teacher
+- **Fixed missing route decorator** pada `api_update_broadcast()` — `@api_bp.route("/broadcast/update")` sekarang terpasang
+- **Fixed duplicate `fetchConversations()`** di teacher notifications — duplikat dihapus
+- **RBAC inter-student restriction diperkuat**:
+  - `api_send_broadcast`: role `murid` diverifikasi per-recipient — hanya guru/admin/super_admin yang valid
+  - `api_conversations`: role `murid` disaring (skip) percakapan antar-murid server-side
+  - `other_role` ditambahkan ke response conversations API — tampil sebagai badge di cards
+  - Student `target_role` diperluas ke `"guru"` dan `"admin_sekolah"`
 
 ### In Progress
 - Many exams (Sejarah, Agama, PPKN, AD) masih punya answer key `None` — guru perlu isi via halaman baru answer keys
@@ -81,6 +109,7 @@
 - NISN: fill from LEFT if < 10 digits (most significant first, trailing cells empty) — standard OMR convention
 - **`brand-*` class fix**: Added `brand` as alias for `primary` in Tailwind config (same blue palette) — fixes all templates system-wide without per-file edits
 - **MCQ answer format**: Use dict `{answer, pages}` only when canvas/text data exists; keep string for backward compatibility
+- **Inter-student restriction**: Three-layer defense — (1) `api_send_broadcast` memverifikasi role setiap recipient (guru/admin/super_admin only), (2) `api_conversations` server-side skip conv antar-murid untuk role murid, (3) FE hanya menampilkan guru di "Pesan Guru" tab
 
 ## Next Steps
 - **Deploy latest commit** on VPS: `git pull origin main && systemctl restart scangrade`
@@ -167,6 +196,14 @@ Setiap task dinilai dengan formula:
 - `supabase/migrations/018_data_retention.sql`: Soft-delete columns, `deletion_requests` table — **not yet executed**
 - `app/services/data_retention_service.py`: Data retention logic, purge scheduler, deletion request handling, data export
 - `app/templates/student/settings.html`: Student settings page (password, data export, deletion request)
+- `app/templates/teacher/settings.html`: Teacher settings page (password, data export)
+- `app/templates/base.html`: Sidebar + mobile nav with notification links and unread badge
+- `app/templates/student/notifications.html`: Conversations + inbox + "Pesan Guru" tabs with auto-polling
+- `app/templates/teacher/notifications.html`: Conversations + send broadcast + history with auto-polling
+- `app/templates/admin_sekolah/notifications.html`: Send broadcast + deletion request management
+- `app/templates/super_admin/notifications.html`: Super admin broadcast page
+- `app/routes/api.py`: All broadcast, conversation, export/delete, and admin deletion API endpoints
+- `app/services/data_retention_service.py`: Data retention logic, purge scheduler, deletion request handling, data export
 - `locustfile.py`: Load test suite for 500 concurrent users
 - `deploy/tune-production.sh`: Production tuning (NGINX, kernel, file limits)
 - `seed.py`: seed script with super_admin + 2 schools (SMP/SMA)

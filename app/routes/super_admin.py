@@ -1468,3 +1468,38 @@ def api_user_suspend(user_id):
     supabase.auth.admin.update_user_by_id(user_id, {"ban_duration": "365d"})
     supabase.table("profiles").update({"status": "suspended"}).eq("id", user_id).execute()
     return jsonify({"success": True})
+
+
+@super_bp.route("/privacy-settings")
+@_sa_required
+def privacy_settings():
+    """Privacy & compliance settings (DPO, PSE, consent)."""
+    from app.utils.auth import get_supabase
+    supabase = get_supabase()
+    settings = {}
+    try:
+        rows = supabase.table("system_settings").select("key, value").in_("key", ["dpo_contact", "pse_reg_number", "privacy_policy_version", "data_controller_name", "data_controller_email"]).execute().data or []
+        for r in rows:
+            settings[r["key"]] = r["value"]
+    except Exception:
+        pass
+    return render_template("super_admin/privacy_settings.html", settings=settings)
+
+
+@super_bp.route("/api/privacy-settings/save", methods=["POST"])
+@_sa_required
+def api_privacy_settings_save():
+    data = request.get_json() or {}
+    supabase = get_supabase()
+    allowed = ["dpo_contact", "pse_reg_number", "privacy_policy_version", "data_controller_name", "data_controller_email"]
+    for key, value in data.items():
+        if key in allowed:
+            try:
+                existing = supabase.table("system_settings").select("id").eq("key", key).execute().data
+                if existing:
+                    supabase.table("system_settings").update({"value": str(value)}).eq("key", key).execute()
+                else:
+                    supabase.table("system_settings").insert({"key": key, "value": str(value)}).execute()
+            except Exception:
+                pass
+    return jsonify({"success": True})

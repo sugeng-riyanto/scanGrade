@@ -830,8 +830,114 @@ def student_notifications():
     return render_template("student/notifications.html")
 
 
-@student_bp.route("/settings")
+
+@student_bp.route("/settings", methods=["GET"])
 @login_required
 def student_settings():
-    """Student settings page (password, data export, deletion request)."""
-    return render_template("student/settings.html")
+    """Student settings page (password, data export, deletion request, PDP settings)."""
+    supabase = get_supabase()
+    profile = {}
+    try:
+        # Fetch comprehensive profile data
+        profile_data = supabase.table("profiles").select(
+            "id, full_name, phone, role, birth_date, pdp_agreed, parent_pdp_agreed, parent_name, parent_contact"
+        ).eq("id", g.user_id).single().execute().data
+        if profile_data:
+            profile = profile_data
+    except Exception as e:
+        current_app.logger.error(f"Error fetching student profile for settings: {e}")
+        profile = {} # Ensure profile is an empty dict if fetch fails
+
+    # Calculate age if birth_date is available
+    age = None
+    if profile and profile.get("birth_date"):
+        try:
+            # Ensure birth_date is a string for strptime if it's not already a date object
+            if isinstance(profile["birth_date"], str):
+                birth_date_str = profile["birth_date"]
+            elif isinstance(profile["birth_date"], datetime.date):
+                birth_date_str = profile["birth_date"].strftime('%Y-%m-%d')
+            else:
+                birth_date_str = None
+
+            if birth_date_str:
+                birth_date_obj = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                today = datetime.date.today()
+                age = today.year - birth_date_obj.year - ((today.month, today.day) < (birth_date_obj.month, birth_date_obj.day))
+        except (ValueError, TypeError) as e:
+            current_app.logger.warning(f"Invalid birth_date format for user {g.user_id}: {profile.get('birth_date')}. Error: {e}")
+            pass # age remains None
+
+    # Convert date objects to string for template rendering if necessary
+    if profile and profile.get("birth_date") and isinstance(profile["birth_date"], datetime.date):
+        profile["birth_date"] = profile["birth_date"].strftime('%Y-%m-%d')
+
+    return render_template("student/settings.html", profile=profile, age=age)
+
+
+@student_bp.route("/settings/pdp-update", methods=["POST"])
+@login_required
+def student_update_pdp_settings():
+    if g.get("user_role") != "murid":
+        return jsonify({"error": "Forbidden"}), 403
+
+    supabase = get_supabase()
+    data = request.get_json() or {}
+
+    birth_date_str = data.get("birth_date")
+    pdp_agreed = data.get("pdp_agreed", False)
+    parent_pdp_agreed = data.get("parent_pdp_agreed", False)
+    parent_name = data.get("parent_name", "").strip()
+    parent_contact = data.get("parent_contact", "").strip()
+
+    # Convert birth_date string to date object
+    birth_date_obj = None
+    if birth_date_str:
+        try:
+            birth_date_obj = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"status": "error", "message": "Format tanggal lahir tidak valid. Gunakan YYYY-MM-DD."}), 400
+
+    if not birth_date_obj:
+        return jsonify({"status": "error", "message": "Tanggal lahir wajib diisi."}), 400
+
+    age = calculate_age(birth_date_obj) # calculate_age needs to be globally available or imported
+
+    update_payload = {
+        "birth_date": birth_date_str, # Store as string for DB
+        "pdp_agreed": pdp_agreed,
+        "parent_pdp_agreed": parent_pdp_agreed,
+        "parent_name": parent_name if parent_name else None,
+        "parent_contact": parent_contact if parent_contact else None,
+    }
+
+    if age < 18:
+        if pdp_agreed and not parent_pdp_agreed:
+            return jsonify({
+                "status": "requires_parental_consent",
+                "message": "Siswa di bawah 18 tahun wajib menyertakan persetujuan Orang Tua/Wali sesuai UU PDP."
+            }), 400
+        if parent_pdp_agreed and (not parent_name or not parent_contact):
+            return jsonify({
+                "status": "error",
+                "message": "Nama dan kontak wali wajib diisi untuk memverifikasi hak anak."
+            }), 400
+    else:
+        # For adults, parental consent fields are not relevant and should be cleared/ignored
+        update_payload["parent_pdp_agreed"] = False
+        update_payload["parent_name"] = None
+        update_payload["parent_contact"] = None
+
+    try:
+        supabase.table("profiles").update(update_payload).eq("id", g.user_id).execute()
+        log_activity("update", "pdp_settings", g.user_id, new_data=update_payload, user_id=g.user_id)
+        return jsonify({"status": "success", "message": "Pengaturan PDP berhasil diperbarui."}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error updating student PDP settings: {e}")
+        return jsonify({"status": "error", "message": f"Gagal memperbarui pengaturan PDP: {str(e)}"}), 500
+
+
+
+def calculate_age(birth_date: datetime.date) -> int:
+    today = datetime.date.today()
+    return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))

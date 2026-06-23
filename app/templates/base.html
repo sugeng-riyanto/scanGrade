@@ -180,6 +180,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/super-admin/midtrans" class="nav-item {% if request.path == '/super-admin/midtrans' %}active{% endif %}"><i class="fab fa-cc-visa"></i><span>Midtrans</span></a>
             <a href="/super-admin/activation-codes" class="nav-item {% if request.path == '/super-admin/activation-codes' %}active{% endif %}"><i class="fas fa-key"></i><span>Kode Aktivasi</span></a>
             <a href="/super-admin/pricing-settings" class="nav-item {% if request.path == '/super-admin/pricing-settings' %}active{% endif %}"><i class="fas fa-sliders-h"></i><span>Model Harga</span></a>
+            <a href="/super-admin/privacy-settings" class="nav-item {% if request.path == '/super-admin/privacy-settings' %}active{% endif %}"><i class="fas fa-shield-alt"></i><span>Privasi &amp; Kepatuhan</span></a>
             <a href="/super-admin/plans" class="nav-item {% if request.path == '/super-admin/plans' %}active{% endif %}"><i class="fas fa-tags"></i><span>Paket Harga</span></a>
             <a href="/super-admin/payment-fee-settings" class="nav-item {% if request.path == '/super-admin/payment-fee-settings' %}active{% endif %}"><i class="fas fa-receipt"></i><span>Biaya Admin</span></a>
             <a href="/super-admin/trial-settings" class="nav-item {% if request.path == '/super-admin/trial-settings' %}active{% endif %}"><i class="fas fa-clock"></i><span>Masa Trial</span></a>
@@ -556,3 +557,20 @@ function linkify(text) {
 </nav>
 {% endif %}
 
+<footer class="bg-surface-50 border-t border-surface-200 py-6 px-4 mt-auto">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-surface-400">
+        <p>&copy; 2026 ScanGrade. All rights reserved.</p>
+        <div class="flex items-center gap-4 flex-wrap justify-center">
+            <a href="/privacy" class="hover:text-primary-600 transition font-medium">Kebijakan Privasi</a>
+            <a href="/terms" class="hover:text-primary-600 transition font-medium">Syarat &amp; Ketentuan</a>
+            <span id="dpo-footer" class="text-surface-400 hidden"><i class="fas fa-user-shield mr-1"></i> DPO: <span id="dpo-name"></span></span>
+            <span id="pse-footer" class="text-surface-400 hidden"><i class="fas fa-certificate mr-1"></i> <span id="pse-number"></span></span>
+        </div>
+    </div>
+</footer>
+<script>
+fetch('/api/public/privacy-info').then(r=>r.json()).then(d=>{
+    if(d.dpo_contact){document.getElementById('dpo-name').textContent=d.dpo_contact;document.getElementById('dpo-footer').classList.remove('hidden')}
+    if(d.pse_reg_number){document.getElementById('pse-number').textContent='PSE: '+d.pse_reg_number;document.getElementById('pse-footer').classList.remove('hidden')}
+}).catch(function(){})
+</script>

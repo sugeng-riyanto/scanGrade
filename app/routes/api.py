@@ -1481,8 +1481,8 @@ def api_send_broadcast():
             return jsonify({"error": "Admin hanya bisa kirim ke guru/murid"}), 403
         target_school_id = school_id
     elif role == "murid":
-        if target_role not in ("guru",):
-            return jsonify({"error": "Murid hanya bisa kirim ke guru"}), 403
+        if target_role not in ("guru", "admin_sekolah"):
+            return jsonify({"error": "Murid hanya bisa kirim ke guru/admin"}), 403
         target_school_id = school_id
     elif role != "super_admin":
         return jsonify({"error": "Unauthorized"}), 403
@@ -1503,8 +1503,14 @@ def api_send_broadcast():
     recipient_ids = data.get("recipient_ids")
     recipients = []
     if recipient_ids and isinstance(recipient_ids, list) and len(recipient_ids) > 0:
-        # Selective one-on-one — use provided IDs, scope by school
-        if target_school_id:
+        if role == "murid":
+            # Students can only message teachers — verify each recipient
+            try:
+                valid = supabase.table("profiles").select("id, role").eq("status", "active").in_("id", recipient_ids).execute().data or []
+                recipients = [{"id": r["id"]} for r in valid if r.get("role") == "guru" or r.get("role") == "admin_sekolah" or r.get("role") == "super_admin"]
+            except Exception:
+                recipients = []
+        elif target_school_id:
             try:
                 valid = supabase.table("profiles").select("id").eq("status", "active").in_("id", recipient_ids).eq("school_id", target_school_id).execute().data or []
                 recipients = [{"id": r["id"]} for r in valid]
@@ -1650,16 +1656,22 @@ def api_conversations():
             .or_("participant_1.eq." + uid + ",participant_2.eq." + uid) \
             .order("last_message_at", desc=True).limit(50).execute().data or []
 
-        # Enrich with notifications for each conversation
+        role = g.get("user_role")
         result = []
         for c in convs:
             other_id = c["participant_1"] if uid == c["participant_2"] else c["participant_2"]
             other_name = other_id[:8]
+            other_role = None
             try:
-                p = supabase.table("profiles").select("full_name").eq("id", other_id).single().execute().data
-                other_name = p.get("full_name", other_id[:8]) if p else other_id[:8]
+                p = supabase.table("profiles").select("full_name, role").eq("id", other_id).single().execute().data
+                if p:
+                    other_name = p.get("full_name", other_id[:8])
+                    other_role = p.get("role")
             except Exception:
                 pass
+            # Students can only converse with teachers/admins, not other students
+            if role == "murid" and other_role == "murid":
+                continue
             # Get messages in this conversation
             msgs = []
             try:
@@ -1677,16 +1689,20 @@ def api_conversations():
                 pass
             result.append({
                 "id": c["id"], "title": c["title"], "status": c["status"],
-                "other_name": other_name, "other_id": other_id,
+                "other_name": other_name, "other_id": other_id, "other_role": other_role,
                 "last_message_at": str(c.get("last_message_at", ""))[:19].replace("T", " "),
                 "created_at": str(c.get("created_at", ""))[:19].replace("T", " "),
                 "completed_at": str(c.get("completed_at", ""))[:19].replace("T", " ") if c.get("completed_at") else None,
                 "messages": msgs,
                 "unread": any(not m.get("is_mine") for m in msgs[-3:]) if msgs else False,
+                "has_unread": any(not m.get("is_mine") for m in msgs[-3:]) if msgs else False,
             })
         return jsonify({"conversations": result})
     except Exception as e:
         return jsonify({"error": str(e)[:100], "conversations": []}), 500
+
+
+@api_bp.route("/broadcast/update", methods=["POST"])
 @login_required
 def api_update_broadcast():
     """Edit notification title/message."""
@@ -1731,6 +1747,27 @@ def api_delete_broadcast():
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+
+
+@api_bp.route("/broadcast/mark-read", methods=["POST"])
+@login_required
+def api_mark_read():
+    """Mark a conversation's messages as read by the current user."""
+    data = request.get_json() or {}
+    conversation_id = data.get("conversation_id")
+    if not conversation_id:
+        return jsonify({"error": "conversation_id diperlukan"}), 400
+    supabase = get_supabase()
+    try:
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        notifs = supabase.table("notifications").select("id").eq("conversation_id", conversation_id).neq("sender_id", g.user_id).execute().data or []
+        nids = [n["id"] for n in notifs]
+        if nids:
+            supabase.table("notification_recipients").update({"read_at": now_iso}).eq("recipient_id", g.user_id).in_("notification_id", nids).is_("read_at", "null").execute()
+        return jsonify({"success": True, "marked": len(nids)})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
 
 
 @api_bp.route("/broadcast/list", methods=["GET"])
@@ -1957,3 +1994,18 @@ def api_admin_process_deletion():
     from app.services.data_retention_service import process_deletion_request
     result, status = process_deletion_request(request_id, g.user_id, action, notes)
     return jsonify(result), status
+
+
+@api_bp.route("/public/privacy-info")
+def api_public_privacy_info():
+    """Public endpoint: returns DPO contact and PSE registration number."""
+    from app.utils.auth import get_supabase
+    supabase = get_supabase()
+    result = {"dpo_contact": "", "pse_reg_number": "", "data_controller_name": "", "data_controller_email": ""}
+    try:
+        rows = supabase.table("system_settings").select("key, value").in_("key", ["dpo_contact", "pse_reg_number", "data_controller_name", "data_controller_email"]).execute().data or []
+        for r in rows:
+            result[r["key"]] = r["value"]
+    except Exception:
+        pass
+    return jsonify(result)

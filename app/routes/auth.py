@@ -36,6 +36,11 @@ def register():
     if len(password) < 6:
         return render_template("auth/register.html", error="Password minimal 6 karakter")
 
+    # ── Consent check (UU PDP) ──
+    consent = request.form.get("consent")
+    if not consent:
+        return render_template("auth/register.html", error="Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi")
+
     supabase = get_supabase()
 
     # ── Check NPSN duplicate ──
@@ -85,6 +90,7 @@ def register():
             "phone": wa,
             "role": "admin_sekolah",
             "status": "pending",
+            "consent_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
     except Exception as e:
         current_app.logger.error(f"Register step 2 (profile) failed: {e}, cleaning up user {uid}")

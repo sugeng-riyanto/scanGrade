@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Pengaturan Privasi - ScanGrade{% endblock %}
+{% block page_title %}Pengaturan Privasi &amp; Kepatuhan{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
+    <div class="card p-6" x-data="privacySettings()">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600 text-xl"><i class="fas fa-shield-alt"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800">Informasi Pengendali Data</h3>
+                <p class="text-sm text-slate-500 font-medium">Data ini akan tampil di halaman Kebijakan Privasi publik</p>
+            </div>
+        </div>
+
+        <div class="space-y-4" x-init="init({{ settings | tojson }})">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Nama Pengendali Data (Institusi)</label>
+                <input type="text" x-model="settings.data_controller_name" class="input" placeholder="Yayasan Pendidikan XYZ">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Email Pengendali Data</label>
+                <input type="email" x-model="settings.data_controller_email" class="input" placeholder="kontak@sekolah.sch.id">
+            </div>
+        </div>
+
+        <hr class="my-6 border-surface-200">
+
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 text-xl"><i class="fas fa-user-shield"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800">Petugas Perlindungan Data (DPO)</h3>
+                <p class="text-sm text-slate-500 font-medium">Wajib ada sesuai PSE Kominfo — tampil di footer &amp; halaman privasi</p>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Nama DPO / Kontak</label>
+                <input type="text" x-model="settings.dpo_contact" class="input" placeholder="Nama — email — telepon">
+                <p class="text-xs text-slate-400 mt-1">Format: Nama Lengkap — email@sekolah.sch.id — 08123456789</p>
+            </div>
+        </div>
+
+        <hr class="my-6 border-surface-200">
+
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 text-xl"><i class="fas fa-certificate"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800">Registrasi PSE Kominfo</h3>
+                <p class="text-sm text-slate-500 font-medium">Nomor registrasi setelah mendaftar sebagai Penyelenggara Sistem Elektronik</p>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Nomor Registrasi PSE</label>
+                <input type="text" x-model="settings.pse_reg_number" class="input" placeholder="Contoh: PSE.2026.12345">
+            </div>
+        </div>
+
+        <hr class="my-6 border-surface-200">
+
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600 text-xl"><i class="fas fa-file-alt"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800">Versi Kebijakan Privasi</h3>
+                <p class="text-sm text-slate-500 font-medium">Update otomatis setiap kali ada perubahan kebijakan</p>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Label Versi</label>
+                <input type="text" x-model="settings.privacy_policy_version" class="input" placeholder="v1.0 — 23 Juni 2026">
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3 pt-4">
+            <button @click="save()" class="btn btn-primary px-6" :disabled="saving">
+                <span x-show="!saving">Simpan Pengaturan</span>
+                <span x-show="saving" class="flex items-center gap-2"><i class="fas fa-spinner fa-spin"></i> Menyimpan...</span>
+            </button>
+            <a href="/super-admin/dashboard" class="btn btn-ghost">Kembali</a>
+        </div>
+    </div>
+
+    <div class="card p-6">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-xl bg-surface-100 flex items-center justify-center text-surface-500 text-lg"><i class="fas fa-info-circle"></i></div>
+            <div>
+                <h3 class="font-extrabold text-base text-slate-800">Daftar Periksa Kepatuhan PSE</h3>
+            </div>
+        </div>
+        <ul class="space-y-3 text-sm">
+            <li class="flex items-start gap-3">
+                <span class="mt-0.5 w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-bold flex-shrink-0"><i class="fas fa-check"></i></span>
+                <span class="text-slate-600">Kebijakan Privasi &amp; Syarat Ketentuan sudah tersedia di <code class="text-xs bg-surface-100 px-1 rounded">/privacy</code> dan <code class="text-xs bg-surface-100 px-1 rounded">/terms</code></span>
+            </li>
+            <li class="flex items-start gap-3">
+                <span class="mt-0.5 w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-bold flex-shrink-0"><i class="fas fa-check"></i></span>
+                <span class="text-slate-600">Persetujuan (consent) dikumpulkan saat registrasi</span>
+            </li>
+            <li class="flex items-start gap-3">
+                <span class="mt-0.5 w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-bold flex-shrink-0"><i class="fas fa-check"></i></span>
+                <span class="text-slate-600">Hak akses data (ekspor) &amp; penghapusan (delete request) tersedia</span>
+            </li>
+            <li class="flex items-start gap-3">
+                <span class="mt-0.5 w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-bold flex-shrink-0"><i class="fas fa-check"></i></span>
+                <span class="text-slate-600">Retensi data diatur dengan auto-purge scheduler</span>
+            </li>
+            <li class="flex items-start gap-3">
+                <span class="mt-0.5 w-5 h-5 rounded-full" :class="pseRegFilled ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'"><i class="fas" :class="pseRegFilled ? 'fa-check' : 'fa-exclamation'"></i></span>
+                <span class="text-slate-600">Nomor registrasi PSE perlu diisi setelah mendaftar di Kominfo</span>
+            </li>
+            <li class="flex items-start gap-3">
+                <span class="mt-0.5 w-5 h-5 rounded-full" :class="dpoFilled ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'"><i class="fas" :class="dpoFilled ? 'fa-check' : 'fa-exclamation'"></i></span>
+                <span class="text-slate-600">Kontak DPO perlu diisi setelah menunjuk Petugas Perlindungan Data</span>
+            </li>
+        </ul>
+        <div class="mt-4 p-3 bg-blue-50 rounded-xl text-xs text-blue-700 font-medium">
+            <i class="fas fa-lightbulb mr-1"></i> 
+            Setelah melengkapi semua data di atas, jalankan migrasi <code class="text-xs bg-blue-100 px-1 rounded">ALTER TABLE profiles ADD COLUMN IF NOT EXISTS consent_at TIMESTAMPTZ;</code> di Supabase SQL Editor untuk menyimpan timestamp consent secara permanen.
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function privacySettings() {
+    return {
+        settings: { dpo_contact: '', pse_reg_number: '', privacy_policy_version: '', data_controller_name: '', data_controller_email: '' },
+        saving: false,
+        init(data) { if (data) Object.assign(this.settings, data); },
+        get dpoFilled() { return this.settings.dpo_contact && this.settings.dpo_contact.trim().length > 0; },
+        get pseRegFilled() { return this.settings.pse_reg_number && this.settings.pse_reg_number.trim().length > 0; },
+        save() {
+            this.saving = true;
+            fetch('/super-admin/api/privacy-settings/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(this.settings)
+            }).then(r => r.json()).then(data => {
+                if (data.success) { alert('Pengaturan berhasil disimpan!'); }
+                else { alert('Gagal menyimpan: ' + (data.error || 'unknown')); }
+            }).catch(e => alert('Error: ' + e.message))
+            .finally(() => this.saving = false);
+        }
+    }
+}
+</script>
+{% endblock %}
