@@ -54,3 +54,23 @@ def demo_request():
     except Exception as e:
         logger.warning("Failed to save demo request: %s", e)
         return jsonify({"success": True, "message": "Terima kasih! Kami akan menghubungi Anda."})
+
+
+@public_bp.route("/privacy")
+def privacy():
+    """Kebijakan Privasi — UU PDP compliance."""
+    supabase = get_supabase()
+    dpo_contact = None
+    try:
+        dpo = supabase.table("system_settings").select("value").eq("key", "dpo_contact").single().execute().data
+        if dpo:
+            dpo_contact = dpo.get("value")
+    except Exception:
+        pass
+    return render_template("compliance/privacy.html", dpo_contact=dpo_contact)
+
+
+@public_bp.route("/terms")
+def terms():
+    """Syarat dan Ketentuan — PSE Kominfo compliance."""
+    return render_template("compliance/terms.html")
