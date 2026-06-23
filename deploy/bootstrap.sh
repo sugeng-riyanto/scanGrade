@@ -40,8 +40,9 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# 6. Static dir
-mkdir -p static
+# 6. Build Tailwind CSS
+npm install --silent
+npm run css:build
 
 # 7. Systemd service
 sudo cp deploy/scangrade.service /etc/systemd/system/

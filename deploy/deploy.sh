@@ -53,6 +53,13 @@ pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 echo "✅ Dependencies installed ($(pip list --format=columns | wc -l) packages)"
 
+# ── Build Tailwind CSS ──
+echo ""
+echo "🎨 Building Tailwind CSS..."
+npm install --silent 2>/dev/null
+npm run css:build
+echo "✅ Tailwind CSS built"
+
 # ── Copy NGINX config ──
 if [ "$NGINX_MISSING" -eq 0 ] && [ -f "$REPO_DIR/deploy/nginx.conf" ]; then
     echo ""
