@@ -1551,7 +1551,7 @@ def api_send_broadcast():
             if conv:
                 conv_id = conv[0]["id"]
                 supabase.table("conversations").update({
-                    "last_message_at": "now()",
+                    "last_message_at": datetime.now(timezone.utc).isoformat(),
                     "title": title
                 }).eq("id", conv_id).execute()
             else:
@@ -1611,7 +1611,7 @@ def api_reply_broadcast():
 
         # Update conversation last_message_at only (keep original title)
         supabase.table("conversations").update({
-            "last_message_at": "now()"
+            "last_message_at": datetime.now(timezone.utc).isoformat()
         }).eq("id", conversation_id).execute()
 
         return jsonify({"success": True})
@@ -1638,7 +1638,7 @@ def api_complete_conversation():
         if conv["status"] != "open":
             return jsonify({"error": "Percakapan sudah selesai"}), 400
         supabase.table("conversations").update({
-            "status": "completed", "completed_at": "now()", "completed_by": uid
+            "status": "completed", "completed_at": datetime.now(timezone.utc).isoformat(), "completed_by": uid
         }).eq("id", conversation_id).execute()
         return jsonify({"success": True})
     except Exception as e:
