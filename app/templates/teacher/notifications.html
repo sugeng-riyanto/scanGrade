@@ -158,12 +158,13 @@
         fetch('/api/broadcast/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:n.id})})
         .then(r=>r.json()).then(d => { if (d.success) this.fetchNotifs(); });
     },
-    statsData: null,
-    loadStats(n) {
-        this.statsData = null;
+    statsMap: {},
+    toggleStats(n) {
+        if (this.statsMap[n.id]) { delete this.statsMap[n.id]; return; }
+        this.statsMap[n.id] = null;
         fetch('/api/broadcast/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notification_id: n.id})})
         .then(r=>r.json()).then(d => {
-            if (d.total > 0) this.statsData = d;
+            if (d.total > 0) { this.statsMap[n.id] = d; }
         }).catch(()=>{});
     },
     showInfo: false,
@@ -188,11 +189,13 @@
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-history text-primary-500 mr-1 w-4"></i>Tab Riwayat</p>
-                    <p>Daftar pengumuman yang sudah dikirim. Bisa edit atau hapus pengumuman milik sendiri.</p>
+                    <p>Daftar pengumuman yang sudah dikirim. Bisa edit, hapus, dan lihat statistik baca (chart donut) per pengumuman. Klik ikon <i class="fas fa-chart-bar text-primary-600"></i> untuk statistik.</p>
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-bell text-primary-500 mr-1 w-4"></i>Notifikasi Badge</p>
-                    <p>Angka merah di sidebar = jumlah percakapan dengan balasan baru yang <span class="font-bold">belum kamu buka</span>. Hilang setelah kamu klik percakapan tersebut. Update otomatis tiap 30 detik, plus sesaat setelah mark-read.</p>
+                    <p><span class="inline-block w-2 h-2 rounded-full bg-yellow-500 align-middle mr-1"></span> Angka kuning = pengumuman baru belum dibaca.</p>
+                    <p><span class="inline-block w-2 h-2 rounded-full bg-emerald-500 align-middle mr-1"></span> Angka hijau = percakapan dengan balasan baru.</p>
+                    <p>Hilang setelah kamu klik tab terkait atau buka percakapan. Update tiap 30 detik + instan setelah mark-read.</p>
                 </div>
             </div>
         </template>
@@ -400,24 +403,24 @@
                                         <template x-if="n.can_edit">
                                             <button @click="deleteMsg(n)" class="text-xs text-red-500 hover:text-red-700 font-bold"><i class="fas fa-trash"></i></button>
                                         </template>
-                                        <button @click="loadStats(n)" class="text-xs text-primary-600 hover:text-primary-800 font-bold"><i class="fas fa-chart-bar"></i></button>
+                                        <button @click="toggleStats(n)" class="text-xs font-bold" :class="statsMap[n.id] ? 'text-emerald-600' : 'text-primary-600 hover:text-primary-800'"><i class="fas fa-chart-bar"></i><span x-show="statsMap[n.id]"> <i class="fas fa-times text-[9px]"></i></span></button>
                                         <span class="text-[10px] font-medium text-surface-400 whitespace-nowrap" x-text="n.created_at"></span>
                                     </div>
                                 </div>
-                                <template x-if="statsData && n.id">
+                                <template x-if="statsMap[n.id]">
                                     <div class="mt-3 pt-3 border-t border-surface-200">
                                         <div class="flex items-center gap-4">
                                             <div class="relative w-16 h-16">
                                                 <svg viewBox="0 0 36 36" class="w-16 h-16 -rotate-90">
                                                     <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#e5e7eb" stroke-width="3"/>
-                                                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#22c55e" stroke-width="3" :stroke-dasharray="(statsData.total > 0 ? (statsData.read / statsData.total * 100) : 0) + ', 100'"/>
+                                                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#22c55e" stroke-width="3" :stroke-dasharray="(statsMap[n.id].total > 0 ? (statsMap[n.id].read / statsMap[n.id].total * 100) : 0) + ', 100'"/>
                                                 </svg>
-                                                <span class="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-surface-600" x-text="(statsData.total > 0 ? Math.round(statsData.read / statsData.total * 100) : 0) + '%'"></span>
+                                                <span class="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-surface-600" x-text="(statsMap[n.id].total > 0 ? Math.round(statsMap[n.id].read / statsMap[n.id].total * 100) : 0) + '%'"></span>
                                             </div>
                                             <div class="text-xs text-surface-500">
-                                                <p><span class="text-emerald-600 font-bold" x-text="statsData.read"></span> dibaca</p>
-                                                <p><span class="text-red-400 font-bold" x-text="statsData.unread"></span> belum dibaca</p>
-                                                <p>dari <span class="font-bold" x-text="statsData.total"></span> penerima</p>
+                                                <p><span class="text-emerald-600 font-bold" x-text="statsMap[n.id].read"></span> dibaca</p>
+                                                <p><span class="text-red-400 font-bold" x-text="statsMap[n.id].unread"></span> belum dibaca</p>
+                                                <p>dari <span class="font-bold" x-text="statsMap[n.id].total"></span> penerima</p>
                                             </div>
                                         </div>
                                     </div>
