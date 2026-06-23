@@ -1574,9 +1574,8 @@ def api_reply_broadcast():
     """Reply to a conversation thread."""
     data = request.get_json() or {}
     conversation_id = data.get("conversation_id")
-    title = str(data.get("title", "")).strip()
     message = str(data.get("message", "")).strip()
-    if not conversation_id or not title or not message:
+    if not conversation_id or not message:
         return jsonify({"error": "Data tidak lengkap"}), 400
 
     supabase = get_supabase()
@@ -1594,10 +1593,11 @@ def api_reply_broadcast():
         other_id = conv["participant_1"] if uid == conv["participant_2"] else conv["participant_2"]
         role = g.get("user_role")
 
-        # Create notification
+        # Use original conversation title, not reply title
+        orig_title = conv.get("title", title)
         notif = {
             "sender_id": uid, "sender_role": role,
-            "title": title, "message": message,
+            "title": orig_title, "message": message,
             "target_role": None, "target_school_id": None,
             "conversation_id": conversation_id,
         }
@@ -1609,9 +1609,9 @@ def api_reply_broadcast():
             "notification_id": notif_id, "recipient_id": other_id
         }).execute()
 
-        # Update conversation
+        # Update conversation last_message_at only (keep original title)
         supabase.table("conversations").update({
-            "last_message_at": "now()", "title": title
+            "last_message_at": "now()"
         }).eq("id", conversation_id).execute()
 
         return jsonify({"success": True})

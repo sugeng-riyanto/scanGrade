@@ -9,7 +9,7 @@
     selectedRole: 'murid', selectedStudents: [],
     studentList: [], editingId: null, editTitle: '', editMessage: '',
     conversations: [], convsLoading: true,
-    activeConv: null, replyTitle: '', replyMessage: '', replying: false,
+    activeConv: null, replyMessage: '', replying: false,
     pollTimer: null,
     activeTab: 'convs',
     // Conversations with auto-polling
@@ -38,7 +38,6 @@
     },
     openConv(c) {
         this.activeConv = c;
-        this.replyTitle = c.title;
         this.replyMessage = '';
         this.$nextTick(() => { this.scrollToBottom(); });
         this.startPolling();
@@ -52,11 +51,11 @@
         if (el) el.scrollTop = el.scrollHeight;
     },
     sendReply() {
-        if (!this.replyTitle || !this.replyMessage) return;
+        if (!this.replyMessage) return;
         this.replying = true;
         fetch('/api/broadcast/reply', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id, title: this.replyTitle, message: this.replyMessage})
+            body: JSON.stringify({conversation_id: this.activeConv.id, message: this.replyMessage})
         }).then(r=>r.json()).then(d => {
             if (d.success) { this.replyMessage = ''; this.fetchConversations(); }
         }).catch(()=>{}).finally(()=>{ this.replying = false; });
@@ -189,7 +188,6 @@
                     </div>
                     <template x-if="activeConv.status==='open'">
                         <div class="mt-4 space-y-3">
-                            <input type="text" x-model="replyTitle" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium text-sm" placeholder="Judul">
                             <textarea x-model="replyMessage" rows="2" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 text-sm" placeholder="Ketik balasan..."></textarea>
                             <button @click="sendReply()" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="replying">
                                 <span x-text="replying ? 'Mengirim...' : 'Kirim Balasan'"></span>
