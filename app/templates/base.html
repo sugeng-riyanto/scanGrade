@@ -133,9 +133,13 @@ html { transition: background-color .3s, color .3s; }
             setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 4000);
         },
         userMenuOpen: false,
-        unreadCount: 0,
+        unreadCount: 0, broadcastUnread: 0, conversationUnread: 0,
         fetchUnread() {
-            fetch('/api/broadcast/unread').then(r=>r.json()).then(d => { this.unreadCount = d.unread || 0; }).catch(()=>{});
+            fetch('/api/broadcast/unread').then(r=>r.json()).then(d => {
+                this.unreadCount = d.unread || 0;
+                this.broadcastUnread = d.broadcast_unread || 0;
+                this.conversationUnread = d.conversation_unread || 0;
+            }).catch(()=>{});
         },
       }"
       x-init="document.documentElement.classList.toggle('dark', darkMode); window.addEventListener('sg:unread', () => { this.fetchUnread(); }); setInterval(() => this.fetchUnread(), 30000); fetchUnread()"
@@ -189,7 +193,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/super-admin/file-management" class="nav-item {% if request.path == '/super-admin/file-management' %}active{% endif %}"><i class="fas fa-folder-open"></i><span>Manajemen File</span></a>
             <a href="/super-admin/omr-test" class="nav-item {% if request.path == '/super-admin/omr-test' %}active{% endif %}"><i class="fas fa-microscope"></i><span>Uji OMR</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
-            <a href="/super-admin/notifications" class="nav-item {% if request.path == '/super-admin/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pengumuman</span><template x-if="unreadCount > 0"><span class="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="unreadCount"></span></template></a>
+            <a href="/super-admin/notifications" class="nav-item {% if request.path == '/super-admin/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pengumuman</span><template x-if="broadcastUnread > 0"><span class="ml-auto bg-yellow-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="broadcastUnread" title="Pengumuman baru"></span></template><template x-if="conversationUnread > 0"><span class="ml-auto bg-emerald-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="conversationUnread" title="Pesan baru"></span></template></a>
             <div class="nav-section-title pt-2">Tools</div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
             <a href="/super-admin/reset-school-data" class="nav-item {% if request.path == '/super-admin/reset-school-data' %}active{% endif %}"><i class="fas fa-skull-crossbones text-red-400"></i><span class="text-red-400">Reset Sekolah</span></a>
@@ -210,7 +214,7 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Akademik</div>
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span>Mata Pelajaran</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
-            <a href="/admin-sekolah/notifications" class="nav-item {% if request.path == '/admin-sekolah/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pengumuman</span><template x-if="unreadCount > 0"><span class="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="unreadCount"></span></template></a>
+            <a href="/admin-sekolah/notifications" class="nav-item {% if request.path == '/admin-sekolah/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pengumuman</span><template x-if="broadcastUnread > 0"><span class="ml-auto bg-yellow-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="broadcastUnread" title="Pengumuman baru"></span></template><template x-if="conversationUnread > 0"><span class="ml-auto bg-emerald-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="conversationUnread" title="Pesan baru"></span></template></a>
             <div class="nav-section-title pt-2">Langganan</div>
             <a href="/admin-sekolah/subscription" class="nav-item {% if request.path == '/admin-sekolah/subscription' %}active{% endif %}"><i class="fas fa-credit-card"></i><span>Langganan Saya</span></a>
             <a href="/admin-sekolah/invoices" class="nav-item {% if request.path == '/admin-sekolah/invoices' %}active{% endif %}"><i class="fas fa-file-invoice"></i><span>Invoice</span></a>
@@ -234,7 +238,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Hasil Ujian</span></a>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
-            <a href="/teacher/notifications" class="nav-item {% if request.path == '/teacher/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pengumuman</span><template x-if="unreadCount > 0"><span class="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="unreadCount"></span></template></a>
+            <a href="/teacher/notifications" class="nav-item {% if request.path == '/teacher/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pengumuman</span><template x-if="broadcastUnread > 0"><span class="ml-auto bg-yellow-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="broadcastUnread" title="Pengumuman baru"></span></template><template x-if="conversationUnread > 0"><span class="ml-auto bg-emerald-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="conversationUnread" title="Pesan baru"></span></template></a>
             <div class="nav-section-title pt-2">Pengaturan</div>
             <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan Akun</span></a>
             <div class="nav-section-title pt-2">Tools</div>
@@ -253,7 +257,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/student/exams" class="nav-item {% if request.path == '/student/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian Saya</span></a>
             <a href="/student/results" class="nav-item {% if request.path == '/student/results' %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Nilai Saya</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
-            <a href="/student/notifications" class="nav-item {% if request.path == '/student/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pesan & Pengumuman</span><template x-if="unreadCount > 0"><span class="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="unreadCount"></span></template></a>
+            <a href="/student/notifications" class="nav-item {% if request.path == '/student/notifications' %}active{% endif %}"><i class="fas fa-bullhorn"></i><span>Pesan & Pengumuman</span><template x-if="broadcastUnread > 0"><span class="ml-auto bg-yellow-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="broadcastUnread" title="Pengumuman baru"></span></template><template x-if="conversationUnread > 0"><span class="ml-auto bg-emerald-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center" x-text="conversationUnread" title="Pesan baru"></span></template></a>
             <a href="/student/settings" class="nav-item {% if request.path == '/student/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan</span></a>
             {% set _feat = get_school_features() %}
             {% if False and _feat.get('whiteboard_enabled', True) %}

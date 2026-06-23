@@ -1473,8 +1473,8 @@ def api_send_broadcast():
     school_id = g.get("user_school_id")
 
     if role == "guru":
-        if target_role not in ("murid",):
-            return jsonify({"error": "Guru hanya bisa kirim ke murid"}), 403
+        if target_role not in ("murid", "guru"):
+            return jsonify({"error": "Guru hanya bisa kirim ke guru/murid"}), 403
         target_school_id = school_id
     elif role == "admin_sekolah":
         if target_role not in ("guru", "murid"):
@@ -1912,16 +1912,65 @@ def api_broadcast_list():
 @api_bp.route("/broadcast/unread", methods=["GET"])
 @login_required
 def api_broadcast_unread():
-    """Get unread notification count."""
+    """Get unread notification count (separate broadcast vs conversation)."""
     supabase = get_supabase()
     user_id = g.user_id
-    count = 0
+    broadcast_unread = 0
+    conversation_unread = 0
     try:
-        res = supabase.table("notification_recipients").select("id", count="exact").eq("recipient_id", user_id).is_("read_at", "null").execute()
-        count = res.count or 0
+        # Get all unread notification IDs for this user
+        unread = supabase.table("notification_recipients").select("notification_id") \
+            .eq("recipient_id", user_id).is_("read_at", "null").execute().data or []
+        nids = [r["notification_id"] for r in unread]
+        if nids:
+            # Check which of these belong to conversations vs broadcasts
+            conv_notifs = supabase.table("notifications").select("id") \
+                .in_("id", nids).is_("conversation_id", "not.null").execute().data or []
+            conv_nids = set(n["id"] for n in conv_notifs)
+            broadcast_unread = sum(1 for nid in nids if nid not in conv_nids)
+            conversation_unread = len(nids) - broadcast_unread
     except Exception:
         pass
-    return jsonify({"unread": count})
+    return jsonify({"unread": broadcast_unread + conversation_unread,
+                    "broadcast_unread": broadcast_unread,
+                    "conversation_unread": conversation_unread})
+
+
+@api_bp.route("/broadcast/classes", methods=["GET"])
+@login_required
+def api_broadcast_classes():
+    """Get classes in teacher's school."""
+    supabase = get_supabase()
+    school_id = g.get("user_school_id")
+    try:
+        query = supabase.table("classes").select("id, name, grade_level")
+        if school_id:
+            query = query.eq("school_id", school_id)
+        classes = query.order("name").execute().data or []
+    except Exception:
+        classes = []
+    return jsonify({"classes": classes})
+
+
+@api_bp.route("/broadcast/stats", methods=["POST"])
+@login_required
+def api_broadcast_stats():
+    """Get read/unread stats for a notification."""
+    data = request.get_json() or {}
+    notif_id = data.get("notification_id")
+    if not notif_id:
+        return jsonify({"error": "notification_id diperlukan"}), 400
+    supabase = get_supabase()
+    try:
+        total = supabase.table("notification_recipients").select("id", count="exact") \
+            .eq("notification_id", notif_id).execute()
+        total_count = total.count or 0
+        read = supabase.table("notification_recipients").select("id", count="exact") \
+            .eq("notification_id", notif_id).is_("read_at", "not.null").execute()
+        read_count = read.count or 0
+        return jsonify({"total": total_count, "read": read_count, "unread": total_count - read_count})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
 
 
 @api_bp.route("/broadcast/students", methods=["GET"])
@@ -1932,6 +1981,7 @@ def api_broadcast_students():
     role = g.get("user_role")
     school_id = g.get("user_school_id")
     target_role = request.args.get("role", "murid")
+    class_id = request.args.get("class_id")
 
     try:
         query = supabase.table("profiles").select("id, full_name").eq("status", "active")
@@ -1940,6 +1990,11 @@ def api_broadcast_students():
         if school_id:
             try:
                 query = query.eq("school_id", school_id)
+            except Exception:
+                pass
+        if class_id:
+            try:
+                query = query.eq("class_id", class_id)
             except Exception:
                 pass
         users = query.order("full_name").execute().data or []
