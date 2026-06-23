@@ -6,7 +6,8 @@
     lang: localStorage.getItem('sg_lang') || 'id',
     pwNew: '', pwConfirm: '', pwMsg: '',
     exportLoading: false, exportData: null,
-    sending: false,
+    sending: false, deletionRequest: null,
+    delReason: '', delMsg: '',
     changePassword() {
         if (!this.pwNew) { this.pwMsg = 'Isi password baru'; return; }
         if (this.pwNew.length < 6) { this.pwMsg = 'Password minimal 6 karakter'; return; }
@@ -23,8 +24,26 @@
     exportData() {
         this.exportLoading = true; this.exportData = null;
         fetch('/api/account/export-data').then(r=>r.json()).then(d => { this.exportData = d; }).catch(()=>{ alert('Gagal export'); }).finally(()=>{ this.exportLoading = false; });
+    },
+    requestDeletion() {
+        if (!confirm('Anda yakin ingin menghapus akun? Data akan dihapus setelah 14 hari.')) return;
+        this.sending = true;
+        fetch('/api/account/delete-request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason: this.delReason})})
+        .then(r=>r.json()).then(d => {
+            this.delMsg = d.success ? 'Permintaan penghapusan telah dikirim.' : 'Gagal: ' + (d.error||'');
+            if (d.success) this.checkStatus();
+        }).catch(()=>{ this.delMsg = 'Error koneksi'; }).finally(()=>{ this.sending = false; });
+    },
+    cancelDeletion() {
+        fetch('/api/account/delete-request/cancel', {method:'POST'})
+        .then(r=>r.json()).then(d => { if (d.success) this.checkStatus(); });
+    },
+    checkStatus() {
+        fetch('/api/account/deletion-status')
+        .then(r=>r.json()).then(d => { this.deletionRequest = d.request; })
+        .catch(()=>{});
     }
-}">
+}" x-init="checkStatus()">
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
         <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-lock text-primary-500 mr-2"></i>Ubah Password</h3>
         <form @submit.prevent="changePassword()" class="space-y-4 max-w-md">
@@ -45,19 +64,38 @@
             </div>
         </template>
     </div>
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-red-100">
+        <h3 class="font-extrabold text-red-600 mb-4"><i class="fas fa-trash-alt mr-2"></i>Hapus Akun</h3>
+        <template x-if="deletionRequest && deletionRequest.status === 'pending'">
+            <div>
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                    <p class="text-sm font-bold text-amber-800"><i class="fas fa-clock mr-1"></i>Permintaan penghapusan sedang diproses</p>
+                    <p class="text-xs text-amber-700 mt-1">Diajukan: <span x-text="deletionRequest.requested_at"></span></p>
+                </div>
+                <button @click="cancelDeletion()" class="px-4 py-2 border-2 border-amber-600 text-amber-700 rounded-xl font-bold text-xs hover:bg-amber-50 transition">Batalkan Permintaan</button>
+            </div>
+        </template>
+        <template x-if="!deletionRequest || deletionRequest.status !== 'pending'">
+            <div class="space-y-4 max-w-md">
+                <p class="text-sm text-surface-600">Hapus akun dan seluruh data Anda secara permanen. Proses ini membutuhkan waktu 14 hari sesuai ketentuan PSE Kominfo.</p>
+                <div><label class="block text-sm font-bold text-surface-700 mb-1">Alasan (opsional)</label><textarea x-model="delReason" rows="2" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-red-500 text-surface-700 text-sm" placeholder="Alasan menghapus akun..."></textarea></div>
+                <button @click="requestDeletion()" class="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="sending"><span x-text="sending ? 'Mengirim...' : 'Ajukan Hapus Akun'"></span></button>
+                <p x-show="delMsg" class="text-xs font-bold" :class="delMsg.includes('berhasil') || delMsg.includes('Terkirim') ? 'text-emerald-600' : 'text-red-600'" x-text="delMsg"></p>
+            </div>
+        </template>
+    </div>
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
         <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-shield-alt text-primary-500 mr-2"></i>Kebijakan Data</h3>
         <div class="bg-surface-50 border border-surface-200 rounded-xl p-4 text-xs text-surface-600 space-y-1">
             <p>ScanGrade mematuhi <strong>UU No. 27/2022 tentang Perlindungan Data Pribadi</strong> dan <strong>PSE Kominfo</strong>.</p>
             <p class="mt-2 font-bold text-surface-700">Retensi Data:</p>
-            <p>• <strong>Profil & Akun</strong>: Disimpan selama akun aktif. Dihapus 90 hari setelah permintaan penghapusan.</p>
-            <p>• <strong>Hasil Ujian & Jawaban</strong>: Disimpan 5 tahun untuk keperluan akademik.</p>
-            <p>• <strong>Pesan & Percakapan</strong>: Disimpan 2 tahun untuk keperluan komunikasi.</p>
-            <p>• <strong>Log Pelanggaran</strong>: Disimpan 2 tahun untuk audit.</p>
-            <p>• <strong>Draft Ujian</strong>: Dihapus otomatis setelah 30 hari.</p>
-            <p class="mt-2">Anda berhak: (1) Mengakses data pribadi, (2) Memperbaiki data, (3) Menghapus akun, (4) Mengekspor data, (5) Menarik persetujuan.</p>
+            <p>&bull; <strong>Profil &amp; Akun</strong>: Disimpan selama akun aktif. Dihapus 90 hari setelah permintaan penghapusan.</p>
+            <p>&bull; <strong>Hasil Ujian &amp; Jawaban</strong>: Disimpan 5 tahun untuk keperluan akademik.</p>
+            <p>&bull; <strong>Pesan &amp; Percakapan</strong>: Disimpan 2 tahun untuk keperluan komunikasi.</p>
+            <p>&bull; <strong>Log Pelanggaran</strong>: Disimpan 2 tahun untuk audit.</p>
+            <p>&bull; <strong>Draft Ujian</strong>: Dihapus otomatis setelah 30 hari.</p>
+            <p class="mt-2">Anda berhak: (1) Mengakses data pribadi, (2) Memperbaiki data, (3) Menghapus akun, (4) Mengekspor data, (5) Menarik persetujuan. Lihat <a href="/privacy" class="text-primary-600 underline">Kebijakan Privasi</a> dan <a href="/terms" class="text-primary-600 underline">Syarat &amp; Ketentuan</a> untuk informasi lengkap.</p>
         </div>
     </div>
-    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-lock text-primary</div>
+</div>
 {% endblock %}
