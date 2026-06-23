@@ -1645,6 +1645,32 @@ def api_complete_conversation():
         return jsonify({"error": str(e)[:100]}), 500
 
 
+@api_bp.route("/broadcast/edit-message", methods=["POST"])
+@login_required
+def api_edit_broadcast_message():
+    """Edit a message within 2 minutes of sending."""
+    data = request.get_json() or {}
+    notification_id = data.get("notification_id")
+    new_message = str(data.get("message", "")).strip()
+    if not notification_id or not new_message:
+        return jsonify({"error": "Data tidak lengkap"}), 400
+    supabase = get_supabase()
+    try:
+        notif = supabase.table("notifications").select("id, sender_id, message, created_at, conversation_id").eq("id", notification_id).single().execute().data
+        if not notif:
+            return jsonify({"error": "Pesan tidak ditemukan"}), 404
+        if notif["sender_id"] != g.user_id:
+            return jsonify({"error": "Anda bukan pengirim pesan ini"}), 403
+        from datetime import datetime, timezone, timedelta
+        created = datetime.fromisoformat(notif["created_at"].replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) - created > timedelta(minutes=2):
+            return jsonify({"error": "Batas edit 2 menit telah berlalu"}), 400
+        supabase.table("notifications").update({"message": new_message}).eq("id", notification_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
 @api_bp.route("/broadcast/conversations", methods=["GET"])
 @login_required
 def api_conversations():
