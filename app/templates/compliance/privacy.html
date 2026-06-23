@@ -1,6 +1,157 @@
 {% extends "base.html" %}
 {% block title %}Kebijakan Privasi - ScanGrade{% endblock %}
 {% block page_title %}Kebijakan Privasi{% endblock %}
+{% block content_noauth %}
+<div class="max-w-4xl mx-auto space-y-6">
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 lg:p-8 border border-surface-100">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white shadow-lg">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl font-extrabold text-surface-800">Kebijakan Privasi</h1>
+                <p class="text-sm text-surface-500">Terakhir diperbarui: Juni 2026</p>
+            </div>
+        </div>
+
+        <div class="prose prose-sm max-w-none text-surface-600 space-y-6">
+            <p class="font-semibold text-surface-700">ScanGrade berkomitmen untuk melindungi privasi dan data pribadi Anda. Kebijakan ini menjelaskan bagaimana kami mengumpulkan, menggunakan, menyimpan, dan menghapus data pribadi sesuai dengan <strong>Undang-Undang No. 27 Tahun 2022 tentang Perlindungan Data Pribadi (UU PDP)</strong> dan peraturan <strong>Penyelenggara Sistem Elektronik (PSE) Kominfo</strong>.</p>
+
+            <div class="bg-surface-50 border border-surface-200 rounded-xl p-5">
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">1. Pengendali Data</h2>
+                <p>Pengendali data pribadi dalam layanan ScanGrade adalah sekolah pengguna (Satuan Pendidikan) yang mendaftarkan diri. Data dikelola untuk kepentingan operasional penilaian pendidikan. Untuk pertanyaan terkait data, hubungi administrator sekolah masing-masing atau tim ScanGrade di kontak yang tercantum di bawah.</p>
+            </div>
+
+            <div>
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">2. Data Pribadi yang Dikumpulkan</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm border-collapse">
+                        <thead><tr class="bg-surface-100"><th class="text-left p-3 font-bold text-surface-700">Kategori</th><th class="text-left p-3 font-bold text-surface-700">Data</th><th class="text-left p-3 font-bold text-surface-700">Tujuan</th></tr></thead>
+                        <tbody class="divide-y divide-surface-200">
+                            <tr><td class="p-3 font-medium">Identitas</td><td class="p-3">Nama lengkap, NISN/NIS, kelas</td><td class="p-3">Identifikasi peserta ujian</td></tr>
+                            <tr><td class="p-3 font-medium">Kontak</td><td class="p-3">Email, nomor telepon/WhatsApp</td><td class="p-3">Komunikasi akademik, aktivasi akun</td></tr>
+                            <tr><td class="p-3 font-medium">Akun</td><td class="p-3">Username, password (dihash), role</td><td class="p-3">Autentikasi dan otorisasi</td></tr>
+                            <tr><td class="p-3 font-medium">Akademik</td><td class="p-3">Jawaban ujian, hasil penilaian, scan LJK</td><td class="p-3">Pelaksanaan dan koreksi ujian</td></tr>
+                            <tr><td class="p-3 font-medium">Perilaku</td><td class="p-3">Log pelanggaran (tab switch, dll)</td><td class="p-3">Integritas ujian (anti-cheat)</td></tr>
+                            <tr><td class="p-3 font-medium">Teknis</td><td class="p-3">Alamat IP, user agent, localStorage</td><td class="p-3">Keamanan, offline-first, pengalaman pengguna</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="bg-surface-50 border border-surface-200 rounded-xl p-5">
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">3. Dasar Hukum Pemrosesan</h2>
+                <p>Kami memproses data pribadi Anda berdasarkan:</p>
+                <ul class="list-disc list-inside space-y-1 mt-2">
+                    <li><strong>Persetujuan eksplisit</strong> — Anda menyetujui kebijakan privasi ini saat mendaftar</li>
+                    <li><strong>Kepentingan sah</strong> — Pemrosesan diperlukan untuk pelaksanaan ujian dan penilaian pendidikan</li>
+                    <li><strong>Kewajiban hukum</strong> — Penyimpanan data akademik sesuai regulasi pendidikan</li>
+                </ul>
+            </div>
+
+            <div>
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">4. Penyimpanan dan Retensi Data</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm border-collapse">
+                        <thead><tr class="bg-surface-100"><th class="text-left p-3 font-bold text-surface-700">Jenis Data</th><th class="text-left p-3 font-bold text-surface-700">Periode Retensi</th><th class="text-left p-3 font-bold text-surface-700">Dasar</th></tr></thead>
+                        <tbody class="divide-y divide-surface-200">
+                            <tr><td class="p-3 font-medium">Hasil ujian &amp; jawaban</td><td class="p-3">5 tahun</td><td class="p-3">Keperluan akademik</td></tr>
+                            <tr><td class="p-3 font-medium">Pesan &amp; percakapan</td><td class="p-3">2 tahun</td><td class="p-3">Komunikasi</td></tr>
+                            <tr><td class="p-3 font-medium">Log pelanggaran</td><td class="p-3">2 tahun</td><td class="p-3">Audit</td></tr>
+                            <tr><td class="p-3 font-medium">Draft ujian</td><td class="p-3">30 hari</td><td class="p-3">Storage limit</td></tr>
+                            <tr><td class="p-3 font-medium">Akun tidak aktif</td><td class="p-3">3 tahun</td><td class="p-3">Regulasi</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-surface-400 mt-2">Setelah masa retensi, data akan dihapus secara otomatis. Penghapusan akun memiliki masa tenggang 90 hari sebelum data dihapus permanen.</p>
+            </div>
+
+            <div class="bg-surface-50 border border-surface-200 rounded-xl p-5">
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">5. Hak Anda sebagai Subjek Data</h2>
+                <p>Berdasarkan UU PDP, Anda memiliki hak-hak berikut:</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                    <div class="bg-white rounded-xl p-3 border border-surface-200">
+                        <p class="font-bold text-surface-700 text-sm"><i class="fas fa-info-circle text-primary-500 mr-1.5"></i>Hak untuk Mengetahui</p>
+                        <p class="text-xs text-surface-500 mt-0.5">Mengetahui bagaimana data Anda dikumpulkan dan digunakan</p>
+                    </div>
+                    <div class="bg-white rounded-xl p-3 border border-surface-200">
+                        <p class="font-bold text-surface-700 text-sm"><i class="fas fa-download text-primary-500 mr-1.5"></i>Hak Akses &amp; Portabilitas</p>
+                        <p class="text-xs text-surface-500 mt-0.5">Mengakses dan mengekspor data Anda kapan saja</p>
+                    </div>
+                    <div class="bg-white rounded-xl p-3 border border-surface-200">
+                        <p class="font-bold text-surface-700 text-sm"><i class="fas fa-edit text-primary-500 mr-1.5"></i>Hak Perbaikan</p>
+                        <p class="text-xs text-surface-500 mt-0.5">Memperbaiki data yang tidak akurat</p>
+                    </div>
+                    <div class="bg-white rounded-xl p-3 border border-surface-200">
+                        <p class="font-bold text-surface-700 text-sm"><i class="fas fa-trash text-primary-500 mr-1.5"></i>Hak Penghapusan</p>
+                        <p class="text-xs text-surface-500 mt-0.5">Menghapus akun dan data Anda</p>
+                    </div>
+                    <div class="bg-white rounded-xl p-3 border border-surface-200">
+                        <p class="font-bold text-surface-700 text-sm"><i class="fas fa-pause-circle text-primary-500 mr-1.5"></i>Hak Pembatasan</p>
+                        <p class="text-xs text-surface-500 mt-0.5">Membatasi pemrosesan data Anda</p>
+                    </div>
+                    <div class="bg-white rounded-xl p-3 border border-surface-200">
+                        <p class="font-bold text-surface-700 text-sm"><i class="fas fa-times-circle text-primary-500 mr-1.5"></i>Hak Keberatan</p>
+                        <p class="text-xs text-surface-500 mt-0.5">Menolak pemrosesan data untuk kepentingan tertentu</p>
+                    </div>
+                </div>
+                <p class="text-sm text-surface-600 mt-4">Untuk menggunakan hak Anda, kunjungi halaman <a href="/student/settings" class="text-primary-600 hover:text-primary-700 font-bold">Pengaturan Akun</a> atau hubungi administrator sekolah Anda.</p>
+            </div>
+
+            <div>
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">6. Transfer Data Lintas Batas</h2>
+                <p>Data Anda disimpan di server <strong>Supabase</strong> yang berlokasi di <strong>Singapura (ap-southeast-1)</strong>. Hal ini telah memperhatikan tingkat perlindungan data yang setara dengan standar UU PDP. Penyimpanan lintas batas dilakukan semata-mata untuk tujuan operasional dan keamanan layanan.</p>
+            </div>
+
+            <div class="bg-surface-50 border border-surface-200 rounded-xl p-5">
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">7. Keamanan Data</h2>
+                <ul class="list-disc list-inside space-y-1">
+                    <li>Enkripsi HTTPS/TLS untuk seluruh transmisi data</li>
+                    <li>Password di-hash menggunakan algoritma standar (bcrypt)</li>
+                    <li>Token autentikasi JWT dengan masa berlaku terbatas</li>
+                    <li>Kebijakan akses berbasis role (RBAC) yang ketat</li>
+                    <li>Log akses dan audit trail untuk aktivitas sensitif</li>
+                    <li>CSP (Content Security Policy) untuk mencegah serangan XSS</li>
+                </ul>
+            </div>
+
+            <div>
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">8. Pelanggaran Data</h2>
+                <p>Jika terjadi pelanggaran data yang berpotensi merugikan subjek data, kami akan memberitahukan kepada subjek data dan <strong>PSE Kominfo</strong> dalam waktu maksimal <strong>14 hari</strong> sesuai peraturan yang berlaku.</p>
+            </div>
+
+            <div class="bg-surface-50 border border-surface-200 rounded-xl p-5">
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">9. Penggunaan localStorage</h2>
+                <p>ScanGrade menggunakan <strong>localStorage</strong> browser untuk mendukung mode offline-first. Data yang disimpan di localStorage meliputi:</p>
+                <ul class="list-disc list-inside space-y-1 mt-2">
+                    <li>Preferensi bahasa (<code>sg_lang</code>)</li>
+                    <li>Draft jawaban ujian (sementara, untuk offline-sync)</li>
+                    <li>Token sesi untuk autentikasi</li>
+                </ul>
+                <p class="text-xs text-surface-500 mt-2">Data localStorage bersifat lokal di perangkat Anda dan dapat dihapus kapan saja melalui pengaturan browser.</p>
+            </div>
+
+            <div>
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">10. Perubahan Kebijakan</h2>
+                <p>Kebijakan privasi ini dapat diperbarui dari waktu ke waktu. Perubahan signifikan akan diberitahukan melalui platform atau email yang terdaftar. Tanggal "<strong>Terakhir diperbarui</strong>" di bagian atas menunjukkan kapan kebijakan ini terakhir direvisi.</p>
+            </div>
+
+            <div class="bg-surface-50 border border-surface-200 rounded-xl p-5">
+                <h2 class="font-extrabold text-surface-800 text-lg mb-3">11. Kontak</h2>
+                <p>Untuk pertanyaan, keluhan, atau pelaksanaan hak Anda terkait data pribadi:</p>
+                <div class="mt-3 space-y-1 text-sm">
+                    <p><strong>Pengelola Platform:</strong> Tim ScanGrade</p>
+                    <p><strong>Email:</strong> <a href="mailto:privacy@scangrade.app" class="text-primary-600 hover:text-primary-700 font-semibold">privacy@scangrade.app</a></p>
+                    {% if dpo_contact %}
+                    <p><strong>Petugas Perlindungan Data (DPO):</strong> {{ dpo_contact }}</p>
+                    {% endif %}
+                    <p><strong>Respons waktu:</strong> Maksimal 7 hari kerja untuk menanggapi permintaan Anda</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 {% block content %}
 <div class="max-w-4xl mx-auto space-y-6">
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 lg:p-8 border border-surface-100">
