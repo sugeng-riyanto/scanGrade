@@ -90,6 +90,10 @@
 ### In Progress
 - None
 
+### Latest (2025-06-23)
+- **Conversation reply simplified**: Removed `title` input from reply form (student & teacher) — only `message` textarea shown. Reply API no longer updates conversation title (keeps original title). `title` field removed from API validation (optional). True two-way reply works until creator clicks "Selesaikan".
+- **Badge alert mechanism fixed**: `api_conversations()` checks `notification_recipients.read_at` for `has_unread`. Added `POST /api/broadcast/mark-read-all` endpoint. Both notification pages call `mark-read-all` on tab switch and dispatch `sg:unread` custom event for instant badge refresh.
+
 ### Blocked
 - Migration 018 (soft-delete + deletion_requests) must run in Supabase SQL Editor
 - Migration for PDP columns (`birth_date`, `pdp_agreed`, `parent_pdp_agreed`, `parent_name`, `parent_contact`, `consent_at`) must run in Supabase SQL Editor:
