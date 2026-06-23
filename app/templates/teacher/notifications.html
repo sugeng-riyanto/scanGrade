@@ -5,6 +5,7 @@
 <div class="space-y-6" x-data="{
     lang: localStorage.getItem('sg_lang') || 'id',
     notifs: [], loading: true,
+    inboxNotifs: [], inboxLoading: true,
     formTitle: '', formMessage: '', sending: false, sendMsg: '',
     toGuru: false, toMurid: true,
     guruOpt: 'all', muridOpt: 'all', kelasOpt: 'all',
@@ -100,13 +101,19 @@
             body: JSON.stringify({conversation_id: this.activeConv.id})
         }).then(r=>r.json()).then(d => { if (d.success) { this.activeConv.status = 'completed'; this.fetchConversations(); } });
     },
-    // Broadcasts
-    fetchNotifs() {
+    // Broadcasts - Sent history
+    fetchHistory() {
         this.loading = true;
-        fetch('/api/broadcast/list').then(r=>r.json()).then(d => {
+        fetch('/api/broadcast/list?type=sent').then(r=>r.json()).then(d => {
             this.notifs = d.notifications || [];
-            this.$nextTick(() => { this.markReadHistory(); });
         }).catch(()=>{}).finally(()=>{ this.loading = false; });
+    },
+    // Broadcasts - Received inbox
+    fetchInbox() {
+        this.inboxLoading = true;
+        fetch('/api/broadcast/list?type=received').then(r=>r.json()).then(d => {
+            this.inboxNotifs = d.notifications || [];
+        }).catch(()=>{}).finally(()=>{ this.inboxLoading = false; });
     },
     fetchClasses() {
         fetch('/api/broadcast/classes').then(r=>r.json()).then(d => { this.classList = d.classes || []; }).catch(()=>{});
@@ -155,7 +162,7 @@
                 var total = results.reduce((s, r) => s + (r.recipients || 0), 0);
                 this.sendMsg = 'Terkirim ke ' + total + ' penerima';
                 this.formTitle = ''; this.formMessage = '';
-                this.fetchNotifs(); this.fetchConversations();
+                this.fetchHistory(); this.fetchInbox(); this.fetchConversations();
             } else {
                 var err = results.find(r => !r.success);
                 this.sendMsg = 'Gagal: ' + (err ? (err.error||'') : '');
@@ -167,18 +174,18 @@
     saveEdit() {
         if (!this.editTitle || !this.editMessage) return;
         fetch('/api/broadcast/update', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:this.editingId, title:this.editTitle, message:this.editMessage})})
-        .then(r=>r.json()).then(d => { if (d.success) { this.cancelEdit(); this.fetchNotifs(); } });
+        .then(r=>r.json()).then(d => { if (d.success) { this.cancelEdit(); this.fetchHistory(); } });
     },
-    markReadHistory() {
+    markReadInbox() {
         fetch('/api/broadcast/mark-read-all', { method: 'POST' }).then(() => {
-            this.notifs.forEach(n => { n.read = true; });
+            this.inboxNotifs.forEach(n => { n.read = true; });
             this.refreshBadge();
         }).catch(()=>{});
     },
     deleteMsg(n) {
         if (!confirm('Hapus pesan ini?')) return;
         fetch('/api/broadcast/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:n.id})})
-        .then(r=>r.json()).then(d => { if (d.success) this.fetchNotifs(); });
+        .then(r=>r.json()).then(d => { if (d.success) this.fetchHistory(); });
     },
     statsMap: {},
     toggleStats(n) {
@@ -190,7 +197,7 @@
         }).catch(()=>{});
     },
     showInfo: false
-}" x-init="fetchConversations(); fetchNotifs(); fetchClasses(); $watch('activeTab', val => { if (val === 'history') { this.markReadHistory(); } })">
+}" x-init="fetchConversations(); fetchHistory(); fetchInbox(); fetchClasses(); $watch('activeTab', val => { if (val === 'inbox') { this.markReadInbox(); } })">
     <!-- Info Panel -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-4 border border-surface-100">
         <button @click="showInfo = !showInfo" class="flex items-center gap-2 w-full text-left">
@@ -205,12 +212,16 @@
                     <p>Chat 1-on-1 dengan murid. Balas dua arah seperti WhatsApp. Edit pesan sendiri dalam 2 menit dengan ikon pensil. Murid tidak bisa chat sesama murid.</p>
                 </div>
                 <div>
+                    <p class="font-bold text-surface-800 mb-1"><i class="fas fa-inbox text-primary-500 mr-1 w-4"></i>Tab Kotak Masuk</p>
+                    <p>Pengumuman yang kamu terima (broadcast dari guru/admin). Hanya bisa baca, tidak bisa dibalas. Tandai terbaca otomatis saat tab diklik.</p>
+                </div>
+                <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-bullhorn text-primary-500 mr-1 w-4"></i>Tab Kirim Pengumuman</p>
-                    <p>Broadcast ke Guru dan/atau Murid. Pilih all, per kelas, atau selektif. Pengumuman hanya bisa dibaca. Edit/hapus/statistik di tab Riwayat.</p>
+                    <p>Broadcast ke Guru dan/atau Murid. Pilih all, per kelas, atau selektif. Pengumuman hanya bisa dibaca oleh penerima.</p>
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-history text-primary-500 mr-1 w-4"></i>Tab Riwayat</p>
-                    <p>Daftar pengumuman yang sudah dikirim. Bisa edit, hapus, dan lihat statistik baca (chart donut) per pengumuman. Klik ikon <i class="fas fa-chart-bar text-primary-600"></i> untuk statistik.</p>
+                    <p>Daftar pengumuman yang sudah kamu kirim. Bisa edit, hapus, dan lihat statistik baca (chart donut). Klik ikon <i class="fas fa-chart-bar text-emerald-600"></i> untuk statistik.</p>
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-bell text-primary-500 mr-1 w-4"></i>Notifikasi Badge</p>
@@ -225,7 +236,8 @@
     <!-- Tab Navigation -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 overflow-x-auto">
         <button @click="activeTab='convs'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>
-        <button @click="activeTab='broadcast'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='broadcast' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-bullhorn mr-1.5"></i>Kirim Pengumuman</button>
+        <button @click="activeTab='inbox'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='inbox' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-inbox mr-1.5"></i>Kotak Masuk</button>
+        <button @click="activeTab='broadcast'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='broadcast' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-bullhorn mr-1.5"></i>Kirim</button>
         <button @click="activeTab='history'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='history' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-history mr-1.5"></i>Riwayat</button>
     </div>
 
@@ -328,6 +340,32 @@
                     </template>
                 </div>
             </template>
+        </div>
+    </template>
+
+    <!-- Inbox (Received Broadcasts) -->
+    <template x-if="activeTab === 'inbox'">
+        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
+            <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-inbox text-primary-500 mr-2"></i>Kotak Masuk</h3>
+            <template x-if="inboxLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
+            <template x-if="!inboxLoading && inboxNotifs.length === 0"><div class="text-center py-8 text-surface-400">Tidak ada pengumuman</div></template>
+            <div class="space-y-3">
+                <template x-for="n in inboxNotifs" :key="n.id">
+                    <div class="p-4 rounded-xl bg-surface-50 border" :class="n.read ? 'border-surface-100' : 'border-l-4 border-l-primary-500 bg-primary-50/30'">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <template x-if="!n.read"><span class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span></template>
+                                    <p class="font-bold text-surface-800" x-text="n.title"></p>
+                                </div>
+                                <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
+                                <p class="text-[10px] font-medium text-surface-400 mt-1" x-text="'Dari: ' + (n.sender_role || '-')"></p>
+                            </div>
+                            <span class="text-[10px] font-medium text-surface-400 whitespace-nowrap ml-3" x-text="n.created_at"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
         </div>
     </template>
 
@@ -449,12 +487,12 @@
         </div>
     </template>
 
-    <!-- History -->
+    <!-- History (Sent Broadcasts) -->
     <template x-if="activeTab === 'history'">
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
             <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-history text-primary-500 mr-2"></i>Riwayat Pengumuman</h3>
             <template x-if="loading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
-            <template x-if="!loading && notifs.length === 0"><div class="text-center py-8 text-surface-400">Belum ada pengumuman</div></template>
+            <template x-if="!loading && notifs.length === 0"><div class="text-center py-8 text-surface-400">Belum ada pengumuman terkirim</div></template>
             <div class="space-y-3">
                 <template x-for="n in notifs" :key="n.id">
                     <div class="p-4 rounded-xl bg-surface-50 border border-surface-100">
@@ -474,7 +512,7 @@
                                     <div class="flex-1 min-w-0">
                                         <p class="font-bold text-surface-800" x-text="n.title"></p>
                                         <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
-                                        <p class="text-[10px] font-medium text-surface-400 mt-1" x-text="'Target: ' + (n.sender_role || '-')"></p>
+                                        <p class="text-[10px] font-medium text-surface-400 mt-1" x-text="'Target: ' + (n.target_role || n.sender_role || '-')"></p>
                                     </div>
                                     <div class="flex items-center gap-2 ml-3 shrink-0">
                                         <template x-if="n.can_edit">
