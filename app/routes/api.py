@@ -1828,85 +1828,93 @@ def api_mark_read_all():
 @api_bp.route("/broadcast/list", methods=["GET"])
 @login_required
 def api_broadcast_list():
-    """Get notifications for current user."""
+    """Get notifications for current user. ?type=sent|received filters."""
     supabase = get_supabase()
     user_id = g.user_id
     role = g.get("user_role")
     school_id = g.get("user_school_id")
+    filter_type = request.args.get("type", "")
 
     notifs = []
-    try:
-        # Notifications sent TO this user (direct recipients)
-        direct = supabase.table("notification_recipients") \
-            .select("notification_id, read_at") \
-            .eq("recipient_id", user_id) \
-            .order("notification_id", desc=True) \
-            .limit(50) \
-            .execute().data or []
-        uid = g.user_id
-        urole = g.get("user_role")
-        if direct:
-            nids = [d["notification_id"] for d in direct]
-            notif_map = {}
-            try:
-                ndata = supabase.table("notifications") \
-                    .select("id, sender_id, sender_role, title, message, created_at") \
-                    .in_("id", nids) \
-                    .execute().data or []
-                for n in ndata:
-                    notif_map[n["id"]] = n
-            except Exception:
-                pass
-            for d in direct:
-                nid = d["notification_id"]
-                n = notif_map.get(nid, {})
-                notifs.append({
-                    "id": nid, "title": n.get("title"),
-                    "message": n.get("message"), "sender_role": n.get("sender_role"),
-                    "sender_id": n.get("sender_id"),
-                    "created_at": str(n.get("created_at", ""))[:19].replace("T", " "),
-                    "read": d.get("read_at") is not None,
-                    "can_edit": urole == "super_admin" or n.get("sender_id") == uid,
-                })
-    except Exception:
-        pass
-    try:
-        # Notifications SENT BY this user
-        sent = supabase.table("notifications") \
-            .select("id, title, message, sender_role, sender_id, created_at") \
-            .eq("sender_id", user_id) \
-            .order("created_at", desc=True) \
-            .limit(50) \
-            .execute().data or []
-        sent_ids = {n["id"] for n in notifs}
-        for n in sent:
-            if n["id"] not in sent_ids:
-                n["read"] = True
-                n["can_edit"] = True
-                n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
-                notifs.append(n)
-    except Exception:
-        pass
-    try:
-        # Role-based notifications (broadcasts to this role)
-        role_notifs_query = supabase.table("notifications") \
-            .select("id, title, message, sender_role, sender_id, created_at") \
-            .in_("target_role", [role, None])
-        if school_id:
-            role_notifs_query = role_notifs_query.eq("target_school_id", school_id)
-        role_notifs = role_notifs_query.order("created_at", desc=True).limit(50).execute().data or []
-        existing_ids = {n["id"] for n in notifs}
-        for n in role_notifs:
-            if n["id"] not in existing_ids:
-                n["read"] = False
-                n["can_edit"] = urole == "super_admin" or n.get("sender_id") == uid
-                n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
-                notifs.append(n)
-    except Exception:
-        pass
+    uid = g.user_id
+    urole = g.get("user_role")
+
+    # Notifications sent TO this user (direct recipients)
+    if filter_type != "sent":
+        try:
+            direct = supabase.table("notification_recipients") \
+                .select("notification_id, read_at") \
+                .eq("recipient_id", user_id) \
+                .order("notification_id", desc=True) \
+                .limit(50) \
+                .execute().data or []
+            if direct:
+                nids = [d["notification_id"] for d in direct]
+                notif_map = {}
+                try:
+                    ndata = supabase.table("notifications") \
+                        .select("id, sender_id, sender_role, target_role, title, message, created_at") \
+                        .in_("id", nids) \
+                        .execute().data or []
+                    for n in ndata:
+                        notif_map[n["id"]] = n
+                except Exception:
+                    pass
+                for d in direct:
+                    nid = d["notification_id"]
+                    n = notif_map.get(nid, {})
+                    notifs.append({
+                        "id": nid, "title": n.get("title"),
+                        "message": n.get("message"), "sender_role": n.get("sender_role"),
+                        "target_role": n.get("target_role"),
+                        "sender_id": n.get("sender_id"),
+                        "created_at": str(n.get("created_at", ""))[:19].replace("T", " "),
+                        "read": d.get("read_at") is not None,
+                        "can_edit": urole == "super_admin" or n.get("sender_id") == uid,
+                    })
+        except Exception:
+            pass
+
+    # Role-based notifications (broadcasts to this role) - only for received
+    if filter_type != "sent":
+        try:
+            role_notifs_query = supabase.table("notifications") \
+                .select("id, sender_id, sender_role, target_role, title, message, created_at") \
+                .in_("target_role", [role, None])
+            if school_id:
+                role_notifs_query = role_notifs_query.eq("target_school_id", school_id)
+            role_notifs = role_notifs_query.order("created_at", desc=True).limit(50).execute().data or []
+            existing_ids = {n["id"] for n in notifs}
+            for n in role_notifs:
+                if n["id"] not in existing_ids:
+                    n["read"] = False
+                    n["can_edit"] = urole == "super_admin" or n.get("sender_id") == uid
+                    n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
+                    notifs.append(n)
+        except Exception:
+            pass
+
+    # Notifications SENT BY this user
+    if filter_type != "received":
+        try:
+            sent = supabase.table("notifications") \
+                .select("id, sender_id, sender_role, target_role, title, message, created_at") \
+                .eq("sender_id", user_id) \
+                .order("created_at", desc=True) \
+                .limit(50) \
+                .execute().data or []
+            sent_ids = {n["id"] for n in notifs}
+            for n in sent:
+                if n["id"] not in sent_ids:
+                    n["read"] = True
+                    n["can_edit"] = True
+                    n["created_at"] = str(n.get("created_at", ""))[:19].replace("T", " ")
+                    notifs.append(n)
+        except Exception:
+            pass
 
     notifs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return jsonify({"notifications": notifs[:20]})
+    return jsonify({"notifications": notifs[:50]})
 
 
 @api_bp.route("/broadcast/unread", methods=["GET"])
