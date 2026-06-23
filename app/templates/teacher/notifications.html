@@ -13,6 +13,9 @@
     pollTimer: null,
     activeTab: 'convs',
     // Conversations with auto-polling
+    refreshBadge() {
+        window.dispatchEvent(new CustomEvent('sg:unread'));
+    },
     fetchConversations() {
         this.convsLoading = true;
         fetch('/api/broadcast/conversations').then(r=>r.json()).then(d => {
@@ -39,9 +42,9 @@
         this.replyMessage = '';
         this.$nextTick(() => { this.scrollToBottom(); });
         this.startPolling();
-        // Mark as read via API
         fetch('/api/broadcast/mark-read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({conversation_id: c.id}) }).then(() => {
             if (this.conversations) this.conversations.forEach(x => { if (x.id === c.id) x.has_unread = false; });
+            this.refreshBadge();
         }).catch(()=>{});
     },
     scrollToBottom() {
@@ -101,12 +104,18 @@
         fetch('/api/broadcast/update', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:this.editingId, title:this.editTitle, message:this.editMessage})})
         .then(r=>r.json()).then(d => { if (d.success) { this.cancelEdit(); this.fetchNotifs(); } });
     },
+    markReadHistory() {
+        fetch('/api/broadcast/mark-read-all', { method: 'POST' }).then(() => {
+            this.notifs.forEach(n => { n.read = true; });
+            this.refreshBadge();
+        }).catch(()=>{});
+    },
     deleteMsg(n) {
         if (!confirm('Hapus pesan ini?')) return;
         fetch('/api/broadcast/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:n.id})})
         .then(r=>r.json()).then(d => { if (d.success) this.fetchNotifs(); });
     }
-}" x-init="fetchConversations(); fetchNotifs()">
+}" x-init="fetchConversations(); fetchNotifs(); $watch('activeTab', val => { if (val === 'history') { this.markReadHistory(); } })">
     <!-- Tab Navigation -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 overflow-x-auto">
         <button @click="activeTab='convs'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>

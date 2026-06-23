@@ -11,14 +11,13 @@
     pollTimer: null, unreadCount: 0,
     activeTab: 'convs',
     // Conversations with auto-polling
+    refreshBadge() {
+        window.dispatchEvent(new CustomEvent('sg:unread'));
+    },
     fetchConversations() {
         this.convsLoading = true;
         fetch('/api/broadcast/conversations').then(r=>r.json()).then(d => {
-            var old = this.conversations;
             this.conversations = d.conversations || [];
-            // Count unread across all conversations
-            this.unreadCount = this.conversations.filter(c => c.status === 'open' && c.messages && c.messages.some(m => !m.is_mine && !m.read)).length;
-            // If a conversation is open, update its messages in-place
             if (this.activeConv) {
                 var updated = this.conversations.find(c => c.id === this.activeConv.id);
                 if (updated) {
@@ -41,9 +40,9 @@
         this.replyMessage = '';
         this.$nextTick(() => { this.scrollToBottom(); });
         this.startPolling();
-        // Mark as read via API
         fetch('/api/broadcast/mark-read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({conversation_id: c.id}) }).then(() => {
             if (this.conversations) this.conversations.forEach(x => { if (x.id === c.id) x.has_unread = false; });
+            this.refreshBadge();
         }).catch(()=>{});
     },
     scrollToBottom() {
@@ -68,9 +67,18 @@
         }).then(r=>r.json()).then(d => { if (d.success) { this.activeConv.status = 'completed'; this.fetchConversations(); } });
     },
     // Broadcasts
+    markReadInbox() {
+        fetch('/api/broadcast/mark-read-all', { method: 'POST' }).then(() => {
+            this.notifs.forEach(n => { n.read = true; });
+            this.refreshBadge();
+        }).catch(()=>{});
+    },
     fetchNotifs() {
         this.loading = true;
-        fetch('/api/broadcast/list').then(r=>r.json()).then(d => { this.notifs = d.notifications || []; }).catch(()=>{}).finally(()=>{ this.loading = false; });
+        fetch('/api/broadcast/list').then(r=>r.json()).then(d => {
+            this.notifs = d.notifications || [];
+            this.$nextTick(() => { this.markReadInbox(); });
+        }).catch(()=>{}).finally(()=>{ this.loading = false; });
     },
     fetchTeachers() {
         fetch('/api/broadcast/teachers').then(r=>r.json()).then(d => { this.teachers = d.teachers || []; }).catch(()=>{});
@@ -92,7 +100,7 @@
         if (!confirm('Hapus pesan ini?')) return;
         fetch('/api/broadcast/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: n.id})}).then(r=>r.json()).then(d => { if (d.success) this.fetchNotifs(); });
     }
-}" x-init="fetchConversations(); fetchTeachers(); fetchNotifs()">
+}" x-init="fetchConversations(); fetchTeachers(); fetchNotifs(); $watch('activeTab', val => { if (val === 'inbox') { this.markReadInbox(); } })">
     <!-- Tab Navigation -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1">
         <button @click="activeTab='convs'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition" :class="activeTab==='convs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>

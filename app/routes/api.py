@@ -1687,6 +1687,19 @@ def api_conversations():
                     })
             except Exception:
                 pass
+            # Determine has_unread from notification_recipients.read_at
+            has_unread = False
+            try:
+                nids_unread = []
+                for m in msgs:
+                    if not m.get("is_mine"):
+                        nids_unread.append(m["id"])
+                if nids_unread:
+                    unread_check = supabase.table("notification_recipients").select("id", count="exact") \
+                        .eq("recipient_id", uid).is_("read_at", "null").in_("notification_id", nids_unread).execute()
+                    has_unread = (unread_check.count or 0) > 0
+            except Exception:
+                pass
             result.append({
                 "id": c["id"], "title": c["title"], "status": c["status"],
                 "other_name": other_name, "other_id": other_id, "other_role": other_role,
@@ -1694,8 +1707,8 @@ def api_conversations():
                 "created_at": str(c.get("created_at", ""))[:19].replace("T", " "),
                 "completed_at": str(c.get("completed_at", ""))[:19].replace("T", " ") if c.get("completed_at") else None,
                 "messages": msgs,
-                "unread": any(not m.get("is_mine") for m in msgs[-3:]) if msgs else False,
-                "has_unread": any(not m.get("is_mine") for m in msgs[-3:]) if msgs else False,
+                "unread": has_unread,
+                "has_unread": has_unread,
             })
         return jsonify({"conversations": result})
     except Exception as e:
@@ -1766,6 +1779,22 @@ def api_mark_read():
         if nids:
             supabase.table("notification_recipients").update({"read_at": now_iso}).eq("recipient_id", g.user_id).in_("notification_id", nids).is_("read_at", "null").execute()
         return jsonify({"success": True, "marked": len(nids)})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/broadcast/mark-read-all", methods=["POST"])
+@login_required
+def api_mark_read_all():
+    """Mark all user's unread notifications as read."""
+    supabase = get_supabase()
+    try:
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        res = supabase.table("notification_recipients").update({"read_at": now_iso}) \
+            .eq("recipient_id", g.user_id).is_("read_at", "null").execute()
+        marked = res.data if res.data else []
+        return jsonify({"success": True, "marked": len(marked)})
     except Exception as e:
         return jsonify({"error": str(e)[:100]}), 500
 

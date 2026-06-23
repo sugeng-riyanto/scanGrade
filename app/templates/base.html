@@ -138,7 +138,7 @@ html { transition: background-color .3s, color .3s; }
             fetch('/api/broadcast/unread').then(r=>r.json()).then(d => { this.unreadCount = d.unread || 0; }).catch(()=>{});
         },
       }"
-      x-init="document.documentElement.classList.toggle('dark', darkMode); setInterval(() => this.fetchUnread(), 30000); fetchUnread()"
+      x-init="document.documentElement.classList.toggle('dark', darkMode); window.addEventListener('sg:unread', () => { this.fetchUnread(); }); setInterval(() => this.fetchUnread(), 30000); fetchUnread()"
       @htmx:before-request.window="loading = true"
       @htmx:after-request.window="loading = false"
       @htmx:response-error.window="notify('Terjadi kesalahan', 'error')">
