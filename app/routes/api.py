@@ -1487,27 +1487,14 @@ def api_send_broadcast():
     elif role != "super_admin":
         return jsonify({"error": "Unauthorized"}), 403
 
-    notif = {
-        "sender_id": g.user_id, "sender_role": role,
-        "title": title, "message": message,
-        "target_role": target_role if target_role != "all" else None,
-        "target_school_id": target_school_id,
-    }
-    try:
-        res = supabase.table("notifications").insert(notif).execute()
-        notif_id = res.data[0]["id"]
-    except Exception as e:
-        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
-
-    # Create individual recipient entries for read tracking
+    # Build recipient list first (before notification insert)
     recipient_ids = data.get("recipient_ids")
     recipients = []
     if recipient_ids and isinstance(recipient_ids, list) and len(recipient_ids) > 0:
         if role == "murid":
-            # Students can only message teachers — verify each recipient
             try:
                 valid = supabase.table("profiles").select("id, role").eq("status", "active").in_("id", recipient_ids).execute().data or []
-                recipients = [{"id": r["id"]} for r in valid if r.get("role") == "guru" or r.get("role") == "admin_sekolah" or r.get("role") == "super_admin"]
+                recipients = [{"id": r["id"]} for r in valid if r.get("role") in ("guru", "admin_sekolah", "super_admin")]
             except Exception:
                 recipients = []
         elif target_school_id:
@@ -1533,6 +1520,48 @@ def api_send_broadcast():
         except Exception:
             pass
 
+    # For one-on-one messages, create/update conversation FIRST
+    conversation_id = None
+    if recipient_ids and len(recipient_ids) == 1 and target_role and target_role != "all":
+        other_id = recipient_ids[0]
+        try:
+            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).eq("title", title).order("created_at", desc=True).limit(1).execute().data or []
+            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).eq("title", title).order("created_at", desc=True).limit(1).execute().data or []
+            conv = conv1 + conv2
+            if conv:
+                conversation_id = conv[0]["id"]
+                if conv[0].get("status") != "open":
+                    supabase.table("conversations").update({
+                        "status": "open", "completed_at": None, "completed_by": None
+                    }).eq("id", conversation_id).execute()
+                supabase.table("conversations").update({
+                    "last_message_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", conversation_id).execute()
+            else:
+                conv_res = supabase.table("conversations").insert({
+                    "participant_1": g.user_id, "participant_2": other_id,
+                    "title": title, "status": "open",
+                }).execute()
+                conversation_id = conv_res.data[0]["id"]
+        except Exception as e:
+            return jsonify({"error": f"Gagal membuat percakapan: {str(e)[:100]}"}), 500
+
+    # Insert notification WITH conversation_id already set
+    notif = {
+        "sender_id": g.user_id, "sender_role": role,
+        "title": title, "message": message,
+        "target_role": target_role if target_role != "all" else None,
+        "target_school_id": target_school_id,
+    }
+    if conversation_id:
+        notif["conversation_id"] = conversation_id
+    try:
+        res = supabase.table("notifications").insert(notif).execute()
+        notif_id = res.data[0]["id"]
+    except Exception as e:
+        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+
+    # Create individual recipient entries for read tracking
     if recipients:
         rec_data = [{"notification_id": notif_id, "recipient_id": r["id"]} for r in recipients]
         for i in range(0, len(rec_data), 100):
@@ -1541,31 +1570,10 @@ def api_send_broadcast():
             except Exception:
                 pass
 
-    # For one-on-one messages, create/update a conversation
-    if recipient_ids and len(recipient_ids) == 1 and target_role and target_role != "all":
-        other_id = recipient_ids[0]
-        try:
-            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).eq("title", title).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
-            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).eq("title", title).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
-            conv = conv1 + conv2
-            if conv:
-                conv_id = conv[0]["id"]
-                supabase.table("conversations").update({
-                    "last_message_at": datetime.now(timezone.utc).isoformat(),
-                    "title": title
-                }).eq("id", conv_id).execute()
-            else:
-                conv_res = supabase.table("conversations").insert({
-                    "participant_1": g.user_id, "participant_2": other_id,
-                    "title": title, "status": "open",
-                }).execute()
-                conv_id = conv_res.data[0]["id"]
-            supabase.table("notifications").update({"conversation_id": conv_id}).eq("id", notif_id).execute()
-            return jsonify({"success": True, "recipients": len(recipients), "conversation_id": conv_id})
-        except Exception:
-            pass
-
-    return jsonify({"success": True, "recipients": len(recipients)})
+    resp = {"success": True, "recipients": len(recipients)}
+    if conversation_id:
+        resp["conversation_id"] = conversation_id
+    return jsonify(resp)
 
 
 @api_bp.route("/broadcast/reply", methods=["POST"])
