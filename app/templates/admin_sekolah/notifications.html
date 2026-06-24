@@ -15,6 +15,7 @@
     activeConv: null, replyMessage: '', replying: false, replyError: '',
     editingMsgId: null, editMsgText: '',
     pollTimer: null,
+    convMenuOpen: false, msgMenuId: null,
     statsMap: {},
     get filteredRecipients() {
         var s = this.searchRecipient.toLowerCase();
@@ -85,6 +86,54 @@
         if (!confirm('Selesaikan percakapan ini?')) return;
         fetch('/api/broadcast/complete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: this.activeConv.id}) })
         .then(r=>r.json()).then(d => { if (d.success) { this.activeConv.status = 'completed'; this.fetchConversations(); } });
+    },
+    toggleConvMenu() { this.convMenuOpen = !this.convMenuOpen; },
+    closeConvMenu() { this.convMenuOpen = false; },
+    toggleMsgMenu(id) { this.msgMenuId = this.msgMenuId === id ? null : id; },
+    unsendMsg(m) {
+        if (!confirm('Hapus pesan ini untuk semua orang?')) return;
+        fetch('/api/broadcast/unsend', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({notification_id: m.id})
+        }).then(r=>r.json()).then(d => {
+            if (d.success) { this.msgMenuId = null; this.fetchConversations(); }
+            else { alert(d.error || 'Gagal'); }
+        });
+    },
+    deleteForMe(m) {
+        fetch('/api/broadcast/delete-for-me', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({notification_id: m.id})
+        }).then(r=>r.json()).then(d => {
+            if (d.success) { this.msgMenuId = null; this.fetchConversations(); }
+        });
+    },
+    deleteConv() {
+        if (!confirm('Hapus percakapan ini? Pesan akan dihapus untuk Anda.')) return;
+        fetch('/api/broadcast/conversation/delete', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({conversation_id: this.activeConv.id})
+        }).then(r=>r.json()).then(d => {
+            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
+        });
+    },
+    archiveConv() {
+        fetch('/api/broadcast/conversation/archive', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({conversation_id: this.activeConv.id})
+        }).then(r=>r.json()).then(d => {
+            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
+            else { alert(d.error || 'Gagal'); }
+        });
+    },
+    unarchiveConv() {
+        fetch('/api/broadcast/conversation/unarchive', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({conversation_id: this.activeConv.id})
+        }).then(r=>r.json()).then(d => {
+            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
+            else { alert(d.error || 'Gagal'); }
+        });
     },
     fetchNotifs() {
         this.loading = true;
@@ -260,6 +309,20 @@
                                         <button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan percakapan"><i class="fas fa-check-double text-sm"></i></button>
                                     </template>
                                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" :class="activeConv.status==='open' ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-200 text-surface-500'"><span x-text="activeConv.status==='open' ? 'Aktif' : 'Selesai'"></span></span>
+                                    <div class="relative" @click.outside="closeConvMenu()">
+                                        <button @click="toggleConvMenu()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Lainnya"><i class="fas fa-ellipsis-v text-sm"></i></button>
+                                        <template x-if="convMenuOpen">
+                                            <div class="absolute right-0 top-full mt-1 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[180px]">
+                                                <button @click="deleteConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-trash-alt text-xs"></i>Hapus Percakapan</button>
+                                                <template x-if="activeConv.status==='open'">
+                                                    <button @click="archiveConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-surface-700 hover:bg-surface-50 transition font-medium"><i class="fas fa-archive text-xs"></i>Arsipkan</button>
+                                                </template>
+                                                <template x-if="activeConv.status==='archived'">
+                                                    <button @click="unarchiveConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-surface-700 hover:bg-surface-50 transition font-medium"><i class="fas fa-inbox text-xs"></i>Buka Arsip</button>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
                                 </div>
                                 <div class="flex-1 overflow-y-auto p-4 chat-scroll bg-[#efeae2] space-y-1" style="background-image: url('data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot; opacity=&quot;0.06&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23efeae2&quot;/><path d=&quot;M0 0l200 200M200 0L0 200&quot; stroke=&quot;%238d6e5c&quot; stroke-width=&quot;0.5&quot;/></svg>')">
                                     <template x-for="(m, idx) in activeConv.messages" :key="m.id">
@@ -280,13 +343,26 @@
                                                     </div>
                                                 </template>
                                                 <template x-if="editingMsgId !== m.id">
-                                                    <div>
+                                                    <div class="relative">
                                                         <div class="px-3 py-2 shadow-sm" :class="m.is_mine ? 'bg-primary-500 text-white rounded-2xl rounded-br-sm' : 'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
                                                             <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
                                                         </div>
-                                                        <template x-if="canEdit(m)">
-                                                            <button @click="startEdit(m)" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button>
-                                                        </template>
+                                                        <div class="flex gap-1 absolute -top-1.5 -right-1.5 z-10 opacity-0 group-hover:opacity-100 transition">
+                                                            <div class="relative" @click.outside="if(msgMenuId===m.id) msgMenuId=null">
+                                                                <button @click="toggleMsgMenu(m.id)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-chevron-down text-[8px]"></i></button>
+                                                                <template x-if="msgMenuId === m.id">
+                                                                    <div class="absolute right-0 top-full mt-0.5 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[140px]">
+                                                                        <template x-if="m.is_mine && !m.is_deleted">
+                                                                            <button @click="unsendMsg(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-undo-alt text-[10px]"></i>Unsend</button>
+                                                                        </template>
+                                                                        <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50 transition font-medium"><i class="fas fa-eye-slash text-[10px]"></i>Hapus untukku</button>
+                                                                    </div>
+                                                                </template>
+                                                            </div>
+                                                            <template x-if="canEdit(m)">
+                                                                <button @click="startEdit(m)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button>
+                                                            </template>
+                                                        </div>
                                                     </div>
                                                 </template>
                                                 <div class="flex items-center gap-1 justify-end mt-0.5 px-0.5" :class="m.is_mine ? 'text-right' : 'text-left'">
