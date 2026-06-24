@@ -232,8 +232,8 @@
                                     <span x-show="c.has_unread" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <div class="flex items-center justify-between"><span class="font-semibold text-surface-800 text-sm truncate" x-text="c.other_name"></span><span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at?c.last_message_at.slice(0,10).replace('-','/'):''"></span></div>
-                                    <div class="flex items-center gap-1.5 mt-0.5"><span class="text-xs text-surface-500 truncate" x-text="c.title||'Percakapan'"></span><span x-show="c.has_unread" class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">baru</span></div>
+                                    <div class="flex items-center justify-between"><span class="font-semibold text-surface-800 text-sm truncate" x-text="c.title||'Percakapan'"></span><span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at?c.last_message_at.slice(11,16):''"></span></div>
+                                    <div class="flex items-center gap-1.5 mt-0.5"><span class="text-xs text-surface-500 truncate"><span class="font-medium text-surface-400" x-text="c.other_name+': '"></span><span x-text="c.last_msg_preview||'Belum ada pesan'"></span></span><template x-if="c.has_unread"><span class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center" x-text="c.unread_count||'baru'"></span></template></div>
                                 </div>
                             </div>
                         </template>
