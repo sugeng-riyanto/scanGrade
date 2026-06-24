@@ -12,7 +12,7 @@
     guruList: [], muridList: [], classList: [],
     selectedGuruIds: [], selectedMuridIds: [], selectedClass: '',
     editingId: null, editTitle: '', editMessage: '',
-    conversations: [], convsLoading: true,
+    conversations: [], convsLoading: true, searchContact: '',
     activeConv: null, replyMessage: '', replying: false, replyError: '',
     editingMsgId: null, editMsgText: '',
     pollTimer: null,
@@ -25,6 +25,13 @@
             groups[key].push(n);
         });
         return Object.entries(groups);
+    },
+    get filteredConvs() {
+        var q = (this.searchContact || '').toLowerCase();
+        if (!q) return this.conversations;
+        return this.conversations.filter(function(c) {
+            return (c.other_name || '').toLowerCase().includes(q) || (c.title || '').toLowerCase().includes(q);
+        });
     },
     // Conversations with auto-polling
     refreshBadge() {
@@ -218,7 +225,7 @@
             <div class="mt-3 space-y-3 text-xs text-surface-600 border-t border-surface-100 pt-3">
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-comments text-primary-500 mr-1 w-4"></i>Tab Percakapan</p>
-                    <p>Chat 1-on-1 dengan murid + riwayat pengumuman terkirim. Balas dua arah seperti WhatsApp. Edit pesan sendiri dalam 2 menit. Riwayat pengumuman bisa diedit/dihapus dengan statistik baca (chart donut).</p>
+                    <p>Chat 1-on-1 dengan murid. Tampilan dua kolom seperti WhatsApp — pilih kontak di sidebar kiri. Edit pesan sendiri dalam 2 menit.</p>
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-inbox text-primary-500 mr-1 w-4"></i>Tab Kotak Masuk</p>
@@ -251,104 +258,147 @@
     </div>
 
     <!-- Conversations -->
+    <!-- Percakapan — WhatsApp Web-like -->
     <template x-if="activeTab === 'convs'">
-        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-            <template x-if="!activeConv">
-                <div>
-                    <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-comments text-primary-500 mr-2"></i>Percakapan dengan Murid</h3>
-                    <template x-if="convsLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
-                    <template x-if="!convsLoading && conversations.length === 0"><div class="text-center py-8 text-surface-400">Belum ada percakapan</div></template>
-                    <!-- Open Conversations -->
-                    <p class="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2 mt-2"><i class="fas fa-comments mr-1"></i>Percakapan Aktif</p>
-                    <div class="space-y-2" x-show="!convsLoading">
-                        <template x-for="c in conversations.filter(c => c.status==='open')" :key="c.id">
-                            <div @click="openConv(c)" class="p-4 rounded-xl cursor-pointer transition border" :class="[c.status==='open' ? 'bg-surface-50 hover:bg-surface-100 border-surface-100' : 'bg-surface-50/50 border-surface-100 opacity-70', c.has_unread ? 'ring-2 ring-primary-300' : '']">
-                                <div class="flex items-start justify-between">
-                                    <div class="flex-1 min-w-0">
-                                        <div class="flex items-center gap-2">
-                                            <span class="text-xs font-bold text-surface-500" x-text="c.other_name"></span>
-                                            <span class="text-[10px] px-1.5 py-0.5 rounded-full font-bold" :class="c.other_role==='guru' ? 'bg-amber-100 text-amber-700' : (c.other_role==='admin_sekolah' ? 'bg-purple-100 text-purple-700' : (c.other_role==='murid' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'))" x-text="c.other_role==='guru' ? 'Guru' : (c.other_role==='admin_sekolah' ? 'Admin' : (c.other_role==='murid' ? 'Murid' : (c.other_role||'?')))"></span>
-                                            <span x-show="c.has_unread" class="w-2 h-2 rounded-full bg-red-500 inline-block shrink-0"></span>
-                                        </div>
-                                        <p class="font-bold text-surface-800 mt-0.5 truncate" x-text="c.title"></p>
-                                        <p class="text-xs text-surface-400 mt-0.5" x-text="c.last_message_at"></p>
-                                    </div>
-                                    <i class="fas fa-chevron-right text-surface-300 ml-2 mt-2"></i>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-
-                </div>
+        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-hidden" style="height: min(72vh, 640px);">
+            <template x-if="convsLoading && conversations.length === 0">
+                <div class="flex items-center justify-center h-full text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div>
             </template>
-            <template x-if="activeConv">
-                <div>
-                    <div class="flex items-center justify-between mb-4">
-                        <button @click="activeConv=null; stopPolling()" class="text-sm font-bold text-primary-600 hover:text-primary-700"><i class="fas fa-arrow-left mr-1"></i>Kembali</button>
-                        <div class="flex items-center gap-2">
-                            <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" :class="activeConv.status==='open' ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-200 text-surface-500'" x-text="activeConv.status==='open' ? 'Aktif' : 'Selesai'"></span>
-                            <template x-if="activeConv.status==='open'">
-                                <button @click="completeConv()" class="text-xs font-bold text-emerald-600 hover:text-emerald-700 border border-emerald-600 px-2.5 py-1 rounded-lg hover:bg-emerald-50 transition"><i class="fas fa-check mr-1"></i>Selesaikan</button>
+            <template x-if="!convsLoading || conversations.length > 0">
+                <div class="flex h-full">
+                    <!-- Sidebar -->
+                    <div class="w-20 md:w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv ? 'hidden md:flex' : 'flex'">
+                        <div class="px-3 md:px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
+                            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{{ (g.user_name or 'G')[:1]|upper }}</div>
+                            <span class="hidden md:block font-bold text-surface-800 text-sm truncate">{{ g.user_name or 'Guru' }}</span>
+                            <button @click="fetchConversations()" class="ml-auto text-surface-400 hover:text-primary-600 transition" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
+                        </div>
+                        <div class="px-3 md:px-4 py-2 bg-surface-50">
+                            <div class="relative">
+                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 text-xs"></i>
+                                <input type="text" x-model="searchContact" placeholder="Cari percakapan..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 focus:border-primary-400 outline-none text-surface-700 placeholder-surface-400">
+                            </div>
+                        </div>
+                        <div class="flex-1 overflow-y-auto divide-y divide-surface-100">
+                            <template x-for="c in filteredConvs" :key="c.id">
+                                <div @click="openConv(c)" class="flex items-center gap-3 px-3 md:px-4 py-3 cursor-pointer transition" :class="activeConv && activeConv.id === c.id ? 'bg-surface-100' : 'hover:bg-surface-50'">
+                                    <div class="relative shrink-0">
+                                        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (c.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (c.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                            <span x-text="(c.other_name||'?')[0].toUpperCase()"></span>
+                                        </div>
+                                        <span x-show="c.has_unread" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+                                    </div>
+                                    <div class="hidden md:block flex-1 min-w-0">
+                                        <div class="flex items-center justify-between">
+                                            <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.other_name"></span>
+                                            <span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at ? c.last_message_at.slice(0,10) : ''"></span>
+                                        </div>
+                                        <div class="flex items-center gap-1.5 mt-0.5">
+                                            <span class="text-xs text-surface-400 truncate" x-text="c.title || 'Percakapan'"></span>
+                                            <span x-show="c.has_unread" class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">baru</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="filteredConvs.length === 0">
+                                <div class="flex flex-col items-center justify-center py-12 text-surface-400 px-4">
+                                    <i class="fas fa-comments text-3xl mb-3 text-surface-200"></i>
+                                    <p class="text-sm font-medium">Belum ada percakapan</p>
+                                    <p class="text-xs mt-1">Murid akan muncul di sini saat mereka mengirim pesan</p>
+                                </div>
                             </template>
                         </div>
                     </div>
-                    <div class="flex items-center gap-2 mb-3">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-white font-bold text-xs shrink-0"><span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span></div>
-                        <div>
-                            <p class="font-bold text-surface-800 text-sm" x-text="activeConv.other_name"></p>
-                            <p class="text-[10px] text-surface-400" x-text="'Percakapan: ' + activeConv.title"></p>
-                        </div>
-                    </div>
-                    <div class="space-y-1 max-h-96 overflow-y-auto p-4 bg-[#efeae2] rounded-xl chat-scroll" style="background-image: url('data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot; opacity=&quot;0.04&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23efeae2&quot;/><path d=&quot;M0 0l200 200M200 0L0 200&quot; stroke=&quot;%238d6e5c&quot; stroke-width=&quot;0.5&quot;/></svg>')">
-                        <template x-for="(m, idx) in activeConv.messages" :key="m.id">
-                            <div>
-                                <div class="flex items-end gap-1.5" :class="m.is_mine ? 'justify-end' : 'justify-start'">
-                                    <template x-if="!m.is_mine">
-                                        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-bold text-[10px] shrink-0 mb-0.5"><span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span></div>
-                                    </template>
-                                    <div class="max-w-[75%]">
-                                        <template x-if="editingMsgId === m.id">
-                                            <div class="bg-white rounded-2xl rounded-br-sm border border-primary-300 p-2 shadow-sm">
-                                                <textarea x-model="editMsgText" rows="2" class="w-full px-2 py-1 border-0 focus:ring-0 text-sm resize-none outline-none"></textarea>
-                                                <div class="flex gap-1.5 mt-1 justify-end">
-                                                    <button @click="cancelEdit()" class="text-[10px] font-bold text-surface-500 px-2 py-1 rounded-lg hover:bg-surface-100">Batal</button>
-                                                    <button @click="saveEditMsg()" class="text-[10px] font-bold text-white bg-primary-600 px-2.5 py-1 rounded-lg hover:bg-primary-700">Simpan</button>
-                                                </div>
-                                            </div>
-                                        </template>
-                                        <template x-if="editingMsgId !== m.id">
-                                            <div class="group relative">
-                                                <div class="px-3 py-2 shadow-sm" :class="m.is_mine ? 'bg-primary-500 text-white rounded-2xl rounded-br-sm' : 'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
-                                                    <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
-                                                </div>
-                                                <template x-if="canEdit(m)">
-                                                    <button @click="startEdit(m)" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button>
-                                                </template>
-                                            </div>
-                                        </template>
-                                        <p class="text-[9px] mt-0.5" :class="m.is_mine ? 'text-right text-surface-400 mr-1' : 'text-left text-surface-400 ml-1'" x-text="m.created_at ? m.created_at.slice(11,16) : ''"></p>
-                                    </div>
+                    <!-- Chat Area -->
+                    <div class="flex-1 flex flex-col" :class="!activeConv ? 'hidden md:flex' : 'flex'">
+                        <template x-if="!activeConv">
+                            <div class="flex flex-col items-center justify-center h-full bg-surface-50 text-surface-400 px-6">
+                                <div class="w-20 h-20 rounded-full bg-surface-100 flex items-center justify-center mb-4">
+                                    <i class="fas fa-comments text-3xl text-surface-300"></i>
                                 </div>
+                                <p class="font-bold text-surface-500 text-lg">ScanGrade Chat</p>
+                                <p class="text-sm mt-1 text-center">Pilih percakapan dari sidebar untuk mulai mengobrol</p>
                             </div>
                         </template>
-                        <template x-if="(!activeConv.messages || activeConv.messages.length === 0)">
-                            <p class="text-center text-xs text-surface-400 py-4">Belum ada pesan. Mulai percakapan.</p>
+                        <template x-if="activeConv">
+                            <div class="flex flex-col h-full">
+                                <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3 shrink-0">
+                                    <button @click="activeConv=null; stopPolling()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
+                                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                        <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p>
+                                        <p class="text-[11px]" :class="activeConv.status==='open' ? 'text-emerald-600' : 'text-surface-400'" x-text="activeConv.status==='open' ? 'Online' : 'Offline'"></p>
+                                    </div>
+                                    <template x-if="activeConv.status==='open'">
+                                        <button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan percakapan"><i class="fas fa-check-double text-sm"></i></button>
+                                    </template>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" :class="activeConv.status==='open' ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-200 text-surface-500'"><span x-text="activeConv.status==='open' ? 'Aktif' : 'Selesai'"></span></span>
+                                </div>
+                                <div class="flex-1 overflow-y-auto p-4 chat-scroll bg-[#efeae2] space-y-1" style="background-image: url('data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot; opacity=&quot;0.06&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23efeae2&quot;/><path d=&quot;M0 0l200 200M200 0L0 200&quot; stroke=&quot;%238d6e5c&quot; stroke-width=&quot;0.5&quot;/></svg>')">
+                                    <template x-for="(m, idx) in activeConv.messages" :key="m.id">
+                                        <div class="flex items-end gap-1.5 mb-1" :class="m.is_mine ? 'justify-end' : 'justify-start'">
+                                            <template x-if="!m.is_mine">
+                                                <div class="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0 mb-0.5" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                                    <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
+                                                </div>
+                                            </template>
+                                            <div class="max-w-[75%] md:max-w-[65%] group relative">
+                                                <template x-if="editingMsgId === m.id">
+                                                    <div class="bg-white rounded-2xl rounded-br-sm border border-primary-300 p-2 shadow-sm">
+                                                        <textarea x-model="editMsgText" rows="2" class="w-full px-2 py-1 border-0 focus:ring-0 text-sm resize-none outline-none"></textarea>
+                                                        <div class="flex gap-1.5 mt-1 justify-end">
+                                                            <button @click="cancelEdit()" class="text-[10px] font-bold text-surface-500 px-2 py-1 rounded-lg hover:bg-surface-100">Batal</button>
+                                                            <button @click="saveEditMsg()" class="text-[10px] font-bold text-white bg-primary-600 px-2.5 py-1 rounded-lg hover:bg-primary-700">Simpan</button>
+                                                        </div>
+                                                    </div>
+                                                </template>
+                                                <template x-if="editingMsgId !== m.id">
+                                                    <div>
+                                                        <div class="px-3 py-2 shadow-sm" :class="m.is_mine ? 'bg-primary-500 text-white rounded-2xl rounded-br-sm' : 'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
+                                                            <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
+                                                        </div>
+                                                        <template x-if="canEdit(m)">
+                                                            <button @click="startEdit(m)" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                                <div class="flex items-center gap-1 justify-end mt-0.5 px-0.5" :class="m.is_mine ? 'text-right' : 'text-left'">
+                                                    <span class="text-[9px] text-surface-400" x-text="m.created_at ? m.created_at.slice(11,16) : ''"></span>
+                                                    <template x-if="m.is_mine">
+                                                        <i class="fas fa-check-double text-[9px]" :class="idx === activeConv.messages.length - 1 ? 'text-primary-400' : 'text-surface-300'"></i>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="(!activeConv.messages || activeConv.messages.length === 0)">
+                                        <div class="flex items-center justify-center h-full">
+                                            <p class="text-center text-xs text-surface-400 bg-white/70 px-4 py-2 rounded-full">Belum ada pesan. Mulai percakapan.</p>
+                                        </div>
+                                    </template>
+                                </div>
+                                <template x-if="activeConv.status==='open'">
+                                    <div class="px-3 md:px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0">
+                                        <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
+                                            <button class="text-surface-400 hover:text-primary-600 transition shrink-0 p-1" title="Lampirkan"><i class="fas fa-paperclip text-lg"></i></button>
+                                            <textarea x-model="replyMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendReply()"></textarea>
+                                            <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying || !replyMessage">
+                                                <i class="fas fa-paper-plane text-sm"></i>
+                                            </button>
+                                        </div>
+                                        <p x-show="replyError" class="text-xs text-red-500 mt-1 text-right" x-text="replyError"></p>
+                                    </div>
+                                </template>
+                                <template x-if="activeConv.status!=='open'">
+                                    <div class="px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0 text-center">
+                                        <p class="text-xs font-bold text-surface-400"><i class="fas fa-check-circle mr-1"></i>Percakapan selesai — tidak bisa mengirim pesan baru</p>
+                                    </div>
+                                </template>
+                            </div>
                         </template>
                     </div>
-                    <template x-if="activeConv.status==='open'">
-                        <div>
-                            <div class="mt-3 flex items-end gap-2 bg-white rounded-2xl border border-surface-200 p-2">
-                                <textarea x-model="replyMessage" rows="1" class="flex-1 px-3 py-2 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none" placeholder="Ketik pesan..."></textarea>
-                                <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying">
-                                    <i class="fas fa-paper-plane text-sm"></i>
-                                </button>
-                            </div>
-                            <p x-show="replyError" class="text-xs text-red-500 mt-1 text-right" x-text="replyError"></p>
-                        </div>
-                    </template>
-                    <template x-if="activeConv.status!=='open'">
-                        <p class="text-center text-xs font-bold text-surface-400 mt-4"><i class="fas fa-check-circle mr-1"></i>Percakapan selesai</p>
-                    </template>
                 </div>
             </template>
         </div>
