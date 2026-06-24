@@ -2,503 +2,290 @@
 {% block title %}Pengumuman & Pesan - ScanGrade{% endblock %}
 {% block page_title %}Pengumuman & Pesan{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{
-    lang: localStorage.getItem('sg_lang') || 'id',
-    notifs: [], loading: true,
+<div class="space-y-4" x-data="{
+    // Tab
+    activeTab: 'convs',
+
+    // Percakapan
+    conversations: [], convsLoading: true,
+    activeConv: null, replyMessage: '', replying: false, replyError: '',
+    searchContact: '',
+    pollTimer: null,
+
+    // Pengumuman (inbox)
     inboxNotifs: [], inboxLoading: true,
+
+    // Kirim Pengumuman
     formTitle: '', formMessage: '', sending: false, sendMsg: '',
     toGuru: false, toMurid: true,
-    guruOpt: 'all', muridOpt: 'all', kelasOpt: 'all',
+    guruOpt: 'all', muridOpt: 'all',
     guruList: [], muridList: [], classList: [],
     selectedGuruIds: [], selectedMuridIds: [], selectedClass: '',
-    editingId: null, editTitle: '', editMessage: '',
-    conversations: [], convsLoading: true, searchContact: '',
-    activeConv: null, replyMessage: '', replying: false, replyError: '',
-    editingMsgId: null, editMsgText: '',
-    pollTimer: null,
-    convMenuOpen: false, msgMenuId: null,
-    activeTab: 'convs',
-    groupedNotifs() {
-        var groups = {};
-        (this.notifs || []).forEach(function(n) {
-            var key = n.title || 'Tanpa Judul';
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(n);
-        });
-        return Object.entries(groups);
-    },
+    history: [], historyLoading: true,
+
     get filteredConvs() {
         var q = (this.searchContact || '').toLowerCase();
         if (!q) return this.conversations;
-        return this.conversations.filter(function(c) {
-            return (c.other_name || '').toLowerCase().includes(q) || (c.title || '').toLowerCase().includes(q);
-        });
+        return this.conversations.filter(function(c){return (c.other_name||'').toLowerCase().includes(q);});
     },
-    // Conversations with auto-polling
-    refreshBadge() {
-        window.dispatchEvent(new CustomEvent('sg:unread'));
-    },
+
+    // Percakapan methods
+    refreshBadge() { window.dispatchEvent(new CustomEvent('sg:unread')); },
     fetchConversations() {
         this.convsLoading = true;
-        fetch('/api/broadcast/conversations').then(r=>r.json()).then(d => {
-            this.conversations = (d.conversations || []).sort(function(a,b){ return a.last_message_at < b.last_message_at ? 1 : -1; });
+        fetch('/api/broadcast/conversations').then(function(r){return r.json();}).then(function(d) {
+            this.conversations = d.conversations || [];
             if (this.activeConv) {
-                var updated = this.conversations.find(c => c.id === this.activeConv.id);
-                if (updated) {
-                    this.activeConv = updated;
-                    this.$nextTick(() => { this.scrollToBottom(); });
-                }
+                var upd = this.conversations.find(function(c){return c.id===this.activeConv.id;}.bind(this));
+                if (upd) { this.activeConv = upd; this.$nextTick(function(){this.scrollBottom();}.bind(this)); }
             }
-        }).catch(()=>{}).finally(()=>{ this.convsLoading = false; });
+        }.bind(this)).catch(function(){}).finally(function(){this.convsLoading=false;}.bind(this));
     },
-    startPolling() {
-        this.stopPolling();
-        this.pollTimer = setInterval(() => { this.fetchConversations(); }, 5000);
-    },
-    stopPolling() {
-        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
-    },
+    scrollBottom() { var el = this.$el.querySelector('.chat-scroll'); if (el) el.scrollTop = el.scrollHeight; },
     openConv(c) {
-        this.activeConv = c;
-        this.replyMessage = '';
-        this.replyError = '';
-        this.editingMsgId = null;
-        this.$nextTick(() => { this.scrollToBottom(); });
-        this.startPolling();
-        fetch('/api/broadcast/mark-read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({conversation_id: c.id}) }).then(() => {
-            if (this.conversations) this.conversations.forEach(x => { if (x.id === c.id) x.has_unread = false; });
-            this.refreshBadge();
-        }).catch(()=>{});
+        this.activeConv = c; this.replyMessage = ''; this.replyError = '';
+        this.$nextTick(function(){this.scrollBottom();}.bind(this));
+        this.startPoll();
+        fetch('/api/broadcast/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:c.id})})
+        .then(function(){this.conversations.forEach(function(x){if(x.id===c.id)x.has_unread=false;});this.refreshBadge();}.bind(this)).catch(function(){});
     },
-    scrollToBottom() {
-        var el = document.querySelector('.chat-scroll');
-        if (el) el.scrollTop = el.scrollHeight;
-    },
-    canEdit(m) {
-        if (!m.is_mine) return false;
-        try {
-            var now = new Date();
-            var created = new Date(m.created_at);
-            return (now - created) < 120000;
-        } catch(e) { return false; }
-    },
-    startEdit(m) {
-        this.editingMsgId = m.id;
-        this.editMsgText = m.message;
-    },
-    cancelEdit() {
-        this.editingMsgId = null;
-        this.editMsgText = '';
-    },
-    saveEditMsg() {
-        if (!this.editMsgText || !this.editingMsgId) return;
-        fetch('/api/broadcast/edit-message', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({notification_id: this.editingMsgId, message: this.editMsgText})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.editingMsgId = null; this.editMsgText = ''; this.fetchConversations(); }
-        }).catch(()=>{});
-    },
+    startPoll() { this.stopPoll(); this.pollTimer = setInterval(function(){this.fetchConversations();}.bind(this), 5000); },
+    stopPoll() { if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; } },
     sendReply() {
-        if (!this.replyMessage) return;
-        this.replying = true;
-        this.replyError = '';
-        fetch('/api/broadcast/reply', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id, message: this.replyMessage})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.replyMessage = ''; this.activeConv = null; this.stopPolling(); this.fetchConversations(); this.refreshBadge(); }
-            else { this.replyError = d.error || 'Gagal kirim'; }
-        }).catch(()=>{ this.replyError = 'Gagal terhubung ke server'; }).finally(()=>{ this.replying = false; });
+        if (!this.replyMessage || !this.activeConv) return;
+        this.replying = true; this.replyError = '';
+        fetch('/api/broadcast/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id,message:this.replyMessage})})
+        .then(function(r){return r.json();}).then(function(d){
+            if (d.success) { this.replyMessage=''; this.activeConv=null; this.stopPoll(); this.fetchConversations(); this.refreshBadge(); }
+            else { this.replyError=d.error||'Gagal kirim'; }
+        }.bind(this)).catch(function(){this.replyError='Gagal terhubung';}.bind(this)).finally(function(){this.replying=false;}.bind(this));
     },
     completeConv() {
-        if (!confirm('Selesaikan percakapan ini?')) return;
-        fetch('/api/broadcast/complete', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id})
-        }).then(r=>r.json()).then(d => { if (d.success) { this.activeConv.status = 'completed'; this.fetchConversations(); } });
+        if (!this.activeConv || !confirm('Selesaikan percakapan ini?')) return;
+        fetch('/api/broadcast/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.activeConv.status='completed';this.fetchConversations();}}.bind(this));
     },
-    toggleConvMenu() { this.convMenuOpen = !this.convMenuOpen; },
-    closeConvMenu() { this.convMenuOpen = false; },
-    toggleMsgMenu(id) { this.msgMenuId = this.msgMenuId === id ? null : id; },
-    unsendMsg(m) {
-        if (!confirm('Hapus pesan ini untuk semua orang?')) return;
-        fetch('/api/broadcast/unsend', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({notification_id: m.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.msgMenuId = null; this.fetchConversations(); }
-            else { alert(d.error || 'Gagal'); }
-        });
-    },
-    deleteForMe(m) {
-        fetch('/api/broadcast/delete-for-me', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({notification_id: m.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.msgMenuId = null; this.fetchConversations(); }
-        });
-    },
-    deleteConv() {
-        if (!confirm('Hapus percakapan ini? Pesan akan dihapus untuk Anda.')) return;
-        fetch('/api/broadcast/conversation/delete', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
-        });
-    },
-    archiveConv() {
-        fetch('/api/broadcast/conversation/archive', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
-            else { alert(d.error || 'Gagal'); }
-        });
-    },
-    unarchiveConv() {
-        fetch('/api/broadcast/conversation/unarchive', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
-            else { alert(d.error || 'Gagal'); }
-        });
-    },
-    // Broadcasts - Sent history
-    fetchHistory() {
-        this.loading = true;
-        fetch('/api/broadcast/list?type=sent').then(r=>r.json()).then(d => {
-            this.notifs = d.notifications || [];
-        }).catch(()=>{}).finally(()=>{ this.loading = false; });
-    },
-    // Broadcasts - Received inbox
+
+    // Inbox methods
     fetchInbox() {
         this.inboxLoading = true;
-        fetch('/api/broadcast/list?type=received').then(r=>r.json()).then(d => {
+        fetch('/api/broadcast/list?type=received').then(function(r){return r.json();}).then(function(d) {
             this.inboxNotifs = d.notifications || [];
-        }).catch(()=>{}).finally(()=>{ this.inboxLoading = false; });
+        }.bind(this)).catch(function(){}).finally(function(){this.inboxLoading=false;}.bind(this));
+    },
+    markReadAll() {
+        fetch('/api/broadcast/mark-read-all',{method:'POST'}).then(function(){this.inboxNotifs.forEach(function(n){n.read=true;});this.refreshBadge();}.bind(this)).catch(function(){});
+    },
+
+    // Kirim Pengumuman methods
+    fetchHistory() {
+        this.historyLoading = true;
+        fetch('/api/broadcast/list?type=sent').then(function(r){return r.json();}).then(function(d) {
+            this.history = d.notifications || [];
+        }.bind(this)).catch(function(){}).finally(function(){this.historyLoading=false;}.bind(this));
     },
     fetchClasses() {
-        fetch('/api/broadcast/classes').then(r=>r.json()).then(d => { this.classList = d.classes || []; }).catch(()=>{});
+        fetch('/api/broadcast/classes').then(function(r){return r.json();}).then(function(d){this.classList=d.classes||[];}.bind(this)).catch(function(){});
     },
     fetchGuruList() {
-        fetch('/api/broadcast/students?role=guru').then(r=>r.json()).then(d => { this.guruList = d.users || []; }).catch(()=>{});
+        fetch('/api/broadcast/students?role=guru').then(function(r){return r.json();}).then(function(d){this.guruList=d.users||[];}.bind(this)).catch(function(){});
     },
     fetchMuridList() {
         var url = '/api/broadcast/students?role=murid';
         if (this.selectedClass) url += '&class_id=' + this.selectedClass;
-        fetch(url).then(r=>r.json()).then(d => { this.muridList = d.users || []; }).catch(()=>{});
+        fetch(url).then(function(r){return r.json();}).then(function(d){this.muridList=d.users||[];}.bind(this)).catch(function(){});
     },
-    toggleArray(arr, id) {
-        var idx = arr.indexOf(id);
-        if (idx > -1) arr.splice(idx,1); else arr.push(id);
-    },
-    toggleAll(arr, list) {
-        if (arr.length === list.length) arr.splice(0);
-        else { arr.splice(0); list.forEach(s => arr.push(s.id)); }
-    },
+    toggleArray(arr, id) { var i=arr.indexOf(id); if(i>-1) arr.splice(i,1); else arr.push(id); },
+    toggleAll(arr, list) { if(arr.length===list.length) arr.splice(0); else { arr.splice(0); list.forEach(function(s){arr.push(s.id);}); } },
     sendBroadcast() {
         if (!this.toGuru && !this.toMurid) { this.sendMsg = 'Pilih minimal Guru atau Murid'; return; }
         if (!this.formTitle || !this.formMessage) { this.sendMsg = 'Isi judul dan pesan'; return; }
         this.sending = true; this.sendMsg = '';
-        var self = this;
         var promises = [];
-        // Send to Guru
         if (this.toGuru) {
-            var body = {title: this.formTitle, message: this.formMessage, target_role: 'guru'};
-            if (this.guruOpt === 'select' && this.selectedGuruIds.length > 0) body.recipient_ids = this.selectedGuruIds;
-            promises.push(fetch('/api/broadcast/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r=>r.json()));
+            var body = {title:this.formTitle,message:this.formMessage,target_role:'guru'};
+            if (this.guruOpt==='select' && this.selectedGuruIds.length>0) body.recipient_ids = this.selectedGuruIds;
+            promises.push(fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}));
         }
-        // Send to Murid
         if (this.toMurid) {
-            var body2 = {title: this.formTitle, message: this.formMessage, target_role: 'murid'};
-            if (this.muridOpt === 'class' && this.selectedClass) {
-                if (this.kelasOpt === 'select' && this.selectedMuridIds.length > 0) body2.recipient_ids = this.selectedMuridIds;
-                else body2.target_role = 'murid';
-            }
-            promises.push(fetch('/api/broadcast/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body2)}).then(r=>r.json()));
+            var body2 = {title:this.formTitle,message:this.formMessage,target_role:'murid'};
+            if (this.selectedClass || (this.muridOpt==='select' && this.selectedMuridIds.length>0)) body2.recipient_ids = this.selectedMuridIds;
+            promises.push(fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body2)}).then(function(r){return r.json();}));
         }
-        Promise.all(promises).then(results => {
+        Promise.all(promises).then(function(results) {
             this.sending = false;
-            var ok = results.every(r => r.success);
+            var ok = results.every(function(r){return r.success;});
             if (ok) {
-                var total = results.reduce((s, r) => s + (r.recipients || 0), 0);
+                var total = results.reduce(function(s,r){return s+(r.recipients||0);},0);
                 this.sendMsg = 'Terkirim ke ' + total + ' penerima';
                 this.formTitle = ''; this.formMessage = '';
                 this.fetchHistory(); this.fetchInbox(); this.fetchConversations();
             } else {
-                var err = results.find(r => !r.success);
+                var err = results.find(function(r){return !r.success;});
                 this.sendMsg = 'Gagal: ' + (err ? (err.error||'') : '');
             }
-        }).catch(() => { this.sending = false; this.sendMsg = 'Error koneksi'; });
+        }.bind(this)).catch(function(){this.sending=false;this.sendMsg='Error koneksi';}.bind(this));
     },
-    startEdit(n) { this.editingId = n.id; this.editTitle = n.title; this.editMessage = n.message; },
-    cancelEdit() { this.editingId = null; this.editTitle = ''; this.editMessage = ''; },
-    saveEdit() {
-        if (!this.editTitle || !this.editMessage) return;
-        fetch('/api/broadcast/update', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:this.editingId, title:this.editTitle, message:this.editMessage})})
-        .then(r=>r.json()).then(d => { if (d.success) { this.cancelEdit(); this.fetchHistory(); } });
-    },
-    markReadInbox() {
-        fetch('/api/broadcast/mark-read-all', { method: 'POST' }).then(() => {
-            this.inboxNotifs.forEach(n => { n.read = true; });
-            this.refreshBadge();
-        }).catch(()=>{});
-    },
-    deleteMsg(n) {
-        if (!confirm('Hapus pesan ini?')) return;
-        fetch('/api/broadcast/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:n.id})})
-        .then(r=>r.json()).then(d => { if (d.success) this.fetchHistory(); });
-    },
-    statsMap: {},
-    toggleStats(n) {
-        if (this.statsMap[n.id]) { delete this.statsMap[n.id]; return; }
-        this.statsMap[n.id] = null;
-        fetch('/api/broadcast/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notification_id: n.id})})
-        .then(r=>r.json()).then(d => {
-            if (d.total > 0) { this.statsMap[n.id] = d; }
-        }).catch(()=>{});
-    },
-    showInfo: false
-}" x-init="fetchConversations(); fetchHistory(); fetchInbox(); fetchClasses(); $watch('activeTab', val => { if (val === 'inbox') { this.markReadInbox(); } })">
-    <!-- Info Panel -->
-    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-4 border border-surface-100">
-        <button @click="showInfo = !showInfo" class="flex items-center gap-2 w-full text-left">
-            <i class="fas fa-info-circle text-primary-500"></i>
-            <span class="font-bold text-sm text-surface-700">Petunjuk Penggunaan</span>
-            <i class="fas fa-chevron-down ml-auto text-surface-400 text-xs transition" :class="showInfo ? 'rotate-180' : ''"></i>
-        </button>
-        <template x-if="showInfo">
-            <div class="mt-3 space-y-3 text-xs text-surface-600 border-t border-surface-100 pt-3">
-                <div>
-                    <p class="font-bold text-surface-800 mb-1"><i class="fas fa-comments text-primary-500 mr-1 w-4"></i>Tab Percakapan</p>
-                    <p>Chat 1-on-1 dengan murid. Tampilan dua kolom seperti WhatsApp — pilih kontak di sidebar kiri. Edit pesan sendiri dalam 2 menit.</p>
-                </div>
-                <div>
-                    <p class="font-bold text-surface-800 mb-1"><i class="fas fa-inbox text-primary-500 mr-1 w-4"></i>Tab Kotak Masuk</p>
-                    <p>Pengumuman yang kamu terima (broadcast dari guru/admin). Hanya bisa baca, tidak bisa dibalas. Tandai terbaca otomatis saat tab diklik.</p>
-                </div>
-                <div>
-                    <p class="font-bold text-surface-800 mb-1"><i class="fas fa-bullhorn text-primary-500 mr-1 w-4"></i>Tab Kirim Pengumuman</p>
-                    <p>Broadcast ke Guru dan/atau Murid. Pilih all, per kelas, atau selektif. Pengumuman hanya bisa dibaca oleh penerima.</p>
-                </div>
-                <div>
-                    <p class="font-bold text-surface-800 mb-1"><i class="fas fa-history text-primary-500 mr-1 w-4"></i>Tab Riwayat</p>
-                    <p>Daftar percakapan yang sudah selesai (ditutup). Klik untuk melihat riwayat chat. Percakapan selesai tidak bisa dibalas lagi.</p>
-                </div>
-                <div>
-                    <p class="font-bold text-surface-800 mb-1"><i class="fas fa-bell text-primary-500 mr-1 w-4"></i>Notifikasi Badge</p>
-                    <p><span class="inline-block w-2 h-2 rounded-full bg-yellow-500 align-middle mr-1"></span> Angka kuning = pengumuman baru belum dibaca.</p>
-                    <p><span class="inline-block w-2 h-2 rounded-full bg-emerald-500 align-middle mr-1"></span> Angka hijau = percakapan dengan balasan baru.</p>
-                    <p>Hilang setelah kamu klik tab terkait atau buka percakapan. Update tiap 30 detik + instan setelah mark-read.</p>
-                </div>
-            </div>
-        </template>
-    </div>
 
-    <!-- Tab Navigation -->
+    // Init
+    editBroadcastId: null, editTitle: '', editMessage: '',
+    startEdit(n) { this.editBroadcastId=n.id; this.editTitle=n.title; this.editMessage=n.message; },
+    cancelEditBroadcast() { this.editBroadcastId=null; this.editTitle=''; this.editMessage=''; },
+    saveEditBroadcast() {
+        if (!this.editTitle||!this.editMessage) return;
+        fetch('/api/broadcast/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:this.editBroadcastId,title:this.editTitle,message:this.editMessage})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.cancelEditBroadcast();this.fetchHistory();}}.bind(this));
+    },
+    deleteBroadcast(n) {
+        if (!confirm('Hapus pengumuman ini?')) return;
+        fetch('/api/broadcast/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:n.id})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success)this.fetchHistory();}.bind(this));
+    }
+}" x-init="fetchConversations(); fetchInbox(); fetchHistory(); fetchClasses(); fetchGuruList(); fetchMuridList(); $watch('selectedClass',function(){this.fetchMuridList();}.bind(this))">
+    <!-- Tab Nav -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 overflow-x-auto">
-        <button @click="activeTab='convs'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>
-        <button @click="activeTab='inbox'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='inbox' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-inbox mr-1.5"></i>Kotak Masuk</button>
-        <button @click="activeTab='broadcast'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='broadcast' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-bullhorn mr-1.5"></i>Kirim</button>
-        <button @click="activeTab='history'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='history' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-history mr-1.5"></i>Riwayat</button>
+        <button @click="activeTab='convs'; activeConv=null; stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>
+        <button @click="activeTab='inbox'; activeConv=null; stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='inbox' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-bullhorn mr-1.5"></i>Pengumuman</button>
+        <button @click="activeTab='send'; activeConv=null; stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='send' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-paper-plane mr-1.5"></i>Kirim Pengumuman</button>
     </div>
 
-    <!-- Conversations -->
-    <!-- Percakapan — WhatsApp Web-like -->
+    <!-- PERCAKAPAN -->
     <template x-if="activeTab === 'convs'">
-        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-hidden" style="height: min(72vh, 640px);">
-            <template x-if="convsLoading && conversations.length === 0">
-                <div class="flex items-center justify-center h-full text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div>
-            </template>
-            <template x-if="!convsLoading || conversations.length > 0">
-                <div class="flex h-full">
-                    <!-- Sidebar -->
-                    <div class="w-20 md:w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv ? 'hidden md:flex' : 'flex'">
-                        <div class="px-3 md:px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
-                            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{{ (g.user_name or 'G')[:1]|upper }}</div>
-                            <span class="hidden md:block font-bold text-surface-800 text-sm truncate">{{ g.user_name or 'Guru' }}</span>
-                            <button @click="fetchConversations()" class="ml-auto text-surface-400 hover:text-primary-600 transition" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
-                        </div>
-                        <div class="px-3 md:px-4 py-2 bg-surface-50">
-                            <div class="relative">
-                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 text-xs"></i>
-                                <input type="text" x-model="searchContact" placeholder="Cari percakapan..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 focus:border-primary-400 outline-none text-surface-700 placeholder-surface-400">
-                            </div>
-                        </div>
-                        <div class="flex-1 overflow-y-auto divide-y divide-surface-100">
-                            <template x-for="c in filteredConvs" :key="c.id">
-                                <div @click="openConv(c)" class="flex items-center gap-3 px-3 md:px-4 py-3 cursor-pointer transition" :class="activeConv && activeConv.id === c.id ? 'bg-surface-100' : 'hover:bg-surface-50'">
-                                    <div class="relative shrink-0">
-                                        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (c.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (c.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
-                                            <span x-text="(c.other_name||'?')[0].toUpperCase()"></span>
-                                        </div>
-                                        <span x-show="c.has_unread" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
-                                    </div>
-                                    <div class="hidden md:block flex-1 min-w-0">
-                                        <div class="flex items-center justify-between">
-                                            <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.other_name"></span>
-                                            <span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at ? c.last_message_at.slice(0,10) : ''"></span>
-                                        </div>
-                                        <div class="flex items-center gap-1.5 mt-0.5">
-                                            <span class="text-xs text-surface-400 truncate" x-text="c.title || 'Percakapan'"></span>
-                                            <span x-show="c.has_unread" class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">baru</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-                            <template x-if="filteredConvs.length === 0">
-                                <div class="flex flex-col items-center justify-center py-12 text-surface-400 px-4">
-                                    <i class="fas fa-comments text-3xl mb-3 text-surface-200"></i>
-                                    <p class="text-sm font-medium">Belum ada percakapan</p>
-                                    <p class="text-xs mt-1">Murid akan muncul di sini saat mereka mengirim pesan</p>
-                                </div>
-                            </template>
+        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 overflow-hidden" style="height: min(72vh, 640px);">
+            <div class="flex h-full">
+                <div class="w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv ? 'hidden md:flex' : 'flex'">
+                    <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{{ (g.user_name or 'G')[:1]|upper }}</div>
+                        <span class="font-bold text-surface-800 text-sm truncate">{{ g.user_name or 'Guru' }}</span>
+                        <button @click="fetchConversations()" class="ml-auto text-surface-400 hover:text-primary-600 transition" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
+                    </div>
+                    <div class="px-4 py-2 bg-surface-50">
+                        <div class="relative">
+                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 text-xs"></i>
+                            <input type="text" x-model="searchContact" placeholder="Cari kontak..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 outline-none text-surface-700 placeholder-surface-400">
                         </div>
                     </div>
-                    <!-- Chat Area -->
-                    <div class="flex-1 flex flex-col" :class="!activeConv ? 'hidden md:flex' : 'flex'">
-                        <template x-if="!activeConv">
-                            <div class="flex flex-col items-center justify-center h-full bg-surface-50 text-surface-400 px-6">
-                                <div class="w-20 h-20 rounded-full bg-surface-100 flex items-center justify-center mb-4">
-                                    <i class="fas fa-comments text-3xl text-surface-300"></i>
+                    <div class="flex-1 overflow-y-auto divide-y divide-surface-100">
+                        <template x-for="c in filteredConvs" :key="c.id">
+                            <div @click="openConv(c)" class="flex items-center gap-3 px-4 py-3 cursor-pointer transition" :class="activeConv&&activeConv.id===c.id ? 'bg-surface-100' : 'hover:bg-surface-50'">
+                                <div class="relative shrink-0">
+                                    <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (c.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : (c.other_role==='admin_sekolah'||c.other_role==='super_admin' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                        <span x-text="(c.other_name||'?')[0].toUpperCase()"></span>
+                                    </div>
+                                    <span x-show="c.has_unread" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
                                 </div>
-                                <p class="font-bold text-surface-500 text-lg">ScanGrade Chat</p>
-                                <p class="text-sm mt-1 text-center">Pilih percakapan dari sidebar untuk mulai mengobrol</p>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between">
+                                        <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.other_name"></span>
+                                        <span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at ? c.last_message_at.slice(0,10).replace('-','/').replace('-','/') : ''"></span>
+                                    </div>
+                                    <div class="flex items-center gap-1.5 mt-0.5">
+                                        <span class="text-xs text-surface-500 truncate" x-text="c.title || 'Percakapan'"></span>
+                                        <span x-show="c.has_unread" class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">baru</span>
+                                    </div>
+                                </div>
                             </div>
                         </template>
-                        <template x-if="activeConv">
-                            <div class="flex flex-col h-full">
-                                <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3 shrink-0">
-                                    <button @click="activeConv=null; stopPolling()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
-                                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
-                                        <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p>
-                                        <p class="text-[11px]" :class="activeConv.status==='open' ? 'text-emerald-600' : 'text-surface-400'" x-text="activeConv.status==='open' ? 'Online' : 'Offline'"></p>
-                                    </div>
-                                    <template x-if="activeConv.status==='open'">
-                                        <button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan percakapan"><i class="fas fa-check-double text-sm"></i></button>
-                                    </template>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" :class="activeConv.status==='open' ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-200 text-surface-500'"><span x-text="activeConv.status==='open' ? 'Aktif' : 'Selesai'"></span></span>
-                                    <div class="relative" @click.outside="closeConvMenu()">
-                                        <button @click="toggleConvMenu()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Lainnya"><i class="fas fa-ellipsis-v text-sm"></i></button>
-                                        <template x-if="convMenuOpen">
-                                            <div class="absolute right-0 top-full mt-1 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[180px]">
-                                                <button @click="deleteConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-trash-alt text-xs"></i>Hapus Percakapan</button>
-                                                <template x-if="activeConv.status==='open'">
-                                                    <button @click="archiveConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-surface-700 hover:bg-surface-50 transition font-medium"><i class="fas fa-archive text-xs"></i>Arsipkan</button>
-                                                </template>
-                                                <template x-if="activeConv.status==='archived'">
-                                                    <button @click="unarchiveConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-surface-700 hover:bg-surface-50 transition font-medium"><i class="fas fa-inbox text-xs"></i>Buka Arsip</button>
-                                                </template>
-                                            </div>
-                                        </template>
-                                    </div>
+                        <template x-if="!convsLoading && filteredConvs.length === 0">
+                            <div class="flex flex-col items-center justify-center py-16 text-surface-400 px-4">
+                                <i class="fas fa-comments text-4xl mb-3 text-surface-200"></i>
+                                <p class="text-sm font-medium">Belum ada percakapan</p>
+                            </div>
+                        </template>
+                        <template x-if="convsLoading && conversations.length === 0">
+                            <div class="flex items-center justify-center py-16 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex flex-col" :class="!activeConv ? 'hidden md:flex' : 'flex'">
+                    <template x-if="!activeConv">
+                        <div class="flex flex-col items-center justify-center h-full bg-surface-50 text-surface-400 px-6">
+                            <div class="w-20 h-20 rounded-full bg-surface-100 flex items-center justify-center mb-4"><i class="fas fa-comments text-3xl text-surface-300"></i></div>
+                            <p class="font-bold text-surface-500 text-lg">ScanGrade Chat</p>
+                            <p class="text-sm mt-1 text-center">Pilih percakapan dari samping untuk mulai mengobrol</p>
+                        </div>
+                    </template>
+                    <template x-if="activeConv">
+                        <div class="flex flex-col h-full">
+                            <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3 shrink-0">
+                                <button @click="activeConv=null; stopPoll()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : (activeConv.other_role==='admin_sekolah'||activeConv.other_role==='super_admin' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                    <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
                                 </div>
-                                <div class="flex-1 overflow-y-auto p-4 chat-scroll bg-[#efeae2] space-y-1" style="background-image: url('data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot; opacity=&quot;0.06&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23efeae2&quot;/><path d=&quot;M0 0l200 200M200 0L0 200&quot; stroke=&quot;%238d6e5c&quot; stroke-width=&quot;0.5&quot;/></svg>')">
-                                    <template x-for="(m, idx) in activeConv.messages" :key="m.id">
-                                        <div class="flex items-end gap-1.5 mb-1" :class="m.is_mine ? 'justify-end' : 'justify-start'">
-                                            <template x-if="!m.is_mine">
-                                                <div class="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0 mb-0.5" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
-                                                    <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
-                                                </div>
-                                            </template>
-                                            <div class="max-w-[75%] md:max-w-[65%] group relative">
-                                                <template x-if="editingMsgId === m.id">
-                                                    <div class="bg-white rounded-2xl rounded-br-sm border border-primary-300 p-2 shadow-sm">
-                                                        <textarea x-model="editMsgText" rows="2" class="w-full px-2 py-1 border-0 focus:ring-0 text-sm resize-none outline-none"></textarea>
-                                                        <div class="flex gap-1.5 mt-1 justify-end">
-                                                            <button @click="cancelEdit()" class="text-[10px] font-bold text-surface-500 px-2 py-1 rounded-lg hover:bg-surface-100">Batal</button>
-                                                            <button @click="saveEditMsg()" class="text-[10px] font-bold text-white bg-primary-600 px-2.5 py-1 rounded-lg hover:bg-primary-700">Simpan</button>
-                                                        </div>
-                                                    </div>
-                                                </template>
-                                                <template x-if="editingMsgId !== m.id">
-                                                    <div class="relative">
-                                                        <div class="px-3 py-2 shadow-sm" :class="m.is_mine ? 'bg-primary-500 text-white rounded-2xl rounded-br-sm' : 'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
-                                                            <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
-                                                        </div>
-                                                        <div class="flex gap-1 absolute -top-1.5 -right-1.5 z-10 opacity-0 group-hover:opacity-100 transition">
-                                                            <div class="relative" @click.outside="if(msgMenuId===m.id) msgMenuId=null">
-                                                                <button @click="toggleMsgMenu(m.id)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-chevron-down text-[8px]"></i></button>
-                                                                <template x-if="msgMenuId === m.id">
-                                                                    <div class="absolute right-0 top-full mt-0.5 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[140px]">
-                                                                        <template x-if="m.is_mine && !m.is_deleted">
-                                                                            <button @click="unsendMsg(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-undo-alt text-[10px]"></i>Unsend</button>
-                                                                        </template>
-                                                                        <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50 transition font-medium"><i class="fas fa-eye-slash text-[10px]"></i>Hapus untukku</button>
-                                                                    </div>
-                                                                </template>
-                                                            </div>
-                                                            <template x-if="canEdit(m)">
-                                                                <button @click="startEdit(m)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button>
-                                                            </template>
-                                                        </div>
-                                                    </div>
-                                                </template>
-                                                <div class="flex items-center gap-1 justify-end mt-0.5 px-0.5" :class="m.is_mine ? 'text-right' : 'text-left'">
-                                                    <span class="text-[9px] text-surface-400" x-text="m.created_at ? m.created_at.slice(11,16) : ''"></span>
-                                                    <template x-if="m.is_mine">
-                                                        <i class="fas fa-check-double text-[9px]" :class="idx === activeConv.messages.length - 1 ? 'text-primary-400' : 'text-surface-300'"></i>
-                                                    </template>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </template>
-                                    <template x-if="(!activeConv.messages || activeConv.messages.length === 0)">
-                                        <div class="flex items-center justify-center h-full">
-                                            <p class="text-center text-xs text-surface-400 bg-white/70 px-4 py-2 rounded-full">Belum ada pesan. Mulai percakapan.</p>
-                                        </div>
-                                    </template>
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p>
+                                    <p class="text-[11px]" :class="activeConv.status==='open' ? 'text-emerald-600' : 'text-surface-400'" x-text="activeConv.status==='open' ? 'Online' : 'Selesai'"></p>
                                 </div>
                                 <template x-if="activeConv.status==='open'">
-                                    <div class="px-3 md:px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0">
-                                        <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
-                                            <button class="text-surface-400 hover:text-primary-600 transition shrink-0 p-1" title="Lampirkan"><i class="fas fa-paperclip text-lg"></i></button>
-                                            <textarea x-model="replyMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendReply()"></textarea>
-                                            <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying || !replyMessage">
-                                                <i class="fas fa-paper-plane text-sm"></i>
-                                            </button>
-                                        </div>
-                                        <p x-show="replyError" class="text-xs text-red-500 mt-1 text-right" x-text="replyError"></p>
-                                    </div>
-                                </template>
-                                <template x-if="activeConv.status!=='open'">
-                                    <div class="px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0 text-center">
-                                        <p class="text-xs font-bold text-surface-400"><i class="fas fa-check-circle mr-1"></i>Percakapan selesai — tidak bisa mengirim pesan baru</p>
-                                    </div>
+                                    <button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan"><i class="fas fa-check-double text-sm"></i></button>
                                 </template>
                             </div>
-                        </template>
-                    </div>
+                            <div class="flex-1 overflow-y-auto p-4 chat-scroll bg-[#efeae2] space-y-1" style="background-image: url('data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot; opacity=&quot;0.06&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23efeae2&quot;/><path d=&quot;M0 0l200 200M200 0L0 200&quot; stroke=&quot;%238d6e5c&quot; stroke-width=&quot;0.5&quot;/></svg>')">
+                                <template x-for="(m, idx) in activeConv.messages" :key="m.id">
+                                    <div class="flex items-end gap-1.5 mb-1" :class="m.is_mine ? 'justify-end' : 'justify-start'">
+                                        <template x-if="!m.is_mine">
+                                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0 mb-0.5" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : (activeConv.other_role==='admin_sekolah'||activeConv.other_role==='super_admin' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                                <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
+                                            </div>
+                                        </template>
+                                        <div class="max-w-[75%] md:max-w-[65%] group relative">
+                                            <div class="px-3 py-2 shadow-sm" :class="m.is_mine ? 'bg-primary-500 text-white rounded-2xl rounded-br-sm' : 'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
+                                                <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
+                                            </div>
+                                            <div class="flex items-center gap-1 justify-end mt-0.5 px-0.5" :class="m.is_mine ? 'text-right' : 'text-left'">
+                                                <span class="text-[9px] text-surface-400" x-text="m.created_at ? m.created_at.slice(11,16) : ''"></span>
+                                                <template x-if="m.is_mine">
+                                                    <i class="fas fa-check-double text-[9px]" :class="idx === activeConv.messages.length-1 && m.is_mine ? 'text-primary-400' : 'text-surface-300'"></i>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="!activeConv.messages || activeConv.messages.length === 0">
+                                    <div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400 bg-white/70 px-4 py-2 rounded-full">Belum ada pesan.</p></div>
+                                </template>
+                            </div>
+                            <template x-if="activeConv.status==='open'">
+                                <div class="px-3 md:px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0">
+                                    <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
+                                        <button class="text-surface-400 hover:text-primary-600 transition shrink-0 p-1" title="Lampirkan"><i class="fas fa-paperclip text-lg"></i></button>
+                                        <textarea x-model="replyMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendReply()"></textarea>
+                                        <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying || !replyMessage"><i class="fas fa-paper-plane text-sm"></i></button>
+                                    </div>
+                                    <p x-show="replyError" class="text-xs text-red-500 mt-1" x-text="replyError"></p>
+                                </div>
+                            </template>
+                            <template x-if="activeConv.status!=='open'">
+                                <div class="px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0 text-center"><p class="text-xs font-bold text-surface-400"><i class="fas fa-check-circle mr-1"></i>Percakapan selesai</p></div>
+                            </template>
+                        </div>
+                    </template>
                 </div>
-            </template>
+            </div>
         </div>
     </template>
 
-    <!-- Inbox (Received Broadcasts) -->
+    <!-- PENGUMUMAN (INBOX) -->
     <template x-if="activeTab === 'inbox'">
-        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-            <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-inbox text-primary-500 mr-2"></i>Kotak Masuk</h3>
+        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Pengumuman Masuk</h3>
+                <button @click="markReadAll()" class="text-xs font-bold text-primary-600 hover:text-primary-800 transition"><i class="fas fa-check-double mr-1"></i>Tandai Dibaca</button>
+            </div>
             <template x-if="inboxLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
             <template x-if="!inboxLoading && inboxNotifs.length === 0"><div class="text-center py-8 text-surface-400">Tidak ada pengumuman</div></template>
-            <div class="space-y-3">
+            <div class="divide-y divide-surface-100">
                 <template x-for="n in inboxNotifs" :key="n.id">
-                    <div class="p-4 rounded-xl bg-surface-50 border" :class="n.read ? 'border-surface-100' : 'border-l-4 border-l-primary-500 bg-primary-50/30'">
-                        <div class="flex items-start justify-between">
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2">
-                                    <template x-if="!n.read"><span class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span></template>
-                                    <p class="font-bold text-surface-800" x-text="n.title"></p>
-                                </div>
-                                <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
-                                <p class="text-[10px] font-medium text-surface-400 mt-1" x-text="'Dari: ' + (n.sender_role || '-')"></p>
+                    <div class="py-4 flex items-start gap-3">
+                        <div class="w-10 h-10 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center shrink-0"><i class="fas fa-bullhorn text-sm"></i></div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2">
+                                <span x-show="!n.read" class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span>
+                                <p class="font-bold text-surface-800 text-sm" x-text="n.title || 'Pengumuman'"></p>
                             </div>
-                            <span class="text-[10px] font-medium text-surface-400 whitespace-nowrap ml-3" x-text="n.created_at"></span>
+                            <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
+                            <p class="text-[10px] text-surface-400 mt-1"><span x-text="n.sender_role || '-'"></span> &middot; <span x-text="n.created_at || ''"></span></p>
                         </div>
                     </div>
                 </template>
@@ -506,211 +293,126 @@
         </div>
     </template>
 
-    <!-- Send Broadcast -->
-    <template x-if="activeTab === 'broadcast'">
-        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-            <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Kirim Pengumuman</h3>
-            <form @submit.prevent="sendBroadcast()" class="space-y-4">
-                <!-- Target checkboxes -->
-                <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-2">Kirim ke</label>
-                    <div class="flex gap-4">
-                        <label class="flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition" :class="toGuru ? 'bg-primary-50 border-primary-300' : 'bg-surface-50 border-surface-200'">
-                            <input type="checkbox" x-model="toGuru" @change="if(toGuru)fetchGuruList()" class="rounded text-primary-600 focus:ring-primary-500">
+    <!-- KIRIM PENGUMUMAN -->
+    <template x-if="activeTab === 'send'">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Form -->
+            <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-6">
+                <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-paper-plane text-primary-500 mr-2"></i>Kirim Pengumuman</h3>
+                <form @submit.prevent="sendBroadcast()" class="space-y-4">
+                    <!-- Target: Guru -->
+                    <div class="flex items-center gap-3">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" x-model="toGuru" class="rounded text-primary-600 focus:ring-primary-500">
                             <span class="text-sm font-bold text-surface-700">Guru</span>
                         </label>
-                        <label class="flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition" :class="toMurid ? 'bg-primary-50 border-primary-300' : 'bg-surface-50 border-surface-200'">
+                        <template x-if="toGuru">
+                            <select x-model="guruOpt" class="text-xs border border-surface-200 rounded-lg px-2 py-1 text-surface-600 bg-white">
+                                <option value="all">Semua Guru</option>
+                                <option value="select">Pilih Guru</option>
+                            </select>
+                        </template>
+                        <template x-if="toGuru && guruOpt==='select'">
+                            <button @click.prevent="fetchGuruList()" class="text-xs text-primary-600 font-bold hover:underline">Muat daftar</button>
+                        </template>
+                    </div>
+                    <template x-if="toGuru && guruOpt==='select' && guruList.length>0">
+                        <div class="max-h-32 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1">
+                            <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
+                                <input type="checkbox" @change="toggleAll(selectedGuruIds, guruList)" class="rounded text-primary-600 focus:ring-primary-500">Pilih Semua
+                            </label>
+                            <template x-for="g in guruList" :key="g.id">
+                                <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
+                                    <input type="checkbox" :checked="selectedGuruIds.includes(g.id)" @change="toggleArray(selectedGuruIds, g.id)" class="rounded text-primary-600 focus:ring-primary-500">
+                                    <span x-text="g.full_name"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Target: Murid -->
+                    <div class="flex items-center gap-3">
+                        <label class="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" x-model="toMurid" class="rounded text-primary-600 focus:ring-primary-500">
                             <span class="text-sm font-bold text-surface-700">Murid</span>
                         </label>
-                    </div>
-                </div>
-
-                <!-- Guru options -->
-                <template x-if="toGuru">
-                    <div class="p-3 bg-surface-50 rounded-xl border border-surface-200">
-                        <label class="block text-sm font-bold text-surface-700 mb-2">Opsi Guru</label>
-                        <div class="space-y-2">
-                            <label class="flex items-center gap-2">
-                                <input type="radio" x-model="guruOpt" value="all" class="text-primary-600 focus:ring-primary-500">
-                                <span class="text-sm text-surface-700">Semua Guru</span>
-                            </label>
-                            <label class="flex items-center gap-2">
-                                <input type="radio" x-model="guruOpt" value="select" class="text-primary-600 focus:ring-primary-500">
-                                <span class="text-sm text-surface-700">Pilih Guru Tertentu</span>
-                            </label>
-                            <template x-if="guruOpt === 'select'">
-                                <div class="ml-5 mt-2">
-                                    <button @click="toggleAll(selectedGuruIds, guruList)" type="button" class="text-xs font-bold text-primary-600 hover:text-primary-700 mb-1.5" x-text="selectedGuruIds.length === guruList.length ? 'Unselect Semua' : 'Pilih Semua'"></button>
-                                    <div class="max-h-40 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1 bg-white">
-                                        <template x-for="g in guruList" :key="g.id">
-                                            <label class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-surface-50 cursor-pointer">
-                                                <input type="checkbox" :checked="selectedGuruIds.includes(g.id)" @change="toggleArray(selectedGuruIds, g.id)" class="rounded text-primary-600 focus:ring-primary-500">
-                                                <span class="text-sm text-surface-700" x-text="g.full_name"></span>
-                                            </label>
-                                        </template>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-                </template>
-
-                <!-- Murid options -->
-                <template x-if="toMurid">
-                    <div class="p-3 bg-surface-50 rounded-xl border border-surface-200">
-                        <label class="block text-sm font-bold text-surface-700 mb-2">Opsi Murid</label>
-                        <div class="space-y-2">
-                            <label class="flex items-center gap-2">
-                                <input type="radio" x-model="muridOpt" value="all" class="text-primary-600 focus:ring-primary-500">
-                                <span class="text-sm text-surface-700">Semua Kelas</span>
-                            </label>
-                            <label class="flex items-center gap-2">
-                                <input type="radio" x-model="muridOpt" value="class" class="text-primary-600 focus:ring-primary-500">
-                                <span class="text-sm text-surface-700">Pilih Kelas Tertentu</span>
-                            </label>
-                            <template x-if="muridOpt === 'class'">
-                                <div class="ml-5 mt-2 space-y-2">
-                                    <select x-model="selectedClass" @change="selectedMuridIds=[]; kelasOpt='all'; fetchMuridList()" class="w-full px-3 py-2 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 text-sm bg-white">
-                                        <option value="">- Pilih Kelas -</option>
-                                        <template x-for="cls in classList" :key="cls.id">
-                                            <option :value="cls.id" x-text="cls.name + (cls.grade_level ? ' (' + cls.grade_level + ')' : '')"></option>
-                                        </template>
-                                    </select>
-                                    <template x-if="selectedClass">
-                                        <div>
-                                            <label class="flex items-center gap-2 mb-1">
-                                                <input type="radio" x-model="kelasOpt" value="all" class="text-primary-600 focus:ring-primary-500">
-                                                <span class="text-sm text-surface-700">Semua Murid di kelas ini</span>
-                                            </label>
-                                            <label class="flex items-center gap-2">
-                                                <input type="radio" x-model="kelasOpt" value="select" class="text-primary-600 focus:ring-primary-500">
-                                                <span class="text-sm text-surface-700">Pilih Murid Tertentu</span>
-                                            </label>
-                                            <template x-if="kelasOpt === 'select'">
-                                                <div class="mt-2">
-                                                    <button @click="toggleAll(selectedMuridIds, muridList)" type="button" class="text-xs font-bold text-primary-600 hover:text-primary-700 mb-1.5" x-text="selectedMuridIds.length === muridList.length ? 'Unselect Semua' : 'Pilih Semua'"></button>
-                                                    <div class="max-h-40 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1 bg-white">
-                                                        <template x-for="m in muridList" :key="m.id">
-                                                            <label class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-surface-50 cursor-pointer">
-                                                                <input type="checkbox" :checked="selectedMuridIds.includes(m.id)" @change="toggleArray(selectedMuridIds, m.id)" class="rounded text-primary-600 focus:ring-primary-500">
-                                                                <span class="text-sm text-surface-700" x-text="m.full_name"></span>
-                                                            </label>
-                                                        </template>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    </template>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-                </template>
-
-                <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
-                    <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium">
-                </div>
-                <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Pesan</label>
-                    <textarea x-model="formMessage" required rows="4" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></textarea>
-                </div>
-                <button type="submit" class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition" :disabled="sending">
-                    <span x-text="sending ? 'Mengirim...' : 'Kirim Pengumuman'"></span>
-                </button>
-                <p x-show="sendMsg" class="text-xs font-bold" :class="sendMsg.includes('Terkirim') ? 'text-emerald-600' : 'text-red-600'" x-text="sendMsg"></p>
-            </form>
-        </div>
-    </template>
-
-    <!-- Sent Broadcast History -->
-    <template x-if="activeTab === 'broadcast'">
-        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100 mt-6">
-            <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-history text-primary-500 mr-2"></i>Riwayat Pengumuman</h3>
-            <template x-if="loading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
-            <template x-if="!loading && notifs.length === 0"><div class="text-center py-8 text-surface-400">Belum ada pengumuman terkirim</div></template>
-            <div class="space-y-3" x-show="!loading">
-                <template x-for="n in (notifs || []).sort(function(a,b){ return a.created_at < b.created_at ? 1 : -1; })" :key="n.id">
-                    <div class="p-4 rounded-xl bg-surface-50 border border-surface-100">
-                        <template x-if="editingId === n.id">
-                            <div class="space-y-3">
-                                <input type="text" x-model="editTitle" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium text-sm">
-                                <textarea x-model="editMessage" rows="3" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 text-sm"></textarea>
-                                <div class="flex gap-2">
-                                    <button @click="saveEdit()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs">Simpan</button>
-                                    <button @click="cancelEdit()" class="px-4 py-2 border border-surface-200 rounded-lg font-bold text-xs text-surface-600 hover:bg-surface-100">Batal</button>
-                                </div>
-                            </div>
+                        <template x-if="toMurid">
+                            <select x-model="muridOpt" class="text-xs border border-surface-200 rounded-lg px-2 py-1 text-surface-600 bg-white">
+                                <option value="all">Semua Murid</option>
+                                <option value="select">Pilih Murid</option>
+                            </select>
                         </template>
-                        <template x-if="editingId !== n.id">
-                            <div>
-                                <div class="flex items-start justify-between">
-                                    <div class="flex-1 min-w-0">
-                                        <p class="font-bold text-surface-800" x-text="n.title"></p>
-                                        <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
-                                        <p class="text-[10px] font-medium text-surface-400 mt-1" x-text="'Target: ' + (n.target_role || n.sender_role || '-')"></p>
-                                    </div>
-                                    <div class="flex items-center gap-2 ml-3 shrink-0">
-                                        <template x-if="n.can_edit">
-                                            <button @click="startEdit(n)" class="text-xs text-primary-600 hover:text-primary-800 font-bold"><i class="fas fa-edit"></i></button>
-                                        </template>
-                                        <template x-if="n.can_edit">
-                                            <button @click="deleteMsg(n)" class="text-xs text-red-500 hover:text-red-700 font-bold"><i class="fas fa-trash"></i></button>
-                                        </template>
-                                        <button @click="toggleStats(n)" class="text-xs font-bold" :class="statsMap[n.id] ? 'text-emerald-600' : 'text-primary-600 hover:text-primary-800'"><i class="fas fa-chart-bar"></i></button>
-                                        <span class="text-[10px] font-medium text-surface-400 whitespace-nowrap" x-text="n.created_at"></span>
-                                    </div>
-                                </div>
-                                <template x-if="statsMap[n.id]">
-                                    <div class="mt-3 pt-3 border-t border-surface-200">
-                                        <div class="flex items-center gap-4">
-                                            <div class="relative w-16 h-16">
-                                                <svg viewBox="0 0 36 36" class="w-16 h-16 -rotate-90">
-                                                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#e5e7eb" stroke-width="3"/>
-                                                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#22c55e" stroke-width="3" :stroke-dasharray="(statsMap[n.id].total > 0 ? (statsMap[n.id].read / statsMap[n.id].total * 100) : 0) + ', 100'"/>
-                                                </svg>
-                                                <span class="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-surface-600" x-text="(statsMap[n.id].total > 0 ? Math.round(statsMap[n.id].read / statsMap[n.id].total * 100) : 0) + '%'"></span>
-                                            </div>
-                                            <div class="text-xs text-surface-500">
-                                                <p><span class="text-emerald-600 font-bold" x-text="statsMap[n.id].read"></span> dibaca</p>
-                                                <p><span class="text-red-400 font-bold" x-text="statsMap[n.id].unread"></span> belum dibaca</p>
-                                                <p>dari <span class="font-bold" x-text="statsMap[n.id].total"></span> penerima</p>
-                                            </div>
-                                        </div>
-                                    </div>
+                    </div>
+                    <template x-if="toMurid && muridOpt==='select'">
+                        <div>
+                            <select x-model="selectedClass" class="w-full mb-2 text-xs border border-surface-200 rounded-lg px-3 py-2 text-surface-600 bg-white">
+                                <option value="">Semua Kelas</option>
+                                <template x-for="cls in classList" :key="cls.id">
+                                    <option :value="cls.id" x-text="cls.name"></option>
+                                </template>
+                            </select>
+                            <div class="max-h-32 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1">
+                                <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
+                                    <input type="checkbox" @change="toggleAll(selectedMuridIds, muridList)" class="rounded text-primary-600 focus:ring-primary-500">Pilih Semua
+                                </label>
+                                <template x-for="m in muridList" :key="m.id">
+                                    <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
+                                        <input type="checkbox" :checked="selectedMuridIds.includes(m.id)" @change="toggleArray(selectedMuridIds, m.id)" class="rounded text-primary-600 focus:ring-primary-500">
+                                        <span x-text="m.full_name"></span>
+                                    </label>
+                                </template>
+                                <template x-if="muridList.length===0">
+                                    <p class="text-xs text-surface-400 px-1 py-1">Tidak ada murid ditemukan</p>
                                 </template>
                             </div>
-                        </template>
-                    </div>
-                </template>
-            </div>
-        </div>
-    </template>
-
-    <!-- Riwayat (Completed Conversations) -->
-    <template x-if="activeTab === 'history'">
-        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-            <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-history text-primary-500 mr-2"></i>Riwayat Percakapan Selesai</h3>
-            <template x-if="convsLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
-            <template x-if="!convsLoading && conversations.filter(c => c.status !== 'open').length === 0"><div class="text-center py-8 text-surface-400">Belum ada percakapan selesai</div></template>
-            <div class="space-y-2" x-show="!convsLoading">
-                <template x-for="c in conversations.filter(c => c.status !== 'open')" :key="c.id">
-                    <div @click="openConv(c)" class="p-4 rounded-xl cursor-pointer transition border bg-surface-50/50 border-surface-100 opacity-70 hover:opacity-100">
-                        <div class="flex items-start justify-between">
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-xs font-bold text-surface-500" x-text="c.other_name"></span>
-                                    <span class="text-[10px] px-1.5 py-0.5 rounded-full font-bold" :class="c.other_role==='guru' ? 'bg-amber-100 text-amber-700' : (c.other_role==='admin_sekolah' ? 'bg-purple-100 text-purple-700' : (c.other_role==='murid' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'))" x-text="c.other_role==='guru' ? 'Guru' : (c.other_role==='admin_sekolah' ? 'Admin' : (c.other_role==='murid' ? 'Murid' : (c.other_role||'?')))"></span>
-                                    <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-200 text-surface-500 font-bold">Selesai</span>
-                                </div>
-                                <p class="font-bold text-surface-800 mt-0.5 truncate" x-text="c.title"></p>
-                                <p class="text-xs text-surface-400 mt-0.5" x-text="c.last_message_at"></p>
-                            </div>
-                            <i class="fas fa-chevron-right text-surface-300 ml-2 mt-2"></i>
                         </div>
+                    </template>
+
+                    <div>
+                        <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
+                        <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium">
                     </div>
-                </template>
+                    <div>
+                        <label class="block text-sm font-bold text-surface-700 mb-1.5">Pesan</label>
+                        <textarea x-model="formMessage" required rows="4" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></textarea>
+                    </div>
+                    <button type="submit" class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition disabled:opacity-50" :disabled="sending"><span x-text="sending ? 'Mengirim...' : 'Kirim Pengumuman'"></span></button>
+                    <p x-show="sendMsg" class="text-xs font-bold" :class="sendMsg.includes('Terkirim') ? 'text-emerald-600' : 'text-red-600'" x-text="sendMsg"></p>
+                </form>
+            </div>
+
+            <!-- Riwayat -->
+            <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-6">
+                <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-history text-primary-500 mr-2"></i>Riwayat Pengumuman</h3>
+                <template x-if="historyLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
+                <template x-if="!historyLoading && history.length === 0"><div class="text-center py-8 text-surface-400">Belum ada pengumuman terkirim</div></template>
+                <div class="space-y-3 max-h-[500px] overflow-y-auto">
+                    <template x-for="n in history" :key="n.id">
+                        <div class="p-4 rounded-xl bg-surface-50 border border-surface-100">
+                            <template x-if="editBroadcastId === n.id">
+                                <div class="space-y-2">
+                                    <input type="text" x-model="editTitle" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm">
+                                    <textarea x-model="editMessage" rows="3" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm"></textarea>
+                                    <div class="flex gap-2">
+                                        <button @click="saveEditBroadcast()" class="text-xs font-bold text-white bg-primary-600 px-3 py-1.5 rounded-lg hover:bg-primary-700">Simpan</button>
+                                        <button @click="cancelEditBroadcast()" class="text-xs font-bold text-surface-500 px-3 py-1.5 rounded-lg hover:bg-surface-200">Batal</button>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="editBroadcastId !== n.id">
+                                <div>
+                                    <p class="font-bold text-surface-800 text-sm" x-text="n.title"></p>
+                                    <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
+                                    <p class="text-[10px] text-surface-400 mt-1"><span x-text="n.created_at || ''"></span></p>
+                                    <div class="flex gap-2 mt-2">
+                                        <button @click="startEdit(n)" class="text-xs font-bold text-primary-600 hover:underline">Edit</button>
+                                        <button @click="deleteBroadcast(n)" class="text-xs font-bold text-red-600 hover:underline">Hapus</button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
             </div>
         </div>
     </template>
