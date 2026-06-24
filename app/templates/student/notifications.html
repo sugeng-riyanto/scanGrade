@@ -142,11 +142,11 @@
             <div class="mt-3 space-y-3 text-xs text-surface-600 border-t border-surface-100 pt-3">
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-comments text-primary-500 mr-1 w-4"></i>Tab Percakapan</p>
-                    <p>Chat 1-on-1 dengan guru atau admin sekolah. Balas dua arah seperti WhatsApp. Klik <span class="font-bold text-emerald-600">Selesaikan</span> untuk menutup percakapan (tidak bisa dibalas lagi). Edit pesan sendiri dalam 2 menit dengan ikon pensil.</p>
+                    <p>Semua pesan dalam satu tempat: pengumuman dari guru/admin + chat 1-on-1. Balas dua arah seperti WhatsApp. Klik <span class="font-bold text-emerald-600">Selesaikan</span> untuk menutup percakapan. Edit pesan sendiri dalam 2 menit.</p>
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-bullhorn text-primary-500 mr-1 w-4"></i>Tab Pengumuman</p>
-                    <p>Pesan broadcast dari guru atau admin sekolah. Hanya bisa dibaca (tidak bisa dibalas).</p>
+                    <p>Daftar pengumuman masuk dari guru atau admin. Tandai sudah dibaca secara otomatis. Hanya bisa dibaca, tidak bisa dibalas.</p>
                 </div>
                 <div>
                     <p class="font-bold text-surface-800 mb-1"><i class="fas fa-plus-circle text-primary-500 mr-1 w-4"></i>Tab Pesan Guru</p>
@@ -177,6 +177,31 @@
                     <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-comments text-primary-500 mr-2"></i>Percakapan Saya</h3>
                     <template x-if="convsLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
                     <template x-if="!convsLoading && conversations.length === 0"><div class="text-center py-8 text-surface-400">Belum ada percakapan</div></template>
+                    <!-- Received Broadcasts (Pengumuman) -->
+                    <template x-if="notifs && notifs.length > 0">
+                        <div class="mb-4">
+                            <p class="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2"><i class="fas fa-bullhorn mr-1"></i>Pengumuman</p>
+                            <div class="space-y-2">
+                                <template x-for="n in notifs" :key="n.id">
+                                    <div class="p-4 rounded-xl bg-surface-50 border" :class="n.read ? 'border-surface-100' : 'border-l-4 border-l-primary-500 bg-primary-50/30'">
+                                        <div class="flex items-start justify-between">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-center gap-2">
+                                                    <template x-if="!n.read"><span class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span></template>
+                                                    <p class="font-bold text-surface-800" x-text="n.title"></p>
+                                                </div>
+                                                <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
+                                                <p class="text-[10px] font-medium text-surface-400 mt-1" x-text="'Dari: ' + (n.sender_role || '-')"></p>
+                                            </div>
+                                            <span class="text-[10px] font-medium text-surface-400 whitespace-nowrap ml-3" x-text="n.created_at"></span>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <!-- Conversations -->
+                    <p class="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2"><i class="fas fa-comments mr-1"></i>Percakapan</p>
                     <div class="space-y-2" x-show="!convsLoading">
                         <template x-for="c in conversations" :key="c.id">
                             <div @click="openConv(c)" class="p-4 rounded-xl cursor-pointer transition border" :class="[c.status==='open' ? 'bg-surface-50 hover:bg-surface-100 border-surface-100' : 'bg-surface-50/50 border-surface-100 opacity-70', c.has_unread ? 'ring-2 ring-primary-300' : '']">
