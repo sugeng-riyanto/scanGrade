@@ -141,8 +141,12 @@ html { transition: background-color .3s, color .3s; }
                 this.conversationUnread = d.conversation_unread || 0;
             }).catch(()=>{});
         },
+        init() {
+            document.documentElement.classList.toggle('dark', this.darkMode);
+            this.fetchUnread();
+            setInterval(() => { this.fetchUnread(); }, 30000);
+        },
       }"
-      x-init="document.documentElement.classList.toggle('dark', darkMode); setInterval(() => this.fetchUnread(), 30000); this.fetchUnread()"
       @sg\:unread.window="fetchUnread()"
       @htmx:before-request.window="loading = true"
       @htmx:after-request.window="loading = false"
