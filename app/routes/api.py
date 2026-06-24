@@ -1584,9 +1584,10 @@ def api_reply_broadcast():
         conv = supabase.table("conversations").select("id, participant_1, participant_2, status, title").eq("id", conversation_id).single().execute().data
         if not conv:
             return jsonify({"error": "Percakapan tidak ditemukan"}), 404
-        if conv["status"] != "open":
-            return jsonify({"error": "Percakapan sudah selesai"}), 400
         uid = g.user_id
+        if conv["status"] != "open":
+            update_data = {"status": "open", "completed_at": None, "completed_by": None, "last_message_at": datetime.now(timezone.utc).isoformat()}
+            supabase.table("conversations").update(update_data).eq("id", conversation_id).execute()
         if uid != conv["participant_1"] and uid != conv["participant_2"]:
             return jsonify({"error": "Anda bukan peserta percakapan ini"}), 403
 
