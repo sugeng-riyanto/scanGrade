@@ -93,7 +93,7 @@
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({conversation_id: this.activeConv.id, message: this.replyMessage})
         }).then(r=>r.json()).then(d => {
-            if (d.success) { this.replyMessage = ''; this.fetchConversations(); }
+            if (d.success) { this.replyMessage = ''; this.activeConv = null; this.stopPolling(); this.fetchConversations(); this.refreshBadge(); }
             else { this.replyError = d.error || 'Gagal kirim'; }
         }).catch(()=>{ this.replyError = 'Gagal terhubung ke server'; }).finally(()=>{ this.replying = false; });
     },
