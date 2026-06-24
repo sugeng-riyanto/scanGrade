@@ -1545,8 +1545,8 @@ def api_send_broadcast():
     if recipient_ids and len(recipient_ids) == 1 and target_role and target_role != "all":
         other_id = recipient_ids[0]
         try:
-            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
-            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
+            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).eq("title", title).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
+            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).eq("title", title).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
             conv = conv1 + conv2
             if conv:
                 conv_id = conv[0]["id"]
@@ -1864,6 +1864,7 @@ def api_conversations():
                 pass
             # Determine has_unread from notification_recipients.read_at
             has_unread = False
+            unread_count = 0
             try:
                 nids_unread = []
                 for m in msgs:
@@ -1873,8 +1874,15 @@ def api_conversations():
                     unread_check = supabase.table("notification_recipients").select("id", count="exact") \
                         .eq("recipient_id", uid).is_("read_at", "null").in_("notification_id", nids_unread).execute()
                     has_unread = (unread_check.count or 0) > 0
+                    unread_count = unread_check.count or 0
             except Exception:
                 pass
+            # Last message preview (truncated)
+            last_msg_preview = ""
+            if msgs:
+                last_msg = msgs[-1].get("message", "")
+                if last_msg:
+                    last_msg_preview = last_msg[:80] + "..." if len(last_msg) > 80 else last_msg
             is_archived = c.get("status") == "archived"
             if is_archived and not include_archived:
                 continue
@@ -1885,8 +1893,10 @@ def api_conversations():
                 "created_at": str(c.get("created_at", ""))[:19].replace("T", " "),
                 "completed_at": str(c.get("completed_at", ""))[:19].replace("T", " ") if c.get("completed_at") else None,
                 "messages": msgs,
+                "last_msg_preview": last_msg_preview,
                 "unread": has_unread,
                 "has_unread": has_unread,
+                "unread_count": unread_count,
                 "is_archived": is_archived,
             })
         return jsonify({"conversations": result})
