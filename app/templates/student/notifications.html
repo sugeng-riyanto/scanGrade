@@ -142,7 +142,7 @@
 
     <!-- PERCAKAPAN -->
     <template x-if="activeTab === 'convs'">
-        <div class="bg-white rounded-2xl shadow-lg border border-surface-100 overflow-hidden" style="height: min(72vh, 640px);">
+        <div class="bg-white overflow-hidden border border-surface-200" style="height: min(80vh, 700px);">
             <div class="flex h-full">
                 <div class="w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv?'hidden md:flex':'flex'">
                     <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
@@ -268,7 +268,7 @@
                                     </div>
                                 </template>
                                 <template x-if="!activeConv.messages||activeConv.messages.length===0">
-                                    <div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400 bg-white/70 px-4 py-2 rounded-full">Belum ada pesan.</p></div>
+                                    <div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p></div>
                                 </template>
                             </div>
                             <template x-if="activeConv.status==='open'">
