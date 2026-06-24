@@ -314,21 +314,17 @@
                                     </div>
                                 </template>
                                 <template x-if="!activeConv.messages||activeConv.messages.length===0">
-                                    <div class="flex-1 flex flex-col items-center justify-center px-6 py-10">
-                                        <div class="w-16 h-16 rounded-full bg-surface-100 flex items-center justify-center mb-4"><i class="fas fa-comment-dots text-2xl text-surface-300"></i></div>
-                                        <p class="font-bold text-surface-600 text-sm mb-1">Mulai percakapan dengan <span class="text-primary-600" x-text="activeConv.other_name"></span></p>
-                                        <p class="text-xs text-surface-400 mb-5">Kirim pesan pertama untuk memulai</p>
-                                        <div class="w-full max-w-md space-y-3">
-                                            <input type="text" x-model="firstMsgTitle" placeholder="Judul" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 outline-none text-surface-700">
-                                            <textarea x-model="firstMsgBody" placeholder="Tulis pesan..." rows="3" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 outline-none text-surface-700 resize-none"></textarea>
-                                            <button @click="sendFirstMsg()" class="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl transition disabled:opacity-50" :disabled="sendingFirst">
-                                                <span x-text="sendingFirst?'Mengirim...':'Kirim Pesan Pertama'"></span>
-                                            </button>
-                                            <p x-show="firstMsgError" class="text-xs text-red-500 text-center" x-text="firstMsgError"></p>
-                                        </div>
-                                    </div>
+                                    <div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p></div>
                                 </template>
                         </div>
+                            <div class="px-3 md:px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0">
+                                <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
+                                    <button class="text-surface-400 hover:text-primary-600 transition shrink-0 p-1" title="Lampirkan"><i class="fas fa-paperclip text-lg"></i></button>
+                                    <textarea x-model="replyMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendReply()"></textarea>
+                                    <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying||!replyMessage"><i class="fas fa-paper-plane text-sm"></i></button>
+                                </div>
+                                <p x-show="replyError" class="text-xs text-red-500 mt-1" x-text="replyError"></p>
+                            </div>
                     </template>
                 </div>
             </div>

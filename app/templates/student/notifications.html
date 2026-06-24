@@ -3,7 +3,6 @@
 {% block page_title %}Pesan & Pengumuman{% endblock %}
 {% block content %}
 <div class="space-y-4" x-data="{
-    // Tabs: convs | inbox | new
     activeTab: 'convs',
 
     // Percakapan
@@ -22,8 +21,6 @@
     recipients: [], selectedRecipient: null, recipientRole: 'guru', msgTitle: '', msgMessage: '', sending: false, sendMsg: '',
     openCompose() { this.showCompose=true; this.fetchRecipients(); this.msgTitle=''; this.msgMessage=''; this.sendMsg=''; },
     closeCompose() { this.showCompose=false; this.msgTitle=''; this.msgMessage=''; this.sendMsg=''; },
-    // First message (when conv has 0 messages)
-    firstMsgTitle: '', firstMsgBody: '', sendingFirst: false, firstMsgError: '',
 
     get filteredConvs() {
         var q = (this.searchContact || '').toLowerCase();
@@ -47,7 +44,6 @@
     scrollBottom() { var el = this.$el.querySelector('.chat-scroll'); if (el) el.scrollTop = el.scrollHeight; },
     openConv(c) {
         this.activeConv = c; this.replyMessage=''; this.replyError=''; this.editingMsgId=null;
-        this.firstMsgTitle = c.title||'Percakapan'; this.firstMsgBody=''; this.firstMsgError='';
         this.$nextTick(function(){this.scrollBottom();}.bind(this)); this.startPoll();
         fetch('/api/broadcast/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:c.id})})
         .then(function(){this.conversations.forEach(function(x){if(x.id===c.id)x.has_unread=false;});this.refreshBadge();}.bind(this)).catch(function(){});
@@ -137,19 +133,6 @@
             if (d.success) { this.sendMsg='Terkirim'; this.msgTitle=''; this.msgMessage=''; this.selectedRecipient=null; this.closeCompose(); this.fetchConversations(); }
             else { this.sendMsg='Gagal: '+(d.error||''); }
         }.bind(this)).catch(function(){this.sending=false;this.sendMsg='Error';}.bind(this));
-    },
-    sendFirstMsg() {
-        if (!this.activeConv) return;
-        var title = this.firstMsgTitle || this.activeConv.title || 'Percakapan';
-        var msg = this.firstMsgBody || this.replyMessage;
-        if (!msg) { this.firstMsgError='Tulis pesan terlebih dahulu'; return; }
-        this.sendingFirst=true; this.firstMsgError='';
-        fetch('/api/broadcast/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id,message:msg})})
-        .then(function(r){return r.json();}).then(function(d){
-            this.sendingFirst=false;
-            if(d.success){this.firstMsgTitle='';this.firstMsgBody='';this.replyMessage='';this.fetchConversations();}
-            else{this.firstMsgError=d.error||'Gagal';}
-        }.bind(this)).catch(function(){this.sendingFirst=false;this.firstMsgError='Gagal terhubung';}.bind(this));
     }
 }" x-init="fetchConversations(); fetchNotifs(); $watch('recipientRole',function(){this.selectedRecipient=null;this.fetchRecipients();}.bind(this)); $watch('activeTab',function(v){if(v==='inbox')this.markRead();}.bind(this))">
     <!-- Tab Nav -->
@@ -309,21 +292,18 @@
                                         </div>
                                     </div>
                                 </template>
-                                <template x-if="activeConv.messages&&activeConv.messages.length===0">
-                                    <div class="flex-1 flex flex-col items-center justify-center px-6 py-10">
-                                        <div class="w-16 h-16 rounded-full bg-surface-100 flex items-center justify-center mb-4"><i class="fas fa-comment-dots text-2xl text-surface-300"></i></div>
-                                        <p class="font-bold text-surface-600 text-sm mb-1">Mulai percakapan dengan <span class="text-primary-600" x-text="activeConv.other_name"></span></p>
-                                        <p class="text-xs text-surface-400 mb-5">Kirim pesan pertama untuk memulai</p>
-                                        <div class="w-full max-w-md space-y-3">
-                                            <input type="text" x-model="firstMsgTitle" placeholder="Judul" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 outline-none text-surface-700">
-                                            <textarea x-model="firstMsgBody" placeholder="Tulis pesan..." rows="3" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 outline-none text-surface-700 resize-none"></textarea>
-                                            <button @click="sendFirstMsg()" class="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl transition disabled:opacity-50" :disabled="sendingFirst">
-                                                <span x-text="sendingFirst?'Mengirim...':'Kirim Pesan Pertama'"></span>
-                                            </button>
-                                            <p x-show="firstMsgError" class="text-xs text-red-500 text-center" x-text="firstMsgError"></p>
-                                        </div>
-                                    </div>
+                                <template x-if="!activeConv.messages||activeConv.messages.length===0">
+                                    <div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p></div>
                                 </template>
+                            </div>
+                            <div class="px-3 md:px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0">
+                                <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
+                                    <button class="text-surface-400 hover:text-primary-600 transition shrink-0 p-1" title="Lampirkan"><i class="fas fa-paperclip text-lg"></i></button>
+                                    <textarea x-model="replyMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendReply()"></textarea>
+                                    <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying||!replyMessage"><i class="fas fa-paper-plane text-sm"></i></button>
+                                </div>
+                                <p x-show="replyError" class="text-xs text-red-500 mt-1" x-text="replyError"></p>
+                            </div>
                         </div>
                     </template>
                 </div>
