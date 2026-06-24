@@ -3,16 +3,18 @@
 {% block page_title %}Pengumuman & Pesan{% endblock %}
 {% block content %}
 <div class="space-y-4" x-data="{
-    // Tab
+    // Tabs: convs | inbox | send
     activeTab: 'convs',
 
     // Percakapan
     conversations: [], convsLoading: true,
     activeConv: null, replyMessage: '', replying: false, replyError: '',
     searchContact: '',
+    editingMsgId: null, editMsgText: '',
+    convMenuOpen: false, msgMenuId: null,
     pollTimer: null,
 
-    // Pengumuman (inbox)
+    // Pengumuman inbox
     inboxNotifs: [], inboxLoading: true,
 
     // Kirim Pengumuman
@@ -22,15 +24,17 @@
     guruList: [], muridList: [], classList: [],
     selectedGuruIds: [], selectedMuridIds: [], selectedClass: '',
     history: [], historyLoading: true,
+    editBroadcastId: null, editTitle: '', editMessage: '',
 
     get filteredConvs() {
-        var q = (this.searchContact || '').toLowerCase();
+        var q = (this.searchContact||'').toLowerCase();
         if (!q) return this.conversations;
         return this.conversations.filter(function(c){return (c.other_name||'').toLowerCase().includes(q);});
     },
 
-    // Percakapan methods
     refreshBadge() { window.dispatchEvent(new CustomEvent('sg:unread')); },
+
+    // CRUD Percakapan
     fetchConversations() {
         this.convsLoading = true;
         fetch('/api/broadcast/conversations').then(function(r){return r.json();}).then(function(d) {
@@ -41,224 +45,224 @@
             }
         }.bind(this)).catch(function(){}).finally(function(){this.convsLoading=false;}.bind(this));
     },
-    scrollBottom() { var el = this.$el.querySelector('.chat-scroll'); if (el) el.scrollTop = el.scrollHeight; },
+    scrollBottom() { var el = this.$el.querySelector('.chat-scroll'); if(el) el.scrollTop = el.scrollHeight; },
     openConv(c) {
-        this.activeConv = c; this.replyMessage = ''; this.replyError = '';
-        this.$nextTick(function(){this.scrollBottom();}.bind(this));
-        this.startPoll();
+        this.activeConv = c; this.replyMessage=''; this.replyError=''; this.editingMsgId=null;
+        this.$nextTick(function(){this.scrollBottom();}.bind(this)); this.startPoll();
         fetch('/api/broadcast/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:c.id})})
         .then(function(){this.conversations.forEach(function(x){if(x.id===c.id)x.has_unread=false;});this.refreshBadge();}.bind(this)).catch(function(){});
     },
     startPoll() { this.stopPoll(); this.pollTimer = setInterval(function(){this.fetchConversations();}.bind(this), 5000); },
-    stopPoll() { if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; } },
+    stopPoll() { if(this.pollTimer){clearInterval(this.pollTimer);this.pollTimer=null;} },
     sendReply() {
-        if (!this.replyMessage || !this.activeConv) return;
-        this.replying = true; this.replyError = '';
+        if(!this.replyMessage||!this.activeConv) return;
+        this.replying=true; this.replyError='';
         fetch('/api/broadcast/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id,message:this.replyMessage})})
-        .then(function(r){return r.json();}).then(function(d){
-            if (d.success) { this.replyMessage=''; this.activeConv=null; this.stopPoll(); this.fetchConversations(); this.refreshBadge(); }
-            else { this.replyError=d.error||'Gagal kirim'; }
+        .then(function(r){return r.json();}).then(function(d) {
+            if(d.success){this.replyMessage='';this.activeConv=null;this.stopPoll();this.fetchConversations();this.refreshBadge();}
+            else{this.replyError=d.error||'Gagal';}
         }.bind(this)).catch(function(){this.replyError='Gagal terhubung';}.bind(this)).finally(function(){this.replying=false;}.bind(this));
     },
+
+    // Update: edit own message
+    canEdit(m) {
+        if(!m.is_mine||m.is_deleted) return false;
+        try{return(new Date()-new Date(m.created_at))<120000;}catch(e){return false;}
+    },
+    startEdit(m) { this.editingMsgId=m.id; this.editMsgText=m.message; },
+    cancelEdit() { this.editingMsgId=null; this.editMsgText=''; },
+    saveEditMsg() {
+        if(!this.editMsgText||!this.editingMsgId) return;
+        fetch('/api/broadcast/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notification_id:this.editingMsgId,message:this.editMsgText})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.cancelEdit();this.fetchConversations();}}.bind(this));
+    },
+
+    // Delete
+    unsendMsg(m) {
+        if(!confirm('Hapus pesan ini untuk semua orang?')) return;
+        fetch('/api/broadcast/unsend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notification_id:m.id})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.msgMenuId=null;this.fetchConversations();}else{alert(d.error);}}.bind(this));
+    },
+    deleteForMe(m) {
+        fetch('/api/broadcast/delete-for-me',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notification_id:m.id})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.msgMenuId=null;this.fetchConversations();}}.bind(this));
+    },
+    deleteConv() {
+        if(!confirm('Hapus percakapan ini dari daftar Anda?')) return;
+        fetch('/api/broadcast/conversation/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.convMenuOpen=false;this.activeConv=null;this.stopPoll();this.fetchConversations();}}.bind(this));
+    },
+    toggleConvMenu() { this.convMenuOpen=!this.convMenuOpen; },
+    closeConvMenu() { this.convMenuOpen=false; },
+    toggleMsgMenu(id) { this.msgMenuId=this.msgMenuId===id?null:id; },
     completeConv() {
-        if (!this.activeConv || !confirm('Selesaikan percakapan ini?')) return;
+        if(!this.activeConv||!confirm('Selesaikan percakapan ini?')) return;
         fetch('/api/broadcast/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id})})
         .then(function(r){return r.json();}).then(function(d){if(d.success){this.activeConv.status='completed';this.fetchConversations();}}.bind(this));
     },
 
-    // Inbox methods
+    // Pengumuman inbox
     fetchInbox() {
-        this.inboxLoading = true;
-        fetch('/api/broadcast/list?type=received').then(function(r){return r.json();}).then(function(d) {
-            this.inboxNotifs = d.notifications || [];
-        }.bind(this)).catch(function(){}).finally(function(){this.inboxLoading=false;}.bind(this));
+        this.inboxLoading=true;
+        fetch('/api/broadcast/list?type=received').then(function(r){return r.json();}).then(function(d){this.inboxNotifs=d.notifications||[];}.bind(this)).catch(function(){}).finally(function(){this.inboxLoading=false;}.bind(this));
     },
     markReadAll() {
         fetch('/api/broadcast/mark-read-all',{method:'POST'}).then(function(){this.inboxNotifs.forEach(function(n){n.read=true;});this.refreshBadge();}.bind(this)).catch(function(){});
     },
 
-    // Kirim Pengumuman methods
+    // Kirim Pengumuman
     fetchHistory() {
-        this.historyLoading = true;
-        fetch('/api/broadcast/list?type=sent').then(function(r){return r.json();}).then(function(d) {
-            this.history = d.notifications || [];
-        }.bind(this)).catch(function(){}).finally(function(){this.historyLoading=false;}.bind(this));
+        this.historyLoading=true;
+        fetch('/api/broadcast/list?type=sent').then(function(r){return r.json();}).then(function(d){this.history=d.notifications||[];}.bind(this)).catch(function(){}).finally(function(){this.historyLoading=false;}.bind(this));
     },
-    fetchClasses() {
-        fetch('/api/broadcast/classes').then(function(r){return r.json();}).then(function(d){this.classList=d.classes||[];}.bind(this)).catch(function(){});
-    },
-    fetchGuruList() {
-        fetch('/api/broadcast/students?role=guru').then(function(r){return r.json();}).then(function(d){this.guruList=d.users||[];}.bind(this)).catch(function(){});
-    },
-    fetchMuridList() {
-        var url = '/api/broadcast/students?role=murid';
-        if (this.selectedClass) url += '&class_id=' + this.selectedClass;
-        fetch(url).then(function(r){return r.json();}).then(function(d){this.muridList=d.users||[];}.bind(this)).catch(function(){});
-    },
-    toggleArray(arr, id) { var i=arr.indexOf(id); if(i>-1) arr.splice(i,1); else arr.push(id); },
-    toggleAll(arr, list) { if(arr.length===list.length) arr.splice(0); else { arr.splice(0); list.forEach(function(s){arr.push(s.id);}); } },
+    fetchClasses() { fetch('/api/broadcast/classes').then(function(r){return r.json();}).then(function(d){this.classList=d.classes||[];}.bind(this)).catch(function(){}); },
+    fetchGuruList() { fetch('/api/broadcast/students?role=guru').then(function(r){return r.json();}).then(function(d){this.guruList=d.users||[];}.bind(this)).catch(function(){}); },
+    fetchMuridList() { var url='/api/broadcast/students?role=murid'; if(this.selectedClass) url+='&class_id='+this.selectedClass; fetch(url).then(function(r){return r.json();}).then(function(d){this.muridList=d.users||[];}.bind(this)).catch(function(){}); },
+    toggleArray(arr,id){var i=arr.indexOf(id);if(i>-1)arr.splice(i,1);else arr.push(id);},
+    toggleAll(arr,list){if(arr.length===list.length)arr.splice(0);else{arr.splice(0);list.forEach(function(s){arr.push(s.id);});}},
     sendBroadcast() {
-        if (!this.toGuru && !this.toMurid) { this.sendMsg = 'Pilih minimal Guru atau Murid'; return; }
-        if (!this.formTitle || !this.formMessage) { this.sendMsg = 'Isi judul dan pesan'; return; }
-        this.sending = true; this.sendMsg = '';
-        var promises = [];
-        if (this.toGuru) {
-            var body = {title:this.formTitle,message:this.formMessage,target_role:'guru'};
-            if (this.guruOpt==='select' && this.selectedGuruIds.length>0) body.recipient_ids = this.selectedGuruIds;
-            promises.push(fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}));
-        }
-        if (this.toMurid) {
-            var body2 = {title:this.formTitle,message:this.formMessage,target_role:'murid'};
-            if (this.selectedClass || (this.muridOpt==='select' && this.selectedMuridIds.length>0)) body2.recipient_ids = this.selectedMuridIds;
-            promises.push(fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body2)}).then(function(r){return r.json();}));
-        }
-        Promise.all(promises).then(function(results) {
-            this.sending = false;
-            var ok = results.every(function(r){return r.success;});
-            if (ok) {
-                var total = results.reduce(function(s,r){return s+(r.recipients||0);},0);
-                this.sendMsg = 'Terkirim ke ' + total + ' penerima';
-                this.formTitle = ''; this.formMessage = '';
-                this.fetchHistory(); this.fetchInbox(); this.fetchConversations();
-            } else {
-                var err = results.find(function(r){return !r.success;});
-                this.sendMsg = 'Gagal: ' + (err ? (err.error||'') : '');
-            }
-        }.bind(this)).catch(function(){this.sending=false;this.sendMsg='Error koneksi';}.bind(this));
+        if(!this.toGuru&&!this.toMurid){this.sendMsg='Pilih minimal Guru atau Murid';return;}
+        if(!this.formTitle||!this.formMessage){this.sendMsg='Isi judul dan pesan';return;}
+        this.sending=true; this.sendMsg='';
+        var promises=[];
+        if(this.toGuru){var b={title:this.formTitle,message:this.formMessage,target_role:'guru'};if(this.guruOpt==='select'&&this.selectedGuruIds.length>0)b.recipient_ids=this.selectedGuruIds;promises.push(fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}));}
+        if(this.toMurid){var b2={title:this.formTitle,message:this.formMessage,target_role:'murid'};if(this.selectedClass||(this.muridOpt==='select'&&this.selectedMuridIds.length>0))b2.recipient_ids=this.selectedMuridIds;promises.push(fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}));}
+        Promise.all(promises).then(function(results){
+            this.sending=false;
+            var ok=results.every(function(r){return r.success;});
+            if(ok){var t=results.reduce(function(s,r){return s+(r.recipients||0);},0);this.sendMsg='Terkirim ke '+t+' penerima';this.formTitle='';this.formMessage='';this.fetchHistory();this.fetchInbox();this.fetchConversations();}
+            else{var err=results.find(function(r){return !r.success;});this.sendMsg='Gagal: '+(err?(err.error||''):'');}
+        }.bind(this)).catch(function(){this.sending=false;this.sendMsg='Error';}.bind(this));
     },
-
-    // Init
-    editBroadcastId: null, editTitle: '', editMessage: '',
-    startEdit(n) { this.editBroadcastId=n.id; this.editTitle=n.title; this.editMessage=n.message; },
-    cancelEditBroadcast() { this.editBroadcastId=null; this.editTitle=''; this.editMessage=''; },
-    saveEditBroadcast() {
-        if (!this.editTitle||!this.editMessage) return;
-        fetch('/api/broadcast/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:this.editBroadcastId,title:this.editTitle,message:this.editMessage})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success){this.cancelEditBroadcast();this.fetchHistory();}}.bind(this));
-    },
-    deleteBroadcast(n) {
-        if (!confirm('Hapus pengumuman ini?')) return;
-        fetch('/api/broadcast/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:n.id})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success)this.fetchHistory();}.bind(this));
-    }
-}" x-init="fetchConversations(); fetchInbox(); fetchHistory(); fetchClasses(); fetchGuruList(); fetchMuridList(); $watch('selectedClass',function(){this.fetchMuridList();}.bind(this))">
+    startEditBroadcast(n){this.editBroadcastId=n.id;this.editTitle=n.title;this.editMessage=n.message;},
+    cancelEditBroadcast(){this.editBroadcastId=null;this.editTitle='';this.editMessage='';},
+    saveEditBroadcast(){if(!this.editTitle||!this.editMessage)return;fetch('/api/broadcast/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:this.editBroadcastId,title:this.editTitle,message:this.editMessage})}).then(function(r){return r.json();}).then(function(d){if(d.success){this.cancelEditBroadcast();this.fetchHistory();}}.bind(this));},
+    deleteBroadcast(n){if(!confirm('Hapus pengumuman ini?'))return;fetch('/api/broadcast/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:n.id})}).then(function(r){return r.json();}).then(function(d){if(d.success)this.fetchHistory();}.bind(this));}
+}" x-init="fetchConversations();fetchInbox();fetchHistory();fetchClasses();fetchGuruList();fetchMuridList();$watch('selectedClass',function(){this.fetchMuridList();}.bind(this))">
     <!-- Tab Nav -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 overflow-x-auto">
-        <button @click="activeTab='convs'; activeConv=null; stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>
-        <button @click="activeTab='inbox'; activeConv=null; stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='inbox' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-bullhorn mr-1.5"></i>Pengumuman</button>
-        <button @click="activeTab='send'; activeConv=null; stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='send' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-paper-plane mr-1.5"></i>Kirim Pengumuman</button>
+        <button @click="activeTab='convs';activeConv=null;stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs'?'bg-white text-primary-600 shadow-sm':'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>
+        <button @click="activeTab='inbox';activeConv=null;stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='inbox'?'bg-white text-primary-600 shadow-sm':'text-surface-500 hover:text-surface-700'"><i class="fas fa-bullhorn mr-1.5"></i>Pengumuman</button>
+        <button @click="activeTab='send';activeConv=null;stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='send'?'bg-white text-primary-600 shadow-sm':'text-surface-500 hover:text-surface-700'"><i class="fas fa-paper-plane mr-1.5"></i>Kirim Pengumuman</button>
     </div>
 
     <!-- PERCAKAPAN -->
     <template x-if="activeTab === 'convs'">
         <div class="bg-white rounded-2xl shadow-lg border border-surface-100 overflow-hidden" style="height: min(72vh, 640px);">
             <div class="flex h-full">
-                <div class="w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv ? 'hidden md:flex' : 'flex'">
+                <div class="w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv?'hidden md:flex':'flex'">
                     <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
                         <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{{ (g.user_name or 'G')[:1]|upper }}</div>
                         <span class="font-bold text-surface-800 text-sm truncate">{{ g.user_name or 'Guru' }}</span>
                         <button @click="fetchConversations()" class="ml-auto text-surface-400 hover:text-primary-600 transition" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
                     </div>
                     <div class="px-4 py-2 bg-surface-50">
-                        <div class="relative">
-                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 text-xs"></i>
-                            <input type="text" x-model="searchContact" placeholder="Cari kontak..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 outline-none text-surface-700 placeholder-surface-400">
-                        </div>
+                        <div class="relative"><i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 text-xs"></i><input type="text" x-model="searchContact" placeholder="Cari kontak..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 outline-none text-surface-700 placeholder-surface-400"></div>
                     </div>
                     <div class="flex-1 overflow-y-auto divide-y divide-surface-100">
                         <template x-for="c in filteredConvs" :key="c.id">
-                            <div @click="openConv(c)" class="flex items-center gap-3 px-4 py-3 cursor-pointer transition" :class="activeConv&&activeConv.id===c.id ? 'bg-surface-100' : 'hover:bg-surface-50'">
+                            <div @click="openConv(c)" class="flex items-center gap-3 px-4 py-3 cursor-pointer transition" :class="activeConv&&activeConv.id===c.id?'bg-surface-100':'hover:bg-surface-50'">
                                 <div class="relative shrink-0">
-                                    <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (c.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : (c.other_role==='admin_sekolah'||c.other_role==='super_admin' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                    <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.other_role==='guru'?'bg-gradient-to-br from-amber-400 to-amber-600':(c.other_role==='murid'?'bg-gradient-to-br from-emerald-400 to-emerald-600':(c.other_role==='admin_sekolah'||c.other_role==='super_admin'?'bg-gradient-to-br from-purple-400 to-purple-600':'bg-gradient-to-br from-blue-400 to-blue-600'))">
                                         <span x-text="(c.other_name||'?')[0].toUpperCase()"></span>
                                     </div>
                                     <span x-show="c.has_unread" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <div class="flex items-center justify-between">
-                                        <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.other_name"></span>
-                                        <span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at ? c.last_message_at.slice(0,10).replace('-','/').replace('-','/') : ''"></span>
-                                    </div>
-                                    <div class="flex items-center gap-1.5 mt-0.5">
-                                        <span class="text-xs text-surface-500 truncate" x-text="c.title || 'Percakapan'"></span>
-                                        <span x-show="c.has_unread" class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">baru</span>
-                                    </div>
+                                    <div class="flex items-center justify-between"><span class="font-semibold text-surface-800 text-sm truncate" x-text="c.other_name"></span><span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at?c.last_message_at.slice(0,10).replace('-','/'):''"></span></div>
+                                    <div class="flex items-center gap-1.5 mt-0.5"><span class="text-xs text-surface-500 truncate" x-text="c.title||'Percakapan'"></span><span x-show="c.has_unread" class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">baru</span></div>
                                 </div>
                             </div>
                         </template>
-                        <template x-if="!convsLoading && filteredConvs.length === 0">
-                            <div class="flex flex-col items-center justify-center py-16 text-surface-400 px-4">
-                                <i class="fas fa-comments text-4xl mb-3 text-surface-200"></i>
-                                <p class="text-sm font-medium">Belum ada percakapan</p>
-                            </div>
+                        <template x-if="!convsLoading&&filteredConvs.length===0">
+                            <div class="flex flex-col items-center justify-center py-16 text-surface-400 px-4"><i class="fas fa-comments text-4xl mb-3 text-surface-200"></i><p class="text-sm font-medium">Belum ada percakapan</p></div>
                         </template>
-                        <template x-if="convsLoading && conversations.length === 0">
+                        <template x-if="convsLoading&&conversations.length===0">
                             <div class="flex items-center justify-center py-16 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div>
                         </template>
                     </div>
                 </div>
 
-                <div class="flex-1 flex flex-col" :class="!activeConv ? 'hidden md:flex' : 'flex'">
+                <div class="flex-1 flex flex-col" :class="!activeConv?'hidden md:flex':'flex'">
                     <template x-if="!activeConv">
                         <div class="flex flex-col items-center justify-center h-full bg-surface-50 text-surface-400 px-6">
                             <div class="w-20 h-20 rounded-full bg-surface-100 flex items-center justify-center mb-4"><i class="fas fa-comments text-3xl text-surface-300"></i></div>
                             <p class="font-bold text-surface-500 text-lg">ScanGrade Chat</p>
-                            <p class="text-sm mt-1 text-center">Pilih percakapan dari samping untuk mulai mengobrol</p>
+                            <p class="text-sm mt-1 text-center">Pilih percakapan dari samping</p>
                         </div>
                     </template>
                     <template x-if="activeConv">
                         <div class="flex flex-col h-full">
                             <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3 shrink-0">
-                                <button @click="activeConv=null; stopPoll()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
-                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : (activeConv.other_role==='admin_sekolah'||activeConv.other_role==='super_admin' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                <button @click="activeConv=null;stopPoll()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru'?'bg-gradient-to-br from-amber-400 to-amber-600':(activeConv.other_role==='murid'?'bg-gradient-to-br from-emerald-400 to-emerald-600':(activeConv.other_role==='admin_sekolah'||activeConv.other_role==='super_admin'?'bg-gradient-to-br from-purple-400 to-purple-600':'bg-gradient-to-br from-blue-400 to-blue-600'))">
                                     <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
                                 </div>
-                                <div class="flex-1 min-w-0">
-                                    <p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p>
-                                    <p class="text-[11px]" :class="activeConv.status==='open' ? 'text-emerald-600' : 'text-surface-400'" x-text="activeConv.status==='open' ? 'Online' : 'Selesai'"></p>
+                                <div class="flex-1 min-w-0"><p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p><p class="text-[11px]" :class="activeConv.status==='open'?'text-emerald-600':'text-surface-400'" x-text="activeConv.status==='open'?'Online':'Selesai'"></p></div>
+                                <template x-if="activeConv.status==='open'"><button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan"><i class="fas fa-check-double text-sm"></i></button></template>
+                                <div class="relative" @click.outside="closeConvMenu()">
+                                    <button @click="toggleConvMenu()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Lainnya"><i class="fas fa-ellipsis-v text-sm"></i></button>
+                                    <template x-if="convMenuOpen">
+                                        <div class="absolute right-0 top-full mt-1 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[160px]">
+                                            <button @click="deleteConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition"><i class="fas fa-trash-alt text-xs"></i>Hapus</button>
+                                        </div>
+                                    </template>
                                 </div>
-                                <template x-if="activeConv.status==='open'">
-                                    <button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan"><i class="fas fa-check-double text-sm"></i></button>
-                                </template>
                             </div>
                             <div class="flex-1 overflow-y-auto p-4 chat-scroll bg-[#efeae2] space-y-1" style="background-image: url('data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot; opacity=&quot;0.06&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23efeae2&quot;/><path d=&quot;M0 0l200 200M200 0L0 200&quot; stroke=&quot;%238d6e5c&quot; stroke-width=&quot;0.5&quot;/></svg>')">
                                 <template x-for="(m, idx) in activeConv.messages" :key="m.id">
-                                    <div class="flex items-end gap-1.5 mb-1" :class="m.is_mine ? 'justify-end' : 'justify-start'">
+                                    <div class="flex items-end gap-1.5 mb-1" :class="m.is_mine?'justify-end':'justify-start'">
                                         <template x-if="!m.is_mine">
-                                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0 mb-0.5" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : (activeConv.other_role==='admin_sekolah'||activeConv.other_role==='super_admin' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0 mb-0.5" :class="activeConv.other_role==='guru'?'bg-gradient-to-br from-amber-400 to-amber-600':(activeConv.other_role==='murid'?'bg-gradient-to-br from-emerald-400 to-emerald-600':(activeConv.other_role==='admin_sekolah'||activeConv.other_role==='super_admin'?'bg-gradient-to-br from-purple-400 to-purple-600':'bg-gradient-to-br from-blue-400 to-blue-600'))">
                                                 <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
                                             </div>
                                         </template>
                                         <div class="max-w-[75%] md:max-w-[65%] group relative">
-                                            <div class="px-3 py-2 shadow-sm" :class="m.is_mine ? 'bg-primary-500 text-white rounded-2xl rounded-br-sm' : 'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
-                                                <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
-                                            </div>
-                                            <div class="flex items-center gap-1 justify-end mt-0.5 px-0.5" :class="m.is_mine ? 'text-right' : 'text-left'">
-                                                <span class="text-[9px] text-surface-400" x-text="m.created_at ? m.created_at.slice(11,16) : ''"></span>
-                                                <template x-if="m.is_mine">
-                                                    <i class="fas fa-check-double text-[9px]" :class="idx === activeConv.messages.length-1 && m.is_mine ? 'text-primary-400' : 'text-surface-300'"></i>
-                                                </template>
+                                            <template x-if="editingMsgId===m.id">
+                                                <div class="bg-white rounded-2xl rounded-br-sm border border-primary-300 p-2 shadow-sm">
+                                                    <textarea x-model="editMsgText" rows="2" class="w-full px-2 py-1 border-0 focus:ring-0 text-sm resize-none outline-none"></textarea>
+                                                    <div class="flex gap-1.5 mt-1 justify-end"><button @click="cancelEdit()" class="text-[10px] font-bold text-surface-500 px-2 py-1 rounded-lg hover:bg-surface-100">Batal</button><button @click="saveEditMsg()" class="text-[10px] font-bold text-white bg-primary-600 px-2.5 py-1 rounded-lg hover:bg-primary-700">Simpan</button></div>
+                                                </div>
+                                            </template>
+                                            <template x-if="editingMsgId!==m.id">
+                                                <div class="relative">
+                                                    <div class="px-3 py-2 shadow-sm" :class="m.is_mine?'bg-primary-500 text-white rounded-2xl rounded-br-sm':'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
+                                                        <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
+                                                    </div>
+                                                    <div class="flex gap-0.5 absolute -top-1.5 -right-1.5 z-10 opacity-0 group-hover:opacity-100 transition">
+                                                        <div class="relative" @click.outside="if(msgMenuId===m.id)msgMenuId=null">
+                                                            <button @click="toggleMsgMenu(m.id)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-chevron-down text-[8px]"></i></button>
+                                                            <template x-if="msgMenuId===m.id">
+                                                                <div class="absolute right-0 top-full mt-0.5 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[130px]">
+                                                                    <template x-if="m.is_mine&&!m.is_deleted"><button @click="unsendMsg(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50"><i class="fas fa-undo-alt text-[10px]"></i>Unsend</button></template>
+                                                                    <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50"><i class="fas fa-eye-slash text-[10px]"></i>Sembunyikan</button>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                        <template x-if="canEdit(m)"><button @click="startEdit(m)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button></template>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                            <div class="flex items-center gap-1 justify-end mt-0.5 px-0.5" :class="m.is_mine?'text-right':'text-left'">
+                                                <span class="text-[9px] text-surface-400" x-text="m.created_at?m.created_at.slice(11,16):''"></span>
+                                                <template x-if="m.is_mine"><i class="fas fa-check-double text-[9px]" :class="m.is_deleted?'text-surface-300':(idx===activeConv.messages.length-1?'text-primary-400':'text-surface-300')"></i></template>
                                             </div>
                                         </div>
                                     </div>
                                 </template>
-                                <template x-if="!activeConv.messages || activeConv.messages.length === 0">
-                                    <div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400 bg-white/70 px-4 py-2 rounded-full">Belum ada pesan.</p></div>
-                                </template>
+                                <template x-if="!activeConv.messages||activeConv.messages.length===0"><div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400 bg-white/70 px-4 py-2 rounded-full">Belum ada pesan.</p></div></template>
                             </div>
                             <template x-if="activeConv.status==='open'">
                                 <div class="px-3 md:px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0">
                                     <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
                                         <button class="text-surface-400 hover:text-primary-600 transition shrink-0 p-1" title="Lampirkan"><i class="fas fa-paperclip text-lg"></i></button>
                                         <textarea x-model="replyMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendReply()"></textarea>
-                                        <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying || !replyMessage"><i class="fas fa-paper-plane text-sm"></i></button>
+                                        <button @click="sendReply()" class="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 text-white flex items-center justify-center shrink-0 transition disabled:opacity-50 shadow-sm" :disabled="replying||!replyMessage"><i class="fas fa-paper-plane text-sm"></i></button>
                                     </div>
                                     <p x-show="replyError" class="text-xs text-red-500 mt-1" x-text="replyError"></p>
                                 </div>
                             </template>
-                            <template x-if="activeConv.status!=='open'">
-                                <div class="px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0 text-center"><p class="text-xs font-bold text-surface-400"><i class="fas fa-check-circle mr-1"></i>Percakapan selesai</p></div>
-                            </template>
+                            <template x-if="activeConv.status!=='open'"><div class="px-4 py-3 bg-surface-50 border-t border-surface-200 shrink-0 text-center"><p class="text-xs font-bold text-surface-400"><i class="fas fa-check-circle mr-1"></i>Percakapan selesai</p></div></template>
                         </div>
                     </template>
                 </div>
@@ -269,24 +273,14 @@
     <!-- PENGUMUMAN (INBOX) -->
     <template x-if="activeTab === 'inbox'">
         <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-6">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Pengumuman Masuk</h3>
-                <button @click="markReadAll()" class="text-xs font-bold text-primary-600 hover:text-primary-800 transition"><i class="fas fa-check-double mr-1"></i>Tandai Dibaca</button>
-            </div>
+            <div class="flex items-center justify-between mb-4"><h3 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Pengumuman Masuk</h3><button @click="markReadAll()" class="text-xs font-bold text-primary-600 hover:text-primary-800 transition"><i class="fas fa-check-double mr-1"></i>Tandai Dibaca</button></div>
             <template x-if="inboxLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
-            <template x-if="!inboxLoading && inboxNotifs.length === 0"><div class="text-center py-8 text-surface-400">Tidak ada pengumuman</div></template>
+            <template x-if="!inboxLoading&&inboxNotifs.length===0"><div class="text-center py-8 text-surface-400">Tidak ada pengumuman</div></template>
             <div class="divide-y divide-surface-100">
                 <template x-for="n in inboxNotifs" :key="n.id">
                     <div class="py-4 flex items-start gap-3">
                         <div class="w-10 h-10 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center shrink-0"><i class="fas fa-bullhorn text-sm"></i></div>
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2">
-                                <span x-show="!n.read" class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span>
-                                <p class="font-bold text-surface-800 text-sm" x-text="n.title || 'Pengumuman'"></p>
-                            </div>
-                            <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
-                            <p class="text-[10px] text-surface-400 mt-1"><span x-text="n.sender_role || '-'"></span> &middot; <span x-text="n.created_at || ''"></span></p>
-                        </div>
+                        <div class="flex-1 min-w-0"><div class="flex items-center gap-2"><span x-show="!n.read" class="w-2 h-2 rounded-full bg-primary-500 shrink-0"></span><p class="font-bold text-surface-800 text-sm" x-text="n.title||'Pengumuman'"></p></div><p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p><p class="text-[10px] text-surface-400 mt-1"><span x-text="n.sender_role||'-'"></span> &middot; <span x-text="n.created_at||''"></span></p></div>
                     </div>
                 </template>
             </div>
@@ -296,119 +290,48 @@
     <!-- KIRIM PENGUMUMAN -->
     <template x-if="activeTab === 'send'">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <!-- Form -->
             <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-6">
                 <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-paper-plane text-primary-500 mr-2"></i>Kirim Pengumuman</h3>
                 <form @submit.prevent="sendBroadcast()" class="space-y-4">
-                    <!-- Target: Guru -->
-                    <div class="flex items-center gap-3">
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" x-model="toGuru" class="rounded text-primary-600 focus:ring-primary-500">
-                            <span class="text-sm font-bold text-surface-700">Guru</span>
-                        </label>
-                        <template x-if="toGuru">
-                            <select x-model="guruOpt" class="text-xs border border-surface-200 rounded-lg px-2 py-1 text-surface-600 bg-white">
-                                <option value="all">Semua Guru</option>
-                                <option value="select">Pilih Guru</option>
-                            </select>
-                        </template>
-                        <template x-if="toGuru && guruOpt==='select'">
-                            <button @click.prevent="fetchGuruList()" class="text-xs text-primary-600 font-bold hover:underline">Muat daftar</button>
-                        </template>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" x-model="toGuru" class="rounded text-primary-600 focus:ring-primary-500"><span class="text-sm font-bold text-surface-700">Guru</span></label>
+                        <template x-if="toGuru"><select x-model="guruOpt" class="text-xs border border-surface-200 rounded-lg px-2 py-1 text-surface-600 bg-white"><option value="all">Semua Guru</option><option value="select">Pilih Guru</option></select></template>
+                        <template x-if="toGuru&&guruOpt==='select'"><button @click.prevent="fetchGuruList()" class="text-xs text-primary-600 font-bold hover:underline">Muat daftar</button></template>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" x-model="toMurid" class="rounded text-primary-600 focus:ring-primary-500"><span class="text-sm font-bold text-surface-700">Murid</span></label>
+                        <template x-if="toMurid"><select x-model="muridOpt" class="text-xs border border-surface-200 rounded-lg px-2 py-1 text-surface-600 bg-white"><option value="all">Semua Murid</option><option value="select">Pilih Murid</option></select></template>
                     </div>
-                    <template x-if="toGuru && guruOpt==='select' && guruList.length>0">
+                    <template x-if="toGuru&&guruOpt==='select'&&guruList.length>0">
                         <div class="max-h-32 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1">
-                            <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
-                                <input type="checkbox" @change="toggleAll(selectedGuruIds, guruList)" class="rounded text-primary-600 focus:ring-primary-500">Pilih Semua
-                            </label>
-                            <template x-for="g in guruList" :key="g.id">
-                                <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
-                                    <input type="checkbox" :checked="selectedGuruIds.includes(g.id)" @change="toggleArray(selectedGuruIds, g.id)" class="rounded text-primary-600 focus:ring-primary-500">
-                                    <span x-text="g.full_name"></span>
-                                </label>
-                            </template>
+                            <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5"><input type="checkbox" @change="toggleAll(selectedGuruIds,guruList)" class="rounded text-primary-600 focus:ring-primary-500">Pilih Semua</label>
+                            <template x-for="g in guruList" :key="g.id"><label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5"><input type="checkbox" :checked="selectedGuruIds.includes(g.id)" @change="toggleArray(selectedGuruIds,g.id)" class="rounded text-primary-600 focus:ring-primary-500"><span x-text="g.full_name"></span></label></template>
                         </div>
                     </template>
-
-                    <!-- Target: Murid -->
-                    <div class="flex items-center gap-3">
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" x-model="toMurid" class="rounded text-primary-600 focus:ring-primary-500">
-                            <span class="text-sm font-bold text-surface-700">Murid</span>
-                        </label>
-                        <template x-if="toMurid">
-                            <select x-model="muridOpt" class="text-xs border border-surface-200 rounded-lg px-2 py-1 text-surface-600 bg-white">
-                                <option value="all">Semua Murid</option>
-                                <option value="select">Pilih Murid</option>
-                            </select>
-                        </template>
-                    </div>
-                    <template x-if="toMurid && muridOpt==='select'">
-                        <div>
-                            <select x-model="selectedClass" class="w-full mb-2 text-xs border border-surface-200 rounded-lg px-3 py-2 text-surface-600 bg-white">
-                                <option value="">Semua Kelas</option>
-                                <template x-for="cls in classList" :key="cls.id">
-                                    <option :value="cls.id" x-text="cls.name"></option>
-                                </template>
-                            </select>
-                            <div class="max-h-32 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1">
-                                <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
-                                    <input type="checkbox" @change="toggleAll(selectedMuridIds, muridList)" class="rounded text-primary-600 focus:ring-primary-500">Pilih Semua
-                                </label>
-                                <template x-for="m in muridList" :key="m.id">
-                                    <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5">
-                                        <input type="checkbox" :checked="selectedMuridIds.includes(m.id)" @change="toggleArray(selectedMuridIds, m.id)" class="rounded text-primary-600 focus:ring-primary-500">
-                                        <span x-text="m.full_name"></span>
-                                    </label>
-                                </template>
-                                <template x-if="muridList.length===0">
-                                    <p class="text-xs text-surface-400 px-1 py-1">Tidak ada murid ditemukan</p>
-                                </template>
-                            </div>
-                        </div>
+                    <template x-if="toMurid&&muridOpt==='select'">
+                        <div><select x-model="selectedClass" class="w-full mb-2 text-xs border border-surface-200 rounded-lg px-3 py-2 text-surface-600 bg-white"><option value="">Semua Kelas</option><template x-for="cls in classList" :key="cls.id"><option :value="cls.id" x-text="cls.name"></option></template></select>
+                        <div class="max-h-32 overflow-y-auto border border-surface-200 rounded-xl p-2 space-y-1">
+                            <label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5"><input type="checkbox" @change="toggleAll(selectedMuridIds,muridList)" class="rounded text-primary-600 focus:ring-primary-500">Pilih Semua</label>
+                            <template x-for="m in muridList" :key="m.id"><label class="flex items-center gap-2 text-xs text-surface-600 cursor-pointer px-1 py-0.5"><input type="checkbox" :checked="selectedMuridIds.includes(m.id)" @change="toggleArray(selectedMuridIds,m.id)" class="rounded text-primary-600 focus:ring-primary-500"><span x-text="m.full_name"></span></label></template>
+                            <template x-if="muridList.length===0"><p class="text-xs text-surface-400 px-1 py-1">Tidak ada murid</p></template>
+                        </div></div>
                     </template>
-
-                    <div>
-                        <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
-                        <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-bold text-surface-700 mb-1.5">Pesan</label>
-                        <textarea x-model="formMessage" required rows="4" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></textarea>
-                    </div>
-                    <button type="submit" class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition disabled:opacity-50" :disabled="sending"><span x-text="sending ? 'Mengirim...' : 'Kirim Pengumuman'"></span></button>
-                    <p x-show="sendMsg" class="text-xs font-bold" :class="sendMsg.includes('Terkirim') ? 'text-emerald-600' : 'text-red-600'" x-text="sendMsg"></p>
+                    <div><label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label><input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></div>
+                    <div><label class="block text-sm font-bold text-surface-700 mb-1.5">Pesan</label><textarea x-model="formMessage" required rows="4" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></textarea></div>
+                    <button type="submit" class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition disabled:opacity-50" :disabled="sending"><span x-text="sending?'Mengirim...':'Kirim Pengumuman'"></span></button>
+                    <p x-show="sendMsg" class="text-xs font-bold" :class="sendMsg.includes('Terkirim')?'text-emerald-600':'text-red-600'" x-text="sendMsg"></p>
                 </form>
             </div>
-
-            <!-- Riwayat -->
             <div class="bg-white rounded-2xl shadow-lg border border-surface-100 p-6">
                 <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-history text-primary-500 mr-2"></i>Riwayat Pengumuman</h3>
                 <template x-if="historyLoading"><div class="text-center py-8 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div></template>
-                <template x-if="!historyLoading && history.length === 0"><div class="text-center py-8 text-surface-400">Belum ada pengumuman terkirim</div></template>
+                <template x-if="!historyLoading&&history.length===0"><div class="text-center py-8 text-surface-400">Belum ada pengumuman terkirim</div></template>
                 <div class="space-y-3 max-h-[500px] overflow-y-auto">
                     <template x-for="n in history" :key="n.id">
                         <div class="p-4 rounded-xl bg-surface-50 border border-surface-100">
-                            <template x-if="editBroadcastId === n.id">
-                                <div class="space-y-2">
-                                    <input type="text" x-model="editTitle" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm">
-                                    <textarea x-model="editMessage" rows="3" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm"></textarea>
-                                    <div class="flex gap-2">
-                                        <button @click="saveEditBroadcast()" class="text-xs font-bold text-white bg-primary-600 px-3 py-1.5 rounded-lg hover:bg-primary-700">Simpan</button>
-                                        <button @click="cancelEditBroadcast()" class="text-xs font-bold text-surface-500 px-3 py-1.5 rounded-lg hover:bg-surface-200">Batal</button>
-                                    </div>
-                                </div>
+                            <template x-if="editBroadcastId===n.id">
+                                <div class="space-y-2"><input type="text" x-model="editTitle" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm"><textarea x-model="editMessage" rows="3" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm"></textarea><div class="flex gap-2"><button @click="saveEditBroadcast()" class="text-xs font-bold text-white bg-primary-600 px-3 py-1.5 rounded-lg hover:bg-primary-700">Simpan</button><button @click="cancelEditBroadcast()" class="text-xs font-bold text-surface-500 px-3 py-1.5 rounded-lg hover:bg-surface-200">Batal</button></div></div>
                             </template>
-                            <template x-if="editBroadcastId !== n.id">
-                                <div>
-                                    <p class="font-bold text-surface-800 text-sm" x-text="n.title"></p>
-                                    <p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p>
-                                    <p class="text-[10px] text-surface-400 mt-1"><span x-text="n.created_at || ''"></span></p>
-                                    <div class="flex gap-2 mt-2">
-                                        <button @click="startEdit(n)" class="text-xs font-bold text-primary-600 hover:underline">Edit</button>
-                                        <button @click="deleteBroadcast(n)" class="text-xs font-bold text-red-600 hover:underline">Hapus</button>
-                                    </div>
-                                </div>
+                            <template x-if="editBroadcastId!==n.id">
+                                <div><p class="font-bold text-surface-800 text-sm" x-text="n.title"></p><p class="text-sm text-surface-600 mt-1 whitespace-pre-wrap" x-html="linkify(n.message)"></p><p class="text-[10px] text-surface-400 mt-1"><span x-text="n.created_at||''"></span></p><div class="flex gap-2 mt-2"><button @click="startEditBroadcast(n)" class="text-xs font-bold text-primary-600 hover:underline">Edit</button><button @click="deleteBroadcast(n)" class="text-xs font-bold text-red-600 hover:underline">Hapus</button></div></div>
                             </template>
                         </div>
                     </template>

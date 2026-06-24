@@ -313,7 +313,7 @@
                                         <button @click="toggleConvMenu()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Lainnya"><i class="fas fa-ellipsis-v text-sm"></i></button>
                                         <template x-if="convMenuOpen">
                                             <div class="absolute right-0 top-full mt-1 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[180px]">
-                                                <button @click="deleteConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-trash-alt text-xs"></i>Hapus Percakapan</button>
+                                                <button @click="deleteConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-trash-alt text-xs"></i>Hapus</button>
                                                 <template x-if="activeConv.status==='open'">
                                                     <button @click="archiveConv()" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-surface-700 hover:bg-surface-50 transition font-medium"><i class="fas fa-archive text-xs"></i>Arsipkan</button>
                                                 </template>
@@ -356,7 +356,7 @@
                                                                         <template x-if="m.is_mine && !m.is_deleted">
                                                                             <button @click="unsendMsg(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-undo-alt text-[10px]"></i>Unsend</button>
                                                                         </template>
-                                                                        <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50 transition font-medium"><i class="fas fa-eye-slash text-[10px]"></i>Hapus untukku</button>
+                                                                        <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50 transition font-medium"><i class="fas fa-eye-slash text-[10px]"></i>Sembunyikan</button>
                                                                     </div>
                                                                 </template>
                                                             </div>
