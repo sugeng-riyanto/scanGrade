@@ -11,58 +11,59 @@
     inboxNotifs: [], inboxLoading: true,
     editingId: null, editTitle: '', editMessage: '',
     searchRecipient: '',
-    conversations: [], convsLoading: true, searchContact: '',
+    contacts: [], contactsLoading: true, searchContact: '',
     activeConv: null, replyMessage: '', replying: false, replyError: '',
     editingMsgId: null, editMsgText: '',
     pollTimer: null,
     convMenuOpen: false, msgMenuId: null,
-    showCompose: false, composeRole: 'guru',     composeRecipients: [], composeRecipient: null, composeSending: false, composeStatus: '',
     pendingRecipient: null,
     statsMap: {},
-    get filteredRecipients() {
-        var s = this.searchRecipient.toLowerCase();
-        return this.recipients.filter(r => r.full_name.toLowerCase().includes(s));
-    },
-    get filteredConvs() {
+
+    get filteredContacts() {
         var q = (this.searchContact || '').toLowerCase();
-        if (!q) return this.conversations;
-        return this.conversations.filter(function(c) {
-            return (c.other_name || '').toLowerCase().includes(q) || (c.title || '').toLowerCase().includes(q);
-        });
+        if (!q) return this.contacts;
+        return this.contacts.filter(function(c) { return (c.full_name||'').toLowerCase().includes(q); });
     },
-    refreshBadge() {
-        window.dispatchEvent(new CustomEvent('sg:unread'));
-    },
-    fetchConversations() {
-        this.convsLoading = true;
-        fetch('/api/broadcast/conversations').then(r=>r.json()).then(d => {
-            this.conversations = (d.conversations || []).sort(function(a,b){ return a.last_message_at < b.last_message_at ? 1 : -1; });
+
+    refreshBadge() { window.dispatchEvent(new CustomEvent('sg:unread')); },
+
+    fetchContacts() {
+        this.contactsLoading = true;
+        fetch('/api/broadcast/contacts').then(r=>r.json()).then(d => {
+            this.contacts = d.contacts || [];
             if (this.activeConv) {
-                var updated = this.conversations.find(c => c.id === this.activeConv.id);
-                if (updated) { this.activeConv = updated; this.$nextTick(() => { this.scrollToBottom(); }); }
+                var upd = this.contacts.find(function(c){return c.conversation_id===this.activeConv.conversation_id||c.conversation_id===this.activeConv.id;}.bind(this));
+                if (upd) { this.activeConv.other_name = upd.full_name; }
             }
-        }).catch(()=>{}).finally(()=>{ this.convsLoading = false; });
+        }).catch(()=>{}).finally(()=>{ this.contactsLoading = false; });
     },
-    startPolling() {
-        this.stopPolling();
-        this.pollTimer = setInterval(() => { this.fetchConversations(); }, 5000);
+    startChat(contact) {
+        if (contact.conversation_id) { this.openConv(contact); }
+        else { this.pendingRecipient = {id: contact.id, name: contact.full_name, role: contact.role}; }
     },
-    stopPolling() {
-        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
-    },
-    openConv(c) {
-        this.activeConv = c;
-        this.replyMessage = ''; this.replyError = ''; this.editingMsgId = null;
+    openConv(contact) {
+        var cid = contact.conversation_id;
+        if (!cid) return;
+        this.activeConv = contact; this.replyMessage = ''; this.replyError = ''; this.editingMsgId = null;
         this.$nextTick(() => { this.scrollToBottom(); });
-        this.startPolling();
-        fetch('/api/broadcast/mark-read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({conversation_id: c.id}) }).then(() => {
-            if (this.conversations) this.conversations.forEach(x => { if (x.id === c.id) x.has_unread = false; });
-            this.refreshBadge();
-        }).catch(()=>{});
+        this.startPoll();
+        fetch('/api/broadcast/mark-read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({conversation_id: cid}) })
+        .then(() => { this.refreshBadge(); }).catch(()=>{});
+        fetch('/api/broadcast/conversations').then(r=>r.json()).then(d => {
+            var found = (d.conversations||[]).find(function(c){return c.id===cid;});
+            if (found) { this.activeConv = Object.assign(this.activeConv, found); this.$nextTick(()=>{this.scrollToBottom();}); }
+        });
     },
     scrollToBottom() {
         var el = document.querySelector('.chat-scroll');
         if (el) el.scrollTop = el.scrollHeight;
+    },
+    startPoll() {
+        this.stopPoll();
+        this.pollTimer = setInterval(() => { this.fetchContacts(); }, 5000);
+    },
+    stopPoll() {
+        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     },
     canEdit(m) {
         if (!m.is_mine) return false;
@@ -73,7 +74,7 @@
     saveEditMsg() {
         if (!this.editMsgText || !this.editingMsgId) return;
         fetch('/api/broadcast/edit-message', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({notification_id: this.editingMsgId, message: this.editMsgText}) })
-        .then(r=>r.json()).then(d => { if (d.success) { this.editingMsgId = null; this.editMsgText = ''; this.fetchConversations(); } }).catch(()=>{});
+        .then(r=>r.json()).then(d => { if (d.success) { this.editingMsgId = null; this.editMsgText = ''; this.fetchContacts(); } }).catch(()=>{});
     },
     sendReply() {
         if (!this.replyMessage) return;
@@ -82,85 +83,53 @@
             fetch('/api/broadcast/send', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: this.replyMessage, message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]}) })
             .then(r=>r.json()).then(d => {
                 this.replying = false;
-                if (d.success) { this.replyMessage = ''; this.pendingRecipient = null; this.fetchConversations(); this.refreshBadge(); }
+                if (d.success) { this.replyMessage = ''; this.pendingRecipient = null; this.fetchContacts(); this.refreshBadge(); }
                 else { this.replyError = d.error || 'Gagal'; }
             }).catch(()=>{ this.replying = false; this.replyError = 'Gagal terhubung'; });
         } else if (this.activeConv) {
+            var cid = this.activeConv.conversation_id || this.activeConv.id;
+            if(!cid) return;
             this.replying = true; this.replyError = '';
-            fetch('/api/broadcast/reply', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: this.activeConv.id, message: this.replyMessage}) })
+            fetch('/api/broadcast/reply', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: cid, message: this.replyMessage}) })
             .then(r=>r.json()).then(d => {
-                if (d.success) { this.replyMessage = ''; this.activeConv = null; this.stopPolling(); this.fetchConversations(); this.refreshBadge(); }
+                if (d.success) { this.replyMessage = ''; this.activeConv = null; this.stopPoll(); this.fetchContacts(); this.refreshBadge(); }
                 else { this.replyError = d.error || 'Gagal kirim'; }
             }).catch(()=>{ this.replyError = 'Gagal terhubung ke server'; }).finally(()=>{ this.replying = false; });
         }
     },
     completeConv() {
-        if (!confirm('Selesaikan percakapan ini?')) return;
-        fetch('/api/broadcast/complete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: this.activeConv.id}) })
-        .then(r=>r.json()).then(d => { if (d.success) { this.activeConv.status = 'completed'; this.fetchConversations(); } });
+        if (!this.activeConv||!confirm('Selesaikan percakapan ini?')) return;
+        var cid = this.activeConv.conversation_id || this.activeConv.id;
+        fetch('/api/broadcast/complete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: cid}) })
+        .then(r=>r.json()).then(d => { if (d.success) { this.activeConv.status = 'completed'; this.fetchContacts(); } });
     },
     toggleConvMenu() { this.convMenuOpen = !this.convMenuOpen; },
     closeConvMenu() { this.convMenuOpen = false; },
     toggleMsgMenu(id) { this.msgMenuId = this.msgMenuId === id ? null : id; },
     unsendMsg(m) {
         if (!confirm('Hapus pesan ini untuk semua orang?')) return;
-        fetch('/api/broadcast/unsend', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({notification_id: m.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.msgMenuId = null; this.fetchConversations(); }
-            else { alert(d.error || 'Gagal'); }
-        });
+        fetch('/api/broadcast/unsend', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({notification_id: m.id}) })
+        .then(r=>r.json()).then(d => { if (d.success) { this.msgMenuId = null; this.fetchContacts(); } else { alert(d.error || 'Gagal'); } });
     },
     deleteForMe(m) {
-        fetch('/api/broadcast/delete-for-me', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({notification_id: m.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.msgMenuId = null; this.fetchConversations(); }
-        });
+        fetch('/api/broadcast/delete-for-me', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({notification_id: m.id}) })
+        .then(r=>r.json()).then(d => { if (d.success) { this.msgMenuId = null; this.fetchContacts(); } });
     },
     deleteConv() {
         if (!confirm('Hapus percakapan ini? Pesan akan dihapus untuk Anda.')) return;
-        fetch('/api/broadcast/conversation/delete', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
-        });
+        var cid = this.activeConv.conversation_id || this.activeConv.id;
+        fetch('/api/broadcast/conversation/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: cid}) })
+        .then(r=>r.json()).then(d => { if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPoll(); this.fetchContacts(); } });
     },
     archiveConv() {
-        fetch('/api/broadcast/conversation/archive', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
-            else { alert(d.error || 'Gagal'); }
-        });
+        var cid = this.activeConv.conversation_id || this.activeConv.id;
+        fetch('/api/broadcast/conversation/archive', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: cid}) })
+        .then(r=>r.json()).then(d => { if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPoll(); this.fetchContacts(); } else { alert(d.error || 'Gagal'); } });
     },
     unarchiveConv() {
-        fetch('/api/broadcast/conversation/unarchive', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({conversation_id: this.activeConv.id})
-        }).then(r=>r.json()).then(d => {
-            if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPolling(); this.fetchConversations(); }
-            else { alert(d.error || 'Gagal'); }
-        });
-    },
-    // Compose (Pesan Baru inline)
-    openCompose() {
-        this.showCompose=true; this.composeRole='guru'; this.composeRecipient=null; this.composeSending=false; this.composeStatus='';
-        this.fetchComposeRecipients();
-    },
-    closeCompose() { this.showCompose=false; },
-    fetchComposeRecipients() {
-        fetch('/api/broadcast/students?role='+this.composeRole).then(function(r){return r.json();}).then(function(d){this.composeRecipients=d.users||[];}.bind(this)).catch(function(){});
-    },
-    selectRecipient() {
-        if(!this.composeRecipient){this.composeStatus='Pilih penerima';return;}
-        var r = this.composeRecipients.find(function(u){return u.id===this.composeRecipient;}.bind(this));
-        if(r){this.pendingRecipient={id:r.id,name:r.full_name,role:this.composeRole};}
-        this.showCompose=false; this.composeRecipient=null;
+        var cid = this.activeConv.conversation_id || this.activeConv.id;
+        fetch('/api/broadcast/conversation/unarchive', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: cid}) })
+        .then(r=>r.json()).then(d => { if (d.success) { this.convMenuOpen = false; this.activeConv = null; this.stopPoll(); this.fetchContacts(); } else { alert(d.error || 'Gagal'); } });
     },
     fetchNotifs() {
         this.loading = true;
@@ -232,7 +201,7 @@
         .then(r=>r.json()).then(d => { if (d.success) this.fetchDelReqs(); });
     },
     showInfo: false
-}" x-init="fetchConversations(); fetchNotifs(); fetchInbox(); $watch('activeTab', val => { if (val === 'inbox') { this.markReadInbox(); } }); $watch('composeRole',function(){this.composeRecipient=null;this.fetchComposeRecipients();}.bind(this))">
+}" x-init="fetchContacts(); fetchNotifs(); fetchInbox(); $watch('activeTab', val => { if (val === 'inbox') { this.markReadInbox(); if (this.activeTab !== 'delreqs') {} } })">
     <!-- Tab Navigation -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 overflow-x-auto">
         <button @click="activeTab='convs'; activeConv=null" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs' ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>
@@ -255,61 +224,44 @@
                         <div class="px-3 md:px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
                             <div class="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{{ (g.user_name or 'A')[:1]|upper }}</div>
                             <span class="hidden md:block font-bold text-surface-800 text-sm truncate">{{ g.user_name or 'Admin Sekolah' }}</span>
-                            <button @click="openCompose()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Pesan Baru"><i class="fas fa-plus text-xs"></i></button>
-                            <button @click="fetchConversations()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
+                            <button @click="fetchContacts()" class="text-surface-400 hover:text-primary-600 transition p-1 ml-auto" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
                         </div>
                         <div class="px-3 md:px-4 py-2 bg-surface-50">
                             <div class="relative">
                                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 text-xs"></i>
-                                <input type="text" x-model="searchContact" placeholder="Cari percakapan..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 focus:border-primary-400 outline-none text-surface-700 placeholder-surface-400">
+                                <input type="text" x-model="searchContact" placeholder="Cari kontak..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 focus:border-primary-400 outline-none text-surface-700 placeholder-surface-400">
                             </div>
                         </div>
-                        <!-- Pilih Penerima Inline -->
-                        <template x-if="showCompose">
-                            <div class="flex-1 overflow-y-auto p-4 space-y-3">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <button @click="closeCompose()" class="text-surface-400 hover:text-primary-600 transition"><i class="fas fa-arrow-left text-sm"></i></button>
-                                    <span class="font-bold text-surface-700 text-sm">Pilih Penerima</span>
-                                </div>
-                                <div class="flex gap-2">
-                                    <button @click="composeRole='guru';composeRecipient=null;fetchComposeRecipients()" class="flex-1 py-2 text-xs font-bold rounded-lg transition" :class="composeRole==='guru'?'bg-primary-600 text-white shadow':'bg-surface-100 text-surface-600 hover:bg-surface-200'">Guru</button>
-                                    <button @click="composeRole='murid';composeRecipient=null;fetchComposeRecipients()" class="flex-1 py-2 text-xs font-bold rounded-lg transition" :class="composeRole==='murid'?'bg-primary-600 text-white shadow':'bg-surface-100 text-surface-600 hover:bg-surface-200'">Murid</button>
-                                </div>
-                                <select x-model="composeRecipient" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs text-surface-700 bg-white">
-                                    <option value="">Pilih penerima</option>
-                                    <template x-for="r in composeRecipients" :key="r.id"><option :value="r.id" x-text="r.full_name"></option></template>
-                                </select>
-                                <button @click="selectRecipient()" class="w-full py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition">Pilih</button>
-                                <p x-show="composeStatus" class="text-xs font-bold text-red-600" x-text="composeStatus"></p>
-                            </div>
-                        </template>
-                        <div class="flex-1 overflow-y-auto divide-y divide-surface-100" x-show="!showCompose">
-                            <template x-for="c in filteredConvs" :key="c.id">
-                                <div @click="openConv(c)" class="flex items-center gap-3 px-3 md:px-4 py-3 cursor-pointer transition" :class="activeConv && activeConv.id === c.id ? 'bg-surface-100' : 'hover:bg-surface-50'">
+                        <div class="flex-1 overflow-y-auto divide-y divide-surface-100">
+                            <template x-for="c in filteredContacts" :key="c.id">
+                                <div @click="startChat(c)" class="flex items-center gap-3 px-3 md:px-4 py-3 cursor-pointer transition" :class="activeConv&&(activeConv.conversation_id===c.conversation_id||activeConv.id===c.conversation_id)?'bg-surface-100':'hover:bg-surface-50'">
                                     <div class="relative shrink-0">
-                                        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (c.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (c.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
-                                            <span x-text="(c.other_name||'?')[0].toUpperCase()"></span>
+                                        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (c.role==='admin_sekolah'||c.role==='super_admin' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (c.role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                            <span x-text="(c.full_name||'?')[0].toUpperCase()"></span>
                                         </div>
-                                        <span x-show="c.has_unread" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+                                        <span x-show="c.unread_count>0" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
                                     </div>
                                     <div class="hidden md:block flex-1 min-w-0">
                                         <div class="flex items-center justify-between">
-                                            <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.title || 'Percakapan'"></span>
+                                            <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.full_name"></span>
                                             <span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at ? c.last_message_at.slice(11,16) : ''"></span>
                                         </div>
                                         <div class="flex items-center gap-1.5 mt-0.5">
-                                            <span class="text-xs text-surface-500 truncate"><span class="font-medium text-surface-400" x-text="c.other_name+': '"></span><span x-text="c.last_msg_preview||'Belum ada pesan'"></span></span>
-                                            <template x-if="c.has_unread"><span class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center" x-text="c.unread_count||'baru'"></span></template>
+                                            <span class="text-xs text-surface-500 truncate"><span x-text="c.last_msg_preview||'Belum ada pesan'"></span></span>
+                                            <template x-if="c.unread_count>0"><span class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center" x-text="c.unread_count"></span></template>
                                         </div>
                                     </div>
                                 </div>
                             </template>
-                            <template x-if="filteredConvs.length === 0">
+                            <template x-if="filteredContacts.length === 0">
                                 <div class="flex flex-col items-center justify-center py-12 text-surface-400 px-4">
                                     <i class="fas fa-comments text-3xl mb-3 text-surface-200"></i>
-                                    <p class="text-sm font-medium">Belum ada percakapan</p>
-                                    <p class="text-xs mt-1">Kirim pesan ke guru atau murid untuk memulai</p>
+                                    <p class="text-sm font-medium">Belum ada kontak</p>
+                                    <p class="text-xs mt-1">Tidak ada pengguna yang dapat dihubungi</p>
                                 </div>
+                            </template>
+                            <template x-if="contactsLoading">
+                                <div class="flex items-center justify-center py-12 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div>
                             </template>
                         </div>
                     </div>
@@ -328,7 +280,7 @@
                             <div class="flex flex-col h-full">
                                 <template x-if="activeConv">
                                 <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3 shrink-0">
-                                    <button @click="activeConv=null; stopPolling()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
+                                    <button @click="activeConv=null; stopPoll()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
                                     <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
                                         <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
                                     </div>

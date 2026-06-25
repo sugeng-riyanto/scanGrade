@@ -1924,6 +1924,98 @@ def api_conversations():
         return jsonify({"error": str(e)[:100], "conversations": []}), 500
 
 
+@api_bp.route("/broadcast/contacts", methods=["GET"])
+@login_required
+def api_broadcast_contacts():
+    """Get contacts the current user can message, merged with conversation info."""
+    supabase = get_supabase()
+    uid = g.user_id
+    role = g.get("user_role")
+    school_id = g.get("user_school_id")
+
+    roles_map = {
+        "murid": ["guru", "admin_sekolah"],
+        "guru": ["murid"],
+        "admin_sekolah": ["guru", "murid"],
+        "super_admin": ["guru", "murid", "admin_sekolah"],
+    }
+    target_roles = roles_map.get(role, [])
+    if not target_roles:
+        return jsonify({"contacts": []})
+
+    try:
+        query = supabase.table("profiles").select("id, full_name, role").eq("status", "active").in_("role", target_roles)
+        if school_id and role != "super_admin":
+            try:
+                query = query.eq("school_id", school_id)
+            except Exception:
+                pass
+        profiles = query.order("full_name").execute().data or []
+    except Exception:
+        profiles = []
+
+    profile_map = {p["id"]: p for p in profiles}
+
+    convs = []
+    try:
+        convs = supabase.table("conversations").select("id, participant_1, participant_2, title, status, last_message_at, created_at") \
+            .or_("participant_1.eq." + uid + ",participant_2.eq." + uid) \
+            .order("last_message_at", desc=True).limit(50).execute().data or []
+    except Exception:
+        pass
+
+    hidden_ids = set()
+    try:
+        hides = supabase.table("message_hides").select("notification_id").eq("user_id", uid).execute().data or []
+        hidden_ids = set(h["notification_id"] for h in hides)
+    except Exception:
+        pass
+
+    contacts = []
+    for p_id, p in profile_map.items():
+        conv_id = None
+        last_msg_preview = None
+        unread_count = 0
+        last_message_at = None
+        for c in convs:
+            other_id = c["participant_1"] if uid == c["participant_2"] else c["participant_2"]
+            if other_id == p_id:
+                conv_id = c["id"]
+                last_message_at = str(c.get("last_message_at", ""))[:19].replace("T", " ")
+                try:
+                    msgs = supabase.table("notifications").select("id, message, sender_id, created_at") \
+                        .eq("conversation_id", c["id"]).order("created_at", desc=True).limit(1).execute().data or []
+                    if msgs:
+                        last = msgs[0]
+                        if last["id"] not in hidden_ids:
+                            msg_text = last.get("message", "")
+                            if msg_text:
+                                last_msg_preview = msg_text[:80] + "..." if len(msg_text) > 80 else msg_text
+                    nids = []
+                    for m in supabase.table("notifications").select("id, sender_id") \
+                            .eq("conversation_id", c["id"]).neq("sender_id", uid).execute().data or []:
+                        nids.append(m["id"])
+                    if nids:
+                        chk = supabase.table("notification_recipients").select("id", count="exact") \
+                            .eq("recipient_id", uid).is_("read_at", "null").in_("notification_id", nids).execute()
+                        unread_count = chk.count or 0
+                except Exception:
+                    pass
+                break
+        contacts.append({
+            "id": p_id,
+            "full_name": p.get("full_name", p_id[:8]),
+            "role": p.get("role"),
+            "conversation_id": conv_id,
+            "last_msg_preview": last_msg_preview or "",
+            "unread_count": unread_count,
+            "last_message_at": last_message_at or "",
+        })
+
+    contacts.sort(key=lambda x: (x["last_message_at"] or ""), reverse=True)
+    return jsonify({"contacts": contacts})
+
+
 @api_bp.route("/broadcast/update", methods=["POST"])
 @login_required
 def api_update_broadcast():

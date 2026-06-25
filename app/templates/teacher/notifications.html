@@ -6,16 +6,14 @@
     // Tabs: convs | inbox | send
     activeTab: 'convs',
 
-    // Percakapan
-    conversations: [], convsLoading: true,
+    // Kontak
+    contacts: [], contactsLoading: true,
     activeConv: null, replyMessage: '', replying: false, replyError: '',
     searchContact: '',
     editingMsgId: null, editMsgText: '',
     convMenuOpen: false, msgMenuId: null,
     pollTimer: null,
 
-    // Compose (Pesan Baru inline)
-    showCompose: false, composeRole: 'murid', composeRecipients: [], composeRecipient: null, composeSending: false, composeStatus: '',
     pendingRecipient: null,
 
     // Pengumuman inbox
@@ -30,51 +28,69 @@
     history: [], historyLoading: true,
     editBroadcastId: null, editTitle: '', editMessage: '',
 
-    get filteredConvs() {
+    get filteredContacts() {
         var q = (this.searchContact||'').toLowerCase();
-        if (!q) return this.conversations;
-        return this.conversations.filter(function(c){return (c.other_name||'').toLowerCase().includes(q);});
+        if (!q) return this.contacts;
+        return this.contacts.filter(function(c){return (c.full_name||'').toLowerCase().includes(q);});
     },
 
     refreshBadge() { window.dispatchEvent(new CustomEvent('sg:unread')); },
 
     // CRUD Percakapan
-    fetchConversations() {
-        this.convsLoading = true;
-        fetch('/api/broadcast/conversations').then(function(r){return r.json();}).then(function(d) {
-            this.conversations = d.conversations || [];
+    fetchContacts() {
+        this.contactsLoading = true;
+        fetch('/api/broadcast/contacts').then(function(r){return r.json();}).then(function(d) {
+            this.contacts = d.contacts || [];
             if (this.activeConv) {
-                var upd = this.conversations.find(function(c){return c.id===this.activeConv.id;}.bind(this));
-                if (upd) { this.activeConv = upd; this.$nextTick(function(){this.scrollBottom();}.bind(this)); }
+                var upd = this.contacts.find(function(c){return c.conversation_id===this.activeConv.id;}.bind(this));
+                if (upd) { this.activeConv.other_name = upd.full_name; }
             }
-        }.bind(this)).catch(function(){}).finally(function(){this.convsLoading=false;}.bind(this));
+        }.bind(this)).catch(function(){}).finally(function(){this.contactsLoading=false;}.bind(this));
     },
     scrollBottom() { var el = this.$el.querySelector('.chat-scroll'); if(el) el.scrollTop = el.scrollHeight; },
-    openConv(c) {
-        this.activeConv = c; this.replyMessage=''; this.replyError=''; this.editingMsgId=null;
-        this.$nextTick(function(){this.scrollBottom();}.bind(this)); this.startPoll();
-        fetch('/api/broadcast/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:c.id})})
-        .then(function(){this.conversations.forEach(function(x){if(x.id===c.id)x.has_unread=false;});this.refreshBadge();}.bind(this)).catch(function(){});
+    startChat(contact) {
+        if (contact.conversation_id) {
+            this.openConv(contact);
+        } else {
+            this.pendingRecipient = {id: contact.id, name: contact.full_name, role: contact.role};
+        }
     },
-    startPoll() { this.stopPoll(); this.pollTimer = setInterval(function(){this.fetchConversations();}.bind(this), 5000); },
+    openConv(contact) {
+        var cid = contact.conversation_id;
+        if (!cid) return;
+        this.activeConv = contact; this.replyMessage=''; this.replyError=''; this.editingMsgId=null;
+        this.$nextTick(function(){this.scrollBottom();}.bind(this)); this.startPoll();
+        fetch('/api/broadcast/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:cid})})
+        .then(function(){this.refreshBadge();}.bind(this)).catch(function(){});
+        fetch('/api/broadcast/conversations').then(function(r){return r.json();}).then(function(d) {
+            var found = (d.conversations||[]).find(function(c){return c.id===cid;});
+            if (found) {
+                this.activeConv = Object.assign(this.activeConv, found);
+                this.$nextTick(function(){this.scrollBottom();}.bind(this));
+            }
+        }.bind(this));
+    },
+    startPoll() { this.stopPoll(); this.pollTimer = setInterval(function(){this.fetchContacts();}.bind(this), 5000); },
     stopPoll() { if(this.pollTimer){clearInterval(this.pollTimer);this.pollTimer=null;} },
     sendReply() {
-        if(!this.replyMessage) return;
+        if (!this.replyMessage) return;
         if(this.pendingRecipient) {
-            this.replying=true; this.replyError='';
+            this.replying = true; this.replyError = '';
             var body = JSON.stringify({title: this.replyMessage, message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]});
             fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:body})
-            .then(function(r){return r.json();}).then(function(d){
+            .then(function(r){return r.json();}).then(function(d) {
                 this.replying=false;
-                if(d.success){this.replyMessage='';this.pendingRecipient=null;this.fetchConversations();this.refreshBadge();}
+                if(d.success){this.replyMessage='';this.pendingRecipient=null;this.fetchContacts();this.refreshBadge();}
                 else{this.replyError=d.error||'Gagal';}
             }.bind(this)).catch(function(){this.replying=false;this.replyError='Gagal terhubung';}.bind(this));
-        } else if(this.activeConv) {
-            this.replying=true; this.replyError='';
-            fetch('/api/broadcast/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id,message:this.replyMessage})})
+        } else if (this.activeConv) {
+            var cid = this.activeConv.conversation_id || this.activeConv.id;
+            if(!cid) return;
+            this.replying = true; this.replyError = '';
+            fetch('/api/broadcast/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:cid,message:this.replyMessage})})
             .then(function(r){return r.json();}).then(function(d) {
-                if(d.success){this.replyMessage='';this.activeConv=null;this.stopPoll();this.fetchConversations();this.refreshBadge();}
-                else{this.replyError=d.error||'Gagal';}
+                if (d.success) { this.replyMessage=''; this.activeConv=null; this.stopPoll(); this.fetchContacts(); this.refreshBadge(); }
+                else { this.replyError=d.error||'Gagal'; }
             }.bind(this)).catch(function(){this.replyError='Gagal terhubung';}.bind(this)).finally(function(){this.replying=false;}.bind(this));
         }
     },
@@ -89,49 +105,33 @@
     saveEditMsg() {
         if(!this.editMsgText||!this.editingMsgId) return;
         fetch('/api/broadcast/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notification_id:this.editingMsgId,message:this.editMsgText})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success){this.cancelEdit();this.fetchConversations();}}.bind(this));
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.cancelEdit();this.fetchContacts();}}.bind(this));
     },
 
     // Delete
     unsendMsg(m) {
         if(!confirm('Hapus pesan ini untuk semua orang?')) return;
         fetch('/api/broadcast/unsend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notification_id:m.id})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success){this.msgMenuId=null;this.fetchConversations();}else{alert(d.error);}}.bind(this));
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.msgMenuId=null;this.fetchContacts();}else{alert(d.error);}}.bind(this));
     },
     deleteForMe(m) {
         fetch('/api/broadcast/delete-for-me',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notification_id:m.id})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success){this.msgMenuId=null;this.fetchConversations();}}.bind(this));
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.msgMenuId=null;this.fetchContacts();}}.bind(this));
     },
     deleteConv() {
         if(!confirm('Hapus percakapan ini dari daftar Anda?')) return;
-        fetch('/api/broadcast/conversation/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success){this.convMenuOpen=false;this.activeConv=null;this.stopPoll();this.fetchConversations();}}.bind(this));
+        var cid = this.activeConv.id || this.activeConv.conversation_id;
+        fetch('/api/broadcast/conversation/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:cid})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.convMenuOpen=false;this.activeConv=null;this.stopPoll();this.fetchContacts();}}.bind(this));
     },
     toggleConvMenu() { this.convMenuOpen=!this.convMenuOpen; },
     closeConvMenu() { this.convMenuOpen=false; },
     toggleMsgMenu(id) { this.msgMenuId=this.msgMenuId===id?null:id; },
     completeConv() {
         if(!this.activeConv||!confirm('Selesaikan percakapan ini?')) return;
-        fetch('/api/broadcast/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success){this.activeConv.status='completed';this.fetchConversations();}}.bind(this));
-    },
-
-    // Compose (Pesan Baru inline)
-    openCompose() {
-        this.showCompose=true; this.composeRole='murid'; this.composeRecipient=null; this.composeSending=false; this.composeStatus='';
-        this.fetchComposeRecipients();
-    },
-    closeCompose() { this.showCompose=false; },
-    selectRecipient() {
-        if(!this.composeRecipient){this.composeStatus='Pilih penerima';return;}
-        var r = this.composeRecipients.find(function(x){return x.id===this.composeRecipient;}.bind(this));
-        if(!r)return;
-        this.pendingRecipient = {id: r.id, name: r.full_name, role: this.composeRole};
-        this.showCompose = false; this.composeRecipient = null;
-        this.replyMessage = ''; this.composeStatus = '';
-    },
-    fetchComposeRecipients() {
-        fetch('/api/broadcast/students?role='+this.composeRole).then(function(r){return r.json();}).then(function(d){this.composeRecipients=d.users||[];}.bind(this)).catch(function(){});
+        var cid = this.activeConv.id || this.activeConv.conversation_id;
+        fetch('/api/broadcast/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:cid})})
+        .then(function(r){return r.json();}).then(function(d){if(d.success){this.activeConv.status='completed';this.fetchContacts();}}.bind(this));
     },
 
     // Pengumuman inbox
@@ -163,7 +163,7 @@
         Promise.all(promises).then(function(results){
             this.sending=false;
             var ok=results.every(function(r){return r.success;});
-            if(ok){var t=results.reduce(function(s,r){return s+(r.recipients||0);},0);this.sendMsg='Terkirim ke '+t+' penerima';this.formTitle='';this.formMessage='';this.fetchHistory();this.fetchInbox();this.fetchConversations();}
+            if(ok){var t=results.reduce(function(s,r){return s+(r.recipients||0);},0);this.sendMsg='Terkirim ke '+t+' penerima';this.formTitle='';this.formMessage='';this.fetchHistory();this.fetchInbox();this.fetchContacts();}
             else{var err=results.find(function(r){return !r.success;});this.sendMsg='Gagal: '+(err?(err.error||''):'');}
         }.bind(this)).catch(function(){this.sending=false;this.sendMsg='Error';}.bind(this));
     },
@@ -171,7 +171,7 @@
     cancelEditBroadcast(){this.editBroadcastId=null;this.editTitle='';this.editMessage='';},
     saveEditBroadcast(){if(!this.editTitle||!this.editMessage)return;fetch('/api/broadcast/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:this.editBroadcastId,title:this.editTitle,message:this.editMessage})}).then(function(r){return r.json();}).then(function(d){if(d.success){this.cancelEditBroadcast();this.fetchHistory();}}.bind(this));},
     deleteBroadcast(n){if(!confirm('Hapus pengumuman ini?'))return;fetch('/api/broadcast/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:n.id})}).then(function(r){return r.json();}).then(function(d){if(d.success)this.fetchHistory();}.bind(this));}
-}" x-init="fetchConversations();fetchInbox();fetchHistory();fetchClasses();fetchGuruList();fetchMuridList();$watch('selectedClass',function(){this.fetchMuridList();}.bind(this));$watch('composeRole',function(){this.composeRecipient=null;this.fetchComposeRecipients();}.bind(this))">
+}" x-init="fetchContacts();fetchInbox();fetchHistory();fetchClasses();fetchGuruList();fetchMuridList();$watch('selectedClass',function(){this.fetchMuridList();}.bind(this));$watch('activeTab',function(v){if(v==='inbox')this.markReadAll();}.bind(this))">
     <!-- Tab Nav -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 overflow-x-auto">
         <button @click="activeTab='convs';activeConv=null;stopPoll()" class="px-3 py-2.5 text-sm font-bold rounded-lg transition whitespace-nowrap" :class="activeTab==='convs'?'bg-white text-primary-600 shadow-sm':'text-surface-500 hover:text-surface-700'"><i class="fas fa-comments mr-1.5"></i>Percakapan</button>
@@ -187,50 +187,42 @@
                     <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
                         <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{{ (g.user_name or 'G')[:1]|upper }}</div>
                         <span class="font-bold text-surface-800 text-sm truncate">{{ g.user_name or 'Guru' }}</span>
-                        <button @click="openCompose()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Pesan Baru"><i class="fas fa-plus text-xs"></i></button>
-                        <button @click="fetchConversations()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
+                        <button @click="fetchContacts()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
                     </div>
                     <div class="px-4 py-2 bg-surface-50">
                         <div class="relative"><i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 text-xs"></i><input type="text" x-model="searchContact" placeholder="Cari kontak..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 outline-none text-surface-700 placeholder-surface-400"></div>
                     </div>
-                    <!-- Pilih Penerima Inline -->
-                    <template x-if="showCompose">
-                        <div class="flex-1 overflow-y-auto p-4 space-y-3">
-                            <div class="flex items-center gap-2 mb-2">
-                                <button @click="closeCompose()" class="text-surface-400 hover:text-primary-600 transition"><i class="fas fa-arrow-left text-sm"></i></button>
-                                <span class="font-bold text-surface-700 text-sm">Pilih Penerima</span>
-                            </div>
-                            <div class="flex gap-2">
-                                <button @click="composeRole='murid';composeRecipient=null;fetchComposeRecipients()" class="flex-1 py-2 text-xs font-bold rounded-lg transition" :class="composeRole==='murid'?'bg-primary-600 text-white shadow':'bg-surface-100 text-surface-600 hover:bg-surface-200'">Murid</button>
-                                <button @click="composeRole='guru';composeRecipient=null;fetchComposeRecipients()" class="flex-1 py-2 text-xs font-bold rounded-lg transition" :class="composeRole==='guru'?'bg-primary-600 text-white shadow':'bg-surface-100 text-surface-600 hover:bg-surface-200'">Guru</button>
-                            </div>
-                            <select x-model="composeRecipient" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs text-surface-700 bg-white">
-                                <option value="">Pilih penerima</option>
-                                <template x-for="r in composeRecipients" :key="r.id"><option :value="r.id" x-text="r.full_name"></option></template>
-                            </select>
-                            <button @click="selectRecipient()" class="w-full py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition">Pilih</button>
-                            <p x-show="composeStatus" class="text-xs font-bold text-red-600" x-text="composeStatus"></p>
-                        </div>
-                    </template>
-                    <div class="flex-1 overflow-y-auto divide-y divide-surface-100" x-show="!showCompose">
-                        <template x-for="c in filteredConvs" :key="c.id">
-                            <div @click="openConv(c)" class="flex items-center gap-3 px-4 py-3 cursor-pointer transition" :class="activeConv&&activeConv.id===c.id?'bg-surface-100':'hover:bg-surface-50'">
+                    <div class="flex-1 overflow-y-auto divide-y divide-surface-100">
+                        <template x-for="c in filteredContacts" :key="c.id">
+                            <div @click="startChat(c)" class="flex items-center gap-3 px-4 py-3 cursor-pointer transition" :class="activeConv&&(activeConv.id===c.conversation_id||activeConv.conversation_id===c.conversation_id)?'bg-surface-100':'hover:bg-surface-50'">
                                 <div class="relative shrink-0">
-                                    <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.other_role==='guru'?'bg-gradient-to-br from-amber-400 to-amber-600':(c.other_role==='murid'?'bg-gradient-to-br from-emerald-400 to-emerald-600':(c.other_role==='admin_sekolah'||c.other_role==='super_admin'?'bg-gradient-to-br from-purple-400 to-purple-600':'bg-gradient-to-br from-blue-400 to-blue-600'))">
-                                        <span x-text="(c.other_name||'?')[0].toUpperCase()"></span>
+                                    <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm" :class="c.role==='guru'?'bg-gradient-to-br from-amber-400 to-amber-600':(c.role==='admin_sekolah'||c.role==='super_admin'?'bg-gradient-to-br from-purple-400 to-purple-600':'bg-gradient-to-br from-blue-400 to-blue-600')">
+                                        <span x-text="(c.full_name||'?')[0].toUpperCase()"></span>
                                     </div>
-                                    <span x-show="c.has_unread" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+                                    <span x-show="c.unread_count>0" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <div class="flex items-center justify-between"><span class="font-semibold text-surface-800 text-sm truncate" x-text="c.title||'Percakapan'"></span><span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at?c.last_message_at.slice(11,16):''"></span></div>
-                                    <div class="flex items-center gap-1.5 mt-0.5"><span class="text-xs text-surface-500 truncate"><span class="font-medium text-surface-400" x-text="c.other_name+': '"></span><span x-text="c.last_msg_preview||'Belum ada pesan'"></span></span><template x-if="c.has_unread"><span class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center" x-text="c.unread_count||'baru'"></span></template></div>
+                                    <div class="flex items-center justify-between">
+                                        <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.full_name"></span>
+                                        <span class="text-[10px] text-surface-400 shrink-0 ml-2" x-text="c.last_message_at?c.last_message_at.slice(11,16):''"></span>
+                                    </div>
+                                    <div class="flex items-center gap-1.5 mt-0.5">
+                                        <span class="text-xs text-surface-500 truncate"><span x-text="c.last_msg_preview||'Belum ada pesan'"></span></span>
+                                        <template x-if="c.unread_count>0">
+                                            <span class="shrink-0 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center" x-text="c.unread_count"></span>
+                                        </template>
+                                    </div>
                                 </div>
                             </div>
                         </template>
-                        <template x-if="!convsLoading&&filteredConvs.length===0">
-                            <div class="flex flex-col items-center justify-center py-16 text-surface-400 px-4"><i class="fas fa-comments text-4xl mb-3 text-surface-200"></i><p class="text-sm font-medium">Belum ada percakapan</p></div>
+                        <template x-if="!contactsLoading&&filteredContacts.length===0">
+                            <div class="flex flex-col items-center justify-center py-16 text-surface-400 px-4">
+                                <i class="fas fa-comments text-4xl mb-3 text-surface-200"></i>
+                                <p class="text-sm font-medium">Belum ada kontak</p>
+                                <p class="text-xs mt-1">Tidak ada pengguna yang dapat dihubungi</p>
+                            </div>
                         </template>
-                        <template x-if="convsLoading&&conversations.length===0">
+                        <template x-if="contactsLoading">
                             <div class="flex items-center justify-center py-16 text-surface-400"><i class="fas fa-spinner fa-spin mr-2"></i>Memuat...</div>
                         </template>
                     </div>
