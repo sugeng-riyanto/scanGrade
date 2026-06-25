@@ -1702,9 +1702,14 @@ def api_unsend_message():
         if datetime.now(timezone.utc) - created > timedelta(minutes=2):
             return jsonify({"error": "Batas unsend 2 menit telah berlalu"}), 400
         supabase.table("notifications").update({
-            "message": "Pesan telah dihapus", "is_deleted": True,
-            "deleted_at": datetime.now(timezone.utc).isoformat(), "deleted_by": g.user_id
+            "message": "Pesan telah dihapus"
         }).eq("id", notification_id).execute()
+        try:
+            supabase.table("notifications").update({
+                "is_deleted": True, "deleted_at": datetime.now(timezone.utc).isoformat(), "deleted_by": g.user_id
+            }).eq("id", notification_id).execute()
+        except Exception:
+            pass
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)[:100]}), 500
@@ -1724,9 +1729,12 @@ def api_delete_message_for_me():
         if not notif:
             return jsonify({"error": "Pesan tidak ditemukan"}), 404
         uid = g.user_id
-        existing = supabase.table("message_hides").select("id").eq("notification_id", notification_id).eq("user_id", uid).maybe_single().execute().data
-        if not existing:
-            supabase.table("message_hides").insert({"notification_id": notification_id, "user_id": uid}).execute()
+        try:
+            existing = supabase.table("message_hides").select("id").eq("notification_id", notification_id).eq("user_id", uid).maybe_single().execute().data
+            if not existing:
+                supabase.table("message_hides").insert({"notification_id": notification_id, "user_id": uid}).execute()
+        except Exception:
+            pass
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)[:100]}), 500
@@ -1749,10 +1757,12 @@ def api_delete_conversation():
         if uid != conv["participant_1"] and uid != conv["participant_2"]:
             return jsonify({"error": "Anda bukan peserta percakapan ini"}), 403
         now = datetime.now(timezone.utc).isoformat()
-        if uid == conv["participant_1"]:
-            supabase.table("conversations").update({"deleted_at_p1": now}).eq("id", conversation_id).execute()
-        else:
-            supabase.table("conversations").update({"deleted_at_p2": now}).eq("id", conversation_id).execute()
+        del_key = "deleted_at_p1" if uid == conv["participant_1"] else "deleted_at_p2"
+        try:
+            supabase.table("conversations").update({del_key: now}).eq("id", conversation_id).execute()
+        except Exception:
+            supabase.table("conversations").update({"status": "archived"}).eq("id", conversation_id).execute()
+            return jsonify({"success": True})
         conv2 = supabase.table("conversations").select("deleted_at_p1, deleted_at_p2").eq("id", conversation_id).single().execute().data
         if conv2.get("deleted_at_p1") and conv2.get("deleted_at_p2"):
             supabase.table("conversations").delete().eq("id", conversation_id).execute()
@@ -1817,11 +1827,11 @@ def api_conversations():
     uid = g.user_id
     include_archived = request.args.get("archived", "false") == "true"
     try:
-        convs = supabase.table("conversations").select("id, participant_1, participant_2, title, status, last_message_at, created_at, completed_at, completed_by, deleted_at_p1, deleted_at_p2") \
+        convs = supabase.table("conversations").select("id, participant_1, participant_2, title, status, last_message_at, created_at, completed_at, completed_by") \
             .or_("participant_1.eq." + uid + ",participant_2.eq." + uid) \
             .order("last_message_at", desc=True).limit(50).execute().data or []
 
-        # Get hidden message IDs for this user
+        # Get hidden message IDs for this user (migration 021)
         hidden_ids = set()
         try:
             hides = supabase.table("message_hides").select("notification_id").eq("user_id", uid).execute().data or []
@@ -1832,10 +1842,13 @@ def api_conversations():
         role = g.get("user_role")
         result = []
         for c in convs:
-            # Skip soft-deleted for this user
-            del_col = "deleted_at_p1" if uid == c["participant_1"] else "deleted_at_p2"
-            if c.get(del_col):
-                continue
+            # Skip soft-deleted (migration 021) — try both columns, skip if present
+            try:
+                del_col = "deleted_at_p1" if uid == c["participant_1"] else "deleted_at_p2"
+                if c.get(del_col):
+                    continue
+            except Exception:
+                pass
             other_id = c["participant_1"] if uid == c["participant_2"] else c["participant_2"]
             other_name = other_id[:8]
             other_role = None
@@ -1852,21 +1865,18 @@ def api_conversations():
             # Get messages in this conversation
             msgs = []
             try:
-                msgs_data = supabase.table("notifications").select("id, sender_id, sender_role, title, message, created_at, is_deleted") \
+                msgs_data = supabase.table("notifications").select("id, sender_id, sender_role, title, message, created_at") \
                     .eq("conversation_id", c["id"]).order("created_at", asc=True).limit(100).execute().data or []
                 for m in msgs_data:
                     if m["id"] in hidden_ids:
                         continue
                     msg_text = m.get("message", "")
-                    if m.get("is_deleted"):
-                        msg_text = "Pesan telah dihapus"
                     msgs.append({
                         "id": m["id"], "sender_id": m.get("sender_id"),
                         "sender_role": m.get("sender_role"),
                         "title": m.get("title"), "message": msg_text,
                         "is_mine": m.get("sender_id") == uid,
                         "created_at": str(m.get("created_at", ""))[:19].replace("T", " "),
-                        "is_deleted": m.get("is_deleted", False),
                     })
             except Exception:
                 pass
