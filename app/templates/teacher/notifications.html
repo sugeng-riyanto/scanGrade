@@ -294,28 +294,32 @@
                                                     </template>
                                                     <template x-if="editingMsgId!==m.id">
                                                         <div class="relative">
-                                                            <div class="px-3 py-2 shadow-sm" :class="m.is_mine?'bg-primary-500 text-white rounded-2xl rounded-br-sm':'bg-white text-surface-800 rounded-2xl rounded-bl-sm border border-surface-100'">
-                                                                <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
-                                                            </div>
-                                                            <div class="flex gap-0.5 absolute -top-1.5 -right-1.5 z-10 opacity-0 group-hover:opacity-100 transition">
-                                                                <div class="relative" @click.outside="if(msgMenuId===m.id)msgMenuId=null">
-                                                                    <button @click="toggleMsgMenu(m.id)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-chevron-down text-[8px]"></i></button>
-                                                                    <template x-if="msgMenuId===m.id">
-                                                                        <div class="absolute right-0 top-full mt-0.5 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[130px]">
-                                                                            <template x-if="m.is_mine"><button @click="unsendMsg(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50"><i class="fas fa-undo-alt text-[10px]"></i>Unsend</button></template>
-                                                                            <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50"><i class="fas fa-eye-slash text-[10px]"></i>Sembunyikan</button>
+                                                            <div :class="m.is_mine?'bg-[#dcf8c6] text-[#111b21] rounded-2xl rounded-br-sm shadow-sm':'bg-white text-surface-800 rounded-2xl rounded-bl-sm shadow-sm border border-surface-100'">
+                                                                    <div class="px-3 pt-2 pb-1">
+                                                                        <div class="text-sm leading-relaxed whitespace-pre-wrap" x-html="linkify(m.message)"></div>
+                                                                        <div class="flex items-center gap-1 justify-end -mt-0.5">
+                                                                            <span class="text-[11px] text-[#667781]" x-text="m.created_at?m.created_at.slice(11,16):''"></span>
+                                                                            <template x-if="m.is_mine">
+                                                                                <i class="fas fa-check-double text-[11px]" :class="idx===activeConv.messages.length-1?'text-[#53bdeb]':'text-[#8696a0]'"></i>
+                                                                            </template>
                                                                         </div>
-                                                                    </template>
+                                                                    </div>
                                                                 </div>
-                                                                <template x-if="canEdit(m)"><button @click="startEdit(m)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button></template>
+                                                                <div class="flex gap-0.5 absolute -top-1.5 -right-1.5 z-10 opacity-0 group-hover:opacity-100 transition">
+                                                                    <div class="relative" @click.outside="if(msgMenuId===m.id)msgMenuId=null">
+                                                                        <button @click="toggleMsgMenu(m.id)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-chevron-down text-[8px]"></i></button>
+                                                                        <template x-if="msgMenuId===m.id">
+                                                                            <div class="absolute right-0 top-full mt-0.5 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[130px]">
+                                                                                <template x-if="m.is_mine"><button @click="unsendMsg(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50"><i class="fas fa-undo-alt text-[10px]"></i>Unsend</button></template>
+                                                                                <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50"><i class="fas fa-eye-slash text-[10px]"></i>Sembunyikan</button>
+                                                                            </div>
+                                                                        </template>
+                                                                    </div>
+                                                                    <template x-if="canEdit(m)"><button @click="startEdit(m)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-pen text-[8px]"></i></button></template>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    </template>
-                                                    <div class="flex items-center gap-1 justify-end mt-0.5 px-0.5" :class="m.is_mine?'text-right':'text-left'">
-                                                        <span class="text-[9px] text-surface-400" x-text="m.created_at?m.created_at.slice(11,16):''"></span>
-                                                        <template x-if="m.is_mine"><i class="fas fa-check-double text-[9px]" :class="m.is_deleted?'text-surface-300':(idx===activeConv.messages.length-1?'text-primary-400':'text-surface-300')"></i></template>
+                                                        </template>
                                                     </div>
-                                                </div>
                                             </div>
                                         </template>
                                     </div>
