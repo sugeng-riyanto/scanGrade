@@ -1495,13 +1495,23 @@ def api_send_broadcast():
     if recipient_ids and isinstance(recipient_ids, list) and len(recipient_ids) > 0:
         if role == "murid":
             try:
-                valid = supabase.table("profiles").select("id, role").eq("status", "active").in_("id", recipient_ids).execute().data or []
+                valid = supabase.table("profiles").select("id, role").in_("id", recipient_ids).execute().data or []
+                try:
+                    valid = [v for v in valid if v.get("status") == "active"]
+                except Exception:
+                    pass
                 recipients = [{"id": r["id"]} for r in valid if r.get("role") in ("guru", "admin_sekolah", "super_admin")]
             except Exception:
                 recipients = []
         elif target_school_id:
             try:
-                valid = supabase.table("profiles").select("id").eq("status", "active").in_("id", recipient_ids).eq("school_id", target_school_id).execute().data or []
+                query = supabase.table("profiles").select("id").in_("id", recipient_ids)
+                try:
+                    query = query.eq("status", "active")
+                except Exception:
+                    pass
+                query = query.eq("school_id", target_school_id)
+                valid = query.execute().data or []
                 recipients = [{"id": r["id"]} for r in valid]
             except Exception:
                 recipients = [{"id": uid} for uid in recipient_ids]
@@ -1510,7 +1520,11 @@ def api_send_broadcast():
     else:
         # Broadcast to all matching role + school
         try:
-            query = supabase.table("profiles").select("id").eq("status", "active")
+            query = supabase.table("profiles").select("id")
+            try:
+                query = query.eq("status", "active")
+            except Exception:
+                pass
             if target_role and target_role != "all":
                 query = query.eq("role", target_role)
             if target_school_id:
@@ -1937,14 +1951,18 @@ def api_broadcast_contacts():
         "murid": ["guru", "admin_sekolah"],
         "guru": ["murid"],
         "admin_sekolah": ["guru", "murid"],
-        "super_admin": ["guru", "murid", "admin_sekolah"],
+        "super_admin": ["guru", "murid", "admin_sekolah", "super_admin"],
     }
     target_roles = roles_map.get(role, [])
     if not target_roles:
         return jsonify({"contacts": []})
 
     try:
-        query = supabase.table("profiles").select("id, full_name, role").eq("status", "active").in_("role", target_roles)
+        query = supabase.table("profiles").select("id, full_name, role").in_("role", target_roles)
+        try:
+            query = query.eq("status", "active")
+        except Exception:
+            pass
         if school_id and role != "super_admin":
             try:
                 query = query.eq("school_id", school_id)
