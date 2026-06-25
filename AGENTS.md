@@ -92,9 +92,11 @@
 ### In Progress
 - None
 
-### Latest (2025-06-23)
-- **Conversation reply simplified**: Removed `title` input from reply form (student & teacher) — only `message` textarea shown. Reply API no longer updates conversation title (keeps original title). `title` field removed from API validation (optional). True two-way reply works until creator clicks "Selesaikan".
-- **Badge alert mechanism fixed**: `api_conversations()` checks `notification_recipients.read_at` for `has_unread`. Added `POST /api/broadcast/mark-read-all` endpoint. Both notification pages call `mark-read-all` on tab switch and dispatch `sg:unread` custom event for instant badge refresh.
+### Latest (2025-06-25)
+- **Empty messages bug fix**: `api_conversations` stopped selecting `is_deleted` (migration 021 column missing from DB → query silently failed → `msgs=[]` → "Belum ada pesan"). Removed from SELECT entirely; 021-only features use try/except fallbacks.
+- **Compose flow simplified** (all 4 RBAC templates): Replaced `composeTitle`/`composeMessage`/`sendFirstMsg` with `pendingRecipient` pattern. Click "+" → recipient picker (role toggle + dropdown + "Pilih") → closes → input bar appears with recipient name → user types and sends. Title auto-generated from `message[:50]` by API.
+- **`api_send_broadcast` restructured**: Creates conversation BEFORE notification insert (not separate UPDATE). `conversation_id` set at insert time, matching `api_reply_broadcast` pattern.
+- **CRUD consistency**: All 4 templates now share same chat area structure: sidebar responsive for `pendingRecipient`, pendingRecipient header, messages wrapped in `x-if="activeConv"` guard, input bar shown for both `activeConv || pendingRecipient`.
 
 ### Blocked
 - Migration 018 (soft-delete + deletion_requests) must run in Supabase SQL Editor
@@ -127,14 +129,28 @@
 - **Privacy policy expanded**: 13 sections covering UU PDP + PSE Kominfo — added Penarikan Persetujuan (§6), Keputusan Otomatis/Profiling (§7), Data Sensitif (§2 explicit Pasal 26 disclosure).
 - **Terms updated with RBAC matrix**: Full communication RBAC table in §5 matching AGENTS.md matrix, plus dispute resolution (§9: musyawarah → mediasi 30 hari → pengadilan).
 - **Terms route now passes dpo_contact**: Both `/privacy` and `/terms` fetch DPO from system_settings.
+- **Title optional**: Auto-generated from first 50 chars of message. Users no longer need to think of a title — just type and send.
+- **Compose simplified to recipient picker**: No more title + message + send form. "+" → pick recipient → input bar appears directly (like WhatsApp "New chat"). `pendingRecipient` pattern drives the flow.
+- **Always-visible input bar**: Shows when `activeConv || pendingRecipient`; no compose form replaces the chat view.
+- **Conversation before notification**: `api_send_broadcast` creates/updates conversation first, then inserts notification WITH `conversation_id` — no separate UPDATE needed, no race condition.
+- **Graceful fallback for missing columns**: All migration-021-specific features (unsend, hide, soft-delete) try the new columns first; if they don't exist, fall back gracefully (e.g., unsend always sets `message="Pesan telah hapus"` even if `is_deleted` column is missing).
+- **Messages area guarded by `x-if="activeConv"`**: Prevents Alpine errors when `pendingRecipient` is set but `activeConv` is null.
 
 ## Next Steps
-1. **Run migration 018** in Supabase SQL Editor (`supabase/migrations/018_data_retention.sql`)
+1. **Run migration 021** in Supabase SQL Editor (`supabase/migrations/021_conversation_crud.sql`) — needed for unsend/hide/soft-delete full features
 2. **Run PDP columns migration** (see SQL above) in Supabase SQL Editor
 3. **Deploy**: `git pull origin main && systemctl restart scangrade`
 4. **Configure DPO/PSE**: Login as super_admin → `/super-admin/privacy-settings` → fill DPO contact, PSE reg number, data controller info
 5. **Register as PSE Kominfo** (operational, not code)
 6. **Appoint DPO** (operational, not code) and set contact in system_settings
+
+## Key Files (Notifications)
+- `app/routes/api.py`: All conversation/broadcast CRUD + title auto-generation + conv-before-notif insert + graceful migration-021 fallbacks + `last_msg_preview`/`unread_count`.
+- `supabase/migrations/021_conversation_crud.sql`: Unsend, soft-delete, message_hides support (must run in SQL Editor).
+- `app/templates/teacher/notifications.html`: 3 tabs + simplified recipient picker compose + pendingRecipient input bar + CRUD + broadcast form.
+- `app/templates/student/notifications.html`: 2 tabs + simplified recipient picker compose + pendingRecipient input bar.
+- `app/templates/admin_sekolah/notifications.html`: 5 tabs + simplified compose + CRUD + broadcast + deletion requests.
+- `app/templates/super_admin/notifications.html`: 5 tabs + simplified compose + CRUD + broadcast + privacy settings.
 
 ## Key Files (Compliance)
 - `app/routes/public.py`: `/privacy` and `/terms` routes with DPO fetch

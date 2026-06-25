@@ -16,8 +16,8 @@
     editingMsgId: null, editMsgText: '',
     pollTimer: null,
     convMenuOpen: false, msgMenuId: null,
-    showCompose: false, composeRole: 'guru',     composeRecipients: [], composeRecipient: null, composeTitle: '', composeMessage: '', composeSending: false, composeStatus: '',
-    firstMsgTitle: '', firstMsgBody: '', sendingFirst: false, firstMsgError: '',
+    showCompose: false, composeRole: 'guru',     composeRecipients: [], composeRecipient: null, composeSending: false, composeStatus: '',
+    pendingRecipient: null,
     statsMap: {},
     get filteredRecipients() {
         var s = this.searchRecipient.toLowerCase();
@@ -53,7 +53,6 @@
     openConv(c) {
         this.activeConv = c;
         this.replyMessage = ''; this.replyError = ''; this.editingMsgId = null;
-        this.firstMsgTitle=c.title||'Percakapan'; this.firstMsgBody=''; this.firstMsgError='';
         this.$nextTick(() => { this.scrollToBottom(); });
         this.startPolling();
         fetch('/api/broadcast/mark-read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({conversation_id: c.id}) }).then(() => {
@@ -78,12 +77,22 @@
     },
     sendReply() {
         if (!this.replyMessage) return;
-        this.replying = true; this.replyError = '';
-        fetch('/api/broadcast/reply', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: this.activeConv.id, message: this.replyMessage}) })
-        .then(r=>r.json()).then(d => {
-            if (d.success) { this.replyMessage = ''; this.activeConv = null; this.stopPolling(); this.fetchConversations(); this.refreshBadge(); }
-            else { this.replyError = d.error || 'Gagal kirim'; }
-        }).catch(()=>{ this.replyError = 'Gagal terhubung ke server'; }).finally(()=>{ this.replying = false; });
+        if (this.pendingRecipient) {
+            this.replying = true; this.replyError = '';
+            fetch('/api/broadcast/send', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: this.replyMessage, message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]}) })
+            .then(r=>r.json()).then(d => {
+                this.replying = false;
+                if (d.success) { this.replyMessage = ''; this.pendingRecipient = null; this.fetchConversations(); this.refreshBadge(); }
+                else { this.replyError = d.error || 'Gagal'; }
+            }).catch(()=>{ this.replying = false; this.replyError = 'Gagal terhubung'; });
+        } else if (this.activeConv) {
+            this.replying = true; this.replyError = '';
+            fetch('/api/broadcast/reply', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: this.activeConv.id, message: this.replyMessage}) })
+            .then(r=>r.json()).then(d => {
+                if (d.success) { this.replyMessage = ''; this.activeConv = null; this.stopPolling(); this.fetchConversations(); this.refreshBadge(); }
+                else { this.replyError = d.error || 'Gagal kirim'; }
+            }).catch(()=>{ this.replyError = 'Gagal terhubung ke server'; }).finally(()=>{ this.replying = false; });
+        }
     },
     completeConv() {
         if (!confirm('Selesaikan percakapan ini?')) return;
@@ -140,35 +149,18 @@
     },
     // Compose (Pesan Baru inline)
     openCompose() {
-        this.showCompose=true; this.composeRole='guru'; this.composeRecipient=null; this.composeTitle=''; this.composeMessage=''; this.composeSending=false; this.composeStatus='';
+        this.showCompose=true; this.composeRole='guru'; this.composeRecipient=null; this.composeSending=false; this.composeStatus='';
         this.fetchComposeRecipients();
     },
     closeCompose() { this.showCompose=false; },
     fetchComposeRecipients() {
         fetch('/api/broadcast/students?role='+this.composeRole).then(function(r){return r.json();}).then(function(d){this.composeRecipients=d.users||[];}.bind(this)).catch(function(){});
     },
-    sendCompose() {
+    selectRecipient() {
         if(!this.composeRecipient){this.composeStatus='Pilih penerima';return;}
-        if(!this.composeTitle||!this.composeMessage){this.composeStatus='Isi judul dan pesan';return;}
-        this.composeSending=true; this.composeStatus='';
-        fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:this.composeTitle,message:this.composeMessage,target_role:this.composeRole,recipient_ids:[this.composeRecipient]})})
-        .then(function(r){return r.json();}).then(function(d){
-            this.composeSending=false;
-            if(d.success){this.composeStatus='Terkirim';this.composeTitle='';this.composeMessage='';this.composeRecipient=null;this.showCompose=false;this.fetchConversations();}
-            else{this.composeStatus='Gagal: '+(d.error||'');}
-        }.bind(this)).catch(function(){this.composeSending=false;this.composeStatus='Error';}.bind(this));
-    },
-    sendFirstMsg() {
-        if(!this.activeConv) return;
-        var msg=this.firstMsgBody||this.replyMessage;
-        if(!msg){this.firstMsgError='Tulis pesan terlebih dahulu';return;}
-        this.sendingFirst=true; this.firstMsgError='';
-        fetch('/api/broadcast/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:this.activeConv.id,message:msg})})
-        .then(function(r){return r.json();}).then(function(d){
-            this.sendingFirst=false;
-            if(d.success){this.firstMsgTitle='';this.firstMsgBody='';this.replyMessage='';this.fetchConversations();}
-            else{this.firstMsgError=d.error||'Gagal';}
-        }.bind(this)).catch(function(){this.sendingFirst=false;this.firstMsgError='Gagal terhubung';}.bind(this));
+        var r = this.composeRecipients.find(function(u){return u.id===this.composeRecipient;}.bind(this));
+        if(r){this.pendingRecipient={id:r.id,name:r.full_name,role:this.composeRole};}
+        this.showCompose=false; this.composeRecipient=null;
     },
     fetchNotifs() {
         this.loading = true;
@@ -259,7 +251,7 @@
             <template x-if="!convsLoading || conversations.length > 0">
                 <div class="flex h-full">
                     <!-- Sidebar -->
-                    <div class="w-20 md:w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv ? 'hidden md:flex' : 'flex'">
+                    <div class="w-20 md:w-72 lg:w-80 border-r border-surface-200 flex flex-col shrink-0" :class="activeConv || pendingRecipient ? 'hidden md:flex' : 'flex'">
                         <div class="px-3 md:px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3">
                             <div class="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shrink-0">{{ (g.user_name or 'A')[:1]|upper }}</div>
                             <span class="hidden md:block font-bold text-surface-800 text-sm truncate">{{ g.user_name or 'Admin Sekolah' }}</span>
@@ -272,12 +264,12 @@
                                 <input type="text" x-model="searchContact" placeholder="Cari percakapan..." class="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 focus:border-primary-400 outline-none text-surface-700 placeholder-surface-400">
                             </div>
                         </div>
-                        <!-- Pesan Baru Inline -->
+                        <!-- Pilih Penerima Inline -->
                         <template x-if="showCompose">
                             <div class="flex-1 overflow-y-auto p-4 space-y-3">
                                 <div class="flex items-center gap-2 mb-2">
                                     <button @click="closeCompose()" class="text-surface-400 hover:text-primary-600 transition"><i class="fas fa-arrow-left text-sm"></i></button>
-                                    <span class="font-bold text-surface-700 text-sm">Pesan Baru</span>
+                                    <span class="font-bold text-surface-700 text-sm">Pilih Penerima</span>
                                 </div>
                                 <div class="flex gap-2">
                                     <button @click="composeRole='guru';composeRecipient=null;fetchComposeRecipients()" class="flex-1 py-2 text-xs font-bold rounded-lg transition" :class="composeRole==='guru'?'bg-primary-600 text-white shadow':'bg-surface-100 text-surface-600 hover:bg-surface-200'">Guru</button>
@@ -287,10 +279,8 @@
                                     <option value="">Pilih penerima</option>
                                     <template x-for="r in composeRecipients" :key="r.id"><option :value="r.id" x-text="r.full_name"></option></template>
                                 </select>
-                                <input type="text" x-model="composeTitle" placeholder="Judul" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 outline-none text-surface-700 placeholder-surface-400">
-                                <textarea x-model="composeMessage" placeholder="Pesan" rows="3" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs focus:ring-1 focus:ring-primary-400 outline-none text-surface-700 placeholder-surface-400 resize-none"></textarea>
-                                <button @click="sendCompose()" class="w-full py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition disabled:opacity-50" :disabled="composeSending"><span x-text="composeSending?'Mengirim...':'Kirim'"></span></button>
-                                <p x-show="composeStatus" class="text-xs font-bold" :class="composeStatus.includes('Terkirim')?'text-emerald-600':'text-red-600'" x-text="composeStatus"></p>
+                                <button @click="selectRecipient()" class="w-full py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition">Pilih</button>
+                                <p x-show="composeStatus" class="text-xs font-bold text-red-600" x-text="composeStatus"></p>
                             </div>
                         </template>
                         <div class="flex-1 overflow-y-auto divide-y divide-surface-100" x-show="!showCompose">
@@ -324,8 +314,8 @@
                         </div>
                     </div>
                     <!-- Chat Area -->
-                    <div class="flex-1 flex flex-col" :class="!activeConv ? 'hidden md:flex' : 'flex'">
-                        <template x-if="!activeConv">
+                    <div class="flex-1 flex flex-col" :class="!activeConv && !pendingRecipient ? 'hidden md:flex' : 'flex'">
+                        <template x-if="!activeConv && !pendingRecipient">
                             <div class="flex flex-col items-center justify-center h-full bg-surface-50 text-surface-400 px-6">
                                 <div class="w-20 h-20 rounded-full bg-surface-100 flex items-center justify-center mb-4">
                                     <i class="fas fa-comments text-3xl text-surface-300"></i>
@@ -334,8 +324,9 @@
                                 <p class="text-sm mt-1 text-center">Pilih percakapan dari sidebar untuk mulai mengobrol</p>
                             </div>
                         </template>
-                        <template x-if="activeConv">
+                        <template x-if="activeConv || pendingRecipient">
                             <div class="flex flex-col h-full">
+                                <template x-if="activeConv">
                                 <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3 shrink-0">
                                     <button @click="activeConv=null; stopPolling()" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
                                     <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru' ? 'bg-gradient-to-br from-amber-400 to-amber-600' : (activeConv.other_role==='admin_sekolah' ? 'bg-gradient-to-br from-purple-400 to-purple-600' : (activeConv.other_role==='murid' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-blue-400 to-blue-600'))">
@@ -364,7 +355,19 @@
                                         </template>
                                     </div>
                                 </div>
+                                </template>
+                                <template x-if="!activeConv && pendingRecipient">
+                                <div class="px-4 py-3 bg-surface-50 border-b border-surface-200 flex items-center gap-3 shrink-0">
+                                    <button @click="pendingRecipient=null" class="md:hidden text-surface-500 hover:text-primary-600 mr-1"><i class="fas fa-arrow-left"></i></button>
+                                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="pendingRecipient.role==='guru'?'bg-gradient-to-br from-amber-400 to-amber-600':(pendingRecipient.role==='admin_sekolah'?'bg-gradient-to-br from-purple-400 to-purple-600':(pendingRecipient.role==='murid'?'bg-gradient-to-br from-emerald-400 to-emerald-600':'bg-gradient-to-br from-blue-400 to-blue-600'))">
+                                        <span x-text="(pendingRecipient.name||'?')[0].toUpperCase()"></span>
+                                    </div>
+                                    <div class="flex-1 min-w-0"><p class="font-semibold text-surface-800 text-sm truncate" x-text="pendingRecipient.name"></p><p class="text-[11px] text-emerald-600">Online</p></div>
+                                </div>
+                                </template>
                                 <div class="flex-1 overflow-y-auto p-4 chat-scroll bg-[#efeae2] space-y-1" style="background-image: url('data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot; opacity=&quot;0.06&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23efeae2&quot;/><path d=&quot;M0 0l200 200M200 0L0 200&quot; stroke=&quot;%238d6e5c&quot; stroke-width=&quot;0.5&quot;/></svg>')">
+                                <template x-if="activeConv">
+                                <div>
                                     <template x-for="(m, idx) in activeConv.messages" :key="m.id">
                                         <div class="flex items-end gap-1.5 mb-1" :class="m.is_mine ? 'justify-end' : 'justify-start'">
                                             <template x-if="!m.is_mine">
@@ -392,7 +395,7 @@
                                                                 <button @click="toggleMsgMenu(m.id)" class="w-5 h-5 rounded-full bg-white shadow border border-surface-200 flex items-center justify-center text-surface-400 hover:text-primary-600"><i class="fas fa-chevron-down text-[8px]"></i></button>
                                                                 <template x-if="msgMenuId === m.id">
                                                                     <div class="absolute right-0 top-full mt-0.5 bg-white border border-surface-200 rounded-xl shadow-xl py-1 z-50 min-w-[140px]">
-                                                                        <template x-if="m.is_mine && !m.is_deleted">
+                                                                         <template x-if="m.is_mine">
                                                                             <button @click="unsendMsg(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition font-medium"><i class="fas fa-undo-alt text-[10px]"></i>Unsend</button>
                                                                         </template>
                                                                         <button @click="deleteForMe(m)" class="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-600 hover:bg-surface-50 transition font-medium"><i class="fas fa-eye-slash text-[10px]"></i>Sembunyikan</button>
@@ -414,7 +417,9 @@
                                             </div>
                                         </div>
                                     </template>
-                                <template x-if="!activeConv.messages||activeConv.messages.length===0">
+                                </div>
+                                </template>
+                                <template x-if="!activeConv || !activeConv.messages||activeConv.messages.length===0">
                                     <div class="flex items-center justify-center h-full"><p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p></div>
                                 </template>
                                 <!-- reply input -->
