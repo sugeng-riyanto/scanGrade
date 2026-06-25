@@ -98,6 +98,7 @@
 - **`/api/broadcast/contacts` endpoint**: Returns all contacts the user can message (RBAC-filtered), merged with conversation info (`conversation_id`, `last_msg_preview`, `unread_count`, `last_message_at`).
 - **Contacts-based sidebar (all 4 RBAC templates)**: Replaced conversation list with contact list. Removed `showCompose`/recipient picker entirely. `filteredConvs` → `filteredContacts`, `fetchConversations` → `fetchContacts`. Click any contact → direct chat (existing conv or new via `pendingRecipient`). No "+" button needed — ALL contacts visible in sidebar.
 - **`api_send_broadcast` restructured**: Creates conversation BEFORE notification insert (not separate UPDATE). `conversation_id` set at insert time, matching `api_reply_broadcast` pattern.
+- **Reply stays in chat**: `sendReply` no longer nulls `activeConv` — message appears instantly in-place. `pendingRecipient` branch opens the newly created conversation instead of returning to contact list.
 
 ### Blocked
 - Migration 021 (soft-delete + conversation CRUD columns) must run in Supabase SQL Editor
