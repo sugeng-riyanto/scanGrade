@@ -1465,8 +1465,10 @@ def api_send_broadcast():
     target_role = data.get("target_role", "")
     target_school_id = data.get("school_id", None)
 
-    if not title or not message:
-        return jsonify({"error": "Judul dan pesan wajib diisi"}), 400
+    if not message:
+        return jsonify({"error": "Pesan wajib diisi"}), 400
+    if not title:
+        title = (message[:50] + '...') if len(message) > 50 else message
 
     supabase = get_supabase()
     role = g.get("user_role")
