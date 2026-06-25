@@ -83,7 +83,14 @@
             fetch('/api/broadcast/send', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: this.replyMessage, message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]}) })
             .then(r=>r.json()).then(d => {
                 this.replying = false;
-                if (d.success) { this.replyMessage = ''; this.pendingRecipient = null; this.fetchContacts(); this.refreshBadge(); }
+                if (d.success) {
+                    var name = this.pendingRecipient.name;
+                    var role = this.pendingRecipient.role;
+                    this.replyMessage = ''; this.pendingRecipient = null;
+                    this.fetchContacts(); this.refreshBadge();
+                    var cid = d.conversation_id;
+                    if (cid) { this.openConv({conversation_id: cid, other_name: name, other_role: role}); }
+                }
                 else { this.replyError = d.error || 'Gagal'; }
             }).catch(()=>{ this.replying = false; this.replyError = 'Gagal terhubung'; });
         } else if (this.activeConv) {
@@ -92,7 +99,16 @@
             this.replying = true; this.replyError = '';
             fetch('/api/broadcast/reply', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: cid, message: this.replyMessage}) })
             .then(r=>r.json()).then(d => {
-                if (d.success) { this.replyMessage = ''; this.activeConv = null; this.stopPoll(); this.fetchContacts(); this.refreshBadge(); }
+                if (d.success) {
+                    this.replyMessage = '';
+                    this.fetchContacts();
+                    this.refreshBadge();
+                    var cid = this.activeConv.conversation_id || this.activeConv.id;
+                    fetch('/api/broadcast/conversations').then(r=>r.json()).then(d2 => {
+                        var found = (d2.conversations||[]).find(c => c.id === cid);
+                        if (found) { this.activeConv = Object.assign(this.activeConv, found); this.$nextTick(()=>{this.scrollToBottom();}); }
+                    });
+                }
                 else { this.replyError = d.error || 'Gagal kirim'; }
             }).catch(()=>{ this.replyError = 'Gagal terhubung ke server'; }).finally(()=>{ this.replying = false; });
         }
