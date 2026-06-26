@@ -1559,23 +1559,22 @@ def api_list_pengumuman():
     unread_only = request.args.get("unread_only", "false") == "true"
 
     try:
-        query = supabase.table("pengumuman").select("*").eq("target_role", role).is_("is_archived", "false")
         school_id = g.get("user_school_id")
+        use_int_filter = False
         if school_id and role != "super_admin":
             try:
-                # Try UUID filter (post-migration 024)
-                q = query.eq("school_id", school_id)
-                test = q.limit(1).execute().data or []
-                if test:
-                    query = q
-                else:
-                    # Fallback to INT 1 (legacy school_settings schema)
-                    query = query.eq("school_id", 1)
+                # Probe: try UUID filter (post-migration 024) — use fresh query, don't mutate
+                probe = supabase.table("pengumuman").select("id").eq("target_role", role).eq("school_id", school_id).limit(1).execute().data or []
+                if not probe:
+                    use_int_filter = True
             except Exception:
-                try:
-                    query = query.eq("school_id", 1)
-                except Exception:
-                    pass
+                use_int_filter = True
+
+        query = supabase.table("pengumuman").select("*").eq("target_role", role).is_("is_archived", "false")
+        if school_id and role != "super_admin" and use_int_filter:
+            query = query.eq("school_id", 1)
+        elif school_id and role != "super_admin":
+            query = query.eq("school_id", school_id)
         data = query.order("created_at", desc=True).limit(limit).offset(offset).execute().data or []
     except Exception:
         data = []
