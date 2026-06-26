@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Komunikasi - ScanGrade{% endblock %}
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
 {% block content %}
 <div x-data="{
     activeTab: 'chat',
@@ -9,6 +12,7 @@
     pengumumanList: [],
     unreadPengumuman: 0,
     chatUnreadCount: 0,
+    tzOffset: {{ tz_offset }},
     pollTimer: null,
     muted: localStorage.getItem('sg_chat_muted') === 'true',
     showCreatePengumuman: false,
@@ -25,6 +29,8 @@
     editFormTitle: '',
     editFormContent: '',
     selectedPengumuman: null,
+    readStatus: null,
+    showReadStatus: false,
     contacts: [],
     searchChat: '',
     selectedPercakapan: null,
@@ -60,13 +66,25 @@
     },
 
     formatDate(ts) {
-        return ts ? ts.substring(0,10) : '';
+        if (!ts) return '';
+        const off = this.tzOffset || 7;
+        const d = new Date(ts);
+        const local = new Date(d.getTime() + d.getTimezoneOffset() * 60000 + off * 3600000);
+        return local.toISOString().substring(0, 10);
     },
     formatTime(ts) {
-        return ts ? ts.substring(11,16) : '';
+        if (!ts) return '';
+        const off = this.tzOffset || 7;
+        const d = new Date(ts);
+        const local = new Date(d.getTime() + d.getTimezoneOffset() * 60000 + off * 3600000);
+        return local.toISOString().substring(11, 16);
     },
     formatDateTime(ts) {
-        return ts ? ts.substring(0,16).replace('T',' ') : '';
+        if (!ts) return '';
+        const off = this.tzOffset || 7;
+        const d = new Date(ts);
+        const local = new Date(d.getTime() + d.getTimezoneOffset() * 60000 + off * 3600000);
+        return local.toISOString().substring(0, 16).replace('T', ' ');
     },
 
     fetchPengumuman() {
@@ -137,6 +155,8 @@
 
     openPengumuman(item) {
         this.selectedPengumuman = item;
+        this.showReadStatus = false;
+        this.readStatus = null;
         fetch('/api/pengumuman/' + item.id + '/mark-read', {method:'POST'}).catch(() => {});
         if (!item.is_read) {
             item.is_read = true;
@@ -183,6 +203,73 @@
                 }
             })
             .catch(() => {});
+    },
+
+    fetchReadStatus(id) {
+        this.readStatus = null;
+        this.showReadStatus = true;
+        fetch('/api/pengumuman/' + id + '/read-status')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) return;
+                this.readStatus = d;
+                this.$nextTick(() => this.renderReadCharts());
+            })
+            .catch(() => {});
+    },
+    renderReadCharts() {
+        if (!this.readStatus || this.readStatus.total_target === 0) return;
+        const pieCanvas = this.$refs.readPieChart;
+        const barCanvas = this.$refs.readBarChart;
+        if (!pieCanvas || !barCanvas) return;
+        if (this._readPieChart) { this._readPieChart.destroy(); }
+        if (this._readBarChart) { this._readBarChart.destroy(); }
+        this._readPieChart = new Chart(pieCanvas, {
+            type: 'doughnut',
+            data: {
+                labels: ['Sudah Dibaca', 'Belum Dibaca'],
+                datasets: [{
+                    data: [this.readStatus.total_read, this.readStatus.total_unread],
+                    backgroundColor: ['#22c55e', '#ef4444'],
+                    borderWidth: 2,
+                    borderColor: '#fff',
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                cutout: '30%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11, weight: 'bold' } } },
+                    tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + ctx.parsed + ' (' + Math.round(ctx.parsed / ctx.dataset.data.reduce((a,b)=>a+b,0) * 100) + '%)'; } } }
+                }
+            }
+        });
+        this._readBarChart = new Chart(barCanvas, {
+            type: 'bar',
+            data: {
+                labels: ['Sudah Dibaca', 'Belum Dibaca'],
+                datasets: [{
+                    label: 'Jumlah',
+                    data: [this.readStatus.total_read, this.readStatus.total_unread],
+                    backgroundColor: ['rgba(34,197,94,0.8)', 'rgba(239,68,68,0.8)'],
+                    borderColor: ['#22c55e', '#ef4444'],
+                    borderWidth: 2,
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                indexAxis: 'x',
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 11 } }, grid: { display: false } },
+                    x: { grid: { display: false } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + ctx.parsed.y + ' (' + Math.round(ctx.parsed.y / (ctx.dataset.data[0] + ctx.dataset.data[1]) * 100) + '%)'; } } }
+                }
+            }
+        });
     },
 
     fetchContacts() {
@@ -580,10 +667,10 @@
 
     <!-- PENGUMUMAN DETAIL MODAL -->
     <div x-ref="pengumumanDetailModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="$refs.pengumumanDetailModal.classList.add('hidden')">
-        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg">
+        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="font-extrabold text-surface-800 text-lg" x-text="selectedPengumuman?.title"></h3>
-                <button @click="$refs.pengumumanDetailModal.classList.add('hidden')" class="text-surface-400 hover:text-surface-600 text-xl leading-none">&times;</button>
+                <button @click="$refs.pengumumanDetailModal.classList.add('hidden'); showReadStatus=false" class="text-surface-400 hover:text-surface-600 text-xl leading-none">&times;</button>
             </div>
             <p class="text-sm text-surface-600 whitespace-pre-wrap" x-text="selectedPengumuman?.content"></p>
             <div class="mt-4 flex justify-between text-xs text-surface-400 border-t border-surface-100 pt-3">
@@ -593,6 +680,63 @@
             <div x-show="selectedPengumuman?.read_by_count > 0" class="mt-2 text-xs text-surface-400">
                 <i class="fas fa-eye mr-1"></i>Dibaca <span x-text="selectedPengumuman?.read_by_count || 0"></span> orang
             </div>
+
+            <!-- Read Status Button (sender or super_admin) -->
+            <div x-show="selectedPengumuman?.sender_id === userId || userRole === 'super_admin'" class="mt-3">
+                <button @click="fetchReadStatus(selectedPengumuman.id)" class="w-full px-3 py-2 bg-primary-50 text-primary-700 hover:bg-primary-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5">
+                    <i class="fas fa-chart-pie"></i> Lihat Status Bacaan
+                </button>
+            </div>
+
+            <!-- Read Status Panel -->
+            <div x-show="showReadStatus && readStatus" class="mt-4 p-4 bg-surface-50 rounded-xl border border-surface-100">
+                <template x-if="readStatus && readStatus.total_target > 0">
+                    <div>
+                        <div class="flex items-center justify-between mb-3 text-xs font-bold text-surface-600">
+                            <span><span x-text="readStatus.total_target"></span> target penerima</span>
+                            <span class="text-green-600"><span x-text="readStatus.total_read"></span> sudah baca</span>
+                            <span class="text-red-600"><span x-text="readStatus.total_unread"></span> belum baca</span>
+                        </div>
+                        <!-- Progress bar -->
+                        <div class="w-full h-3 bg-surface-200 rounded-full overflow-hidden mb-4">
+                            <div class="h-full bg-green-500 rounded-full transition-all duration-500" :style="'width:' + readStatus.read_percentage + '%'"></div>
+                        </div>
+                        <!-- Charts -->
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div><canvas x-ref="readPieChart" class="w-full max-h-[160px]"></canvas></div>
+                            <div><canvas x-ref="readBarChart" class="w-full max-h-[160px]"></canvas></div>
+                        </div>
+                        <!-- User lists -->
+                        <div class="space-y-2 text-xs max-h-40 overflow-y-auto">
+                            <template x-if="readStatus.read_users.length > 0">
+                                <div>
+                                    <p class="font-bold text-green-700 mb-1"><i class="fas fa-check-circle mr-1"></i>Sudah Dibaca (<span x-text="readStatus.read_users.length"></span>)</p>
+                                    <template x-for="u in readStatus.read_users" :key="u.id">
+                                        <div class="flex items-center justify-between px-2 py-1 rounded hover:bg-white">
+                                            <span class="text-surface-700" x-text="u.full_name"></span>
+                                            <span class="text-surface-400" x-text="formatDateTime(u.read_at)"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                            <template x-if="readStatus.unread_users.length > 0">
+                                <div class="mt-2">
+                                    <p class="font-bold text-red-700 mb-1"><i class="fas fa-clock mr-1"></i>Belum Dibaca (<span x-text="readStatus.unread_users.length"></span>)</p>
+                                    <template x-for="u in readStatus.unread_users" :key="u.id">
+                                        <div class="px-2 py-1 rounded hover:bg-white">
+                                            <span class="text-surface-700" x-text="u.full_name"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="readStatus && readStatus.total_target === 0">
+                    <p class="text-xs text-surface-400 text-center py-4">Tidak ada data penerima.</p>
+                </template>
+            </div>
+
             <div x-show="selectedPengumuman?.sender_id === userId || userRole === 'super_admin'" class="mt-4 pt-3 border-t border-surface-100 flex gap-2">
                 <button @click="openEditPengumuman(selectedPengumuman)" class="flex-1 px-3 py-2 bg-primary-50 text-primary-700 hover:bg-primary-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1">
                     <i class="fas fa-pen"></i>Edit

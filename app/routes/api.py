@@ -1560,21 +1560,28 @@ def api_list_pengumuman():
 
     try:
         school_id = g.get("user_school_id")
-        use_int_filter = False
+
+        # Super admin sees ALL pengumuman; others see targeted at their role OR sent by them
+        if role == "super_admin":
+            query = supabase.table("pengumuman").select("*").is_("is_archived", "false")
+        else:
+            query = supabase.table("pengumuman").select("*").is_("is_archived", "false").or_("target_role.eq." + role + ",sender_id.eq." + uid)
+
+        # School scope filter (skip for super_admin)
         if school_id and role != "super_admin":
+            use_int_filter = False
             try:
                 # Probe: try UUID filter (post-migration 024) — use fresh query, don't mutate
-                probe = supabase.table("pengumuman").select("id").eq("target_role", role).eq("school_id", school_id).limit(1).execute().data or []
+                probe = supabase.table("pengumuman").select("id").or_("target_role.eq." + role + ",sender_id.eq." + uid).eq("school_id", school_id).limit(1).execute().data or []
                 if not probe:
                     use_int_filter = True
             except Exception:
                 use_int_filter = True
+            if use_int_filter:
+                query = query.eq("school_id", 1)
+            else:
+                query = query.eq("school_id", school_id)
 
-        query = supabase.table("pengumuman").select("*").eq("target_role", role).is_("is_archived", "false")
-        if school_id and role != "super_admin" and use_int_filter:
-            query = query.eq("school_id", 1)
-        elif school_id and role != "super_admin":
-            query = query.eq("school_id", school_id)
         data = query.order("created_at", desc=True).limit(limit).offset(offset).execute().data or []
     except Exception:
         data = []
@@ -1676,6 +1683,74 @@ def api_get_pengumuman(pengumuman_id):
         return jsonify({**p, "is_read": is_read, "read_by_count": len(enriched), "readers": enriched})
     except Exception as e:
         return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/pengumuman/<uuid:pengumuman_id>/read-status", methods=["GET"])
+@login_required
+def api_pengumuman_read_status(pengumuman_id):
+    """Get read/unread breakdown for a pengumuman (sender only)."""
+    supabase = get_supabase()
+    pengumuman_id = str(pengumuman_id)
+    try:
+        p = supabase.table("pengumuman").select("*").eq("id", pengumuman_id).single().execute().data
+        if not p:
+            return jsonify({"error": "Not found"}), 404
+        if p["sender_id"] != g.user_id and g.get("user_role") != "super_admin":
+            return jsonify({"error": "Forbidden"}), 403
+
+        # Get all readers
+        reads = supabase.table("pengumuman_read").select("reader_id, read_at").eq("pengumuman_id", pengumuman_id).execute().data or []
+        read_ids = set(r["reader_id"] for r in reads)
+
+        # Get target recipients: either all profiles matching target_role (within school)
+        # or specific_recipients if set
+        target_role = p.get("target_role")
+        school_id = p.get("school_id")
+        specific = p.get("specific_recipients")
+        if specific and isinstance(specific, list) and len(specific) > 0:
+            target_query = supabase.table("profiles").select("id, full_name").in_("id", specific)
+        else:
+            target_query = supabase.table("profiles").select("id, full_name").eq("role", target_role)
+            if school_id:
+                try:
+                    target_query = target_query.eq("school_id", school_id)
+                except Exception:
+                    target_query = target_query.eq("school_id", 1)
+        all_targets = target_query.execute().data or []
+
+        seen = set()
+        enriched_targets = []
+        for t in all_targets:
+            if t["id"] in seen:
+                continue
+            seen.add(t["id"])
+            enriched_targets.append(t)
+
+        read_users = []
+        unread_users = []
+        read_map = {r["reader_id"]: r["read_at"] for r in reads}
+
+        for t in enriched_targets:
+            if t["id"] in read_map:
+                read_users.append({"id": t["id"], "full_name": t["full_name"], "read_at": read_map[t["id"]]})
+            else:
+                unread_users.append({"id": t["id"], "full_name": t["full_name"]})
+
+        total = len(enriched_targets)
+        read_count = len(read_users)
+        unread_count = len(unread_users)
+
+        return jsonify({
+            "total_target": total,
+            "total_read": read_count,
+            "total_unread": unread_count,
+            "read_percentage": round((read_count / total * 100), 1) if total > 0 else 0,
+            "unread_percentage": round((unread_count / total * 100), 1) if total > 0 else 0,
+            "read_users": read_users,
+            "unread_users": unread_users,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
 
 
 @api_bp.route("/pengumuman/<uuid:pengumuman_id>", methods=["PUT"])
