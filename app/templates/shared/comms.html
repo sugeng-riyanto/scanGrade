@@ -2,12 +2,14 @@
 {% block title %}Komunikasi - ScanGrade{% endblock %}
 {% block content %}
 <div x-data="{
-    activeTab: 'pengumuman',
+    activeTab: 'chat',
     userId: '{{ g.user_id }}',
     userRole: '{{ g.user_role }}',
     userName: '{{ g.user_name or g.user_email }}',
     pengumumanList: [],
     unreadPengumuman: 0,
+    chatUnreadCount: 0,
+    pollTimer: null,
     showCreatePengumuman: false,
     formTitle: '',
     formContent: '',
@@ -29,6 +31,25 @@
     init() {
         this.fetchPengumuman();
         this.fetchUnreadCount();
+        this.fetchPercakapan();
+        this.startPolling();
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    },
+
+    startPolling() {
+        this.pollTimer = setInterval(() => this.pollNow(), 100);
+    },
+    stopPolling() {
+        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    },
+    pollNow() {
+        this.fetchUnreadCount();
+        this.fetchPercakapanSilent();
+        if (this.selectedPercakapan) {
+            this.fetchPesan(this.selectedPercakapan, true);
+        }
     },
 
     formatDate(ts) {
@@ -119,6 +140,20 @@
             .then(r => r.json())
             .then(d => {
                 this.percakapanList = d.percakapan || [];
+                this.chatUnreadCount = this.percakapanList.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+            })
+            .catch(() => {});
+    },
+    fetchPercakapanSilent() {
+        fetch('/api/percakapan?limit=50')
+            .then(r => r.json())
+            .then(d => {
+                const oldUnread = this.chatUnreadCount;
+                this.percakapanList = d.percakapan || [];
+                this.chatUnreadCount = this.percakapanList.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+                if (this.chatUnreadCount > oldUnread) {
+                    this.notifyNewChat();
+                }
             })
             .catch(() => {});
     },
@@ -158,15 +193,26 @@
         this.selectedPercakapan = id;
         this.fetchPesan(id);
     },
-    fetchPesan(percakapanId) {
+    fetchPesan(percakapanId, silent) {
         fetch('/api/percakapan/' + percakapanId + '/pesan?limit=50')
             .then(r => r.json())
             .then(d => {
-                this.pesanList = d.pesan || [];
-                this.$nextTick(() => {
-                    const el = this.$refs.pesanContainer;
-                    if (el) el.scrollTop = el.scrollHeight;
-                });
+                const newList = d.pesan || [];
+                if (silent && this.pesanList.length > 0) {
+                    if (newList.length > this.pesanList.length) {
+                        this.pesanList = newList;
+                        this.$nextTick(() => {
+                            const el = this.$refs.pesanContainer;
+                            if (el) el.scrollTop = el.scrollHeight;
+                        });
+                    }
+                } else {
+                    this.pesanList = newList;
+                    this.$nextTick(() => {
+                        const el = this.$refs.pesanContainer;
+                        if (el) el.scrollTop = el.scrollHeight;
+                    });
+                }
             })
             .catch(() => {});
     },
@@ -205,6 +251,23 @@
             })
             .catch(() => {});
     },
+
+    notifyNewChat() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = 660; gain.gain.value = 0.12;
+            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.1);
+        } catch (_) {}
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Pesan baru di ScanGrade', {
+                body: 'Ada pesan baru di chat',
+                icon: '/static/favicon.ico'
+            });
+        }
+    },
 }">
 
     <div class="flex items-center justify-between mb-4">
@@ -212,12 +275,13 @@
     </div>
 
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 mb-4">
+        <button @click="activeTab='chat'; if(!selectedPercakapan) fetchPercakapan()" :class="activeTab==='chat' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
+            <i class="fas fa-comments mr-1.5"></i>Chat
+            <template x-if="chatUnreadCount > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="chatUnreadCount"></span></template>
+        </button>
         <button @click="activeTab='pengumuman'" :class="activeTab==='pengumuman' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
             <i class="fas fa-bullhorn mr-1.5"></i>Pengumuman
             <template x-if="unreadPengumuman > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="unreadPengumuman"></span></template>
-        </button>
-        <button @click="activeTab='chat'; if(!selectedPercakapan) fetchPercakapan()" :class="activeTab==='chat' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
-            <i class="fas fa-comments mr-1.5"></i>Chat
         </button>
     </div>
 
