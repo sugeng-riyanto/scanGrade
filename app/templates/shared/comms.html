@@ -16,6 +16,10 @@
     formContent: '',
     formTargetRole: '',
     formClassId: '',
+    showEditPengumuman: false,
+    editPengumumanId: null,
+    editFormTitle: '',
+    editFormContent: '',
     selectedPengumuman: null,
     contacts: [],
     searchChat: '',
@@ -103,6 +107,30 @@
             this.unreadPengumuman = Math.max(0, this.unreadPengumuman - 1);
         }
         this.$refs.pengumumanDetailModal.classList.remove('hidden');
+    },
+
+    editPengumuman() {
+        if (!this.editFormTitle.trim() || !this.editFormContent.trim()) return;
+        this.sending = true;
+        fetch('/api/pengumuman/' + this.editPengumumanId, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title: this.editFormTitle, content: this.editFormContent})})
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) { alert('Gagal: '+d.error); return; }
+                this.showEditPengumuman = false;
+                if (this.selectedPengumuman) {
+                    this.selectedPengumuman.title = this.editFormTitle;
+                    this.selectedPengumuman.content = this.editFormContent;
+                }
+                this.fetchPengumuman();
+            })
+            .catch(() => { alert('Error'); })
+            .finally(() => { this.sending = false; });
+    },
+    openEditPengumuman(item) {
+        this.editPengumumanId = item.id;
+        this.editFormTitle = item.title;
+        this.editFormContent = item.content;
+        this.showEditPengumuman = true;
     },
 
     deletePengumuman(id) {
@@ -475,6 +503,9 @@
                 <i class="fas fa-eye mr-1"></i>Dibaca <span x-text="selectedPengumuman?.read_by_count || 0"></span> orang
             </div>
             <div x-show="selectedPengumuman?.sender_id === userId || userRole === 'super_admin'" class="mt-4 pt-3 border-t border-surface-100 flex gap-2">
+                <button @click="openEditPengumuman(selectedPengumuman)" class="flex-1 px-3 py-2 bg-primary-50 text-primary-700 hover:bg-primary-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1">
+                    <i class="fas fa-pen"></i>Edit
+                </button>
                 <button @click="deletePengumuman(selectedPengumuman.id)" class="flex-1 px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1">
                     <i class="fas fa-trash"></i>Hapus
                 </button>
@@ -482,7 +513,29 @@
         </div>
     </div>
 
-
+    <!-- EDIT PENGUMUMAN MODAL -->
+    <div x-show="showEditPengumuman" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showEditPengumuman=false">
+        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="font-extrabold text-surface-800"><i class="fas fa-pen text-primary-500 mr-2"></i>Edit Pengumuman</h2>
+                <button @click="showEditPengumuman=false" class="text-surface-400 hover:text-surface-600 text-xl leading-none">&times;</button>
+            </div>
+            <form @submit.prevent="editPengumuman()" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
+                    <input type="text" x-model="editFormTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Isi Pengumuman</label>
+                    <textarea x-model="editFormContent" required rows="4" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium"></textarea>
+                </div>
+                <button type="submit" class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition" :disabled="sending">
+                    <span x-text="sending ? 'Menyimpan...' : 'Simpan Perubahan'"></span>
+                </button>
+                <button type="button" @click="showEditPengumuman=false" class="w-full px-4 py-3 text-surface-500 hover:text-surface-700 font-bold">Batal</button>
+            </form>
+        </div>
+    </div>
 
 </div>
 {% endblock %}
