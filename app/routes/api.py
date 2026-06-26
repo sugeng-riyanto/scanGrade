@@ -1496,22 +1496,12 @@ def api_send_broadcast():
         if role == "murid":
             try:
                 valid = supabase.table("profiles").select("id, role").in_("id", recipient_ids).execute().data or []
-                try:
-                    valid = [v for v in valid if v.get("status") == "active"]
-                except Exception:
-                    pass
                 recipients = [{"id": r["id"]} for r in valid if r.get("role") in ("guru", "admin_sekolah", "super_admin")]
             except Exception:
                 recipients = []
         elif target_school_id:
             try:
-                query = supabase.table("profiles").select("id").in_("id", recipient_ids)
-                try:
-                    query = query.eq("status", "active")
-                except Exception:
-                    pass
-                query = query.eq("school_id", target_school_id)
-                valid = query.execute().data or []
+                valid = supabase.table("profiles").select("id").in_("id", recipient_ids).eq("school_id", target_school_id).execute().data or []
                 recipients = [{"id": r["id"]} for r in valid]
             except Exception:
                 recipients = [{"id": uid} for uid in recipient_ids]
@@ -1521,20 +1511,19 @@ def api_send_broadcast():
         # Broadcast to all matching role + school
         try:
             query = supabase.table("profiles").select("id")
-            try:
-                query = query.eq("status", "active")
-            except Exception:
-                pass
             if target_role and target_role != "all":
                 query = query.eq("role", target_role)
             if target_school_id:
-                try:
-                    query = query.eq("school_id", target_school_id)
-                except Exception:
-                    pass
+                query = query.eq("school_id", target_school_id)
             recipients = query.execute().data or []
         except Exception:
-            pass
+            try:
+                query = supabase.table("profiles").select("id")
+                if target_role and target_role != "all":
+                    query = query.eq("role", target_role)
+                recipients = query.execute().data or []
+            except Exception:
+                pass
 
     # For one-on-one messages, create/update conversation FIRST
     conversation_id = None
@@ -1959,18 +1948,15 @@ def api_broadcast_contacts():
 
     try:
         query = supabase.table("profiles").select("id, full_name, role").in_("role", target_roles)
-        try:
-            query = query.eq("status", "active")
-        except Exception:
-            pass
         if school_id and role != "super_admin":
-            try:
-                query = query.eq("school_id", school_id)
-            except Exception:
-                pass
+            query = query.eq("school_id", school_id)
         profiles = query.order("full_name").execute().data or []
     except Exception:
-        profiles = []
+        try:
+            query = supabase.table("profiles").select("id, full_name, role").in_("role", target_roles)
+            profiles = query.order("full_name").execute().data or []
+        except Exception:
+            profiles = []
 
     profile_map = {p["id"]: p for p in profiles}
 
