@@ -1529,7 +1529,88 @@ def grading_center():
                 pending_subs.append(s)
             elif s["status"] in ("graded", "published"):
                 graded_subs.append(s)
-    return render_template("teacher/grading.html", pending_subs=pending_subs, graded_subs=graded_subs)
+    # Group by exam
+    exam_groups = {}
+    for s in pending_subs + graded_subs:
+        eid = s["exam_id"]
+        if eid not in exam_groups:
+            exam_groups[eid] = {"id": eid, "title": s["exam_title"], "pending": [], "graded": []}
+        if s["status"] == "submitted":
+            exam_groups[eid]["pending"].append(s)
+        else:
+            exam_groups[eid]["graded"].append(s)
+    return render_template("teacher/grading.html", exam_groups=list(exam_groups.values()))
+
+
+@teacher_bp.route("/grading/<exam_id>")
+@teacher_or_admin_required
+def grading_queue(exam_id):
+    """Per-exam split-pane grading queue."""
+    supabase = get_supabase()
+    exam = supabase.table("exams").select("id,title,subject,question_types,question_weights,answer_key,total_questions").eq("id", exam_id).single().execute().data
+    if not exam:
+        flash("Ujian tidak ditemukan", "error")
+        return redirect("/teacher/grading")
+    return render_template("teacher/grading_queue.html", exam=exam)
+
+
+@teacher_bp.route("/api/grading-queue/<exam_id>")
+@teacher_or_admin_required
+def api_grading_queue(exam_id):
+    """JSON data for grading queue — list of submissions with essay preview."""
+    supabase = get_supabase()
+    user_role = g.get("user_role")
+    school_id = g.get("user_school_id")
+
+    # Verify access
+    exam = supabase.table("exams").select("id,teacher_id,school_id,question_types,question_weights,answer_key,total_questions").eq("id", exam_id).single().execute().data
+    if not exam:
+        return jsonify({"error": "Not found"}), 404
+    if user_role != "super_admin" and exam["teacher_id"] != g.user_id:
+        if user_role == "admin_sekolah" and str(exam.get("school_id", "")) == str(school_id or ""):
+            pass
+        else:
+            return jsonify({"error": "Forbidden"}), 403
+
+    question_types = exam.get("question_types") or {}
+    essay_indices = [str(i) for i in range(int(exam.get("total_questions", 0))) if question_types.get(str(i), "mcq") in ("essay", "essay_text", "essay_canvas")]
+
+    subs = supabase.table("submissions").select("id,student_id,answers,teacher_feedback,score,final_score,status,violations,penalty,submitted_at,profiles!inner(full_name)").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).order("submitted_at", desc=False).execute().data or []
+
+    result = []
+    for s in subs:
+        answers = s.get("answers") or {}
+        fb = s.get("teacher_feedback") or {}
+        fb_scores = fb.get("scores") or {}
+        graded_essays = sum(1 for ei in essay_indices if ei in fb_scores)
+        preview = ""
+        for ei in essay_indices:
+            ans = answers.get(ei)
+            if isinstance(ans, dict):
+                txt = (ans.get("text") or "").strip()
+                if txt:
+                    preview = txt[:150]
+                    break
+        profile = s.get("profiles") or {}
+        result.append({
+            "id": s["id"],
+            "student_name": profile.get("full_name") or "-",
+            "status": s["status"],
+            "submitted_at": s.get("submitted_at"),
+            "essay_count": len(essay_indices),
+            "graded_essays": graded_essays,
+            "score": s.get("final_score") or s.get("score"),
+            "has_drawing": any(isinstance(answers.get(ei), dict) and answers[ei].get("pages") for ei in essay_indices),
+            "preview": preview,
+        })
+
+    return jsonify({
+        "submissions": result,
+        "total": len(result),
+        "pending": sum(1 for r in result if r["status"] == "submitted"),
+        "graded": sum(1 for r in result if r["status"] in ("graded", "published")),
+        "essay_indices": essay_indices,
+    })
 
 
 @teacher_bp.route("/analytics")
