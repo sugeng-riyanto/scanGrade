@@ -677,15 +677,53 @@
                         </div>
                     </template>
                     <template x-if="q.type === 'essay_canvas'">
-                        <div class="">
-                            <div class="flex items-center gap-2 mb-2 flex-wrap">
-                                <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
-                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Canvas</span>
-                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                                    <i class="fas fa-check text-emerald-500"></i>Terjawab
-                                </span>
+                        <div class="mt-2">
+                            <!-- Tab: Teks / Canvas (default Canvas untuk essay_canvas) -->
+                            <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
+                                <button @click="essayMode[i]='text'" :class="(essayMode[i]||'canvas')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                    <i class="fas fa-font mr-1"></i>Teks
+                                </button>
+                                <button @click="essayMode[i]='canvas'" :class="(essayMode[i]||'canvas')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                    <i class="fas fa-paint-brush mr-1"></i>Canvas
+                                </button>
                             </div>
-                            <div class="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-emerald-200/50">
+                            <!-- Text mode -->
+                            <div x-show="(essayMode[i]||'canvas')==='text'">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                                        <i class="fas fa-align-left mr-0.5"></i>Jawaban Teks
+                                    </span>
+                                    <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + ' karakter, ' + ((paragraphs[i]||[]).length) + ' paragraf)'"></span>
+                                </div>
+                                <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                    <button @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
+                                    <button @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
+                                    <button @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
+                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
+                                    <button @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
+                                    <button @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
+                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
+                                    <button @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
+                                </div>
+                                <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
+                                    <template x-for="(para, pIdx) in (paragraphs[i] || [{id:'p0',text:'',html:'<p><br></p>',order:0}])" :key="para.id">
+                                        <div class="relative group">
+                                            <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
+                                                <span class="text-[10px] font-semibold text-surface-400" x-text="'Paragraf ' + (pIdx + 1)"></span>
+                                                <button @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
+                                            </div>
+                                            <div :ref="'para_' + para.id"
+                                                 contenteditable="true"
+                                                 @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
+                                                 @keydown.enter.prevent="addParagraph(i, pIdx + 1)"
+                                                 class="min-h-[60px] p-3 text-sm leading-relaxed text-surface-800 focus:outline-none focus:bg-blue-50/30"
+                                                 x-html="para.html || '<p><br></p>'"></div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            <!-- Canvas mode -->
+                            <div x-show="(essayMode[i]||'canvas')==='canvas'" class="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-emerald-200/50">
                                 <i class="fas fa-paint-brush text-emerald-500"></i>
                                 <span>Gambar &amp; teks pada halaman PDF di atas</span>
                             </div>
@@ -1901,15 +1939,22 @@ function examApp(duration, totalQ) {
                             .filter(p => p.text.trim())
                             .map(p => ({id: p.id, text: p.text, html: p.html, order: p.order}));
                     }
-                } else if (q.type === 'essay') {
+                } else if (q.type === 'essay' || q.type === 'essay_canvas') {
                     const textAnswer = (this.answersText[i] || '').trim();
+                    const paras = this.paragraphs[i];
+                    const hasParas = paras && paras.length > 0 && paras.some(p => p.text.trim());
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
                     for (let p = 0; p < totalP; p++) {
                         const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
                         if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
                     }
-                    data[oi] = { type: 'essay', text: textAnswer, pages: pagesData };
+                    data[oi] = { type: q.type, text: textAnswer, pages: pagesData };
+                    if (hasParas) {
+                        data[oi].paragraphs = paras
+                            .filter(p => p.text.trim())
+                            .map(p => ({id: p.id, text: p.text, html: p.html, order: p.order}));
+                    }
                 } else if (q.type === 'mcq') {
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
