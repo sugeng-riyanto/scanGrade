@@ -18,7 +18,9 @@
 - Color theme: `primary` (blue) defined in Tailwind config — `brand-*` was previously undefined (invisible buttons/text), now aliased to `primary` palette
 - No direct DB DDL access — migrations must be run manually in Supabase SQL Editor
 - `profiles` table columns: `['id', 'full_name', 'phone', 'role', 'created_at', 'updated_at']` — **no `school_id`, `class_id`, `nisn`, `nis`, `email` columns exist** (unless migration 017 added `school_id`)
-- `schools` table **does NOT exist** in `public` schema
+- `schools` table exists in `public` schema (since migration 007/013)
+- `school_settings` table (legacy, single-row INT id=1) exists alongside `schools` (UUID id)
+- `pengumuman.school_id` is currently INT referencing `school_settings(id)` — migration 024 fixes to UUID
 - MCQ answer keys: single value (`"A"`), multiple (`["A","B"]`), or `"bonus"` (all correct)
 - Weighted scoring: Teacher sets MCQ% + Essay% (total must = 100), distributed equally per question within each group
 - `question_weights` JSONB column does NOT exist in DB — code uses `.get()` + `setdefault` with try/except fallback
@@ -92,16 +94,17 @@
 ### In Progress
 - None
 
-### Latest (2025-06-25)
-- **Empty messages bug fix**: `api_conversations` stopped selecting `is_deleted` (migration 021 column missing from DB → query silently failed → `msgs=[]` → "Belum ada pesan"). Removed from SELECT entirely; 021-only features use try/except fallbacks.
-- **WhatsApp Web green bubbles**: Sent `bg-[#dcf8c6] text-[#111b21]`, received `bg-white` with `rounded-bl-sm`. Timestamps + double-check marks INSIDE bubble (bottom-right). Gray `#8696a0` / blue `#53bdeb` for read (last msg). Applied to all 4 RBAC templates.
-- **`/api/broadcast/contacts` endpoint**: Returns all contacts the user can message (RBAC-filtered), merged with conversation info (`conversation_id`, `last_msg_preview`, `unread_count`, `last_message_at`).
-- **Contacts-based sidebar (all 4 RBAC templates)**: Replaced conversation list with contact list. Removed `showCompose`/recipient picker entirely. `filteredConvs` → `filteredContacts`, `fetchConversations` → `fetchContacts`. Click any contact → direct chat (existing conv or new via `pendingRecipient`). No "+" button needed — ALL contacts visible in sidebar.
-- **`api_send_broadcast` restructured**: Creates conversation BEFORE notification insert (not separate UPDATE). `conversation_id` set at insert time, matching `api_reply_broadcast` pattern.
-- **Reply stays in chat**: `sendReply` no longer nulls `activeConv` — message appears instantly in-place. `pendingRecipient` branch opens the newly created conversation instead of returning to contact list.
+### Latest (2025-06-26)
+- **`pengumuman.school_id` INT/UUID mismatch fix**: `profiles.school_id` is `UUID` referencing `schools(id)`, but `pengumuman.school_id` was `INT` referencing `school_settings(id)`. Create endpoint failed with `"invalid input syntax for type integer"`. Added fallback: try UUID first, retry with INT `1` on type error. Migration `024_fix_pengumuman_school_id_type.sql` created to permanently fix column type to UUID.
+- **Cascading pengumuman form**: Target role → jangkauan (all/class/specific) → class filter → recipient checkboxes. New APIs: `GET /api/pengumuman/classes`, `GET /api/pengumuman/recipients-by-role`
+- **Edit pengumuman modal**: RBAC-controlled (super_admin any, admin_sekolah/guru own, murid none)
+- **RBAC matrix update**: admin_sekolah can target super_admin; guru can target guru & admin_sekolah
+- **Migration 023**: `specific_recipients UUID[]` column for specific-student targeting
 
 ### Blocked
 - Migration 021 (soft-delete + conversation CRUD columns) must run in Supabase SQL Editor
+- Migration 023 (`specific_recipients UUID[]` for specific-student targeting) in Supabase SQL Editor
+- Migration 024 (fix `pengumuman.school_id INT → UUID`) in Supabase SQL Editor
 - Node.js broken on VPS (npm missing); Tailwind CSS local build file already in git (98 KB)
 - PSE registration number / DPO contact not configured in system_settings
 - Run PDP columns migration in Supabase SQL Editor:
