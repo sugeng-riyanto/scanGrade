@@ -919,7 +919,7 @@ function examApp(duration, totalQ) {
                 else this.timeLeft--;
             }, 1000);
             this.autoSaveTimer = setInterval(() => this.periodicSync(), 60000);
-            this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 60000);
+            this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 15000);
             this.$watch('currentQ', (val, oldVal) => {
                 if (oldVal !== undefined) this.closeAllTools(oldVal);
                 var rng = this.parsePageRange(QUESTION_PAGES[val] || '');
@@ -935,17 +935,21 @@ function examApp(duration, totalQ) {
                 this.saveToLocal();
                 if (this.dirty) {
                     const data = this.getAnswersLight();
-                    // Inject active page canvas for crash/close recovery
-                    const activeQ = this.currentQ !== undefined ? this.currentQ : 0;
-                    const activeP = this.page - 1;
-                    const activeCanvas = this.canvasData[activeQ]?.[activeP];
-                    if (activeCanvas && this.hasDrawn[activeQ]?.[activeP]) {
-                        const qAnswer = data[String(this.questions[activeQ]?.origIdx ?? activeQ)];
-                        if (qAnswer && typeof qAnswer === 'object') {
-                            if (!qAnswer.pages) qAnswer.pages = {};
-                            if (!qAnswer.pages[activeP]) qAnswer.pages[activeP] = {};
-                            qAnswer.pages[activeP].canvas = activeCanvas;
-                        }
+                    // Inject ALL dirty canvas pages for crash/close recovery
+                    Object.keys(this.canvasDirty).forEach(qk => {
+                        const qi = parseInt(qk);
+                        const qAnswer = data[String(this.questions[qi]?.origIdx ?? qi)];
+                        if (!qAnswer || typeof qAnswer !== 'object') return;
+                        if (!qAnswer.pages) qAnswer.pages = {};
+                        Object.keys(this.canvasDirty[qk]).forEach(pk => {
+                            const pi = parseInt(pk);
+                            const canvasUrl = this.canvasData[qi]?.[pi];
+                            if (canvasUrl) {
+                                if (!qAnswer.pages[pk]) qAnswer.pages[pk] = {};
+                                qAnswer.pages[pk].canvas = canvasUrl;
+                            }
+                        });
+                    });
                     }
                     navigator.sendBeacon('/api/student/sync-draft',
                         new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data, light: true})], {type: 'application/json'}));
@@ -2001,20 +2005,25 @@ function examApp(duration, totalQ) {
             if (this.submitted || this._syncInFlight) return;
             const lightData = this.getAnswersLight();
             const hash = JSON.stringify(lightData);
-            if (hash === this.lastSyncHash) { this.dirty = false; return; }
+            if (hash === this.lastSyncHash && Object.keys(this.canvasDirty).length === 0) { this.dirty = false; return; }
             this._syncInFlight = true;
             this.syncStatus = 'saving';
             this.syncLabel = 'Menyinkronkan...';
             var body = { exam_id: '{{ exam.id }}', answers: lightData, light: true };
-            // Include active page canvas for device-switch recovery
-            const activeQ = this.currentQ !== undefined ? this.currentQ : 0;
-            const activeP = this.page - 1;
-            const activeCanvas = this.canvasData[activeQ]?.[activeP];
-            if (activeCanvas && this.hasDrawn[activeQ]?.[activeP]) {
-                body.current_q_idx = activeQ;
-                body.current_page = activeP;
-                body.current_canvas = activeCanvas;
-            }
+            // Include ALL dirty canvas pages for device-switch recovery
+            body.dirty_canvases = {};
+            Object.keys(this.canvasDirty).forEach(qk => {
+                const qi = parseInt(qk);
+                const pages = this.canvasDirty[qi];
+                Object.keys(pages).forEach(pk => {
+                    const pi = parseInt(pk);
+                    const canvasUrl = this.canvasData[qi]?.[pi];
+                    if (canvasUrl) {
+                        if (!body.dirty_canvases[qk]) body.dirty_canvases[qk] = {};
+                        body.dirty_canvases[qk][pk] = canvasUrl;
+                    }
+                });
+            });
             var ls = localStorage.getItem('exam_started_' + '{{ exam.id }}');
             if (ls) body.started_at = parseInt(ls);
             fetch('/api/student/sync-draft', {
@@ -2022,7 +2031,7 @@ function examApp(duration, totalQ) {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
             })
-            .then(r => { if (r.ok) { this.lastSyncHash = hash; this.dirty = false; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
+            .then(r => { if (r.ok) { this.lastSyncHash = hash; this.dirty = false; this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
             .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; this.pendingSync = true; })
             .finally(() => { this._syncInFlight = false; });
         },
