@@ -1465,6 +1465,12 @@ def api_user_suspend(user_id):
     return jsonify({"success": True})
 
 
+@super_bp.route("/comms")
+@_sa_required
+def super_admin_comms():
+    return render_template("shared/comms.html")
+
+
 @super_bp.route("/privacy-settings")
 @_sa_required
 def privacy_settings():

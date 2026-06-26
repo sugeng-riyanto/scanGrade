@@ -717,4 +717,7 @@ def audit_logs_view():
     )
 
 
-
+@admin_bp.route("/comms")
+@admin_required
+def admin_comms():
+    return render_template("shared/comms.html")
