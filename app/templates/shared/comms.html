@@ -10,6 +10,7 @@
     unreadPengumuman: 0,
     chatUnreadCount: 0,
     pollTimer: null,
+    muted: localStorage.getItem('sg_chat_muted') === 'true',
     showCreatePengumuman: false,
     formTitle: '',
     formContent: '',
@@ -253,15 +254,22 @@
             .catch(() => {});
     },
 
+    toggleMute() {
+        this.muted = !this.muted;
+        localStorage.setItem('sg_chat_muted', this.muted);
+    },
+
     notifyNewChat() {
-        try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.frequency.value = 660; gain.gain.value = 0.12;
-            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.1);
-        } catch (_) {}
+        if (!this.muted) {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.frequency.value = 660; gain.gain.value = 0.12;
+                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.1);
+            } catch (_) {}
+        }
         if ('Notification' in window && Notification.permission === 'granted') {
             new Notification('Pesan baru di ScanGrade', {
                 body: 'Ada pesan baru di chat',
@@ -273,6 +281,9 @@
 
     <div class="flex items-center justify-between mb-4">
         <h1 class="text-xl font-extrabold text-surface-800"><i class="fas fa-comments text-primary-500 mr-2"></i>Komunikasi</h1>
+        <button @click="toggleMute()" class="text-surface-400 hover:text-primary-500 transition text-lg" :title="muted ? 'Aktifkan suara' : 'Matikan suara'">
+            <i :class="muted ? 'fas fa-volume-off text-red-400' : 'fas fa-volume-up'"></i>
+        </button>
     </div>
 
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 mb-4">
