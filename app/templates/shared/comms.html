@@ -213,65 +213,65 @@
             .then(d => {
                 if (d.error) return;
                 this.readStatus = d;
-                this.$nextTick(() => setTimeout(() => this.renderReadCharts(), 150));
+                this.$nextTick(() => {
+                    setTimeout(() => {
+                        if (d.total_target === 0) return;
+                        const C = window.Chart;
+                        if (!C) return;
+                        if (this._readPieChart) { this._readPieChart.destroy(); }
+                        if (this._readBarChart) { this._readBarChart.destroy(); }
+                        const pc = document.getElementById('readPieChart');
+                        const bc = document.getElementById('readBarChart');
+                        if (!pc || !bc) return;
+                        if (pc.offsetParent === null || pc.offsetHeight === 0) return;
+                        try {
+                            this._readPieChart = new C(pc, {
+                                type: 'doughnut',
+                                data: {
+                                    labels: ['Sudah Dibaca', 'Belum Dibaca'],
+                                    datasets: [{
+                                        data: [d.total_read, d.total_unread],
+                                        backgroundColor: ['#22c55e', '#ef4444'],
+                                        borderWidth: 2, borderColor: '#fff'
+                                    }]
+                                },
+                                options: {
+                                    responsive: true, maintainAspectRatio: true,
+                                    cutout: '30%',
+                                    plugins: {
+                                        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11, weight: 'bold' } } },
+                                        tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + ctx.parsed + ' (' + Math.round(ctx.parsed / (d.total_read + d.total_unread) * 100) + '%)'; } } }
+                                    }
+                                }
+                            });
+                        } catch(e) { console.error('Pie chart error:', e); }
+                        try {
+                            this._readBarChart = new C(bc, {
+                                type: 'bar',
+                                data: {
+                                    labels: ['Sudah Dibaca', 'Belum Dibaca'],
+                                    datasets: [{
+                                        label: 'Jumlah',
+                                        data: [d.total_read, d.total_unread],
+                                        backgroundColor: ['rgba(34,197,94,0.8)', 'rgba(239,68,68,0.8)'],
+                                        borderColor: ['#22c55e', '#ef4444'],
+                                        borderWidth: 2, borderRadius: 6
+                                    }]
+                                },
+                                options: {
+                                    responsive: true, maintainAspectRatio: true,
+                                    scales: {
+                                        y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 11 } }, grid: { display: false } },
+                                        x: { grid: { display: false } }
+                                    },
+                                    plugins: { legend: { display: false }, tooltip: { enabled: true } }
+                                }
+                            });
+                        } catch(e) { console.error('Bar chart error:', e); }
+                    }, 300);
+                });
             })
             .catch(() => {});
-    },
-    renderReadCharts() {
-        if (!this.readStatus || this.readStatus.total_target === 0) return;
-        if (typeof Chart === 'undefined' && typeof window.Chart === 'undefined') return;
-        const C = window.Chart || Chart;
-        const pieCanvas = this.$refs.readPieChart;
-        const barCanvas = this.$refs.readBarChart;
-        if (!pieCanvas || !barCanvas) return;
-        if (this._readPieChart) { this._readPieChart.destroy(); }
-        if (this._readBarChart) { this._readBarChart.destroy(); }
-        this._readPieChart = new C(pieCanvas, {
-            type: 'doughnut',
-            data: {
-                labels: ['Sudah Dibaca', 'Belum Dibaca'],
-                datasets: [{
-                    data: [this.readStatus.total_read, this.readStatus.total_unread],
-                    backgroundColor: ['#22c55e', '#ef4444'],
-                    borderWidth: 2,
-                    borderColor: '#fff',
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: true,
-                cutout: '30%',
-                plugins: {
-                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11, weight: 'bold' } } },
-                    tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + ctx.parsed + ' (' + Math.round(ctx.parsed / ctx.dataset.data.reduce((a,b)=>a+b,0) * 100) + '%)'; } } }
-                }
-            }
-        });
-        this._readBarChart = new C(barCanvas, {
-            type: 'bar',
-            data: {
-                labels: ['Sudah Dibaca', 'Belum Dibaca'],
-                datasets: [{
-                    label: 'Jumlah',
-                    data: [this.readStatus.total_read, this.readStatus.total_unread],
-                    backgroundColor: ['rgba(34,197,94,0.8)', 'rgba(239,68,68,0.8)'],
-                    borderColor: ['#22c55e', '#ef4444'],
-                    borderWidth: 2,
-                    borderRadius: 6,
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: true,
-                indexAxis: 'x',
-                scales: {
-                    y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 11 } }, grid: { display: false } },
-                    x: { grid: { display: false } }
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + ctx.parsed.y + ' (' + Math.round(ctx.parsed.y / (ctx.dataset.data[0] + ctx.dataset.data[1]) * 100) + '%)'; } } }
-                }
-            }
-        });
     },
 
     fetchContacts() {
@@ -705,8 +705,8 @@
                         </div>
                         <!-- Charts -->
                         <div class="grid grid-cols-2 gap-4 mb-4">
-                            <div><canvas x-ref="readPieChart" style="height:160px" class="w-full"></canvas></div>
-                            <div><canvas x-ref="readBarChart" style="height:160px" class="w-full"></canvas></div>
+                            <div><canvas id="readPieChart" style="height:160px;width:100%"></canvas></div>
+                            <div><canvas id="readBarChart" style="height:160px;width:100%"></canvas></div>
                         </div>
                         <!-- User lists -->
                         <div class="space-y-2 text-xs max-h-40 overflow-y-auto">
