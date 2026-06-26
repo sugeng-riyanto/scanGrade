@@ -1634,30 +1634,8 @@ def api_reply_broadcast():
         return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
 
 
-@api_bp.route("/broadcast/complete", methods=["POST"])
-@login_required
-def api_complete_conversation():
-    """Mark a conversation as complete."""
-    data = request.get_json() or {}
-    conversation_id = data.get("conversation_id")
-    if not conversation_id:
-        return jsonify({"error": "conversation_id diperlukan"}), 400
-    supabase = get_supabase()
-    try:
-        conv = supabase.table("conversations").select("id, participant_1, participant_2, status").eq("id", conversation_id).single().execute().data
-        if not conv:
-            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
-        uid = g.user_id
-        if uid != conv["participant_1"] and uid != conv["participant_2"]:
-            return jsonify({"error": "Anda bukan peserta percakapan ini"}), 403
-        if conv["status"] != "open":
-            return jsonify({"error": "Percakapan sudah selesai"}), 400
-        supabase.table("conversations").update({
-            "status": "completed", "completed_at": datetime.now(timezone.utc).isoformat(), "completed_by": uid
-        }).eq("id", conversation_id).execute()
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)[:100]}), 500
+
+@api_bp.route("/broadcast/conversations", methods=["GET"])
 
 
 @api_bp.route("/broadcast/edit-message", methods=["POST"])
@@ -1793,8 +1771,6 @@ def api_archive_conversation():
         uid = g.user_id
         if uid != conv["participant_1"] and uid != conv["participant_2"]:
             return jsonify({"error": "Anda bukan peserta percakapan ini"}), 403
-        if conv["status"] != "open":
-            return jsonify({"error": "Hanya percakapan aktif yang bisa diarsipkan"}), 400
         supabase.table("conversations").update({"status": "archived"}).eq("id", conversation_id).execute()
         return jsonify({"success": True})
     except Exception as e:
