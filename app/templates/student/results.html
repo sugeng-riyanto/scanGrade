@@ -89,9 +89,9 @@
                     <tr class="hover:bg-surface-50 transition">
                         <td class="px-5 py-3">
                             <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
-                                     :class="s.status==='graded'||s.status==='published'?'bg-emerald-50 text-emerald-600':s.status==='submitted'?'bg-amber-50 text-amber-600':s.status==='retracted'?'bg-red-50 text-red-500':'bg-surface-100 text-surface-400'">
-                                    <i class="fas text-sm" :class="s.status==='graded'||s.status==='published'?'fa-check-circle':s.status==='submitted'?'fa-clock':s.status==='retracted'?'fa-undo':'fa-file-alt'"></i>
+                                 <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
+                                      :class="s.status==='published'?'bg-emerald-50 text-emerald-600':s.status==='graded'?'bg-amber-50 text-amber-600':s.status==='submitted'?'bg-blue-50 text-blue-600':s.status==='retracted'?'bg-red-50 text-red-500':'bg-surface-100 text-surface-400'">
+                                     <i class="fas text-sm" :class="s.status==='published'?'fa-check-circle':s.status==='graded'?'fa-spinner':s.status==='submitted'?'fa-clock':s.status==='retracted'?'fa-undo':'fa-file-alt'"></i>
                                 </div>
                                 <div>
                                     <p class="font-bold text-surface-800" x-text="s.exam?.title || '-'"></p>
@@ -110,7 +110,14 @@
                         </td>
                         <td class="px-5 py-3 text-center">
                             <template x-if="s.penalty!=null">
-                                <span class="text-sm font-extrabold" :class="s.penalty>0?'text-red-600':'text-surface-400'" x-text="s.penalty>0?'-'+s.penalty:'0'"></span>
+                                <div>
+                                    <span class="text-sm font-extrabold" :class="s.penalty>0?'text-red-600':'text-surface-400'" x-text="s.penalty>0?'-'+s.penalty:'0'"></span>
+                                    <template x-if="s.penalty > 0">
+                                        <div class="mt-1">
+                                            <a :href="'/student/results/'+s.id" class="text-[10px] font-bold text-amber-600 hover:text-amber-700 underline">Banding</a>
+                                        </div>
+                                    </template>
+                                </div>
                             </template>
                             <template x-if="s.penalty==null">
                                 <span class="text-surface-400 font-bold">-</span>
@@ -118,9 +125,9 @@
                         </td>
                         <td class="px-5 py-3 text-center">
                             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
-                                  :class="s.status==='graded'||s.status==='published'?'bg-emerald-50 text-emerald-700':s.status==='submitted'?'bg-amber-50 text-amber-700':s.status==='draft'?'bg-slate-100 text-slate-500':s.status==='retracted'?'bg-red-50 text-red-600':'bg-surface-100 text-surface-600'">
-                                <i class="fas mr-0.5 text-xs" :class="s.status==='graded'||s.status==='published'?'fa-check':s.status==='submitted'?'fa-clock':s.status==='draft'?'fa-pen':s.status==='retracted'?'fa-undo':'fa-file'"></i>
-                                <span x-text="s.status==='draft'?'Draft (belum dikumpulkan)':s.status"></span>
+                                  :class="s.status==='published'?'bg-emerald-50 text-emerald-700':s.status==='graded'?'bg-amber-50 text-amber-700':s.status==='submitted'?'bg-blue-50 text-blue-700':s.status==='draft'?'bg-slate-100 text-slate-500':s.status==='retracted'?'bg-red-50 text-red-600':'bg-surface-100 text-surface-600'">
+                                <i class="fas mr-0.5 text-xs" :class="s.status==='published'?'fa-check':s.status==='graded'?'fa-spinner':s.status==='submitted'?'fa-clock':s.status==='draft'?'fa-pen':s.status==='retracted'?'fa-undo':'fa-file'"></i>
+                                <span x-text="s.status==='draft'?'Draft (belum dikumpulkan)':s.status==='submitted'?'Menunggu':s.status==='graded' && !s.is_published?'On Progress':s.status==='graded'?'Draft Nilai':s.status==='published'?'Dipublikasikan':s.status"></span>
                             </span>
                             <template x-if="s.answers?._retract_request?.status==='pending'">
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600 ml-1"><i class="fas fa-hourglass-half"></i> Menunggu</span>
