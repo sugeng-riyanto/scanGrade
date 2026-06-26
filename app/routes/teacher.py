@@ -1583,20 +1583,34 @@ def api_grading_queue(exam_id):
 
     subs = supabase.table("submissions").select("id,student_id,answers,teacher_feedback,score,final_score,status,violations,penalty,submitted_at,profiles!inner(full_name)").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).order("submitted_at", desc=False).execute().data or []
 
+    # Build essay question info
+    essay_qs = []
+    for idx_str in essay_indices:
+        idx = int(idx_str)
+        essay_qs.append({"index": idx, "label": f"Soal {idx + 1}", "weight": exam.get("question_weights", {}).get(idx_str, 0)})
+
     result = []
     for s in subs:
         answers = s.get("answers") or {}
         fb = s.get("teacher_feedback") or {}
         fb_scores = fb.get("scores") or {}
+        fb_comments = fb.get("comments") or {}
         graded_essays = sum(1 for ei in essay_indices if ei in fb_scores)
         preview = ""
+        per_question = []
         for ei in essay_indices:
             ans = answers.get(ei)
+            text = ""
             if isinstance(ans, dict):
-                txt = (ans.get("text") or "").strip()
-                if txt:
-                    preview = txt[:150]
-                    break
+                text = (ans.get("text") or "").strip()
+                if not preview and text:
+                    preview = text[:150]
+            per_question.append({
+                "index": ei,
+                "score": fb_scores.get(ei),
+                "comment": fb_comments.get(ei, ""),
+                "preview": text[:100] if text else "",
+            })
         profile = s.get("profiles") or {}
         result.append({
             "id": s["id"],
@@ -1608,6 +1622,7 @@ def api_grading_queue(exam_id):
             "score": s.get("final_score") or s.get("score"),
             "has_drawing": any(isinstance(answers.get(ei), dict) and answers[ei].get("pages") for ei in essay_indices),
             "preview": preview,
+            "questions": per_question,
         })
 
     return jsonify({
