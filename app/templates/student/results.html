@@ -20,7 +20,7 @@
         return this.sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
       });
     }
-    return arr.filter(s => (this.filter==='all'||s.status===this.filter||(this.filter==='graded'&&s.status==='published')) && (!this.search||(s.exam?.title||'').toLowerCase().includes(this.search.toLowerCase())));
+    return arr.filter(s => (this.filter==='all'||s.status===this.filter||(this.filter==='graded'&&(s.status==='graded'||s.status==='published'))) && (!this.search||(s.exam?.title||'').toLowerCase().includes(this.search.toLowerCase())));
   }
 }">
     <!-- Header -->
