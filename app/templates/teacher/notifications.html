@@ -76,7 +76,7 @@
         if (!this.replyMessage) return;
         if(this.pendingRecipient) {
             this.replying = true; this.replyError = '';
-            var body = JSON.stringify({title: this.replyMessage, message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]});
+            var body = JSON.stringify({message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]});
             fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:body})
             .then(function(r){return r.json();}).then(function(d) {
                 this.replying=false;

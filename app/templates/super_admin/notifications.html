@@ -84,7 +84,7 @@
         if (!this.replyMessage) return;
         if (this.pendingRecipient) {
             this.replying = true; this.replyError = '';
-            fetch('/api/broadcast/send', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: this.replyMessage, message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]}) })
+            fetch('/api/broadcast/send', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: this.replyMessage, target_role: this.pendingRecipient.role, recipient_ids: [this.pendingRecipient.id]}) })
             .then(r=>r.json()).then(d => {
                 this.replying = false;
                 if (d.success) {
