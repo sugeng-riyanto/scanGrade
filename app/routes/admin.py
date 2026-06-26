@@ -717,7 +717,4 @@ def audit_logs_view():
     )
 
 
-@admin_bp.route("/notifications")
-@admin_required
-def admin_notifications():
-    return render_template("admin_sekolah/notifications.html")
+

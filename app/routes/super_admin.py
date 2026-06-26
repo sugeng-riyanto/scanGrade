@@ -349,11 +349,6 @@ def demo_settings():
     return jsonify({"success": True})
 
 
-@super_bp.route("/notifications")
-@_sa_required
-def super_admin_notifications():
-    return render_template("super_admin/notifications.html")
-
     current = {}
     try:
         data = supabase.table("school_settings").select("demo_settings").eq("id", 1).single().execute().data or {}

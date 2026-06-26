@@ -5,7 +5,7 @@
 <div class="space-y-6" x-data="{
     lang: localStorage.getItem('sg_lang') || 'id',
     showAssignForm: false, assigningClassId: null, assigningSubjectId: null, assignLoading: false
-, showBroadcast: false, formTitle: '', formMessage: '', formTarget: 'murid', sending: false, sendMsg: ''}">
+}">
     {% if exams_no_key %}
     <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4 flex items-start gap-3">
         <i class="fas fa-exclamation-triangle text-amber-600 mt-0.5"></i>
@@ -321,30 +321,6 @@
                     </button>
                     <button type="button" @click="showAssignForm=false" class="px-6 py-3 border border-surface-200 rounded-xl font-bold text-surface-600 hover:bg-surface-50 transition text-sm">Batal</button>
                 </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Broadcast Modal -->
-    <div x-show="showBroadcast" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-         @click.self="showBroadcast=false">
-        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg" @click.outside="showBroadcast=false">
-            <div class="flex items-center justify-between mb-5">
-                <h3 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Kirim Pengumuman ke Murid</h3>
-                <button @click="showBroadcast=false" class="text-surface-400 hover:text-surface-600">&times;</button>
-            </div>
-            <form @submit.prevent="sending=true; fetch('/api/broadcast/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:formTitle,message:formMessage,target_role:'murid'})}).then(r=>r.json()).then(d=>{sending=false;if(d.success){sendMsg='Terkirim ke '+d.recipients+' murid';formTitle='';formMessage=''}else{sendMsg='Gagal: '+d.error}}).catch(()=>{sending=false;sendMsg='Error'})" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
-                    <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium">
-                </div>
-                <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Pesan</label>
-                    <textarea x-model="formMessage" required rows="3" class="w-full px-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700 font-medium"></textarea>
-                </div>
-                <button type="submit" class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition"
-                        :disabled="sending"><span x-text="sending ? 'Mengirim...' : 'Kirim ke Murid'"></span></button>
-                <p x-show="sendMsg" class="text-xs font-bold" :class="sendMsg.includes('Terkirim') ? 'text-emerald-600' : 'text-red-600'" x-text="sendMsg"></p>
             </form>
         </div>
     </div>
