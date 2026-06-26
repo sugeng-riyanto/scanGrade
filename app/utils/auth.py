@@ -88,10 +88,50 @@ def login_required(f):
             if g.get("user_status") == "pending":
                 return redirect("/auth/activate?email={}&pending=1".format(g.user_email))
         except Exception:
-            return _unauthorized()
+            # Token expired — try refresh using refresh_token cookie
+            token = _refresh_token()
+            if not token:
+                return _unauthorized()
+            g.user_token = token
         return f(*args, **kwargs)
 
     return wrapper
+
+
+def _refresh_token():
+    """Try to refresh Supabase session. Returns new access_token or None."""
+    rt = request.cookies.get("refresh_token")
+    if not rt:
+        return None
+    try:
+        supabase = get_auth_client()
+        res = supabase.auth.refresh_session(rt)
+        if not res or not res.session or not res.session.access_token:
+            return None
+        token = res.session.access_token
+        g.user_id = res.user.id
+        g.user_email = res.user.email
+        g.user_name = res.user.user_metadata.get("full_name", "")
+        db = get_supabase()
+        try:
+            pd = db.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
+        except Exception:
+            pd = {}
+        if pd:
+            g.user_role = _normalize_role(pd.get("role", "murid"))
+            g.user_school_id = pd.get("school_id") or res.user.user_metadata.get("school_id")
+            if g.user_school_id == "None": g.user_school_id = None
+            g.user_status = pd.get("status", "active")
+        else:
+            meta = res.user.user_metadata
+            g.user_role = _normalize_role(meta.get("role", "murid"))
+            g.user_school_id = meta.get("school_id")
+            if g.user_school_id == "None": g.user_school_id = None
+            g.user_status = "active"
+        g._new_access_token = token
+        return token
+    except Exception:
+        return None
 
 
 def _check_roles(user_role: str, allowed_roles: tuple) -> bool:
