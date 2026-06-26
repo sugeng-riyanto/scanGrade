@@ -17,22 +17,19 @@
     formTargetRole: '',
     formClassId: '',
     selectedPengumuman: null,
-    percakapanList: [],
+    contacts: [],
     searchChat: '',
     selectedPercakapan: null,
     pesanList: [],
     newMessage: '',
-    showCreateChat: false,
-    searchRecipient: '',
-    allowedRecipients: [],
-    selectedRecipient: null,
+
     sending: false,
     loading: false,
 
     init() {
         this.fetchPengumuman();
         this.fetchUnreadCount();
-        this.fetchPercakapan();
+        this.fetchContacts();
         this.startPolling();
         if ('Notification' in window && Notification.permission === 'default') {
             Notification.requestPermission();
@@ -69,19 +66,6 @@
             .then(r => r.json())
             .then(d => {
                 this.pengumumanList = d || [];
-                const sids = [...new Set(this.pengumumanList.map(p => p.sender_id))];
-                if (sids.length) {
-                    fetch('/api/percakapan/recipients')
-                        .then(r => r.json())
-                        .then(u => {
-                            const map = {};
-                            (u.users||[]).forEach(uu => map[uu.id] = uu.full_name);
-                            this.pengumumanList.forEach(p => {
-                                p.sender_name = map[p.sender_id] || p.sender_id.substring(0,8);
-                            });
-                        })
-                        .catch(() => {});
-                }
                 this.loading = false;
             })
             .catch(() => { this.loading = false; });
@@ -136,22 +120,22 @@
             .catch(() => {});
     },
 
-    fetchPercakapan() {
-        fetch('/api/percakapan?limit=50')
+    fetchContacts() {
+        fetch('/api/percakapan/contacts')
             .then(r => r.json())
             .then(d => {
-                this.percakapanList = d.percakapan || [];
-                this.chatUnreadCount = this.percakapanList.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+                this.contacts = d.contacts || [];
+                this.chatUnreadCount = this.contacts.reduce((sum, c) => sum + (c.unread_count || 0), 0);
             })
             .catch(() => {});
     },
     fetchPercakapanSilent() {
-        fetch('/api/percakapan?limit=50')
+        fetch('/api/percakapan/contacts')
             .then(r => r.json())
             .then(d => {
                 const oldUnread = this.chatUnreadCount;
-                this.percakapanList = d.percakapan || [];
-                this.chatUnreadCount = this.percakapanList.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+                this.contacts = d.contacts || [];
+                this.chatUnreadCount = this.contacts.reduce((sum, c) => sum + (c.unread_count || 0), 0);
                 if (this.chatUnreadCount > oldUnread) {
                     this.notifyNewChat();
                 }
@@ -159,41 +143,43 @@
             .catch(() => {});
     },
 
-    get filteredPercakapan() {
-        if (!this.searchChat.trim()) return this.percakapanList;
+    get filteredContacts() {
+        if (!this.searchChat.trim()) return this.contacts;
         const q = this.searchChat.toLowerCase();
-        return this.percakapanList.filter(c => (c.other_name||'').toLowerCase().includes(q));
+        return this.contacts.filter(c => (c.full_name||'').toLowerCase().includes(q));
     },
 
-    searchRecipients() {
-        const q = this.searchRecipient.trim();
-        fetch('/api/percakapan/recipients?q=' + encodeURIComponent(q))
-            .then(r => r.json())
-            .then(d => { this.allowedRecipients = d.users || []; })
-            .catch(() => { this.allowedRecipients = []; });
-    },
-    createChat() {
-        if (!this.selectedRecipient) return;
-        this.sending = true;
-        fetch('/api/percakapan', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({recipient_id: this.selectedRecipient})})
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) { alert('Gagal: '+d.error); return; }
-                const conv = d.percakapan || d;
-                this.showCreateChat = false;
-                this.searchRecipient = '';
-                this.selectedRecipient = null;
-                this.allowedRecipients = [];
-                this.fetchPercakapan();
-                this.openPercakapan(conv.id);
-            })
-            .catch(() => {})
-            .finally(() => { this.sending = false; });
+    openContact(contact) {
+        if (contact.conversation_id) {
+            this.openPercakapan(contact.conversation_id);
+        } else {
+            this.sending = true;
+            fetch('/api/percakapan', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({recipient_id: contact.id})})
+                .then(r => r.json())
+                .then(d => {
+                    if (d.error) { alert('Gagal: '+d.error); return; }
+                    const conv = d.percakapan || d;
+                    this.openPercakapan(conv.id);
+                    this.fetchContacts();
+                })
+                .catch(() => {})
+                .finally(() => { this.sending = false; });
+        }
     },
     openPercakapan(id) {
         this.selectedPercakapan = id;
         this.fetchPesan(id);
     },
+
+    roleColor(role) {
+        const colors = {guru:'bg-blue-500', murid:'bg-emerald-500', admin_sekolah:'bg-purple-500', super_admin:'bg-amber-500'};
+        return colors[role] || 'bg-surface-400';
+    },
+    roleLabel(role) {
+        const labels = {guru:'Guru', murid:'Murid', admin_sekolah:'Admin Sekolah', super_admin:'Super Admin'};
+        return labels[role] || role;
+    },
+
     fetchPesan(percakapanId, silent) {
         fetch('/api/percakapan/' + percakapanId + '/pesan?limit=50')
             .then(r => r.json())
@@ -228,6 +214,7 @@
                 const exists = this.pesanList.some(m => m.id === d.id);
                 if (!exists) this.pesanList.push(d);
                 this.newMessage = '';
+                this.fetchContacts();
                 this.$nextTick(() => {
                     const el = this.$refs.pesanContainer;
                     if (el) el.scrollTop = el.scrollHeight;
@@ -237,8 +224,8 @@
             .finally(() => { this.sending = false; });
     },
 
-    getOtherUser(conv) {
-        return conv ? (conv.other_name || conv.other_id?.substring(0,8) || '') : '';
+    getContactById(id) {
+        return this.contacts.find(c => c.conversation_id === id);
     },
 
     deletePesan(id) {
@@ -328,45 +315,52 @@
 
     <!-- CHAT TAB -->
     <div x-show="activeTab==='chat'" class="flex flex-col md:flex-row gap-0 md:gap-4" style="height: calc(100vh - 280px); min-height: 400px;">
-        <!-- Conversation list -->
+        <!-- Contact list sidebar -->
         <div class="w-full md:w-72 shrink-0 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden" x-show="!selectedPercakapan || window.innerWidth >= 768" :class="selectedPercakapan ? 'hidden md:flex' : 'flex'">
-            <div class="p-3 border-b border-surface-100 space-y-2">
-                <input type="text" x-model="searchChat" placeholder="Cari percakapan..." class="w-full px-3 py-2 bg-surface-50 border-0 rounded-lg text-xs text-surface-600">
-                <button @click="showCreateChat=true; searchRecipients()" class="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">
-                    <i class="fas fa-plus-circle"></i> Chat Baru
-                </button>
+            <div class="p-3 border-b border-surface-100">
+                <input type="text" x-model="searchChat" placeholder="Cari kontak..." class="w-full px-3 py-2 bg-surface-50 border-0 rounded-lg text-xs text-surface-600">
             </div>
-            <div class="flex-1 overflow-y-auto">
-                <template x-for="conv in filteredPercakapan" :key="conv.id">
-                    <div @click="openPercakapan(conv.id)" class="p-3 border-b border-surface-50 cursor-pointer hover:bg-surface-50 transition"
-                         :class="selectedPercakapan===conv.id ? 'bg-primary-50 border-l-2 border-l-primary-500' : ''">
-                        <div class="flex items-center gap-2">
-                            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(conv.other_name||'?')[0].toUpperCase()"></div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center justify-between">
-                                    <span class="font-bold text-surface-800 text-sm truncate" x-text="conv.other_name"></span>
-                                    <span class="text-[10px] text-surface-400 shrink-0 ml-1" x-text="formatDate(conv.last_message_at)"></span>
-                                </div>
-                                <p class="text-xs text-surface-500 truncate" x-text="conv.last_message || 'Belum ada pesan'"></p>
+            <div class="flex-1 overflow-y-auto divide-y divide-surface-50">
+                <template x-for="c in filteredContacts" :key="c.id">
+                    <div @click="openContact(c)" class="p-3 cursor-pointer hover:bg-surface-50 transition flex items-center gap-3"
+                         :class="selectedPercakapan===c.conversation_id ? 'bg-primary-50' : ''">
+                        <div class="relative shrink-0">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-sm" :class="roleColor(c.role)" x-text="c.initial"></div>
+                            <span class="absolute -bottom-0.5 -right-0.5 text-[9px] bg-white rounded-full px-1 py-0.5 shadow border border-surface-100 text-surface-500 font-medium leading-none" x-text="c.role==='guru'?'G':c.role==='murid'?'M':c.role==='admin_sekolah'?'A':'SA'"></span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center justify-between gap-1">
+                                <span class="font-bold text-surface-800 text-sm truncate" x-text="c.full_name"></span>
+                                <span x-show="c.last_message_at" class="text-[10px] text-surface-400 shrink-0" x-text="formatDate(c.last_message_at)"></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] text-surface-400 font-medium" x-text="c.role==='guru'?'Guru':c.role==='murid'?'Murid':c.role==='admin_sekolah'?'Admin':'Super Admin'"></span>
+                                <span x-show="c.last_message" class="text-xs text-surface-500 truncate" x-text="c.last_message"></span>
+                                <span x-show="!c.conversation_id" class="text-xs text-primary-400 italic">Baru</span>
                             </div>
                         </div>
-                        <div x-show="conv.unread_count > 0" class="ml-11 mt-1">
-                            <span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" x-text="conv.unread_count"></span>
+                        <div x-show="c.unread_count > 0" class="shrink-0">
+                            <span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center block" x-text="c.unread_count"></span>
                         </div>
                     </div>
                 </template>
+                <div x-show="filteredContacts.length===0" class="p-6 text-center text-surface-400">
+                    <i class="fas fa-users text-2xl mb-2"></i>
+                    <p class="text-xs font-bold">Tidak ada kontak yang tersedia</p>
+                </div>
             </div>
         </div>
 
         <!-- Message area -->
         <div class="flex-1 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden" x-show="selectedPercakapan" :class="selectedPercakapan ? 'flex' : 'hidden md:flex'">
-            <!-- Header -->
             <div class="p-3 border-b border-surface-200 flex items-center gap-3">
                 <button @click="selectedPercakapan=null; pesanList=[]" class="md:hidden text-surface-400 hover:text-surface-600"><i class="fas fa-arrow-left"></i></button>
-                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))||'?')[0].toUpperCase()"></div>
-                <span class="font-bold text-surface-800 text-sm" x-text="getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))"></span>
+                <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm" :class="roleColor(getContactById(selectedPercakapan)?.role)" x-text="getContactById(selectedPercakapan)?.initial || '?'"></div>
+                <div class="flex-1 min-w-0">
+                    <span class="font-bold text-surface-800 text-sm block truncate" x-text="getContactById(selectedPercakapan)?.full_name || 'Unknown'"></span>
+                    <span class="text-[10px] text-surface-400" x-text="getContactById(selectedPercakapan)?.role ? roleLabel(getContactById(selectedPercakapan).role) : ''"></span>
+                </div>
             </div>
-            <!-- Messages -->
             <div x-ref="pesanContainer" class="flex-1 overflow-y-auto p-4 space-y-2" style="background-color: #efeae2;">
                 <div x-show="pesanList.length===0" class="flex items-center justify-center h-full">
                     <p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p>
@@ -395,7 +389,6 @@
                     </div>
                 </template>
             </div>
-            <!-- Input bar -->
             <div class="p-3 border-t border-surface-200 bg-surface-50">
                 <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
                     <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendMessage()"></textarea>
@@ -407,11 +400,10 @@
             </div>
         </div>
 
-        <!-- No conversation selected -->
         <div x-show="!selectedPercakapan" class="flex-1 hidden md:flex items-center justify-center bg-white rounded-2xl border border-surface-100 shadow-sm">
             <div class="text-center text-surface-400">
                 <i class="fas fa-comments text-5xl mb-3"></i>
-                <p class="text-sm font-bold">Pilih percakapan untuk mulai chat</p>
+                <p class="text-sm font-bold">Pilih kontak untuk mulai chat</p>
             </div>
         </div>
     </div>
@@ -478,37 +470,7 @@
         </div>
     </div>
 
-    <!-- CREATE CHAT MODAL -->
-    <div x-show="showCreateChat" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showCreateChat=false">
-        <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-md">
-            <div class="flex items-center justify-between mb-5">
-                <h2 class="font-extrabold text-surface-800"><i class="fas fa-comment-dots text-primary-500 mr-2"></i>Chat Baru</h2>
-                <button @click="showCreateChat=false" class="text-surface-400 hover:text-surface-600 text-xl leading-none">&times;</button>
-            </div>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Cari penerima</label>
-                    <input type="text" x-model="searchRecipient" @input="searchRecipients()" placeholder="Nama..." class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium">
-                </div>
-                <div class="max-h-48 overflow-y-auto border border-surface-100 rounded-xl" x-show="allowedRecipients.length > 0">
-                    <template x-for="user in allowedRecipients" :key="user.id">
-                        <div @click="selectedRecipient=user.id" class="p-3 hover:bg-surface-50 cursor-pointer border-b border-surface-50 last:border-0 flex items-center gap-3"
-                             :class="selectedRecipient===user.id ? 'bg-primary-50' : ''">
-                            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-primary-500 flex items-center justify-center text-white text-xs font-bold" x-text="(user.full_name||'?')[0].toUpperCase()"></div>
-                            <div>
-                                <p class="text-sm font-bold text-surface-700" x-text="user.full_name"></p>
-                                <p class="text-[10px] text-surface-400" x-text="user.role"></p>
-                            </div>
-                            <i x-show="selectedRecipient===user.id" class="fas fa-check-circle text-primary-500 ml-auto"></i>
-                        </div>
-                    </template>
-                </div>
-                <button @click="createChat()" class="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition" :disabled="!selectedRecipient||sending">
-                    <span x-text="sending ? 'Memproses...' : 'Mulai Chat'"></span>
-                </button>
-            </div>
-        </div>
-    </div>
+
 
 </div>
 {% endblock %}
