@@ -96,10 +96,15 @@
 
 ### Latest (2025-06-26)
 - **`pengumuman.school_id` INT/UUID mismatch fix**: `profiles.school_id` is `UUID` referencing `schools(id)`, but `pengumuman.school_id` was `INT` referencing `school_settings(id)`. Create endpoint failed with `"invalid input syntax for type integer"`. Added fallback: try UUID first, retry with INT `1` on type error. Migration `024_fix_pengumuman_school_id_type.sql` created to permanently fix column type to UUID.
+- **List query fix**: supabase-py builder mutates in place — old code added `AND school_id=uuid AND school_id=1` (always empty). Fixed with fresh probe query + fallback to INT 1.
 - **Cascading pengumuman form**: Target role → jangkauan (all/class/specific) → class filter → recipient checkboxes. New APIs: `GET /api/pengumuman/classes`, `GET /api/pengumuman/recipients-by-role`
 - **Edit pengumuman modal**: RBAC-controlled (super_admin any, admin_sekolah/guru own, murid none)
 - **RBAC matrix update**: admin_sekolah can target super_admin; guru can target guru & admin_sekolah
 - **Migration 023**: `specific_recipients UUID[]` column for specific-student targeting
+- **Sender sees own broadcasts**: `api_list_pengumuman` now uses `OR` query — `target_role = role OR sender_id = uid`
+- **Read-status charts**: `GET /api/pengumuman/<id>/read-status` returns read/unread breakdown. Pie + bar chart in detail modal (Chart.js 4.4.7). Canvas rendered with `document.getElementById`, explicit dims, try/catch, 300ms delay for layout.
+- **Timezone fix**: `formatDate`/`formatTime`/`formatDateTime` now convert UTC to user's `tzOffset` (from cookie). Added `tz_offset` context processor in `__init__.py` for all templates.
+- **All chat endpoints NPSN-scoped**: contacts list, create conversation, list conversations, send message — all filter by `school_id` (UUID). Super_admin exempt. RBAC via `_get_allowed_recipient_roles()`.
 
 ### Blocked
 - Migration 021 (soft-delete + conversation CRUD columns) must run in Supabase SQL Editor
