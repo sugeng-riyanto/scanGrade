@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Banding Penalti - ScanGrade{% endblock %}
+{% block page_title %}Banding Penalti{% endblock %}
+{% block head_extra %}
+<script>
+function appealAction(submissionId, action) {
+    const row = document.getElementById('appeal-' + submissionId);
+    const reductionType = row ? row.querySelector('.reduction-type').value : 'fixed';
+    const reductionValue = row ? row.querySelector('.reduction-value').value : '0';
+    const response = row ? row.querySelector('.appeal-response').value : '';
+    fetch('/teacher/api/penalty-appeal/' + submissionId, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action, reduction_type: reductionType, reduction_value: reductionValue, response})
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.success) { location.reload(); }
+        else { alert('Gagal: ' + (d.error || '')); }
+    })
+    .catch(() => { alert('Gagal'); });
+}
+</script>
+{% endblock %}
+{% block content %}
+<div class="space-y-4">
+    {% if appeals %}
+    <div class="space-y-3">
+        {% for s in appeals %}
+        <div id="appeal-{{ s.id }}" class="card p-5">
+            <div class="flex items-center justify-between mb-3">
+                <div>
+                    <h3 class="font-bold text-slate-800">{{ s.student_name }}</h3>
+                    <p class="text-xs text-slate-500 font-medium">{{ s.exam_title }} &middot; {{ s.submitted_at|tz if s.submitted_at else '-' }}</p>
+                </div>
+                <div class="flex items-center gap-2 text-xs">
+                    <span class="badge bg-amber-50 text-amber-700">Penalti: {{ s.penalty or 0 }}</span>
+                    <span class="badge bg-blue-50 text-blue-700">Final: {{ s.final_score or '-' }}</span>
+                </div>
+            </div>
+            <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-3">
+                <p class="text-xs font-bold text-amber-700 mb-1">Alasan Siswa:</p>
+                <p class="text-sm text-slate-700 whitespace-pre-wrap">{{ (s.appeal or {}).get('reason', '') }}</p>
+                <p class="text-[10px] text-slate-400 mt-1">Diajukan: {{ (s.appeal or {}).get('requested_at', '')|tz }}</p>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mb-3">
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 block mb-0.5">Jenis Pengurangan</label>
+                    <select class="reduction-type w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
+                        <option value="fixed">Nominal tetap</option>
+                        <option value="percent">Persentase (%)</option>
+                        <option value="all">Semua penalti</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 block mb-0.5">Nilai Pengurangan</label>
+                    <input type="number" class="reduction-value w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5" value="5" min="0" step="1">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 block mb-0.5">Catatan</label>
+                    <input type="text" class="appeal-response w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5" placeholder="Opsional...">
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="appealAction('{{ s.id }}', 'approve')" class="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition">Setujui</button>
+                <button onclick="appealAction('{{ s.id }}', 'reject')" class="flex-1 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition">Tolak</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card p-12 text-center text-slate-400">
+        <i class="fas fa-check-circle text-5xl mb-4"></i>
+        <p class="text-lg font-bold">Tidak ada banding penalti</p>
+        <p class="text-sm font-medium mt-1">Semua banding sudah diproses</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

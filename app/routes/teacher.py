@@ -1424,6 +1424,94 @@ def override_score(submission_id):
     return redirect(request.referrer or "/teacher/results")
 
 
+# --- Penalty Appeals ---
+@teacher_bp.route("/penalty-appeals")
+@teacher_or_admin_required
+def penalty_appeals():
+    """List all pending penalty appeals."""
+    supabase = get_supabase()
+    user_role = g.get("user_role")
+    school_id = g.get("user_school_id")
+    exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
+    if not exam_ids and user_role == "admin_sekolah" and school_id:
+        exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("school_id", school_id).execute().data or []]
+    appeals = []
+    if exam_ids:
+        subs = supabase.table("submissions").select("id,student_id,exam_id,penalty,final_score,answers,submitted_at,exams(title),profiles(full_name)").in_("exam_id", exam_ids).execute().data or []
+        for s in subs:
+            answers = s.get("answers")
+            if isinstance(answers, str):
+                try: answers = json.loads(answers)
+                except: answers = {}
+            if isinstance(answers, dict):
+                appeal = answers.get("_penalty_appeal")
+                if isinstance(appeal, dict) and appeal.get("status") == "pending":
+                    s["exam_title"] = (s.get("exams") or {}).get("title", "-")
+                    s["student_name"] = (s.get("profiles") or {}).get("full_name", "-")
+                    s["appeal"] = appeal
+                    appeals.append(s)
+    return render_template("teacher/penalty_appeals.html", appeals=appeals)
+
+
+@teacher_bp.route("/api/penalty-appeal/<submission_id>", methods=["POST"])
+@teacher_or_admin_required
+@require_school_access("submissions", "submission_id", ("exam_id", "exams"))
+def api_penalty_appeal_handle(submission_id):
+    """Teacher approves/rejects a penalty appeal."""
+    data = request.get_json(silent=True) or {}
+    action = data.get("action")
+    reduction_type = data.get("reduction_type")
+    reduction_value = data.get("reduction_value")
+    response_msg = str(data.get("response", "")).strip()
+
+    if action not in ("approve", "reject"):
+        return jsonify({"error": "action harus 'approve' atau 'reject'"}), 400
+
+    supabase = get_supabase()
+    sub = supabase.table("submissions").select("id,student_id,exam_id,penalty,answers,final_score").eq("id", submission_id).single().execute().data
+    if not sub:
+        return jsonify({"error": "Not found"}), 404
+
+    answers = sub.get("answers") or {}
+    if isinstance(answers, str):
+        try: answers = json.loads(answers)
+        except: answers = {}
+    if not isinstance(answers, dict) or "_penalty_appeal" not in answers:
+        return jsonify({"error": "Tidak ada banding"}), 404
+
+    appeal = answers["_penalty_appeal"]
+    current_penalty = float(sub.get("penalty") or 0)
+    penalty_reduction = 0
+
+    if action == "approve":
+        if reduction_type == "all":
+            penalty_reduction = current_penalty
+        elif reduction_type == "fixed":
+            penalty_reduction = min(float(reduction_value or 0), current_penalty)
+        elif reduction_type == "percent":
+            pct = min(float(reduction_value or 0), 100)
+            penalty_reduction = round(current_penalty * pct / 100, 2)
+        else:
+            return jsonify({"error": "reduction_type harus fixed/percent/all"}), 400
+        penalty_reduction = max(0, min(penalty_reduction, current_penalty))
+        new_penalty = round(current_penalty - penalty_reduction, 2)
+        current_final = float(sub.get("final_score") or 0)
+        new_final = round(current_final + penalty_reduction, 2)
+        supabase.table("submissions").update({
+            "penalty": new_penalty,
+            "final_score": new_final,
+        }).eq("id", submission_id).execute()
+
+    appeal["status"] = "approved" if action == "approve" else "rejected"
+    appeal["responded_at"] = datetime.now(timezone.utc).isoformat()
+    appeal["response"] = response_msg
+    appeal["penalty_reduction"] = penalty_reduction if action == "approve" else 0
+    answers["_penalty_appeal"] = appeal
+    supabase.table("submissions").update({"answers": json.dumps(answers)}).eq("id", submission_id).execute()
+
+    return jsonify({"success": True, "message": "Banding " + ("disetujui" if action == "approve" else "ditolak")})
+
+
 @teacher_bp.route("/publish/<exam_id>", methods=["GET", "POST"])
 @subscription_write_required
 @teacher_or_admin_required

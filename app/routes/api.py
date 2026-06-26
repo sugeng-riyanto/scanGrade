@@ -805,6 +805,50 @@ def grade_batch():
     })
 
 
+@api_bp.route("/student/penalty-appeal", methods=["POST"])
+@login_required
+def api_penalty_appeal():
+    """Student submits a penalty appeal with reasoning."""
+    data = request.get_json(silent=True) or {}
+    submission_id = data.get("submission_id")
+    reason = str(data.get("reason", "")).strip()
+    if not submission_id or not reason:
+        return jsonify({"error": "submission_id dan reason wajib diisi"}), 400
+    if len(reason) < 10:
+        return jsonify({"error": "Alasan minimal 10 karakter"}), 400
+
+    supabase = get_supabase()
+    sub = supabase.table("submissions").select("id,student_id,penalty,answers,status").eq("id", submission_id).single().execute().data
+    if not sub:
+        return jsonify({"error": "Submission tidak ditemukan"}), 404
+    if sub["student_id"] != g.user_id:
+        return jsonify({"error": "Bukan submission Anda"}), 403
+    if sub["status"] not in ("submitted", "graded", "published"):
+        return jsonify({"error": "Status submission tidak memungkinkan banding"}), 400
+
+    answers = sub.get("answers") or {}
+    if isinstance(answers, str):
+        try: answers = json.loads(answers)
+        except: answers = {}
+    if not isinstance(answers, dict): answers = {}
+    # Check existing pending appeal
+    existing = answers.get("_penalty_appeal", {})
+    if isinstance(existing, dict) and existing.get("status") == "pending":
+        return jsonify({"error": "Sudah ada banding yang menunggu"}), 400
+
+    answers["_penalty_appeal"] = {
+        "reason": reason,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
+        "current_penalty": float(sub.get("penalty") or 0),
+        "responded_at": None,
+        "response": None,
+        "penalty_reduction": None,
+    }
+    supabase.table("submissions").update({"answers": json.dumps(answers)}).eq("id", submission_id).execute()
+    return jsonify({"success": True, "message": "Banding penalti telah dikirim. Guru akan mereview."})
+
+
 @api_bp.route("/scan/save", methods=["POST"])
 @login_required
 @_rate_limit("30 per minute")
