@@ -623,15 +623,57 @@
                     </template>
                     <template x-if="q.type === 'essay_text' || q.type === 'essay'">
                         <div class="mt-2">
-                            <div class="flex items-center gap-2 mb-2">
-                                <span class="text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                                    <i class="fas fa-align-left mr-0.5"></i>Jawaban Teks
-                                </span>
-                                <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + ' karakter)'"></span>
+                            <!-- Tab: Teks / Canvas -->
+                            <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
+                                <button @click="essayMode[i]='text'" :class="(essayMode[i]||'text')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                    <i class="fas fa-font mr-1"></i>Teks
+                                </button>
+                                <button @click="essayMode[i]='canvas'" :class="(essayMode[i]||'text')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                    <i class="fas fa-paint-brush mr-1"></i>Canvas
+                                </button>
                             </div>
-                            <textarea x-model="answersText[i]" @input="onAnswerInput(i)"
-                                class="w-full min-h-[200px] p-4 border-2 border-slate-200 rounded-xl text-sm leading-relaxed focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 resize-y"
-                                placeholder="Tulis jawaban esai Anda di sini..."></textarea>
+                            <!-- Text mode -->
+                            <div x-show="(essayMode[i]||'text')==='text'">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                                        <i class="fas fa-align-left mr-0.5"></i>Jawaban Teks
+                                    </span>
+                                    <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + ' karakter, ' + ((paragraphs[i]||[]).length) + ' paragraf)'"></span>
+                                </div>
+                                <!-- Rich text toolbar -->
+                                <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
+                                    <button @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
+                                    <button @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
+                                    <button @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
+                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
+                                    <button @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
+                                    <button @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
+                                    <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
+                                    <button @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
+                                </div>
+                                <!-- Paragraphs -->
+                                <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
+                                    <template x-for="(para, pIdx) in (paragraphs[i] || [{id:'p0',text:'',html:'<p><br></p>',order:0}])" :key="para.id">
+                                        <div class="relative group">
+                                            <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
+                                                <span class="text-[10px] font-semibold text-surface-400" x-text="'Paragraf ' + (pIdx + 1)"></span>
+                                                <button @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
+                                            </div>
+                                            <div :ref="'para_' + para.id"
+                                                 contenteditable="true"
+                                                 @input="onParagraphInput(i, pIdx, $refs['para_' + para.id])"
+                                                 @keydown.enter.prevent="addParagraph(i, pIdx + 1)"
+                                                 class="min-h-[60px] p-3 text-sm leading-relaxed text-surface-800 focus:outline-none focus:bg-blue-50/30"
+                                                 x-html="para.html || '<p><br></p>'"></div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            <!-- Canvas mode -->
+                            <div x-show="(essayMode[i]||'text')==='canvas'" class="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-emerald-200/50">
+                                <i class="fas fa-paint-brush text-emerald-500"></i>
+                                <span>Gambar &amp; teks pada halaman PDF di atas</span>
+                            </div>
                         </div>
                     </template>
                     <template x-if="q.type === 'essay_canvas'">
@@ -688,6 +730,8 @@ function examApp(duration, totalQ) {
         totalQ: totalQ,
         answered: {},
         answersText: {},
+        paragraphs: {},       // { i: [{id, text, html, order}] } per question
+        essayMode: {},        // { i: 'text' | 'canvas' }
         _qOrder: null,
         _shuffledOpts: {},
         _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
@@ -853,8 +897,20 @@ function examApp(duration, totalQ) {
                 this.saveToLocal();
                 if (this.dirty) {
                     const data = this.getAnswersLight();
+                    // Inject active page canvas for crash/close recovery
+                    const activeQ = this.currentQ !== undefined ? this.currentQ : 0;
+                    const activeP = this.page - 1;
+                    const activeCanvas = this.canvasData[activeQ]?.[activeP];
+                    if (activeCanvas && this.hasDrawn[activeQ]?.[activeP]) {
+                        const qAnswer = data[String(this.questions[activeQ]?.origIdx ?? activeQ)];
+                        if (qAnswer && typeof qAnswer === 'object') {
+                            if (!qAnswer.pages) qAnswer.pages = {};
+                            if (!qAnswer.pages[activeP]) qAnswer.pages[activeP] = {};
+                            qAnswer.pages[activeP].canvas = activeCanvas;
+                        }
+                    }
                     navigator.sendBeacon('/api/student/sync-draft',
-                        new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data})], {type: 'application/json'}));
+                        new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data, light: true})], {type: 'application/json'}));
                 }
             });
             // Shuffle questions if enabled
@@ -1734,6 +1790,42 @@ function examApp(duration, totalQ) {
             if (!this.hasDrawn[i]) this.hasDrawn[i] = {};
             this.hasDrawn[i][this.page - 1] = h.length > 1;
         },
+        // ── Paragraph management ──
+        addParagraph(qIdx, afterIdx) {
+            if (!this.paragraphs[qIdx]) this.paragraphs[qIdx] = [{id:'p0',text:'',html:'<p><br></p>',order:0}];
+            const insertAt = afterIdx !== undefined ? afterIdx : this.paragraphs[qIdx].length;
+            const newPara = {id:'p' + Date.now(), text:'', html:'<p><br></p>', order: insertAt};
+            this.paragraphs[qIdx].splice(insertAt, 0, newPara);
+            this.paragraphs[qIdx].forEach((p, i) => p.order = i);
+            this.$nextTick(() => {
+                const el = this.$refs['para_' + newPara.id];
+                if (el) el.focus();
+            });
+            this.onParagraphUpdate(qIdx);
+        },
+        deleteParagraph(qIdx, pIdx) {
+            if (!this.paragraphs[qIdx] || this.paragraphs[qIdx].length <= 1) return;
+            this.paragraphs[qIdx].splice(pIdx, 1);
+            this.paragraphs[qIdx].forEach((p, i) => p.order = i);
+            this.onParagraphUpdate(qIdx);
+        },
+        onParagraphInput(qIdx, pIdx, el) {
+            if (!el || !this.paragraphs[qIdx] || !this.paragraphs[qIdx][pIdx]) return;
+            const para = this.paragraphs[qIdx][pIdx];
+            para.html = el.innerHTML;
+            para.text = el.innerText;
+            this.onParagraphUpdate(qIdx);
+        },
+        onParagraphUpdate(qIdx) {
+            if (!this.paragraphs[qIdx]) return;
+            const fullText = this.paragraphs[qIdx].map(p => p.text).join('\n\n').trim();
+            this.answersText[qIdx] = fullText;
+            this.answered[qIdx] = fullText.length > 0;
+            this.dirty = true;
+        },
+        execCmd(cmd) {
+            document.execCommand(cmd);
+        },
         clearCanvas(i) {
             if (!this.canvasDraw[i]) return;
             const d = this.canvasDraw[i];
@@ -1754,10 +1846,25 @@ function examApp(duration, totalQ) {
         saveToLocal() {
             try {
                 const data = this.getAnswersLight();
+                // Inject canvas data for active page + any drawn pages (for device-switch recovery)
+                this.questions.forEach((q, i) => {
+                    const oi = q.origIdx !== undefined ? q.origIdx : i;
+                    if (!this.canvasData[i]) return;
+                    const qAnswer = data[oi];
+                    if (!qAnswer || typeof qAnswer !== 'object') return;
+                    if (!qAnswer.pages) qAnswer.pages = {};
+                    Object.keys(this.canvasData[i]).forEach(p => {
+                        const canvasUrl = this.canvasData[i][p];
+                        if (canvasUrl && this.hasDrawn[i]?.[p]) {
+                            if (!qAnswer.pages[p]) qAnswer.pages[p] = {};
+                            qAnswer.pages[p].canvas = canvasUrl;
+                        }
+                    });
+                });
                 const payload = { answers: data, savedAt: Date.now(), examId: '{{ exam.id }}' };
                 const json = JSON.stringify(payload);
                 if (json.length > 4 * 1024 * 1024) {
-                    console.warn('localStorage draft too large (' + (json.length/1024/1024).toFixed(1) + 'MB), skipping canvas');
+                    console.warn('localStorage draft too large, saving light');
                     const light = this.getAnswersLight();
                     payload.answers = light;
                     localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify(payload));
@@ -1766,13 +1873,11 @@ function examApp(duration, totalQ) {
                 }
             } catch(e) {
                 if (e.name === 'QuotaExceededError' || e.code === 22) {
-                    console.warn('localStorage quota exceeded, saving light data only');
+                    console.warn('localStorage quota exceeded, saving light');
                     try {
                         const light = this.getAnswersLight();
                         localStorage.setItem('exam_draft_' + '{{ exam.id }}', JSON.stringify({ answers: light, savedAt: Date.now(), examId: '{{ exam.id }}', light: true }));
                     } catch(e2) {}
-                } else {
-                    console.warn('localStorage save failed:', e);
                 }
             }
         },
@@ -1782,6 +1887,8 @@ function examApp(duration, totalQ) {
                 const oi = q.origIdx !== undefined ? q.origIdx : i;
                 if (q.type === 'essay_text') {
                     const textAnswer = (this.answersText[i] || '').trim();
+                    const paras = this.paragraphs[i];
+                    const hasParas = paras && paras.length > 0 && paras.some(p => p.text.trim());
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
                     for (let p = 0; p < totalP; p++) {
@@ -1789,6 +1896,11 @@ function examApp(duration, totalQ) {
                         if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
                     }
                     data[oi] = { type: 'essay_text', text: textAnswer, pages: pagesData };
+                    if (hasParas) {
+                        data[oi].paragraphs = paras
+                            .filter(p => p.text.trim())
+                            .map(p => ({id: p.id, text: p.text, html: p.html, order: p.order}));
+                    }
                 } else if (q.type === 'essay') {
                     const textAnswer = (this.answersText[i] || '').trim();
                     const pagesData = {};
@@ -1849,6 +1961,15 @@ function examApp(duration, totalQ) {
             this.syncStatus = 'saving';
             this.syncLabel = 'Menyinkronkan...';
             var body = { exam_id: '{{ exam.id }}', answers: lightData, light: true };
+            // Include active page canvas for device-switch recovery
+            const activeQ = this.currentQ !== undefined ? this.currentQ : 0;
+            const activeP = this.page - 1;
+            const activeCanvas = this.canvasData[activeQ]?.[activeP];
+            if (activeCanvas && this.hasDrawn[activeQ]?.[activeP]) {
+                body.current_q_idx = activeQ;
+                body.current_page = activeP;
+                body.current_canvas = activeCanvas;
+            }
             var ls = localStorage.getItem('exam_started_' + '{{ exam.id }}');
             if (ls) body.started_at = parseInt(ls);
             fetch('/api/student/sync-draft', {
@@ -1919,6 +2040,16 @@ function examApp(duration, totalQ) {
                             if (!this.answersText) this.answersText = {};
                             this.answersText[i] = qData.text;
                             this.answered[i] = true;
+                        }
+                        // Restore paragraphs
+                        if (qData && qData.paragraphs && qData.paragraphs.length > 0) {
+                            if (!this.paragraphs) this.paragraphs = {};
+                            this.paragraphs[i] = qData.paragraphs.map((p, idx) => ({
+                                id: p.id || ('p' + idx),
+                                text: p.text || '',
+                                html: p.html || '<p>' + (p.text || '') + '</p>',
+                                order: p.order !== undefined ? p.order : idx
+                            }));
                         }
                     } else if (q.type === 'mcq' && qData) {
                         if (typeof qData === 'object' && qData.answer) {

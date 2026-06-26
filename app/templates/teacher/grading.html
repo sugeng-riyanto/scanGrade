@@ -8,29 +8,50 @@
         <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Submissions waiting for your review':'Jawaban yang menunggu koreksi Anda'"></p>
     </div>
 
-    {% if pending_subs %}
-    <div class="space-y-3">
-        {% for s in pending_subs %}
-        <div class="card card-hover p-5">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-4 min-w-0">
-                    <div class="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                        <i class="fas fa-pen-alt"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="font-bold text-slate-800">{{ s.student_name or 'Siswa' }}</p>
-                        <p class="text-sm text-slate-500 font-medium">{{ s.exam_title or 'Ujian' }} &middot; {{ s.submitted_at|tz if s.submitted_at else '-' }}</p>
-                    </div>
+    {% for eg in exam_groups %}
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div>
+                <h3 class="font-extrabold text-slate-800">{{ eg.title }}</h3>
+                <p class="text-xs text-slate-500 font-medium mt-0.5">
+                    {{ eg.pending|length }} perlu koreksi  •  {{ eg.graded|length }} selesai
+                </p>
+            </div>
+            <div class="flex items-center gap-2">
+                {% set total = eg.pending|length + eg.graded|length %}
+                {% set pct = (eg.graded|length / total * 100)|round if total > 0 else 0 %}
+                <div class="w-32 h-2 bg-slate-200 rounded-full overflow-hidden hidden sm:block">
+                    <div class="h-full bg-emerald-500 rounded-full" style="width: {{ pct }}%"></div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <span class="badge bg-amber-50 text-amber-700" x-text="lang==='en'?'Needs Grading':'Perlu Koreksi'"></span>
-                    <a href="/teacher/grade/{{ s.id }}" class="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg font-semibold text-xs shadow transition">
-                        <i class="fas fa-pen mr-1"></i><span x-text="lang==='en'?'Grade':'Koreksi'"></span>
-                    </a>
-                </div>
+                <a href="/teacher/grading/{{ eg.id }}" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg font-bold text-xs shadow transition">
+                    <i class="fas fa-tasks mr-1"></i><span x-text="lang==='en'?'Quick Grade':'Koreksi Cepat'"></span>
+                </a>
             </div>
         </div>
-        {% endfor %}
+        {% if eg.pending %}
+        <div class="divide-y divide-slate-50">
+            {% for s in eg.pending[:5] %}
+            <div class="px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center text-xs font-bold shrink-0">{{ (s.student_name or '?')[0] }}</div>
+                    <div class="min-w-0">
+                        <p class="font-semibold text-slate-800 text-sm">{{ s.student_name or '-' }}</p>
+                        <p class="text-xs text-slate-400">{{ s.submitted_at|tz if s.submitted_at else '-' }}</p>
+                    </div>
+                </div>
+                <a href="/teacher/grade/{{ s.id }}" class="text-primary-600 hover:text-primary-700 text-xs font-semibold"><i class="fas fa-pen mr-1"></i>Koreksi</a>
+            </div>
+            {% endfor %}
+            {% if eg.pending|length > 5 %}
+            <div class="px-5 py-2 text-center text-xs text-slate-400">+ {{ eg.pending|length - 5 }} lainnya</div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="px-5 py-8 text-center text-slate-400">
+            <i class="fas fa-check-circle text-2xl mb-2"></i>
+            <p class="text-sm font-medium">Semua terkoreksi untuk ujian ini</p>
+        </div>
+        {% endif %}
     </div>
     {% else %}
     <div class="card p-12 text-center text-slate-400">
@@ -38,34 +59,6 @@
         <p class="text-lg font-bold" x-text="lang==='en'?'All caught up!':'Semua terkoreksi!'"></p>
         <p class="text-sm font-medium mt-1" x-text="lang==='en'?'No submissions waiting for grading':'Tidak ada jawaban yang perlu dikoreksi'"></p>
     </div>
-    {% endif %}
-
-    {% if graded_subs %}
-    <div>
-        <h3 class="font-bold text-slate-800 mb-3" x-text="lang==='en'?'Recently Graded':'Baru Dikoreksi'"></h3>
-        <div class="card overflow-hidden">
-            <table class="w-full text-sm">
-                <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Student':'Siswa'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Score':'Nilai'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Status':'Status'"></th>
-                    <th class="px-5 py-3 font-semibold"></th>
-                </tr></thead>
-                <tbody>
-                    {% for s in graded_subs[:10] %}
-                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
-                        <td class="px-5 py-3 font-semibold text-slate-700">{{ s.student_name or '-' }}</td>
-                        <td class="px-5 py-3 text-slate-600">{{ s.exam_title or '-' }}</td>
-                        <td class="px-5 py-3 font-bold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</td>
-                        <td class="px-5 py-3"><span class="badge bg-emerald-50 text-emerald-700">Graded</span></td>
-                        <td class="px-5 py-3"><a href="/teacher/grade/{{ s.id }}" class="text-brand-600 hover:text-brand-700 font-semibold"><i class="fas fa-eye mr-1"></i>View</a></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% endif %}
+    {% endfor %}
 </div>
 {% endblock %}
