@@ -1490,6 +1490,7 @@ def api_create_pengumuman():
     target_role = data.get("target_role")
     school_id = data.get("school_id")
     class_id = data.get("class_id")
+    recipient_ids = data.get("recipient_ids")
     attachment_url = data.get("attachment_url")
 
     if not title or not content or not target_role:
@@ -1518,8 +1519,13 @@ def api_create_pengumuman():
     }
     if school_id:
         payload["school_id"] = school_id
-    if class_id and role == "guru":
+    if class_id:
         payload["class_id"] = class_id
+    if recipient_ids and isinstance(recipient_ids, list) and len(recipient_ids) > 0:
+        try:
+            payload["specific_recipients"] = recipient_ids
+        except Exception:
+            pass
     if attachment_url:
         payload["attachment_url"] = attachment_url
     expires_at = data.get("expires_at")
@@ -1560,6 +1566,12 @@ def api_list_pengumuman():
     except Exception:
         pass
 
+    # Filter by specific_recipients if column exists & populated
+    try:
+        data = [p for p in data if p.get("specific_recipients") is None or uid in p["specific_recipients"]]
+    except Exception:
+        pass
+
     result = []
     for p in data:
         if unread_only and p["id"] in read_ids:
@@ -1576,6 +1588,46 @@ def api_list_pengumuman():
         })
 
     return jsonify(result)
+
+
+@api_bp.route("/pengumuman/classes", methods=["GET"])
+@login_required
+def api_pengumuman_classes():
+    """Get classes for current user's school (for broadcast targeting)."""
+    supabase = get_supabase()
+    school_id = g.get("user_school_id")
+    if not school_id:
+        return jsonify({"classes": []})
+    try:
+        classes = supabase.table("classes").select("id, name").eq("school_id", school_id).order("name").execute().data or []
+        return jsonify({"classes": classes})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "classes": []}), 500
+
+
+@api_bp.route("/pengumuman/recipients-by-role", methods=["GET"])
+@login_required
+def api_pengumuman_recipients():
+    """Get users by role for specific recipient selection (scoped to school/NPSN)."""
+    supabase = get_supabase()
+    role = request.args.get("role")
+    class_id = request.args.get("class_id")
+    if not role:
+        return jsonify({"error": "role required"}), 400
+    allowed = _get_allowed_recipient_roles(g.get("user_role"))
+    if role not in allowed and g.get("user_role") != "super_admin":
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        query = supabase.table("profiles").select("id, full_name").eq("role", role)
+        school_id = g.get("user_school_id")
+        if school_id:
+            query = query.eq("school_id", school_id)
+        if class_id:
+            query = query.eq("class_id", class_id)
+        users = query.order("full_name").execute().data or []
+        return jsonify({"users": users})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "users": []}), 500
 
 
 @api_bp.route("/pengumuman/<uuid:pengumuman_id>", methods=["GET"])
