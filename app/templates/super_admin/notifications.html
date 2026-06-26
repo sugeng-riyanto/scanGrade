@@ -117,12 +117,7 @@
             }).catch(()=>{ this.replyError = 'Gagal terhubung ke server'; }).finally(()=>{ this.replying = false; });
         }
     },
-    completeConv() {
-        if (!confirm('Selesaikan percakapan ini?')) return;
-        var cid = this.activeConv.id || this.activeConv.conversation_id;
-        fetch('/api/broadcast/complete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conversation_id: cid}) })
-        .then(r=>r.json()).then(d => { if (d.success) { this.activeConv.status = 'completed'; this.fetchContacts(); } });
-    },
+    completeConv() {},
     toggleConvMenu() { this.convMenuOpen = !this.convMenuOpen; },
     closeConvMenu() { this.convMenuOpen = false; },
     toggleMsgMenu(id) { this.msgMenuId = this.msgMenuId === id ? null : id; },
@@ -333,12 +328,8 @@
                                     </div>
                                     <div class="flex-1 min-w-0">
                                         <p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p>
-                                        <p class="text-[11px]" :class="activeConv.status==='open' ? 'text-emerald-600' : 'text-surface-400'" x-text="activeConv.status==='open' ? 'Online' : 'Offline'"></p>
+                                        <p class="text-[11px] text-emerald-600"><i class="fas fa-circle text-[6px] mr-1 align-middle"></i>Online</p>
                                     </div>
-                                    <template x-if="activeConv.status==='open'">
-                                        <button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan percakapan"><i class="fas fa-check-double text-sm"></i></button>
-                                    </template>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" :class="activeConv.status==='open' ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-200 text-surface-500'"><span x-text="activeConv.status==='open' ? 'Aktif' : 'Selesai'"></span></span>
                                     <div class="relative" @click.outside="closeConvMenu()">
                                         <button @click="toggleConvMenu()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Lainnya"><i class="fas fa-ellipsis-v text-sm"></i></button>
                                         <template x-if="convMenuOpen">

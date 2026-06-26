@@ -143,12 +143,7 @@
     toggleConvMenu() { this.convMenuOpen=!this.convMenuOpen; },
     closeConvMenu() { this.convMenuOpen=false; },
     toggleMsgMenu(id) { this.msgMenuId=this.msgMenuId===id?null:id; },
-    completeConv() {
-        if(!this.activeConv||!confirm('Selesaikan percakapan ini?')) return;
-        var cid = this.activeConv.id || this.activeConv.conversation_id;
-        fetch('/api/broadcast/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:cid})})
-        .then(function(r){return r.json();}).then(function(d){if(d.success){this.activeConv.status='completed';this.fetchContacts();}}.bind(this));
-    },
+    completeConv() {},
 
     // Pengumuman inbox
     fetchInbox() {
@@ -261,8 +256,7 @@
                                     <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" :class="activeConv.other_role==='guru'?'bg-gradient-to-br from-amber-400 to-amber-600':(activeConv.other_role==='murid'?'bg-gradient-to-br from-emerald-400 to-emerald-600':(activeConv.other_role==='admin_sekolah'||activeConv.other_role==='super_admin'?'bg-gradient-to-br from-purple-400 to-purple-600':'bg-gradient-to-br from-blue-400 to-blue-600'))">
                                         <span x-text="(activeConv.other_name||'?')[0].toUpperCase()"></span>
                                     </div>
-                                    <div class="flex-1 min-w-0"><p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p><p class="text-[11px]" :class="activeConv.status==='open'?'text-emerald-600':'text-surface-400'" x-text="activeConv.status==='open'?'Online':'Selesai'"></p></div>
-                                    <template x-if="activeConv.status==='open'"><button @click="completeConv()" class="text-surface-400 hover:text-emerald-600 transition p-1" title="Selesaikan"><i class="fas fa-check-double text-sm"></i></button></template>
+                                    <div class="flex-1 min-w-0"><p class="font-semibold text-surface-800 text-sm truncate" x-text="activeConv.other_name"></p><p class="text-[11px] text-emerald-600"><i class="fas fa-circle text-[6px] mr-1 align-middle"></i>Online</p></div>
                                     <div class="relative" @click.outside="closeConvMenu()">
                                         <button @click="toggleConvMenu()" class="text-surface-400 hover:text-primary-600 transition p-1" title="Lainnya"><i class="fas fa-ellipsis-v text-sm"></i></button>
                                         <template x-if="convMenuOpen">
