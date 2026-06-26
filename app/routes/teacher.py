@@ -1592,7 +1592,13 @@ def api_grading_queue(exam_id):
     result = []
     for s in subs:
         answers = s.get("answers") or {}
+        if isinstance(answers, str):
+            try: answers = json.loads(answers)
+            except: answers = {}
         fb = s.get("teacher_feedback") or {}
+        if isinstance(fb, str):
+            try: fb = json.loads(fb)
+            except: fb = {}
         fb_scores = fb.get("scores") or {}
         fb_comments = fb.get("comments") or {}
         graded_essays = sum(1 for ei in essay_indices if ei in fb_scores)
@@ -1623,6 +1629,7 @@ def api_grading_queue(exam_id):
             "has_drawing": any(isinstance(answers.get(ei), dict) and answers[ei].get("pages") for ei in essay_indices),
             "preview": preview,
             "questions": per_question,
+            "teacher_feedback": fb,
         })
 
     return jsonify({
