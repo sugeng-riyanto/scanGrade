@@ -1,6 +1,6 @@
 import traceback
 
-from flask import jsonify, request, redirect
+from flask import jsonify, request, redirect, render_template
 from app.errors import ScanGradeException
 from app.utils.logger import get_logger
 
@@ -39,13 +39,15 @@ def register_error_handlers(app):
 
     @app.errorhandler(403)
     def forbidden(e):
-        return jsonify({"success": False, "error": "FORBIDDEN", "message": "Akses ditolak"}), 403
+        if _wants_json():
+            return jsonify({"success": False, "error": "FORBIDDEN", "message": "Akses ditolak"}), 403
+        return render_template("errors/403.html"), 403
 
     @app.errorhandler(404)
     def not_found(e):
         if _wants_json():
             return jsonify({"success": False, "error": "NOT_FOUND", "message": "Halaman tidak ditemukan"}), 404
-        return redirect("/")
+        return render_template("errors/404.html"), 404
 
     @app.errorhandler(413)
     def request_entity_too_large(e):
@@ -63,13 +65,17 @@ def register_error_handlers(app):
             sentry_sdk.capture_exception(e)
         except ImportError:
             pass
+        if _wants_json():
+            if app.debug:
+                return jsonify({
+                    "success": False, "error": "SERVER_ERROR",
+                    "message": "Internal server error",
+                    "detail": str(e), "traceback": traceback.format_exc(),
+                }), 500
+            return jsonify({"success": False, "error": "SERVER_ERROR", "message": "Terjadi kesalahan server. Tim kami sedang menanganinya."}), 500
         if app.debug:
-            return jsonify({
-                "success": False, "error": "SERVER_ERROR",
-                "message": "Internal server error",
-                "detail": str(e), "traceback": traceback.format_exc(),
-            }), 500
-        return jsonify({"success": False, "error": "SERVER_ERROR", "message": "Terjadi kesalahan server. Tim kami sedang menanganinya."}), 500
+            return f"<h1>500 Server Error</h1><pre>{traceback.format_exc()}</pre>", 500
+        return render_template("errors/500.html"), 500
 
 
 def _wants_json():

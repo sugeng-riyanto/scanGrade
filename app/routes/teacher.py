@@ -1337,50 +1337,56 @@ def grade_question_save(exam_id, question_index):
 @require_school_access("submissions", "submission_id", ("exam_id", "exams"))
 def grade_detail(submission_id):
     supabase = get_supabase()
-    sub = supabase.table("submissions").select("*").eq("id", submission_id).maybe_single().execute()
-    if not sub.data:
-        return redirect("/teacher/grading")
-    sub = sub.data
-    exam = supabase.table("exams").select("*").eq("id", sub["exam_id"]).single().execute().data
-    exam.setdefault("question_weights", {})
-    if not exam.get("question_weights") and exam.get("total_questions", 0) > 0:
-        qtypes = exam.get("question_types", {})
-        tq = exam["total_questions"]
-        mcq_n = sum(1 for i in range(tq) if qtypes.get(str(i), "mcq") == "mcq")
-        essay_n = tq - mcq_n
-        mp, ep = (70, 30)
-        if mcq_n == 0: mp, ep = 0, 100
-        elif essay_n == 0: mp, ep = 100, 0
-        if mcq_n:
-            e = round(mp / mcq_n, 2)
-            for i in range(tq):
-                if qtypes.get(str(i), "mcq") == "mcq":
-                    exam["question_weights"][str(i)] = e
-        if essay_n:
-            e = round(ep / essay_n, 2)
-            for i in range(tq):
-                if qtypes.get(str(i), "mcq") != "mcq":
-                    exam["question_weights"][str(i)] = e
-    student = supabase.table("profiles").select("id,full_name,phone").eq("id", sub["student_id"]).single().execute().data or {}
-    # Parse JSON string fields
-    for field in ("teacher_feedback", "answers"):
-        val = sub.get(field)
-        if isinstance(val, str):
-            try:
-                sub[field] = json.loads(val)
-            except (json.JSONDecodeError, TypeError):
+    try:
+        sub = supabase.table("submissions").select("*").eq("id", submission_id).maybe_single().execute()
+        if not sub.data:
+            flash("Submission tidak ditemukan", "error")
+            return redirect("/teacher/grading")
+        sub = sub.data
+        exam = supabase.table("exams").select("*").eq("id", sub["exam_id"]).single().execute().data
+        exam.setdefault("question_weights", {})
+        if not exam.get("question_weights") and exam.get("total_questions", 0) > 0:
+            qtypes = exam.get("question_types", {})
+            tq = exam["total_questions"]
+            mcq_n = sum(1 for i in range(tq) if qtypes.get(str(i), "mcq") == "mcq")
+            essay_n = tq - mcq_n
+            mp, ep = (70, 30)
+            if mcq_n == 0: mp, ep = 0, 100
+            elif essay_n == 0: mp, ep = 100, 0
+            if mcq_n:
+                e = round(mp / mcq_n, 2)
+                for i in range(tq):
+                    if qtypes.get(str(i), "mcq") == "mcq":
+                        exam["question_weights"][str(i)] = e
+            if essay_n:
+                e = round(ep / essay_n, 2)
+                for i in range(tq):
+                    if qtypes.get(str(i), "mcq") != "mcq":
+                        exam["question_weights"][str(i)] = e
+        student = supabase.table("profiles").select("id,full_name,phone").eq("id", sub["student_id"]).single().execute().data or {}
+        # Parse JSON string fields
+        for field in ("teacher_feedback", "answers"):
+            val = sub.get(field)
+            if isinstance(val, str):
+                try:
+                    sub[field] = json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    sub[field] = {} if field != "answers" else {}
+            if not isinstance(sub.get(field), dict):
                 sub[field] = {} if field != "answers" else {}
-        if not isinstance(sub.get(field), dict):
-            sub[field] = {} if field != "answers" else {}
-    # Parse exam JSON fields
-    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
-        _val = exam.get(_field)
-        if isinstance(_val, str):
-            try:
-                exam[_field] = json.loads(_val)
-            except (json.JSONDecodeError, TypeError):
-                exam[_field] = {}
-    return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
+        # Parse exam JSON fields
+        for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
+            _val = exam.get(_field)
+            if isinstance(_val, str):
+                try:
+                    exam[_field] = json.loads(_val)
+                except (json.JSONDecodeError, TypeError):
+                    exam[_field] = {}
+        return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
+    except Exception as e:
+        current_app.logger.error("grade_detail error: %s", str(e), exc_info=True)
+        flash(f"Terjadi kesalahan: {str(e)[:100]}", "error")
+        return redirect("/teacher/grading")
 
 
 @teacher_bp.route("/grade/<submission_id>/override", methods=["POST"])
