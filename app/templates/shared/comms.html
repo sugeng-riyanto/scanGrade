@@ -213,18 +213,20 @@
             .then(d => {
                 if (d.error) return;
                 this.readStatus = d;
-                this.$nextTick(() => this.renderReadCharts());
+                this.$nextTick(() => setTimeout(() => this.renderReadCharts(), 150));
             })
             .catch(() => {});
     },
     renderReadCharts() {
         if (!this.readStatus || this.readStatus.total_target === 0) return;
+        if (typeof Chart === 'undefined' && typeof window.Chart === 'undefined') return;
+        const C = window.Chart || Chart;
         const pieCanvas = this.$refs.readPieChart;
         const barCanvas = this.$refs.readBarChart;
         if (!pieCanvas || !barCanvas) return;
         if (this._readPieChart) { this._readPieChart.destroy(); }
         if (this._readBarChart) { this._readBarChart.destroy(); }
-        this._readPieChart = new Chart(pieCanvas, {
+        this._readPieChart = new C(pieCanvas, {
             type: 'doughnut',
             data: {
                 labels: ['Sudah Dibaca', 'Belum Dibaca'],
@@ -244,7 +246,7 @@
                 }
             }
         });
-        this._readBarChart = new Chart(barCanvas, {
+        this._readBarChart = new C(barCanvas, {
             type: 'bar',
             data: {
                 labels: ['Sudah Dibaca', 'Belum Dibaca'],
@@ -690,7 +692,7 @@
 
             <!-- Read Status Panel -->
             <div x-show="showReadStatus && readStatus" class="mt-4 p-4 bg-surface-50 rounded-xl border border-surface-100">
-                <template x-if="readStatus && readStatus.total_target > 0">
+                <div x-show="readStatus && readStatus.total_target > 0">
                     <div>
                         <div class="flex items-center justify-between mb-3 text-xs font-bold text-surface-600">
                             <span><span x-text="readStatus.total_target"></span> target penerima</span>
@@ -703,8 +705,8 @@
                         </div>
                         <!-- Charts -->
                         <div class="grid grid-cols-2 gap-4 mb-4">
-                            <div><canvas x-ref="readPieChart" class="w-full max-h-[160px]"></canvas></div>
-                            <div><canvas x-ref="readBarChart" class="w-full max-h-[160px]"></canvas></div>
+                            <div><canvas x-ref="readPieChart" style="height:160px" class="w-full"></canvas></div>
+                            <div><canvas x-ref="readBarChart" style="height:160px" class="w-full"></canvas></div>
                         </div>
                         <!-- User lists -->
                         <div class="space-y-2 text-xs max-h-40 overflow-y-auto">
@@ -731,10 +733,10 @@
                             </template>
                         </div>
                     </div>
-                </template>
-                <template x-if="readStatus && readStatus.total_target === 0">
+                </div>
+                <div x-show="readStatus && readStatus.total_target === 0">
                     <p class="text-xs text-surface-400 text-center py-4">Tidak ada data penerima.</p>
-                </template>
+                </div>
             </div>
 
             <div x-show="selectedPengumuman?.sender_id === userId || userRole === 'super_admin'" class="mt-4 pt-3 border-t border-surface-100 flex gap-2">
