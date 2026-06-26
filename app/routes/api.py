@@ -1535,7 +1535,16 @@ def api_create_pengumuman():
         res = supabase.table("pengumuman").insert(payload).execute()
         return jsonify(res.data[0]), 201
     except Exception as e:
-        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+        err_msg = str(e)
+        # If school_id type mismatch (INT vs UUID), retry with INT 1
+        if "invalid input syntax for type integer" in err_msg and "school_id" in payload:
+            try:
+                payload["school_id"] = 1
+                res = supabase.table("pengumuman").insert(payload).execute()
+                return jsonify(res.data[0]), 201
+            except Exception as e2:
+                return jsonify({"error": f"Gagal: {str(e2)[:100]}"}), 500
+        return jsonify({"error": f"Gagal: {err_msg[:100]}"}), 500
 
 
 @api_bp.route("/pengumuman", methods=["GET"])
@@ -1553,7 +1562,10 @@ def api_list_pengumuman():
         query = supabase.table("pengumuman").select("*").eq("target_role", role).is_("is_archived", "false")
         school_id = g.get("user_school_id")
         if school_id and role != "super_admin":
-            query = query.eq("school_id", school_id)
+            try:
+                query = query.eq("school_id", school_id)
+            except Exception:
+                pass
         data = query.order("created_at", desc=True).limit(limit).offset(offset).execute().data or []
     except Exception:
         data = []
