@@ -313,97 +313,108 @@
         </div>
     </div>
 
-    <!-- CHAT TAB -->
+    <!-- CHAT TAB (WhatsApp-style) -->
     <div x-show="activeTab==='chat'" class="flex flex-col md:flex-row gap-0 md:gap-4" style="height: calc(100vh - 280px); min-height: 400px;">
-        <!-- Contact list sidebar -->
-        <div class="w-full md:w-72 shrink-0 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden" x-show="!selectedPercakapan || window.innerWidth >= 768" :class="selectedPercakapan ? 'hidden md:flex' : 'flex'">
+
+        <!-- LEFT: Contact list -->
+        <div class="w-full md:w-[350px] shrink-0 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden"
+             :class="selectedPercakapan ? 'hidden md:flex' : 'flex'">
             <div class="p-3 border-b border-surface-100">
-                <input type="text" x-model="searchChat" placeholder="Cari kontak..." class="w-full px-3 py-2 bg-surface-50 border-0 rounded-lg text-xs text-surface-600">
+                <input type="text" x-model="searchChat" placeholder="Cari kontak..." class="w-full px-3 py-2.5 bg-surface-50 border-0 rounded-lg text-sm text-surface-700 placeholder:text-surface-400">
             </div>
-            <div class="flex-1 overflow-y-auto divide-y divide-surface-50">
+            <div class="flex-1 overflow-y-auto">
                 <template x-for="c in filteredContacts" :key="c.id">
-                    <div @click="openContact(c)" class="p-3 cursor-pointer hover:bg-surface-50 transition flex items-center gap-3"
+                    <div @click="openContact(c)" class="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-surface-50 transition border-b border-surface-50"
                          :class="selectedPercakapan===c.conversation_id ? 'bg-primary-50' : ''">
                         <div class="relative shrink-0">
-                            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-sm" :class="roleColor(c.role)" x-text="c.initial"></div>
-                            <span class="absolute -bottom-0.5 -right-0.5 text-[9px] bg-white rounded-full px-1 py-0.5 shadow border border-surface-100 text-surface-500 font-medium leading-none" x-text="c.role==='guru'?'G':c.role==='murid'?'M':c.role==='admin_sekolah'?'A':'SA'"></span>
+                            <div class="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold shadow-sm" :class="roleColor(c.role)" x-text="c.initial"></div>
+                            <span class="absolute -bottom-0.5 -right-0.5 text-[10px] bg-white rounded-full px-1 py-0.5 shadow border border-surface-200 text-surface-500 font-bold leading-none" x-text="c.role==='guru'?'G':c.role==='murid'?'M':c.role==='admin_sekolah'?'A':'SA'"></span>
                         </div>
                         <div class="flex-1 min-w-0">
-                            <div class="flex items-center justify-between gap-1">
-                                <span class="font-bold text-surface-800 text-sm truncate" x-text="c.full_name"></span>
-                                <span x-show="c.last_message_at" class="text-[10px] text-surface-400 shrink-0" x-text="formatDate(c.last_message_at)"></span>
+                            <div class="flex items-center justify-between">
+                                <span class="font-semibold text-surface-800 text-sm truncate" x-text="c.full_name"></span>
+                                <span x-show="c.last_message_at" class="text-[11px] text-surface-400 shrink-0 ml-1" x-text="formatDate(c.last_message_at)"></span>
                             </div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-[10px] text-surface-400 font-medium" x-text="c.role==='guru'?'Guru':c.role==='murid'?'Murid':c.role==='admin_sekolah'?'Admin':'Super Admin'"></span>
-                                <span x-show="c.last_message" class="text-xs text-surface-500 truncate" x-text="c.last_message"></span>
-                                <span x-show="!c.conversation_id" class="text-xs text-primary-400 italic">Baru</span>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <span class="text-[11px] text-surface-400" x-text="c.role==='guru'?'Guru':c.role==='murid'?'Murid':c.role==='admin_sekolah'?'Admin':'Super Admin'"></span>
+                                <span x-show="c.last_message" class="text-[13px] text-surface-500 truncate">· <span x-text="c.last_message"></span></span>
+                                <span x-show="!c.conversation_id" class="text-xs text-primary-500 font-medium">Baru</span>
                             </div>
                         </div>
-                        <div x-show="c.unread_count > 0" class="shrink-0">
-                            <span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center block" x-text="c.unread_count"></span>
+                        <div x-show="c.unread_count > 0">
+                            <span class="bg-green-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-full min-w-[22px] text-center block" x-text="c.unread_count"></span>
                         </div>
                     </div>
                 </template>
                 <div x-show="filteredContacts.length===0" class="p-6 text-center text-surface-400">
-                    <i class="fas fa-users text-2xl mb-2"></i>
-                    <p class="text-xs font-bold">Tidak ada kontak yang tersedia</p>
+                    <i class="fas fa-users text-3xl mb-2"></i>
+                    <p class="text-sm font-medium">Tidak ada kontak</p>
                 </div>
             </div>
         </div>
 
-        <!-- Message area -->
-        <div class="flex-1 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden" x-show="selectedPercakapan" :class="selectedPercakapan ? 'flex' : 'hidden md:flex'">
-            <div class="p-3 border-b border-surface-200 flex items-center gap-3">
-                <button @click="selectedPercakapan=null; pesanList=[]" class="md:hidden text-surface-400 hover:text-surface-600"><i class="fas fa-arrow-left"></i></button>
-                <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm" :class="roleColor(getContactById(selectedPercakapan)?.role)" x-text="getContactById(selectedPercakapan)?.initial || '?'"></div>
-                <div class="flex-1 min-w-0">
-                    <span class="font-bold text-surface-800 text-sm block truncate" x-text="getContactById(selectedPercakapan)?.full_name || 'Unknown'"></span>
-                    <span class="text-[10px] text-surface-400" x-text="getContactById(selectedPercakapan)?.role ? roleLabel(getContactById(selectedPercakapan).role) : ''"></span>
+        <!-- RIGHT: Chat panel -->
+        <div class="flex-1 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden"
+             :class="selectedPercakapan ? 'flex' : 'hidden md:flex'">
+
+            <!-- When conversation selected -->
+            <div x-show="selectedPercakapan" class="flex-1 flex flex-col overflow-hidden">
+                <!-- Chat header -->
+                <div class="px-4 py-3 border-b border-surface-200 flex items-center gap-3 bg-surface-50">
+                    <button @click="selectedPercakapan=null; pesanList=[]" class="md:hidden text-surface-500 hover:text-surface-700"><i class="fas fa-arrow-left text-lg"></i></button>
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shrink-0 shadow-sm" :class="roleColor(getContactById(selectedPercakapan)?.role)" x-text="getContactById(selectedPercakapan)?.initial || '?'"></div>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-semibold text-surface-800 text-sm truncate" x-text="getContactById(selectedPercakapan)?.full_name || 'Unknown'"></div>
+                        <div class="text-[11px] text-surface-400" x-text="getContactById(selectedPercakapan)?.role ? roleLabel(getContactById(selectedPercakapan).role) : ''"></div>
+                    </div>
                 </div>
-            </div>
-            <div x-ref="pesanContainer" class="flex-1 overflow-y-auto p-4 space-y-2" style="background-color: #efeae2;">
-                <div x-show="pesanList.length===0" class="flex items-center justify-center h-full">
-                    <p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p>
-                </div>
-                <template x-for="msg in pesanList" :key="msg.id">
-                    <div class="flex" :class="msg.sender_id === userId ? 'justify-end' : 'justify-start'">
-                        <div class="max-w-[75%] min-w-[100px] rounded-2xl px-3 py-2 shadow-sm relative"
-                             :class="msg.sender_id === userId ? 'bg-[#dcf8c6] text-[#111b21] rounded-br-sm' : 'bg-white text-[#111b21] rounded-bl-sm border border-surface-100'">
-                            <template x-if="msg.is_deleted">
-                                <p class="italic text-surface-400 text-xs"><i class="fas fa-trash-can mr-1"></i>Pesan dihapus</p>
-                            </template>
-                            <template x-if="!msg.is_deleted">
-                                <div>
-                                    <p class="text-sm whitespace-pre-wrap break-words" x-text="msg.content"></p>
-                                    <p x-show="msg.is_edited" class="text-[10px] text-surface-400 italic">diedit</p>
-                                </div>
-                            </template>
-                            <div class="flex items-center justify-end gap-1 mt-1">
-                                <span class="text-[10px] text-surface-400" x-text="formatTime(msg.created_at)"></span>
-                                <template x-if="msg.sender_id === userId">
-                                    <i class="text-[10px] fa-regular fa-circle-check" :class="msg.is_read ? 'text-[#53bdeb]' : 'text-[#8696a0]'"></i>
+                <!-- Messages -->
+                <div x-ref="pesanContainer" class="flex-1 overflow-y-auto px-4 py-3 space-y-1" style="background-color:#efeae2">
+                    <div x-show="pesanList.length===0" class="flex items-center justify-center h-full">
+                        <p class="text-sm text-surface-400">Belum ada pesan. Kirim pesan pertama!</p>
+                    </div>
+                    <template x-for="msg in pesanList" :key="msg.id">
+                        <div class="flex" :class="msg.sender_id === userId ? 'justify-end' : 'justify-start'">
+                            <div class="max-w-[80%] md:max-w-[65%] min-w-[120px] rounded-lg px-3 py-2 shadow-sm"
+                                 :class="msg.sender_id === userId ? 'bg-[#dcf8c6] text-[#111b21] rounded-br-none' : 'bg-white text-[#111b21] rounded-bl-none border border-surface-150'">
+                                <template x-if="msg.is_deleted">
+                                    <p class="italic text-surface-400 text-xs"><i class="fas fa-trash-can mr-1"></i>Pesan dihapus</p>
                                 </template>
-                                <button x-show="msg.sender_id === userId && !msg.is_deleted" @click="deletePesan(msg.id)" class="text-[10px] text-surface-300 hover:text-red-400 ml-1">&times;</button>
+                                <template x-if="!msg.is_deleted">
+                                    <div>
+                                        <p class="text-[15px] leading-relaxed whitespace-pre-wrap break-words" x-text="msg.content"></p>
+                                        <p x-show="msg.is_edited" class="text-[11px] text-surface-400 italic mt-0.5">diedit</p>
+                                    </div>
+                                </template>
+                                <div class="flex items-center justify-end gap-1 mt-1">
+                                    <span class="text-[11px] text-surface-400" x-text="formatTime(msg.created_at)"></span>
+                                    <template x-if="msg.sender_id === userId">
+                                        <i class="text-[11px] fa-regular fa-circle-check" :class="msg.is_read ? 'text-[#53bdeb]' : 'text-[#8696a0]'"></i>
+                                    </template>
+                                    <button x-show="msg.sender_id === userId && !msg.is_deleted" @click="deletePesan(msg.id)" class="text-[11px] text-surface-300 hover:text-red-400 ml-1">&times;</button>
+                                </div>
                             </div>
                         </div>
+                    </template>
+                </div>
+                <!-- Input -->
+                <div class="px-4 py-3 border-t border-surface-200 bg-surface-50">
+                    <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
+                        <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-800 text-sm resize-none outline-none max-h-24 bg-transparent" placeholder="Ketik pesan..." @keydown.enter.prevent="sendMessage()"></textarea>
+                        <button @click="sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
+                                :class="newMessage.trim() ? 'bg-primary-600 text-white shadow-md' : 'bg-surface-100 text-surface-400'">
+                            <i class="fas fa-paper-plane text-sm"></i>
+                        </button>
                     </div>
-                </template>
-            </div>
-            <div class="p-3 border-t border-surface-200 bg-surface-50">
-                <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
-                    <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendMessage()"></textarea>
-                    <button @click="sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
-                            :class="newMessage.trim() ? 'bg-primary-600 text-white shadow-md' : 'bg-surface-100 text-surface-400'">
-                        <i class="fas fa-paper-plane text-sm"></i>
-                    </button>
                 </div>
             </div>
-        </div>
 
-        <div x-show="!selectedPercakapan" class="flex-1 hidden md:flex items-center justify-center bg-white rounded-2xl border border-surface-100 shadow-sm">
-            <div class="text-center text-surface-400">
-                <i class="fas fa-comments text-5xl mb-3"></i>
-                <p class="text-sm font-bold">Pilih kontak untuk mulai chat</p>
+            <!-- Placeholder when no conversation -->
+            <div x-show="!selectedPercakapan" class="flex-1 hidden md:flex items-center justify-center bg-surface-50/50">
+                <div class="text-center text-surface-400">
+                    <i class="fas fa-comments text-5xl mb-3"></i>
+                    <p class="text-sm font-medium">Pilih kontak untuk mulai chat</p>
+                </div>
             </div>
         </div>
     </div>
