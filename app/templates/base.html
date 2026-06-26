@@ -229,6 +229,7 @@ html { transition: background-color .3s, color .3s; }
             <a href="/teacher/scan" class="nav-item {% if request.path == '/teacher/scan' %}active{% endif %}"><i class="fas fa-camera"></i><span>Scan OMR</span></a>
             <a href="/teacher/grading" class="nav-item {% if request.path == '/teacher/grading' %}active{% endif %}"><i class="fas fa-pen-alt"></i><span>Koreksi Esai</span></a>
             <a href="/teacher/retractions" class="nav-item {% if request.path == '/teacher/retractions' %}active{% endif %}"><i class="fas fa-undo-alt"></i><span>Permintaan Tarik</span></a>
+            <a href="/teacher/penalty-appeals" class="nav-item {% if request.path == '/teacher/penalty-appeals' %}active{% endif %}"><i class="fas fa-gavel"></i><span>Banding Penalti</span></a>
             <div class="nav-section-title pt-2">Laporan</div>
             <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Hasil Ujian</span></a>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>

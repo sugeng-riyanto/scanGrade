@@ -145,6 +145,41 @@
                     <p class="text-orange-600 font-bold">Final</p>
                 </div>
             </div>
+            {% set appeal = (submission.answers or {}).get('_penalty_appeal', {}) %}
+            {% if (submission.penalty or 0) > 0 and submission.status in ('graded', 'published') %}
+            <div class="mt-2" x-data="{ showAppealForm: false, appealReason: '{{ appeal.get("reason", "") }}', appealStatus: '{{ appeal.get("status", "") }}' }">
+                <template x-if="!appealStatus || appealStatus === ''">
+                    <button @click="showAppealForm = !showAppealForm" class="w-full text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-2 rounded-xl transition flex items-center justify-center gap-1">
+                        <i class="fas fa-gavel"></i> Ajukan Banding Penalti
+                    </button>
+                </template>
+                <template x-if="appealStatus === 'pending'">
+                    <div class="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-2 rounded-xl flex items-center justify-center gap-1">
+                        <i class="fas fa-clock"></i> Banding sedang diproses guru
+                    </div>
+                </template>
+                <template x-if="appealStatus === 'approved'">
+                    <div class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl">
+                        <i class="fas fa-check-circle mr-1"></i>Banding disetujui — pengurangan <span x-text="'{{ appeal.get("penalty_reduction", 0) }}'"></span> poin
+                        <template x-if="'{{ appeal.get("response", "") }}'">
+                            <p class="mt-1 font-normal text-emerald-600" x-text="'Catatan guru: {{ appeal.get("response", "") }}'"></p>
+                        </template>
+                    </div>
+                </template>
+                <template x-if="appealStatus === 'rejected'">
+                    <div class="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded-xl">
+                        <i class="fas fa-times-circle mr-1"></i>Banding ditolak
+                        <template x-if="'{{ appeal.get("response", "") }}'">
+                            <p class="mt-1 font-normal text-red-600" x-text="'Alasan: {{ appeal.get("response", "") }}'"></p>
+                        </template>
+                    </div>
+                </template>
+                <form x-show="showAppealForm" @submit.prevent="fetch('/api/student/penalty-appeal', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submission_id:'{{ submission.id }}', reason: appealReason})}).then(r=>r.json()).then(d=>{if(d.error)alert(d.error);else{appealStatus='pending';showAppealForm=false;alert(d.message);}}).catch(()=>{alert('Gagal');})" class="mt-2 space-y-2">
+                    <textarea x-model="appealReason" rows="3" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs text-surface-700" placeholder="Tulis alasan banding Anda... (min 10 karakter)" required></textarea>
+                    <button type="submit" class="w-full text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 px-3 py-2 rounded-xl transition">Kirim Banding</button>
+                </form>
+            </div>
+            {% endif %}
             {% if submission.status == 'submitted' %}
             <div class="mt-2 text-center text-xs font-bold text-amber-600 bg-amber-50 p-2 rounded-xl border border-amber-100">
                 <i class="fas fa-clock mr-1"></i><span x-text="lang==='en'?'Waiting for teacher grading':'Menunggu koreksi guru'"></span>
