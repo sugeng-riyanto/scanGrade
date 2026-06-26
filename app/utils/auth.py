@@ -1,6 +1,16 @@
 import functools
+import time
 from flask import g, request, jsonify, current_app, redirect, flash
 from supabase import Client
+
+# Role-based session timeout (OWASP + UU PDP standard)
+SESSION_TIMEOUTS = {
+    "super_admin":    {"idle_minutes": 15,  "absolute_hours": 4},
+    "admin_sekolah":  {"idle_minutes": 30,  "absolute_hours": 8},
+    "guru":           {"idle_minutes": 60,  "absolute_hours": 12},
+    "murid":          {"idle_minutes": 120, "absolute_hours": 24},
+}
+DEFAULT_SESSION_TIMEOUT = {"idle_minutes": 30, "absolute_hours": 8}
 
 # Role name mapping: old -> new (both accepted in decorators)
 ROLE_ALIASES = {
@@ -87,6 +97,23 @@ def login_required(f):
             # Block pending users from accessing protected routes
             if g.get("user_status") == "pending":
                 return redirect("/auth/activate?email={}&pending=1".format(g.user_email))
+
+            # Session timeout check (idle + absolute)
+            role = g.get("user_role")
+            to = SESSION_TIMEOUTS.get(role, DEFAULT_SESSION_TIMEOUT)
+            now = time.time()
+            try:
+                last_act = float(request.cookies.get("last_activity", "0"))
+                if last_act > 0 and now - last_act > to["idle_minutes"] * 60:
+                    return _unauthorized()
+            except Exception:
+                pass
+            try:
+                sess_start = float(request.cookies.get("session_start", "0"))
+                if sess_start > 0 and now - sess_start > to["absolute_hours"] * 3600:
+                    return _unauthorized()
+            except Exception:
+                pass
         except Exception:
             # Token expired — try refresh using refresh_token cookie
             token = _refresh_token()

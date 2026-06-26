@@ -12,6 +12,15 @@ from app.config import get_config
 
 DEFAULT_TZ_OFFSET = 7
 
+# Session timeout by role (OWASP + UU PDP standard)
+SESSION_TIMEOUTS = {
+    "super_admin":    {"idle_minutes": 15,  "absolute_hours": 4},
+    "admin_sekolah":  {"idle_minutes": 30,  "absolute_hours": 8},
+    "guru":           {"idle_minutes": 60,  "absolute_hours": 12},
+    "murid":          {"idle_minutes": 120, "absolute_hours": 24},
+}
+DEFAULT_SESSION_TIMEOUT = {"idle_minutes": 30, "absolute_hours": 8}
+
 _lru_cache = {}
 _lru_cache_ttl = {}
 _lru_max = 256
@@ -488,6 +497,9 @@ def _register_request_logging(app):
         new_token = getattr(g, "_new_access_token", None)
         if new_token:
             response.set_cookie("access_token", new_token, httponly=True, samesite="Lax", path="/", max_age=86400)
+        # Update last_activity timestamp for session timeout tracking
+        if g.get("user_id"):
+            response.set_cookie("last_activity", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400)
         return response
 
     @app.route("/metrics")
