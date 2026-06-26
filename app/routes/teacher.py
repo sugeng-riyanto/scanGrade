@@ -1398,20 +1398,26 @@ def override_score(submission_id):
         data = request.get_json()
         new_score = data.get("final_score")
         feedback = data.get("teacher_feedback", {})
+        penalty_override = data.get("penalty")  # optional penalty override
     else:
         new_score = request.form.get("final_score")
         feedback_raw = request.form.get("teacher_feedback", "{}")
+        penalty_override = request.form.get("penalty")
         try:
             feedback = json.loads(feedback_raw)
         except json.JSONDecodeError:
             feedback = {}
     supabase = get_supabase()
     final_score_val = float(new_score) if new_score is not None and new_score != '' else None
-    supabase.table("submissions").update({
+    update_data = {
         "final_score": final_score_val,
         "status": "graded",
         "teacher_feedback": feedback,
-    }).eq("id", submission_id).execute()
+    }
+    # If teacher provides penalty override, update it
+    if penalty_override is not None and penalty_override != '':
+        update_data["penalty"] = round(float(penalty_override), 2)
+    supabase.table("submissions").update(update_data).eq("id", submission_id).execute()
     # Recalculate after grading
     try:
         sub_updated = supabase.table("submissions").select("exam_id").eq("id", submission_id).single().execute().data
@@ -1723,6 +1729,7 @@ def api_grading_queue(exam_id):
             "essay_count": len(essay_indices),
             "graded_essays": graded_essays,
             "score": s.get("final_score") or s.get("score"),
+            "score_penalty": s.get("penalty") or 0,
             "has_drawing": any(isinstance(answers.get(ei), dict) and answers[ei].get("pages") for ei in essay_indices),
             "preview": preview,
             "questions": per_question,
