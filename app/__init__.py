@@ -468,6 +468,10 @@ def _register_request_logging(app):
         except (ValueError, TypeError):
             g.tz_offset = DEFAULT_TZ_OFFSET
 
+    @app.context_processor
+    def inject_globals():
+        return {"tz_offset": g.get("tz_offset", DEFAULT_TZ_OFFSET)}
+
     @app.after_request
     def log_request(response):
         if hasattr(g, "start"):
