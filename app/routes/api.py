@@ -1526,12 +1526,13 @@ def api_send_broadcast():
                 pass
 
     # For one-on-one messages, create/update conversation FIRST
+    # Match by participant pair only (no title — WhatsApp style)
     conversation_id = None
     if recipient_ids and len(recipient_ids) == 1 and target_role and target_role != "all":
         other_id = recipient_ids[0]
         try:
-            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).eq("title", title).order("created_at", desc=True).limit(1).execute().data or []
-            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).eq("title", title).order("created_at", desc=True).limit(1).execute().data or []
+            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).order("last_message_at", desc=True).nulls_last().limit(1).execute().data or []
+            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).order("last_message_at", desc=True).nulls_last().limit(1).execute().data or []
             conv = conv1 + conv2
             if conv:
                 conversation_id = conv[0]["id"]
@@ -1545,7 +1546,7 @@ def api_send_broadcast():
             else:
                 conv_res = supabase.table("conversations").insert({
                     "participant_1": g.user_id, "participant_2": other_id,
-                    "title": title, "status": "open",
+                    "title": "Percakapan", "status": "open",
                 }).execute()
                 conversation_id = conv_res.data[0]["id"]
         except Exception as e:
