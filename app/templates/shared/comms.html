@@ -39,7 +39,7 @@
     },
 
     startPolling() {
-        this.pollTimer = setInterval(() => this.pollNow(), 100);
+        this.pollTimer = setInterval(() => this.pollNow(), 1000);
     },
     stopPolling() {
         if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
@@ -224,7 +224,8 @@
             .then(r => r.json())
             .then(d => {
                 if (d.error) { alert('Gagal: '+d.error); return; }
-                this.pesanList.push(d);
+                const exists = this.pesanList.some(m => m.id === d.id);
+                if (!exists) this.pesanList.push(d);
                 this.newMessage = '';
                 this.$nextTick(() => {
                     const el = this.$refs.pesanContainer;
