@@ -1541,6 +1541,15 @@ def unpublish_scores(exam_id):
     return redirect("/teacher/results?exam_id=" + exam_id)
 
 
+@teacher_bp.route("/exams/<exam_id>/recalculate", methods=["POST"])
+@teacher_or_admin_required
+def recalculate_exam_scores(exam_id):
+    """Recalculate all scores for an exam (MCQ auto-grade + essay + penalty)."""
+    _recalculate_scores(exam_id)
+    flash("Nilai berhasil dihitung ulang", "success")
+    return redirect("/teacher/results?exam_id=" + exam_id)
+
+
 @teacher_bp.route("/publish/submission/<submission_id>", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required

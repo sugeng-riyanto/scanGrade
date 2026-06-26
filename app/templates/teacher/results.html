@@ -35,6 +35,11 @@
             <a href="/teacher/exams/{{ exam_id }}/cheat-analysis" class="border-2 border-red-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-red-50 text-[11px] sm:text-sm font-bold text-red-700 transition whitespace-nowrap">
                 <i class="fas fa-shield-alt mr-1"></i><span class="hidden sm:inline">Deteksi Curang</span>
             </a>
+            <form method="POST" action="/teacher/exams/{{ exam_id }}/recalculate" class="inline" onsubmit="return confirm('Hitung ulang nilai semua siswa?')">
+                <button type="submit" class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
+                    <i class="fas fa-calculator mr-1"></i><span class="hidden sm:inline">Hitung Ulang Nilai</span>
+                </button>
+            </form>
             <a href="/teacher/exams/{{ exam_id }}/accreditation-report" target="_blank" class="border-2 border-blue-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-blue-50 text-[11px] sm:text-sm font-bold text-blue-700 transition whitespace-nowrap">
                 <i class="fas fa-file-pdf mr-1"></i><span class="hidden sm:inline">Laporan</span>
             </a>
