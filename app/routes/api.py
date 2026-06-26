@@ -644,21 +644,19 @@ def student_sync_draft():
                 if isinstance(merged, dict):
                     merged.update(answers)
                     answers = merged
-            # Inject current_canvas into answers for device-switch recovery
-            if data.get("current_canvas"):
-                q_idx = data.get("current_q_idx")
-                page = data.get("current_page")
-                if q_idx is not None and page is not None:
+            # Inject dirty_canvases into answers for device-switch recovery
+            if data.get("dirty_canvases"):
+                for qk, pages in data["dirty_canvases"].items():
                     try:
-                        q_key = str(q_idx)
-                        if q_key not in answers:
-                            answers[q_key] = {"type": "essay", "text": "", "pages": {}}
-                        if isinstance(answers[q_key], dict):
-                            if "pages" not in answers[q_key]:
-                                answers[q_key]["pages"] = {}
-                            if str(page) not in answers[q_key]["pages"]:
-                                answers[q_key]["pages"][str(page)] = {}
-                            answers[q_key]["pages"][str(page)]["canvas"] = data["current_canvas"]
+                        if qk not in answers:
+                            answers[qk] = {"type": "essay", "text": "", "pages": {}}
+                        if isinstance(answers[qk], dict):
+                            if "pages" not in answers[qk]:
+                                answers[qk]["pages"] = {}
+                            for pk, canvasUrl in pages.items():
+                                if str(pk) not in answers[qk]["pages"]:
+                                    answers[qk]["pages"][str(pk)] = {}
+                                answers[qk]["pages"][str(pk)]["canvas"] = canvasUrl
                     except Exception:
                         pass
             supabase.table("submissions").update({"answers": answers}).eq("id", existing[0]["id"]).execute()
