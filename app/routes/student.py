@@ -824,6 +824,12 @@ def delete_submission(submission_id):
     return jsonify({"success": True})
 
 
+@student_bp.route("/comms")
+@login_required
+def student_comms():
+    return render_template("shared/comms.html")
+
+
 @student_bp.route("/settings", methods=["GET"])
 @login_required
 def student_settings():

@@ -190,6 +190,8 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Tools</div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
             <a href="/super-admin/reset-school-data" class="nav-item {% if request.path == '/super-admin/reset-school-data' %}active{% endif %}"><i class="fas fa-skull-crossbones text-red-400"></i><span class="text-red-400">Reset Sekolah</span></a>
+            <div class="nav-section-title pt-2">Komunikasi</div>
+            <a href="/super-admin/comms" class="nav-item {% if request.path == '/super-admin/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
 
 {% elif g.user_role == 'admin_sekolah' %}
             <div class="nav-section-title">Utama</div>
@@ -206,6 +208,8 @@ html { transition: background-color .3s, color .3s; }
             <a href="/admin-sekolah/import" class="nav-item {% if request.path == '/admin-sekolah/import' %}active{% endif %}"><i class="fas fa-upload"></i><span>Import Excel</span></a>
             <div class="nav-section-title pt-2">Akademik</div>
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span>Mata Pelajaran</span></a>
+            <div class="nav-section-title pt-2">Komunikasi</div>
+            <a href="/admin-sekolah/comms" class="nav-item {% if request.path == '/admin-sekolah/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
             <div class="nav-section-title pt-2">Langganan</div>
             <a href="/admin-sekolah/subscription" class="nav-item {% if request.path == '/admin-sekolah/subscription' %}active{% endif %}"><i class="fas fa-credit-card"></i><span>Langganan Saya</span></a>
             <a href="/admin-sekolah/invoices" class="nav-item {% if request.path == '/admin-sekolah/invoices' %}active{% endif %}"><i class="fas fa-file-invoice"></i><span>Invoice</span></a>
@@ -228,6 +232,8 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Laporan</div>
             <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Hasil Ujian</span></a>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>
+            <div class="nav-section-title pt-2">Komunikasi</div>
+            <a href="/teacher/comms" class="nav-item {% if request.path == '/teacher/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
             <div class="nav-section-title pt-2">Pengaturan</div>
             <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan Akun</span></a>
             <div class="nav-section-title pt-2">Tools</div>
@@ -245,6 +251,8 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Ujian</div>
             <a href="/student/exams" class="nav-item {% if request.path == '/student/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian Saya</span></a>
             <a href="/student/results" class="nav-item {% if request.path == '/student/results' %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Nilai Saya</span></a>
+            <div class="nav-section-title pt-2">Komunikasi</div>
+            <a href="/student/comms" class="nav-item {% if request.path == '/student/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
             <a href="/student/settings" class="nav-item {% if request.path == '/student/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan</span></a>
             {% set _feat = get_school_features() %}
             {% if False and _feat.get('whiteboard_enabled', True) %}
@@ -520,23 +528,27 @@ function linkify(text) {
     <a href="/super-admin/schools" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/schools' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-school text-lg mb-0.5"></i><span>Sekolah</span></a>
     <a href="/super-admin/file-management" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/file-management' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-folder-open text-lg mb-0.5"></i><span>File</span></a>
     <a href="/admin/registration-requests" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin/registration-requests' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-user-plus text-lg mb-0.5"></i><span>Registrasi</span></a>
+    <a href="/super-admin/comms" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/comms' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-comments text-lg mb-0.5"></i><span>Komunikasi</span></a>
     {% elif role == 'admin_sekolah' %}
     <a href="/admin-sekolah/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span></a>
     <a href="/admin-sekolah/classes" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/classes' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-school text-lg mb-0.5"></i><span>Kelas</span></a>
     <a href="/admin-sekolah/teachers" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/teachers' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chalkboard-teacher text-lg mb-0.5"></i><span>Guru</span></a>
     <a href="/admin-sekolah/students" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/students' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-user-graduate text-lg mb-0.5"></i><span>Murid</span></a>
     <a href="/admin-sekolah/subscription" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/subscription' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-credit-card text-lg mb-0.5"></i><span>Langganan</span></a>
+    <a href="/admin-sekolah/comms" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/admin-sekolah/comms' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-comments text-lg mb-0.5"></i><span>Komunikasi</span></a>
     {% elif role == 'guru' %}
     <a href="/teacher/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span>Dashboard</span></a>
     <a href="/teacher/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.startswith('/teacher/exams') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span>Ujian</span></a>
     <a href="/teacher/grading" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/grading' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-pen-alt text-lg mb-0.5"></i><span>Koreksi</span></a>
     <a href="/teacher/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.startswith('/teacher/results') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-bar text-lg mb-0.5"></i><span>Nilai</span></a>
     <a href="/teacher/settings" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/settings' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-cog text-lg mb-0.5"></i><span>Akun</span></a>
+    <a href="/teacher/comms" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/comms' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-comments text-lg mb-0.5"></i><span>Komunikasi</span></a>
     {% elif role == 'murid' %}
     <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-home text-lg mb-0.5"></i><span>Beranda</span></a>
     <a href="/student/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/exams' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span>Ujian</span></a>
     <a href="/student/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/results' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-bar text-lg mb-0.5"></i><span>Nilai</span></a>
     <a href="/student/settings" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/settings' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-cog text-lg mb-0.5"></i><span>Akun</span></a>
+    <a href="/student/comms" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/comms' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-comments text-lg mb-0.5"></i><span>Komunikasi</span></a>
     {% endif %}
     <button @click="toggleDark()" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold transition"
             :class="darkMode ? 'text-indigo-500' : 'text-surface-400'"

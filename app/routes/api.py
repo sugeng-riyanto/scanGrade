@@ -1456,7 +1456,549 @@ def ai_grade_bulk():
     return jsonify(result)
 
 
-@api_bp.route("/account/export-data", methods=["GET"])
+# ═══════════════════════════════════════════════════════════
+# PENGUMUMAN (Broadcast Notifications)
+# ═══════════════════════════════════════════════════════════
+
+@api_bp.route("/pengumuman/unread-count", methods=["GET"])
+@login_required
+def api_pengumuman_unread_count():
+    """Get unread pengumuman count for current user."""
+    supabase = get_supabase()
+    try:
+        result = supabase.rpc("get_unread_pengumuman_count", {"user_id": g.user_id}).execute()
+        return jsonify({"unread_count": result.data or 0})
+    except Exception:
+        try:
+            res = supabase.table("pengumuman_read").select("pengumuman_id", count="exact").eq("reader_id", g.user_id).execute()
+            read_ids = set(r["pengumuman_id"] for r in (res.data or []))
+            role = g.get("user_role")
+            all_p = supabase.table("pengumuman").select("id").eq("target_role", role).is_("is_archived", "false").execute().data or []
+            unread = sum(1 for p in all_p if p["id"] not in read_ids)
+            return jsonify({"unread_count": unread})
+        except Exception:
+            return jsonify({"unread_count": 0})
+
+
+@api_bp.route("/pengumuman", methods=["POST"])
+@login_required
+def api_create_pengumuman():
+    """Create broadcast notification."""
+    data = request.get_json() or {}
+    title = str(data.get("title", "")).strip()
+    content = str(data.get("content", "")).strip()
+    target_role = data.get("target_role")
+    school_id = data.get("school_id")
+    class_id = data.get("class_id")
+    attachment_url = data.get("attachment_url")
+
+    if not title or not content or not target_role:
+        return jsonify({"error": "Judul, isi, dan target_role wajib diisi"}), 400
+
+    supabase = get_supabase()
+    role = g.get("user_role")
+    uid = g.user_id
+
+    # RBAC validation
+    if role == "murid":
+        return jsonify({"error": "Murid tidak bisa membuat pengumuman"}), 403
+    if role == "guru" and target_role != "murid":
+        return jsonify({"error": "Guru hanya bisa kirim pengumuman ke murid"}), 403
+    if role == "admin_sekolah" and target_role not in ("guru", "murid"):
+        return jsonify({"error": "Admin sekolah hanya bisa kirim ke guru/murid"}), 403
+    if role == "admin_sekolah":
+        school_id = g.get("user_school_id")
+
+    payload = {
+        "sender_id": uid,
+        "sender_role": role,
+        "target_role": target_role,
+        "title": title,
+        "content": content,
+    }
+    if school_id:
+        payload["school_id"] = school_id
+    if class_id and role == "guru":
+        payload["class_id"] = class_id
+    if attachment_url:
+        payload["attachment_url"] = attachment_url
+    expires_at = data.get("expires_at")
+    if expires_at:
+        payload["expires_at"] = expires_at
+
+    try:
+        res = supabase.table("pengumuman").insert(payload).execute()
+        return jsonify(res.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+
+
+@api_bp.route("/pengumuman", methods=["GET"])
+@login_required
+def api_list_pengumuman():
+    """List pengumuman for current user."""
+    supabase = get_supabase()
+    role = g.get("user_role")
+    uid = g.user_id
+    limit = min(int(request.args.get("limit", 20)), 100)
+    offset = int(request.args.get("offset", 0))
+    unread_only = request.args.get("unread_only", "false") == "true"
+
+    try:
+        query = supabase.table("pengumuman").select("*").eq("target_role", role).is_("is_archived", "false").order("created_at", desc=True).limit(limit).offset(offset)
+        data = query.execute().data or []
+    except Exception:
+        data = []
+
+    read_ids = set()
+    try:
+        pr = supabase.table("pengumuman_read").select("pengumuman_id").eq("reader_id", uid).execute().data or []
+        read_ids = set(r["pengumuman_id"] for r in pr)
+    except Exception:
+        pass
+
+    result = []
+    for p in data:
+        if unread_only and p["id"] in read_ids:
+            continue
+        try:
+            rc = supabase.table("pengumuman_read").select("id", count="exact").eq("pengumuman_id", p["id"]).execute()
+            read_by_count = rc.count or 0
+        except Exception:
+            read_by_count = 0
+        result.append({
+            **p,
+            "is_read": p["id"] in read_ids,
+            "read_by_count": read_by_count,
+        })
+
+    return jsonify(result)
+
+
+@api_bp.route("/pengumuman/<uuid:pengumuman_id>", methods=["GET"])
+@login_required
+def api_get_pengumuman(pengumuman_id):
+    """Get single pengumuman with metadata."""
+    supabase = get_supabase()
+    pengumuman_id = str(pengumuman_id)
+    try:
+        p = supabase.table("pengumuman").select("*").eq("id", pengumuman_id).single().execute().data
+        if not p:
+            return jsonify({"error": "Pengumuman tidak ditemukan"}), 404
+        # Check access
+        role = g.get("user_role")
+        if p["target_role"] != role and p["sender_id"] != g.user_id and role != "super_admin":
+            return jsonify({"error": "Tidak berhak mengakses"}), 403
+        readers = supabase.table("pengumuman_read").select("reader_id, read_at").eq("pengumuman_id", pengumuman_id).execute().data or []
+        reader_ids = [r["reader_id"] for r in readers]
+        enriched = []
+        if reader_ids:
+            profs = supabase.table("profiles").select("id, full_name").in_("id", reader_ids).execute().data or []
+            prof_map = {pr["id"]: pr["full_name"] for pr in profs}
+            for r in readers:
+                enriched.append({"id": r["reader_id"], "full_name": prof_map.get(r["reader_id"], r["reader_id"][:8]), "read_at": r["read_at"]})
+        is_read = any(r["reader_id"] == g.user_id for r in readers)
+        return jsonify({**p, "is_read": is_read, "read_by_count": len(enriched), "readers": enriched})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/pengumuman/<uuid:pengumuman_id>", methods=["PUT"])
+@login_required
+def api_update_pengumuman(pengumuman_id):
+    """Edit pengumuman (title, content, expires_at)."""
+    supabase = get_supabase()
+    pengumuman_id = str(pengumuman_id)
+    role = g.get("user_role")
+    try:
+        p = supabase.table("pengumuman").select("id, sender_id").eq("id", pengumuman_id).single().execute().data
+        if not p:
+            return jsonify({"error": "Pengumuman tidak ditemukan"}), 404
+        if p["sender_id"] != g.user_id and role != "super_admin":
+            return jsonify({"error": "Tidak berhak mengedit"}), 403
+        data = {k: request.json[k] for k in ("title", "content", "expires_at") if k in request.json}
+        if not data:
+            return jsonify({"error": "Tidak ada data yang diubah"}), 400
+        supabase.table("pengumuman").update(data).eq("id", pengumuman_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/pengumuman/<uuid:pengumuman_id>", methods=["DELETE"])
+@login_required
+def api_delete_pengumuman(pengumuman_id):
+    """Soft-delete pengumuman."""
+    supabase = get_supabase()
+    pengumuman_id = str(pengumuman_id)
+    role = g.get("user_role")
+    try:
+        p = supabase.table("pengumuman").select("id, sender_id").eq("id", pengumuman_id).single().execute().data
+        if not p:
+            return jsonify({"error": "Pengumuman tidak ditemukan"}), 404
+        if p["sender_id"] != g.user_id and role != "super_admin":
+            return jsonify({"error": "Tidak berhak menghapus"}), 403
+        supabase.table("pengumuman").update({"is_archived": True}).eq("id", pengumuman_id).execute()
+        supabase.table("pengumuman_read").delete().eq("pengumuman_id", pengumuman_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/pengumuman/<uuid:pengumuman_id>/mark-read", methods=["POST"])
+@login_required
+def api_mark_read_pengumuman(pengumuman_id):
+    """Mark pengumuman as read for current user."""
+    supabase = get_supabase()
+    pengumuman_id = str(pengumuman_id)
+    try:
+        supabase.table("pengumuman_read").insert({
+            "pengumuman_id": pengumuman_id,
+            "reader_id": g.user_id,
+        }, on_conflict=["pengumuman_id", "reader_id"], ignore_duplicates=True).execute()
+        return jsonify({"success": True})
+    except Exception:
+        try:
+            existing = supabase.table("pengumuman_read").select("id").eq("pengumuman_id", pengumuman_id).eq("reader_id", g.user_id).execute().data
+            if not existing:
+                supabase.table("pengumuman_read").insert({
+                    "pengumuman_id": pengumuman_id, "reader_id": g.user_id
+                }).execute()
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"error": str(e)[:100]}), 500
+
+
+# ═══════════════════════════════════════════════════════════
+# PERCAKAPAN (1-on-1 Chat)
+# ═══════════════════════════════════════════════════════════
+
+def _normalize_pair(uid_a, uid_b):
+    """Return (smaller, larger) UUID string pair."""
+    a, b = str(uid_a), str(uid_b)
+    return (a, b) if a < b else (b, a)
+
+
+def _get_allowed_recipient_roles(user_role):
+    """Return list of roles the user can message."""
+    if user_role == "super_admin":
+        return ["guru", "murid", "admin_sekolah"]
+    if user_role == "admin_sekolah":
+        return ["guru", "murid"]
+    if user_role == "guru":
+        return ["murid"]
+    if user_role == "murid":
+        return ["guru", "admin_sekolah"]
+    return []
+
+
+@api_bp.route("/percakapan", methods=["GET"])
+@login_required
+def api_list_percakapan():
+    """List conversations for current user."""
+    supabase = get_supabase()
+    uid = g.user_id
+    limit = min(int(request.args.get("limit", 20)), 100)
+    offset = int(request.args.get("offset", 0))
+    archived = request.args.get("archived", "false") == "true"
+
+    try:
+        query = supabase.table("percakapan").select("*").or_("user_a_id.eq." + uid + ",user_b_id.eq." + uid)
+        if not archived:
+            query = query.eq("is_archived", False)
+        data = query.order("last_message_at", desc=True).limit(limit).offset(offset).execute().data or []
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "percakapan": []}), 500
+
+    result = []
+    for c in data:
+        other_id = c["user_b_id"] if uid == c["user_a_id"] else c["user_a_id"]
+        other_name = other_id[:8]
+        other_role = ""
+        try:
+            p = supabase.table("profiles").select("full_name, role").eq("id", other_id).single().execute().data
+            if p:
+                other_name = p.get("full_name", other_id[:8])
+                other_role = p.get("role", "")
+        except Exception:
+            pass
+        last_msg = None
+        try:
+            msgs = supabase.table("pesan").select("content, created_at, is_deleted").eq("percakapan_id", c["id"]).order("created_at", desc=True).limit(1).execute().data or []
+            if msgs:
+                m = msgs[0]
+                if m.get("is_deleted"):
+                    last_msg = "[Pesan dihapus]"
+                else:
+                    last_msg = m.get("content", "")[:80]
+        except Exception:
+            pass
+        unread = 0
+        try:
+            uc = supabase.table("pesan").select("id", count="exact").eq("percakapan_id", c["id"]).neq("sender_id", uid).eq("is_read", False).eq("is_deleted", False).execute()
+            unread = uc.count or 0
+        except Exception:
+            pass
+        result.append({
+            "id": c["id"],
+            "other_id": other_id,
+            "other_name": other_name,
+            "other_role": other_role,
+            "subject": c.get("subject") or "",
+            "last_message": last_msg or "",
+            "last_message_at": c.get("last_message_at"),
+            "is_archived": c.get("is_archived", False),
+            "unread_count": unread,
+        })
+
+    return jsonify({"percakapan": result})
+
+
+@api_bp.route("/percakapan", methods=["POST"])
+@login_required
+def api_create_percakapan():
+    """Create new 1-on-1 conversation."""
+    data = request.get_json() or {}
+    recipient_id = data.get("recipient_id")
+    if not recipient_id:
+        return jsonify({"error": "recipient_id wajib diisi"}), 400
+
+    supabase = get_supabase()
+    uid = g.user_id
+    role = g.get("user_role")
+
+    if recipient_id == uid:
+        return jsonify({"error": "Tidak bisa chat diri sendiri"}), 400
+
+    # Validate recipient exists and role is allowed
+    try:
+        recipient = supabase.table("profiles").select("id, role").eq("id", recipient_id).single().execute().data
+        if not recipient:
+            return jsonify({"error": "Penerima tidak ditemukan"}), 404
+        allowed = _get_allowed_recipient_roles(role)
+        if recipient["role"] not in allowed:
+            return jsonify({"error": f"Tidak boleh chat dengan {recipient['role']}"}), 403
+        # Also check reverse: recipient must be allowed to chat with sender
+        recip_allowed = _get_allowed_recipient_roles(recipient["role"])
+        if role not in recip_allowed:
+            return jsonify({"error": "Penerima tidak boleh chat dengan anda"}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+    # Normalize pair
+    ua, ub = _normalize_pair(uid, recipient_id)
+
+    try:
+        existing = supabase.table("percakapan").select("id").eq("user_a_id", ua).eq("user_b_id", ub).limit(1).execute().data
+        if existing:
+            return jsonify({"percakapan": existing[0]}), 200
+        now = datetime.now(timezone.utc).isoformat()
+        res = supabase.table("percakapan").insert({
+            "user_a_id": ua, "user_b_id": ub, "last_message_at": now,
+        }).execute()
+        return jsonify({"percakapan": res.data[0]}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/percakapan/<uuid:percakapan_id>", methods=["PUT"])
+@login_required
+def api_update_percakapan(percakapan_id):
+    """Archive/unarchive conversation."""
+    supabase = get_supabase()
+    percakapan_id = str(percakapan_id)
+    uid = g.user_id
+    is_archived = request.json.get("is_archived", True)
+    try:
+        c = supabase.table("percakapan").select("id, user_a_id, user_b_id").eq("id", percakapan_id).single().execute().data
+        if not c:
+            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
+        if uid != c["user_a_id"] and uid != c["user_b_id"]:
+            return jsonify({"error": "Bukan peserta percakapan"}), 403
+        supabase.table("percakapan").update({"is_archived": is_archived}).eq("id", percakapan_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/percakapan/<uuid:percakapan_id>", methods=["DELETE"])
+@login_required
+def api_delete_percakapan(percakapan_id):
+    """Delete conversation (super_admin only)."""
+    supabase = get_supabase()
+    percakapan_id = str(percakapan_id)
+    role = g.get("user_role")
+    if role != "super_admin":
+        return jsonify({"error": "Hanya super admin"}), 403
+    try:
+        supabase.table("pesan").delete().eq("percakapan_id", percakapan_id).execute()
+        supabase.table("percakapan").delete().eq("id", percakapan_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/percakapan/<uuid:percakapan_id>/pesan", methods=["POST"])
+@login_required
+def api_send_pesan(percakapan_id):
+    """Send message in conversation."""
+    data = request.get_json() or {}
+    content = str(data.get("content", "")).strip()
+    if not content:
+        return jsonify({"error": "Pesan wajib diisi"}), 400
+
+    supabase = get_supabase()
+    uid = g.user_id
+    percakapan_id = str(percakapan_id)
+
+    try:
+        c = supabase.table("percakapan").select("id, user_a_id, user_b_id").eq("id", percakapan_id).single().execute().data
+        if not c:
+            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
+        if uid != c["user_a_id"] and uid != c["user_b_id"]:
+            return jsonify({"error": "Bukan peserta percakapan"}), 403
+        role = g.get("user_role")
+        other_id = c["user_b_id"] if uid == c["user_a_id"] else c["user_a_id"]
+        # Verify role pair still valid
+        other = supabase.table("profiles").select("role").eq("id", other_id).single().execute().data
+        if other:
+            allowed = _get_allowed_recipient_roles(role)
+            if other["role"] not in allowed:
+                return jsonify({"error": "Tidak boleh kirim pesan ke pengguna ini"}), 403
+
+        media_urls = data.get("media_urls", [])
+        res = supabase.table("pesan").insert({
+            "percakapan_id": percakapan_id,
+            "sender_id": uid,
+            "content": content,
+            "media_urls": media_urls or [],
+        }).execute()
+        return jsonify(res.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/percakapan/<uuid:percakapan_id>/pesan", methods=["GET"])
+@login_required
+def api_list_pesan(percakapan_id):
+    """List messages in conversation."""
+    supabase = get_supabase()
+    uid = g.user_id
+    percakapan_id = str(percakapan_id)
+    limit = min(int(request.args.get("limit", 30)), 100)
+    offset = int(request.args.get("offset", 0))
+
+    try:
+        c = supabase.table("percakapan").select("id, user_a_id, user_b_id").eq("id", percakapan_id).single().execute().data
+        if not c:
+            return jsonify({"error": "Percakapan tidak ditemukan"}), 404
+        if uid != c["user_a_id"] and uid != c["user_b_id"]:
+            return jsonify({"error": "Bukan peserta percakapan"}), 403
+
+        # Auto-mark messages as read
+        try:
+            supabase.rpc("mark_pesan_read", {"percakapan_id": percakapan_id, "user_id": uid}).execute()
+        except Exception:
+            supabase.table("pesan").update({"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}).eq("percakapan_id", percakapan_id).neq("sender_id", uid).eq("is_read", False).execute()
+
+        msgs = supabase.table("pesan").select("*").eq("percakapan_id", percakapan_id).order("created_at").limit(limit).offset(offset).execute().data or []
+
+        # Enrich sender names
+        sender_ids = set(m["sender_id"] for m in msgs)
+        profs = {}
+        if sender_ids:
+            pd = supabase.table("profiles").select("id, full_name").in_("id", list(sender_ids)).execute().data or []
+            profs = {p["id"]: p["full_name"] for p in pd}
+        for m in msgs:
+            m["sender_name"] = profs.get(m["sender_id"], m["sender_id"][:8])
+        return jsonify({"pesan": msgs})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "pesan": []}), 500
+
+
+@api_bp.route("/percakapan/<uuid:percakapan_id>/unread-count", methods=["GET"])
+@login_required
+def api_percakapan_unread_count(percakapan_id):
+    """Get unread message count for a conversation."""
+    supabase = get_supabase()
+    uid = g.user_id
+    percakapan_id = str(percakapan_id)
+    try:
+        uc = supabase.table("pesan").select("id", count="exact").eq("percakapan_id", percakapan_id).neq("sender_id", uid).eq("is_read", False).eq("is_deleted", False).execute()
+        return jsonify({"unread_count": uc.count or 0})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "unread_count": 0}), 500
+
+
+# ═══════════════════════════════════════════════════════════
+# PESAN (Individual Message Operations)
+# ═══════════════════════════════════════════════════════════
+
+@api_bp.route("/pesan/<uuid:pesan_id>", methods=["PUT"])
+@login_required
+def api_update_pesan(pesan_id):
+    """Edit message content."""
+    supabase = get_supabase()
+    pesan_id = str(pesan_id)
+    uid = g.user_id
+    content = str(request.json.get("content", "")).strip()
+    if not content:
+        return jsonify({"error": "Pesan wajib diisi"}), 400
+    try:
+        m = supabase.table("pesan").select("id, sender_id, created_at").eq("id", pesan_id).single().execute().data
+        if not m:
+            return jsonify({"error": "Pesan tidak ditemukan"}), 404
+        if m["sender_id"] != uid:
+            return jsonify({"error": "Tidak berhak mengedit"}), 403
+        supabase.table("pesan").update({
+            "content": content, "is_edited": True, "edited_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", pesan_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+@api_bp.route("/pesan/<uuid:pesan_id>", methods=["DELETE"])
+@login_required
+def api_delete_pesan(pesan_id):
+    """Soft-delete message."""
+    supabase = get_supabase()
+    pesan_id = str(pesan_id)
+    uid = g.user_id
+    role = g.get("user_role")
+    try:
+        m = supabase.table("pesan").select("id, sender_id").eq("id", pesan_id).single().execute().data
+        if not m:
+            return jsonify({"error": "Pesan tidak ditemukan"}), 404
+        if m["sender_id"] != uid and role != "super_admin":
+            return jsonify({"error": "Tidak berhak menghapus"}), 403
+        now = datetime.now(timezone.utc).isoformat()
+        supabase.table("pesan").update({"is_deleted": True, "deleted_at": now}).eq("id", pesan_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)[:100]}), 500
+
+
+# ═══════════════════════════════════════════════════════════
+# RECIPIENT SEARCH (for creating new chat)
+# ═══════════════════════════════════════════════════════════
+
+@api_bp.route("/percakapan/recipients", methods=["GET"])
+@login_required
+def api_search_recipients():
+    """Search users that current user can start a chat with."""
+    supabase = get_supabase()
+    role = g.get("user_role")
+    q = request.args.get("q", "").strip()
+    allowed = _get_allowed_recipient_roles(role)
+    try:
+        query = supabase.table("profiles").select("id, full_name, role").in_("role", allowed)
+        if q:
+            query = query.ilike("full_name", f"%{q}%")
+        users = query.limit(20).execute().data or []
+        return jsonify({"users": users})
+    except Exception:
+        return jsonify({"users": []})
 @login_required
 def api_export_data():
     """Export all personal data (UU PDP right to data portability)."""
