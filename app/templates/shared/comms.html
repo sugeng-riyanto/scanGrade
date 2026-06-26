@@ -69,21 +69,21 @@
         if (!ts) return '';
         const off = this.tzOffset || 7;
         const d = new Date(ts);
-        const local = new Date(d.getTime() + d.getTimezoneOffset() * 60000 + off * 3600000);
+        const local = new Date(d.getTime() + off * 3600000);
         return local.toISOString().substring(0, 10);
     },
     formatTime(ts) {
         if (!ts) return '';
         const off = this.tzOffset || 7;
         const d = new Date(ts);
-        const local = new Date(d.getTime() + d.getTimezoneOffset() * 60000 + off * 3600000);
+        const local = new Date(d.getTime() + off * 3600000);
         return local.toISOString().substring(11, 16);
     },
     formatDateTime(ts) {
         if (!ts) return '';
         const off = this.tzOffset || 7;
         const d = new Date(ts);
-        const local = new Date(d.getTime() + d.getTimezoneOffset() * 60000 + off * 3600000);
+        const local = new Date(d.getTime() + off * 3600000);
         return local.toISOString().substring(0, 16).replace('T', ' ');
     },
 
