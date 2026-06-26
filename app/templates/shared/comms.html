@@ -29,14 +29,15 @@
     init() {
         this.fetchPengumuman();
         this.fetchUnreadCount();
-        this.fetchContacts();
-        this.startPolling();
+        if (this.activeTab === 'chat') this.startPolling();
         if ('Notification' in window && Notification.permission === 'default') {
             Notification.requestPermission();
         }
     },
 
     startPolling() {
+        if (this.pollTimer) return;
+        this.fetchContacts();
         this.pollTimer = setInterval(() => this.pollNow(), 3000);
     },
     stopPolling() {
@@ -274,11 +275,11 @@
     </div>
 
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 mb-4">
-        <button @click="activeTab='chat'; if(!selectedPercakapan) fetchPercakapan()" :class="activeTab==='chat' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
+        <button @click="activeTab='chat'; startPolling()" :class="activeTab==='chat' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
             <i class="fas fa-comments mr-1.5"></i>Chat
             <template x-if="chatUnreadCount > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="chatUnreadCount"></span></template>
         </button>
-        <button @click="activeTab='pengumuman'" :class="activeTab==='pengumuman' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
+        <button @click="activeTab='pengumuman'; stopPolling()" :class="activeTab==='pengumuman' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
             <i class="fas fa-bullhorn mr-1.5"></i>Pengumuman
             <template x-if="unreadPengumuman > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="unreadPengumuman"></span></template>
         </button>
