@@ -27,6 +27,7 @@
 - PDF generation uses `xhtml2pdf` (pure Python) — WeasyPrint requires GTK/Pango not available on Windows
 - Anti-cheat: graduated penalty (1st=warning, 2nd=-base, 3rd=-2×base, 4th+=-3×base), auto-submit on max violations
 - Router / security: 404 catch-all `/tools` for admin functions; CSP `frame-ancestors 'self'` in response headers
+- **Session timeouts** (OWASP + UU PDP): super_admin idle=15m/abs=4h, admin_sekolah=30m/8h, guru=60m/12h, murid=120m/24h
 
 ## Pertukaran Pesan — RBAC Matrix
 
