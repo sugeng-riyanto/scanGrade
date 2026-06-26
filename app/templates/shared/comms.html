@@ -215,9 +215,10 @@
     },
     get targetRoleOptions() {
         const opts = [];
-        if (this.userRole === 'super_admin') opts.push({value:'admin_sekolah', label:'Admin Sekolah'});
-        if (this.userRole === 'super_admin' || this.userRole === 'admin_sekolah') opts.push({value:'guru', label:'Guru'});
-        if (this.userRole !== 'murid') opts.push({value:'murid', label:'Murid'});
+        const allowed = {'super_admin':['admin_sekolah','guru','murid'], 'admin_sekolah':['super_admin','guru','murid'], 'guru':['admin_sekolah','guru','murid']};
+        const labels = {'super_admin':'Super Admin','admin_sekolah':'Admin Sekolah','guru':'Guru','murid':'Murid'};
+        const targets = allowed[this.userRole] || [];
+        targets.forEach(v => opts.push({value:v, label:labels[v] || v}));
         return opts;
     },
 

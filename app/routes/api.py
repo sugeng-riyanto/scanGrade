@@ -1500,13 +1500,12 @@ def api_create_pengumuman():
     role = g.get("user_role")
     uid = g.user_id
 
-    # RBAC validation
+    # RBAC validation — per User-matrix
     if role == "murid":
         return jsonify({"error": "Murid tidak bisa membuat pengumuman"}), 403
-    if role == "guru" and target_role != "murid":
-        return jsonify({"error": "Guru hanya bisa kirim pengumuman ke murid"}), 403
-    if role == "admin_sekolah" and target_role not in ("guru", "murid"):
-        return jsonify({"error": "Admin sekolah hanya bisa kirim ke guru/murid"}), 403
+    allowed_targets = _get_allowed_recipient_roles(role)
+    if target_role not in allowed_targets:
+        return jsonify({"error": f"Anda tidak bisa mengirim pengumuman ke {target_role}"}), 403
     if role in ("admin_sekolah", "guru"):
         school_id = g.get("user_school_id")
 
@@ -1735,13 +1734,13 @@ def _normalize_pair(uid_a, uid_b):
 
 
 def _get_allowed_recipient_roles(user_role):
-    """Return list of roles the user can message."""
+    """Return list of roles the user can message (used for chat + broadcast)."""
     if user_role == "super_admin":
-        return ["guru", "murid", "admin_sekolah"]
+        return ["guru", "murid", "admin_sekolah", "super_admin"]
     if user_role == "admin_sekolah":
-        return ["guru", "murid"]
+        return ["super_admin", "guru", "murid"]
     if user_role == "guru":
-        return ["murid"]
+        return ["admin_sekolah", "guru", "murid"]
     if user_role == "murid":
         return ["guru", "admin_sekolah"]
     return []
