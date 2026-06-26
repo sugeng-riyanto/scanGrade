@@ -37,7 +37,7 @@
     },
 
     startPolling() {
-        this.pollTimer = setInterval(() => this.pollNow(), 1000);
+        this.pollTimer = setInterval(() => this.pollNow(), 3000);
     },
     stopPolling() {
         if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
