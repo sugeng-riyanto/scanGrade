@@ -248,6 +248,7 @@ def login():
         resp = make_response(redirect(redirect_url))
         resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/", max_age=86400)
         resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
+        resp.set_cookie("session_start", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400*7)
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
     except Exception:
@@ -331,6 +332,7 @@ def login_user():
         resp = make_response(redirect(redirect_url))
         resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/", max_age=86400)
         resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
+        resp.set_cookie("session_start", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400*7)
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
     except Exception:
