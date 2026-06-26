@@ -1,11 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Koreksi {{ exam.title }} - ScanGrade{% endblock %}
 {% block page_title %}Koreksi: {{ exam.title }}{% endblock %}
-{% block head_extra %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-{% endblock %}
 {% block content %}
-<div x-data="gradingQueueApp()" x-init="init()" class="flex flex-col h-[calc(100vh-12rem)]">
+<div x-data="gradingQueueApp()" x-init="init()" class="flex flex-col h-[calc(100vh-12rem)]" @keydown.window="handleKey($event)">
     <!-- Header -->
     <div class="flex items-center justify-between mb-3 shrink-0">
         <div>
@@ -65,6 +62,7 @@
                     <div class="text-center">
                         <i class="fas fa-arrow-left text-3xl mb-2"></i>
                         <p class="text-sm font-medium">Pilih siswa dari daftar</p>
+                        <p class="text-xs mt-1">Gunakan <kbd class="px-1.5 py-0.5 bg-surface-100 rounded text-xs font-bold">j</kbd> <kbd class="px-1.5 py-0.5 bg-surface-100 rounded text-xs font-bold">k</kbd> navigasi • <kbd class="px-1.5 py-0.5 bg-surface-100 rounded text-xs font-bold">Enter</kbd> simpan &amp; lanjut</p>
                     </div>
                 </div>
             </template>
@@ -79,6 +77,7 @@
                                 <div class="text-[11px] text-surface-400">
                                     <span x-text="'Esai ' + current.graded_essays + '/' + current.essay_count"></span>
                                     <span x-show="current.has_drawing">  •  <i class="fas fa-paint-brush text-primary-500"></i> Ada gambar</span>
+                                    <span x-show="saveStatus" class="ml-2" :class="saveStatus === 'saved' ? 'text-emerald-500' : 'text-amber-500'" x-text="saveStatus === 'saved' ? 'Tersimpan' : 'Belum disimpan'"></span>
                                 </div>
                             </div>
                         </div>
@@ -92,32 +91,46 @@
 
                     <!-- Grading content -->
                     <div class="flex-1 overflow-y-auto p-4 space-y-4">
-                        <!-- Student answer preview -->
-                        <div x-show="current.preview" class="bg-blue-50 border border-blue-100 rounded-xl p-4">
-                            <p class="text-xs font-bold text-blue-700 mb-1"><i class="fas fa-file-alt mr-1"></i>Jawaban Esai:</p>
-                            <p class="text-sm text-surface-700 whitespace-pre-wrap line-clamp-6" x-text="current.preview"></p>
-                        </div>
-                        <div x-show="!current.preview" class="bg-amber-50 border border-amber-100 rounded-xl p-4">
-                            <p class="text-xs font-bold text-amber-700"><i class="fas fa-info-circle mr-1"></i>Tidak ada jawaban esai teks — periksa halaman detail untuk anotasi canvas</p>
-                        </div>
+                        <!-- Per-question grading -->
+                        <template x-for="(q, qIdx) in current.questions" :key="q.index">
+                            <div class="border border-surface-200 rounded-xl overflow-hidden">
+                                <div class="px-4 py-2.5 bg-surface-50 border-b border-surface-200 flex items-center justify-between">
+                                    <span class="text-sm font-bold text-surface-700" x-text="'Soal ' + (parseInt(q.index) + 1)"></span>
+                                    <span class="text-[10px] text-surface-400 font-medium" x-text="'Bobot: ' + (q.weight || 0)"></span>
+                                </div>
+                                <div class="px-4 py-3 space-y-3">
+                                    <!-- Preview -->
+                                    <div x-show="q.preview" class="text-xs text-surface-600 bg-blue-50 rounded-lg px-3 py-2 border border-blue-100 max-h-20 overflow-y-auto" x-text="q.preview"></div>
+                                    <div x-show="!q.preview" class="text-xs text-surface-400 italic">Tidak ada jawaban teks</div>
+                                    <!-- Score row -->
+                                    <div class="flex items-center gap-3">
+                                        <label class="text-xs font-bold text-surface-600 w-16">Nilai:</label>
+                                        <input type="number" x-model="qscores[q.index]" @input="onScoreChange()" min="0" max="100" class="w-20 text-center text-lg font-bold px-2 py-1.5 border-2 border-surface-200 rounded-lg focus:border-primary-500 focus:ring-0" :class="(qscores[q.index]||0) >= 70 ? 'text-emerald-600 border-emerald-300' : (qscores[q.index]||0) > 0 ? 'text-red-500 border-red-300' : ''">
+                                        <span class="text-xs text-surface-400 font-medium">/ 100</span>
+                                    </div>
+                                    <!-- Feedback -->
+                                    <div>
+                                        <textarea x-model="qcomments[q.index]" @input="onScoreChange()" rows="2" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-xs text-surface-700" placeholder="Catatan koreksi untuk soal ini..."></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
 
-                        <!-- Score & Feedback -->
-                        <div>
-                            <label class="block text-xs font-bold text-surface-600 mb-1">Nilai (0-100)</label>
-                            <input type="number" x-model="scoreInput" min="0" max="100"
-                                   class="w-28 text-center text-2xl font-bold px-3 py-2 border-2 border-surface-200 rounded-xl focus:border-primary-500 focus:ring-0"
-                                   :class="scoreInput >= 70 ? 'text-emerald-600 border-emerald-300' : scoreInput > 0 ? 'text-red-500 border-red-300' : ''">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-surface-600 mb-1">Feedback / Catatan</label>
-                            <textarea x-model="feedbackInput" rows="3" class="w-full px-3 py-2 border border-surface-200 rounded-xl text-sm text-surface-700" placeholder="Tulis catatan koreksi..."></textarea>
+                        <!-- Overall feedback -->
+                        <div class="border border-surface-200 rounded-xl p-4">
+                            <label class="text-xs font-bold text-surface-600 mb-1">Catatan Umum</label>
+                            <textarea x-model="overallInput" rows="2" class="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm text-surface-700" placeholder="Catatan keseluruhan..."></textarea>
                         </div>
 
                         <!-- AI Suggest -->
                         <div class="flex gap-2">
                             <button @click="aiSuggest()" :disabled="aiLoading" class="flex-1 px-3 py-2 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1">
                                 <i class="fas fa-robot"></i>
-                                <span x-text="aiLoading ? 'Memproses...' : 'Koreksi AI'"></span>
+                                <span x-text="aiLoading ? 'Memproses...' : 'Koreksi AI (soal pertama)'"></span>
+                            </button>
+                            <button @click="bulkAiGrade()" :disabled="bulkAiLoading" class="px-3 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1">
+                                <i class="fas fa-bolt"></i>
+                                <span x-text="bulkAiLoading ? 'Memproses...' : 'AI Semua'"></span>
                             </button>
                         </div>
                         <div x-show="aiResult" class="bg-purple-50 border border-purple-100 rounded-xl p-3 text-xs text-surface-700">
@@ -129,12 +142,12 @@
                     <!-- Bottom actions -->
                     <div class="px-4 py-3 border-t border-surface-200 bg-surface-50 flex items-center gap-2 shrink-0">
                         <button @click="saveGrade()" :disabled="saving" class="flex-1 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-surface-300 text-white rounded-xl text-sm font-bold transition shadow-lg shadow-primary-600/20">
-                            <span x-text="saving ? 'Menyimpan...' : '💾 Simpan Nilai'"></span>
+                            <span x-text="saving ? 'Menyimpan...' : '💾 Simpan (Enter)'"></span>
                         </button>
-                        <button @click="prevSubmission()" :disabled="currentIdx <= 0" class="px-3 py-2.5 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl text-sm font-bold transition text-surface-600">
+                        <button @click="prevSubmission()" :disabled="currentIdx <= 0" class="px-3 py-2.5 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl text-sm font-bold transition text-surface-600" title="Sebelumnya (K)">
                             <i class="fas fa-chevron-left"></i>
                         </button>
-                        <button @click="nextSubmission()" :disabled="currentIdx >= filteredList.length - 1" class="px-3 py-2.5 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl text-sm font-bold transition text-surface-600">
+                        <button @click="nextSubmission()" :disabled="currentIdx >= filteredList.length - 1" class="px-3 py-2.5 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl text-sm font-bold transition text-surface-600" title="Selanjutnya (J)">
                             <i class="fas fa-chevron-right"></i>
                         </button>
                     </div>
@@ -152,11 +165,14 @@ function gradingQueueApp() {
         currentIdx: -1,
         searchQuery: '',
         filterRole: 'all',
-        scoreInput: '',
-        feedbackInput: '',
+        qscores: {},       // { "0": 85, "1": 90 }
+        qcomments: {},     // { "0": "Bagus!", "1": "Kurang detail" }
+        overallInput: '',
         saving: false,
+        saveStatus: '',
         aiLoading: false,
         aiResult: '',
+        bulkAiLoading: false,
 
         get total() { return this.submissions.length },
         get pending() { return this.submissions.filter(s => s.status === 'submitted').length },
@@ -175,6 +191,20 @@ function gradingQueueApp() {
 
         init() { this.fetchQueue() },
 
+        handleKey(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.key === 'j' || e.key === 'J') { e.preventDefault(); this.nextSubmission(); }
+            if (e.key === 'k' || e.key === 'K') { e.preventDefault(); this.prevSubmission(); }
+            if (e.key === 'Enter') { e.preventDefault(); this.saveGrade(); }
+            if (e.key >= '0' && e.key <= '9') {
+                if (!this.current || !this.current.questions || this.current.questions.length === 0) return;
+                const score = parseInt(e.key) * 10;
+                const firstQ = this.current.questions[0].index;
+                this.qscores[firstQ] = score;
+                this.onScoreChange();
+            }
+        },
+
         fetchQueue() {
             fetch('/teacher/api/grading-queue/' + this.examId)
                 .then(r => r.json())
@@ -182,40 +212,77 @@ function gradingQueueApp() {
                     if (d.error) return;
                     this.submissions = d.submissions || [];
                     if (this.currentIdx >= this.submissions.length) this.currentIdx = -1;
+                    if (this.currentIdx >= 0 && this.current) this.loadScores();
                 })
                 .catch(() => {});
         },
 
+        loadScores() {
+            if (!this.current || !this.current.questions) return;
+            const fb = this.current.teacher_feedback || {};
+            this.qscores = {};
+            this.qcomments = {};
+            this.overallInput = fb.overall || '';
+            (this.current.questions || []).forEach(q => {
+                if (q.score !== undefined && q.score !== null) this.qscores[q.index] = q.score;
+                if (q.comment) this.qcomments[q.index] = q.comment;
+            });
+        },
+
         selectSubmission(idx) {
             this.currentIdx = idx;
-            this.scoreInput = this.current && this.current.score !== null && this.current.score !== undefined ? String(this.current.score) : '';
-            this.feedbackInput = '';
             this.aiResult = '';
+            this.saveStatus = '';
+            this.loadScores();
+        },
+
+        onScoreChange() {
+            this.saveStatus = 'unsaved';
+        },
+
+        computeFinalScore() {
+            if (!this.current || !this.current.questions || this.current.questions.length === 0) return null;
+            let totalWeight = 0;
+            let earned = 0;
+            this.current.questions.forEach(q => {
+                const w = q.weight || 0;
+                totalWeight += w;
+                const s = parseFloat(this.qscores[q.index]) || 0;
+                earned += (s / 100) * w;
+            });
+            if (totalWeight === 0) return null;
+            return Math.round(Math.min(earned, 100));
         },
 
         saveGrade() {
             if (!this.current || this.saving) return;
             this.saving = true;
-            const body = JSON.stringify({
-                final_score: parseFloat(this.scoreInput) || 0,
-                teacher_feedback: {
-                    scores: {},
-                    comments: {},
-                    overall: this.feedbackInput || ''
-                }
+            this.saveStatus = '';
+            const scores = {};
+            const comments = {};
+            (this.current.questions || []).forEach(q => {
+                const s = this.qscores[q.index];
+                if (s !== undefined && s !== null && s !== '') scores[q.index] = parseFloat(s);
+                const c = this.qcomments[q.index];
+                if (c && c.trim()) comments[q.index] = c.trim();
             });
+            const finalScore = this.computeFinalScore();
+            const body = {
+                final_score: finalScore,
+                teacher_feedback: { scores, comments, overall: this.overallInput || '' }
+            };
             fetch('/teacher/grade/' + this.current.id + '/override', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: body
+                body: JSON.stringify(body)
             })
             .then(r => r.json())
             .then(d => {
                 if (d.success) {
-                    this.current.score = parseFloat(this.scoreInput) || 0;
-                    if (this.current.status === 'submitted') {
-                        this.current.status = 'graded';
-                    }
+                    this.current.score = finalScore;
+                    this.current.graded_essays = Object.keys(scores).length;
+                    if (this.current.status === 'submitted') this.current.status = 'graded';
+                    this.saveStatus = 'saved';
                     this.fetchQueue();
                 }
             })
@@ -224,12 +291,14 @@ function gradingQueueApp() {
         },
 
         nextSubmission() {
+            if (this.saveStatus === 'unsaved') this.saveGrade();
             if (this.currentIdx < this.filteredList.length - 1) {
                 this.selectSubmission(this.currentIdx + 1);
             }
         },
 
         prevSubmission() {
+            if (this.saveStatus === 'unsaved') this.saveGrade();
             if (this.currentIdx > 0) {
                 this.selectSubmission(this.currentIdx - 1);
             }
@@ -246,11 +315,33 @@ function gradingQueueApp() {
             })
             .then(r => r.json())
             .then(d => {
-                if (d.suggested_score !== undefined) this.scoreInput = String(Math.round(d.suggested_score));
+                if (d.suggested_score !== undefined) {
+                    if (this.current.questions && this.current.questions.length > 0) {
+                        this.qscores[this.current.questions[0].index] = Math.round(d.suggested_score);
+                    }
+                }
                 this.aiResult = d.feedback || 'Tidak ada feedback';
+                this.onScoreChange();
             })
             .catch(() => { this.aiResult = 'Gagal memproses AI'; })
             .finally(() => { this.aiLoading = false; });
+        },
+
+        bulkAiGrade() {
+            if (this.bulkAiLoading) return;
+            this.bulkAiLoading = true;
+            fetch('/api/ai/grade-bulk', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ exam_id: this.examId })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.graded !== undefined) alert('AI selesai mengkoreksi ' + d.graded + ' esai');
+                this.fetchQueue();
+            })
+            .catch(() => { alert('Gagal'); })
+            .finally(() => { this.bulkAiLoading = false; });
         },
     };
 }
