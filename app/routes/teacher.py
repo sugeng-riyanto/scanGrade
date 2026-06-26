@@ -2453,13 +2453,6 @@ def accreditation_report(exam_id):
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"Laporan_{exam.get('title', 'Ujian')[:30]}.pdf")
 
-
-@teacher_bp.route("/notifications")
-@login_required
-def teacher_notifications():
-    return render_template("teacher/notifications.html")
-
-
 @teacher_bp.route("/settings")
 @login_required
 def teacher_settings():

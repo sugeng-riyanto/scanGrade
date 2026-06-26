@@ -824,13 +824,6 @@ def delete_submission(submission_id):
     return jsonify({"success": True})
 
 
-@student_bp.route("/notifications")
-@login_required
-def student_notifications():
-    return render_template("student/notifications.html")
-
-
-
 @student_bp.route("/settings", methods=["GET"])
 @login_required
 def student_settings():
