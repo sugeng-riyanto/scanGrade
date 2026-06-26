@@ -1563,9 +1563,19 @@ def api_list_pengumuman():
         school_id = g.get("user_school_id")
         if school_id and role != "super_admin":
             try:
-                query = query.eq("school_id", school_id)
+                # Try UUID filter (post-migration 024)
+                q = query.eq("school_id", school_id)
+                test = q.limit(1).execute().data or []
+                if test:
+                    query = q
+                else:
+                    # Fallback to INT 1 (legacy school_settings schema)
+                    query = query.eq("school_id", 1)
             except Exception:
-                pass
+                try:
+                    query = query.eq("school_id", 1)
+                except Exception:
+                    pass
         data = query.order("created_at", desc=True).limit(limit).offset(offset).execute().data or []
     except Exception:
         data = []
