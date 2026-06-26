@@ -1525,34 +1525,28 @@ def api_send_broadcast():
             except Exception:
                 pass
 
-    # For one-on-one messages, create/update conversation FIRST
-    # Match by participant pair only (no title — WhatsApp style)
+    # For one-on-one messages: find or create conversation by participant pair
     conversation_id = None
     if recipient_ids and len(recipient_ids) == 1 and target_role and target_role != "all":
         other_id = recipient_ids[0]
         try:
-            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).order("last_message_at", desc=True).limit(1).execute().data or []
-            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).order("last_message_at", desc=True).limit(1).execute().data or []
+            conv1 = supabase.table("conversations").select("id").eq("participant_1", g.user_id).eq("participant_2", other_id).limit(1).execute().data or []
+            conv2 = supabase.table("conversations").select("id").eq("participant_1", other_id).eq("participant_2", g.user_id).limit(1).execute().data or []
             conv = conv1 + conv2
             if conv:
                 conversation_id = conv[0]["id"]
-                if conv[0].get("status") != "open":
-                    supabase.table("conversations").update({
-                        "status": "open", "completed_at": None, "completed_by": None
-                    }).eq("id", conversation_id).execute()
-                supabase.table("conversations").update({
-                    "last_message_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", conversation_id).execute()
             else:
                 conv_res = supabase.table("conversations").insert({
                     "participant_1": g.user_id, "participant_2": other_id,
                     "title": "Percakapan", "status": "open",
                 }).execute()
                 conversation_id = conv_res.data[0]["id"]
-        except Exception as e:
-            return jsonify({"error": f"Gagal membuat percakapan: {str(e)[:100]}"}), 500
+            if conversation_id:
+                supabase.table("conversations").update({"last_message_at": datetime.now(timezone.utc).isoformat()}).eq("id", conversation_id).execute()
+        except Exception:
+            pass
 
-    # Insert notification WITH conversation_id already set
+    # Insert notification
     notif = {
         "sender_id": g.user_id, "sender_role": role,
         "title": title, "message": message,
@@ -1565,9 +1559,9 @@ def api_send_broadcast():
         res = supabase.table("notifications").insert(notif).execute()
         notif_id = res.data[0]["id"]
     except Exception as e:
-        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
+        return jsonify({"error": f"Gagal kirim: {str(e)[:100]}"}), 500
 
-    # Create individual recipient entries for read tracking
+    # Best-effort read tracking
     if recipients:
         rec_data = [{"notification_id": notif_id, "recipient_id": r["id"]} for r in recipients]
         for i in range(0, len(rec_data), 100):
@@ -1593,38 +1587,34 @@ def api_reply_broadcast():
         return jsonify({"error": "Data tidak lengkap"}), 400
 
     supabase = get_supabase()
+    uid = g.user_id
     try:
-        # Verify user is a participant
-        conv = supabase.table("conversations").select("id, participant_1, participant_2, status, title").eq("id", conversation_id).single().execute().data
+        conv = supabase.table("conversations").select("id, participant_1, participant_2").eq("id", conversation_id).single().execute().data
         if not conv:
             return jsonify({"error": "Percakapan tidak ditemukan"}), 404
-        uid = g.user_id
-        if conv["status"] != "open":
-            update_data = {"status": "open", "completed_at": None, "completed_by": None, "last_message_at": datetime.now(timezone.utc).isoformat()}
-            supabase.table("conversations").update(update_data).eq("id", conversation_id).execute()
         if uid != conv["participant_1"] and uid != conv["participant_2"]:
             return jsonify({"error": "Anda bukan peserta percakapan ini"}), 403
 
         other_id = conv["participant_1"] if uid == conv["participant_2"] else conv["participant_2"]
         role = g.get("user_role")
 
-        # Use original conversation title, not reply title
-        orig_title = conv.get("title", "")
+        title = ("reply: " + message[:40] + '...') if len(message) > 40 else "reply: " + message
         notif = {
             "sender_id": uid, "sender_role": role,
-            "title": orig_title, "message": message,
-            "target_role": None, "target_school_id": None,
+            "title": title, "message": message,
             "conversation_id": conversation_id,
         }
         res = supabase.table("notifications").insert(notif).execute()
         notif_id = res.data[0]["id"]
 
-        # Add recipient = the other participant
-        supabase.table("notification_recipients").insert({
-            "notification_id": notif_id, "recipient_id": other_id
-        }).execute()
+        # Best-effort read tracking
+        try:
+            supabase.table("notification_recipients").insert({
+                "notification_id": notif_id, "recipient_id": other_id
+            }).execute()
+        except Exception:
+            pass
 
-        # Update conversation last_message_at only (keep original title)
         supabase.table("conversations").update({
             "last_message_at": datetime.now(timezone.utc).isoformat()
         }).eq("id", conversation_id).execute()
@@ -1809,7 +1799,7 @@ def api_conversations():
     uid = g.user_id
     include_archived = request.args.get("archived", "false") == "true"
     try:
-        convs = supabase.table("conversations").select("id, participant_1, participant_2, title, status, last_message_at, created_at, completed_at, completed_by") \
+        convs = supabase.table("conversations").select("id, participant_1, participant_2, title, last_message_at, created_at") \
             .or_("participant_1.eq." + uid + ",participant_2.eq." + uid) \
             .order("last_message_at", desc=True).limit(50).execute().data or []
 
@@ -1883,21 +1873,18 @@ def api_conversations():
                 last_msg = msgs[-1].get("message", "")
                 if last_msg:
                     last_msg_preview = last_msg[:80] + "..." if len(last_msg) > 80 else last_msg
-            is_archived = c.get("status") == "archived"
-            if is_archived and not include_archived:
-                continue
             result.append({
-                "id": c["id"], "title": c["title"], "status": c["status"],
+                "id": c["id"], "title": c.get("title", ""), "status": "open",
                 "other_name": other_name, "other_id": other_id, "other_role": other_role,
                 "last_message_at": str(c.get("last_message_at", ""))[:19].replace("T", " "),
                 "created_at": str(c.get("created_at", ""))[:19].replace("T", " "),
-                "completed_at": str(c.get("completed_at", ""))[:19].replace("T", " ") if c.get("completed_at") else None,
+                "completed_at": None,
                 "messages": msgs,
                 "last_msg_preview": last_msg_preview,
                 "unread": has_unread,
                 "has_unread": has_unread,
                 "unread_count": unread_count,
-                "is_archived": is_archived,
+                "is_archived": False,
             })
         return jsonify({"conversations": result})
     except Exception as e:
@@ -1939,7 +1926,7 @@ def api_broadcast_contacts():
 
     convs = []
     try:
-        convs = supabase.table("conversations").select("id, participant_1, participant_2, title, status, last_message_at, created_at") \
+        convs = supabase.table("conversations").select("id, participant_1, participant_2, last_message_at") \
             .or_("participant_1.eq." + uid + ",participant_2.eq." + uid) \
             .order("last_message_at", desc=True).limit(50).execute().data or []
     except Exception:
