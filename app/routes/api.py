@@ -1506,7 +1506,7 @@ def api_create_pengumuman():
         return jsonify({"error": "Guru hanya bisa kirim pengumuman ke murid"}), 403
     if role == "admin_sekolah" and target_role not in ("guru", "murid"):
         return jsonify({"error": "Admin sekolah hanya bisa kirim ke guru/murid"}), 403
-    if role == "admin_sekolah":
+    if role in ("admin_sekolah", "guru"):
         school_id = g.get("user_school_id")
 
     payload = {
@@ -1545,8 +1545,11 @@ def api_list_pengumuman():
     unread_only = request.args.get("unread_only", "false") == "true"
 
     try:
-        query = supabase.table("pengumuman").select("*").eq("target_role", role).is_("is_archived", "false").order("created_at", desc=True).limit(limit).offset(offset)
-        data = query.execute().data or []
+        query = supabase.table("pengumuman").select("*").eq("target_role", role).is_("is_archived", "false")
+        school_id = g.get("user_school_id")
+        if school_id and role != "super_admin":
+            query = query.eq("school_id", school_id)
+        data = query.order("created_at", desc=True).limit(limit).offset(offset).execute().data or []
     except Exception:
         data = []
 
@@ -1707,6 +1710,21 @@ def api_list_percakapan():
         if not archived:
             query = query.eq("is_archived", False)
         data = query.order("last_message_at", desc=True).limit(limit).offset(offset).execute().data or []
+        # Filter to same-school conversations only (for non-super_admin)
+        school_id = g.get("user_school_id")
+        if school_id and role != "super_admin":
+            filtered = []
+            for c in data:
+                other_id = c["user_b_id"] if uid == c["user_a_id"] else c["user_a_id"]
+                try:
+                    p = supabase.table("profiles").select("school_id").eq("id", other_id).single().execute().data
+                    if p and p.get("school_id") and str(p["school_id"]) == str(school_id):
+                        filtered.append(c)
+                    elif not p or not p.get("school_id"):
+                        filtered.append(c)
+                except Exception:
+                    filtered.append(c)
+            data = filtered
     except Exception as e:
         return jsonify({"error": str(e)[:100], "percakapan": []}), 500
 
@@ -1772,7 +1790,7 @@ def api_create_percakapan():
 
     # Validate recipient exists and role is allowed
     try:
-        recipient = supabase.table("profiles").select("id, role").eq("id", recipient_id).single().execute().data
+        recipient = supabase.table("profiles").select("id, role, school_id").eq("id", recipient_id).single().execute().data
         if not recipient:
             return jsonify({"error": "Penerima tidak ditemukan"}), 404
         allowed = _get_allowed_recipient_roles(role)
@@ -1782,6 +1800,11 @@ def api_create_percakapan():
         recip_allowed = _get_allowed_recipient_roles(recipient["role"])
         if role not in recip_allowed:
             return jsonify({"error": "Penerima tidak boleh chat dengan anda"}), 403
+        # School scoping: must be same school (except super_admin)
+        if role != "super_admin":
+            my_school = g.get("user_school_id")
+            if my_school and recipient.get("school_id") and str(my_school) != str(recipient["school_id"]):
+                return jsonify({"error": "Tidak bisa chat dengan pengguna di luar sekolah"}), 403
     except Exception as e:
         return jsonify({"error": str(e)[:100]}), 500
 
@@ -1993,12 +2016,69 @@ def api_search_recipients():
     allowed = _get_allowed_recipient_roles(role)
     try:
         query = supabase.table("profiles").select("id, full_name, role").in_("role", allowed)
+        school_id = g.get("user_school_id")
+        if school_id and role != "super_admin":
+            query = query.eq("school_id", school_id)
         if q:
             query = query.ilike("full_name", f"%{q}%")
         users = query.limit(20).execute().data or []
         return jsonify({"users": users})
     except Exception:
         return jsonify({"users": []})
+
+@api_bp.route("/percakapan/contacts", methods=["GET"])
+@login_required
+def api_contacts():
+    """Get all contacts the user can chat with, merged with conversation info."""
+    supabase = get_supabase()
+    role = g.get("user_role")
+    uid = g.user_id
+    allowed = _get_allowed_recipient_roles(role)
+    school_id = g.get("user_school_id")
+    try:
+        query = supabase.table("profiles").select("id, full_name, role").in_("role", allowed)
+        if school_id and role != "super_admin":
+            query = query.eq("school_id", school_id)
+        profiles = query.limit(200).execute().data or []
+
+        convs = supabase.table("percakapan").select("*").or_("user_a_id.eq." + uid + ",user_b_id.eq." + uid).order("last_message_at", desc=True).limit(200).execute().data or []
+        conv_map = {}
+        for c in convs:
+            other = c["user_b_id"] if uid == c["user_a_id"] else c["user_a_id"]
+            conv_map[other] = c
+
+        contacts = []
+        for p in profiles:
+            if p["id"] == uid: continue
+            conv = conv_map.get(p["id"])
+            conv_id = conv["id"] if conv else None
+            last_msg = ""
+            unread = 0
+            if conv:
+                try:
+                    ms = supabase.table("pesan").select("content, created_at, is_deleted").eq("percakapan_id", conv["id"]).order("created_at", desc=True).limit(1).execute().data or []
+                    if ms:
+                        m = ms[0]
+                        last_msg = "[Pesan dihapus]" if m.get("is_deleted") else (m.get("content","")[:80])
+                    uc = supabase.table("pesan").select("id", count="exact").eq("percakapan_id", conv["id"]).neq("sender_id", uid).eq("is_read", False).execute()
+                    unread = uc.count or 0
+                except Exception:
+                    pass
+            contacts.append({
+                "id": p["id"],
+                "full_name": p["full_name"],
+                "role": p["role"],
+                "initial": (p["full_name"] or "?")[0].upper(),
+                "conversation_id": conv_id,
+                "last_message": last_msg,
+                "unread_count": unread,
+                "last_message_at": conv["last_message_at"] if conv else None,
+            })
+        contacts.sort(key=lambda x: (0 if x["last_message_at"] else 1, x.get("last_message_at") or ""), reverse=True)
+        return jsonify({"contacts": contacts})
+    except Exception as e:
+        return jsonify({"error": str(e)[:100], "contacts": []}), 500
+
 @login_required
 def api_export_data():
     """Export all personal data (UU PDP right to data portability)."""
