@@ -8,6 +8,7 @@
     userName: '{{ g.user_name or g.user_email }}',
     pengumumanList: [],
     unreadPengumuman: 0,
+    chatUnreadCount: 0,
     showCreatePengumuman: false,
     formTitle: '',
     formContent: '',
@@ -25,10 +26,49 @@
     selectedRecipient: null,
     sending: false,
     loading: false,
+    pollTimer: null,
+    showMobilePengumuman: false,
+    prevUnreadChat: 0,
 
     init() {
         this.fetchPengumuman();
         this.fetchUnreadCount();
+        this.fetchPercakapan();
+        this.startPolling();
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    },
+
+    get totalUnread() {
+        return this.unreadPengumuman + this.chatUnreadCount;
+    },
+
+    startPolling() {
+        this.pollTimer = setInterval(() => this.pollNow(), 10000);
+    },
+    stopPolling() {
+        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    },
+    pollNow() {
+        this.fetchUnreadCount();
+        this.fetchPercakapanSilent();
+        if (this.selectedPercakapan) {
+            this.fetchPesan(this.selectedPercakapan, true);
+        }
+    },
+    fetchPercakapanSilent() {
+        fetch('/api/percakapan?limit=50')
+            .then(r => r.json())
+            .then(d => {
+                const oldUnread = this.chatUnreadCount;
+                this.percakapanList = d.percakapan || [];
+                this.chatUnreadCount = this.percakapanList.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+                if (this.chatUnreadCount > oldUnread) {
+                    this.notifyNewChat();
+                }
+            })
+            .catch(() => {});
     },
 
     formatDate(ts) {
@@ -119,6 +159,7 @@
             .then(r => r.json())
             .then(d => {
                 this.percakapanList = d.percakapan || [];
+                this.chatUnreadCount = this.percakapanList.reduce((sum, c) => sum + (c.unread_count || 0), 0);
             })
             .catch(() => {});
     },
@@ -157,16 +198,26 @@
     openPercakapan(id) {
         this.selectedPercakapan = id;
         this.fetchPesan(id);
+        this.fetchPercakapan();
     },
-    fetchPesan(percakapanId) {
+    fetchPesan(percakapanId, silent) {
         fetch('/api/percakapan/' + percakapanId + '/pesan?limit=50')
             .then(r => r.json())
             .then(d => {
-                this.pesanList = d.pesan || [];
-                this.$nextTick(() => {
-                    const el = this.$refs.pesanContainer;
-                    if (el) el.scrollTop = el.scrollHeight;
-                });
+                const newList = d.pesan || [];
+                if (silent && this.pesanList.length > 0 && newList.length > this.pesanList.length) {
+                    this.pesanList = newList;
+                    this.$nextTick(() => {
+                        const el = this.$refs.pesanContainer;
+                        if (el) el.scrollTop = el.scrollHeight;
+                    });
+                } else if (!silent) {
+                    this.pesanList = newList;
+                    this.$nextTick(() => {
+                        const el = this.$refs.pesanContainer;
+                        if (el) el.scrollTop = el.scrollHeight;
+                    });
+                }
             })
             .catch(() => {});
     },
@@ -205,137 +256,264 @@
             })
             .catch(() => {});
     },
+
+    notifyNewChat() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = 660; gain.gain.value = 0.15;
+            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.12);
+        } catch (_) {}
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Pesan baru di ScanGrade', {
+                body: 'Ada pesan baru di chat',
+                icon: '/static/favicon.ico'
+            });
+        }
+    },
 }">
 
-    <div class="flex items-center justify-between mb-4">
+    <!-- Mobile: tab bar (shown below lg) -->
+    <div class="flex items-center justify-between mb-4 lg:hidden">
         <h1 class="text-xl font-extrabold text-surface-800"><i class="fas fa-comments text-primary-500 mr-2"></i>Komunikasi</h1>
+        <template x-if="totalUnread > 0">
+            <span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full" x-text="totalUnread"></span>
+        </template>
     </div>
-
-    <div class="flex gap-1 bg-surface-100 rounded-xl p-1 mb-4">
-        <button @click="activeTab='pengumuman'" :class="activeTab==='pengumuman' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
+    <div class="flex gap-1 bg-surface-100 rounded-xl p-1 mb-4 lg:hidden">
+        <button @click="activeTab='pengumuman'; showMobilePengumuman=false" :class="activeTab==='pengumuman' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
             <i class="fas fa-bullhorn mr-1.5"></i>Pengumuman
             <template x-if="unreadPengumuman > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="unreadPengumuman"></span></template>
         </button>
-        <button @click="activeTab='chat'; if(!selectedPercakapan) fetchPercakapan()" :class="activeTab==='chat' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
+        <button @click="activeTab='chat'; fetchPercakapan();" :class="activeTab==='chat' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
             <i class="fas fa-comments mr-1.5"></i>Chat
+            <template x-if="chatUnreadCount > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="chatUnreadCount"></span></template>
         </button>
     </div>
 
-    <!-- PENGUMUMAN TAB -->
-    <div x-show="activeTab==='pengumuman'">
-        <template x-if="userRole !== 'murid'">
-            <button @click="showCreatePengumuman=true" class="w-full mb-4 px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition flex items-center justify-center gap-2">
-                <i class="fas fa-plus-circle"></i>Buat Pengumuman
-            </button>
-        </template>
-
-        <div class="space-y-3">
-            <div x-show="pengumumanList.length===0 && !loading" class="text-center py-12 text-surface-400">
-                <i class="fas fa-bullhorn text-4xl mb-3"></i>
-                <p class="text-sm font-bold">Belum ada pengumuman</p>
+    <!-- Desktop: side-by-side (lg+) -->
+    <div class="hidden lg:flex gap-4" style="height: calc(100vh - 220px); min-height: 450px;">
+        <!-- LEFT: Chat area (w-80) -->
+        <div class="w-80 shrink-0 flex flex-col gap-4 overflow-hidden">
+            <div class="bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden" style="height: calc(100vh - 275px); min-height: 400px;">
+                <div class="p-3 border-b border-surface-100 flex items-center justify-between">
+                    <h2 class="font-bold text-surface-700 text-sm"><i class="fas fa-comments text-primary-500 mr-1.5"></i>Chat</h2>
+                    <template x-if="chatUnreadCount > 0"><span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" x-text="chatUnreadCount"></span></template>
+                </div>
+                <div class="p-3 border-b border-surface-100 space-y-2">
+                    <input type="text" x-model="searchChat" placeholder="Cari percakapan..." class="w-full px-3 py-2 bg-surface-50 border-0 rounded-lg text-xs text-surface-600">
+                    <button @click="showCreateChat=true; searchRecipients()" class="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">
+                        <i class="fas fa-plus-circle"></i> Chat Baru
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto">
+                    <template x-for="conv in filteredPercakapan" :key="conv.id">
+                        <div @click="openPercakapan(conv.id)" class="p-3 border-b border-surface-50 cursor-pointer hover:bg-surface-50 transition"
+                             :class="selectedPercakapan===conv.id ? 'bg-primary-50 border-l-2 border-l-primary-500' : ''">
+                            <div class="flex items-center gap-2">
+                                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(conv.other_name||'?')[0].toUpperCase()"></div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between">
+                                        <span class="font-bold text-surface-800 text-sm truncate" x-text="conv.other_name"></span>
+                                        <span class="text-[10px] text-surface-400 shrink-0 ml-1" x-text="formatDate(conv.last_message_at)"></span>
+                                    </div>
+                                    <p class="text-xs text-surface-500 truncate" x-text="conv.last_message || 'Belum ada pesan'"></p>
+                                </div>
+                            </div>
+                            <div x-show="conv.unread_count > 0" class="ml-11 mt-1">
+                                <span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" x-text="conv.unread_count"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </div>
-            <template x-for="item in pengumumanList" :key="item.id">
-                <div @click="openPengumuman(item)" class="bg-white rounded-2xl p-4 shadow-sm border border-surface-100 cursor-pointer hover:shadow-md transition relative">
-                    <div class="flex justify-between items-start">
-                        <h3 class="font-bold text-surface-800 text-sm" x-text="item.title"></h3>
-                        <span x-show="!item.is_read" class="w-2.5 h-2.5 bg-red-500 rounded-full mt-1 shrink-0"></span>
+            <!-- Inline chat when conversation selected (in the same column) -->
+            <div x-show="selectedPercakapan" class="flex-1 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden">
+                <div class="p-3 border-b border-surface-200 flex items-center gap-3">
+                    <button @click="selectedPercakapan=null; pesanList=[]" class="text-surface-400 hover:text-surface-600"><i class="fas fa-arrow-left"></i></button>
+                    <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))||'?')[0].toUpperCase()"></div>
+                    <span class="font-bold text-surface-800 text-sm" x-text="getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))"></span>
+                </div>
+                <div x-ref="pesanContainer" class="flex-1 overflow-y-auto p-4 space-y-2" style="background-color: #efeae2;">
+                    <div x-show="pesanList.length===0" class="flex items-center justify-center h-full">
+                        <p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p>
                     </div>
-                    <p class="text-xs text-surface-500 mt-1 line-clamp-2" x-text="item.content"></p>
-                    <div class="flex justify-between items-center text-[10px] text-surface-400 mt-2">
-                        <span x-text="item.sender_name || item.sender_id?.substring(0,8)"></span>
-                        <span x-text="formatDate(item.created_at)"></span>
+                    <template x-for="msg in pesanList" :key="msg.id">
+                        <div class="flex" :class="msg.sender_id === userId ? 'justify-end' : 'justify-start'">
+                            <div class="max-w-[75%] min-w-[100px] rounded-2xl px-3 py-2 shadow-sm relative"
+                                 :class="msg.sender_id === userId ? 'bg-[#dcf8c6] text-[#111b21] rounded-br-sm' : 'bg-white text-[#111b21] rounded-bl-sm border border-surface-100'">
+                                <template x-if="msg.is_deleted">
+                                    <p class="italic text-surface-400 text-xs"><i class="fas fa-trash-can mr-1"></i>Pesan dihapus</p>
+                                </template>
+                                <template x-if="!msg.is_deleted">
+                                    <div>
+                                        <p class="text-sm whitespace-pre-wrap break-words" x-text="msg.content"></p>
+                                        <p x-show="msg.is_edited" class="text-[10px] text-surface-400 italic">diedit</p>
+                                    </div>
+                                </template>
+                                <div class="flex items-center justify-end gap-1 mt-1">
+                                    <span class="text-[10px] text-surface-400" x-text="formatTime(msg.created_at)"></span>
+                                    <template x-if="msg.sender_id === userId">
+                                        <i class="text-[10px] fa-regular fa-circle-check" :class="msg.is_read ? 'text-[#53bdeb]' : 'text-[#8696a0]'"></i>
+                                    </template>
+                                    <button x-show="msg.sender_id === userId && !msg.is_deleted" @click="deletePesan(msg.id)" class="text-[10px] text-surface-300 hover:text-red-400 ml-1">&times;</button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div class="p-3 border-t border-surface-200 bg-surface-50">
+                    <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
+                        <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendMessage()"></textarea>
+                        <button @click="sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
+                                :class="newMessage.trim() ? 'bg-primary-600 text-white shadow-md' : 'bg-surface-100 text-surface-400'">
+                            <i class="fas fa-paper-plane text-sm"></i>
+                        </button>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Pengumuman panel (flex-1) -->
+        <div class="flex-1 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden">
+            <div class="p-3 border-b border-surface-100 flex items-center justify-between">
+                <h2 class="font-bold text-surface-700 text-sm"><i class="fas fa-bullhorn text-primary-500 mr-1.5"></i>Pengumuman</h2>
+                <template x-if="unreadPengumuman > 0"><span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" x-text="unreadPengumuman"></span></template>
+            </div>
+            <template x-if="userRole !== 'murid'">
+                <div class="px-3 pt-2">
+                    <button @click="showCreatePengumuman=true" class="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">
+                        <i class="fas fa-plus-circle"></i>Buat Pengumuman
+                    </button>
+                </div>
             </template>
+            <div class="flex-1 overflow-y-auto p-3 space-y-2">
+                <div x-show="pengumumanList.length===0 && !loading" class="text-center py-8 text-surface-400">
+                    <i class="fas fa-bullhorn text-3xl mb-2"></i>
+                    <p class="text-xs font-bold">Belum ada pengumuman</p>
+                </div>
+                <template x-for="item in pengumumanList" :key="item.id">
+                    <div @click="openPengumuman(item)" class="bg-surface-50 rounded-xl p-3 cursor-pointer hover:bg-surface-100 transition relative">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-bold text-surface-800 text-xs" x-text="item.title"></h3>
+                            <span x-show="!item.is_read" class="w-2 h-2 bg-red-500 rounded-full mt-1 shrink-0"></span>
+                        </div>
+                        <p class="text-[11px] text-surface-500 mt-0.5 line-clamp-2" x-text="item.content"></p>
+                        <div class="flex justify-between items-center text-[10px] text-surface-400 mt-1">
+                            <span x-text="item.sender_name || item.sender_id?.substring(0,8)"></span>
+                            <span x-text="formatDate(item.created_at)"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
         </div>
     </div>
 
-    <!-- CHAT TAB -->
-    <div x-show="activeTab==='chat'" class="flex flex-col md:flex-row gap-0 md:gap-4" style="height: calc(100vh - 280px); min-height: 400px;">
-        <!-- Conversation list -->
-        <div class="w-full md:w-72 shrink-0 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden" x-show="!selectedPercakapan || window.innerWidth >= 768" :class="selectedPercakapan ? 'hidden md:flex' : 'flex'">
-            <div class="p-3 border-b border-surface-100 space-y-2">
-                <input type="text" x-model="searchChat" placeholder="Cari percakapan..." class="w-full px-3 py-2 bg-surface-50 border-0 rounded-lg text-xs text-surface-600">
-                <button @click="showCreateChat=true; searchRecipients()" class="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">
-                    <i class="fas fa-plus-circle"></i> Chat Baru
+    <!-- Mobile: tab content -->
+    <div class="lg:hidden">
+        <!-- Mobile PENGUMUMAN -->
+        <div x-show="activeTab==='pengumuman'">
+            <template x-if="userRole !== 'murid'">
+                <button @click="showCreatePengumuman=true" class="w-full mb-4 px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition flex items-center justify-center gap-2">
+                    <i class="fas fa-plus-circle"></i>Buat Pengumuman
                 </button>
-            </div>
-            <div class="flex-1 overflow-y-auto">
-                <template x-for="conv in filteredPercakapan" :key="conv.id">
-                    <div @click="openPercakapan(conv.id)" class="p-3 border-b border-surface-50 cursor-pointer hover:bg-surface-50 transition"
-                         :class="selectedPercakapan===conv.id ? 'bg-primary-50 border-l-2 border-l-primary-500' : ''">
-                        <div class="flex items-center gap-2">
-                            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(conv.other_name||'?')[0].toUpperCase()"></div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center justify-between">
-                                    <span class="font-bold text-surface-800 text-sm truncate" x-text="conv.other_name"></span>
-                                    <span class="text-[10px] text-surface-400 shrink-0 ml-1" x-text="formatDate(conv.last_message_at)"></span>
-                                </div>
-                                <p class="text-xs text-surface-500 truncate" x-text="conv.last_message || 'Belum ada pesan'"></p>
-                            </div>
+            </template>
+            <div class="space-y-3">
+                <div x-show="pengumumanList.length===0 && !loading" class="text-center py-12 text-surface-400">
+                    <i class="fas fa-bullhorn text-4xl mb-3"></i>
+                    <p class="text-sm font-bold">Belum ada pengumuman</p>
+                </div>
+                <template x-for="item in pengumumanList" :key="item.id">
+                    <div @click="openPengumuman(item)" class="bg-white rounded-2xl p-4 shadow-sm border border-surface-100 cursor-pointer hover:shadow-md transition relative">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-bold text-surface-800 text-sm" x-text="item.title"></h3>
+                            <span x-show="!item.is_read" class="w-2.5 h-2.5 bg-red-500 rounded-full mt-1 shrink-0"></span>
                         </div>
-                        <div x-show="conv.unread_count > 0" class="ml-11 mt-1">
-                            <span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" x-text="conv.unread_count"></span>
+                        <p class="text-xs text-surface-500 mt-1 line-clamp-2" x-text="item.content"></p>
+                        <div class="flex justify-between items-center text-[10px] text-surface-400 mt-2">
+                            <span x-text="item.sender_name || item.sender_id?.substring(0,8)"></span>
+                            <span x-text="formatDate(item.created_at)"></span>
                         </div>
                     </div>
                 </template>
             </div>
         </div>
 
-        <!-- Message area -->
-        <div class="flex-1 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden" x-show="selectedPercakapan" :class="selectedPercakapan ? 'flex' : 'hidden md:flex'">
-            <!-- Header -->
-            <div class="p-3 border-b border-surface-200 flex items-center gap-3">
-                <button @click="selectedPercakapan=null; pesanList=[]" class="md:hidden text-surface-400 hover:text-surface-600"><i class="fas fa-arrow-left"></i></button>
-                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))||'?')[0].toUpperCase()"></div>
-                <span class="font-bold text-surface-800 text-sm" x-text="getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))"></span>
-            </div>
-            <!-- Messages -->
-            <div x-ref="pesanContainer" class="flex-1 overflow-y-auto p-4 space-y-2" style="background-color: #efeae2;">
-                <div x-show="pesanList.length===0" class="flex items-center justify-center h-full">
-                    <p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p>
-                </div>
-                <template x-for="msg in pesanList" :key="msg.id">
-                    <div class="flex" :class="msg.sender_id === userId ? 'justify-end' : 'justify-start'">
-                        <div class="max-w-[75%] min-w-[100px] rounded-2xl px-3 py-2 shadow-sm relative"
-                             :class="msg.sender_id === userId ? 'bg-[#dcf8c6] text-[#111b21] rounded-br-sm' : 'bg-white text-[#111b21] rounded-bl-sm border border-surface-100'">
-                            <template x-if="msg.is_deleted">
-                                <p class="italic text-surface-400 text-xs"><i class="fas fa-trash-can mr-1"></i>Pesan dihapus</p>
-                            </template>
-                            <template x-if="!msg.is_deleted">
-                                <div>
-                                    <p class="text-sm whitespace-pre-wrap break-words" x-text="msg.content"></p>
-                                    <p x-show="msg.is_edited" class="text-[10px] text-surface-400 italic">diedit</p>
-                                </div>
-                            </template>
-                            <div class="flex items-center justify-end gap-1 mt-1">
-                                <span class="text-[10px] text-surface-400" x-text="formatTime(msg.created_at)"></span>
-                                <template x-if="msg.sender_id === userId">
-                                    <i class="text-[10px] fa-regular fa-circle-check" :class="msg.is_read ? 'text-[#53bdeb]' : 'text-[#8696a0]'"></i>
-                                </template>
-                                <button x-show="msg.sender_id === userId && !msg.is_deleted" @click="deletePesan(msg.id)" class="text-[10px] text-surface-300 hover:text-red-400 ml-1">&times;</button>
-                            </div>
-                        </div>
-                    </div>
-                </template>
-            </div>
-            <!-- Input bar -->
-            <div class="p-3 border-t border-surface-200 bg-surface-50">
-                <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
-                    <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendMessage()"></textarea>
-                    <button @click="sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
-                            :class="newMessage.trim() ? 'bg-primary-600 text-white shadow-md' : 'bg-surface-100 text-surface-400'">
-                        <i class="fas fa-paper-plane text-sm"></i>
+        <!-- Mobile CHAT -->
+        <div x-show="activeTab==='chat'" class="flex flex-col gap-0" style="height: calc(100vh - 280px); min-height: 400px;">
+            <div class="w-full bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden flex-1" x-show="!selectedPercakapan">
+                <div class="p-3 border-b border-surface-100 space-y-2">
+                    <input type="text" x-model="searchChat" placeholder="Cari percakapan..." class="w-full px-3 py-2 bg-surface-50 border-0 rounded-lg text-xs text-surface-600">
+                    <button @click="showCreateChat=true; searchRecipients()" class="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">
+                        <i class="fas fa-plus-circle"></i> Chat Baru
                     </button>
                 </div>
+                <div class="flex-1 overflow-y-auto">
+                    <template x-for="conv in filteredPercakapan" :key="conv.id">
+                        <div @click="openPercakapan(conv.id)" class="p-3 border-b border-surface-50 cursor-pointer hover:bg-surface-50 transition"
+                             :class="selectedPercakapan===conv.id ? 'bg-primary-50 border-l-2 border-l-primary-500' : ''">
+                            <div class="flex items-center gap-2">
+                                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(conv.other_name||'?')[0].toUpperCase()"></div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between">
+                                        <span class="font-bold text-surface-800 text-sm truncate" x-text="conv.other_name"></span>
+                                        <span class="text-[10px] text-surface-400 shrink-0 ml-1" x-text="formatDate(conv.last_message_at)"></span>
+                                    </div>
+                                    <p class="text-xs text-surface-500 truncate" x-text="conv.last_message || 'Belum ada pesan'"></p>
+                                </div>
+                            </div>
+                            <div x-show="conv.unread_count > 0" class="ml-11 mt-1">
+                                <span class="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" x-text="conv.unread_count"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </div>
-        </div>
-
-        <!-- No conversation selected -->
-        <div x-show="!selectedPercakapan" class="flex-1 hidden md:flex items-center justify-center bg-white rounded-2xl border border-surface-100 shadow-sm">
-            <div class="text-center text-surface-400">
-                <i class="fas fa-comments text-5xl mb-3"></i>
-                <p class="text-sm font-bold">Pilih percakapan untuk mulai chat</p>
+            <div class="flex-1 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden" x-show="selectedPercakapan">
+                <div class="p-3 border-b border-surface-200 flex items-center gap-3">
+                    <button @click="selectedPercakapan=null; pesanList=[]" class="text-surface-400 hover:text-surface-600"><i class="fas fa-arrow-left"></i></button>
+                    <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0" x-text="(getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))||'?')[0].toUpperCase()"></div>
+                    <span class="font-bold text-surface-800 text-sm" x-text="getOtherUser(percakapanList.find(c=>c.id===selectedPercakapan))"></span>
+                </div>
+                <div x-ref="pesanContainer" class="flex-1 overflow-y-auto p-4 space-y-2" style="background-color: #efeae2;">
+                    <div x-show="pesanList.length===0" class="flex items-center justify-center h-full">
+                        <p class="text-xs text-surface-400">Belum ada pesan. Kirim pesan pertama!</p>
+                    </div>
+                    <template x-for="msg in pesanList" :key="msg.id">
+                        <div class="flex" :class="msg.sender_id === userId ? 'justify-end' : 'justify-start'">
+                            <div class="max-w-[75%] min-w-[100px] rounded-2xl px-3 py-2 shadow-sm relative"
+                                 :class="msg.sender_id === userId ? 'bg-[#dcf8c6] text-[#111b21] rounded-br-sm' : 'bg-white text-[#111b21] rounded-bl-sm border border-surface-100'">
+                                <template x-if="msg.is_deleted">
+                                    <p class="italic text-surface-400 text-xs"><i class="fas fa-trash-can mr-1"></i>Pesan dihapus</p>
+                                </template>
+                                <template x-if="!msg.is_deleted">
+                                    <div>
+                                        <p class="text-sm whitespace-pre-wrap break-words" x-text="msg.content"></p>
+                                        <p x-show="msg.is_edited" class="text-[10px] text-surface-400 italic">diedit</p>
+                                    </div>
+                                </template>
+                                <div class="flex items-center justify-end gap-1 mt-1">
+                                    <span class="text-[10px] text-surface-400" x-text="formatTime(msg.created_at)"></span>
+                                    <template x-if="msg.sender_id === userId">
+                                        <i class="text-[10px] fa-regular fa-circle-check" :class="msg.is_read ? 'text-[#53bdeb]' : 'text-[#8696a0]'"></i>
+                                    </template>
+                                    <button x-show="msg.sender_id === userId && !msg.is_deleted" @click="deletePesan(msg.id)" class="text-[10px] text-surface-300 hover:text-red-400 ml-1">&times;</button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div class="p-3 border-t border-surface-200 bg-surface-50">
+                    <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
+                        <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-700 text-sm resize-none outline-none max-h-24" placeholder="Ketik pesan..." @keydown.enter.prevent="sendMessage()"></textarea>
+                        <button @click="sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
+                                :class="newMessage.trim() ? 'bg-primary-600 text-white shadow-md' : 'bg-surface-100 text-surface-400'">
+                            <i class="fas fa-paper-plane text-sm"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
