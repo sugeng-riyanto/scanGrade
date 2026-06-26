@@ -484,6 +484,10 @@ def _register_request_logging(app):
             _metrics["response_times"].append(duration * 1000)
             if len(_metrics["response_times"]) > _max_times:
                 _metrics["response_times"] = _metrics["response_times"][-500:]
+        # Set refreshed access_token cookie if token was refreshed
+        new_token = getattr(g, "_new_access_token", None)
+        if new_token:
+            response.set_cookie("access_token", new_token, httponly=True, samesite="Lax", path="/", max_age=86400)
         return response
 
     @app.route("/metrics")
