@@ -2,8 +2,9 @@
 {% block title %}Pengaturan - ScanGrade{% endblock %}
 {% block page_title %}Pengaturan{% endblock %}
 {% block content %}
+<script>window.__profile={{ profile | tojson | safe }}||{};</script>
 <div class="space-y-6" x-data="{
-    profile: {{ profile | tojson | safe }},
+    profile: window.__profile,
     lang: localStorage.getItem('sg_lang') || 'id',
     loading: true, deletionRequest: null,
     exportLoading: false, exportData: null,
