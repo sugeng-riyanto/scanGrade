@@ -950,7 +950,6 @@ function examApp(duration, totalQ) {
                             }
                         });
                     });
-                    }
                     navigator.sendBeacon('/api/student/sync-draft',
                         new Blob([JSON.stringify({exam_id: '{{ exam.id }}', answers: data, light: true})], {type: 'application/json'}));
                 }
