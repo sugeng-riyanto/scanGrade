@@ -874,6 +874,7 @@ function examApp(duration, totalQ) {
         showViolationBanner: false,
         violationMessage: '',
         violationType: 'warning',
+        _answerTimestamps: {},
         antiCheat: {{ {
             'enabled': exam.get('anti_cheat_enabled', True) if exam.get('anti_cheat_enabled') is not none else True,
             'penalty_per_violation': exam.get('penalty_per_violation', 5) if exam.get('penalty_per_violation') is not none else 5,
@@ -885,6 +886,7 @@ function examApp(duration, totalQ) {
             'watermark_name': exam.get('watermark_name', True) if exam.get('watermark_name') is not none else True,
             'block_copy_paste': exam.get('block_copy_paste', True) if exam.get('block_copy_paste') is not none else True,
             'block_right_click': exam.get('block_right_click', True) if exam.get('block_right_click') is not none else True,
+            'block_screenshot': exam.get('block_screenshot', True) if exam.get('block_screenshot') is not none else True,
             'allow_calculator': exam.get('allow_calculator', False) if exam.get('allow_calculator') is not none else False,
         } | tojson | safe }},
         // Agreement widget
@@ -1060,7 +1062,7 @@ function examApp(duration, totalQ) {
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'PrintScreen') {
                     e.preventDefault();
-                    if (this.antiCheat.block_copy_paste) navigator.clipboard.writeText('').catch(() => {});
+                    if (this.antiCheat.block_screenshot) navigator.clipboard.writeText('').catch(() => {});
                 }
                 if (e.key === 'Escape' && this._blurTimer) {
                     clearTimeout(this._blurTimer);
@@ -1701,6 +1703,10 @@ function examApp(duration, totalQ) {
             } else {
                 this.questions[i].answer = val;
             }
+            // Track timestamp for speed analysis
+            if (!this._answerTimestamps) this._answerTimestamps = {};
+            const oi = this.questions[i].origIdx !== undefined ? this.questions[i].origIdx : i;
+            this._answerTimestamps[oi] = Date.now();
             this.markDirty();
         },
         selectedAnswer(i) { return this.questions[i]?.answer; },
@@ -1980,6 +1986,10 @@ function examApp(duration, totalQ) {
                     data[oi] = q.answer;
                 }
             });
+            // Include timestamp data for server-side speed analysis
+            if (this._answerTimestamps && Object.keys(this._answerTimestamps).length > 0) {
+                data._timestamps = {...this._answerTimestamps};
+            }
             return data;
         },
         getAnswersWithCanvas() {
@@ -2031,7 +2041,34 @@ function examApp(duration, totalQ) {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
             })
-            .then(r => { if (r.ok) { this.lastSyncHash = hash; this.dirty = false; this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
+            .then(r => {
+                if (r.ok) {
+                    return r.json().then(data => {
+                        this.lastSyncHash = hash;
+                        this.dirty = false;
+                        this.canvasDirty = {};
+                        this.lastSyncAt = Date.now();
+                        this.syncStatus = 'synced';
+                        this.syncLabel = 'Tersinkron';
+                        // Timer reconciliation: override client timer with server value
+                        if (data.server_time_left !== undefined) {
+                            this.timeLeft = data.server_time_left;
+                            if (data.server_time_left <= 0 && !this.submitted) {
+                                this.submitExam(true);
+                            }
+                        }
+                    });
+                } else {
+                    return r.json().then(data => {
+                        if (data.error === 'timer_mismatch' && data.server_time_left !== undefined) {
+                            this.timeLeft = data.server_time_left;
+                            if (data.server_time_left <= 0 && !this.submitted) {
+                                this.submitExam(true);
+                            }
+                        }
+                    });
+                }
+            })
             .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; this.pendingSync = true; })
             .finally(() => { this._syncInFlight = false; });
         },

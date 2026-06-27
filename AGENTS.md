@@ -150,6 +150,48 @@
 - **Graceful fallback for missing columns**: All migration-021-specific features (unsend, hide, soft-delete) try the new columns first; if they don't exist, fall back gracefully (e.g., unsend always sets `message="Pesan telah hapus"` even if `is_deleted` column is missing).
 - **Messages area guarded by `x-if="activeConv"`**: Prevents Alpine errors when `pendingRecipient` is set but `activeConv` is null.
 
+## Anti-Cheat System — Panduan per Role
+
+### Guru (Pembuat Ujian)
+| Fitur | Deskripsi | Letak |
+|-------|-----------|-------|
+| **Blokir Screenshot** | Mencegah PrintScreen via `navigator.clipboard.writeText('')` | Form ujian → Pengaturan Anti-Cheat |
+| **Blokir Copy-Paste** | Mencegah copy/paste/cut via `e.preventDefault()` | Form ujian → Pengaturan Anti-Cheat |
+| **Blokir Klik Kanan** | Mencegah context menu via `e.preventDefault()` | Form ujian → Pengaturan Anti-Cheat |
+| **Wajib Fullscreen** | Mendeteksi keluar layar penuh sebagai pelanggaran (`fullscreen_exit`) | Form ujian → Pengaturan Anti-Cheat |
+| **Watermark Nama** | Menampilkan nama siswa sebagai watermark di seluruh halaman ujian | Form ujian → Pengaturan Anti-Cheat |
+| **Penalti per Pelanggaran** | Base penalti (default 5 poin) — 1st=warning, 2nd=-base, 3rd=-2×base, 4th+=-3×base | Form ujian → Pengaturan Anti-Cheat |
+| **Maks Pelanggaran** | Jumlah pelanggaran sebelum auto-submit (default 5) | Form ujian → Pengaturan Anti-Cheat |
+
+**Catatan Penting:**
+- `block_screenshot` sudah diperbaiki — sekarang gate-nya ke `block_screenshot`, bukan `block_copy_paste`
+- Semua pelanggaran tercatat di tabel `violation_logs` + dihitung server-side di `submit_exam()`
+- Timer ujian divalidasi server-side via `student_sync_draft()` — jika ada mismatch >300 detik antar device, client di-reject
+- Jika siswa mematikan JavaScript, server tetap hitung penalti dari violation_logs yang sudah tercatat
+
+### Super Admin / Admin Sekolah
+| Fitur | Deskripsi | Letak |
+|-------|-----------|-------|
+| **Lihat Flag Kecurangan** | Submission dengan `_flags` berisi `suspicious_speed` atau `device_mismatch` akan terlihat di detail submission | Detail submission → `answers._flags` |
+| **CSP Header** | Content-Security-Policy diperkuat — membatasi script hanya dari `'self'` + `cdn.jsdelivr.net` | `__init__.py` after_request |
+| **Speed Analysis** | Jika >5 MCQ dijawab dalam <1.5 detik/soal, submission di-flag suspicious | Server-side di `submit_exam()` |
+| **Device Mismatch** | Jika IP atau User-Agent berubah antara first sync dan submit, submission di-flag | Server-side di `submit_exam()` |
+| **Timer Reconciliation** | Server memvalidasi `started_at` — jika selisih >300 detik antar device, sync di-reject (409) | `api.py` → `student_sync_draft()` |
+
+### Murid (Peserta Ujian)
+| Aturan | Konsekuensi |
+|--------|-------------|
+| Pindah tab / buka aplikasi lain (visibilitychange) | 1st = **PERINGATAN**, 2nd = **-base poin**, 3rd = **-2×base**, 4th+ = **-3×base** |
+| Keluar layar penuh (`fullscreen_exit`) | Langsung dicatat sebagai pelanggaran (warning-style) |
+| Copy/paste/cut | Diblokir — `e.preventDefault()` |
+| Klik kanan | Diblokir — `e.preventDefault()` |
+| PrintScreen | Diblokir (jika guru mengaktifkan `block_screenshot`) |
+| JavaScript dimatikan | Server tetap punya catatan violation_logs + hitung penalti saat submit |
+| Buka 2 tab | Timer reconciliation — server reject jika mismatch >300 detik |
+| Kerjakan dari device lain | Device mismatch terdeteksi saat submit (IP/UA berbeda) |
+| Menjawab terlalu cepat | Speed analysis — jika <1.5 detik/soal untuk >5 MCQ, submission di-flag |
+| Mencapai maks pelanggaran | **Ujian otomatis dikumpulkan (auto-submit)** |
+
 ## Next Steps
 1. **Deploy to VPS**: `cd /opt/scangrade && git pull origin main && sudo systemctl restart scangrade`
 2. **Run migration 021** in Supabase SQL Editor (`supabase/migrations/021_conversation_crud.sql`) — unblocks unsend/hide/soft-delete CRUD

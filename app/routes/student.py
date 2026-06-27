@@ -299,6 +299,7 @@ def take_exam(exam_id):
         "fullscreen_required": True,
         "block_copy_paste": True,
         "block_right_click": True,
+        "block_screenshot": True,
         "watermark_name": True,
         "allow_calculator": False,
     }
@@ -418,6 +419,46 @@ def submit_exam(exam_id):
 
     score = round(min(earned, 100), 2)
 
+    # Device mismatch detection: bandingkan IP/UA dengan first sync
+    flags = []
+    if isinstance(answers, dict):
+        device_info = answers.get("_device_info", {})
+        if device_info:
+            current_ip = request.remote_addr or ""
+            current_ua = request.headers.get("User-Agent", "")
+            expected_ip = device_info.get("ip_address", "")
+            expected_ua = device_info.get("user_agent", "")
+            if current_ip and expected_ip and current_ip != expected_ip:
+                flags.append({
+                    "type": "device_mismatch",
+                    "detail": f"IP berubah: {expected_ip} → {current_ip}",
+                    "timestamp": int(time.time()),
+                })
+            if current_ua and expected_ua and current_ua != expected_ua:
+                flags.append({
+                    "type": "device_mismatch",
+                    "detail": "User-Agent berubah",
+                    "timestamp": int(time.time()),
+                })
+
+    # Speed analysis: detect suspiciously fast answering
+    timestamps = answers.pop("_timestamps", {}) if isinstance(answers, dict) else {}
+    if timestamps:
+        mcq_times = []
+        for i in range(exam["total_questions"]):
+            if question_types.get(str(i), "mcq") == "mcq" and str(i) in timestamps:
+                mcq_times.append(timestamps[str(i)])
+        if len(mcq_times) >= 5:
+            mcq_times.sort()
+            time_span_s = (mcq_times[-1] - mcq_times[0]) / 1000
+            seconds_per_q = time_span_s / len(mcq_times)
+            if seconds_per_q < 1.5:
+                flags.append({
+                    "type": "suspicious_speed",
+                    "detail": f"{len(mcq_times)} MCQ dalam {time_span_s:.1f}s ({seconds_per_q:.2f}s/soal)",
+                    "timestamp": int(time.time()),
+                })
+
     from app.services.anti_cheat_service import calculate_graduated_penalty
     try:
         violation_count = supabase.table("violation_logs").select("id", count="exact").eq("user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
@@ -427,6 +468,14 @@ def submit_exam(exam_id):
     penalty = penalty_info["penalty"]
 
     final_score = max(0.0, round(score - penalty, 2))
+    # Simpan flags jika ada
+    if flags:
+        existing_answers = answers.get("_flags") or []
+        if isinstance(existing_answers, list):
+            existing_answers.extend(flags)
+        else:
+            existing_answers = flags
+        answers["_flags"] = existing_answers
     submission = {
         "exam_id": exam_id,
         "student_id": g.user_id,
