@@ -534,7 +534,7 @@ def exam_form():
                             classes.append(a["classes"])
             except Exception:
                 current_app.logger.warning("Failed to fetch teacher assignments, falling back to all")
-            # Fallback: if no assignments, show all school subjects/classes
+            # Fallback: for admin/super_admin, show all subjects; for guru, empty list
             if not subjects:
                 subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
             if not classes:
