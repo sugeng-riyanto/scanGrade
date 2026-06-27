@@ -2042,32 +2042,30 @@ function examApp(duration, totalQ) {
                 body: JSON.stringify(body)
             })
             .then(r => {
-                if (r.ok) {
-                    return r.json().then(data => {
+                return r.json().then(data => {
+                    if (r.ok) {
                         this.lastSyncHash = hash;
                         this.dirty = false;
                         this.canvasDirty = {};
                         this.lastSyncAt = Date.now();
                         this.syncStatus = 'synced';
                         this.syncLabel = 'Tersinkron';
-                        // Timer reconciliation: override client timer with server value
-                        if (data.server_time_left !== undefined) {
+                    }
+                    // Timer reconciliation: override client timer with server value
+                    // Guard: hanya auto-submit jika server confirmed time habis DAN
+                    // durasi sudah >30 detik (cegah false positive dari kalkulasi awal)
+                    if (data.server_time_left !== undefined && !this.submitted) {
+                        var totalDuration = {{ exam.duration_minutes * 60 }};
+                        var elapsed = totalDuration - data.server_time_left;
+                        if (data.server_time_left <= 0 && elapsed > 30) {
+                            this.timeLeft = 0;
+                            this.submitExam(true);
+                        } else if (data.server_time_left < this.timeLeft - 5 || data.server_time_left > this.timeLeft + 5) {
+                            // Only override if server differs significantly (>5s)
                             this.timeLeft = data.server_time_left;
-                            if (data.server_time_left <= 0 && !this.submitted) {
-                                this.submitExam(true);
-                            }
                         }
-                    });
-                } else {
-                    return r.json().then(data => {
-                        if (data.error === 'timer_mismatch' && data.server_time_left !== undefined) {
-                            this.timeLeft = data.server_time_left;
-                            if (data.server_time_left <= 0 && !this.submitted) {
-                                this.submitExam(true);
-                            }
-                        }
-                    });
-                }
+                    }
+                });
             })
             .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; this.pendingSync = true; })
             .finally(() => { this._syncInFlight = false; });

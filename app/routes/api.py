@@ -680,14 +680,16 @@ def student_sync_draft():
                 except Exception:
                     pass
             # Hitung server_time_left
-            if duration and existing_started:
+            # Guard: only if duration > 0 and elapsed > 30s (prevent false 0)
+            if duration and duration > 0 and existing_started:
                 try:
                     if isinstance(existing_started, str):
                         started_ts = int(datetime.fromisoformat(existing_started.replace("Z", "+00:00")).timestamp())
                     else:
                         started_ts = int(existing_started.timestamp())
                     elapsed = server_now - started_ts
-                    server_time_left = max(0, duration - elapsed)
+                    if elapsed >= 30:
+                        server_time_left = max(0, duration - elapsed)
                 except Exception:
                     pass
         elif not existing:
