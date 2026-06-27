@@ -558,7 +558,7 @@
 
             <form method="POST" action="{{ url_for('teacher.exam_detail', exam_id=exam.id) if exam else url_for('teacher.exam_form') }}" class="space-y-6" onsubmit="return prepareSubmit()" enctype="multipart/form-data">
                 <div class="card p-6 space-y-4">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 gap-3 sm:gap-4">
                         <div class="sm:col-span-2">
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Judul Ujian</label>
                             <input type="text" name="title" x-model="examTitle" value="{{ exam.title if exam else '' }}" required placeholder="Contoh: Ulangan Harian - Persamaan Linear"
@@ -567,7 +567,7 @@
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1">Mata Pelajaran</label>
                             {% if subjects %}
-                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                            <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
                                 {% for s in subjects %}
                                 <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition border-slate-200 bg-white hover:border-slate-300">
                                     <input type="radio" name="subject_id" value="{{ s.id }}" class="w-4 h-4 text-primary-600 border-slate-300 focus:ring-primary-500"
@@ -595,7 +595,7 @@
                     <div>
                         <label class="block text-sm font-extrabold text-slate-700 mb-2">Kelas Tujuan</label>
                         {% if classes %}
-                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2" x-data="{ selected: {{ (exam.class_ids or []) | tojson }} }">
+                        <div class="grid grid-cols-2 gap-1.5 sm:gap-2" x-data="{ selected: {{ (exam.class_ids or []) | tojson }} }">
                             {% for c in classes %}
                             <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                    :class="selected.includes('{{ c.id }}') ? 'border-primary-400 bg-primary-50' : 'border-slate-200 bg-white hover:border-slate-300'">
@@ -659,7 +659,7 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4 mb-4 p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 p-3 sm:p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
                         <div>
                             <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i>Bobot MCQ</label>
                             <div class="flex items-center gap-2">
@@ -680,7 +680,7 @@
                         </div>
                     </div>
 
-                    <div class="flex gap-3 mb-4">
+                    <div class="flex flex-wrap gap-2 mb-4">
                         <button type="button" @click="addMcq()"
                                 class="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-amber-200 transition">
                             <i class="fas fa-plus-circle"></i>Tambah MCQ
@@ -824,7 +824,7 @@
                         </h2>
                         <span class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">Selalu Aktif</span>
                     </div>
-                    <div class="flex items-center gap-4 mb-3 text-sm flex-wrap">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-3 text-xs sm:text-sm">
                         <label class="flex items-center gap-2">
                             <span class="font-bold text-slate-600">Penalti per Pelanggaran:</span>
                             <input type="number" name="penalty_per_violation" x-model="penalty_per_violation" min="1" max="50" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
@@ -834,7 +834,7 @@
                             <input type="number" name="max_violations" x-model="max_violations" min="1" max="20" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
                         </label>
                     </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" value="true" class="w-4 h-4 text-primary-600 rounded">
@@ -888,7 +888,7 @@
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-3 flex-wrap">
+                <div class="flex flex-col sm:flex-row justify-end gap-2">
                     <button type="submit" name="action" value="save_active"
                             class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-3 rounded-xl font-extrabold text-sm transition flex items-center gap-2"
                             title="Simpan sebagai draft — siswa belum bisa lihat">
