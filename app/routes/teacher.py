@@ -1688,9 +1688,13 @@ def api_grading_queue(exam_id):
 
     # Build essay question info
     essay_qs = []
+    qw = exam.get("question_weights", {}) or {}
+    if not qw and essay_indices:
+        equal_weight = round(100 / len(essay_indices), 2)
+        qw = {ei: equal_weight for ei in essay_indices}
     for idx_str in essay_indices:
         idx = int(idx_str)
-        essay_qs.append({"index": idx, "label": f"Soal {idx + 1}", "weight": exam.get("question_weights", {}).get(idx_str, 0)})
+        essay_qs.append({"index": idx, "label": f"Soal {idx + 1}", "weight": qw.get(idx_str, 0)})
 
     result = []
     for s in subs:
