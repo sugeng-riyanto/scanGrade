@@ -647,6 +647,22 @@ def student_sync_draft():
             if is_light and existing[0].get("answers"):
                 merged = existing[0]["answers"]
                 if isinstance(merged, dict):
+                    # Deep merge: preserve existing canvas pages + paragraphs
+                    for k, v in answers.items():
+                        if isinstance(v, dict) and k in merged and isinstance(merged[k], dict):
+                            # Preserve canvas URLs from existing that aren't in incoming
+                            ex_pages = merged[k].get("pages", {})
+                            in_pages = v.get("pages", {})
+                            if isinstance(ex_pages, dict) and isinstance(in_pages, dict):
+                                for pk, pdata in ex_pages.items():
+                                    if isinstance(pdata, dict) and "canvas" in pdata:
+                                        if pk not in in_pages:
+                                            in_pages[pk] = {}
+                                        if "canvas" not in in_pages[pk]:
+                                            in_pages[pk]["canvas"] = pdata["canvas"]
+                            # Preserve paragraphs from existing if incoming doesn't have them
+                            if "paragraphs" not in v and "paragraphs" in merged[k]:
+                                v["paragraphs"] = merged[k]["paragraphs"]
                     merged.update(answers)
                     answers = merged
             # Inject dirty_canvases into answers for device-switch recovery
