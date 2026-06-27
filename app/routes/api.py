@@ -634,10 +634,15 @@ def student_sync_draft():
     rlock = _redis_lock(lock_key)
     if not rlock:
         return jsonify({"saved": True, "at": int(time.time()), "busy": True})
+    server_now = int(time.time())
+    server_time_left = None
     try:
         from app.utils.auth import get_supabase
         supabase = get_supabase()
-        existing = supabase.table("submissions").select("id,status,answers").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
+        # Ambil durasi ujian untuk kalkulasi timer server-side
+        exam_res = supabase.table("exams").select("duration_minutes").eq("id", exam_id).limit(1).execute()
+        duration = (exam_res.data[0]["duration_minutes"] * 60) if exam_res.data else None
+        existing = supabase.table("submissions").select("id,status,answers,started_at").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
         if existing and existing[0].get("status") == "draft":
             if is_light and existing[0].get("answers"):
                 merged = existing[0]["answers"]
@@ -660,11 +665,48 @@ def student_sync_draft():
                     except Exception:
                         pass
             supabase.table("submissions").update({"answers": answers}).eq("id", existing[0]["id"]).execute()
+            # Timer reconciliation: validasi started_at antar device
+            client_started = data.get("started_at")
+            existing_started = existing[0].get("started_at")
+            if client_started and existing_started:
+                try:
+                    if isinstance(existing_started, str):
+                        existing_ts = int(datetime.fromisoformat(existing_started.replace("Z", "+00:00")).timestamp())
+                    else:
+                        existing_ts = int(existing_started.timestamp())
+                    client_ts = client_started // 1000 if client_started > 1e10 else client_started
+                    if abs(client_ts - existing_ts) > 300:
+                        return jsonify({"saved": True, "at": server_now, "error": "timer_mismatch", "server_time_left": max(0, duration - (server_now - existing_ts)) if duration else None}), 409
+                except Exception:
+                    pass
+            # Hitung server_time_left
+            if duration and existing_started:
+                try:
+                    if isinstance(existing_started, str):
+                        started_ts = int(datetime.fromisoformat(existing_started.replace("Z", "+00:00")).timestamp())
+                    else:
+                        started_ts = int(existing_started.timestamp())
+                    elapsed = server_now - started_ts
+                    server_time_left = max(0, duration - elapsed)
+                except Exception:
+                    pass
         elif not existing:
             client_started = data.get("started_at")
-            started_at_ts = client_started if client_started else int(time.time())
+            started_at_ts = client_started if client_started else server_now
+            # Validasi: client_started tidak boleh di masa depan >30 detik
+            if client_started:
+                client_ts = client_started // 1000 if client_started > 1e10 else client_started
+                if client_ts > server_now + 30:
+                    return jsonify({"saved": True, "at": server_now, "error": "invalid_timer", "server_time_left": duration if duration else None}), 400
             # Use client's started_at if earlier than now (more accurate to when user opened exam)
             started_at_dt = datetime.fromtimestamp(started_at_ts / 1000 if started_at_ts > 1e10 else started_at_ts, tz=timezone.utc).isoformat()
+            # Device fingerprint pada first sync
+            if isinstance(answers, dict):
+                answers["_device_info"] = {
+                    "user_agent": request.headers.get("User-Agent", ""),
+                    "ip_address": request.remote_addr,
+                    "recorded_at": int(time.time()),
+                }
             supabase.table("submissions").insert({
                 "exam_id": exam_id,
                 "student_id": g.user_id,
@@ -684,7 +726,10 @@ def student_sync_draft():
         pass
     finally:
         _release_lock(rlock, lock_key)
-    return jsonify({"saved": True, "at": int(time.time())})
+    resp = {"saved": True, "at": server_now}
+    if server_time_left is not None:
+        resp["server_time_left"] = server_time_left
+    return jsonify(resp)
 
 
 @api_bp.route("/grade/auto-save/<submission_id>", methods=["POST"])
