@@ -276,8 +276,8 @@ def take_exam(exam_id):
             pass
 
     # Check if exam is published and active
-    if not exam.get("is_published") or exam.get("status") != "active":
-        flash("Ujian ini belum dipublikasikan oleh guru.", "error")
+    if exam.get("status") != "active":
+        flash("Ujian ini belum aktif.", "error")
         return redirect("/student/exams")
 
     # Check if student already reached max attempts (exclude draft + retracted)
