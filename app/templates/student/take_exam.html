@@ -389,7 +389,7 @@
 
         <!-- Main Content Area -->
         <div class="flex-1 min-w-0">
-    <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit" @submit.prevent>
+    <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit" @submit.prevent="$event.preventDefault()">
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
             <div x-show="!submitted" style="display:none" class="mb-3">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
@@ -680,10 +680,10 @@
                         <div class="mt-2">
                             <!-- Tab: Teks / Canvas -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
-                                <button @click="essayMode[i]='text'" :class="(essayMode[i]||'text')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'text')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-font mr-1"></i>Teks
                                 </button>
-                                <button @click="essayMode[i]='canvas'" :class="(essayMode[i]||'text')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'text')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-paint-brush mr-1"></i>Canvas
                                 </button>
                             </div>
@@ -697,14 +697,14 @@
                                 </div>
                                 <!-- Rich text toolbar -->
                                 <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
-                                    <button @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
-                                    <button @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
+                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
+                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
+                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
-                                    <button @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
+                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
+                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
                                 </div>
                                 <!-- Paragraphs -->
                                 <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
@@ -712,7 +712,7 @@
                                         <div class="relative group">
                                             <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
                                                 <span class="text-[10px] font-semibold text-surface-400" x-text="'Paragraf ' + (pIdx + 1)"></span>
-                                                <button @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
+                                                <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
                                             <div :ref="'para_' + para.id"
                                                  contenteditable="true"
@@ -735,10 +735,10 @@
                         <div class="mt-2">
                             <!-- Tab: Teks / Canvas (default Canvas untuk essay_canvas) -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
-                                <button @click="essayMode[i]='text'" :class="(essayMode[i]||'canvas')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'canvas')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-font mr-1"></i>Teks
                                 </button>
-                                <button @click="essayMode[i]='canvas'" :class="(essayMode[i]||'canvas')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
+                                <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'canvas')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-paint-brush mr-1"></i>Canvas
                                 </button>
                             </div>
@@ -751,21 +751,22 @@
                                     <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + ' karakter, ' + ((paragraphs[i]||[]).length) + ' paragraf)'"></span>
                                 </div>
                                 <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
-                                    <button @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
-                                    <button @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
+                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
+                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
+                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
-                                    <button @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
+                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
+                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
                                 </div>
+                                <!-- Paragraphs (Canvas mode) -->
                                 <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
                                     <template x-for="(para, pIdx) in (paragraphs[i] || [{id:'p0',text:'',html:'<p><br></p>',order:0}])" :key="para.id">
                                         <div class="relative group">
                                             <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
                                                 <span class="text-[10px] font-semibold text-surface-400" x-text="'Paragraf ' + (pIdx + 1)"></span>
-                                                <button @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
+                                                <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
                                             <div :ref="'para_' + para.id"
                                                  contenteditable="true"
