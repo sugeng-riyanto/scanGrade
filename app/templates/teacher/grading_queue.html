@@ -256,15 +256,25 @@ function gradingQueueApp() {
 
         computeFinalScore() {
             if (!this.current || !this.current.questions || this.current.questions.length === 0) return null;
-            let totalWeight = 0;
+            const qs = this.current.questions;
+            let totalWeight = qs.reduce((s, q) => s + (q.weight || 0), 0);
+            if (totalWeight === 0) {
+                // Equal distribution if no weights defined
+                totalWeight = 100;
+                const each = 100 / qs.length;
+                let earned = 0;
+                qs.forEach(q => {
+                    const s = parseFloat(this.qscores[q.index]) || 0;
+                    earned += (s / 100) * each;
+                });
+                return Math.round(Math.min(earned, 100));
+            }
             let earned = 0;
-            this.current.questions.forEach(q => {
+            qs.forEach(q => {
                 const w = q.weight || 0;
-                totalWeight += w;
                 const s = parseFloat(this.qscores[q.index]) || 0;
                 earned += (s / 100) * w;
             });
-            if (totalWeight === 0) return null;
             return Math.round(Math.min(earned, 100));
         },
 
