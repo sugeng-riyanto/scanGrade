@@ -389,7 +389,7 @@
 
         <!-- Main Content Area -->
         <div class="flex-1 min-w-0">
-    <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit" @submit.prevent="$event.preventDefault()">
+    <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit" @submit.prevent="null">
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
             <div x-show="!submitted" style="display:none" class="mb-3">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
