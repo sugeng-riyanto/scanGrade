@@ -1041,8 +1041,9 @@ function examApp(duration, totalQ) {
                 document.addEventListener('fullscreenchange', () => {
                     if (this.submitted) return;
                     if (!document.fullscreenElement) {
-                        this.violationMessage = 'Keluar dari layar penuh. Tekan F11 untuk kembali.';
+                        this.violationMessage = 'PERHATIAN: Keluar layar penuh dicatat sebagai pelanggaran!';
                         this.violationType = 'warning';
+                        this.logViolation('fullscreen_exit');
                         this.showViolationBanner = true;
                         setTimeout(() => { this.showViolationBanner = false; }, 4000);
                     }
