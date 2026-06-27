@@ -824,6 +824,16 @@
                         </h2>
                         <span class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">Selalu Aktif</span>
                     </div>
+                    <div class="flex items-center gap-4 mb-3 text-sm flex-wrap">
+                        <label class="flex items-center gap-2">
+                            <span class="font-bold text-slate-600">Penalti per Pelanggaran:</span>
+                            <input type="number" name="penalty_per_violation" x-model="penalty_per_violation" min="1" max="50" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <span class="font-bold text-slate-600">Maks Pelanggaran:</span>
+                            <input type="number" name="max_violations" x-model="max_violations" min="1" max="20" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
+                        </label>
+                    </div>
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
@@ -855,19 +865,28 @@
                             <input type="checkbox" x-model="allow_calculator" name="allow_calculator" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700">Kalkulator Ilmiah</span>
                         </label>
+                        <label 
+                    </div>
+                </div>
+
+                <!-- Pengaturan Soal -->
+                <div class="card p-5" x-data="{ randomize_questions: true, randomize_options: true }">
+                    <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2 mb-4">
+                        <i class="fas fa-random text-emerald-600"></i>Pengaturan Soal
+                    </h2>
+                    <div class="flex flex-wrap gap-3 text-sm">
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="randomize_questions ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="randomize_questions" name="randomize_questions" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Acak Soal</span>
+                            <span class="font-bold text-slate-700">Acak Urutan Soal</span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="randomize_options ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="randomize_options" name="randomize_options" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Acak Opsi</span>
+                            <span class="font-bold text-slate-700">Acak Urutan Opsi</span>
                         </label>
                     </div>
                 </div>
-
 
                 <div class="flex justify-end gap-3 flex-wrap">
                     <button type="submit" name="action" value="save_active"
