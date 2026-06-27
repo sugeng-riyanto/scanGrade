@@ -456,7 +456,7 @@ def _register_performance_middleware(app):
         if not response.headers.get("Content-Security-Policy"):
             csp = "; ".join([
                 "default-src 'self'",
-                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
                 "style-src 'self' 'unsafe-inline'",
                 "img-src 'self' data: blob:",
                 "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
