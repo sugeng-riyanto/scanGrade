@@ -50,24 +50,26 @@
 
             <!-- PDF Upload Card -->
             <div class="card p-5 mb-6 overflow-hidden" x-data="pdfUpload()">
-                <!-- AI Mode Info Banner -->
-                <div x-show="aiMode" class="mb-5 p-4 rounded-xl bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200">
-                    <div class="flex items-start gap-3">
-                        <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center shrink-0 mt-0.5">
-                            <i class="fas fa-robot text-primary-600 text-sm"></i>
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <p class="text-xs font-extrabold text-primary-800">Mode AI Aktif — Cara Kerja Koreksi Essay</p>
-                            <ul class="text-[10px] text-primary-700 mt-1.5 space-y-1">
-                                <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">•</span> Siswa <strong class="text-primary-900">wajib mengetik jawaban</strong> di kotak teks (paragraph) untuk setiap soal essay</li>
-                                <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">•</span> Canvas/coretan tetap tersedia untuk gambar diagram/rumus — <strong class="text-primary-900">tidak dibaca AI</strong></li>
-                                <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">•</span> AI akan membaca teks jawaban → memberi saran skor + feedback otomatis</li>
-                                <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">•</span> Guru tetap pegang kendali: bisa setuju, edit, atau ignore saran AI</li>
-                            </ul>
-                        </div>
+                <!-- AI Mode Info Banner (outside pdfUpload scope) -->
+            <div x-show="aiMode" class="mb-5 p-4 rounded-xl bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200">
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <i class="fas fa-robot text-primary-600 text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-extrabold text-primary-800">Mode AI Aktif &mdash; Cara Kerja Koreksi Essay</p>
+                        <ul class="text-[10px] text-primary-700 mt-1.5 space-y-1">
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> Siswa <strong class="text-primary-900">wajib mengetik jawaban</strong> di kotak teks untuk setiap soal essay</li>
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> Canvas/coretan tetap tersedia untuk gambar diagram/rumus &mdash; <strong class="text-primary-900">tidak dibaca AI</strong></li>
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> AI baca teks &rarr; saran skor + feedback otomatis</li>
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> Guru tetap kendali: setuju, edit, atau ignore</li>
+                        </ul>
                     </div>
                 </div>
-                <!-- Header -->
+            </div>
+
+            <!-- PDF Upload Card -->
+            <div class="card p-5 mb-6 overflow-hidden" x-data="pdfUpload()"><!-- Header -->
                 <div class="flex items-center gap-3 mb-5">
                     <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg shadow-rose-200/60 shrink-0"><i class="fas fa-file-pdf text-white text-sm"></i></div>
                     <div class="flex-1 min-w-0">
