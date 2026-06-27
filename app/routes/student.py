@@ -44,13 +44,15 @@ def dashboard():
                     cids = json.loads(cids)
                 except (json.JSONDecodeError, TypeError):
                     cids = []
+            if isinstance(cids, list):
+                cids = [c for c in cids if c]
             if student_class_id:
                 if not cids or student_class_id in cids:
                     available_exams.append(e)
             else:
                 if not cids:
                     available_exams.append(e)
-        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).execute().data or []
+        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
         submitted_ids = {s["exam_id"] for s in subs_ids}
         # Exclude retracted
         retracted = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).eq("status", "retracted").execute().data or []
@@ -215,6 +217,8 @@ def exam_list():
                     cids = json.loads(cids)
                 except (json.JSONDecodeError, TypeError):
                     cids = []
+            if isinstance(cids, list):
+                cids = [c for c in cids if c]
             if student_class_id:
                 if not cids or student_class_id in cids:
                     exams.append(e)
@@ -226,8 +230,12 @@ def exam_list():
 
     submitted_ids = set()
     try:
-        subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "draft"]).neq("status", "retracted").execute().data or []
+        # Only hide exams that have been submitted/graded/published — NOT drafts
+        subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
         submitted_ids = {s["exam_id"] for s in subs}
+        # Also exclude retracted but allow draft to still show
+        retracted = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).eq("status", "retracted").execute().data or []
+        submitted_ids -= {s["exam_id"] for s in retracted}
     except Exception as e:
         current_app.logger.error(f"Submission query error: {e}")
     exams = [e for e in exams if e["id"] not in submitted_ids]
@@ -266,6 +274,11 @@ def take_exam(exam_id):
                 return redirect("/student/exams")
         except Exception:
             pass
+
+    # Check if exam is published and active
+    if not exam.get("is_published") or exam.get("status") != "active":
+        flash("Ujian ini belum dipublikasikan oleh guru.", "error")
+        return redirect("/student/exams")
 
     # Check if student already reached max attempts (exclude draft + retracted)
     max_attempts = exam.get("max_attempts", 1)
