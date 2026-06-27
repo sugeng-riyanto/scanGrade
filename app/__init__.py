@@ -399,10 +399,12 @@ def _register_blueprints(app):
     from app.routes.tools import tools_bp
     from app.routes.super_admin import super_bp
     from app.routes.public import public_bp
+    from app.routes.guide import guide_bp
     from app.routes.students import student_bp as students_bp
 
     app.register_blueprint(super_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(guide_bp, url_prefix="/guide")
     app.register_blueprint(students_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(exam_bp, url_prefix="/exam")
@@ -535,3 +537,4 @@ scangrade_memory_percent {mem.percent}
 scangrade_disk_free_bytes {disk.free}
 scangrade_disk_total_bytes {disk.total}
 """, 200, {"Content-Type": "text/plain; charset=utf-8"}
+

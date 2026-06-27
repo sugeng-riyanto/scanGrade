@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Panduan Skor - ScanGrade{% endblock %}
+{% block page_title %}Panduan Sistem Penilaian{% endblock %}
+{% block content %}
+<div x-data="{ tab: 'guru' }" class="max-w-4xl mx-auto space-y-6">
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-2">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-teal-500/20">
+            <i class="fas fa-book-open text-white text-lg"></i>
+        </div>
+        <div>
+            <h1 class="text-2xl font-extrabold text-surface-800">Panduan Sistem Penilaian</h1>
+            <p class="text-sm text-surface-500 font-medium">Cara menghitung nilai, penalti, dan pengajuan banding</p>
+        </div>
+    </div>
+
+    <!-- Tab Switcher -->
+    <div class="flex gap-1 bg-surface-100 rounded-xl p-1 max-w-xs">
+        <button @click="tab='guru'" :class="tab==='guru'?'bg-white shadow-sm text-primary-600':'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition">
+            <i class="fas fa-chalkboard-teacher mr-1.5"></i>Versi Guru
+        </button>
+        <button @click="tab='murid'" :class="tab==='murid'?'bg-white shadow-sm text-primary-600':'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition">
+            <i class="fas fa-user-graduate mr-1.5"></i>Versi Murid
+        </button>
+    </div>
+
+    <!-- ============================== -->
+    <!-- TAB GURU -->
+    <!-- ============================== -->
+    <div x-show="tab==='guru'" class="space-y-6">
+
+        <!-- 1. Bobot Soal -->
+        <div class="card p-6">
+            <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
+                <span class="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-bold">1</span>
+                Mengatur Bobot Soal
+            </h2>
+            <p class="text-sm text-surface-600 mb-3">Guru menentukan persentase nilai untuk <strong>MCQ</strong> dan <strong>Esai</strong>. Total harus <strong class="text-primary-700">100%</strong>.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <p class="text-xs font-bold text-amber-700 mb-1">Rumus Bobot MCQ</p>
+                    <p class="text-sm font-bold text-surface-700">Bobot per soal = <span class="text-amber-600">%MCQ</span> &divide; jumlah soal MCQ</p>
+                    <p class="text-xs text-surface-500 mt-1">Contoh: 40% &divide; 5 soal = <strong>8 poin</strong> per soal</p>
+                </div>
+                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                    <p class="text-xs font-bold text-emerald-700 mb-1">Rumus Bobot Esai</p>
+                    <p class="text-sm font-bold text-surface-700">Bobot per soal = <span class="text-emerald-600">%Esai</span> &divide; jumlah soal esai</p>
+                    <p class="text-xs text-surface-500 mt-1">Contoh: 60% &divide; 5 soal = <strong>12 poin</strong> per soal</p>
+                </div>
+            </div>
+            <div class="bg-surface-50 border border-surface-200 rounded-xl p-4">
+                <p class="text-xs font-bold text-surface-600 mb-2">Contoh Lengkap: 40% MCQ (5 soal) + 60% Esai (5 soal)</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead><tr class="text-surface-500 border-b border-surface-200">
+                            <th class="text-left py-1 pr-2">Tipe</th>
+                            <th class="text-right px-2">%</th>
+                            <th class="text-right px-2">Jumlah</th>
+                            <th class="text-right px-2">Bobot/Soal</th>
+                            <th class="text-right pl-2">Total Bobot</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-amber-700">MCQ</td><td class="text-right px-2">40%</td><td class="text-right px-2">5</td><td class="text-right px-2 font-bold">8</td><td class="text-right pl-2 font-bold">40</td></tr>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-emerald-700">Esai</td><td class="text-right px-2">60%</td><td class="text-right px-2">5</td><td class="text-right px-2 font-bold">12</td><td class="text-right pl-2 font-bold">60</td></tr>
+                            <tr class="font-bold text-surface-800"><td class="py-1.5 pr-2">Total</td><td class="text-right px-2">100%</td><td class="text-right px-2">10</td><td class="text-right px-2">&mdash;</td><td class="text-right pl-2">100</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Skor Akhir -->
+        <div class="card p-6">
+            <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
+                <span class="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-bold">2</span>
+                Cara Menghitung Skor Akhir
+            </h2>
+            <div class="bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200 rounded-xl p-4 mb-4">
+                <p class="text-xs font-bold text-primary-700 mb-1">Rumus:</p>
+                <p class="text-sm font-bold text-surface-700">Nilai Akhir = max(0, min(Skor MCQ + Skor Esai, 100) &minus; Penalti)</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="border border-surface-200 rounded-xl p-4">
+                    <p class="text-xs font-bold text-amber-700 mb-2"><i class="fas fa-list-ol mr-1"></i>Skor MCQ (Otomatis)</p>
+                    <table class="w-full text-xs">
+                        <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1">Soal</th><th class="text-center px-2">Jawab</th><th class="text-center px-2">Kunci</th><th class="text-center px-2">Benar?</th><th class="text-right">Poin</th></tr></thead>
+                        <tbody>
+                            <tr class="border-b border-surface-50"><td class="py-1">MCQ 1</td><td class="text-center px-2">A</td><td class="text-center px-2">A</td><td class="text-center px-2 text-emerald-600">&#10003;</td><td class="text-right font-bold">8</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1">MCQ 2</td><td class="text-center px-2">B</td><td class="text-center px-2">C</td><td class="text-center px-2 text-red-500">&times;</td><td class="text-right font-bold">0</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1">MCQ 3</td><td class="text-center px-2">C</td><td class="text-center px-2">C</td><td class="text-center px-2 text-emerald-600">&#10003;</td><td class="text-right font-bold">8</td></tr>
+                            <tr><td class="py-1 font-bold text-surface-700">Skor MCQ</td><td colspan="3"></td><td class="text-right font-bold text-amber-700">32</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="border border-surface-200 rounded-xl p-4">
+                    <p class="text-xs font-bold text-emerald-700 mb-2"><i class="fas fa-pencil-alt mr-1"></i>Skor Esai (Guru)</p>
+                    <table class="w-full text-xs">
+                        <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1">Soal</th><th class="text-center px-2">Nilai</th><th class="text-center px-2">Bobot</th><th class="text-right">Poin</th></tr></thead>
+                        <tbody>
+                            <tr class="border-b border-surface-50"><td class="py-1">Esai 1</td><td class="text-center px-2">80</td><td class="text-center px-2">12</td><td class="text-right font-bold">9,6</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1">Esai 2</td><td class="text-center px-2">70</td><td class="text-center px-2">12</td><td class="text-right font-bold">8,4</td></tr>
+                            <tr><td class="py-1 font-bold text-surface-700">Skor Esai</td><td colspan="2"></td><td class="text-right font-bold text-emerald-700">48</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="mt-3 bg-surface-50 border border-surface-200 rounded-xl p-4 text-xs">
+                <p><strong>Skor MCQ:</strong> 32 + <strong>Skor Esai:</strong> 48 = <strong>Earned:</strong> 80 &rarr; min(80, 100) = 80 &rarr; 80 &minus; 5 (penalti) = <strong class="text-primary-700 text-sm">75</strong></p>
+            </div>
+        </div>
+
+        <!-- 3. Penalti -->
+        <div class="card p-6">
+            <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
+                <span class="w-8 h-8 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-sm font-bold">3</span>
+                Sistem Penalti
+            </h2>
+            <p class="text-sm text-surface-600 mb-3">Penalti dihitung otomatis dari jumlah pelanggaran. Guru bisa <strong>override</strong> di grading queue.</p>
+            <div class="overflow-x-auto mb-4">
+                <table class="w-full text-xs">
+                    <thead><tr class="bg-red-50 text-red-700"><th class="text-left px-4 py-2">Pelanggaran Ke-</th><th class="text-left px-4 py-2">Jenis</th><th class="text-right px-4 py-2">Penalti</th><th class="text-left px-4 py-2">Keterangan</th></tr></thead>
+                    <tbody>
+                        <tr class="border-b border-surface-100"><td class="px-4 py-2 font-bold">1</td><td class="px-4 py-2">Tab switch / dll</td><td class="text-right px-4 py-2 font-bold text-surface-400">0</td><td class="px-4 py-2 text-surface-500">Peringatan saja</td></tr>
+                        <tr class="border-b border-surface-100"><td class="px-4 py-2 font-bold">2</td><td class="px-4 py-2">Tab switch / dll</td><td class="text-right px-4 py-2 font-bold text-red-500">&minus;{penalty_per_violation}</td><td class="px-4 py-2 text-surface-500">Default &minus;5</td></tr>
+                        <tr class="border-b border-surface-100"><td class="px-4 py-2 font-bold">3</td><td class="px-4 py-2">Tab switch / dll</td><td class="text-right px-4 py-2 font-bold text-red-500">&minus;{penalty_per_violation}&times;2</td><td class="px-4 py-2 text-surface-500">Default &minus;10</td></tr>
+                        <tr><td class="px-4 py-2 font-bold">4+</td><td class="px-4 py-2">Tab switch / dll</td><td class="text-right px-4 py-2 font-bold text-red-600">&minus;{penalty_per_violation}&times;3</td><td class="px-4 py-2 text-surface-500">Default &minus;15 per pelanggaran</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 4. Banding -->
+        <div class="card p-6">
+            <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
+                <span class="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">4</span>
+                Menangani Banding Penalti
+            </h2>
+            <p class="text-sm text-surface-600 mb-4">Siswa bisa mengajukan banding. Guru review dan putuskan di menu <strong>Banding Penalti</strong> (sidebar).</p>
+            <div class="flex flex-col md:flex-row items-stretch gap-3 mb-4">
+                <div class="flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                    <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-file-alt"></i></div>
+                    <p class="text-xs font-bold text-blue-700">Siswa Kirim</p>
+                    <p class="text-[10px] text-blue-500">Tulis alasan</p></div>
+                <div class="flex items-center justify-center text-surface-300 text-lg"><i class="fas fa-arrow-right hidden md:block"></i><i class="fas fa-arrow-down md:hidden"></i></div>
+                <div class="flex-1 bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+                    <div class="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-gavel"></i></div>
+                    <p class="text-xs font-bold text-amber-700">Guru Review</p>
+                    <p class="text-[10px] text-amber-500">Setujui / Tolak</p></div>
+                <div class="flex items-center justify-center text-surface-300 text-lg"><i class="fas fa-arrow-right hidden md:block"></i><i class="fas fa-arrow-down md:hidden"></i></div>
+                <div class="flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                    <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-check-double"></i></div>
+                    <p class="text-xs font-bold text-emerald-700">Selesai</p>
+                    <p class="text-[10px] text-emerald-500">Skor diperbarui</p></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3"><p class="font-bold text-emerald-700">&#10003; Setujui</p><p class="text-surface-600 mt-0.5">Pengurangan: nominal, persen, atau semua.</p></div>
+                <div class="bg-red-50 border border-red-200 rounded-xl p-3"><p class="font-bold text-red-700">&#10007; Tolak</p><p class="text-surface-600 mt-0.5">Penalti tetap. Bisa tambah catatan.</p></div>
+                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-history mr-1"></i>Tercatat</p><p class="text-surface-600 mt-0.5">Riwayat banding untuk guru &amp; murid.</p></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================== -->
+    <!-- TAB MURID -->
+    <!-- ============================== -->
+    <div x-show="tab==='murid'" class="space-y-6">
+
+        <!-- 1. -->
+        <div class="card p-6">
+            <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
+                <span class="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-bold">1</span>
+                Cara Nilai Anda Dihitung
+            </h2>
+            <div class="bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200 rounded-xl p-4 mb-4">
+                <p class="text-xs font-bold text-primary-700 mb-1">Rumus:</p>
+                <p class="text-sm font-bold text-surface-700">Nilai Akhir = max(0, (Skor MCQ + Skor Esai) &minus; Penalti)</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-center text-xs">
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <div class="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-list-ol"></i></div>
+                    <p class="font-bold text-amber-700">Skor MCQ</p>
+                    <p class="text-surface-500">Otomatis. Benar = poin penuh.</p></div>
+                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                    <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-pencil-alt"></i></div>
+                    <p class="font-bold text-emerald-700">Skor Esai</p>
+                    <p class="text-surface-500">Dikoreksi guru. Nilai 0&ndash;100.</p></div>
+                <div class="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <div class="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-shield-alt"></i></div>
+                    <p class="font-bold text-red-700">Penalti</p>
+                    <p class="text-surface-500">Dari pelanggaran. Dikurangi.</p></div>
+            </div>
+        </div>
+
+        <!-- 2. -->
+        <div class="card p-6">
+            <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
+                <span class="w-8 h-8 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-sm font-bold">2</span>
+                Tabel Penalti
+            </h2>
+            <p class="text-sm text-surface-600 mb-3">Pelanggaran (tab switch, copy-paste, klik kanan, keluar fullscreen) dikenakan penalti bertahap:</p>
+            <div class="overflow-x-auto mb-4">
+                <table class="w-full text-xs">
+                    <thead><tr class="bg-red-50 text-red-700"><th class="text-left px-4 py-2">Ke-</th><th class="text-right px-4 py-2">Penalti</th></tr></thead>
+                    <tbody>
+                        <tr class="border-b border-surface-100"><td class="px-4 py-2 font-bold">1</td><td class="text-right px-4 py-2 text-surface-400">0 (peringatan)</td></tr>
+                        <tr class="border-b border-surface-100"><td class="px-4 py-2 font-bold">2</td><td class="text-right px-4 py-2 text-red-500">&minus;5</td></tr>
+                        <tr class="border-b border-surface-100"><td class="px-4 py-2 font-bold">3</td><td class="text-right px-4 py-2 text-red-500">&minus;10</td></tr>
+                        <tr><td class="px-4 py-2 font-bold">4+</td><td class="text-right px-4 py-2 text-red-600">&minus;15 per pelanggaran</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 3. -->
+        <div class="card p-6">
+            <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
+                <span class="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">3</span>
+                Cara Banding
+            </h2>
+            <p class="text-sm text-surface-600 mb-4">Jika penalti tidak wajar, ajukan banding ke guru.</p>
+            <div class="flex flex-col md:flex-row items-stretch gap-3 mb-4">
+                <div class="flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                    <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-file-alt"></i></div>
+                    <p class="text-xs font-bold text-blue-700">1. Tulis Alasan</p>
+                    <p class="text-[10px] text-blue-500">Min 10 karakter</p></div>
+                <div class="flex items-center justify-center text-surface-300"><i class="fas fa-arrow-right"></i></div>
+                <div class="flex-1 bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+                    <div class="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-paper-plane"></i></div>
+                    <p class="text-xs font-bold text-amber-700">2. Kirim</p>
+                    <p class="text-[10px] text-amber-500">Submit ke guru</p></div>
+                <div class="flex items-center justify-center text-surface-300"><i class="fas fa-arrow-right"></i></div>
+                <div class="flex-1 bg-purple-50 border border-purple-200 rounded-xl p-4 text-center">
+                    <div class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-clock"></i></div>
+                    <p class="text-xs font-bold text-purple-700">3. Tunggu</p>
+                    <p class="text-[10px] text-purple-500">Review guru</p></div>
+                <div class="flex items-center justify-center text-surface-300"><i class="fas fa-arrow-right"></i></div>
+                <div class="flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                    <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-check-double"></i></div>
+                    <p class="text-xs font-bold text-emerald-700">4. Selesai</p>
+                    <p class="text-[10px] text-emerald-500">Nilai diperbarui</p></div>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs">
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200"><i class="fas fa-hourglass-half"></i>Pending</span>
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"><i class="fas fa-check-circle"></i>Disetujui</span>
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200"><i class="fas fa-times-circle"></i>Ditolak</span>
+            </div>
+            <div class="mt-3 bg-primary-50 border border-primary-200 rounded-xl p-3 text-xs">
+                <p><i class="fas fa-info-circle text-primary-600 mr-1"></i>Buka <strong>Detail Hasil</strong> ujian &rarr; klik <strong>"Ajukan Banding Penalti"</strong> &rarr; tulis alasan &rarr; kirim.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

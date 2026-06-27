@@ -190,6 +190,8 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Tools</div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span>Lembar Jawaban</span></a>
             <a href="/super-admin/reset-school-data" class="nav-item {% if request.path == '/super-admin/reset-school-data' %}active{% endif %}"><i class="fas fa-skull-crossbones text-red-400"></i><span class="text-red-400">Reset Sekolah</span></a>
+            <div class="nav-section-title pt-2">Panduan</div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span>Panduan Skor</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
             <a href="/super-admin/comms" class="nav-item {% if request.path == '/super-admin/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
 
@@ -208,6 +210,8 @@ html { transition: background-color .3s, color .3s; }
             <a href="/admin-sekolah/import" class="nav-item {% if request.path == '/admin-sekolah/import' %}active{% endif %}"><i class="fas fa-upload"></i><span>Import Excel</span></a>
             <div class="nav-section-title pt-2">Akademik</div>
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span>Mata Pelajaran</span></a>
+            <div class="nav-section-title pt-2">Panduan</div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span>Panduan Skor</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
             <a href="/admin-sekolah/comms" class="nav-item {% if request.path == '/admin-sekolah/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
             <div class="nav-section-title pt-2">Langganan</div>
@@ -233,8 +237,12 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Laporan</div>
             <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Hasil Ujian</span></a>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span>Analitik</span></a>
+            <div class="nav-section-title pt-2">Panduan</div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span>Panduan Skor</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
             <a href="/teacher/comms" class="nav-item {% if request.path == '/teacher/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
+            <div class="nav-section-title pt-2">Panduan</div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span>Panduan Skor</span></a>
             <div class="nav-section-title pt-2">Pengaturan</div>
             <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan Akun</span></a>
             <div class="nav-section-title pt-2">Tools</div>
@@ -252,6 +260,8 @@ html { transition: background-color .3s, color .3s; }
             <div class="nav-section-title pt-2">Ujian</div>
             <a href="/student/exams" class="nav-item {% if request.path == '/student/exams' %}active{% endif %}"><i class="fas fa-file-alt"></i><span>Ujian Saya</span></a>
             <a href="/student/results" class="nav-item {% if request.path == '/student/results' %}active{% endif %}"><i class="fas fa-chart-bar"></i><span>Nilai Saya</span></a>
+            <div class="nav-section-title pt-2">Panduan</div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span>Panduan Skor</span></a>
             <div class="nav-section-title pt-2">Komunikasi</div>
             <a href="/student/comms" class="nav-item {% if request.path == '/student/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span>Pesan &amp; Pengumuman</span></a>
             <a href="/student/settings" class="nav-item {% if request.path == '/student/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span>Pengaturan</span></a>
