@@ -366,12 +366,12 @@
                                     }"
                                     x-text="i + 1">
                                 <span class="absolute -top-1.5 -right-1.5 text-[7px] leading-none"
-                                      :class="q.type === 'essay_text' ? 'text-amber-500' : q.type === 'essay_canvas' ? 'text-emerald-500' : 'text-orange-400'"
-                                      x-show="q.type !== 'mcq'">
-                                    <i :class="q.type === 'essay_text' ? 'fas fa-font' : 'fas fa-paint-brush'"></i>
+                                      :class="qType(i) === 'essay_text' ? 'text-amber-500' : qType(i) === 'essay_canvas' ? 'text-emerald-500' : 'text-orange-400'"
+                                      x-show="!isMCQ(i)">
+                                    <i :class="qType(i) === 'essay_text' ? 'fas fa-font' : 'fas fa-paint-brush'"></i>
                                 </span>
                                 <span class="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[6px] font-bold text-stone-400 leading-tight whitespace-nowrap"
-                                      x-show="QUESTION_PAGES[i]" x-text="'Hlm '+QUESTION_PAGES[i]"></span>
+                                      x-show="questionPages[i]" x-text="'Hlm '+questionPages[i]"></span>
                             </button>
                         </template>
                     </div>
@@ -389,14 +389,14 @@
 
         <!-- Main Content Area -->
         <div class="flex-1 min-w-0">
-    <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit">
+    <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit" @submit.prevent>
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
             <div x-show="!submitted" style="display:none" class="mb-3">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
                     <div x-show="currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
                             <i class="fas fa-pencil-alt"></i>
-                            <span>Soal #<span x-text="i+1"></span> <span x-text="q.type==='mcq'?'— Corat-coret pada halaman PDF':'— Canvas + PDF'"></span></span>
+                            <span>Soal #<span x-text="i+1"></span> <span x-text="isMCQ(i) ? '— Corat-coret pada halaman PDF' : '— Canvas + PDF'"></span></span>
                             <span class="ml-auto" x-text="totalPages>0 ? (pageLabel ? pageLabel + ' — ' : '') + 'Hal '+page+'/'+totalPages : ''"></span>
                         </div>
                         <div class="draw-toolbar px-3 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100 flex-wrap">
@@ -610,7 +610,7 @@
             <template x-for="(q, i) in questions" :key="i">
                 <div x-show="currentQ === i" class="">
                     <!-- Media players -->
-                    <template x-if="q.youtube">
+                    <template x-if="qYouTube(i)">
                         <div class="mb-3 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl px-4 py-3 border border-red-200/50">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="flex items-center gap-2">
@@ -621,7 +621,7 @@
                             </div>
                             <div class="relative w-full rounded-lg overflow-hidden bg-black/5" style="padding-bottom:56.25%">
                                 <iframe class="absolute inset-0 w-full h-full"
-                                    :src="youtubeEmbedUrl(q.youtube)"
+                                    :src="youtubeEmbedUrl(qYouTube(i))"
                                     frameborder="0"
                                     loading="lazy"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -630,19 +630,19 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="q.audio">
+                    <template x-if="qAudio(i)">
                         <div class="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 border border-amber-200/50">
                             <div class="flex items-center gap-3">
                                 <div class="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
                                     <i class="fas fa-headphones text-orange-500 text-sm"></i>
                                 </div>
-                                <audio :src="gdriveDirect(q.audio)" controls class="h-9 w-full max-w-md" preload="none"></audio>
+                                <audio :src="gdriveDirect(qAudio(i))" controls class="h-9 w-full max-w-md" preload="none"></audio>
                             </div>
                             <p class="text-[11px] text-stone-400 mt-1.5 ml-12">Putar audio soal</p>
                         </div>
                     </template>
 
-                    <template x-if="q.type === 'mcq'">
+                    <template x-if="isMCQ(i)">
                         <div class="">
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
@@ -650,7 +650,7 @@
                                     <template x-for="opt in (_shuffledOpts[i] || ['A','B','C','D','E'])">
                                         <button type="button" @click="markAnswered(i, opt)"
                                                 class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
-                                                :class="q.answer === opt ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
+                                                :class="qAnswer(i) === opt ? 'selected' : 'bg-white border-stone-200 text-stone-600 hover:border-orange-300'">
                                             <span x-text="opt"></span>
                                         </button>
                                     </template>
@@ -661,7 +661,7 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="q.type === 'essay_text' || q.type === 'essay'">
+                    <template x-if="isEssayText(i)">
                         <div class="">
                             <div class="flex items-center gap-2 mb-2 flex-wrap">
                                 <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
@@ -676,7 +676,7 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="q.type === 'essay_text' || q.type === 'essay'">
+                    <template x-if="isEssayText(i)">
                         <div class="mt-2">
                             <!-- Tab: Teks / Canvas -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
@@ -731,7 +731,7 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="q.type === 'essay_canvas'">
+                    <template x-if="isEssayCanvas(i)">
                         <div class="mt-2">
                             <!-- Tab: Teks / Canvas (default Canvas untuk essay_canvas) -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
@@ -839,6 +839,17 @@ function examApp(duration, totalQ) {
                 canvas: QUESTION_CANVAS[i] || ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] === 'essay' || false,
             };
         }),
+        // Alpine-compatible data (moved from globals to avoid x-for scope errors)
+        questionPages: QUESTION_PAGES,
+        questionAudio: QUESTION_AUDIO,
+        questionCanvas: QUESTION_CANVAS,
+        qType(i) { return (this.questions[i] || {}).type || 'mcq'; },
+        isMCQ(i) { return this.qType(i) === 'mcq'; },
+        isEssayText(i) { return this.qType(i) === 'essay_text' || this.qType(i) === 'essay'; },
+        isEssayCanvas(i) { return this.qType(i) === 'essay_canvas'; },
+        qAnswer(i) { return this.questions[i] ? this.questions[i].answer : null; },
+        qYouTube(i) { return this.questions[i] ? this.questions[i].youtube : null; },
+        qAudio(i) { return this.questions[i] ? this.questions[i].audio : null; },
         // Per-question page range from question_pages
         get qPages() { return QUESTION_PAGES[this.currentQ] || ''; },
         get pageLabel() {
