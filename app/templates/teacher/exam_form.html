@@ -15,7 +15,7 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-3">
+        <div class="lg:col-span-2">
             <div x-data="{
                 aiMode: false,
                 aiLang: 'en',
@@ -173,7 +173,23 @@
                     </div>
 
                     <!-- Steps after upload -->
-                    
+                    <div x-show="aiMode && questions.length > 0" class="p-4 rounded-xl bg-primary-50 border border-primary-200">
+                        <p class="text-xs font-bold text-primary-800 mb-3">Langkah selanjutnya:</p>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
+                                <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">1</span>
+                                <span class="text-[10px] font-bold text-surface-700">Review deteksi soal</span>
+                            </div>
+                            <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
+                                <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">2</span>
+                                <span class="text-[10px] font-bold text-surface-700">Klik "Terapkan ke Form"</span>
+                            </div>
+                            <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
+                                <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">3</span>
+                                <span class="text-[10px] font-bold text-surface-700">Isi judul & simpan</span>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Actions -->
                     <div class="flex flex-wrap gap-2">
@@ -915,7 +931,47 @@
                 </div>
             </div>
             {% else %}
-            <!-- end x-data wrapper (aiMode) -->
+            <div class="card p-4 lg:p-6 sticky top-20 order-first lg:order-none">
+                <h3 class="font-extrabold text-slate-800 mb-3 lg:mb-4 flex items-center gap-2 text-sm lg:text-base">
+                    <i class="fas fa-tasks text-primary-500"></i>Langkah
+                </h3>
+                <ol class="space-y-2 lg:space-y-3 text-xs lg:text-sm font-bold text-slate-600">
+                    <li class="flex items-start gap-2 p-2 rounded-xl transition-all duration-300"
+                        :class="step1Done ? 'bg-emerald-50 border border-emerald-200' : 'bg-transparent'">
+                        <span class="rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5 transition-all duration-300"
+                              :class="step1Done ? 'bg-emerald-500 text-white' : 'bg-surface-200 text-surface-500'">
+                            <i x-show="step1Done" class="fas fa-check text-[8px]"></i>
+                            <span x-show="!step1Done" x-text="1"></span>
+                        </span>
+                        <div><span>Isi data &amp; soal</span>
+                        <p class="text-[9px] lg:text-[10px] font-medium mt-0.5" :class="step1Done ? 'text-emerald-700' : 'text-slate-400'">Judul, mapel, durasi, kelas</p></div>
+                    </li>
+                    <li class="flex items-start gap-2 p-2 rounded-xl transition-all duration-300"
+                        :class="pdfUrl ? 'bg-emerald-50 border border-emerald-200' : 'bg-transparent'">
+                        <span class="rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5 transition-all duration-300"
+                              :class="pdfUrl ? 'bg-emerald-500 text-white' : 'bg-surface-200 text-surface-500'">
+                            <i x-show="pdfUrl" class="fas fa-check text-[8px]"></i>
+                            <span x-show="!pdfUrl" x-text="2"></span>
+                        </span>
+                        <div><span>Upload <strong class="text-slate-800">PDF</strong> soal</span>
+                        <p class="text-[9px] lg:text-[10px] font-medium mt-0.5" :class="pdfUrl ? 'text-emerald-700' : 'text-slate-400'">Opsional — untuk tampilan ujian siswa</p></div>
+                    </li>
+                    <li class="flex items-start gap-2 p-2 rounded-xl transition-all duration-300 bg-transparent">
+                        <span class="rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5 bg-surface-200 text-surface-500">3</span>
+                        <div><span><strong class="text-slate-800">Publikasikan</strong> ke kelas</span>
+                        <p class="text-[9px] lg:text-[10px] font-medium text-slate-400 mt-0.5">Siswa langsung terima notifikasi</p></div>
+                    </li>
+                    <li class="flex items-start gap-2 p-2 rounded-xl transition-all duration-300 bg-transparent">
+                        <span class="rounded-2xl w-6 h-6 flex items-center justify-center text-xs font-extrabold shrink-0 mt-0.5 bg-surface-200 text-surface-500">4</span>
+                        <div><span>Siswa kerjakan, guru <strong class="text-slate-800">koreksi</strong></span>
+                        <p class="text-[9px] lg:text-[10px] font-medium text-slate-400 mt-0.5">MCQ auto, Essay AI + review</p></div>
+                    </li>
+                </ol>
+
+            </div>
+            {% endif %}
+        </div>
+        </div><!-- end x-data wrapper (aiMode) -->
     </div>
 </div>
 
