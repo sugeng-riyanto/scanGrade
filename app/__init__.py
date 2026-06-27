@@ -454,15 +454,9 @@ def _register_performance_middleware(app):
             response.cache_control.must_revalidate = True
         # Add security headers (PSE Kominfo & UU PDP compliance)
         if not response.headers.get("Content-Security-Policy"):
-            csp = "; ".join([
-                "default-src 'self'",
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
-                "style-src 'self' 'unsafe-inline'",
-                "img-src 'self' data: blob:",
-                "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
-                "font-src 'self'",
-                "frame-ancestors 'self'",
-            ])
+            csp = (
+                "frame-ancestors 'self';"
+            )
             response.headers["Content-Security-Policy"] = csp
         if not response.headers.get("X-Content-Type-Options"):
             response.headers["X-Content-Type-Options"] = "nosniff"
