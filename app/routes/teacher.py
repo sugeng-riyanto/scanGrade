@@ -1857,6 +1857,8 @@ def assignments():
         return redirect("/teacher/dashboard")
 
     if request.method == "POST":
+        if g.get("user_role") not in ("admin_sekolah", "super_admin"):
+            return jsonify({"error": "Hanya admin sekolah yang bisa menambah kelas"}), 403
         class_id = request.form.get("class_id")
         subject_id = request.form.get("subject_id")
         if not class_id or not subject_id:
@@ -1894,6 +1896,8 @@ def assignments():
 @teacher_bp.route("/assignments/<assignment_id>", methods=["DELETE"])
 @teacher_or_admin_required
 def delete_assignment(assignment_id):
+    if g.get("user_role") not in ("admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya admin sekolah yang bisa menghapus kelas"}), 403
     supabase = get_supabase()
     try:
         supabase.table("teacher_assignments").delete().eq("id", assignment_id).eq("teacher_id", g.user_id).execute()
