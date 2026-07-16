@@ -17,13 +17,15 @@
 - UI language: Indonesian (default) with English toggle (`localStorage.sg_lang`)
 - Color theme: `primary` (blue) defined in Tailwind config — `brand-*` was previously undefined (invisible buttons/text), now aliased to `primary` palette
 - No direct DB DDL access — migrations must be run manually in Supabase SQL Editor
-- `profiles` table columns: `['id', 'full_name', 'phone', 'role', 'created_at', 'updated_at']` — **no `school_id`, `class_id`, `nisn`, `nis`, `email` columns exist** (unless migration 017 added `school_id`)
-- `schools` table exists in `public` schema (since migration 007/013)
+- `profiles` table columns: `['id', 'full_name', 'phone', 'role', 'created_at', 'updated_at', 'nisn', 'nis', 'class_id', 'school_id', 'tz_offset']` (migrations 002+013 applied)
+- `schools` table exists in `public` schema (migration 013 applied)
 - `school_settings` table (legacy, single-row INT id=1) exists alongside `schools` (UUID id)
+- `submissions` table: `started_at` column added (migration 013); `is_hidden`, `retracted` status added (migration 003); unique constraint `(student_id, exam_id)` added (migration 013)
 - `pengumuman.school_id` is currently INT referencing `school_settings(id)` — migration 024 fixes to UUID
 - MCQ answer keys: single value (`"A"`), multiple (`["A","B"]`), or `"bonus"` (all correct)
 - Weighted scoring: Teacher sets MCQ% + Essay% (total must = 100), distributed equally per question within each group
-- `question_weights` JSONB column does NOT exist in DB — code uses `.get()` + `setdefault` with try/except fallback
+- `question_weights` JSONB column exists on `exams` table (migration 003 applied)
+- Anti-cheat columns (11 columns) exist on `exams` table (migration 011 applied)
 - PDF generation uses `xhtml2pdf` (pure Python) — WeasyPrint requires GTK/Pango not available on Windows
 - Anti-cheat: graduated penalty (1st=warning, 2nd=-base, 3rd=-2×base, 4th+=-3×base), auto-submit on max violations
 - Router / security: 404 catch-all `/tools` for admin functions; CSP `frame-ancestors 'self'` in response headers
@@ -93,35 +95,39 @@
 - **Auto-purge scheduler**: 24h data retention cleanup
 
 ### In Progress
-- None
+- Many exams (Sejarah, Agama, etc.) have `None` answer keys — teacher must set correct answers via UI before scores appear
+- All 3 pending migrations (002, 003, 011, 013) executed in Supabase SQL Editor — schema now matches code expectations
 
-### Latest (2025-06-26)
-- **`pengumuman.school_id` INT/UUID mismatch fix**: `profiles.school_id` is `UUID` referencing `schools(id)`, but `pengumuman.school_id` was `INT` referencing `school_settings(id)`. Create endpoint failed with `"invalid input syntax for type integer"`. Added fallback: try UUID first, retry with INT `1` on type error. Migration `024_fix_pengumuman_school_id_type.sql` created to permanently fix column type to UUID.
-- **List query fix**: supabase-py builder mutates in place — old code added `AND school_id=uuid AND school_id=1` (always empty). Fixed with fresh probe query + fallback to INT 1.
-- **Cascading pengumuman form**: Target role → jangkauan (all/class/specific) → class filter → recipient checkboxes. New APIs: `GET /api/pengumuman/classes`, `GET /api/pengumuman/recipients-by-role`
-- **Edit pengumuman modal**: RBAC-controlled (super_admin any, admin_sekolah/guru own, murid none)
-- **RBAC matrix update**: admin_sekolah can target super_admin; guru can target guru & admin_sekolah
-- **Migration 023**: `specific_recipients UUID[]` column for specific-student targeting
-- **Sender sees own broadcasts**: `api_list_pengumuman` now uses `OR` query — `target_role = role OR sender_id = uid`
-- **Read-status charts**: `GET /api/pengumuman/<id>/read-status` returns read/unread breakdown. Pie + bar chart in detail modal (Chart.js 4.4.7). Canvas rendered with `document.getElementById`, explicit dims, try/catch, 300ms delay for layout.
-- **Timezone fix**: `formatDate`/`formatTime`/`formatDateTime` now convert UTC to user's `tzOffset` (from cookie). Added `tz_offset` context processor in `__init__.py` for all templates.
-- **All chat endpoints NPSN-scoped**: contacts list, create conversation, list conversations, send message — all filter by `school_id` (UUID). Super_admin exempt. RBAC via `_get_allowed_recipient_roles()`.
+### Done (Batch 2026-07-16 — Major Bug Hunt)
+- **Fixed `student_auto_save` no-op** (api.py): was accepting data and returning success without saving — now properly persists to submissions table
+- **Fixed `NameError: ValidationError`** (exam.py): added missing import, upload PDF kosong no longer crashes
+- **Fixed `NameError: app.logger`** (api.py): changed to `current_app.logger`
+- **Fixed NISN login** (auth.py): added fallback to `auth.admin.list_users()` when `profiles.nisn` column query fails
+- **Fixed Midtrans webhook security** (webhook.py): added HMAC-SHA512 signature verification; Fonnte token check
+- **Fixed `/debug/exam` exposure** (__init__.py): added `@login_required` + school access check
+- **Fixed CSRF bypass** (csrf.py): no longer "allow for now" when session has no token — now properly rejects
+- **Fixed answer key exposure** (exam.py + student.py): stripped from API responses and HTML templates for non-teachers
+- **Fixed essay weight = 0 in submit_exam** (student.py): added proper 70/30 MCQ/essay split matching `_recalculate_scores`
+- **Fixed double submit race condition** (student.py): checks for existing submission before insert
+- **Fixed blank page in answer sheet PDF** (answer_sheet_generator.py): removed extra `c.showPage()` after loop
+- **Fixed MCQ comparison in exports** (export_service.py): handles multi-value `["A","B"]` and `"bonus"` keys
+- **Fixed analytics scores** (analytics_service.py): uses `final_score` instead of `score`
+- **Fixed scan_save grading** (api.py): handles dict-format MCQ answers + multi-value/bonus keys; added school access check; added status check (don't overwrite graded/published)
+- **Fixed create/update/delete exam** (exam.py): added field whitelist, ownership check, teacher_id enforcement
+- **Fixed publish routes** (teacher.py+publish.py): added `@require_school_access`; `/publish/` was a stub, now actually publishes
+- **Fixed admin_sekolah logic** (teacher.py): removed `not exam_ids AND` condition — now always shows school exams
+- **Fixed sync-draft race condition** (api.py): checks status before update — never overwrites submitted/graded/published; proper error logging instead of `except: pass`
+- **Fixed memory leaks** (api.py+__init__.py): `_sync_last`/`_sync_locks` now clean up stale entries every 10 min; `_demo_cache` replaced with `g._demo_settings` (request-scoped)
+- **Fixed timer reset on F5** (take_exam.html): `started_at` persisted server-side; `timeLeft` calculated from elapsed time
+- **Fixed submit button loading state** (take_exam.html): added `submitting` prop, spinner, double-click prevention
+- **Added CSP headers** (__init__.py): `Content-Security-Policy` added to all responses
+- **Fixed OMR deskew memory explosion** (omr_service.py): replaced `np.column_stack(np.where(...))` with Canny edge + Hough lines
+- **Fixed `get_whatsapp_number` no caching** (__init__.py): now cached per-request via `g._whatsapp_number`
+- **Created migration 013** (supabase/migrations/013_fix_missing_columns.sql): adds `profiles.school_id`, `submissions.started_at`, `schools` table, unique constraint `(student_id, exam_id)`
 
 ### Blocked
-- Migration 021 (soft-delete + conversation CRUD columns) must run in Supabase SQL Editor
-- Migration 023 (`specific_recipients UUID[]` for specific-student targeting) in Supabase SQL Editor
-- Migration 024 (fix `pengumuman.school_id INT → UUID`) in Supabase SQL Editor
-- Node.js broken on VPS (npm missing); Tailwind CSS local build file already in git (98 KB)
-- PSE registration number / DPO contact not configured in system_settings
-- Run PDP columns migration in Supabase SQL Editor:
-  ```sql
-  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS birth_date DATE;
-  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pdp_agreed BOOLEAN DEFAULT FALSE;
-  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS parent_pdp_agreed BOOLEAN DEFAULT FALSE;
-  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS parent_name TEXT;
-  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS parent_contact TEXT;
-  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS consent_at TIMESTAMPTZ;
-  ```
+- Exam scoring shows 0 for students when answer keys are `None` (teacher has not set correct answers)
+
 
 ## Key Decisions
 - **Two separate Supabase clients** to avoid service-key client corruption from auth operations
@@ -207,6 +213,24 @@
 - `app/templates/student/notifications.html`: 2 tabs + contacts sidebar.
 - `app/templates/admin_sekolah/notifications.html`: 5 tabs + contacts sidebar + CRUD + broadcast + deletion requests.
 - `app/templates/super_admin/notifications.html`: 5 tabs + contacts sidebar + CRUD + broadcast + privacy settings.
+
+## Critical Context
+- Alpine.js v3.14.8 — `el.__x` does NOT exist. Must use `QUESTION_INSTANCES` global map pattern. NOTE: admin templates use `Alpine.raw(root).__x.$data` for import forms.
+- `xhtml2pdf` does NOT support: `display: flex`, `position: absolute/relative`, `border-radius` (limited), `gap` — use tables for layout, floats for positioning
+- PDF page URLs are local paths like `/static/uploads/exams/<uuid>/page_001.png` — load via `os.path.join(app.static_folder, ...)` not HTTP
+- Student answer JSON (MCQ with canvas): `{"0": {"answer": "A", "pages": {"0": {"canvas": "data:image/png;...", "textBoxes": [...]}}}}` — old format `{"0": "A"}` still supported
+- Answer key JSON: `{"0": "A", "1": ["A","B"], "2": "bonus", "3": "essay"}` — `None` keys cause score 0
+- `question_weights` + anti-cheat columns now exist in DB (migrations 003 + 011 executed)
+- `submissions.is_hidden` column exists (migration 003 executed)
+- `profiles` now has `nisn`, `nis`, `class_id`, `school_id`, `tz_offset` (migrations 002 + 013 executed)
+- `schools` table now exists (migration 013 executed)
+- Violation `sendBeacon` Blob: `new Blob([JSON.stringify([{...}])], {type: 'application/json'})` — must have correct bracket nesting
+- Grade detail form: pressing Enter in score/comment inputs submits the HTML `<form>` and reloads page — `@keydown.enter.prevent=""` added to both inputs
+- NISN: jika < 10 digit, isi dari kiri (most significant digit pertama), trailing cells kosong
+- `final_score` dihitung sebagai `max(0, score - penalty)` saat submit; untuk submission lama di-backfill via script
+- Jawaban guru untuk komentar: mulai dari huruf besar setelah titik dan spasi — `calcFinal()` panggil 50ms setelah input berubah
+- `_saveCurrentPage()` dan `getAnswersLight()`/`getAnswersWithCanvas()` sudah diupdate untuk MCQ — canvas di `ec-canvas-{i}` di-init melalui `initEcCanvas(i)`
+- Essay section's SVG overlay drag/rotate handles: use `startToolRotate(i,'ruler',$event)` — 3-arg form (was `startToolRotate('ruler',$event)` broken)
 
 ## Key Files (Compliance)
 - `app/routes/public.py`: `/privacy` and `/terms` routes with DPO fetch

@@ -391,7 +391,6 @@ def generate_answer_sheet(
         if page_idx < num_pages - 1:
             c.showPage()
 
-    c.showPage()
     c.save()
     buf.seek(0)
     return buf

@@ -278,12 +278,20 @@ def login_user():
     email = login_input
     if "@" not in login_input:
         found_id = None
-        # Try NISN (students)
-        if not found_id:
+        # Try NISN (students) — use raw query since profiles.nisn may not exist as column
+        try:
+            prof = supabase.table("profiles").select("id").filter("nisn", "eq", login_input).limit(1).execute()
+            if prof.data:
+                found_id = prof.data[0]["id"]
+        except:
+            # Fallback: search auth user_metadata for NISN
             try:
-                prof = supabase.table("profiles").select("id").eq("nisn", login_input).limit(1).execute()
-                if prof.data:
-                    found_id = prof.data[0]["id"]
+                users = supabase.auth.admin.list_users()
+                for u in users:
+                    meta = getattr(u, 'user_metadata', {}) or {}
+                    if meta.get("nisn") == login_input:
+                        found_id = u.id
+                        break
             except:
                 pass
         # Try NIP (teachers)

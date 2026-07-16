@@ -314,6 +314,36 @@ def take_exam(exam_id):
                 exam[_field] = json.loads(_val)
             except (json.JSONDecodeError, TypeError):
                 exam[_field] = {}
+    # Strip answer_key from exam before passing to template (students must not see correct answers)
+    safe_exam = {k: v for k, v in exam.items() if k != "answer_key"}
+    # Persist exam start time for accurate timer across refresh
+    started_at = None
+    try:
+        draft = supabase.table("submissions").select("id,started_at,status").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["draft"]).limit(1).execute().data
+        if draft:
+            started_at = draft[0].get("started_at")
+    except Exception:
+        pass
+    if not started_at:
+        import datetime as _dt
+        started_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        try:
+            # Check if any draft exists, if not update/create with started_at
+            draft = supabase.table("submissions").select("id,status").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["draft"]).limit(1).execute().data
+            if draft:
+                supabase.table("submissions").update({"started_at": started_at}).eq("id", draft[0]["id"]).execute()
+            else:
+                supabase.table("submissions").insert({
+                    "exam_id": exam_id,
+                    "student_id": g.user_id,
+                    "answers": {},
+                    "score": 0,
+                    "max_score": 100,
+                    "status": "draft",
+                    "started_at": started_at,
+                }).execute()
+        except Exception:
+            pass
     anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
     # Cek existing draft submission untuk timer persist across devices
     exam_started_at = None
@@ -323,8 +353,7 @@ def take_exam(exam_id):
             exam_started_at = draft.data[0]["started_at"]
     except Exception:
         pass
-    resp = make_response(render_template("student/take_exam.html", exam=exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at))
-    # Allow short browser caching for exam page (exam data is static once started)
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 
@@ -390,15 +419,27 @@ def submit_exam(exam_id):
             except (json.JSONDecodeError, TypeError):
                 exam[_fld] = {}
 
-    mcq_count = sum(1 for v in (exam.get("answer_key") or {}).values() if v not in ("essay", "essay_text", "essay_canvas", None))
-    question_weights = exam.get("question_weights") or {}
     question_types = exam.get("question_types") or {}
     total_q = exam["total_questions"]
-    if not question_weights and mcq_count > 0:
-        each = round(100 / mcq_count, 2)
-        for i in range(total_q):
-            if question_types.get(str(i), "mcq") == "mcq":
-                question_weights[str(i)] = each
+    mcq_count = sum(1 for v in (exam.get("answer_key") or {}).values() if v not in ("essay", "essay_text", "essay_canvas", None))
+    essay_count = total_q - mcq_count
+    question_weights = exam.get("question_weights") or {}
+    if not question_weights and total_q > 0:
+        mcq_pct, essay_pct = 70, 30
+        if mcq_count == 0:
+            mcq_pct, essay_pct = 0, 100
+        elif essay_count == 0:
+            mcq_pct, essay_pct = 100, 0
+        if mcq_count > 0:
+            each = round(mcq_pct / mcq_count, 2)
+            for i in range(total_q):
+                if question_types.get(str(i), "mcq") == "mcq":
+                    question_weights[str(i)] = each
+        if essay_count > 0:
+            each = round(essay_pct / essay_count, 2)
+            for i in range(total_q):
+                if question_types.get(str(i), "mcq") != "mcq":
+                    question_weights[str(i)] = each
     earned = 0.0
     for i in range(exam["total_questions"]):
         qtype = question_types.get(str(i), "mcq")
@@ -489,6 +530,13 @@ def submit_exam(exam_id):
         "is_published": exam.get("publish_mode") == "auto",
     }
     try:
+        # Check for existing submission to prevent double submit
+        existing = supabase.table("submissions").select("id,status").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute().data
+        if existing:
+            current_app.logger.warning("Double submit blocked for exam %s user %s", exam_id, g.user_id)
+            if request.is_json:
+                return jsonify({"success": True, "note": "already_submitted"})
+            return redirect("/student/results")
         supabase.table("submissions").insert(submission).execute()
         log_activity("submit", "submission", None, new_data={"exam_id": exam_id, "score": score}, user_id=g.user_id)
     except Exception as e:

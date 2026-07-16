@@ -175,30 +175,33 @@ def create_app(env=None):
     from app.utils.csrf import generate_csrf_token, csrf_required
     app.jinja_env.globals["csrf_token"] = generate_csrf_token
 
-    # Demo settings global ΓÇö readable from any template
-    _demo_cache = {}
     def get_demo_settings():
-        """Return demo settings dict, cached per request."""
-        req_key = f"demo_{id(request)}"
-        if req_key in _demo_cache:
-            return _demo_cache[req_key]
+        """Return demo settings dict, cached per request via g."""
+        from flask import g as flask_g
+        if hasattr(flask_g, '_demo_settings'):
+            return flask_g._demo_settings
         try:
             supabase = app.extensions["supabase"]
             data = supabase.table("school_settings").select("demo_settings").eq("id", 1).single().execute().data or {}
             result = data.get("demo_settings") or {}
         except Exception:
             result = {}
-        _demo_cache[req_key] = result
+        flask_g._demo_settings = result
         return result
     app.jinja_env.globals["get_demo_settings"] = get_demo_settings
 
     def get_whatsapp_number():
+        from flask import g as flask_g
+        if hasattr(flask_g, '_whatsapp_number'):
+            return flask_g._whatsapp_number
         try:
             supabase = app.extensions["supabase"]
             data = supabase.table("school_settings").select("whatsapp_number").eq("id", 1).single().execute().data or {}
-            return data.get("whatsapp_number", "")
+            result = data.get("whatsapp_number", "")
         except Exception:
-            return ""
+            result = ""
+        flask_g._whatsapp_number = result
+        return result
     app.jinja_env.globals["get_whatsapp_number"] = get_whatsapp_number
 
     _features_cache = {}
@@ -340,12 +343,17 @@ def create_app(env=None):
         return render_template("monitor.html", log_lines=lines)
 
     @app.route("/debug/exam/<exam_id>")
+    @login_required
     def debug_exam(exam_id):
         try:
             supabase = app.extensions["supabase"]
             exam = supabase.table("exams").select("id,title,status,is_published,school_id,teacher_id,class_ids,start_at").eq("id", exam_id).single().execute().data
             if not exam:
                 return jsonify({"error": "not found"}), 404
+            teacher_id = exam.get("teacher_id", "")
+            school_id = exam.get("school_id", "")
+            if g.user_id != teacher_id and g.get("user_school_id") != school_id and g.get("user_role") not in ("admin_sekolah", "super_admin"):
+                return jsonify({"error": "forbidden"}), 403
             return jsonify({k: str(v) if not isinstance(v, (bool, int, float, list, dict)) and v is not None else v for k, v in exam.items()})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
