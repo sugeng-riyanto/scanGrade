@@ -1462,3 +1462,9 @@ Dicetak: {paid_at} &mdash; Terima kasih telah menggunakan ScanGrade.
     resp.headers['Content-Disposition'] = f'attachment; filename="INVOICE-{inv.get("invoice_number", "unknown")}.pdf"'
     resp.headers['Content-Length'] = len(result.getvalue())
     return resp
+
+
+@admin_sekolah_bp.route("/comms")
+@admin_sekolah_required
+def admin_comms():
+    return render_template("shared/comms.html")
