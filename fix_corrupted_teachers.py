@@ -2,7 +2,7 @@
 import os, sys, re
 sys.path.insert(0, os.path.dirname(__file__))
 from app import create_app
-from app.utils.supabase import get_supabase
+from app.utils.auth import get_supabase
 
 app = create_app()
 with app.app_context():
