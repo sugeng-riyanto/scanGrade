@@ -52,7 +52,7 @@
         </div>
         <p class="text-sm text-stone-500 font-medium">{{ total }} guru</p>
         <div class="flex gap-2">
-            <button type="button" x-data @click="if(confirm('Hapus SEMUA guru ({{ total }} orang)? Tindakan ini tidak bisa dibatalkan!')) fetch('/admin-sekolah/teachers/bulk-delete', {method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'{{ csrf_token() }}'},body:JSON.stringify({user_ids:{{ teacher_ids | tojson }}})}).then(r=>r.json()).then(d=>{if(d.total) location.reload()})"
+            <button type="button" x-data @click="if(confirm(`Hapus SEMUA guru ({{ total }} orang)? Tindakan ini tidak bisa dibatalkan`)) fetch('/admin-sekolah/teachers/bulk-delete', {method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'{{ csrf_token() }}'},body:JSON.stringify({user_ids:{{ teacher_ids | tojson }}})}).then(r=>r.json()).then(d=>{if(d.total) location.reload()})"
                     class="px-4 py-2 bg-red-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-red-500/25 hover:bg-red-600 transition">
                 <i class="fas fa-trash mr-1"></i>Hapus Semua
             </button>
