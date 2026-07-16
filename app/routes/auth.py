@@ -89,9 +89,16 @@ def register():
             "full_name": position,
             "phone": wa,
             "role": "admin_sekolah",
-            "status": "pending",
-            "consent_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
+        # Try optional columns that may not exist yet
+        try:
+            supabase.table("profiles").update({"status": "pending"}).eq("id", uid).execute()
+        except Exception:
+            pass
+        try:
+            supabase.table("profiles").update({"consent_at": datetime.now(timezone.utc).isoformat()}).eq("id", uid).execute()
+        except Exception:
+            pass
     except Exception as e:
         current_app.logger.error(f"Register step 2 (profile) failed: {e}, cleaning up user {uid}")
         # Rollback: delete the auth user
