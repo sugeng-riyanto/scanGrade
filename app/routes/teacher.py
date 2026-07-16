@@ -1520,6 +1520,7 @@ def api_penalty_appeal_handle(submission_id):
 
 @teacher_bp.route("/publish/<exam_id>", methods=["GET", "POST"])
 @subscription_write_required
+@require_school_access
 @teacher_or_admin_required
 def publish_scores(exam_id):
     supabase = get_supabase()
@@ -1560,6 +1561,16 @@ def recalculate_exam_scores(exam_id):
 @subscription_write_required
 @teacher_or_admin_required
 def publish_single(submission_id):
+    # Security check: ensure submission belongs to teacher's school/exam
+    supabase_verify = get_supabase()
+    sub_check = supabase_verify.table("submissions").select("exam_id").eq("id", submission_id).single().execute().data
+    if sub_check:
+        exam_check = supabase_verify.table("exams").select("teacher_id,school_id").eq("id", sub_check["exam_id"]).single().execute().data
+        if exam_check:
+            if exam_check.get("teacher_id") != g.user_id:
+                school_id = g.get("user_school_id")
+                if exam_check.get("school_id") != school_id and g.get("user_role") not in ("super_admin",):
+                    return jsonify({"error": "Tidak punya akses"}), 403
     supabase = get_supabase()
     sub = supabase.table("submissions").select("exam_id").eq("id", submission_id).single().execute().data
     supabase.table("submissions") \
@@ -1624,8 +1635,8 @@ def grading_center():
     user_role = g.get("user_role")
     school_id = g.get("user_school_id")
     exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("teacher_id", g.user_id).execute().data or []]
-    # For admin_sekolah, also get exams from their school
-    if not exam_ids and user_role == "admin_sekolah" and school_id:
+    # For admin_sekolah, also get exams from their school (regardless of teacher_id)
+    if user_role == "admin_sekolah" and school_id:
         exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("school_id", school_id).execute().data or []]
     pending_subs = []
     graded_subs = []

@@ -45,15 +45,29 @@ def _release_lock(redis_conn, key):
         pass
 
 _sync_last = {}
+_SYNC_CLEANUP_INTERVAL = 600  # seconds
+_sync_last_cleanup = time.time()
 
 
 def _check_rate_limit(user_id, exam_id, min_interval=5):
-    key = f"{user_id}:{exam_id}"
+    global _sync_last_cleanup
     now = time.time()
+    key = f"{user_id}:{exam_id}"
     last = _sync_last.get(key, 0)
     if now - last < min_interval:
         return False
     _sync_last[key] = now
+    # Periodic cleanup of stale entries (every 10 min)
+    if now - _sync_last_cleanup > _SYNC_CLEANUP_INTERVAL:
+        _sync_last_cleanup = now
+        cutoff = now - 3600  # remove entries older than 1 hour
+        stale_keys = [k for k, v in _sync_last.items() if v < cutoff]
+        for k in stale_keys:
+            del _sync_last[k]
+        with _sync_lock_mutex:
+            stale_locks = [k for k in _sync_locks if k not in _sync_last]
+            for k in stale_locks:
+                del _sync_locks[k]
     return True
 
 
@@ -609,10 +623,41 @@ def _cleanup_scan_tmp(age_hours=1):
 @api_bp.route("/student/auto-save", methods=["POST"])
 @login_required
 def student_auto_save():
-    """Auto-save student's in-progress exam draft."""
+    """Auto-save student's in-progress exam draft — saves to localStorage mirror on server."""
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
+    exam_id = data.get("exam_id")
+    answers = data.get("answers", {})
+    if not exam_id or not answers:
+        return jsonify({"saved": True, "at": int(time.time())})
+    if not _check_rate_limit(g.user_id, exam_id, min_interval=5):
+        return jsonify({"saved": True, "at": int(time.time()), "throttled": True})
+    lock = _get_sync_lock(g.user_id, exam_id)
+    if not lock.acquire(blocking=False):
+        return jsonify({"saved": True, "at": int(time.time()), "busy": True})
+    try:
+        supabase = get_supabase()
+        existing = supabase.table("submissions").select("id,status,answers").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
+        if existing and existing[0].get("status") in ("draft", "submitted"):
+            merged = existing[0].get("answers") or {}
+            if isinstance(merged, dict):
+                merged.update(answers)
+                answers = merged
+            supabase.table("submissions").update({"answers": answers}).eq("id", existing[0]["id"]).execute()
+        elif not existing:
+            supabase.table("submissions").insert({
+                "exam_id": exam_id,
+                "student_id": g.user_id,
+                "answers": answers,
+                "score": 0,
+                "max_score": 100,
+                "status": "draft",
+            }).execute()
+    except Exception as e:
+        current_app.logger.warning("Auto-save failed for exam %s user %s: %s", exam_id, g.user_id, str(e))
+    finally:
+        lock.release()
     return jsonify({"saved": True, "at": int(time.time())})
 
 
@@ -639,13 +684,16 @@ def student_sync_draft():
     try:
         from app.utils.auth import get_supabase
         supabase = get_supabase()
-        # Ambil durasi ujian untuk kalkulasi timer server-side
         exam_res = supabase.table("exams").select("duration_minutes").eq("id", exam_id).limit(1).execute()
         duration = (exam_res.data[0]["duration_minutes"] * 60) if exam_res.data else None
         existing = supabase.table("submissions").select("id,status,answers,started_at").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
-        if existing and existing[0].get("status") == "draft":
-            if is_light and existing[0].get("answers"):
-                merged = existing[0]["answers"]
+        if existing:
+            sub = existing[0]
+            if sub.get("status") in ("submitted", "graded", "published"):
+                current_app.logger.warning("sync-draft blocked: submission %s already %s", sub["id"], sub.get("status"))
+                return jsonify({"saved": True, "at": int(time.time()), "note": "already_submitted"})
+            if is_light and sub.get("answers"):
+                merged = sub["answers"]
                 if isinstance(merged, dict):
                     # Deep merge: preserve existing canvas pages + paragraphs
                     for k, v in answers.items():
@@ -680,10 +728,10 @@ def student_sync_draft():
                                 answers[qk]["pages"][str(pk)]["canvas"] = canvasUrl
                     except Exception:
                         pass
-            supabase.table("submissions").update({"answers": answers}).eq("id", existing[0]["id"]).execute()
+            supabase.table("submissions").update({"answers": answers}).eq("id", sub["id"]).execute()
             # Timer reconciliation: validasi started_at antar device
             client_started = data.get("started_at")
-            existing_started = existing[0].get("started_at")
+            existing_started = sub.get("started_at")
             if client_started and existing_started:
                 try:
                     if isinstance(existing_started, str):
@@ -696,7 +744,6 @@ def student_sync_draft():
                 except Exception:
                     pass
             # Hitung server_time_left
-            # Guard: only if duration > 0 and elapsed > 30s (prevent false 0)
             if duration and duration > 0 and existing_started:
                 try:
                     if isinstance(existing_started, str):
@@ -708,17 +755,14 @@ def student_sync_draft():
                         server_time_left = max(0, duration - elapsed)
                 except Exception:
                     pass
-        elif not existing:
+        else:
             client_started = data.get("started_at")
             started_at_ts = client_started if client_started else server_now
-            # Validasi: client_started tidak boleh di masa depan >30 detik
             if client_started:
                 client_ts = client_started // 1000 if client_started > 1e10 else client_started
                 if client_ts > server_now + 30:
                     return jsonify({"saved": True, "at": server_now, "error": "invalid_timer", "server_time_left": duration if duration else None}), 400
-            # Use client's started_at if earlier than now (more accurate to when user opened exam)
             started_at_dt = datetime.fromtimestamp(started_at_ts / 1000 if started_at_ts > 1e10 else started_at_ts, tz=timezone.utc).isoformat()
-            # Device fingerprint pada first sync
             if isinstance(answers, dict):
                 answers["_device_info"] = {
                     "user_agent": request.headers.get("User-Agent", ""),
@@ -734,14 +778,8 @@ def student_sync_draft():
                 "status": "draft",
                 "started_at": started_at_dt,
             }).execute()
-        elif existing and existing[0].get("started_at") is None:
-            # Backfill started_at if missing (e.g. old drafts before this fix)
-            client_started = data.get("started_at")
-            if client_started:
-                started_at_dt = datetime.fromtimestamp(client_started / 1000 if client_started > 1e10 else client_started, tz=timezone.utc).isoformat()
-                supabase.table("submissions").update({"started_at": started_at_dt}).eq("id", existing[0]["id"]).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        current_app.logger.warning("sync-draft failed for exam %s user %s: %s", exam_id, g.user_id, str(e))
     finally:
         _release_lock(rlock, lock_key)
     resp = {"saved": True, "at": server_now}
@@ -947,14 +985,36 @@ def scan_save():
     if user_role not in ("guru", "admin_sekolah"):
         return jsonify({"error": "Forbidden"}), 403
 
-    # Grade MCQ answers
+    # Verify student belongs to same school (if profile has school_id)
+    try:
+        student_profile = supabase.table("profiles").select("school_id").eq("id", student_id).single().execute().data
+        if student_profile and student_profile.get("school_id"):
+            if user_role == "guru" and str(student_profile.get("school_id")) != str(user_school):
+                return jsonify({"error": "Siswa bukan dari sekolah Anda"}), 403
+    except Exception:
+        pass
+
+    # Grade MCQ answers (handle string + dict formats, multi-value keys, bonus)
     key = exam.get("answer_key", {})
     if isinstance(key, str):
         key = json.loads(key)
     detected = answers
     correct = 0
     for k, v in key.items():
-        if k in detected and detected[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
+        if k not in detected:
+            continue
+        ans = detected[k]
+        if isinstance(ans, dict):
+            ans = ans.get('answer', '')
+        if v in ("essay", "essay_text", "essay_canvas"):
+            continue
+        if v == "bonus":
+            if ans and str(ans).strip():
+                correct += 1
+        elif isinstance(v, list):
+            if ans in v:
+                correct += 1
+        elif ans == v:
             correct += 1
     mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
     score = round((correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
@@ -1003,6 +1063,11 @@ def scan_save():
     }
 
     if existing:
+        current_status = existing[0].get("status", "")
+        # Don't overwrite already-graded/published submissions
+        if current_status in ("graded", "published"):
+            return jsonify({"warning": "Sudah dinilai/dipublikasi, tidak ditimpa", "score": score}), 200
+        new_status = "graded" if current_status != "submitted" else "submitted"
         sub = supabase.table("submissions") \
             .update(update_data) \
             .eq("id", existing[0]["id"]) \
@@ -1195,7 +1260,7 @@ def ai_test_key():
     from app.services.ai_service import test_api_key
     result = test_api_key(g.user_id, key_id)
     if result.get("error"):
-        app.logger.warning("AI key test failed: %s", result["error"], extra={"user_id": g.user_id, "key_id": key_id})
+        current_app.logger.warning("AI key test failed: %s", result["error"], extra={"user_id": g.user_id, "key_id": key_id})
     return jsonify(result)
 
 

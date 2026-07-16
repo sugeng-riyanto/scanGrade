@@ -60,7 +60,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }})" data-exam-id="{{ exam.id }}">
+<div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }}, '{{ started_at }}')" data-exam-id="{{ exam.id }}">
     <!-- Top Bar -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex items-center justify-between border border-surface-100">
         <div class="flex items-center gap-3">
@@ -86,8 +86,8 @@
                 <span x-text="syncLabel"></span>
             </div>
             <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="formatTime(timeLeft)" :class="timeLeft < 60 ? 'text-red-500' : 'text-primary-600'"></div>
-            <button x-show="!submitted" @click="submitExam()" class="bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition">
-                <i class="fas fa-check mr-1.5"></i>Kumpulkan
+            <button x-show="!submitted" @click="submitExam()" :disabled="submitting" class="bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                <i class="fas mr-1.5" :class="submitting ? 'fa-spinner fa-spin' : 'fa-check'"></i><span x-text="submitting ? (lang==='en'?'Sending...':'Mengirim...') : (lang==='en'?'Submit':'Kumpulkan')"></span>
             </button>
         </div>
     </div>
@@ -811,12 +811,12 @@ function examApp(duration, totalQ) {
     if (!localStart && serverStart) {
         localStorage.setItem('exam_started_' + '{{ exam.id }}', String(effectiveStart));
     } else if (!localStart && !serverStart) {
-        // First load ever — save now as starting point
         localStorage.setItem('exam_started_' + '{{ exam.id }}', String(Date.now()));
     }
     return {
         timeLeft: initialTime,
         submitted: false,
+        submitting: false,
         page: 1,
         totalPages: {{ (exam.pdf_page_urls or []) | length }},
         pages: {{ (exam.pdf_page_urls or []) | tojson | safe }},
@@ -2221,12 +2221,10 @@ function examApp(duration, totalQ) {
         },
         submitExam(auto) {
             if (this.submitted) return;
-            // Auto-submit (timer habis / anti-cheat) — langsung submit tanpa konfirmasi
             if (auto) {
                 this._executeSubmit();
                 return;
             }
-            // Manual submit — tampilkan modal konfirmasi checklist
             this.submitChecks = { reviewed: false, sure: false };
             this.showSubmitConfirm = true;
         },
@@ -2289,6 +2287,7 @@ function examApp(duration, totalQ) {
                         } else {
                             alert('Gagal kirim: ' + (d.error || 'coba lagi'));
                             this.submitted = false;
+                            this.submitting = false;
                             this.syncStatus = 'error';
                             this.syncLabel = 'Gagal kirim — coba lagi';
                         }
@@ -2297,6 +2296,7 @@ function examApp(duration, totalQ) {
             })
             .catch(e => {
                 this.submitted = false;
+                this.submitting = false;
                 this.syncStatus = 'offline';
                 this.syncLabel = 'Offline — tersimpan lokal';
                 localStorage.setItem('exam_pending_submit_' + '{{ exam.id }}', JSON.stringify({ answers_json: answers, timestamp: Date.now() }));

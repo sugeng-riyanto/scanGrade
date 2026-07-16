@@ -145,8 +145,14 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
 
             if qtype == "mcq":
                 display = f"{ans}" if ans else "-"
-                if correct and ans == correct:
-                    display += " ✓"
+                if correct and ans:
+                    if correct == "bonus":
+                        display += " ✓"
+                    elif isinstance(correct, list):
+                        if ans in correct:
+                            display += " ✓"
+                    elif ans == correct:
+                        display += " ✓"
                 row_data.append(display)
             else:
                 row_data.append(ans if ans else "✓")
@@ -237,7 +243,13 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
 
             c.setFont("Helvetica", 9)
             if qtype == "mcq":
-                status = "✓" if correct and ans == correct else "✗"
+                if correct == "bonus":
+                    is_correct = bool(ans and str(ans).strip())
+                elif isinstance(correct, list):
+                    is_correct = ans in correct if ans else False
+                else:
+                    is_correct = correct and ans == correct
+                status = "✓" if is_correct else "✗"
                 c.drawString(50, y, f"Jawaban: {ans if ans else '-'} | Kunci: {correct} {status}")
                 y -= 14
             else:

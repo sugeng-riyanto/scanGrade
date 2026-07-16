@@ -35,19 +35,30 @@ def _mm_to_px_y(mm_val: float) -> int: return int(round(mm_val * PX_PER_MM_Y))
 # ── Preprocessing ──
 
 def deskew(img: np.ndarray) -> np.ndarray:
+    """Auto-deskew using Canny edge detection + Hough lines (memory-safe for high-res scans)."""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
-    coords = np.column_stack(np.where(thresh > 0))
-    if coords.shape[0] < 10:
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+
+    lines = cv2.HoughLines(edges, 1, np.pi / 180, 200)
+    if lines is None:
         return img
-    angle = cv2.minAreaRect(coords)[-1]
-    if angle < -45:
-        angle = 90 + angle
-    if abs(angle) < 0.5:
+
+    angles = []
+    for rho, theta in lines[:, 0]:
+        angle = np.degrees(theta) - 90
+        if abs(angle) < 45:
+            angles.append(angle)
+    if not angles:
+        return img
+
+    median_angle = np.median(angles)
+    if abs(median_angle) < 0.5:
         return img
     h, w = img.shape[:2]
-    M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
-    return cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+    rotated = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return rotated
 
 
 def gray_world_normalize(img: np.ndarray) -> np.ndarray:
