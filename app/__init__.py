@@ -173,6 +173,7 @@ def create_app(env=None):
     app.jinja_env.globals["sin"] = _math.sin
 
     from app.utils.csrf import generate_csrf_token, csrf_required
+    from app.utils.auth import login_required
     app.jinja_env.globals["csrf_token"] = generate_csrf_token
 
     def get_demo_settings():
