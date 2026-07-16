@@ -181,25 +181,22 @@ def download_template_murid():
     wb = Workbook()
     ws = wb.active
     ws.title = "Murid"
-    # Headers
-    headers = ["NPSN", "Tahun Ajaran", "NISN", "Email", "Nama Lengkap", "Kelas", "Password"]
+    headers = ["NISN", "Nama Lengkap", "Kelas", "Email", "No. HP", "Password"]
     hf = Font(bold=True, color="FFFFFF", size=11)
     hfill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
     for c, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=c, value=h)
         cell.font = hf; cell.fill = hfill; cell.alignment = Alignment(horizontal="center")
-    # Example rows with generated emails + passwords
-    for i, (nama, nisn) in enumerate([("Ahmad Budiman", "1234567801"), ("Citra Dewi", "1234567802")], 2):
+    for i, (nama, nisn, kelas) in enumerate([("Ahmad Budiman", "1234567801", "VII-A"), ("Citra Dewi", "1234567802", "VII-B")], 2):
         email = _generate_email(nama, domain)
         pw = _gen_password()
-        ws.cell(row=i, column=1, value=school.get("npsn", ""))
-        ws.cell(row=i, column=2, value="2025/2026")
-        ws.cell(row=i, column=3, value=nisn)
+        ws.cell(row=i, column=1, value=nisn)
+        ws.cell(row=i, column=2, value=nama)
+        ws.cell(row=i, column=3, value=kelas)
         ws.cell(row=i, column=4, value=email)
-        ws.cell(row=i, column=5, value=nama)
-        ws.cell(row=i, column=6, value="VII-A")
-        ws.cell(row=i, column=7, value=pw)
-    for col in range(1, 8):
+        ws.cell(row=i, column=5, value="")
+        ws.cell(row=i, column=6, value=pw)
+    for col in range(1, 7):
         ws.column_dimensions[chr(64+col)].width = 22
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="template_murid.xlsx",
@@ -221,25 +218,24 @@ def download_template_guru():
     wb = Workbook()
     ws = wb.active
     ws.title = "Guru"
-    headers = ["NPSN", "Tahun Ajaran", "NIP", "Email", "Nama Lengkap", "Mapel 1", "Mapel 2", "Mapel 3", "Password"]
+    headers = ["NIP", "Nama Lengkap", "Email", "Mata Pelajaran", "No. HP", "Email Pemulihan", "Password"]
     hf = Font(bold=True, color="FFFFFF", size=11)
     hfill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
     for c, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=c, value=h)
         cell.font = hf; cell.fill = hfill; cell.alignment = Alignment(horizontal="center")
-    for i, (nama, nip, mapels) in enumerate([("Budi Santoso", "19870101", subj_names[:2]), ("Siti Rahma", "19900202", subj_names[:1])], 2):
+    for i, (nama, nip, mapel) in enumerate([("Budi Santoso", "19870101", subj_names[0] if subj_names else ""), ("Siti Rahma", "19900202", subj_names[1] if len(subj_names) > 1 else "")], 2):
         email = _generate_email(nama, domain)
         pw = _gen_password()
-        ws.cell(row=i, column=1, value=school.get("npsn", ""))
-        ws.cell(row=i, column=2, value="2025/2026")
-        ws.cell(row=i, column=3, value=nip)
-        ws.cell(row=i, column=4, value=email)
-        ws.cell(row=i, column=5, value=nama)
-        for j, mn in enumerate(mapels):
-            ws.cell(row=i, column=6+j, value=mn)
-        ws.cell(row=i, column=9, value=pw)
-    for col in range(1, 10):
-        ws.column_dimensions[chr(64+col)].width = 20
+        ws.cell(row=i, column=1, value=nip)
+        ws.cell(row=i, column=2, value=nama)
+        ws.cell(row=i, column=3, value=email)
+        ws.cell(row=i, column=4, value=mapel)
+        ws.cell(row=i, column=5, value="")
+        ws.cell(row=i, column=6, value="")
+        ws.cell(row=i, column=7, value=pw)
+    for col in range(1, 8):
+        ws.column_dimensions[chr(64+col)].width = 22
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="template_guru.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -305,15 +301,14 @@ def _import_students(ws, sid, supabase, results):
             continue
         try:
             cols = [str(c or "").strip() for c in row]
-            # Support both old format (NISN, Nama, Kelas, Level, Email)
-            # and new template format (NPSN, Thn Ajaran, NISN, Email, Nama, Kelas, Password)
-            if len(cols) >= 7 and cols[2].isdigit() and len(cols[2]) >= 8:
-                # New template: NPSN(0), ThnAjaran(1), NISN(2), Email(3), Nama(4), Kelas(5), Pw(6)
-                nisn = cols[2]; nama = cols[4]; kelas = cols[5]; email = cols[3]
+            # New template: NISN(0), Nama(1), Kelas(2), Email(3), No.HP(4), Pw(5)
+            if len(cols) >= 6 and cols[0].isdigit() and len(cols[0]) >= 8:
+                nisn = cols[0]; nama = cols[1]; kelas = cols[2]; email = cols[3]; hp = cols[4]
+            # Old format: NISN(0), Nama(1), Kelas(2), Level(3), Email(4)
+            elif len(cols) >= 5 and cols[0].isdigit() and len(cols[0]) >= 8:
+                nisn = cols[0]; nama = cols[1]; kelas = cols[2]; email = cols[4]; hp = ""
             else:
-                # Old format: NISN(0), Nama(1), Kelas(2), Level(3), Email(4)
-                nisn = cols[0]; nama = cols[1]; kelas = cols[2] if len(cols) > 2 else ""
-                email = cols[4] if len(cols) > 4 else ""
+                nisn = cols[0]; nama = cols[1]; kelas = cols[2] if len(cols) > 2 else ""; email = cols[4] if len(cols) > 4 else ""; hp = ""
 
             if not nisn or not nama:
                 continue
@@ -356,16 +351,18 @@ def _import_teachers(ws, sid, supabase, results):
             continue
         try:
             cols = [str(c or "").strip() for c in row]
-            # Support both old format and new template format
-            if len(cols) >= 9 and cols[2].isdigit() and len(cols[2]) >= 5:
-                # New template: NPSN(0), ThnAjaran(1), NIP(2), Email(3), Nama(4), Mapel1(5), Mapel2(6), Mapel3(7), Pw(8)
-                nip = cols[2]; nama = cols[4]; email = cols[3]
-                mapels = [cols[i] for i in range(5, min(8, len(cols))) if cols[i]]
-                hp = ""
+            # New template: NIP(0), Nama(1), Email(2), Mapel(3), No.HP(4), EmailPemulihan(5), Pw(6)
+            if len(cols) >= 7 and cols[0].isdigit() and len(cols[0]) >= 5:
+                nip = cols[0]; nama = cols[1]; email = cols[2]
+                mapels = [cols[3]] if cols[3] else []
+                hp = cols[4]; recovery_email = cols[5]
+            # Old template: NIP(0), Nama(1), Mapel(2), Email(3), HP(4)
+            elif len(cols) >= 5 and cols[0].isdigit() and len(cols[0]) >= 5:
+                nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if cols[2] else []
+                email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
             else:
-                # Old format: NIP(0), Nama(1), Mapel(2), Email(3), HP(4)
                 nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if len(cols) > 2 and cols[2] else []
-                email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""
+                email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
 
             if not nip or not nama:
                 continue
@@ -391,7 +388,7 @@ def _import_teachers(ws, sid, supabase, results):
             })
             uid = res.user.id
             supabase.table("profiles").upsert({
-                "id": uid, "full_name": nama, "phone": hp, "role": "guru",
+                "id": uid, "full_name": nama, "phone": recovery_email or hp, "role": "guru",
                 "status": "active", "school_id": sid,
             }).execute()
             supabase.table("teachers").upsert({
