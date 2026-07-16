@@ -301,10 +301,13 @@ def _import_students(ws, sid, supabase, results):
             continue
         try:
             cols = [str(c or "").strip() for c in row]
-            # New template: NISN(0), Nama(1), Kelas(2), Email(3), No.HP(4), Pw(5)
-            if len(cols) >= 6 and cols[0].isdigit() and len(cols[0]) >= 8:
+            # OLD 9-col template: NPSN(0), ThnAjaran(1), NISN(2), Email(3), Nama(4), Kelas(5), Pw(6)
+            if len(cols) >= 7 and cols[0].isdigit() and cols[2].isdigit() and len(cols[0]) >= 5 and len(cols[2]) >= 8:
+                nisn = cols[2]; nama = cols[4]; kelas = cols[5]; email = cols[3]; hp = ""
+            # New 6-col template: NISN(0), Nama(1), Kelas(2), Email(3), No.HP(4), Pw(5)
+            elif len(cols) >= 6 and cols[0].isdigit() and len(cols[0]) >= 8:
                 nisn = cols[0]; nama = cols[1]; kelas = cols[2]; email = cols[3]; hp = cols[4]
-            # Old format: NISN(0), Nama(1), Kelas(2), Level(3), Email(4)
+            # Old 5-col: NISN(0), Nama(1), Kelas(2), Level(3), Email(4)
             elif len(cols) >= 5 and cols[0].isdigit() and len(cols[0]) >= 8:
                 nisn = cols[0]; nama = cols[1]; kelas = cols[2]; email = cols[4]; hp = ""
             else:
@@ -332,7 +335,7 @@ def _import_students(ws, sid, supabase, results):
             })
             uid = res.user.id
             supabase.table("profiles").upsert({
-                "id": uid, "full_name": nama, "phone": "", "role": "murid",
+                "id": uid, "full_name": nama, "phone": hp, "role": "murid",
                 "nisn": nisn, "class_id": class_id, "status": "active", "school_id": sid,
             }).execute()
             supabase.table("students").upsert({
@@ -351,12 +354,17 @@ def _import_teachers(ws, sid, supabase, results):
             continue
         try:
             cols = [str(c or "").strip() for c in row]
-            # New template: NIP(0), Nama(1), Email(2), Mapel(3), No.HP(4), EmailPemulihan(5), Pw(6)
-            if len(cols) >= 7 and cols[0].isdigit() and len(cols[0]) >= 5:
+            # OLD 9-col template: NPSN(0), ThnAjaran(1), NIP(2), Email(3), Nama(4), Mapel1-3(5-7), Pw(8)
+            if len(cols) >= 9 and cols[2].isdigit() and len(cols[2]) >= 5:
+                nip = cols[2]; nama = cols[4]; email = cols[3]
+                mapels = [cols[i] for i in range(5, min(8, len(cols))) if cols[i]]
+                hp = ""; recovery_email = ""
+            # NEW 7-col template: NIP(0), Nama(1), Email(2), Mapel(3), No.HP(4), EmailPemulihan(5), Pw(6)
+            elif len(cols) >= 7 and cols[0].isdigit() and len(cols[0]) >= 5:
                 nip = cols[0]; nama = cols[1]; email = cols[2]
                 mapels = [cols[3]] if cols[3] else []
                 hp = cols[4]; recovery_email = cols[5]
-            # Old template: NIP(0), Nama(1), Mapel(2), Email(3), HP(4)
+            # OLD 5-col format: NIP(0), Nama(1), Mapel(2), Email(3), HP(4)
             elif len(cols) >= 5 and cols[0].isdigit() and len(cols[0]) >= 5:
                 nip = cols[0]; nama = cols[1]; mapels = [cols[2]] if cols[2] else []
                 email = cols[3] if len(cols) > 3 else ""; hp = cols[4] if len(cols) > 4 else ""; recovery_email = ""
