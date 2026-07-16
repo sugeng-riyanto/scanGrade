@@ -818,7 +818,8 @@ def teachers():
         })
     total_pages = max(1, -(-total // per_page))
     return render_template("admin_sekolah/teachers.html", teachers=teachers_list, subjects=subjects,
-                           q=q, page=page, total=total, total_pages=total_pages, per_page=per_page)
+                           q=q, page=page, total=total, total_pages=total_pages, per_page=per_page,
+                           teacher_ids=[t["id"] for t in teachers_raw])
 
 
 @admin_sekolah_bp.route("/teachers/create", methods=["POST"])
