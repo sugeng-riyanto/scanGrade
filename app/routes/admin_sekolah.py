@@ -286,11 +286,10 @@ def import_excel():
             break
 
     log_activity("import", "school", sid, new_data={"students": results["students"], "teachers": results["teachers"], "subjects": results["subjects"], "errors": len(results["errors"])}, user_id=g.user_id)
-    flash(
-        f"Impor selesai: {results['students']} murid, {results['teachers']} guru, {results['subjects']} mapel. "
-        f"{len(results['errors'])} error.",
-        "success" if not results["errors"] else "warning",
-    )
+    msg = f"Impor selesai: {results['students']} murid, {results['teachers']} guru, {results['subjects']} mapel. {len(results['errors'])} error."
+    if results["errors"]:
+        msg += " " + results["errors"][0]
+    flash(msg, "success" if not results["errors"] else "warning")
     return redirect("/admin-sekolah/import")
 
 
