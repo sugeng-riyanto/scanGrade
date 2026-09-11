@@ -19,7 +19,16 @@ def validate_csrf():
         return True
     if os.environ.get("LOAD_TEST") == "true":
         return True
-    token = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token', '')
+    token = (
+        request.headers.get('X-CSRF-Token', '')
+        or request.form.get('_csrf_token', '')
+    )
+    # Also check JSON body for CSRF token
+    if not token and request.is_json:
+        try:
+            token = (request.get_json(silent=True) or {}).get('_csrf_token', '')
+        except Exception:
+            pass
     expected = session.get('_csrf_token', '')
     if not expected or not token:
         return False

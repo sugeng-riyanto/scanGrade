@@ -69,3 +69,10 @@ app/static/css/input.css
 
 # Load test artifacts
 loadtest*.csv
+# VPS terminal-proxy credentials (moved out of .env)
+.env.vps-credentials
+
+# Test artifacts
+cookies*.txt
+csrf*.txt
+.freebuff/

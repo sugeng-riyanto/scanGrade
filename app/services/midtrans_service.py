@@ -291,10 +291,13 @@ https://scangrade.web.id""", "plain", "utf-8")
                 msg["Subject"] = "🎉 ScanGrade — Pembayaran Berhasil! Akun Aktif"
                 msg["From"] = "ScanGrade <scangrade9@gmail.com>"
                 msg["To"] = recipient
-                context = ssl.create_default_context()
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-                    server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
-                    server.sendmail("scangrade9@gmail.com", recipient, msg.as_string())
+                smtp_email = current_app.config.get("SMTP_EMAIL", "")
+                smtp_pass = current_app.config.get("SMTP_PASSWORD", "")
+                if smtp_email and smtp_pass:
+                    context = ssl.create_default_context()
+                    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                        server.login(smtp_email, smtp_pass)
+                        server.sendmail(smtp_email, recipient, msg.as_string())
                 current_app.logger.info(f"Activation email sent to {recipient}")
     except Exception as e:
         current_app.logger.error(f"Failed to send activation email: {e}")

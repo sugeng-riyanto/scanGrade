@@ -115,8 +115,8 @@ python wsgi.py
 | `SUPABASE_SERVICE_KEY` | Ya | Service role key (backend only, bypass RLS) |
 | `FLASK_SECRET_KEY` | Ya | Min 32 karakter random |
 | `FLASK_ENV` | Tidak | `development` (default) atau `production` |
-| `NGROK_URL` | Tidak | Auto-filled oleh start-dev.sh |
-| `FONNTE_TOKEN` | Tidak | WhatsApp gateway token |
+| `NGROK_DOMAIN` | Tidak | Auto-filled oleh start-dev.sh |
+| `FONNTE_API_KEY` | Tidak | WhatsApp gateway token |
 | `REDIS_URL` | Tidak | `redis://localhost:6379/0` |
 
 ## Arsitektur Offline-First
