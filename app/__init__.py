@@ -7,6 +7,7 @@ import click
 from flask import Flask, g, request, jsonify, redirect, render_template, make_response
 from flask_cors import CORS
 from supabase import create_client, Client
+from app.utils.auth import login_required
 
 from app.config import get_config
 
@@ -121,6 +122,7 @@ def create_app(env=None):
     _register_request_logging(app)
     _register_performance_middleware(app)
     _register_rate_limiter(app)
+    _register_csrf_protection(app)
 
     import json as _json
 
@@ -330,6 +332,7 @@ def create_app(env=None):
         })
 
     @app.route("/monitor")
+    @login_required
     def monitor_page():
         """Simple server monitoring page ΓÇö reads /var/log/scangrade-monitor.log."""
         log_path = "/var/log/scangrade-monitor.log"
@@ -446,6 +449,46 @@ def _register_rate_limiter(app):
     get_rate_limiter(app)
 
 
+def _register_csrf_protection(app):
+    """Global CSRF protection — validates token on all state-changing requests.
+
+    Exemptions:
+    - Bearer token auth (Authorization: Bearer ...) — API keys are CSRF-safe
+    - Webhook endpoints — external callbacks with their own auth
+    - Public read-only endpoints
+    - LOAD_TEST mode (existing bypass)
+    """
+    from app.utils.csrf import validate_csrf
+    from flask import session as _session
+
+    @app.before_request
+    def csrf_protect():
+        if request.method not in ('POST', 'PUT', 'DELETE', 'PATCH'):
+            return None
+        # Bearer token auth is CSRF-safe (requires preflight)
+        auth = request.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            return None
+        # Webhook endpoints have their own signature verification
+        if request.path.startswith('/webhook/'):
+            return None
+        # Public endpoints (no auth, no state change)
+        if request.path == '/api/public/privacy-info':
+            return None
+        # Validate CSRF token
+        if not validate_csrf():
+            return jsonify({"error": "CSRF token invalid"}), 403
+        return None
+
+    @app.after_request
+    def ensure_session_cookie(response):
+        """Persist session cookie on every response so the CSRF token is available."""
+        if _session.modified:
+            response = app.make_response(response)
+            app.session_interface.save_session(app, _session, response)
+        return response
+
+
 def _register_performance_middleware(app):
     @app.after_request
     def add_performance_headers(response):
@@ -514,6 +557,7 @@ def _register_request_logging(app):
         return response
 
     @app.route("/metrics")
+    @login_required
     def metrics():
         import psutil
         _metrics["active_users"] = len(_metrics.get("response_times", [])) or 0

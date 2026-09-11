@@ -179,10 +179,13 @@ https://scangrade.web.id""", "plain", "utf-8")
             msg["Subject"] = "🔐 ScanGrade — Kata Sandi Berhasil Diatur Ulang"
             msg["From"] = "ScanGrade <scangrade9@gmail.com>"
             msg["To"] = admin_email
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-                server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
-                server.sendmail("scangrade9@gmail.com", admin_email, msg.as_string())
+            smtp_email = current_app.config.get("SMTP_EMAIL", "")
+            smtp_pass = current_app.config.get("SMTP_PASSWORD", "")
+            if smtp_email and smtp_pass:
+                context = ssl.create_default_context()
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                    server.login(smtp_email, smtp_pass)
+                    server.sendmail(smtp_email, admin_email, msg.as_string())
     except Exception as e:
         pass  # Email is best-effort; password is returned in response
     return jsonify({"success": True, "password": new_pw, "email_sent": bool(admin_email if 'admin_email' in dir() else False)})

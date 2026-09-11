@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import time
-from flask import Blueprint, request, jsonify, g, render_template, redirect, url_for, make_response, current_app
+from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
 from app.utils.auth import login_required, get_supabase, get_auth_client
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
@@ -407,9 +407,14 @@ def _send_email(to_email: str, subject: str, body: str):
     msg["From"] = "ScanGrade <scangrade9@gmail.com>"
     msg["To"] = to_email
     context = ssl.create_default_context()
+    smtp_email = current_app.config.get("SMTP_EMAIL", "")
+    smtp_pass = current_app.config.get("SMTP_PASSWORD", "")
+    if not smtp_email or not smtp_pass:
+        current_app.logger.warning("SMTP not configured — email not sent")
+        return
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-        server.login("scangrade9@gmail.com", "tjyv mycd pznp fmqn")
-        server.sendmail("scangrade9@gmail.com", to_email, msg.as_string())
+        server.login(smtp_email, smtp_pass)
+        server.sendmail(smtp_email, to_email, msg.as_string())
 
 
 @auth_bp.route("/forgot-password", methods=["GET", "POST"])
@@ -551,7 +556,9 @@ def verify_reset_code():
     if stored != code:
         return render_template("auth/verify_code.html", email=email, error="Kode salah. Coba lagi.")
 
-    # Code OK — show password reset form
+    # Code OK — consume it to prevent replay, and set session marker
+    _delete_reset_code(email)
+    session["reset_email"] = email
     return render_template("auth/set_new_password.html", email=email)
 
 
@@ -568,9 +575,9 @@ def set_new_password():
     if len(password) < 6:
         return render_template("auth/set_new_password.html", email=email, error="Password minimal 6 karakter")
 
-    # Verify code still valid
-    stored = _get_reset_code(email)
-    if not stored:
+    # Verify session marker (code was consumed during verification)
+    session_email = session.get("reset_email", "")
+    if not session_email or session_email != email:
         return render_template("auth/set_new_password.html", email=email, error="Sesi kedaluwarsa. Ulangi proses reset.")
 
     # Find user and update password
@@ -602,7 +609,7 @@ def set_new_password():
 
     try:
         auth_client.admin.update_user_by_id(user_id, {"password": password})
-        _delete_reset_code(email)
+        session.pop("reset_email", None)
 
         # Role-based redirect
         role_redirects = {

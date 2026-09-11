@@ -537,7 +537,12 @@ def submit_exam(exam_id):
             if request.is_json:
                 return jsonify({"success": True, "note": "already_submitted"})
             return redirect("/student/results")
-        supabase.table("submissions").insert(submission).execute()
+        # Check for existing draft submission (from sync_draft) and update it
+        draft = supabase.table("submissions").select("id,status").eq("exam_id", exam_id).eq("student_id", g.user_id).eq("status", "draft").execute().data
+        if draft:
+            supabase.table("submissions").update(submission).eq("id", draft[0]["id"]).execute()
+        else:
+            supabase.table("submissions").insert(submission).execute()
         log_activity("submit", "submission", None, new_data={"exam_id": exam_id, "score": score}, user_id=g.user_id)
     except Exception as e:
         import traceback

@@ -796,6 +796,20 @@ def grade_auto_save(submission_id):
     if not data:
         return jsonify({"error": "No data"}), 400
     supabase = get_supabase()
+    # Verify ownership: submission must belong to an exam the user owns or is in their school
+    role = g.get("user_role")
+    if role not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Forbidden"}), 403
+    sub_data = supabase.table("submissions").select("id, exam_id").eq("id", submission_id).single().execute().data
+    if not sub_data:
+        return jsonify({"error": "Submission tidak ditemukan"}), 404
+    exam = supabase.table("exams").select("teacher_id, school_id").eq("id", sub_data["exam_id"]).single().execute().data
+    if not exam:
+        return jsonify({"error": "Exam tidak ditemukan"}), 404
+    if role == "guru" and exam.get("teacher_id") != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
+    if role == "admin_sekolah" and str(exam.get("school_id")) != str(g.get("user_school_id")):
+        return jsonify({"error": "Forbidden"}), 403
     # Save teacher_feedback draft into submission
     feedback = data.get("teacher_feedback", {})
     supabase.table("submissions") \
@@ -822,6 +836,11 @@ def grade_batch():
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
+    # School/ownership access check
+    if g.user_role == "guru" and exam.get("teacher_id") != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
+    if g.user_role == "admin_sekolah" and str(exam.get("school_id")) != str(g.get("user_school_id")):
+        return jsonify({"error": "Forbidden"}), 403
     # Parse JSON fields that may be strings
     for _fld in ("answer_key", "question_types", "question_weights", "question_pages"):
         _v = exam.get(_fld)
@@ -1092,6 +1111,18 @@ def scan_save():
 @login_required
 def scan_image(exam_id, student_id):
     """Serve the annotated scan image with answer overlays."""
+    # Verify school access: exam must belong to user's school (except super_admin)
+    role = g.get("user_role")
+    if role != "super_admin":
+        supabase = get_supabase()
+        exam = supabase.table("exams").select("school_id, teacher_id").eq("id", exam_id).single().execute().data
+        if not exam:
+            return jsonify({"error": "Exam tidak ditemukan"}), 404
+        user_school = g.get("user_school_id")
+        if role == "guru" and exam.get("teacher_id") != g.user_id:
+            return jsonify({"error": "Forbidden"}), 403
+        if role in ("guru", "admin_sekolah") and str(exam.get("school_id")) != str(user_school):
+            return jsonify({"error": "Forbidden"}), 403
     for ext in (".png", ".jpg"):
         path = os.path.join(UPLOAD_SCAN_DIR, exam_id, student_id + ext)
         if os.path.exists(path):
@@ -1267,7 +1298,9 @@ def ai_test_key():
 @api_bp.route("/ai/test-key-raw", methods=["POST"])
 @login_required
 def ai_test_key_raw():
-    """Test a raw API key (before saving to DB)."""
+    """Test a raw API key (before saving to DB). Teachers/admins only."""
+    if g.user_role not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Forbidden"}), 403
     data = request.get_json() or {}
     api_key = data.get("api_key", "")
     provider = data.get("provider", "gemini")
@@ -1282,6 +1315,9 @@ def ai_test_key_raw():
 @api_bp.route("/grade/ai-suggest", methods=["POST"])
 @login_required
 def ai_suggest():
+    """AI grading suggestion — teachers/admins only."""
+    if g.user_role not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Forbidden"}), 403
     data = request.get_json()
     if not data:
         raise ValidationError("request body", "Data tidak boleh kosong")
@@ -2046,6 +2082,7 @@ def api_list_percakapan():
         data = query.order("last_message_at", desc=True).limit(limit).offset(offset).execute().data or []
         # Filter to same-school conversations only (for non-super_admin)
         school_id = g.get("user_school_id")
+        role = g.get("user_role", "")
         if school_id and role != "super_admin":
             filtered = []
             for c in data:
@@ -2413,6 +2450,7 @@ def api_contacts():
     except Exception as e:
         return jsonify({"error": str(e)[:100], "contacts": []}), 500
 
+@api_bp.route("/account/export-data", methods=["GET"])
 @login_required
 def api_export_data():
     """Export all personal data (UU PDP right to data portability)."""

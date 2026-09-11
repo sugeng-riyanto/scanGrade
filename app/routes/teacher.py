@@ -1520,13 +1520,14 @@ def api_penalty_appeal_handle(submission_id):
 
 @teacher_bp.route("/publish/<exam_id>", methods=["GET", "POST"])
 @subscription_write_required
-@require_school_access
+@require_school_access("exams", "exam_id")
 @teacher_or_admin_required
 def publish_scores(exam_id):
     supabase = get_supabase()
     if request.method == "GET":
         exam = supabase.table("exams").select("id,title,passing_score").eq("id", exam_id).single().execute().data
-        subs = supabase.table("submissions").select("id,student_id,final_score,status,profiles(full_name)").eq("exam_id", exam_id).order("profiles.full_name").execute().data or []
+        subs = supabase.table("submissions").select("id,student_id,final_score,status,profiles(full_name)").eq("exam_id", exam_id).execute().data or []
+        subs.sort(key=lambda s: (s.get("profiles") or {}).get("full_name", ""))
         return render_template("teacher/publish_preview.html", exam=exam, submissions=subs)
     _recalculate_scores(exam_id)
     supabase.table("submissions") \
@@ -1726,9 +1727,11 @@ def api_grading_queue(exam_id):
             ans = answers.get(ei)
             text = ""
             if isinstance(ans, dict):
-                text = (ans.get("text") or "").strip()
-                if not preview and text:
-                    preview = text[:150]
+                text = (ans.get("text") or ans.get("answer", "") or "").strip()
+            elif isinstance(ans, str):
+                text = ans.strip()
+            if not preview and text:
+                preview = text[:150]
             per_question.append({
                 "index": ei,
                 "score": fb_scores.get(ei),

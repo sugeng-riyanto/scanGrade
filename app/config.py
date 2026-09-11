@@ -15,6 +15,8 @@ class Config:
     APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
     MIDTRANS_SERVER_KEY = os.getenv("MIDTRANS_SERVER_KEY", "")
     FONNTE_API_KEY = os.getenv("FONNTE_API_KEY", "")
+    SMTP_EMAIL = os.getenv("SMTP_EMAIL", "scangrade9@gmail.com")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     REDIS_URL = os.getenv("REDIS_URL", "")
     APP_URL = os.getenv("APP_URL", "http://localhost:5000")
     DEMO_AI_KEY = os.getenv("DEMO_AI_KEY", "")
