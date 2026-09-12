@@ -2128,12 +2128,17 @@ def assignments():
                 return jsonify({"error": "Class and subject required"}), 400
             return redirect("/teacher/dashboard")
         try:
+            # on_conflict names the constraint that a repeat should collide with.
+            # Without it supabase-py targets the primary key, and this payload has
+            # no `id` — so there is nothing to conflict with, and assigning a pair
+            # that already exists fails on UNIQUE(teacher_id, class_id, subject_id)
+            # with 23505 instead of updating the row it was meant to update.
             res = supabase.table("teacher_assignments").upsert({
                 "teacher_id": g.user_id,
                 "class_id": class_id,
                 "subject_id": subject_id,
                 "school_id": school_id,
-            }).execute()
+            }, on_conflict="teacher_id,class_id,subject_id").execute()
             aid = res.data[0]["id"] if res.data else None
             log_activity("create", "teacher_assignment", aid, new_data={"class_id": class_id, "subject_id": subject_id}, user_id=g.user_id)
             if request.is_json or request.headers.get("HX-Request"):

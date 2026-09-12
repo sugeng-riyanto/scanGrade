@@ -175,12 +175,17 @@ def list_teacher_assignments(teacher_id: str, school_id: str) -> list:
 
 
 def create_teacher_assignment(teacher_id: str, class_id: str, subject_id: str, school_id: str) -> dict:
+    # on_conflict names the constraint that a repeat should collide with. Without
+    # it supabase-py targets the primary key, and this payload has no `id` — so
+    # there is nothing to conflict with, and re-assigning a pair that already
+    # exists fails on UNIQUE(teacher_id, class_id, subject_id) with 23505 instead
+    # of updating the row it was meant to update.
     res = get_supabase().table("teacher_assignments").upsert({
         "teacher_id": teacher_id,
         "class_id": class_id,
         "subject_id": subject_id,
         "school_id": school_id,
-    }).execute()
+    }, on_conflict="teacher_id,class_id,subject_id").execute()
     return res.data[0] if res.data else {}
 
 
