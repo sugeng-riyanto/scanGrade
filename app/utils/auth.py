@@ -1,4 +1,7 @@
+import base64
 import functools
+import hashlib
+import json
 import time
 from flask import g, request, jsonify, current_app, redirect, flash
 from supabase import Client
@@ -54,6 +57,109 @@ def check_subscription_write(school_id=None):
     return False, msg
 
 
+# ── Session resolution cache ─────────────────────────────────────
+# Validating a token and reading the profile costs two Supabase round-trips
+# (~290 ms measured from this deployment) and used to be paid on *every*
+# authenticated request. Caching the resolved session takes that off the hot
+# path. The TTL is deliberately short so a role or status change still
+# propagates within seconds, and logout invalidates explicitly so a revoked
+# token can't ride the cache. Set AUTH_SESSION_CACHE_TTL=0 to disable.
+AUTH_SESSION_TTL_DEFAULT = 30
+
+
+def _session_ttl():
+    try:
+        return int(current_app.config.get("AUTH_SESSION_CACHE_TTL", AUTH_SESSION_TTL_DEFAULT) or 0)
+    except Exception:
+        return AUTH_SESSION_TTL_DEFAULT
+
+
+def _session_key(token):
+    return "authsess:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _jwt_expired(token):
+    """Read `exp` from the JWT payload.
+
+    The signature was already verified by Supabase when the session was cached,
+    so this local read is only used to stop an expired token from riding the
+    cache for the remainder of its TTL.
+    """
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        exp = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8")).get("exp")
+        return bool(exp) and time.time() >= float(exp)
+    except Exception:
+        return False
+
+
+def _fetch_session(token):
+    """The two Supabase round-trips: validate the token, then read the profile."""
+    user = get_auth_client().auth.get_user(token)
+    meta = user.user.user_metadata or {}
+    try:
+        pd = (
+            get_supabase()
+            .table("profiles")
+            .select("role, school_id, status")
+            .eq("id", user.user.id)
+            .single()
+            .execute()
+            .data
+            or {}
+        )
+    except Exception:
+        pd = {}
+
+    school_id = pd.get("school_id") or meta.get("school_id")
+    if school_id == "None":
+        school_id = None
+    return {
+        "user_id": user.user.id,
+        "email": user.user.email,
+        "name": meta.get("full_name", ""),
+        "role": _normalize_role(pd.get("role") or meta.get("role", "murid")),
+        "school_id": school_id,
+        "status": pd.get("status", "active"),
+    }
+
+
+def _session_for(token):
+    """Resolve a token to session data, via the cache when possible."""
+    if _jwt_expired(token):
+        # Same outcome as a rejected token: let the caller try a refresh.
+        raise ValueError("access token expired")
+
+    from app.utils.kv_cache import cache_get, cache_set
+
+    cached = cache_get(_session_key(token))
+    if cached:
+        return cached
+
+    data = _fetch_session(token)
+    cache_set(_session_key(token), data, _session_ttl())
+    return data
+
+
+def _apply_session(data, token):
+    g.user_id = data["user_id"]
+    g.user_token = token
+    g.user_email = data.get("email", "")
+    g.user_name = data.get("name", "")
+    g.user_role = data.get("role", "murid")
+    g.user_school_id = data.get("school_id")
+    g.user_status = data.get("status", "active")
+
+
+def invalidate_session(token):
+    """Drop a cached session so the token stops working immediately (logout)."""
+    if not token:
+        return
+    from app.utils.kv_cache import cache_delete
+    cache_delete(_session_key(token))
+
+
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -61,38 +167,7 @@ def login_required(f):
         if not token:
             return _unauthorized()
         try:
-            supabase = get_auth_client()
-            user = supabase.auth.get_user(token)
-            g.user_id = user.user.id
-            g.user_token = token
-            g.user_email = user.user.email
-            g.user_name = user.user.user_metadata.get("full_name", "")
-
-            # Fetch fresh profile data from profiles table
-            db = get_supabase()
-            try:
-                profile = (
-                    db.table("profiles")
-                    .select("*")
-                    .eq("id", g.user_id)
-                    .single()
-                    .execute()
-                )
-                pd = profile.data or {}
-            except Exception:
-                pd = {}
-
-            if pd:
-                g.user_role = _normalize_role(pd.get("role", "murid"))
-                g.user_school_id = pd.get("school_id") or user.user.user_metadata.get("school_id")
-                if g.user_school_id == "None": g.user_school_id = None
-                g.user_status = pd.get("status", "active")
-            else:
-                meta = user.user.user_metadata
-                g.user_role = _normalize_role(meta.get("role", "murid"))
-                g.user_school_id = meta.get("school_id")
-                if g.user_school_id == "None": g.user_school_id = None
-                g.user_status = "active"
+            _apply_session(_session_for(token), token)
 
             # Block pending users from accessing protected routes
             if g.get("user_status") == "pending":
