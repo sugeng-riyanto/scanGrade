@@ -19,6 +19,14 @@ class TestCustomExceptions:
         assert "50MB" in err.user_message
         assert err.details["file_size"] == 100_000_000
 
+    def test_file_too_large_error_uses_configured_limit(self):
+        """The message must quote the same limit MAX_CONTENT_LENGTH enforces."""
+        from app.config import Config
+        from app.errors import FileTooLargeError
+        err = FileTooLargeError(Config.MAX_CONTENT_LENGTH + 1, Config.MAX_CONTENT_LENGTH)
+        assert "50MB" in err.user_message
+        assert "50MB" in err.message
+
     def test_invalid_pdf_error(self):
         from app.errors import InvalidPDFError
         err = InvalidPDFError("File is corrupt")
@@ -112,6 +120,9 @@ class TestErrorHandlers:
     def debug_app(self):
         app = Flask(__name__)
         app.config["DEBUG"] = True
+        # Flask turns PROPAGATE_EXCEPTIONS on when DEBUG is on, which would let
+        # the exception escape instead of reaching the 500 handler we're testing.
+        app.config["PROPAGATE_EXCEPTIONS"] = False
         from app.handlers.error_handlers import register_error_handlers
         register_error_handlers(app)
         return app
@@ -120,44 +131,54 @@ class TestErrorHandlers:
     def debug_client(self, debug_app):
         return debug_app.test_client()
 
+    # The error handlers only emit JSON when the caller asks for it
+    # (Accept: application/json or a /api/ path) — see _wants_json().
+    JSON = {"Accept": "application/json"}
+
     def test_404_handler(self, client):
-        resp = client.get("/nonexistent")
+        resp = client.get("/nonexistent", headers=self.JSON)
         assert resp.status_code == 404
         data = resp.get_json()
         assert data["error"] == "NOT_FOUND"
         assert data["success"] is False
 
-    def test_413_handler(self, client):
-        resp = client.get("/", data={}, content_type="application/json",
-                          headers={"Content-Length": "99999999", "Accept": "application/json"})
-        # Can't easily trigger 413 without sending large data, so test with a direct call
-        from app.handlers.error_handlers import register_error_handlers
-        with client.application.app_context():
-            handler = client.application._find_error_handler(413)
-            # If found, just verify the response shape via test client directly
-        # Alternative: test the handler returns proper JSON
-        resp2 = client.get("/api/test")
-        if resp2.status_code == 413:
-            data = resp2.get_json()
-            assert data["error"] == "FILE_TOO_LARGE"
+    def test_413_handler(self, app):
+        """Oversized uploads must produce a JSON FILE_TOO_LARGE error."""
+        app.config["MAX_CONTENT_LENGTH"] = 16
+
+        @app.route("/upload", methods=["POST"])
+        def upload():
+            from flask import request as _r
+            _r.get_data()  # forces Werkzeug to enforce MAX_CONTENT_LENGTH
+            return "ok"
+
+        client = app.test_client()
+        resp = client.post("/upload", data=b"x" * 64, headers=self.JSON)
+        assert resp.status_code == 413
+        data = resp.get_json()
+        assert data["error"] == "FILE_TOO_LARGE"
+        assert data["success"] is False
 
     def test_500_handler_returns_generic_message_in_production(self, client):
         @client.application.route("/trigger-500")
         def trigger():
             raise RuntimeError("Test error")
 
-        resp = client.get("/trigger-500")
+        resp = client.get("/trigger-500", headers=self.JSON)
         assert resp.status_code == 500
         data = resp.get_json()
         assert data["error"] == "SERVER_ERROR"
         assert "Tim kami" in data["message"]
+        # Production responses must never leak internals.
+        assert "traceback" not in data
+        assert "Test error" not in data["message"]
 
     def test_500_handler_returns_traceback_in_debug(self, debug_client):
         @debug_client.application.route("/trigger-500-debug")
         def trigger():
             raise RuntimeError("Debug traceback")
 
-        resp = debug_client.get("/trigger-500-debug")
+        resp = debug_client.get("/trigger-500-debug", headers=self.JSON)
         assert resp.status_code == 500
         data = resp.get_json()
         assert data["error"] == "SERVER_ERROR"

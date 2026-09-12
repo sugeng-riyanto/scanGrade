@@ -9,11 +9,40 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def _smtp_settings():
+    """Resolve SMTP settings the same way the rest of the app does.
+
+    The project stores Gmail credentials as SMTP_EMAIL / SMTP_PASSWORD
+    (app.config.Config). Reading SMTP_USER / SMTP_PASS here — as this module
+    used to — silently produced "SMTP not configured" and no email was ever
+    delivered.
+    """
+    try:
+        from flask import current_app
+        cfg = current_app.config
+        host = cfg.get("SMTP_HOST") or os.getenv("SMTP_HOST") or "smtp.gmail.com"
+        port = int(cfg.get("SMTP_PORT") or os.getenv("SMTP_PORT") or 465)
+        user = cfg.get("SMTP_EMAIL") or os.getenv("SMTP_EMAIL") or ""
+        password = cfg.get("SMTP_PASSWORD") or os.getenv("SMTP_PASSWORD") or ""
+        sender = cfg.get("SMTP_FROM") or os.getenv("SMTP_FROM") or user
+    except Exception:
+        host = os.getenv("SMTP_HOST") or "smtp.gmail.com"
+        port = int(os.getenv("SMTP_PORT") or 465)
+        user = os.getenv("SMTP_EMAIL") or ""
+        password = os.getenv("SMTP_PASSWORD") or ""
+        sender = os.getenv("SMTP_FROM") or user
+    return host, port, user, password, sender
+
+
 def send_whatsapp(phone: str, message: str):
+    """Optional WhatsApp channel — disabled unless FONNTE_API_KEY is set.
+
+    Email is the active notification channel for this deployment.
+    """
     api_key = os.getenv("FONNTE_API_KEY")
-    if not api_key:
-        logger.warning("FONNTE_API_KEY not set, skipping WhatsApp")
-        return
+    if not api_key or not phone:
+        logger.debug("WhatsApp channel not configured, skipping")
+        return False
     try:
         requests.post(
             "https://api.fonnte.com/send",
@@ -21,21 +50,19 @@ def send_whatsapp(phone: str, message: str):
             headers={"Authorization": api_key},
             timeout=10,
         )
+        return True
     except Exception as e:
         logger.error(f"Fonnte send failed: {e}")
+        return False
 
 
 def send_email(to_email: str, subject: str, body_html: str):
-    """Send email via SMTP. Falls back to logging if not configured."""
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = os.getenv("SMTP_PORT", "587")
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_pass = os.getenv("SMTP_PASS")
-    from_email = os.getenv("SMTP_FROM", "noreply@scangrade.app")
+    """Send email via the configured SMTP account. Returns True on success."""
+    smtp_host, smtp_port, smtp_user, smtp_pass, from_email = _smtp_settings()
 
-    if not smtp_host or not smtp_user or not smtp_pass:
-        logger.info(f"SMTP not configured, would send email to {to_email}: {subject}")
-        return
+    if not smtp_user or not smtp_pass:
+        logger.warning("SMTP not configured (SMTP_EMAIL/SMTP_PASSWORD missing); email to %s skipped", to_email)
+        return False
 
     try:
         msg = MIMEMultipart("alternative")
@@ -44,12 +71,22 @@ def send_email(to_email: str, subject: str, body_html: str):
         msg["Subject"] = subject
         msg.attach(MIMEText(body_html, "html"))
 
-        with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, [to_email], msg.as_string())
+        if smtp_port == 465:
+            import ssl
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, [to_email], msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, [to_email], msg.as_string())
+        logger.info("Email sent to %s (%s)", to_email, subject)
+        return True
     except Exception as e:
         logger.error(f"SMTP send failed to {to_email}: {e}")
+        return False
 
 
 def notify_approval(email: str, phone: str, school_name: str, code: str, expires_at_str: str):
@@ -80,7 +117,9 @@ def notify_approval(email: str, phone: str, school_name: str, code: str, expires
         </div>
     </div>
     """
-    send_email(email, subject, body_html)
+    sent = send_email(email, subject, body_html)
+    if not sent:
+        logger.warning("Activation code for %s could not be emailed; code=%s", email, code)
 
     wa_msg = (
         f"*Aktivasi Akun ScanGrade*\n\n"

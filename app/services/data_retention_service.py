@@ -94,35 +94,72 @@ def delete_draft_submissions(before: datetime = None):
         return 0
 
 
+def _last_activity_at(profile, supabase):
+    """Best-effort timestamp of the most recent activity for a profile.
+
+    Falls back to the profile's own timestamps so an account that simply has no
+    submissions (every teacher, admin, or brand-new student) is NOT treated as
+    inactive — that mistake wiped real names once already.
+    """
+    candidates = [profile.get("updated_at"), profile.get("created_at")]
+    try:
+        sub = (
+            supabase.table("submissions")
+            .select("created_at")
+            .eq("student_id", profile["id"])
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if sub:
+            candidates.append(sub[0].get("created_at"))
+    except Exception:
+        pass
+    stamps = [str(c) for c in candidates if c]
+    return max(stamps) if stamps else None
+
+
 def anonymize_inactive_profiles(before: datetime = None):
-    """Anonymize profiles of accounts inactive beyond retention period.
-    Sets full_name to placeholder, clears personal data fields.
+    """Anonymize student accounts inactive beyond the retention period.
+
+    Only ``murid`` rows are eligible, and only when their most recent activity
+    is older than the cutoff. Staff accounts and freshly created accounts are
+    never touched.
     """
     supabase = get_supabase()
     if before is None:
         before = datetime.now(timezone.utc) - timedelta(days=RETENTION["inactive_accounts"])
     cutoff = before.isoformat()
     try:
-        profiles = supabase.table("profiles").select("id").is_("deleted_at", "null").is_("anonymized_at", "null").execute().data or []
+        profiles = (
+            supabase.table("profiles")
+            .select("id,role,created_at,updated_at")
+            .eq("role", "murid")
+            .is_("deleted_at", "null")
+            .is_("anonymized_at", "null")
+            .execute()
+            .data
+        ) or []
         anonymized = 0
         for p in profiles:
             try:
-                # Check last activity — we consider no submissions in retention window as inactive
-                sub = supabase.table("submissions").select("id").eq("student_id", p["id"]).order("created_at", desc=True).limit(1).execute().data
-                if sub:
-                    last_active = sub[0].get("created_at", "")
-                    if last_active and str(last_active) > cutoff:
-                        continue
+                last_active = _last_activity_at(p, supabase)
+                if last_active and last_active > cutoff:
+                    continue
+                if not last_active:
+                    # No usable signal — skip rather than guess.
+                    continue
                 supabase.table("profiles").update({
                     "full_name": "Akun Dinonaktifkan",
                     "phone": None,
                     "anonymized_at": datetime.now(timezone.utc).isoformat()
                 }).eq("id", p["id"]).execute()
                 anonymized += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Retention: anonymize skipped for %s: %s", p.get("id"), e)
         if anonymized:
-            logger.info("Retention: anonymized %d inactive profiles", anonymized)
+            logger.info("Retention: anonymized %d inactive student profiles", anonymized)
         return anonymized
     except Exception as e:
         logger.error("Retention error (anonymize): %s", e)
@@ -267,12 +304,22 @@ _retention_interval = 86400  # 24 jam
 _running = False
 
 
-def _run_retention_loop():
+def _run_retention_loop(app=None):
+    """Purge expired data on a timer.
+
+    purge_all() reads the Supabase client from current_app, so each pass has to
+    run inside an application context — without one the retention job silently
+    errored and UU PDP retention never actually happened.
+    """
     global _running
     _running = True
     while _running:
         try:
-            result = purge_all()
+            if app is not None:
+                with app.app_context():
+                    result = purge_all()
+            else:
+                result = purge_all()
             total = sum(result.values())
             if total > 0:
                 logger.info("Data retention purge: %s", result)
@@ -281,12 +328,12 @@ def _run_retention_loop():
         time.sleep(_retention_interval)
 
 
-def start_retention_scheduler(interval=86400):
+def start_retention_scheduler(interval=86400, app=None):
     global _retention_thread, _retention_interval
     if _retention_thread and _retention_thread.is_alive():
         return
     _retention_interval = interval
-    _retention_thread = threading.Thread(target=_run_retention_loop, daemon=True)
+    _retention_thread = threading.Thread(target=_run_retention_loop, args=(app,), daemon=True)
     _retention_thread.start()
     logger.info("Data retention scheduler started (interval=%ds)", _retention_interval)
 
