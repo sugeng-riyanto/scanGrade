@@ -70,6 +70,15 @@
             </div>
         </div>
         <div class="flex items-center gap-3">
+            <!-- Two tabs of the same exam used to charge each other a violation for
+                 every switch. They no longer double-count, but the student should
+                 still know, and use one tab. -->
+            <span x-show="otherTabOpen && !submitted" x-cloak
+                  class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-200"
+                  title="Ujian ini terbuka di lebih dari satu tab. Pelanggaran dihitung dari tab yang sedang Anda lihat. Gunakan satu tab saja.">
+                <i class="fas fa-clone"></i>
+                <span class="hidden sm:inline">2 tab terbuka</span>
+            </span>
             {% if recovery_code %}
             <!-- The way back in from another device. Shown for the whole session
                  and only while the session is open. -->
@@ -948,6 +957,11 @@ function examApp(duration, totalQ) {
         syncStatus: navigator.onLine ? 'synced' : 'offline',
         syncLabel: navigator.onLine ? 'Tersinkron' : 'Offline — tersimpan lokal',
         copied: false,
+        // Anti-cheat bookkeeping — see armAntiCheat() / claimExamFocus().
+        _antiCheatArmed: false,
+        _tabId: Math.random().toString(36).slice(2),
+        _isFocusTab: true,
+        otherTabOpen: false,
         lastSyncAt: Date.now(),
         pendingSync: false,
         dirty: false,
@@ -1076,7 +1090,8 @@ function examApp(duration, totalQ) {
                 // Navigate to first page of first question's range
                 var rng0 = this.parsePageRange(QUESTION_PAGES[v] || '');
                 if (rng0.length > 0) this.page = Math.max(1, Math.min(rng0[0], this.totalPages));
-                this.setupAntiCheat();
+                this.watchOtherTabs();
+                this.armAntiCheat();
                 if (this.antiCheat.watermark_name) this.startWatermark();
             });
         },
@@ -1095,11 +1110,78 @@ function examApp(duration, totalQ) {
         markDirty() {
             this.dirty = true;
         },
-        setupAntiCheat() {
+        // ─── When the anti-cheat may watch ──────────────────────────────────
+        // Arming on page load meant a student who had not started yet was already
+        // being watched: the terms modal was still up, and a background tab — the
+        // same exam opened in a second tab, a session the phone restored, a
+        // middle-clicked link — was counted as "left the exam" before the first
+        // question had even been shown. It is armed on agreement instead.
+        armAntiCheat() {
+            if (this._antiCheatArmed || this.submitted) return;
+            if (this.showExamAgreement) return;   // waiting for "Saya Setuju"
             if (!this.antiCheat.enabled) {
                 console.log('Anti-cheat disabled for this exam');
                 return;
             }
+            this._antiCheatArmed = true;
+            this.setupAntiCheat();
+            this.claimExamFocus();
+            this.seedViolationCount();
+        },
+        _tabKey() { return 'sg_exam_tab_' + '{{ exam.id }}'; },
+        // ─── Exactly one tab enforces ───────────────────────────────────────
+        // Two tabs of the same exam each counted the other as a violation, so an
+        // accidental second tab could burn through max_violations and auto-submit
+        // the exam. Only the tab in front counts; leaving the exam still counts,
+        // charged once, from whichever tab is actually visible.
+        claimExamFocus() {
+            if (document.hidden) return;   // a background tab must not take over
+            this._isFocusTab = true;
+            try { localStorage.setItem(this._tabKey(), this._tabId); } catch (e) {}
+        },
+        watchOtherTabs() {
+            window.addEventListener('storage', (e) => {
+                if (e.key !== this._tabKey() || !e.newValue) return;
+                if (e.newValue === this._tabId) return;
+                this._isFocusTab = false;
+                this.otherTabOpen = true;
+                console.log('[AntiCheat] Another tab took over the exam session');
+            });
+        },
+        // The penalty ladder lives in the database and survives a reload; this
+        // page's counter started at zero every time, so a refresh handed back
+        // warnings the student had already used and moved the auto-submit point.
+        async seedViolationCount() {
+            try {
+                const r = await fetch('/api/violation/count?exam_id={{ exam.id }}');
+                if (!r.ok) return;
+                const d = await r.json();
+                const server = Number(d.count || 0);
+                if (server > this.violationCount) {
+                    this.violationCount = server;
+                    if (typeof d.penalty === 'number') this.totalPenalty = d.penalty;
+                }
+            } catch (e) {}
+        },
+        _csrfToken() {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            return meta ? meta.getAttribute('content') : '';
+        },
+        // Recorded for the teacher, never counted toward the ladder.
+        logViolationEvent(type, metadata) {
+            try {
+                navigator.sendBeacon('/api/violation/log', new Blob([JSON.stringify({
+                    _csrf_token: this._csrfToken(),
+                    logs: [{
+                        exam_id: '{{ exam.id }}',
+                        violation_type: type,
+                        timestamp: Date.now() / 1000,
+                        metadata: metadata || {},
+                    }],
+                })], {type: 'application/json'}));
+            } catch (e) {}
+        },
+        setupAntiCheat() {
             this._blurTimer = null;
             // ─── Show active indicator in top bar ───
             const acBadge = document.createElement('span');
@@ -1109,15 +1191,17 @@ function examApp(duration, totalQ) {
             const topBar = document.querySelector('.sticky-topbar .flex.items-center.gap-3');
             if (topBar) topBar.prepend(acBadge);
 
-            // ─── Tab switch detection (reliable, no false positives) ───
+            // ─── Tab switch detection ───
+            // Coming back to the front makes this tab the one that counts, so
+            // moving between two tabs of the same exam is not a violation, while
+            // leaving the exam for anything else still is.
             document.addEventListener('visibilitychange', () => {
                 if (this.submitted) return;
                 if (document.hidden) {
-                    console.log('[AntiCheat] Tab hidden, starting 1.5s timer');
                     this._blurTimer = setTimeout(() => { this.handleViolation(); }, 1500);
                 } else {
-                    console.log('[AntiCheat] Tab visible, clearing timer');
                     if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
+                    this.claimExamFocus();
                 }
             });
             // ─── Window blur (click outside browser) ───
@@ -1134,13 +1218,17 @@ function examApp(duration, totalQ) {
             // Fullscreen: gentle reminder, NO penalty
             if (this.antiCheat.fullscreen_required) {
                 document.addEventListener('fullscreenchange', () => {
-                    if (this.submitted) return;
+                    if (this.submitted || !this._isFocusTab) return;
                     if (!document.fullscreenElement) {
-                        this.violationMessage = 'PERHATIAN: Keluar layar penuh dicatat sebagai pelanggaran!';
+                        // Recorded for the teacher and NOT charged, which is what this
+                        // always claimed. It used to call this.logViolation(), a method
+                        // that does not exist on this component: the call threw, so the
+                        // banner never appeared and nothing was ever sent.
+                        this.violationMessage = 'PERHATIAN: Anda keluar dari layar penuh. Sebaiknya kembali ke layar penuh (tidak ada penalti).';
                         this.violationType = 'warning';
-                        this.logViolation('fullscreen_exit');
                         this.showViolationBanner = true;
                         setTimeout(() => { this.showViolationBanner = false; }, 4000);
+                        this.logViolationEvent('fullscreen_exit');
                     }
                 });
             }
@@ -1164,44 +1252,80 @@ function examApp(duration, totalQ) {
             });
         },
         handleViolation() {
-            console.log('[AntiCheat] Violation #' + (this.violationCount + 1));
+            // Only the tab in front counts: a tab that another exam tab has taken
+            // over from must not add a second charge for the same switch.
+            if (!this._isFocusTab || this.submitted) return;
             this.violationCount++;
+            this._applyViolationBanner(this.violationCount);
+
+            const token = this._csrfToken();
+            // This used to be a sendBeacon with no CSRF token in a JSON *array*;
+            // validate_csrf can only read a token from a JSON object, so every one
+            // of these was answered 403 and thrown away — the ladder the student
+            // watched climb was never applied to their score.
+            fetch('/api/violation/log', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
+                keepalive: true,
+                body: JSON.stringify({
+                    _csrf_token: token,
+                    logs: [{
+                        exam_id: '{{ exam.id }}',
+                        violation_type: 'tab_switch',
+                        timestamp: Date.now() / 1000,
+                        metadata: {violation_count: this.violationCount},
+                    }],
+                }),
+            }).then(async (r) => {
+                if (!r.ok) return;
+                const res = ((await r.json()).violations || [])[0];
+                if (!res) return;
+                if (res.logged) {
+                    // The server owns the ladder: show exactly what it will charge.
+                    this.violationCount = res.violation_count;
+                    this.totalPenalty = res.penalty;
+                    this._applyViolationBanner(this.violationCount);
+                    this._maybeAutoSubmit();
+                } else if (this.violationCount > 0) {
+                    // Rejected as a duplicate or out-of-range event — take the number
+                    // back so the student is never shown a penalty that will not be
+                    // applied (the server debounces events within 2s).
+                    this.violationCount--;
+                    this._applyViolationBanner(this.violationCount);
+                }
+            }).catch(() => {
+                // Offline: the count stays local and is reconciled by the next event
+                // or by seedViolationCount() after a reload.
+            });
+        },
+        _applyViolationBanner(n) {
+            if (n <= 0) return;
             const base = this.antiCheat.penalty_per_violation || 5;
-            let currentPenalty = 0;
-            if (this.violationCount === 1) {
-                this.violationMessage = 'PERHATIAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';
+            if (n === 1) {
+                this.violationMessage = 'PERINGATAN! Anda berpindah tab. Pelanggaran berikutnya akan dikenakan penalti.';
                 this.violationType = 'warning';
-            } else if (this.violationCount === 2) {
-                currentPenalty = base;
-                this.violationMessage = 'PELANGGARAN #' + this.violationCount + '! Penalti: -' + base + ' poin';
+            } else if (n === 2) {
+                this.violationMessage = 'PELANGGARAN #2! Penalti: -' + base + ' poin';
                 this.violationType = 'penalty';
-            } else if (this.violationCount === 3) {
-                currentPenalty = base * 2;
-                this.violationMessage = 'PELANGGARAN #' + this.violationCount + '! Penalti: -' + (base * 2) + ' poin';
+            } else if (n === 3) {
+                this.violationMessage = 'PELANGGARAN #3! Penalti: -' + (base * 2) + ' poin';
                 this.violationType = 'penalty';
             } else {
-                currentPenalty = base * 3;
-                this.violationMessage = 'PELANGGARAN #' + this.violationCount + '! Penalti: -' + (base * 3) + ' poin';
+                this.violationMessage = 'PELANGGARAN #' + n + '! Penalti: -' + (base * 3) + ' poin';
                 this.violationType = 'severe';
             }
-            this.totalPenalty += currentPenalty;
             this.showViolationBanner = true;
             setTimeout(() => { this.showViolationBanner = false; }, 5000);
-            navigator.sendBeacon('/api/violation/log',
-                new Blob([JSON.stringify([{
-                    exam_id: '{{ exam.id }}',
-                    violation_type: 'tab_switch',
-                    timestamp: Date.now() / 1000,
-                    metadata: { violation_count: this.violationCount, penalty: currentPenalty }
-                }])], {type: 'application/json'}));
+        },
+        _maybeAutoSubmit() {
             const maxV = this.antiCheat.max_violations || 0;
-            if (maxV > 0 && this.violationCount >= maxV && this.antiCheat.auto_submit_on_max) {
-                if (this.submitted) return; // already submitted
-                this.violationMessage = 'PELANGGARAN MAKSIMAL! Ujian otomatis dikumpulkan.';
-                this.violationType = 'severe';
-                this.showViolationBanner = true;
-                    setTimeout(() => { if (!this.submitted) this.submitExam(true); }, 3000);
-            }
+            if (maxV <= 0 || this.violationCount < maxV) return;
+            if (!this.antiCheat.auto_submit_on_max) return;
+            if (this.submitted) return;
+            this.violationMessage = 'PELANGGARAN MAKSIMAL! Ujian otomatis dikumpulkan.';
+            this.violationType = 'severe';
+            this.showViolationBanner = true;
+            setTimeout(() => { if (!this.submitted) this.submitExam(true); }, 3000);
         },
         startWatermark() {
             const name = {{ (g.user_name or g.user_email or "") | tojson }};
@@ -2504,6 +2628,8 @@ function examApp(duration, totalQ) {
             if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
                 document.documentElement.requestFullscreen().catch(() => {});
             }
+            // The exam has started: this is when the anti-cheat may begin watching.
+            this.armAntiCheat();
         },
         toggleCalculator() { this.showCalculator = !this.showCalculator; },
         // Scientific calculator functions

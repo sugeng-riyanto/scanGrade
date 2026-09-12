@@ -77,8 +77,21 @@ def _check_rate_limit(user_id, exam_id, min_interval=5):
 @api_bp.route("/violation/log", methods=["POST"])
 @login_required
 def log_violation():
-    data = request.get_json()
-    logs = data if isinstance(data, list) else [data]
+    """Record anti-cheat events sent by the exam page.
+
+    Accepts ``{"_csrf_token": ..., "logs": [...]}``. The body has to be an
+    object, not a bare list: ``validate_csrf`` can only read the token out of a
+    JSON *object*, so the list this endpoint used to receive could never carry
+    one — every event was answered 403 and discarded, which left the whole
+    penalty ladder with nothing to count.
+    """
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        logs = data.get("logs") or []
+    else:
+        logs = data if isinstance(data, list) else []
+    if not logs:
+        return jsonify({"violations": []})
 
     supabase = get_supabase()
     results = []
@@ -101,19 +114,29 @@ def log_violation():
                 current_app.logger.warning("Violation log insert failed for exam %s", exam_id)
                 results.append({"logged": False, "reason": "db_error"})
                 continue
-            total_count = supabase.table("violation_logs").select("id", count="exact").eq("user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
-            exam = supabase.table("exams").select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max").eq("id", exam_id).single().execute().data or {}
-            from app.services.anti_cheat_service import calculate_graduated_penalty
+            from app.services.anti_cheat_service import (
+                calculate_graduated_penalty, count_penalized_violations,
+            )
+            # The count is the source of truth for the ladder, and the exam row is
+            # read before it so the response carries the penalty the server would
+            # actually apply. The client displays that number: it must never show a
+            # penalty the server will not charge (or hide one it will).
+            exam = row_or_none(
+                supabase.table("exams")
+                .select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max")
+                .eq("id", exam_id).maybe_single().execute()
+            ) or {}
+            total_count = count_penalized_violations(supabase, g.user_id, exam_id)
             penalty_info = calculate_graduated_penalty(total_count, exam)
-            # Save penalty to the student's submission
+            # Keep the submission's penalty in step with the ladder so the results
+            # screen agrees with the score, without ever double-charging: the value
+            # is the ladder's total, not another increment.
             try:
-                sub = supabase.table("submissions").select("id,penalty").eq("exam_id", exam_id).eq("student_id", g.user_id).order("created_at", desc=True).limit(1).execute()
+                sub = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", g.user_id).order("created_at", desc=True).limit(1).execute()
                 if sub.data:
-                    current_penalty = float(sub.data[0].get("penalty") or 0)
-                    new_penalty = current_penalty + penalty_info.get("current_penalty_this_violation", 0)
-                    supabase.table("submissions").update({"penalty": new_penalty}).eq("id", sub.data[0]["id"]).execute()
+                    supabase.table("submissions").update({"violations": total_count, "penalty": penalty_info["penalty"]}).eq("id", sub.data[0]["id"]).execute()
             except Exception:
-                pass
+                current_app.logger.exception("Could not sync penalty for exam %s", exam_id)
             results.append({"logged": True, "violation_count": total_count, **penalty_info})
         else:
             results.append({"logged": False, "reason": valid.get("reason")})
@@ -177,8 +200,10 @@ def force_submit():
                     elif ans == kv: earned += w
             score = round(min(earned, 100), 2)
             # Get actual penalty from violation logs
-            viol_count = supabase.table("violation_logs").select("id", count="exact").eq("user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
-            from app.services.anti_cheat_service import calculate_graduated_penalty
+            from app.services.anti_cheat_service import (
+                calculate_graduated_penalty, count_penalized_violations,
+            )
+            viol_count = count_penalized_violations(supabase, g.user_id, exam_id)
             pinfo = calculate_graduated_penalty(viol_count, exam)
             total_penalty = pinfo.get("penalty", 0)
             final = max(0.0, round(score - total_penalty, 2))
@@ -196,14 +221,26 @@ def force_submit():
 @api_bp.route("/violation/count", methods=["GET"])
 @login_required
 def violation_count():
-    exam_id = request.args.get("exam_id")
+    """The count and the penalty the server would apply right now.
+
+    The exam page calls this when it starts: the penalty ladder lives in the
+    database and survives a reload, while the page's own counter started at zero
+    every time — so after a refresh a student saw "0 pelanggaran" and earned
+    warnings they had already used, and the auto-submit threshold moved.
+    """
+    exam_id = request.args.get("exam_id") or ""
     supabase = get_supabase()
-    res = supabase.table("violation_logs") \
-        .select("count", count="exact") \
-        .eq("user_id", g.user_id) \
-        .eq("exam_id", exam_id) \
-        .execute()
-    return jsonify({"count": res.count})
+    from app.services.anti_cheat_service import (
+        calculate_graduated_penalty, count_penalized_violations,
+    )
+    exam = row_or_none(
+        supabase.table("exams")
+        .select("anti_cheat_enabled, penalty_per_violation, max_violations, auto_submit_on_max")
+        .eq("id", exam_id).maybe_single().execute()
+    ) or {}
+    count = count_penalized_violations(supabase, g.user_id, exam_id)
+    info = calculate_graduated_penalty(count, exam)
+    return jsonify({"count": count, **info})
 
 
 @api_bp.route("/scan/process", methods=["POST"])

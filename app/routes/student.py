@@ -695,12 +695,10 @@ def submit_exam(exam_id):
                 })
 
     # ── Query 4: GET violation count ──
-    from app.services.anti_cheat_service import calculate_graduated_penalty
-    try:
-        violation_count = supabase.table("violation_logs").select("id", count="exact").eq(
-            "user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
-    except Exception:
-        violation_count = 0
+    from app.services.anti_cheat_service import (
+        calculate_graduated_penalty, count_penalized_violations,
+    )
+    violation_count = count_penalized_violations(supabase, g.user_id, exam_id)
     penalty_info = calculate_graduated_penalty(violation_count, exam)
     penalty = penalty_info["penalty"]
 

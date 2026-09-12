@@ -6,6 +6,37 @@ from flask import current_app
 RATE_LIMIT_SECONDS = 2
 TIMESTAMP_TOLERANCE = 900
 
+# Only leaving the exam counts toward the penalty. Every other recorded event
+# (a fullscreen exit, say) is a reminder for the student and a note for the
+# teacher: the UI promises it carries no penalty, and counting it here made that
+# promise false while pushing the student's next tab switch up the graduated
+# ladder — their first tab switch was charged as the second violation.
+PENALIZED_VIOLATION_TYPES = ("tab_switch",)
+
+
+def count_penalized_violations(supabase, user_id: str, exam_id: str) -> int:
+    """How many violations count toward the penalty.
+
+    Fails to 0 on a lookup error rather than inventing a penalty — but logs it,
+    because silently reporting 0 is how an entire class can finish an exam with
+    no penalty recorded and nobody notices.
+    """
+    try:
+        res = (
+            supabase.table("violation_logs")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .eq("exam_id", exam_id)
+            .in_("violation_type", list(PENALIZED_VIOLATION_TYPES))
+            .execute()
+        )
+        return int(res.count or 0)
+    except Exception:
+        current_app.logger.exception(
+            "Could not count penalized violations for user=%s exam=%s", user_id, exam_id
+        )
+        return 0
+
 
 def calculate_graduated_penalty(
     violation_count: int,
