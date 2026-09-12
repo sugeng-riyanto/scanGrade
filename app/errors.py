@@ -1,3 +1,15 @@
+def format_mb(num_bytes):
+    """Format a byte count as MB the way users read it (1 MB = 1,000,000 bytes).
+
+    Must stay in sync with MAX_CONTENT_LENGTH so the message the user sees
+    matches the limit the server actually enforces.
+    """
+    try:
+        return f"{float(num_bytes) / 1_000_000:.0f}MB"
+    except (TypeError, ValueError):
+        return "?MB"
+
+
 class ScanGradeException(Exception):
     status_code = 400
 
@@ -15,10 +27,10 @@ class FileTooLargeError(ScanGradeException):
     status_code = 413
 
     def __init__(self, file_size, max_size):
-        msg = f"File {file_size/1024/1024:.1f}MB melebihi batas {max_size/1024/1024:.0f}MB"
+        msg = f"File {format_mb(file_size)} melebihi batas {format_mb(max_size)}"
         super().__init__(
             msg, error_code="FILE_TOO_LARGE",
-            user_message=f"File terlalu besar. Maksimal: {max_size/1024/1024:.0f}MB",
+            user_message=f"File terlalu besar. Maksimal: {format_mb(max_size)}",
             details={"file_size": file_size, "max_size": max_size},
         )
 

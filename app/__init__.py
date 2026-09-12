@@ -381,7 +381,8 @@ def create_app(env=None):
     # Start data retention scheduler (daily purge)
     try:
         from app.services.data_retention_service import start_retention_scheduler
-        start_retention_scheduler(interval=86400)
+        # Pass the app so the purge loop can push an application context.
+        start_retention_scheduler(interval=86400, app=app)
     except Exception as e:
         app.logger.warning("Failed to start retention scheduler: %s", e)
 

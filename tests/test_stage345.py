@@ -76,13 +76,19 @@ class TestPublicPages:
     @pytest.fixture
     def app(self):
         from app import create_app
-        _app = create_app("app.config.DevelopmentConfig")
-        _app.config["TESTING"] = True
-        return _app
+        # TestingConfig keeps the suite offline (no real Supabase/Redis calls).
+        return create_app("app.config.TestingConfig")
 
     @pytest.fixture
     def client(self, app):
         return app.test_client()
+
+    @pytest.fixture
+    def csrf_headers(self, client):
+        """The app enforces CSRF on every POST — supply a valid session token."""
+        with client.session_transaction() as sess:
+            sess["_csrf_token"] = "test-csrf-token"
+        return {"X-CSRF-Token": "test-csrf-token", "Accept": "application/json"}
 
     def test_pricing_page_loads(self, client):
         resp = client.get("/pricing")
@@ -94,29 +100,45 @@ class TestPublicPages:
         assert resp.status_code == 200
         assert b"ScanGrade" in resp.data
 
-    def test_demo_request_endpoint(self, client):
+    def test_landing_page_seeds_csrf_token(self, client):
+        """The public demo form can only work if the first page load hands the
+        browser a CSRF token (base.html meta tag)."""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert b'csrf-token' in resp.data
+        with client.session_transaction() as sess:
+            assert sess.get("_csrf_token")
+
+    def test_demo_request_rejected_without_csrf(self, client):
+        resp = client.post("/api/demo-request", json={
+            "school_name": "SMA Test",
+            "email": "test@school.com",
+        })
+        assert resp.status_code == 403
+
+    def test_demo_request_endpoint(self, client, csrf_headers):
         resp = client.post("/api/demo-request", json={
             "school_name": "SMA Test",
             "email": "test@school.com",
             "phone": "081234567890",
-        })
+        }, headers=csrf_headers)
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["success"] is True
 
-    def test_demo_request_missing_fields(self, client):
+    def test_demo_request_missing_fields(self, client, csrf_headers):
         resp = client.post("/api/demo-request", json={
             "email": "test@school.com",
-        })
+        }, headers=csrf_headers)
         assert resp.status_code == 400
         data = resp.get_json()
         assert data["success"] is False
 
-    def test_demo_request_invalid_email(self, client):
+    def test_demo_request_invalid_email(self, client, csrf_headers):
         resp = client.post("/api/demo-request", json={
             "school_name": "Test",
             "email": "not-an-email",
-        })
+        }, headers=csrf_headers)
         assert resp.status_code == 400
 
     def test_template_csv_download(self, client):
