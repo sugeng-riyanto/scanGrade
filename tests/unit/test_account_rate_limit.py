@@ -127,10 +127,23 @@ class TestHookBehaviour:
         assert codes == {200}
 
     def test_other_auth_paths_still_get_the_ip_guard(self):
-        """The hook must remain a backstop everywhere else."""
+        """The hook must remain a backstop everywhere else.
+
+        Note the ceiling is now the per-IP FLOOD bucket, not the per-user one.
+        Anonymous traffic from a school all arrives on one NAT'd address, so a
+        per-user-sized cap here throttled a whole class (measured: 61 of 221
+        requests from one IP with 44 users). It still has to stop a flood.
+        """
         client = _app_with_hook().test_client()
-        codes = [client.get("/auth/reset-password").status_code for _ in range(40)]
-        assert 429 in codes
+        flood = rl.IP_FLOOD_LIMITS["auth"][0]
+
+        under = [client.get("/auth/reset-password").status_code for _ in range(40)]
+        assert set(under) == {200}, "a classroom's traffic must not be throttled"
+
+        # Push past the flood ceiling so the backstop is proven, not assumed.
+        codes = [client.get("/auth/reset-password").status_code for _ in range(flood + 5)]
+        assert 429 in codes, "the hook must still stop a flood from one IP"
+        assert rl.IP_FLOOD_LIMITS["auth"][0] > rl.DEFAULT_LIMITS["auth"][0]
 
 
 # ── Routes actually use it ────────────────────────────────────────

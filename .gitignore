@@ -89,3 +89,6 @@ csrf*.txt
 /restart_*.py
 /sync_*.py
 test_scripts/_*
+# Root-level leading-underscore scratch (same class as above)
+/_*.py
+/_*.sh
