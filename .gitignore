@@ -76,3 +76,16 @@ loadtest*.csv
 cookies*.txt
 csrf*.txt
 .freebuff/
+
+# One-off local deploy/debug scripts (may contain VPS credentials — never commit)
+/deploy_*.py
+/fix_*.py
+/debug_*.py
+/check_*.py
+/capture_*.py
+/force_*.py
+/hard_*.py
+/pull_*.py
+/restart_*.py
+/sync_*.py
+test_scripts/_*
