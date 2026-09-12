@@ -145,6 +145,22 @@ def test_installer_refuses_to_run_as_non_root():
     assert "install -m 0755" in install
 
 
+def test_installer_reloads_the_app_it_just_updated():
+    """Otherwise the install leaves production on stale code indefinitely.
+
+    Step 1 pulls origin/main, but gunicorn keeps serving the copy it started
+    with. Nothing else would reload it: the next timer tick sees the checkout
+    already at origin/main and exits without deploying anything.
+    """
+    install = INSTALL_SH.read_text(encoding="utf-8")
+
+    assert "systemctl reload" in install
+    assert install.index("merge --ff-only") < install.index("systemctl reload"), \
+        "the reload must come after the pull"
+    assert 'is-active "$SERVICE"' in install and "answered" in install, \
+        "a reload that left the app down would otherwise go unnoticed"
+
+
 def test_installer_keeps_a_backup_of_the_unit_it_replaces():
     install = INSTALL_SH.read_text(encoding="utf-8")
 
