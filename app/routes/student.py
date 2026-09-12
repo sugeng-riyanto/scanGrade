@@ -298,6 +298,28 @@ def take_exam(exam_id):
         flash("Ujian ini belum aktif.", "error")
         return redirect("/student/exams")
 
+    # Check school access: exam must belong to student's school
+    student_school_id = None
+    student_class_id = None
+    try:
+        prof = supabase.table("profiles").select("school_id, class_id").eq("id", g.user_id).single().execute().data or {}
+        student_school_id = prof.get("school_id")
+        student_class_id = prof.get("class_id")
+    except Exception:
+        pass
+    if student_school_id and exam.get("school_id") and str(student_school_id) != str(exam["school_id"]):
+        flash("Ujian ini tidak tersedia untuk sekolah Anda.", "error")
+        return redirect("/student/exams")
+    # Check class_ids assignment
+    exam_class_ids = exam.get("class_ids") or []
+    if isinstance(exam_class_ids, str):
+        try: exam_class_ids = json.loads(exam_class_ids)
+        except: exam_class_ids = []
+    if exam_class_ids and student_class_id:
+        if student_class_id not in exam_class_ids:
+            flash("Ujian ini tidak ditugaskan untuk kelas Anda.", "error")
+            return redirect("/student/exams")
+
     # Check if student already reached max attempts (exclude draft + retracted)
     max_attempts = exam.get("max_attempts", 1)
     try:

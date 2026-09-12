@@ -207,6 +207,8 @@ def violation_count():
 @_rate_limit("20 per minute")
 @login_required
 def scan_process():
+    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya guru/admin yang boleh scan OMR"}), 403
     """Process a scanned bubble sheet image and return detected answers.
 
     Security: validates extension, MIME type, image integrity, strips EXIF.
@@ -483,6 +485,8 @@ def scan_task_status(task_id):
 @login_required
 def scan_bulk():
     """Process a ZIP file containing multiple LJK scan images."""
+    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya guru/admin yang boleh scan OMR"}), 403
     if "archive" not in request.files:
         return jsonify({"error": "Tidak ada file ZIP yang dikirim"}), 400
 
@@ -532,6 +536,8 @@ def scan_bulk():
 @_rate_limit("10 per minute")
 def scan_bulk_save():
     """Save multiple scan results as submissions at once."""
+    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya guru/admin yang boleh menyimpan hasil scan"}), 403
     data = request.get_json()
     if not data or "submissions" not in data:
         return jsonify({"error": "No submissions data"}), 400
@@ -689,6 +695,24 @@ def student_sync_draft():
         return jsonify({"saved": True, "at": int(time.time())})
     if not _check_rate_limit(g.user_id, exam_id, min_interval=3 if is_light else 10):
         return jsonify({"saved": True, "at": int(time.time()), "throttled": True})
+    # Verify student owns this exam (school + class check)
+    if g.get("user_role") == "murid":
+        try:
+            from app.utils.auth import get_supabase as _gs
+            _sb = _gs()
+            _exam_check = _sb.table("exams").select("school_id, class_ids, is_published, status").eq("id", exam_id).single().execute().data
+            if not _exam_check or not _exam_check.get("is_published") or _exam_check.get("status") != "active":
+                return jsonify({"saved": True, "at": int(time.time()), "denied": True})
+            _prof = _sb.table("profiles").select("school_id, class_id").eq("id", g.user_id).single().execute().data or {}
+            if _exam_check.get("school_id") and _prof.get("school_id") and str(_exam_check["school_id"]) != str(_prof["school_id"]):
+                return jsonify({"saved": True, "at": int(time.time()), "denied": True})
+            _cids = _exam_check.get("class_ids") or []
+            if isinstance(_cids, str):
+                import json as _j; _cids = _j.loads(_cids)
+            if _cids and _prof.get("class_id") and _prof["class_id"] not in _cids:
+                return jsonify({"saved": True, "at": int(time.time()), "denied": True})
+        except Exception:
+            pass
     lock_key = f"sync:{g.user_id}:{exam_id}"
     rlock = _redis_lock(lock_key)
     if not rlock:
@@ -1363,6 +1387,8 @@ def api_import_students():
 
     Returns: { success, failed, total, errors, message }
     """
+    if g.get("user_role") not in ("admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya admin sekolah yang boleh import siswa"}), 403
     import pandas as pd
 
     school_id = g.get("user_school_id")
@@ -1638,6 +1664,8 @@ def _generate_report_excel(exam, students, stats):
 @login_required
 def ai_grade_essay():
     """Grade a single essay answer."""
+    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
@@ -1675,6 +1703,8 @@ def ai_grade_essay():
 @login_required
 def ai_grade_bulk():
     """Grade all pending essay questions for an exam or submission list."""
+    if g.get("user_role") not in ("guru", "admin_sekolah", "super_admin"):
+        return jsonify({"error": "Hanya guru/admin yang boleh mengoreksi esai"}), 403
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
@@ -1722,6 +1752,9 @@ def api_pengumuman_unread_count():
 @login_required
 def api_create_pengumuman():
     """Create broadcast notification."""
+    role = g.get("user_role")
+    if role == "murid":
+        return jsonify({"error": "Siswa tidak boleh mengirim pengumuman"}), 403
     data = request.get_json() or {}
     title = str(data.get("title", "")).strip()
     content = str(data.get("content", "")).strip()
