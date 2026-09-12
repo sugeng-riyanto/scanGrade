@@ -163,7 +163,59 @@ probe_app() {
 reload_app
 sleep 3
 
+HEALTHY=0
 if systemctl is-active --quiet "$SERVICE" && probe_app; then
+  HEALTHY=1
+fi
+
+# ── Gate 3: sign in as each role and open the pages that matter ──────────────
+# The port answering 200 only says gunicorn is up. It says nothing about whether
+# login still works, whether a page 500s for one role, or whether an RBAC guard
+# was loosened — and "the release is live but teachers cannot open anything" is
+# exactly the failure that a reachability probe waves through.
+#
+# Credentials live outside the repo, in /etc/scangrade-smoke.conf, because they
+# are deployment-specific and must never be committed. SMOKE_ENFORCE=true is
+# what arms the rollback; install-auto-deploy.sh only sets it after confirming
+# the accounts actually sign in, so a stale password cannot roll back good code.
+SMOKE_CONF="/etc/scangrade-smoke.conf"
+if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ] && ! bash -n "$SMOKE_CONF" 2>/dev/null; then
+  # Sourcing a broken file would take the whole deploy script down with it.
+  log "$SMOKE_CONF has a syntax error — skipping the smoke test"
+elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$SMOKE_CONF"
+  set +a
+
+  SMOKE_ENV=()
+  for v in SMOKE_BASE_URL SMOKE_INSECURE SMOKE_SUPER_ADMIN SMOKE_ADMIN_SEKOLAH SMOKE_GURU SMOKE_MURID; do
+    [ -n "${!v:-}" ] && SMOKE_ENV+=("$v=${!v}")
+  done
+
+  as_owner env "${SMOKE_ENV[@]}" "$REPO/.venv/bin/python" "$REPO/deploy/smoke_test.py"
+  SMOKE_RC=$?
+
+  case "$SMOKE_RC" in
+    0)
+      log "smoke test passed" ;;
+    2)
+      # Nothing was testable: no accounts, or the base URL is unreachable from
+      # this box. Neither is evidence that the release is bad.
+      log "smoke test skipped (exit 2) — not treated as a failure" ;;
+    *)
+      if [ "${SMOKE_ENFORCE:-false}" = "true" ]; then
+        log "smoke test FAILED (exit $SMOKE_RC) — rolling back"
+        HEALTHY=0
+      else
+        log "smoke test FAILED (exit $SMOKE_RC) but SMOKE_ENFORCE is not 'true' — keeping the release"
+      fi ;;
+  esac
+elif [ ! -f "$SMOKE_CONF" ]; then
+  log "no $SMOKE_CONF — skipping the per-role smoke test (see docs/AUTO_DEPLOY.md)"
+fi
+
+if [ "$HEALTHY" = "1" ]; then
   mkdir -p "$STATE_DIR"
   printf '%s\n%s\n' "$AFTER" "$(date -Is)" > "$STATE_DIR/last-deploy"
   log "DEPLOY OK: $BEFORE -> $AFTER"
@@ -171,7 +223,7 @@ if systemctl is-active --quiet "$SERVICE" && probe_app; then
 fi
 
 # ── Failure: put the previous release back ───────────────────────────────────
-log "app is not healthy on $AFTER — rolling back to $BEFORE"
+log "$AFTER did not pass verification — rolling back to $BEFORE"
 journalctl -u "$SERVICE" -n 30 --no-pager 2>/dev/null | sed 's/^/    /'
 as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
 reload_app
