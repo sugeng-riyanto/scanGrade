@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response
 from app.utils.auth import login_required, get_supabase
+from app.utils.cache import cache_get, cache_set
 from app.services.audit_service import log_activity
 
 student_bp = Blueprint("student", __name__)
@@ -15,6 +16,12 @@ def dashboard():
     supabase = get_supabase()
     if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
+
+    # Try cache first (30s TTL)
+    cache_key = f"dash:{g.user_id}"
+    cached = cache_get(cache_key)
+    if cached:
+        return render_template("student/dashboard.html", **cached)
 
     available_exams = []
     submitted_ids = set()
@@ -28,7 +35,7 @@ def dashboard():
     except Exception:
         pass
     try:
-        query = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active")
+        query = supabase.table("exams").select("id,title,subject,start_at,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         all_exams = query.execute().data or []
@@ -63,7 +70,7 @@ def dashboard():
 
     subs = []
     try:
-        subs = supabase.table("submissions").select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, teacher_feedback, exams(id, title, answer_key, question_types, total_questions, pdf_page_urls)").eq("student_id", g.user_id).neq("status", "retracted").order("submitted_at", desc=True).execute().data or []
+        subs = supabase.table("submissions").select("id, exam_id, student_id, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, exams(id, title, question_types, total_questions)").eq("student_id", g.user_id).neq("status", "retracted").order("submitted_at", desc=True).execute().data or []
     except Exception as e:
         current_app.logger.error(f"Dashboard submissions query error: {e}")
     completed_exams = []
@@ -134,11 +141,22 @@ def dashboard():
         except Exception:
             pass
 
-    return render_template("student/dashboard.html", available_exams=available_exams,
-                           completed_exams=completed_exams[:5], avg_score=avg_score,
-                           user_name=user_name, student_class=student_class,
-                           subject_count=subject_count, school_info=school_info,
-                           active_whiteboards=active_whiteboards)
+    template_data = {
+        "available_exams": available_exams,
+        "completed_exams": completed_exams[:5],
+        "avg_score": avg_score,
+        "user_name": user_name,
+        "student_class": student_class,
+        "subject_count": subject_count,
+        "school_info": school_info,
+        "active_whiteboards": active_whiteboards,
+    }
+    # Cache for 30 seconds (skip large/non-serializable fields)
+    try:
+        cache_set(cache_key, template_data, ttl=30)
+    except Exception:
+        pass
+    return render_template("student/dashboard.html", **template_data)
 
 
 @student_bp.route("/reset-password", methods=["POST"])
@@ -369,14 +387,17 @@ def submit_exam(exam_id):
 
     supabase = get_supabase()
 
-    # Verify exam exists, is published and active
-    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    # ── Query 1: GET exam (only needed columns) ──
+    exam = supabase.table("exams").select(
+        "id,is_published,status,class_ids,max_attempts,publish_mode,"
+        "total_questions,answer_key,question_types,question_weights,question_pages"
+    ).eq("id", exam_id).single().execute().data
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
     if not exam.get("is_published") or exam.get("status") != "active":
         return jsonify({"error": "Exam is not available for submission"}), 403
 
-    # Verify student's class matches exam's class_ids
+    # ── Query 2: GET student class (conditional) ──
     exam_class_ids = exam.get("class_ids") or []
     if exam_class_ids:
         try:
@@ -387,12 +408,27 @@ def submit_exam(exam_id):
         except Exception:
             pass
 
-    # Check attempts (exclude draft + retracted)
+    # ── Query 3: GET existing submissions (single query for both checks) ──
     max_attempts = exam.get("max_attempts", 1)
-    existing = supabase.table("submissions").select("id", count="exact").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute()
-    attempt_count = existing.count or 0
+    all_subs = supabase.table("submissions").select("id,status").eq(
+        "exam_id", exam_id).eq("student_id", g.user_id).execute().data or []
+
+    # Check attempts (exclude draft + retracted)
+    active_statuses = ["submitted", "graded", "published"]
+    attempt_count = sum(1 for s in all_subs if s.get("status") in active_statuses)
     if attempt_count >= max_attempts:
         return jsonify({"error": f"Anda sudah mencapai batas maksimal {max_attempts}x mengerjakan ujian ini"}), 409
+
+    # Check for double submit
+    already_active = [s for s in all_subs if s.get("status") in active_statuses]
+    if already_active:
+        current_app.logger.warning("Double submit blocked for exam %s user %s", exam_id, g.user_id)
+        if request.is_json:
+            return jsonify({"success": True, "note": "already_submitted"})
+        return redirect("/student/results")
+
+    # Find existing draft
+    draft_sub = next((s for s in all_subs if s.get("status") == "draft"), None)
 
     answers = {}
     if request.is_json:
@@ -500,16 +536,17 @@ def submit_exam(exam_id):
                     "timestamp": int(time.time()),
                 })
 
+    # ── Query 4: GET violation count ──
     from app.services.anti_cheat_service import calculate_graduated_penalty
     try:
-        violation_count = supabase.table("violation_logs").select("id", count="exact").eq("user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
+        violation_count = supabase.table("violation_logs").select("id", count="exact").eq(
+            "user_id", g.user_id).eq("exam_id", exam_id).execute().count or 0
     except Exception:
         violation_count = 0
     penalty_info = calculate_graduated_penalty(violation_count, exam)
     penalty = penalty_info["penalty"]
 
     final_score = max(0.0, round(score - penalty, 2))
-    # Simpan flags jika ada
     if flags:
         existing_answers = answers.get("_flags") or []
         if isinstance(existing_answers, list):
@@ -517,6 +554,7 @@ def submit_exam(exam_id):
         else:
             existing_answers = flags
         answers["_flags"] = existing_answers
+
     submission = {
         "exam_id": exam_id,
         "student_id": g.user_id,
@@ -530,17 +568,9 @@ def submit_exam(exam_id):
         "is_published": exam.get("publish_mode") == "auto",
     }
     try:
-        # Check for existing submission to prevent double submit
-        existing = supabase.table("submissions").select("id,status").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute().data
-        if existing:
-            current_app.logger.warning("Double submit blocked for exam %s user %s", exam_id, g.user_id)
-            if request.is_json:
-                return jsonify({"success": True, "note": "already_submitted"})
-            return redirect("/student/results")
-        # Check for existing draft submission (from sync_draft) and update it
-        draft = supabase.table("submissions").select("id,status").eq("exam_id", exam_id).eq("student_id", g.user_id).eq("status", "draft").execute().data
-        if draft:
-            supabase.table("submissions").update(submission).eq("id", draft[0]["id"]).execute()
+        # ── Query 5: INSERT or UPDATE (draft found earlier) ──
+        if draft_sub:
+            supabase.table("submissions").update(submission).eq("id", draft_sub["id"]).execute()
         else:
             supabase.table("submissions").insert(submission).execute()
         log_activity("submit", "submission", None, new_data={"exam_id": exam_id, "score": score}, user_id=g.user_id)
@@ -560,7 +590,7 @@ def results():
     submissions = []
     try:
         res = supabase.table("submissions") \
-            .select("id, status, is_published, score, final_score, penalty, submitted_at, answers, exams(id, title, subject)") \
+            .select("id, status, is_published, score, final_score, penalty, submitted_at, exams(id, title, subject)") \
             .eq("student_id", g.user_id) \
             .order("submitted_at", desc=True) \
             .execute()

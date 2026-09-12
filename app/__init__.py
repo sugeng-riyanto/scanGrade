@@ -77,15 +77,17 @@ def create_app(env=None):
         from app.utils import rate_limiter as rl_module
 
         storage_uri = "memory://"
-        if cfg.REDIS_URL:
+        redis_url = cfg.REDIS_URL or os.environ.get("REDIS_URL", "")
+        if redis_url:
             try:
                 from redis import Redis
-                r = Redis.from_url(cfg.REDIS_URL)
+                r = Redis.from_url(redis_url, socket_connect_timeout=3, socket_timeout=5)
                 r.ping()
-                storage_uri = cfg.REDIS_URL
+                storage_uri = redis_url
                 r.close()
-            except Exception:
-                app.logger.warning("Redis not available, falling back to memory:// rate limiting")
+                app.logger.info("Redis connected for Flask-Limiter")
+            except Exception as e:
+                app.logger.warning("Redis not available for Flask-Limiter (%s) — falling back to memory://", e)
 
         limiter = Limiter(
             app=app,
@@ -97,7 +99,8 @@ def create_app(env=None):
         rl_module.limiter = limiter
 
         app.config["RATELIMIT_ENABLED"] = True
-        app.logger.info("Flask-Limiter initialized (storage: %s)", storage_uri)
+        app.config["REDIS_URL"] = redis_url
+        app.logger.info("Flask-Limiter initialized (storage: %s)", storage_uri.split("@")[-1] if "@" in storage_uri else storage_uri)
     except ImportError:
         app.logger.info("Flask-Limiter not installed")
     except Exception as e:
@@ -324,9 +327,13 @@ def create_app(env=None):
 
     @app.route("/health")
     def health():
+        from app.utils.rate_limiter import get_redis_status
+        redis_info = get_redis_status()
         return jsonify({
             "status": "ok",
             "supabase": "connected",
+            "redis": redis_info,
+            "workers": os.environ.get("GUNICORN_WORKERS", "1"),
             "cache_size": len(_lru_cache),
             "uptime_ms": int((time.time() - app._start_time) * 1000) if hasattr(app, '_start_time') else 0,
         })
@@ -496,8 +503,10 @@ def _register_performance_middleware(app):
             duration_ms = int((time.time() - g.start) * 1000)
             response.headers["X-Response-Time-ms"] = str(duration_ms)
         if request.path.startswith("/static/"):
-            response.cache_control.max_age = 86400
+            # 7 days for static assets (CSS/JS/images/fonts)
+            response.cache_control.max_age = 604800
             response.cache_control.public = True
+            response.cache_control.immutable = True
         elif request.path.startswith("/api/") or request.path.startswith("/health"):
             response.cache_control.no_cache = True
         else:

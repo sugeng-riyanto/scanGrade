@@ -23,12 +23,26 @@ echo "📋 Checking prerequisites..."
 if ! command -v python3 &>/dev/null; then echo "❌ python3 not found"; exit 1; fi
 if ! command -v git &>/dev/null; then echo "❌ git not found"; exit 1; fi
 if ! command -v nginx &>/dev/null; then echo "⚠️  nginx not found — skipping config reload"; NGINX_MISSING=1; else NGINX_MISSING=0; fi
-if ! command -v redis-server &>/dev/null; then echo "⚠️  redis-server not found — rate limiter will use memory (single worker only)"; fi
+if ! command -v redis-server &>/dev/null; then echo "⚠️  redis-server not found — installing..."; sudo apt install -y redis-server; fi
 
+# Ensure Redis is running
 if systemctl is-active --quiet redis-server 2>/dev/null; then
     echo "✅ Redis is running"
 else
-    echo "⚠️  Redis is not running — rate limiter falls back to in-memory"
+    echo "🔄 Starting Redis..."
+    sudo systemctl enable redis-server --now
+    echo "✅ Redis started"
+fi
+
+# Create log directory
+sudo mkdir -p /var/log/scangrade
+sudo chown scangrade:scangrade /var/log/scangrade 2>/dev/null || true
+
+# Create scangrade user if not exists
+if ! id scangrade &>/dev/null; then
+    echo "👤 Creating scangrade user..."
+    sudo useradd -r -s /bin/false scangrade 2>/dev/null || true
+    sudo chown -R scangrade:scangrade "$REPO_DIR"
 fi
 
 # ── Pull latest code ──
@@ -52,6 +66,25 @@ source .venv/bin/activate
 pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 echo "✅ Dependencies installed ($(pip list --format=columns | wc -l) packages)"
+
+# ── Ensure production env vars ──
+echo ""
+echo "🔧 Setting production env vars..."
+sed -i 's/^FLASK_DEBUG=1/FLASK_DEBUG=0/' .env 2>/dev/null || true
+sed -i 's/^FLASK_ENV=development/FLASK_ENV=production/' .env 2>/dev/null || true
+
+# Ensure REDIS_URL is set
+if ! grep -q '^REDIS_URL=' .env 2>/dev/null; then
+    echo 'REDIS_URL=redis://localhost:6379/0' >> .env
+    echo "✅ Added REDIS_URL to .env"
+fi
+
+# Ensure SMTP vars exist
+if ! grep -q '^SMTP_EMAIL=' .env 2>/dev/null; then
+    echo 'SMTP_EMAIL=scangrade9@gmail.com' >> .env
+    echo 'SMTP_PASSWORD=' >> .env
+    echo "⚠️  SMTP vars added — set SMTP_PASSWORD in .env"
+fi
 
 # ── Build Tailwind CSS ──
 echo ""

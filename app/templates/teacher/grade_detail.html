@@ -345,10 +345,25 @@
                                 </template>
                             </div>
                             {% else %}
+                            {% set ans_raw_np = submission.answers.get(i|string, {}) if submission.answers is mapping else {} %}
+                            {% set s_pages = (ans_raw_np.get('pages') or {}) if ans_raw_np is mapping else {} %}
+                            {% set s_canvases = {} %}
+                            {% for pn, pd in s_pages.items() %}{% if pd is mapping and pd.get('canvas') %}{% if s_canvases.update({pn: pd.get('canvas')}) %}{% endif %}{% endif %}{% endfor %}
+                            {% if s_canvases %}
+                            <div class="full-canvas-wrap" :id="'grade-area-' + {{ i }}">
+                                {% for pn, sdata in s_canvases.items() %}
+                                <img x-show="page === {{ pn|int + 1 }}" :id="'grade-pdf-' + {{ i }} + '-{{ pn }}'"
+                                     src="{{ sdata }}" alt="Jawaban siswa hal {{ pn|int + 1 }}">
+                                {% endfor %}
+                                <canvas :id="'student-canvas-' + {{ i }}" class="absolute inset-0 w-full" style="pointer-events:none; opacity:0.65;"></canvas>
+                                <canvas :id="'teacher-canvas-' + {{ i }}" class="absolute inset-0 w-full"></canvas>
+                            </div>
+                            {% else %}
                             <div class="text-center py-16 text-stone-400 border-2 border-dashed rounded-xl m-4">
                                 <i class="fas fa-file-pdf text-3xl mb-2"></i>
                                 <p class="text-sm font-bold">PDF belum diupload</p>
                             </div>
+                            {% endif %}
                             {% endif %}
                         </div>
 
