@@ -62,8 +62,9 @@ as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH" || {
 AFTER=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 echo "   $BEFORE -> $AFTER"
 
-for f in deploy/scangrade-deploy.sh deploy/scangrade-deploy.service \
-         deploy/scangrade-deploy.timer deploy/scangrade.service; do
+for f in deploy/scangrade-deploy.sh deploy/smoke_test.py \
+         deploy/scangrade-deploy.service deploy/scangrade-deploy.timer \
+         deploy/scangrade.service; do
   [ -f "$REPO/$f" ] || { echo "!! missing $REPO/$f — is origin/$BRANCH the right commit?"; exit 6; }
 done
 
@@ -73,7 +74,68 @@ install -m 0755 -o root -g root "$REPO/deploy/scangrade-deploy.sh" "$DEPLOY_BIN"
 bash -n "$DEPLOY_BIN"
 echo "   syntax ok"
 
-# ── 3. Unit files. Back up anything we replace: this is the file that keeps the
+# ── 3. Smoke-test credentials.
+#       They cannot live in the repo (deployment-specific, and passwords), so
+#       they live here and the repo ships the logic instead. Seeded with the
+#       accounts manage.py creates so the gate is useful immediately.
+SMOKE_CONF=/etc/scangrade-smoke.conf
+say "Smoke-test credentials ($SMOKE_CONF)"
+if [ -f "$SMOKE_CONF" ]; then
+  echo "   already exists — left untouched"
+else
+  # Prefer the app's own APP_URL. It must be https:// — production sets
+  # SESSION_COOKIE_SECURE, so over plain HTTP the session cookie is dropped and
+  # every login would look broken.
+  BASE_DEFAULT=$(grep -E '^APP_URL=' "$REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"' | sed 's/[[:space:]]*#.*//')
+  case "$BASE_DEFAULT" in
+    https://*) ;;
+    *) BASE_DEFAULT="https://scangrade.web.id" ;;
+  esac
+
+  cat > "$SMOKE_CONF" <<EOF
+# Read by scangrade-deploy. Root-only: it holds passwords.
+#
+# SMOKE_BASE_URL is what the smoke test talks to. It must be HTTPS: production
+# sets SESSION_COOKIE_SECURE, so over plain HTTP the browser-like client would
+# drop the session cookie and every login would look broken.
+#
+# Replace the accounts below with dedicated read-only ones when you can; these
+# are the demo accounts manage.py seeds.
+SMOKE_BASE_URL="$BASE_DEFAULT"
+
+# SMOKE_ENFORCE=true makes a failed smoke test roll the release back.
+# install-auto-deploy.sh sets it once the logins below are proven to work.
+SMOKE_ENFORCE="false"
+
+SMOKE_SUPER_ADMIN="superadmin@scan-grade.app:superadmin123"
+SMOKE_ADMIN_SEKOLAH="admin_smp@scan-grade.app:demo123"
+SMOKE_GURU="guru_mtk_smp@scan-grade.app:demo123"
+SMOKE_MURID="siswa2_smp@scan-grade.app:demo123"
+EOF
+  chmod 0600 "$SMOKE_CONF"
+  chown root:root "$SMOKE_CONF"
+  echo "   created (mode 0600)"
+fi
+
+# Prove the accounts before arming the gate. A config whose passwords no longer
+# work must never be able to reject a good release.
+say "Checking the smoke-test credentials"
+SMOKE_ENV=()
+while IFS='=' read -r key value; do
+  case "$key" in SMOKE_SUPER_ADMIN|SMOKE_ADMIN_SEKOLAH|SMOKE_GURU|SMOKE_MURID|SMOKE_BASE_URL|SMOKE_INSECURE)
+    SMOKE_ENV+=("$key=$value");; esac
+done < <(grep -E '^SMOKE_[A-Z_]+=' "$SMOKE_CONF" | tr -d '"')
+
+if as_owner env "${SMOKE_ENV[@]}" "$REPO/.venv/bin/python" \
+     "$REPO/deploy/smoke_test.py" --check-credentials; then
+  sed -i 's/^SMOKE_ENFORCE=.*/SMOKE_ENFORCE="true"/' "$SMOKE_CONF"
+  echo "   every configured account signed in -> SMOKE_ENFORCE=true"
+else
+  echo "   NOT all accounts signed in -> SMOKE_ENFORCE stays false."
+  echo "   Fix the accounts in $SMOKE_CONF, then re-run this installer to arm the gate."
+fi
+
+# ── 4. Unit files. Back up anything we replace: this is the file that keeps the
 #       site up, and a silent overwrite with a wrong copy would be unrecoverable.
 say "Installing systemd units"
 for unit in scangrade.service scangrade-deploy.service scangrade-deploy.timer; do
@@ -94,12 +156,12 @@ done
 
 systemctl daemon-reload
 
-# ── 4. Turn the timer on. start, not restart: an in-flight run is left alone.
+# ── 5. Turn the timer on. start, not restart: an in-flight run is left alone.
 say "Enabling the timer"
 systemctl enable --now scangrade-deploy.timer >/dev/null
 echo "   scangrade-deploy.timer is $(systemctl is-active scangrade-deploy.timer)"
 
-# ── 5. Prove it works now rather than in two minutes, and report what it found.
+# ── 6. Prove it works now rather than in two minutes, and report what it found.
 say "Test run"
 systemctl start scangrade-deploy.service || true
 sleep 2
