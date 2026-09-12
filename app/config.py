@@ -69,6 +69,13 @@ class Config:
     def email_configured(cls):
         return bool(cls.SMTP_EMAIL and cls.SMTP_PASSWORD)
 
+    # Number of trusted reverse-proxy hops in front of the app. Set >0 only
+    # when a proxy (nginx) overwrites X-Forwarded-For. Without it every client
+    # IP collapses to the proxy address (127.0.0.1), which breaks per-IP rate
+    # limits, audit logs, and anti-cheat device-mismatch detection. Defaults to
+    # 0 so a directly reachable instance can't have its client IP spoofed.
+    TRUSTED_PROXY_HOPS = env_int("TRUSTED_PROXY_HOPS", 0)
+
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     # 50 MB (decimal) — keep in sync with app.errors.format_mb so the limit
@@ -93,6 +100,9 @@ class ProductionConfig(Config):
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SENTRY_ENVIRONMENT = "production"
+    # Production is fronted by nginx, which appends the real client address to
+    # X-Forwarded-For. Trust exactly one hop.
+    TRUSTED_PROXY_HOPS = env_int("TRUSTED_PROXY_HOPS", 1)
 
 
 # Well-formed but non-functional credentials — supabase-py only validates the

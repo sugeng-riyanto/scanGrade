@@ -49,6 +49,23 @@ def create_app(env=None):
     app.config.from_object(cfg)
     cfg.validate()
 
+    # Behind nginx every request arrives from the proxy's address, so without
+    # this the client IP is 127.0.0.1 for everyone. That silently breaks per-IP
+    # rate limiting (all users share one bucket), audit logging, and anti-cheat
+    # device-mismatch detection. Only enabled when the config declares a trusted
+    # proxy, so a directly-reachable instance can't have X-Forwarded-For spoofed.
+    _proxy_hops = int(app.config.get("TRUSTED_PROXY_HOPS", 0) or 0)
+    if _proxy_hops > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=_proxy_hops,
+            x_proto=_proxy_hops,
+            x_host=_proxy_hops,
+            x_port=_proxy_hops,
+        )
+        app.logger.info("ProxyFix enabled (trusting %d proxy hop(s) of X-Forwarded-For)", _proxy_hops)
+
     # Structured logging
     from app.utils.logger import setup_logging
     setup_logging(app)
