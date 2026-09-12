@@ -84,10 +84,23 @@ def auth_patches(table_rows, user_id="teacher-a", school_id="school-a", role="gu
         **table_rows,
     })
 
+    # The route modules import get_supabase by value, so patching app.utils.auth
+    # alone does NOT reach them: the view would open a real network connection and
+    # the test would pass or fail for the wrong reason (a 500 is still "not 403").
+    route_modules = ["app.routes.teacher", "app.routes.admin_sekolah", "app.routes.api"]
+    route_patches = []
+    for mod in route_modules:
+        try:
+            __import__(mod)
+        except Exception:
+            continue
+        route_patches.append(patch(f"{mod}.get_supabase", return_value=db))
+
     return [
         patch("app.utils.auth.get_auth_client", return_value=auth_client),
         patch("app.utils.auth.get_supabase", return_value=db),
         patch("app.services.midtrans_service.is_school_active", return_value=True),
+        *route_patches,
     ]
 
 
@@ -203,20 +216,57 @@ class TestCrossSchoolAPIAccess:
         body = resp.get_json() or {}
         assert "sekolah" in (body.get("error") or "").lower()
 
+    def _assert_forbidden(self, resp):
+        """403 with an explanation — the wording belongs to the layer, not the test."""
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.data[:300]}"
+        body = resp.get_json() or {}
+        assert body.get("error"), f"a refusal must say why: {resp.data[:200]}"
+
     def test_teacher_cannot_access_exam_from_different_school(self, client):
         """Teacher A gets 403 when fetching an exam owned by School B."""
-        patches = enter(auth_patches({"exams": {"school_id": "school-b"}}))
+        patches = enter(auth_patches({
+            "exams": {"school_id": "school-b", "teacher_id": "teacher-b"},
+        }))
         try:
             resp = client.get("/teacher/exams/exam-from-school-b", headers=BEARER)
         finally:
             exit_patches(patches)
-        self._assert_school_block(resp)
+        self._assert_forbidden(resp)
 
-    def test_teacher_can_access_own_school_exam(self, client):
-        """Same request with a matching school must NOT be blocked by RBAC."""
-        patches = enter(auth_patches({"exams": {"school_id": "school-a"}}))
+    def test_teacher_can_access_their_own_exam(self, client):
+        """The same request for the teacher's own exam must NOT be blocked."""
+        patches = enter(auth_patches({
+            "exams": {"id": "exam-own", "school_id": "school-a", "teacher_id": "teacher-a"},
+        }))
         try:
-            resp = client.get("/teacher/exams/exam-own-school", headers=BEARER)
+            resp = client.get("/teacher/exams/exam-own", headers=BEARER)
+        finally:
+            exit_patches(patches)
+        assert resp.status_code != 403, resp.data[:300]
+
+    def test_teacher_cannot_edit_a_colleagues_exam(self, client):
+        """Same school is not enough: a guru must not edit another teacher's exam.
+
+        require_school_access alone allowed exactly this, which is how one teacher
+        could rename, close or delete a colleague's assessment.
+        """
+        patches = enter(auth_patches({
+            "exams": {"id": "exam-b", "school_id": "school-a", "teacher_id": "teacher-b"},
+        }))
+        try:
+            resp = client.get("/teacher/exams/exam-b", headers=BEARER)
+        finally:
+            exit_patches(patches)
+        self._assert_forbidden(resp)
+
+    def test_admin_may_open_any_exam_in_their_school(self, client):
+        """An admin_sekolah oversees the whole school, so a colleague's exam is fine."""
+        patches = enter(auth_patches(
+            {"exams": {"id": "exam-b", "school_id": "school-a", "teacher_id": "teacher-b"}},
+            user_id="admin-a", role="admin_sekolah",
+        ))
+        try:
+            resp = client.get("/teacher/exams/exam-b", headers=BEARER)
         finally:
             exit_patches(patches)
         assert resp.status_code != 403, resp.data[:300]
@@ -225,14 +275,14 @@ class TestCrossSchoolAPIAccess:
         """Teacher A gets 403 when grading a submission whose exam is School B's."""
         patches = enter(auth_patches({
             # Embedded parent, as PostgREST actually returns it.
-            "submissions": {"exam_id": "exam-b", "exams": {"school_id": "school-b"}},
-            "exams": {"school_id": "school-b"},
+            "submissions": {"exam_id": "exam-b", "exams": {"teacher_id": "teacher-b", "school_id": "school-b"}},
+            "exams": {"school_id": "school-b", "teacher_id": "teacher-b"},
         }))
         try:
             resp = client.get("/teacher/grade/sub-from-school-b", headers=BEARER)
         finally:
             exit_patches(patches)
-        self._assert_school_block(resp)
+        self._assert_forbidden(resp)
 
     def test_admin_cannot_delete_student_from_different_school(self, client):
         """Admin A gets 403 when deleting a student from School B."""

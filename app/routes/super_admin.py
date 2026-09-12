@@ -5,6 +5,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, current_app, send_file
 from app.utils.auth import login_required, get_supabase
+from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
@@ -311,22 +312,35 @@ def reset_demo_data():
     return jsonify({"success": True, "message": f"{cleared}/{len(tables)} tabel dibersihkan", "errors": errors[:3]})
 
 
+def _demo_settings_row(supabase):
+    """Current ``school_settings.demo_settings`` blob, or ``{}`` when unset."""
+    try:
+        row = row_or_none(
+            supabase.table("school_settings")
+            .select("demo_settings")
+            .eq("id", 1)
+            .maybe_single()
+            .execute()
+        )
+        return (row or {}).get("demo_settings") or {}
+    except Exception:
+        return {}
+
+
 @super_bp.route("/demo-settings/data")
 @_sa_required
 def demo_settings_data():
-    supabase = get_supabase()
-    try:
-        data = supabase.table("school_settings").select("demo_settings").eq("id", 1).single().execute().data or {}
-        return jsonify(data.get("demo_settings") or {})
-    except Exception:
-        return jsonify({})
+    return jsonify(_demo_settings_row(get_supabase()))
 
 
 @super_bp.route("/demo-settings", methods=["GET", "POST"])
 @_sa_required
 def demo_settings():
     supabase = get_supabase()
+
     if request.method == "POST":
+        # The whole demo surface is driven by this one blob, so treat a failed
+        # write as a failure instead of reporting success for a no-op.
         settings = {
             "demo_enabled": request.form.get("demo_enabled", "false") == "true",
             "demo_super_admin": request.form.get("demo_super_admin", "false") == "true",
@@ -339,26 +353,19 @@ def demo_settings():
             "demo_tutorial_admin": request.form.get("demo_tutorial_admin", "false") == "true",
         }
         try:
-            supabase.table("school_settings").upsert({"id": 1, "demo_settings": settings}).execute()
-        except Exception:
-            try:
-                existing = supabase.table("school_settings").select("id").eq("id", 1).execute()
-                if existing.data:
-                    supabase.table("school_settings").update({"demo_settings": settings}).eq("id", 1).execute()
-                else:
-                    supabase.table("school_settings").insert({"id": 1, "demo_settings": settings}).execute()
-            except Exception:
-                pass
-    return jsonify({"success": True})
+            existing = supabase.table("school_settings").select("id").eq("id", 1).execute()
+            if existing.data:
+                supabase.table("school_settings").update({"demo_settings": settings}).eq("id", 1).execute()
+            else:
+                supabase.table("school_settings").insert({"id": 1, "demo_settings": settings}).execute()
+        except Exception as e:
+            current_app.logger.error(f"demo_settings save failed: {str(e)[:120]}")
+            return jsonify({"success": False, "error": str(e)[:120]}), 500
 
+        log_activity("update", "demo_settings", "1", new_data=settings, user_id=g.user_id)
+        return jsonify({"success": True, "settings": settings})
 
-    current = {}
-    try:
-        data = supabase.table("school_settings").select("demo_settings").eq("id", 1).single().execute().data or {}
-        current = data.get("demo_settings") or {}
-    except Exception:
-        pass
-    return render_template("super_admin/demo_settings.html", settings=current)
+    return render_template("super_admin/demo_settings.html", settings=_demo_settings_row(supabase))
 
 
 # ─── Midtrans Settings ────────────────────────────────────────────────

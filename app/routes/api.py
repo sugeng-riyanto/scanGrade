@@ -7,6 +7,9 @@ import time
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, g, render_template, redirect, send_file, current_app
 from app.utils.auth import login_required, get_supabase
+from app.utils.helpers import row_or_none
+from app.utils.exam_access import exam_sitting_allowed
+from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
@@ -381,6 +384,7 @@ def _scan_essay_vision(image_bytes, api_key="", lang="en"):
 
 @api_bp.route("/scan/essay", methods=["POST"])
 @login_required
+@require_role(*STAFF_ROLES)
 def scan_essay():
     if "image" not in request.files:
         return jsonify({"error": "Tidak ada gambar"}), 400
@@ -411,6 +415,7 @@ def scan_essay():
 
 @api_bp.route("/grade/vision-canvas", methods=["POST"])
 @login_required
+@require_role(*STAFF_ROLES)
 def vision_canvas_ocr():
     data = request.get_json() or {}
     image_data = data.get("image", "")
@@ -455,6 +460,7 @@ def vision_canvas_ocr():
 
 @api_bp.route("/scan/task/<task_id>", methods=["GET"])
 @login_required
+@require_role(*STAFF_ROLES)
 def scan_task_status(task_id):
     """Poll Celery task status and get result when done."""
     from app.celery_app import celery_app
@@ -644,14 +650,34 @@ def student_auto_save():
         return jsonify({"saved": True, "at": int(time.time()), "busy": True})
     try:
         supabase = get_supabase()
+        # This route previously accepted ANY exam_id and wrote to whatever
+        # submission it found. Two holes followed: it created a draft for exams
+        # belonging to another school or not published yet, and it accepted a
+        # write to a submission already marked "submitted" — so answers could be
+        # replaced after the exam had been handed in. Both are closed here.
+        exam = row_or_none(
+            supabase.table("exams")
+            .select("id,school_id,class_ids,is_published,status")
+            .eq("id", exam_id).maybe_single().execute()
+        )
+        allowed, _reason = exam_sitting_allowed(supabase, exam or {}, exam_id, g.user_id)
+        if not allowed:
+            current_app.logger.warning("auto-save denied: exam %s user %s", exam_id, g.user_id)
+            return jsonify({"saved": True, "at": int(time.time()), "denied": True})
+
         existing = supabase.table("submissions").select("id,status,answers").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
-        if existing and existing[0].get("status") in ("draft", "submitted"):
-            merged = existing[0].get("answers") or {}
+        if existing:
+            sub = existing[0]
+            # Only an open attempt may be auto-saved. A handed-in, marked, or
+            # released submission is final.
+            if sub.get("status") != "draft":
+                return jsonify({"saved": True, "at": int(time.time()), "note": "not_draft"})
+            merged = sub.get("answers") or {}
             if isinstance(merged, dict):
                 merged.update(answers)
                 answers = merged
-            supabase.table("submissions").update({"answers": answers}).eq("id", existing[0]["id"]).execute()
-        elif not existing:
+            supabase.table("submissions").update({"answers": answers}).eq("id", sub["id"]).execute()
+        else:
             supabase.table("submissions").insert({
                 "exam_id": exam_id,
                 "student_id": g.user_id,
@@ -695,24 +721,21 @@ def student_sync_draft():
         return jsonify({"saved": True, "at": int(time.time())})
     if not _check_rate_limit(g.user_id, exam_id, min_interval=3 if is_light else 10):
         return jsonify({"saved": True, "at": int(time.time()), "throttled": True})
-    # Verify student owns this exam (school + class check)
+    # Verify the student may sit this exam. Delegated to the shared rule so this
+    # path and the page routes cannot drift apart again — and it DENIES on error.
+    # The previous version wrapped the whole check in `except Exception: pass`,
+    # so a failed lookup let the write through, which is the opposite of a check.
     if g.get("user_role") == "murid":
-        try:
-            from app.utils.auth import get_supabase as _gs
-            _sb = _gs()
-            _exam_check = _sb.table("exams").select("school_id, class_ids, is_published, status").eq("id", exam_id).single().execute().data
-            if not _exam_check or not _exam_check.get("is_published") or _exam_check.get("status") != "active":
-                return jsonify({"saved": True, "at": int(time.time()), "denied": True})
-            _prof = _sb.table("profiles").select("school_id, class_id").eq("id", g.user_id).single().execute().data or {}
-            if _exam_check.get("school_id") and _prof.get("school_id") and str(_exam_check["school_id"]) != str(_prof["school_id"]):
-                return jsonify({"saved": True, "at": int(time.time()), "denied": True})
-            _cids = _exam_check.get("class_ids") or []
-            if isinstance(_cids, str):
-                import json as _j; _cids = _j.loads(_cids)
-            if _cids and _prof.get("class_id") and _prof["class_id"] not in _cids:
-                return jsonify({"saved": True, "at": int(time.time()), "denied": True})
-        except Exception:
-            pass
+        from app.utils.auth import get_supabase as _gs
+        _sb = _gs()
+        _exam_check = row_or_none(
+            _sb.table("exams").select("school_id, class_ids, is_published, status")
+            .eq("id", exam_id).maybe_single().execute()
+        )
+        allowed, _why = exam_sitting_allowed(_sb, _exam_check or {}, exam_id, g.user_id)
+        if not allowed:
+            current_app.logger.warning("sync-draft denied: exam %s user %s", exam_id, g.user_id)
+            return jsonify({"saved": True, "at": int(time.time()), "denied": True})
     lock_key = f"sync:{g.user_id}:{exam_id}"
     rlock = _redis_lock(lock_key)
     if not rlock:
@@ -977,7 +1000,16 @@ def api_penalty_appeal():
         return jsonify({"error": "Alasan minimal 10 karakter"}), 400
 
     supabase = get_supabase()
-    sub = supabase.table("submissions").select("id,student_id,penalty,answers,status").eq("id", submission_id).single().execute().data
+    # maybe_single(), not single(): single() RAISES when nothing matches, so an
+    # unknown id — or another student's — answered 500 instead of 404/403.
+    try:
+        sub = row_or_none(
+            supabase.table("submissions")
+            .select("id,student_id,penalty,answers,status")
+            .eq("id", submission_id).maybe_single().execute()
+        )
+    except Exception:
+        sub = None
     if not sub:
         return jsonify({"error": "Submission tidak ditemukan"}), 404
     if sub["student_id"] != g.user_id:
@@ -1196,6 +1228,7 @@ def scan_image(exam_id, student_id):
 
 @api_bp.route("/transaction/status", methods=["GET"])
 @login_required
+@require_role("admin_sekolah", "super_admin")
 def transaction_status():
     order_id = request.args.get("order_id", "")
     if not order_id:
@@ -1269,6 +1302,7 @@ def transaction_status():
 
 @api_bp.route("/activation/redeem", methods=["POST"])
 @login_required
+@require_role("admin_sekolah", "super_admin")
 def redeem_activation_code():
     data = request.get_json()
     code = (data or {}).get("code", "").strip().upper()
@@ -1322,6 +1356,7 @@ def redeem_activation_code():
 
 @api_bp.route("/ai/test-key", methods=["POST"])
 @login_required
+@require_role(*STAFF_ROLES)
 def ai_test_key():
     data = request.get_json()
     key_id = (data or {}).get("key_id", "")
@@ -1444,10 +1479,12 @@ def api_import_students():
                 password = str(row.get("password", "")).strip() or "siswa123"
 
                 # Check duplicate NISN
-                existing = supabase.table("students") \
-                    .select("id").eq("nisn", nisn) \
+                existing = row_or_none(
+                    supabase.table("students")
+                    .select("id").eq("nisn", nisn)
                     .eq("school_id", school_id).maybe_single().execute()
-                if existing.data:
+                )
+                if existing:
                     results["failed"] += 1
                     results["errors"].append({"row": row_num, "nisn": nisn, "message": "NISN sudah terdaftar"})
                     continue
@@ -1455,11 +1492,13 @@ def api_import_students():
                 # Resolve class from name
                 resolved_class_id = class_id
                 if not resolved_class_id and kelas:
-                    c = supabase.table("classes") \
-                        .select("id").eq("school_id", school_id) \
+                    c = row_or_none(
+                        supabase.table("classes")
+                        .select("id").eq("school_id", school_id)
                         .eq("name", kelas).maybe_single().execute()
-                    if c.data:
-                        resolved_class_id = c.data["id"]
+                    )
+                    if c:
+                        resolved_class_id = c["id"]
 
                 # Create auth user
                 user_email = email or f"{nisn}@siswa.scan-grade.app"
@@ -1506,6 +1545,7 @@ def api_import_students():
 
 @api_bp.route("/exams/<exam_id>/report", methods=["GET"])
 @login_required
+@require_role(*STAFF_ROLES)
 def exam_report(exam_id):
     """Generate exam report with statistics. Supports ?format=excel for XLSX download.
 

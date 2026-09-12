@@ -2,9 +2,37 @@ import functools
 from flask import g, request, jsonify, abort
 
 
+# Roles that may see or alter assessment data for other people's students.
+STAFF_ROLES = ("guru", "admin_sekolah", "super_admin")
+
+
 def _wants_json():
     accept = request.headers.get("Accept", "")
     return "application/json" in accept or request.path.startswith("/api/")
+
+
+def require_role(*roles):
+    """Restrict a view to the given roles.
+
+    ``require_school_access`` answers "is this row from your school?" — it does
+    NOT answer "are you allowed to do this at all". Endpoints guarded by school
+    access alone were reachable by every signed-in member of that school,
+    students included: ``/api/exams/<id>/report`` handed a whole class's names,
+    NISN and scores to any student who asked. Use both — this one for the role,
+    that one for the row.
+
+    Place it UNDER ``@login_required`` so the session is applied to ``g`` first.
+    """
+    def decorator(f):
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            if g.get("user_role") not in roles:
+                if _wants_json():
+                    return jsonify({"error": "Akses ditolak"}), 403
+                abort(403)
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def require_school_access(table, resource_id_param="id", school_join=None):
