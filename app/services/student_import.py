@@ -7,6 +7,7 @@ Usage:
 import csv
 import io
 from app.utils.auth import get_supabase
+from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
 from app.errors import ValidationError
 
@@ -90,8 +91,11 @@ def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=5
             password = row.get("password", "").strip() or "siswa123"
 
             # Duplicate NISN check
-            existing = supabase.table("students").select("id").eq("nisn", nisn).eq("school_id", school_id).maybe_single().execute()
-            if existing.data:
+            existing = row_or_none(
+                supabase.table("students").select("id").eq("nisn", nisn)
+                .eq("school_id", school_id).maybe_single().execute()
+            )
+            if existing:
                 results["failed"] += 1
                 results["errors"].append({"row": idx, "nisn": nisn, "message": "NISN sudah terdaftar"})
                 continue
@@ -99,9 +103,12 @@ def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=5
             # Resolve class_id from name if class_id not provided
             resolved_class_id = class_id
             if not resolved_class_id and kelas:
-                c = supabase.table("classes").select("id").eq("school_id", school_id).eq("name", kelas).maybe_single().execute()
-                if c.data:
-                    resolved_class_id = c.data["id"]
+                c = row_or_none(
+                    supabase.table("classes").select("id").eq("school_id", school_id)
+                    .eq("name", kelas).maybe_single().execute()
+                )
+                if c:
+                    resolved_class_id = c["id"]
 
             # Create auth user
             user_email = email or f"{nisn}@siswa.scan-grade.app"
@@ -111,7 +118,6 @@ def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=5
                 "user_metadata": {"role": "murid", "full_name": nama},
                 "email_confirm": True,
             })
-            uid = created.user.id
             uid = created.user.id
 
             supabase.table("profiles").upsert({

@@ -9,6 +9,7 @@ from datetime import datetime, timezone, date
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
 from app.utils.auth import admin_sekolah_required, get_supabase, subscription_write_required
+from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
 
@@ -319,8 +320,11 @@ def _import_students(ws, sid, supabase, results):
             class_id = None
             if kelas:
                 if kelas not in classes_cache:
-                    c = supabase.table("classes").select("id").eq("school_id", sid).eq("name", kelas).maybe_single().execute()
-                    classes_cache[kelas] = c.data["id"] if c.data else None
+                    c = row_or_none(
+                        supabase.table("classes").select("id").eq("school_id", sid)
+                        .eq("name", kelas).maybe_single().execute()
+                    )
+                    classes_cache[kelas] = c["id"] if c else None
                 class_id = classes_cache.get(kelas)
 
             user_email = email or _generate_email(nama, _get_email_domain(sid))
@@ -378,8 +382,11 @@ def _import_teachers(ws, sid, supabase, results):
             subject_id = None
             for mn in mapels:
                 if mn and mn not in subjects_cache:
-                    s = supabase.table("subjects").select("id").eq("school_id", sid).eq("name", mn).maybe_single().execute()
-                    subjects_cache[mn] = s.data["id"] if s.data else None
+                    s = row_or_none(
+                        supabase.table("subjects").select("id").eq("school_id", sid)
+                        .eq("name", mn).maybe_single().execute()
+                    )
+                    subjects_cache[mn] = s["id"] if s else None
                 if mn and subjects_cache.get(mn):
                     subject_id = subjects_cache[mn]
                     break

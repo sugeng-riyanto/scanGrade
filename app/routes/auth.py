@@ -1,10 +1,18 @@
 from datetime import datetime, timezone
+import logging
+import os
+import threading
 import time
 from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
 from app.utils.auth import login_required, get_supabase, get_auth_client, invalidate_session
+from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
 from app.utils.rate_limiter import limiter, check_account_limit, rate_limit_message
+
+# Module-level logger: the login helpers below can be exercised outside a request
+# context, and a logging call must never be the thing that breaks a login.
+logger = logging.getLogger(__name__)
 
 # Safe rate-limit decorator — no-op if Flask-Limiter not available or LOAD_TEST mode
 def _rate_limit(n):
@@ -209,6 +217,152 @@ def activate():
         return render_template("auth/activate.html", error="Kode aktivasi tidak valid atau sudah kedaluwarsa", email=email)
 
 
+# ─── Login failure handling ──────────────────────────
+# Supabase Auth rate-limits sign-in *per IP*, and every login this app performs
+# is made from the server, so all schools share a single bucket. Measured on the
+# VPS: 15/15 sequential sign-ins succeed, but a simultaneous burst of 15 drops
+# to 5/15 with `AuthApiError: Request rate limit reached`.
+#
+# The handlers used to catch that in a bare `except` and render "Email atau
+# password salah" — telling students their correct password was wrong, which
+# pushed them to retry and deepened the very rate limit that caused it, while
+# making the real failure impossible to diagnose.
+_LOGIN_RETRY_BASE = 0.4  # seconds before retrying a rate-limited attempt
+
+# Pace outbound sign-ins BELOW Supabase's refill rate instead of stampeding it.
+#
+# Supabase limits POST /auth/v1/token per IP with a token bucket whose BURST
+# CAPACITY IS FIXED AT 30 — only the refill rate is configurable in the
+# dashboard. All logins leave from this one server IP, so every school shares a
+# single bucket. Measured on this project:
+#
+#   before raising the limit : 0.45 sign-ins/s -> 330 simultaneous logins needed
+#                              ~10 minutes of refill; 286 of 330 failed
+#   after setting it to 1000 : ~9.7/s, confirmed by driving the endpoint past the
+#                              ceiling (215 accepted, 13 rejected at 10.2/s demand)
+#
+# So the useful lever is patience, not concurrency: a school-wide login is a
+# queue. Pacing ourselves under the ceiling is what turns 286 failures into none.
+# Raise LOGIN_SIGNIN_RATE after raising the Supabase limit again.
+_LOGIN_SIGNIN_RATE = float(os.environ.get("LOGIN_SIGNIN_RATE", "8") or 8)  # per second
+_LOGIN_WAIT_BUDGET = float(os.environ.get("LOGIN_WAIT_BUDGET", "60") or 60)  # seconds
+
+# Pacing state. Under gunicorn's gevent worker, threading and time.sleep are
+# monkey-patched, so waiting here yields to other greenlets instead of blocking
+# the worker.
+_pace_lock = threading.Lock()
+_next_slot = [0.0]
+
+# The slot queue is kept in Redis so the rate is AGGREGATE across gunicorn
+# workers. Pacing in-process alone multiplies the rate by the worker count
+# (3 workers x 8/s = 24/s), which is the very stampede this exists to prevent.
+# GET and SET are atomic inside the script, so two workers can never claim the
+# same slot; the key expires on its own so a stale slot can't stall a restart.
+_PACE_LUA = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local interval = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local slot = tonumber(redis.call('GET', key))
+if not slot or slot < now then slot = now end
+redis.call('SET', key, slot + interval, 'EX', ttl)
+return tostring(slot)
+"""
+_PACE_REDIS_KEY = "rl:login:pace"
+
+
+def _pace_signin_redis(interval):
+    """Reserve the next sign-in slot in Redis and wait for it.
+
+    Returns False if Redis is unusable, so the caller can fall back to local
+    pacing instead of silently dropping the throttle. Uses wall-clock time
+    because the queue is shared between processes.
+    """
+    try:
+        from app.utils.rate_limiter import _get_redis_conn
+        conn = _get_redis_conn()
+        if conn is None:
+            return False
+        slot = float(conn.eval(_PACE_LUA, 1, _PACE_REDIS_KEY,
+                               time.time(), interval, 120))
+    except Exception as e:
+        logger.debug("Redis login pacing unavailable (%s) — pacing locally", e)
+        return False
+    delay = slot - time.time()
+    if delay > 0:
+        time.sleep(delay)
+    return True
+
+
+def _pace_signin():
+    """Claim the next outbound sign-in slot, keeping us under the ceiling."""
+    if _LOGIN_SIGNIN_RATE <= 0:
+        return
+    interval = 1.0 / _LOGIN_SIGNIN_RATE
+    if _pace_signin_redis(interval):
+        return
+    with _pace_lock:
+        now = time.monotonic()
+        slot = max(now, _next_slot[0])
+        _next_slot[0] = slot + interval
+    delay = slot - time.monotonic()
+    if delay > 0:
+        time.sleep(delay)
+
+_BAD_CREDENTIAL_CODES = {"invalid_credentials", "invalid_grant"}
+
+
+def _is_transient_auth_error(exc) -> bool:
+    """True for conditions worth retrying: rate limiting or a server-side fault.
+
+    A wrong password is never retried.
+    """
+    status = getattr(exc, "status", None)
+    code = (getattr(exc, "code", None) or "").lower()
+    text = str(exc).lower()
+    if code in _BAD_CREDENTIAL_CODES or "invalid login credentials" in text:
+        return False
+    return status == 429 or status is None or (status and status >= 500) \
+        or "rate limit" in text or "too many" in text
+
+
+def _classify_login_error(exc):
+    """Return (credentials_are_wrong, message_shown_to_the_user)."""
+    if not _is_transient_auth_error(exc):
+        return True, "Email atau password salah"
+    text = str(exc).lower()
+    if "rate limit" in text or getattr(exc, "status", None) == 429:
+        return False, ("Server autentikasi sedang sibuk (batas permintaan). "
+                       "Tunggu beberapa detik, lalu coba lagi.")
+    return False, "Gagal masuk karena gangguan sementara. Silakan coba lagi sebentar lagi."
+
+
+def _sign_in_with_retry(supabase_auth, email, password):
+    """`sign_in_with_password` that queues behind the rate limit, not fails.
+
+    Each attempt claims a paced slot, and a rate-limited attempt waits for
+    another slot until the wait budget runs out. Waiting is cooperative under
+    gevent, so a queued login does not block the worker's other greenlets.
+
+    A wrong password is neither retried nor waited on — it raises immediately.
+    """
+    import random
+
+    deadline = time.monotonic() + _LOGIN_WAIT_BUDGET
+    while True:
+        _pace_signin()
+        try:
+            return supabase_auth.auth.sign_in_with_password(
+                {"email": email, "password": password})
+        except Exception as e:
+            if not _is_transient_auth_error(e):
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            logger.warning("Login rate-limited; waiting for another slot: %s", e)
+            time.sleep(_LOGIN_RETRY_BASE * (0.5 + random.random()))
+
+
 # ─── LOGIN (Admin & Super Admin) ─────────────────────
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -231,7 +385,7 @@ def login():
     supabase = get_supabase()
 
     try:
-        res = supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
+        res = _sign_in_with_retry(supabase_auth, email, password)
 
         # Check profile status
         try:
@@ -265,13 +419,19 @@ def login():
         resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/", max_age=86400)
         resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
         resp.set_cookie("session_start", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400*7)
-    except Exception:
-        # Failed attempts are counted per ACCOUNT. Keying this on the IP would
-        # lock out every colleague behind the same school NAT.
-        allowed, retry = check_account_limit("login_failed", email, ip=request.remote_addr)
-        if not allowed:
-            return render_template("auth/login.html", error=rate_limit_message(retry, "percobaan login"))
-        return render_template("auth/login.html", error="Email atau password salah")
+    except Exception as e:
+        wrong_password, message = _classify_login_error(e)
+        if wrong_password:
+            # Failed attempts are counted per ACCOUNT. Keying this on the IP
+            # would lock out every colleague behind the same school NAT.
+            allowed, retry = check_account_limit("login_failed", email, ip=request.remote_addr)
+            if not allowed:
+                return render_template("auth/login.html", error=rate_limit_message(retry, "percobaan login"))
+        else:
+            # A transient failure must NOT consume the account's budget: doing so
+            # let a rate-limit spike ban a school from logging in for 15 minutes.
+            logger.warning("Login transient failure for %s: %s", email, e)
+        return render_template("auth/login.html", error=message)
     # log_activity outside try/except so audit failures don't block login
     try:
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
@@ -335,7 +495,7 @@ def login_user():
                 pass
 
     try:
-        res = supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
+        res = _sign_in_with_retry(supabase_auth, email, password)
 
         try:
             profile = supabase.table("profiles") \
@@ -368,12 +528,17 @@ def login_user():
         resp.set_cookie("session_start", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400*7)
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
-    except Exception:
-        # Same reasoning as /login: throttle the account, not the school's IP.
-        allowed, retry = check_account_limit("login_failed", login_input, ip=request.remote_addr)
-        if not allowed:
-            return render_template("auth/login_user.html", error=rate_limit_message(retry, "percobaan login"))
-        return render_template("auth/login_user.html", error="Email atau password salah")
+    except Exception as e:
+        # Same reasoning as /login: throttle the account, not the school's IP,
+        # and only for genuine credential failures.
+        wrong_password, message = _classify_login_error(e)
+        if wrong_password:
+            allowed, retry = check_account_limit("login_failed", login_input, ip=request.remote_addr)
+            if not allowed:
+                return render_template("auth/login_user.html", error=rate_limit_message(retry, "percobaan login"))
+        else:
+            logger.warning("Login transient failure for %s: %s", login_input, e)
+        return render_template("auth/login_user.html", error=message)
 
 
 # ─── FORGOT PASSWORD — 6-digit code flow ────────────
@@ -463,16 +628,19 @@ def forgot_password():
 
     # 1. Search profiles by phone (recovery email)
     try:
-        prof = supabase.table("profiles").select("id, phone, full_name, role").eq("phone", email).maybe_single().execute()
-        if prof.data:
+        prof = row_or_none(
+            supabase.table("profiles").select("id, phone, full_name, role")
+            .eq("phone", email).maybe_single().execute()
+        )
+        if prof:
             auth_client = get_auth_client()
-            au = auth_client.admin.get_user_by_id(prof.data["id"])
+            au = auth_client.admin.get_user_by_id(prof["id"])
             user_data = {
                 "auth_email": au.user.email,
                 "recovery_email": email,
-                "user_id": prof.data["id"],
-                "role": prof.data.get("role", "murid"),
-                "full_name": prof.data.get("full_name", ""),
+                "user_id": prof["id"],
+                "role": prof.get("role", "murid"),
+                "full_name": prof.get("full_name", ""),
             }
             target_email = email  # send to the recovery email they entered
     except Exception:
@@ -482,19 +650,21 @@ def forgot_password():
     if not user_data:
         for table_name in ("students", "teachers"):
             try:
-                rec = supabase.table(table_name).select("id, profiles!inner(phone, full_name, role)").eq(
-                    "nisn" if table_name == "students" else "employee_id", email
-                ).maybe_single().execute()
-                if rec.data:
-                    prof = rec.data.get("profiles") or {}
+                rec = row_or_none(
+                    supabase.table(table_name).select("id, profiles!inner(phone, full_name, role)").eq(
+                        "nisn" if table_name == "students" else "employee_id", email
+                    ).maybe_single().execute()
+                )
+                if rec:
+                    prof = rec.get("profiles") or {}
                     auth_client = get_auth_client()
-                    au = auth_client.admin.get_user_by_id(rec.data["id"])
+                    au = auth_client.admin.get_user_by_id(rec["id"])
                     recovery = prof.get("phone", "")
                     target_email = recovery if "@" in recovery else au.user.email
                     user_data = {
                         "auth_email": au.user.email,
                         "recovery_email": recovery if "@" in recovery else "",
-                        "user_id": rec.data["id"],
+                        "user_id": rec["id"],
                         "role": prof.get("role", "murid"),
                         "full_name": prof.get("full_name", ""),
                     }
@@ -509,8 +679,11 @@ def forgot_password():
             users = auth_client.admin.list_users()
             for u in users:
                 if u.email and u.email.lower() == email:
-                    prof = supabase.table("profiles").select("phone, full_name, role").eq("id", u.id).maybe_single().execute()
-                    p = prof.data or {}
+                    prof = row_or_none(
+                        supabase.table("profiles").select("phone, full_name, role")
+                        .eq("id", u.id).maybe_single().execute()
+                    )
+                    p = prof or {}
                     recovery = p.get("phone", "")
                     target_email = recovery if "@" in recovery else u.email
                     user_data = {
@@ -624,19 +797,25 @@ def set_new_password():
 
     try:
         # Find by recovery email (phone)
-        prof = supabase.table("profiles").select("id, role").eq("phone", email).maybe_single().execute()
-        if not prof.data:
+        prof = row_or_none(
+            supabase.table("profiles").select("id, role")
+            .eq("phone", email).maybe_single().execute()
+        )
+        if not prof:
             # Find by auth email
             users = auth_client.admin.list_users()
             for u in users:
                 if u.email and u.email.lower() == email:
                     user_id = u.id
-                    p2 = supabase.table("profiles").select("role").eq("id", u.id).maybe_single().execute()
-                    role = p2.data.get("role", "murid") if p2.data else "murid"
+                    p2 = row_or_none(
+                        supabase.table("profiles").select("role")
+                        .eq("id", u.id).maybe_single().execute()
+                    )
+                    role = p2.get("role", "murid") if p2 else "murid"
                     break
         else:
-            user_id = prof.data["id"]
-            role = prof.data.get("role", "murid")
+            user_id = prof["id"]
+            role = prof.get("role", "murid")
     except Exception:
         pass
 

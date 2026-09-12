@@ -152,6 +152,38 @@ def _apply_session(data, token):
     g.user_status = data.get("status", "active")
 
 
+def peek_identity():
+    """Best-effort identity for the current request, from the cache only.
+
+    The rate-limit hook runs in ``before_request``, i.e. *before*
+    ``login_required`` has applied the session to ``g``. Reading
+    ``g.get("user_id")`` there therefore always returned ``None``, so the hook's
+    ``user_id or ip`` fell back to the IP for **every** request — including
+    authenticated ones. Schools reach the internet through one NAT'd address,
+    so a whole class ended up sharing a single 120 req/min bucket and got 429'd
+    in bulk (measured: 61 of 221 requests from one IP with 44 users).
+
+    Resolving the session here keys authenticated traffic on the user instead.
+
+    Deliberately **cache-only**:
+
+    * The hook must stay cheap; it runs on every request.
+    * A request carrying a forged token must not be able to trigger Supabase
+      lookups before any limit has been applied.
+
+    A cache miss returns ``None`` so the caller falls back to its per-IP flood
+    bucket. That costs at most one request per user per TTL window.
+    """
+    if getattr(g, "user_id", None):
+        return g.user_id
+    token = _extract_token()
+    if not token:
+        return None
+    from app.utils.kv_cache import cache_get
+    data = cache_get(_session_key(token))
+    return (data or {}).get("user_id")
+
+
 def invalidate_session(token):
     """Drop a cached session so the token stops working immediately (logout)."""
     if not token:

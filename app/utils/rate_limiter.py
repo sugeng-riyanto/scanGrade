@@ -97,12 +97,27 @@ def _get_redis_conn():
 _limits = {}
 _limits_lock = threading.Lock()
 
+# Per-IDENTITY limits, for requests whose user can be resolved (see
+# app.utils.auth.peek_identity). One bucket per user — the numbers are sized for
+# a single person browsing or one exam client, not for a whole class.
 DEFAULT_LIMITS = {
     "default": (120, 60),
     "auth": (30, 60),
     "api": (120, 60),
     "api_student": (300, 60),
     "upload": (10, 300),
+}
+
+# Per-IP FLOOD buckets, used only when no identity can be resolved from the
+# session cache (genuinely anonymous, or a forged/expired token). These have to
+# be loose: nginx rejects floods first, and the anonymous requests a school
+# really makes all come from one NAT'd address, so a tight bucket here would
+# throttle an entire classroom again — which is the bug this split fixes.
+IP_FLOOD_LIMITS = {
+    "default": (12000, 60),
+    "auth": (2400, 60),
+    "api": (12000, 60),
+    "upload": (600, 300),
 }
 
 # ── Per-ACCOUNT throttles ─────────────────────────────────────────
@@ -301,12 +316,21 @@ def get_rate_limiter(app):
         else:
             group = "default"
 
-        max_req, window = DEFAULT_LIMITS.get(group, DEFAULT_LIMITS["default"])
-
-        # Identity: user_id for authenticated (school-NAT friendly), IP for anon
         ip = request.remote_addr or "unknown"
-        user_id = g.get("user_id") if hasattr(g, "user_id") else None
-        identity = user_id or ip
+
+        # `g.user_id` is NOT set yet here (the view's login_required applies the
+        # session later), so identity has to come from the session cache —
+        # otherwise `user_id or ip` silently made every request IP-keyed, and
+        # one school's whole NAT'd traffic shared a single bucket.
+        from app.utils.auth import peek_identity
+        identity = peek_identity()
+
+        if identity:
+            max_req, window = DEFAULT_LIMITS.get(group, DEFAULT_LIMITS["default"])
+            bucket = f"u:{identity}"
+        else:
+            max_req, window = IP_FLOOD_LIMITS.get(group, IP_FLOOD_LIMITS["default"])
+            bucket = f"ip:{ip}"
 
         # Periodic memory cleanup (every 10 min)
         now = time.time()
@@ -317,10 +341,10 @@ def get_rate_limiter(app):
         # Try Redis first (shared across workers), fallback to in-memory
         conn = _get_redis_conn()
         if conn:
-            key = f"rl:{group}:{identity}"
+            key = f"rl:{group}:{bucket}"
             allowed, retry_after = _check_limit_redis(conn, key, max_req, window)
         else:
-            key = f"{group}:{identity}"
+            key = f"{group}:{bucket}"
             allowed, retry_after = _check_limit_memory(key, max_req, window)
 
         if not allowed:
