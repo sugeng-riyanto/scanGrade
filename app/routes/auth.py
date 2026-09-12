@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, g, session, render_template, redi
 from app.utils.auth import login_required, get_supabase, get_auth_client
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
-from app.utils.rate_limiter import limiter
+from app.utils.rate_limiter import limiter, check_account_limit, rate_limit_message
 
 # Safe rate-limit decorator — no-op if Flask-Limiter not available or LOAD_TEST mode
 def _rate_limit(n):
@@ -40,6 +40,13 @@ def register():
     consent = request.form.get("consent")
     if not consent:
         return render_template("auth/register.html", error="Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi")
+
+    # Per-ACCOUNT throttle on the school (NPSN), not the client IP: several
+    # schools can share one NAT'd address, so an IP-keyed limit would let one
+    # school's retries block another's first attempt.
+    allowed, retry = check_account_limit("register", npsn)
+    if not allowed:
+        return render_template("auth/register.html", error=rate_limit_message(retry, "percobaan pendaftaran"))
 
     supabase = get_supabase()
 
@@ -430,6 +437,13 @@ def forgot_password():
     if not email:
         return render_template("auth/forgot_password.html", error="Email aktif atau NISN wajib diisi")
 
+    # Per-ACCOUNT throttle (the email/NISN itself). This endpoint sends mail, so
+    # it needs a real limit — but keyed to the account, so a class of students
+    # behind one school IP can each request their own code.
+    allowed, retry = check_account_limit("forgot_password", email)
+    if not allowed:
+        return render_template("auth/forgot_password.html", error=rate_limit_message(retry, "permintaan kode"))
+
     supabase = get_supabase()
 
     # Find user by: recovery email (phone), auth email, or NISN
@@ -552,6 +566,13 @@ def verify_reset_code():
 
     if not email or not code:
         return render_template("auth/verify_code.html", email=email, error="Kode wajib diisi")
+
+    # Per-ACCOUNT throttle (not per-IP): caps brute-forcing one account's reset
+    # code while letting a whole class verify their own codes from a shared IP.
+    allowed, retry = check_account_limit("verify_code", email)
+    if not allowed:
+        return render_template("auth/verify_code.html", email=email,
+                               error=rate_limit_message(retry, "percobaan kode"))
 
     stored = _get_reset_code(email)
     if not stored:
