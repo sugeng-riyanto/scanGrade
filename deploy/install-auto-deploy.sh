@@ -36,7 +36,12 @@ fi
 
 [ -d "$REPO/.git" ] || { echo "!! $REPO is not a git checkout"; exit 3; }
 OWNER=$(stat -c '%U' "$REPO")
-as_owner() { runuser -u "$OWNER" -- env HOME="$REPO" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
+# The owner's real home — not $REPO — so git looks for credentials where they
+# actually live and pip's cache never lands inside the checkout (an untracked
+# $REPO/.cache would trip the deploy script's own dirty-checkout guard).
+OWNER_HOME=$(getent passwd "$OWNER" | cut -d: -f6)
+[ -n "$OWNER_HOME" ] || OWNER_HOME=/tmp
+as_owner() { runuser -u "$OWNER" -- env HOME="$OWNER_HOME" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
 
 # ── 1. Bring the checkout up to date, so the automation we install is the
 #       version in the repo rather than whatever happens to be lying around.
