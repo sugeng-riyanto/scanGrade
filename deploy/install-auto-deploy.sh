@@ -66,6 +66,7 @@ AFTER=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 echo "   $BEFORE -> $AFTER"
 
 for f in deploy/scangrade-deploy.sh deploy/smoke_test.py deploy/db_snapshot.py \
+         deploy/scangrade-db-snapshot.sh \
          deploy/scangrade-deploy.service deploy/scangrade-deploy.timer \
          deploy/scangrade.service; do
   [ -f "$REPO/$f" ] || { echo "!! missing $REPO/$f — is origin/$BRANCH the right commit?"; exit 6; }
@@ -90,38 +91,12 @@ echo "   syntax ok"
 say "Installing $SNAPSHOT_BIN"
 mkdir -p "$BACKUP_DIR"
 chmod 0700 "$BACKUP_DIR"
-cat > "$SNAPSHOT_BIN" <<EOF
-#!/usr/bin/env bash
-# Take a snapshot of the database as it is right now.
-#
-# Run this BEFORE pasting a migration into the Supabase SQL editor: the deploy
-# only knows to capture a release that changes supabase/migrations, and a
-# migration applied by hand changes no file.
-#
-#   scangrade-db-snapshot                    # label it 'manual'
-#   scangrade-db-snapshot --label before-025 # label it after something
-#   scangrade-db-snapshot --list             # what is already there
-#   scangrade-db-snapshot --restore <archive>
-#
-# Archives live in $BACKUP_DIR, mode 0600, newest $BACKUP_KEEP kept.
-set -uo pipefail
-
-if [ "\${1:-}" = "--list" ]; then
-  ls -lht "$BACKUP_DIR"/scangrade-db-*.tar.gz 2>/dev/null || echo "no snapshots yet"
-  exit 0
-fi
-
-# Restoring needs a shell that is already root; anything else is a mistake worth
-# stopping, because a half-run restore is worse than none.
-if [ "\$(id -u)" -ne 0 ] && [ "\${1:-}" = "--restore" ]; then
-  echo "!! run --restore as root: it overwrites live data"
-  exit 2
-fi
-
-exec "$REPO/.venv/bin/python" "$REPO/deploy/db_snapshot.py" \
-  --repo "$REPO" --out "$BACKUP_DIR" --keep $BACKUP_KEEP "\$@"
-EOF
-chmod 0755 "$SNAPSHOT_BIN"
+# Copied out of the checkout, not generated here. This step used to write its own
+# inline copy of the wrapper, which is two versions of one script: whatever the
+# repo version gains, the installed one silently lacks. The repo copy is the
+# source of truth, and it also runs in place — from the checkout — so the command
+# works even on a host where nobody has run this installer.
+install -m 0755 -o root -g root "$REPO/deploy/scangrade-db-snapshot.sh" "$SNAPSHOT_BIN"
 bash -n "$SNAPSHOT_BIN"
 echo "   installed; archives in $BACKUP_DIR (mode 0700, newest $BACKUP_KEEP)"
 
@@ -263,3 +238,6 @@ echo "   the SQL editor is NOT visible to that check — run this before doing i
 echo "       scangrade-db-snapshot --label before-<migration>"
 echo "   then, if it goes wrong:"
 echo "       scangrade-db-snapshot --restore /var/backups/scangrade/<archive>"
+echo
+echo "   Both also run straight from the checkout, with nothing installed:"
+echo "       bash $REPO/deploy/scangrade-db-snapshot.sh --help"
