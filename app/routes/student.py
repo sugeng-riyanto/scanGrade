@@ -89,6 +89,52 @@ def dashboard():
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
     user_name = g.user_name or g.user_email or ""
 
+    # ── Learning Progress Metrics ──
+    # Subject-level score breakdown
+    subject_scores = {}
+    for s in completed_exams:
+        exam = s.get("exam") or {}
+        subject = exam.get("subject") or "Umum"
+        sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
+        if sc is not None:
+            if subject not in subject_scores:
+                subject_scores[subject] = []
+            subject_scores[subject].append(float(sc))
+    subject_averages = {k: round(sum(v) / len(v), 1) for k, v in subject_scores.items()}
+
+    # Score trend (last 5 exams, oldest first)
+    score_trend = []
+    for s in reversed(completed_exams[:5]):
+        sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
+        if sc is not None:
+            score_trend.append({
+                "title": (s.get("exam") or {}).get("title", "-")[:20],
+                "score": float(sc)
+            })
+
+    # Weak areas (exams with score < 70)
+    weak_areas = []
+    for s in completed_exams:
+        sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
+        if sc is not None and float(sc) < 70:
+            exam = s.get("exam") or {}
+            weak_areas.append({
+                "title": exam.get("title", "-")[:30],
+                "subject": exam.get("subject") or "Umum",
+                "score": float(sc)
+            })
+
+    # Mastery level (based on avg score)
+    if all_scores:
+        avg = sum(all_scores) / len(all_scores)
+        if avg >= 90: mastery_level = "Sangat Baik"
+        elif avg >= 80: mastery_level = "Baik"
+        elif avg >= 70: mastery_level = "Cukup"
+        elif avg >= 60: mastery_level = "Perlu Perbaikan"
+        else: mastery_level = "Sangat Perlu Bimbingan"
+    else:
+        mastery_level = "Belum Ada Data"
+
     # Get student's class info
     student_class = None
     subject_count = 0
@@ -150,6 +196,10 @@ def dashboard():
         "subject_count": subject_count,
         "school_info": school_info,
         "active_whiteboards": active_whiteboards,
+        "subject_averages": subject_averages,
+        "score_trend": score_trend,
+        "weak_areas": weak_areas,
+        "mastery_level": mastery_level,
     }
     # Cache for 30 seconds (skip large/non-serializable fields)
     try:

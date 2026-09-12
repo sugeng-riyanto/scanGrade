@@ -206,6 +206,39 @@ def dashboard():
                     elif not qt:
                         exams_no_key.append(e)
 
+    # ── Class Analytics ──
+    # Per-exam performance breakdown (sorted by avg — hardest first)
+    exam_stats = []
+    for e in exams:
+        eid = e["id"]
+        exam_subs = [s for s in subs if s.get("exam_id") == eid]
+        scores = [float(s.get("final_score") or s.get("score") or 0) for s in exam_subs if s.get("final_score") or s.get("score")]
+        if scores:
+            exam_stats.append({
+                "title": e.get("title", "-")[:25],
+                "avg": round(sum(scores) / len(scores), 1),
+                "min": min(scores),
+                "max": max(scores),
+                "count": len(scores),
+            })
+    exam_stats.sort(key=lambda x: x["avg"])
+
+    # Student improvement tracking (first vs latest score)
+    student_improvement = []
+    student_scores_map = {}
+    for s in sorted(subs, key=lambda x: x.get("submitted_at", "")):
+        sid = s.get("student_id")
+        sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
+        if sid and sc:
+            if sid not in student_scores_map:
+                student_scores_map[sid] = {"first": float(sc), "latest": float(sc)}
+            else:
+                student_scores_map[sid]["latest"] = float(sc)
+    for sid, sc in student_scores_map.items():
+        diff = sc["latest"] - sc["first"]
+        student_improvement.append({"student_id": sid, "first": sc["first"], "latest": sc["latest"], "diff": round(diff, 1)})
+    student_improvement.sort(key=lambda x: x["diff"], reverse=True)
+
     # Get teacher's school_id (column may not exist in older schema)
     school_id = None
     try:
@@ -258,6 +291,8 @@ def dashboard():
         "school_info": school_info, "exams_no_key": exams_no_key,
         "pending_grading": pending_grading, "upcoming_exams": upcoming_exams,
         "grading_progress": grading_progress,
+        "exam_stats": exam_stats[:6],
+        "student_improvement": student_improvement[:5],
     }
     try:
         cache_set(cache_key, template_data, ttl=20)
