@@ -102,14 +102,43 @@ DEFAULT_LIMITS = {
     "auth": (30, 60),
     "api": (120, 60),
     "api_student": (300, 60),
-    "register": (10, 600),
     "upload": (10, 300),
-    "reset_password": (3, 300),
+}
+
+# ── Per-ACCOUNT throttles ─────────────────────────────────────────
+# Keyed on the account the caller names (email / NISN / NPSN) instead of the
+# client IP. A school reaches the internet through ONE NAT'd public IP, so an
+# IP-keyed limit lets a few users lock out everybody else on that network — the
+# exact opposite of what these endpoints are for.
+#
+# Each scope also carries a deliberately loose per-IP backstop. That one only
+# exists so a single host can't cycle through thousands of accounts; it is
+# wide enough that a whole class sharing an IP never trips it.
+ACCOUNT_LIMITS = {
+    "register": (5, 3600),        # 5 signups per school (NPSN) per hour
+    "forgot_password": (3, 900),  # 3 reset codes per account per 15 min
+    "verify_code": (10, 900),     # 10 code attempts per account per 15 min
+}
+
+ACCOUNT_IP_BACKSTOP = {
+    "register": (60, 3600),
+    "forgot_password": (60, 900),
+    "verify_code": (60, 900),
 }
 
 _exempt_paths = {"/health", "/static/"}
-_exact_exempt = {"/", "/pricing", "/demo", "/auth/login-user", "/auth/login", "/auth/register"}
-_endpoint_self_limited = {"/api/student/sync-draft", "/api/violation/log", "/api/student/force-submit"}
+_exact_exempt = {"/", "/pricing", "/demo", "/auth/login-user", "/auth/login"}
+# Routes that throttle themselves inside the handler (via check_account_limit).
+# The hook must skip them or the strict per-IP group is applied on top — which
+# is what locked a whole school out of a single NAT'd address.
+_endpoint_self_limited = {
+    "/api/student/sync-draft",
+    "/api/violation/log",
+    "/api/student/force-submit",
+    "/auth/register",
+    "/auth/forgot-password",
+    "/auth/verify-reset-code",
+}
 
 
 def _check_limit_redis(conn, key, max_req, window):
@@ -146,6 +175,58 @@ def _check_limit_memory(key, max_req, window):
             retry_after = int(window - (now - entry["start"]))
             return False, max(1, retry_after)
         return True, 0
+
+
+def _count(conn, key, max_req, window):
+    """One rate-limit check against Redis, or the in-memory fallback."""
+    if conn:
+        return _check_limit_redis(conn, key, max_req, window)
+    return _check_limit_memory(key, max_req, window)
+
+
+def check_account_limit(scope, account, ip=None):
+    """Throttle a *named account* rather than the caller's IP.
+
+    Returns ``(allowed, retry_after_seconds)``. Calls fail open when Redis is
+    unavailable, matching the rest of this module, so a cache outage can never
+    lock users out.
+
+    ``scope`` selects the thresholds from ACCOUNT_LIMITS; ``account`` is the
+    identifier the caller supplied (email / NISN / NPSN). An empty account is
+    allowed through — the handler validates the input and reports it.
+    """
+    if os.environ.get("LOAD_TEST") == "true":
+        return True, 0
+
+    account = (account or "").strip().lower()
+    if not account:
+        return True, 0
+
+    conn = _get_redis_conn()
+
+    acct_max, acct_window = ACCOUNT_LIMITS.get(scope, (10, 600))
+    allowed, retry = _count(conn, f"rl:acct:{scope}:{account}", acct_max, acct_window)
+    if not allowed:
+        return False, retry
+
+    if ip is None:
+        try:
+            ip = request.remote_addr or ""
+        except RuntimeError:  # no request context (e.g. a background job)
+            ip = ""
+    if ip:
+        ip_max, ip_window = ACCOUNT_IP_BACKSTOP.get(scope, (60, 600))
+        allowed, retry = _count(conn, f"rl:acctip:{scope}:{ip}", ip_max, ip_window)
+        if not allowed:
+            return False, retry
+
+    return True, 0
+
+
+def rate_limit_message(retry_after, what="permintaan"):
+    """User-facing message mirroring the hook's wording, in minutes."""
+    minutes = max(1, (int(retry_after) + 59) // 60)
+    return f"Terlalu banyak {what}. Coba lagi dalam {minutes} menit."
 
 
 def _cleanup_memory_limits():
@@ -207,11 +288,7 @@ def get_rate_limiter(app):
                 return None
 
         # Determine rate limit group
-        if path.startswith(("/auth/register",)):
-            group = "register"
-        elif path.startswith(("/auth/reset-password", "/auth/forgot-password")):
-            group = "reset_password"
-        elif path.startswith(("/auth/", "/login", "/login-user")):
+        if path.startswith(("/auth/", "/login", "/login-user")):
             group = "auth"
         elif path.startswith(("/api/",)):
             group = "api"
