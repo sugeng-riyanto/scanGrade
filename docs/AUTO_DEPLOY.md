@@ -167,6 +167,16 @@ scangrade-db-snapshot --label before-025   # snapshot now
 scangrade-db-snapshot --list               # what is already there
 ```
 
+That command is `deploy/scangrade-db-snapshot.sh` in the repo, and it runs from
+the checkout as well as from `/usr/local/bin`:
+
+```bash
+sudo bash /opt/scangrade/deploy/scangrade-db-snapshot.sh --label before-025
+```
+
+It is root-only either way: the archives hold personal data, and `--restore`
+overwrites live data.
+
 ### Putting the data back
 
 ```bash

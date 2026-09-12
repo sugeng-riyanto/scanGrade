@@ -415,13 +415,44 @@ def test_the_rollback_path_names_the_recovery_point():
 def test_installer_installs_the_manual_snapshot_command():
     installer = INSTALL_SH.read_text(encoding="utf-8")
 
-    assert "scangrade-db-snapshot" in installer
-    assert "db_snapshot.py" in installer, "the installer never references the tool"
-    # Migrations are pasted into the SQL editor by hand, which changes no file the
-    # deploy can see — the manual command is the only cover for that path.
-    assert "run --restore as root" in installer, (
-        "the wrapper will happily start a destructive restore as an unprivileged user"
+    assert 'install -m 0755 -o root -g root "$REPO/deploy/scangrade-db-snapshot.sh"' \
+        in installer, "the installer does not install the manual snapshot command"
+    assert 'cat > "$SNAPSHOT_BIN" <<EOF' not in installer, (
+        "the installer generates its own copy of the wrapper again. That is two "
+        "versions of one script, and the installed one drifts silently — which is "
+        "exactly what happened: /usr/local/bin kept a wrapper the repo had moved on "
+        "from, and it was only noticed because the backup directory was missing"
     )
+
+
+def test_the_snapshot_command_refuses_to_run_as_anyone_but_root():
+    script = (DEPLOY / "scangrade-db-snapshot.sh").read_text(encoding="utf-8")
+
+    # Migrations are pasted into the SQL editor by hand, which changes no file the
+    # deploy can see — this command is the only cover for that path, and it writes
+    # personal data and can overwrite live data.
+    assert 'if [ "$(id -u)" -ne 0 ]' in script, "no root check"
+    assert "exit 2" in script
+    assert "db_snapshot.py" in script, "the wrapper does not call the tool"
+    # The check has to be unconditional. Gating it on `--restore` would leave a
+    # plain snapshot writable by any account, into a directory of personal data.
+    # Only the condition line is inspected: the message below it mentions
+    # --restore, and matching on that would pass a check that had been narrowed.
+    condition = script[script.index('if [ "$(id -u)" -ne 0 ]'):].splitlines()[0]
+    assert "--restore" not in condition, "the root check only covers --restore"
+    assert "--list" in script, "no way to see what is already there"
+
+
+def test_the_snapshot_command_works_from_wherever_the_checkout_is():
+    script = (DEPLOY / "scangrade-db-snapshot.sh").read_text(encoding="utf-8")
+
+    assert "BASH_SOURCE" in script, (
+        "it does not locate itself, so it only works from one hard-coded path"
+    )
+    assert "/opt/scangrade" not in script, (
+        "the path is baked in, so the helper cannot be run from any other checkout"
+    )
+    assert 'exec "$PYTHON" "$TOOL"' in script, "it reimplements the tool instead of calling it"
 
 
 # ── the schema defect the restore surfaced ───────────────────────────────────
