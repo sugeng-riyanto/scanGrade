@@ -24,6 +24,9 @@ APP_PORT=8000
 LOCK="/run/scangrade-deploy.lock"
 PAUSE_FILE="/etc/scangrade-deploy.pause"
 STATE_DIR="/var/lib/scangrade-deploy"
+BACKUP_DIR="/var/backups/scangrade"
+BACKUP_KEEP=5
+SNAPSHOT_CMD="$REPO/deploy/db_snapshot.py"
 LOG_TAG="scangrade-deploy"
 
 log() { echo "[$(date '+%F %T')] $*"; }
@@ -91,6 +94,44 @@ fi
 log "new commit on origin/$BRANCH: $BEFORE -> $AFTER"
 
 CHANGED=$(as_owner git -C "$REPO" diff --name-only "$BEFORE" "origin/$BRANCH")
+
+# ── Recovery point, before anything moves ────────────────────────────────────
+# A release can be put back with its code from git alone. Its *data* cannot. So a
+# release that ships SQL is not allowed to start without a snapshot taken while
+# the old schema is still the one being served — the schema a bad migration would
+# change is the one this capture reads.
+#
+# It runs as root, deliberately: the archive holds personal data, and being
+# readable only by root (0600 inside a 0700 directory) is what keeps a backup from
+# becoming a breach. It is therefore taken here rather than in the as_owner path.
+#
+# The failure that matters is a *silent* one, so this is a hard gate: if the
+# snapshot cannot be taken, the release is not deployed at all. Nothing has been
+# merged at this point, so refusing costs nothing but a retry.
+SNAPSHOT=""
+if echo "$CHANGED" | grep -qE '^supabase/migrations/[^/]+\.sql$'; then
+  log "release changes supabase/migrations — taking a data snapshot first"
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 0700 "$BACKUP_DIR"; then
+    log "cannot use $BACKUP_DIR — refusing to deploy a migration without a snapshot"
+    exit 12
+  fi
+  if "$REPO/.venv/bin/python" "$SNAPSHOT_CMD" --repo "$REPO" --out "$BACKUP_DIR" \
+       --keep "$BACKUP_KEEP" --label "$AFTER" --quiet 2>&1 | sed 's/^/    /'; then
+    SNAPSHOT=$(ls -1t "$BACKUP_DIR"/scangrade-db-*.tar.gz 2>/dev/null | head -1)
+    if [ -n "$SNAPSHOT" ]; then
+      log "snapshot: $SNAPSHOT"
+    else
+      log "snapshot command succeeded but left no archive — refusing to deploy"
+      exit 12
+    fi
+  else
+    log "SNAPSHOT FAILED — not deploying a migration release without a recovery point"
+    log "nothing has been merged; $BEFORE is untouched. Retry on the next tick."
+    exit 12
+  fi
+else
+  log "no migration in this release — no snapshot needed"
+fi
 
 if ! as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH"; then
   log "not a fast-forward (history rewritten?) — leaving $BEFORE in place"
@@ -217,13 +258,25 @@ fi
 
 if [ "$HEALTHY" = "1" ]; then
   mkdir -p "$STATE_DIR"
-  printf '%s\n%s\n' "$AFTER" "$(date -Is)" > "$STATE_DIR/last-deploy"
+  printf '%s\n%s\n%s\n' "$AFTER" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"
   log "DEPLOY OK: $BEFORE -> $AFTER"
+  if [ -n "$SNAPSHOT" ]; then
+    log "recovery point kept: $SNAPSHOT"
+  fi
   exit 0
 fi
 
 # ── Failure: put the previous release back ───────────────────────────────────
 log "$AFTER did not pass verification — rolling back to $BEFORE"
+if [ -n "$SNAPSHOT" ]; then
+  # Code goes back on its own; data does not. Name the recovery point here, where
+  # someone is already looking, rather than leaving them to guess whether one
+  # exists — that guess is the difference between a rollback and a loss.
+  log "this release shipped migrations; the data as it was before it is in:"
+  log "    $SNAPSHOT"
+  log "to put the data back too:"
+  log "    $REPO/.venv/bin/python $SNAPSHOT_CMD --repo $REPO --restore $SNAPSHOT"
+fi
 journalctl -u "$SERVICE" -n 30 --no-pager 2>/dev/null | sed 's/^/    /'
 as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
 reload_app
@@ -231,7 +284,8 @@ sleep 3
 
 if systemctl is-active --quiet "$SERVICE" && probe_app; then
   log "ROLLED BACK to $BEFORE — that release is serving. Fix origin/$BRANCH before the next tick."
-  printf '%s\n%s\n' "$BEFORE" "$(date -Is)" > "$STATE_DIR/last-deploy"
+  mkdir -p "$STATE_DIR"
+  printf '%s\n%s\n%s\n' "$BEFORE" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"
   exit 10
 fi
 

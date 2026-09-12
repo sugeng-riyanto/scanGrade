@@ -18,6 +18,9 @@ REPO="/opt/scangrade"
 SERVICE="scangrade"
 BRANCH="main"
 DEPLOY_BIN="/usr/local/bin/scangrade-deploy"
+SNAPSHOT_BIN="/usr/local/bin/scangrade-db-snapshot"
+BACKUP_DIR="/var/backups/scangrade"
+BACKUP_KEEP=5
 STAMP=$(date +%Y%m%d_%H%M%S)
 
 say() { echo; echo "── $* ────────────────────────────────────────"; }
@@ -62,7 +65,7 @@ as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH" || {
 AFTER=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 echo "   $BEFORE -> $AFTER"
 
-for f in deploy/scangrade-deploy.sh deploy/smoke_test.py \
+for f in deploy/scangrade-deploy.sh deploy/smoke_test.py deploy/db_snapshot.py \
          deploy/scangrade-deploy.service deploy/scangrade-deploy.timer \
          deploy/scangrade.service; do
   [ -f "$REPO/$f" ] || { echo "!! missing $REPO/$f — is origin/$BRANCH the right commit?"; exit 6; }
@@ -73,6 +76,54 @@ say "Installing $DEPLOY_BIN"
 install -m 0755 -o root -g root "$REPO/deploy/scangrade-deploy.sh" "$DEPLOY_BIN"
 bash -n "$DEPLOY_BIN"
 echo "   syntax ok"
+
+# ── 2b. Snapshots, and the one the deploy cannot take by itself.
+#       The deploy captures a release that changes supabase/migrations — but
+#       migrations here are pasted into the Supabase SQL editor by hand, and that
+#       changes no file, so nothing can detect it. This is the command to run
+#       before doing that, and the reason it exists as a command at all.
+#
+#       The archives hold personal data (names, phone numbers, exam answers), so
+#       they live in a root-only directory and the rotation keeps the newest
+#       $BACKUP_KEEP. UU PDP treats an unsecured copy as a breach of its own;
+#       docs/AUTO_DEPLOY.md records the retention.
+say "Installing $SNAPSHOT_BIN"
+mkdir -p "$BACKUP_DIR"
+chmod 0700 "$BACKUP_DIR"
+cat > "$SNAPSHOT_BIN" <<EOF
+#!/usr/bin/env bash
+# Take a snapshot of the database as it is right now.
+#
+# Run this BEFORE pasting a migration into the Supabase SQL editor: the deploy
+# only knows to capture a release that changes supabase/migrations, and a
+# migration applied by hand changes no file.
+#
+#   scangrade-db-snapshot                    # label it 'manual'
+#   scangrade-db-snapshot --label before-025 # label it after something
+#   scangrade-db-snapshot --list             # what is already there
+#   scangrade-db-snapshot --restore <archive>
+#
+# Archives live in $BACKUP_DIR, mode 0600, newest $BACKUP_KEEP kept.
+set -uo pipefail
+
+if [ "\${1:-}" = "--list" ]; then
+  ls -lht "$BACKUP_DIR"/scangrade-db-*.tar.gz 2>/dev/null || echo "no snapshots yet"
+  exit 0
+fi
+
+# Restoring needs a shell that is already root; anything else is a mistake worth
+# stopping, because a half-run restore is worse than none.
+if [ "\$(id -u)" -ne 0 ] && [ "\${1:-}" = "--restore" ]; then
+  echo "!! run --restore as root: it overwrites live data"
+  exit 2
+fi
+
+exec "$REPO/.venv/bin/python" "$REPO/deploy/db_snapshot.py" \
+  --repo "$REPO" --out "$BACKUP_DIR" --keep $BACKUP_KEEP "\$@"
+EOF
+chmod 0755 "$SNAPSHOT_BIN"
+bash -n "$SNAPSHOT_BIN"
+echo "   installed; archives in $BACKUP_DIR (mode 0700, newest $BACKUP_KEEP)"
 
 # ── 3. Smoke-test credentials.
 #       They cannot live in the repo (deployment-specific, and passwords), so
@@ -205,3 +256,10 @@ echo "   test it live  : push a commit to main, then watch the journal above"
 echo "   deploy now    : systemctl start scangrade-deploy.service"
 echo "   freeze/resume : touch /etc/scangrade-deploy.pause   (rm to resume)"
 echo "   switch it off : systemctl disable --now scangrade-deploy.timer"
+echo
+echo "   Releases that change supabase/migrations get a data snapshot first, and"
+echo "   the recovery point is named in the journal. A migration applied by hand in"
+echo "   the SQL editor is NOT visible to that check — run this before doing it:"
+echo "       scangrade-db-snapshot --label before-<migration>"
+echo "   then, if it goes wrong:"
+echo "       scangrade-db-snapshot --restore /var/backups/scangrade/<archive>"
