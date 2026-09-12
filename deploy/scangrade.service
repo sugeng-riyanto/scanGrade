@@ -11,6 +11,12 @@ WorkingDirectory=/opt/scangrade
 EnvironmentFile=/opt/scangrade/.env
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/scangrade/.venv/bin/gunicorn wsgi:app -c gunicorn.conf.py
+
+# SIGHUP makes gunicorn retire its workers gracefully — in-flight requests get
+# up to graceful_timeout (30s) to finish. Without this, a reload is impossible
+# and every deploy becomes a hard restart that cuts off students mid-exam.
+ExecReload=/bin/kill -s HUP $MAINPID
+
 Restart=always
 RestartSec=5
 

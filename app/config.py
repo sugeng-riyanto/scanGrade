@@ -41,6 +41,14 @@ def env_int(name, default=0):
         return default
 
 
+def env_bool(name, default=False):
+    """Read a boolean env var, accepting the spellings people actually type."""
+    raw = env_str(name, "")
+    if not raw:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 class Config:
     SECRET_KEY = env_str("FLASK_SECRET_KEY", "dev-secret-change-me")
     SUPABASE_URL = env_str("SUPABASE_URL", "")
@@ -88,6 +96,13 @@ class Config:
     # shown to users matches the limit actually enforced.
     MAX_CONTENT_LENGTH = 50 * 1000 * 1000
 
+    # The cleanup and retention loops each run a pass the moment they start, not
+    # after the first interval. Anything that merely *constructs* the app — the
+    # test suite, a deploy smoke test — therefore triggered a real purge (a
+    # destructive one, against whatever Supabase the config points at). Building
+    # the app must not mutate data, so this is switchable.
+    START_BACKGROUND_SCHEDULERS = env_bool("START_BACKGROUND_SCHEDULERS", True)
+
     @classmethod
     def validate(cls):
         required = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SECRET_KEY"]
@@ -126,6 +141,9 @@ class TestingConfig(Config):
     SESSION_COOKIE_SECURE = False
     SESSION_COOKIE_HTTPONLY = True
     WTF_CSRF_ENABLED = True
+    # Creating the app must stay side-effect free: the retention loop purges
+    # immediately on start. Tests that exercise it start it themselves.
+    START_BACKGROUND_SCHEDULERS = False
 
     SUPABASE_URL = os.getenv("TEST_SUPABASE_URL", "http://127.0.0.1:54321")
     SUPABASE_SERVICE_KEY = _TEST_JWT
