@@ -56,7 +56,13 @@ fi
 # Act as whoever owns the checkout, so git and pip never hit "dubious ownership"
 # and never leave root-owned files behind in a tree another user has to use.
 OWNER=$(stat -c '%U' "$REPO")
-as_owner() { runuser -u "$OWNER" -- env HOME="$REPO" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
+# HOME must be the owner's real home, not the repo: git finds its credentials
+# there, and pip puts its download cache there. Pointing HOME at $REPO made pip
+# create $REPO/.cache, which showed up as an untracked file and then tripped this
+# script's own "checkout has local changes" guard on every later run.
+OWNER_HOME=$(getent passwd "$OWNER" | cut -d: -f6)
+[ -n "$OWNER_HOME" ] || OWNER_HOME=/tmp
+as_owner() { runuser -u "$OWNER" -- env HOME="$OWNER_HOME" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
 
 cd "$REPO" || exit 3
 

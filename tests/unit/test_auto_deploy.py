@@ -106,6 +106,22 @@ def test_deploy_script_refuses_to_clobber_local_edits():
     )
 
 
+@pytest.mark.parametrize("script", [DEPLOY_SH, INSTALL_SH])
+def test_scripts_do_not_point_home_at_the_checkout(script):
+    """A self-inflicted trap worth pinning.
+
+    ``runuser`` leaves HOME as the caller's, so it was set to ``$REPO`` — which is
+    wrong twice over: git then looks for credentials in a directory that is not
+    the user's home, and pip drops its cache in ``$REPO/.cache``, which arrives as
+    an untracked file and trips the script's own dirty-checkout guard on every
+    later run.
+    """
+    text = script.read_text(encoding="utf-8")
+
+    assert 'HOME="$REPO"' not in text
+    assert "getent passwd" in text, "HOME should come from the owner's passwd entry"
+
+
 def test_deploy_script_is_not_a_general_command_runner():
     """Every command it runs is fixed; nothing is taken from the environment."""
     script = DEPLOY_SH.read_text(encoding="utf-8")
