@@ -102,8 +102,13 @@ function demoForm() {
             this.settings.demo_enabled = this.allOn;
             Object.entries(this.settings).forEach(([k,v]) => fd.append(k, v ? 'true' : 'false'));
             fetch('/super-admin/demo-settings', {method:'POST', body: fd})
-                .then(r => r.ok ? (this.saved = true, setTimeout(()=>this.saved=false, 2000)) : alert('Gagal'))
-                .catch(() => alert('Gagal'))
+                .then(async r => {
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok || d.success === false) throw new Error(d.error || 'Gagal menyimpan');
+                    if (d.settings) Object.assign(this.settings, d.settings);
+                    this.saved = true; setTimeout(()=>this.saved=false, 2000);
+                })
+                .catch(e => alert(e.message || 'Gagal menyimpan'))
                 .finally(() => this.saving = false);
         },
     };

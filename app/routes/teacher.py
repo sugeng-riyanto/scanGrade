@@ -7,8 +7,10 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
 from app.utils.cache import cache_get, cache_set, cache_delete
+from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
 from app.decorators.subscription import require_subscription
+from app.utils.exam_access import can_manage_exam
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
@@ -17,6 +19,94 @@ from app.services.audit_service import log_activity
 logger = logging.getLogger(__name__)
 
 teacher_bp = Blueprint("teacher", __name__)
+
+
+# ── Who may act on an exam ───────────────────────────────────────────────────
+#
+# ``require_school_access`` proves a row belongs to the caller's school. That is
+# NOT the same as being allowed to recalculate, unpublish or export it, and it
+# says nothing about a submission id at all. Routes that take an id therefore go
+# through the two helpers below, which apply one rule everywhere:
+# the exam's owner, or the admin of its school.
+
+
+def _wants_json():
+    """True when the caller expects a JSON answer rather than a redirect.
+
+    A browser asks for ``text/html`` and a real form submit arrives as
+    ``application/x-www-form-urlencoded``; both are better served by a redirect
+    with a flash message. A fetch/XHR sends ``*/*`` with no form body, and an
+    API caller asks for ``application/json`` explicitly — those must get a 403
+    they can read, because a 302 followed to an HTML page looks like success
+    and hides the refusal.
+    """
+    accept = request.headers.get("Accept") or ""
+    if request.is_json or "application/json" in accept:
+        return True
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and not request.form:
+        return True
+    return False
+
+
+def _deny(message, as_json, redirect_to="/teacher/exams"):
+    if as_json:
+        return jsonify({"error": message}), 403
+    flash(message, "error")
+    return redirect(redirect_to)
+
+
+def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=True,
+                redirect_to="/teacher/grading"):
+    """Return ``(exam, None)`` when the caller may act on it, else ``(None, response)``.
+
+    ``columns`` is passed through, so a route can fetch everything it needs and let
+    the guard pay for the lookup — no second query just to check permission.
+
+    A failed lookup DENIES. A permission check that raises answers 500, which
+    keeps the data safe but hides the cause and looks like a broken feature; the
+    failure is logged and the caller is told access could not be confirmed.
+    """
+    try:
+        exam = row_or_none(
+            supabase.table("exams").select(columns).eq("id", exam_id).maybe_single().execute()
+        )
+    except Exception:
+        logger.exception("Access check failed for exam %s", exam_id)
+        return None, _deny("Tidak dapat memverifikasi akses ke ujian ini", as_json, redirect_to)
+    if not exam:
+        if as_json:
+            return None, (jsonify({"error": "Ujian tidak ditemukan"}), 404)
+        flash("Ujian tidak ditemukan", "error")
+        return None, redirect(redirect_to)
+    if not can_manage_exam(g.user_id, g.get("user_role"), g.get("user_school_id"), exam):
+        logger.warning("Denied exam access: exam=%s user=%s role=%s",
+                       exam_id, g.user_id, g.get("user_role"))
+        return None, _deny("Tidak punya akses ke ujian ini", as_json, redirect_to)
+    return exam, None
+
+
+def _guard_submission(supabase, submission_id, as_json=True, redirect_to="/teacher/results"):
+    """Same, for a submission id — resolves the owning exam first."""
+    try:
+        sub = row_or_none(
+            supabase.table("submissions")
+            .select("id,exam_id,student_id,exams(id,teacher_id,school_id)")
+            .eq("id", submission_id).maybe_single().execute()
+        )
+    except Exception:
+        logger.exception("Access check failed for submission %s", submission_id)
+        return None, _deny("Tidak dapat memverifikasi akses ke submission ini", as_json, redirect_to)
+    if not sub:
+        if as_json:
+            return None, (jsonify({"error": "Submission tidak ditemukan"}), 404)
+        flash("Submission tidak ditemukan", "error")
+        return None, redirect(redirect_to)
+    exam = sub.get("exams") or {}
+    if not can_manage_exam(g.user_id, g.get("user_role"), g.get("user_school_id"), exam):
+        logger.warning("Denied submission access: submission=%s user=%s", submission_id, g.user_id)
+        return None, _deny("Tidak punya akses ke submission ini", as_json, redirect_to)
+    sub["_exam"] = exam
+    return sub, None
 
 
 def _extract_mcq_answer(student_ans):
@@ -773,18 +863,19 @@ def exam_form():
 @teacher_bp.route("/exams/<exam_id>", methods=["GET", "POST", "DELETE"])
 @subscription_write_required
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def exam_detail(exam_id):
     supabase = get_supabase()
+    # This route edits AND deletes, and DELETE here bypassed the check added to
+    # /exams/<id>/delete — require_school_access alone let any teacher at the
+    # school remove a colleague's exam. Owner or school admin only.
+    exam_row, err = _guard_exam(supabase, exam_id, columns="*", as_json=_wants_json())
+    if err:
+        return err
     if request.method == "DELETE":
         supabase.table("exams").delete().eq("id", exam_id).execute()
         return jsonify({"success": True})
     if request.method == "GET":
-        try:
-            res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
-        except Exception:
-            res = supabase.table("exams").select("id,title,subject,total_questions,duration_minutes,passing_score,description,status,answer_key,question_types,question_audio,question_canvas,teacher_id,created_at").eq("id", exam_id).single().execute()
-        exam_data = res.data
+        exam_data = exam_row
         exam_data.setdefault("question_weights", {})
         sid = g.get("user_school_id")
         subjects = []
@@ -970,10 +1061,10 @@ def preprocess_exam_essays(exam_id):
 @require_school_access("exams", "exam_id")
 def preview_exam(exam_id):
     supabase = get_supabase()
-    res = supabase.table("exams").select("*").eq("id", exam_id).maybe_single().execute()
-    if not res.data:
+    res = row_or_none(supabase.table("exams").select("*").eq("id", exam_id).maybe_single().execute())
+    if not res:
         return redirect("/teacher/exams")
-    return render_template("teacher/preview_exam.html", exam=res.data)
+    return render_template("teacher/preview_exam.html", exam=res)
 
 
 @teacher_bp.route("/exams/<exam_id>/publish-exam", methods=["POST"])
@@ -1022,17 +1113,28 @@ def upload_exam_pdf(exam_id):
 @teacher_or_admin_required
 def my_exams():
     supabase = get_supabase()
-    res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
+    # A teacher sees their own exams; an admin sees the school's. Previously this
+    # filtered by teacher_id for everyone, so an admin_sekolah — who is allowed on
+    # this page — got a permanently empty list, with no clue why.
+    query = supabase.table("exams").select("*").eq("teacher_id", g.user_id)
+    if g.get("user_role") == "admin_sekolah" and g.get("user_school_id"):
+        query = supabase.table("exams").select("*").eq("school_id", g.get("user_school_id"))
+    res = query.order("created_at", desc=True).execute()
     return render_template("teacher/exams.html", exams=res.data or [])
 
 
 @teacher_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def toggle_exam_status(exam_id):
     supabase = get_supabase()
-    exam = supabase.table("exams").select("status").eq("id", exam_id).single().execute().data
+    # require_school_access let a colleague in the same school deactivate an exam —
+    # mid-session, with students still working. Owner or school admin only now, and
+    # the status comes back with the permission check, so it is still one query.
+    exam, err = _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id,status",
+                            as_json=_wants_json())
+    if err:
+        return err
     new_status = "draft" if exam["status"] == "active" else "active"
     supabase.table("exams").update({"status": new_status}).eq("id", exam_id).execute()
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
@@ -1043,10 +1145,15 @@ def toggle_exam_status(exam_id):
 @teacher_bp.route("/exams/<exam_id>/toggle-visibility", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def toggle_exam_visibility(exam_id):
     supabase = get_supabase()
-    exam = supabase.table("exams").select("is_published").eq("id", exam_id).single().execute().data
+    # Withdrawing an exam from students is equally consequential, so it follows the
+    # same rule as status — and reuses the row the check already loaded.
+    exam, err = _guard_exam(supabase, exam_id,
+                            columns="id,teacher_id,school_id,is_published",
+                            as_json=_wants_json())
+    if err:
+        return err
     new_val = not exam["is_published"]
     supabase.table("exams").update({"is_published": new_val}).eq("id", exam_id).execute()
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
@@ -1057,9 +1164,14 @@ def toggle_exam_visibility(exam_id):
 @teacher_bp.route("/exams/<exam_id>/delete", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def delete_exam(exam_id):
     supabase = get_supabase()
+    # This cascades: violations, access codes, analytics cache, every submission,
+    # then the exam. require_school_access meant any teacher at the school could
+    # erase a colleague's whole assessment. Owner or school admin only.
+    _, err = _guard_exam(supabase, exam_id, as_json=_wants_json())
+    if err:
+        return err
     supabase.table("violation_logs").delete().eq("exam_id", exam_id).execute()
     supabase.table("exam_access_codes").delete().eq("exam_id", exam_id).execute()
     supabase.table("analytics_cache").delete().eq("exam_id", exam_id).execute()
@@ -1074,15 +1186,16 @@ def delete_exam(exam_id):
 @teacher_bp.route("/exams/<exam_id>/duplicate", methods=["POST"])
 @subscription_write_required
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def duplicate_exam(exam_id):
     supabase = get_supabase()
+    # Copies the exam including its answer key, so it follows the same rule and
+    # reuses the row the permission check loaded.
+    src_exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=_wants_json(),
+                                redirect_to="/teacher/exams")
+    if err:
+        return err
     try:
-        res = supabase.table("exams").select("*").eq("id", exam_id).single().execute()
-        exam = res.data
-        if not exam:
-            flash("Ujian tidak ditemukan", "error")
-            return redirect("/teacher/exams")
+        exam = src_exam
         import copy, uuid
         new_data = {k: v for k, v in exam.items() if k not in ("id", "created_at", "updated_at")}
         new_data["title"] = exam["title"] + " (salinan)"
@@ -1102,10 +1215,13 @@ def duplicate_exam(exam_id):
 
 @teacher_bp.route("/exams/<exam_id>/answer-keys", methods=["GET", "POST"])
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def answer_keys(exam_id):
     supabase = get_supabase()
-    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    # This page IS the answer key, so it follows the same rule as the grading
+    # queue, and reuses the row the check loaded.
+    exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=_wants_json())
+    if err:
+        return err
     if not exam:
         flash("Ujian tidak ditemukan", "error")
         return redirect("/teacher/exams")
@@ -1252,6 +1368,13 @@ def results():
         exams = query.execute().data or []
         return render_template("teacher/results.html", submissions=[], stats={}, exam_id="", exams=exams, exam={}, scan_subs=[], online_subs=[])
 
+    # exam_id comes from the query string and the submissions used to be fetched
+    # before any check, so another school's names and scores were rendered on demand.
+    _, err = _guard_exam(supabase, exam_id, as_json=_wants_json(),
+                         redirect_to="/teacher/results")
+    if err:
+        return err
+
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     query = supabase.table("exams").select("id,title,subject").eq("teacher_id", g.user_id)
     if user_role == "admin_sekolah" and school_id:
@@ -1303,7 +1426,13 @@ def results():
 def grade_question(exam_id, question_index):
     """Grade a single question across all students."""
     supabase = get_supabase()
-    exam = supabase.table("exams").select("title,total_questions,question_types,answer_key").eq("id", exam_id).single().execute().data or {}
+    # This page renders the answer key. Its sibling API filtered by owner; the page
+    # did not, so any teacher could read any exam's key just by typing the URL.
+    exam, err = _guard_exam(
+        supabase, exam_id, as_json=_wants_json(),
+        columns="id,teacher_id,school_id,title,total_questions,question_types,answer_key")
+    if err:
+        return err
     for f in ("question_types", "answer_key"):
         v = exam.get(f)
         if isinstance(v, str):
@@ -1317,6 +1446,9 @@ def grade_question(exam_id, question_index):
 def grade_question_api(exam_id, question_index):
     """API: return all students' answers for a specific question."""
     supabase = get_supabase()
+    _, err = _guard_exam(supabase, exam_id)
+    if err:
+        return err
     subs = supabase.table("submissions").select("id,student_id,answers,score,final_score,status,submitted_at,profiles(full_name)").eq("exam_id", exam_id).execute().data or []
 
     students = []
@@ -1373,9 +1505,20 @@ def grade_question_save(exam_id, question_index):
         return jsonify({"error": "No submission_id"}), 400
 
     supabase = get_supabase()
-    sub = supabase.table("submissions").select("answers").eq("id", submission_id).single().execute().data
+    # Two holes closed here. There was no access check at all, so any teacher could
+    # overwrite any submission in any school; and the submission was never tied to
+    # the exam in the URL, so access to one exam was enough to rewrite another's.
+    _, err = _guard_exam(supabase, exam_id)
+    if err:
+        return err
+    sub = row_or_none(
+        supabase.table("submissions").select("id,exam_id,answers")
+        .eq("id", submission_id).maybe_single().execute()
+    )
     if not sub:
         return jsonify({"error": "Not found"}), 404
+    if str(sub.get("exam_id") or "") != str(exam_id):
+        return jsonify({"error": "Submission bukan milik ujian ini"}), 400
 
     answers = sub.get("answers") or {}
     if isinstance(answers, str):
@@ -1405,11 +1548,12 @@ def grade_question_save(exam_id, question_index):
 def grade_detail(submission_id):
     supabase = get_supabase()
     try:
-        sub = supabase.table("submissions").select("*").eq("id", submission_id).maybe_single().execute()
-        if not sub.data:
+        sub = row_or_none(
+            supabase.table("submissions").select("*").eq("id", submission_id).maybe_single().execute()
+        )
+        if not sub:
             flash("Submission tidak ditemukan", "error")
             return redirect("/teacher/grading")
-        sub = sub.data
         exam = supabase.table("exams").select("*").eq("id", sub["exam_id"]).single().execute().data
         exam.setdefault("question_weights", {})
         if not exam.get("question_weights") and exam.get("total_questions", 0) > 0:
@@ -1620,6 +1764,12 @@ def publish_scores(exam_id):
 @teacher_or_admin_required
 def unpublish_scores(exam_id):
     supabase = get_supabase()
+    # This withdraws released marks and had NO check at all, so a teacher in one
+    # school could unpublish another school's results by posting an exam id.
+    _, err = _guard_exam(supabase, exam_id, as_json=_wants_json(),
+                         redirect_to="/teacher/results?exam_id=" + exam_id)
+    if err:
+        return err
     supabase.table("submissions") \
         .update({"is_published": False, "status": "graded"}) \
         .eq("exam_id", exam_id) \
@@ -1631,6 +1781,10 @@ def unpublish_scores(exam_id):
 @teacher_or_admin_required
 def recalculate_exam_scores(exam_id):
     """Recalculate all scores for an exam (MCQ auto-grade + essay + penalty)."""
+    _, err = _guard_exam(get_supabase(), exam_id, as_json=_wants_json(),
+                         redirect_to="/teacher/results?exam_id=" + exam_id)
+    if err:
+        return err
     _recalculate_scores(exam_id)
     flash("Nilai berhasil dihitung ulang", "success")
     return redirect("/teacher/results?exam_id=" + exam_id)
@@ -1640,22 +1794,19 @@ def recalculate_exam_scores(exam_id):
 @subscription_write_required
 @teacher_or_admin_required
 def publish_single(submission_id):
-    # Security check: ensure submission belongs to teacher's school/exam
-    supabase_verify = get_supabase()
-    sub_check = supabase_verify.table("submissions").select("exam_id").eq("id", submission_id).single().execute().data
-    if sub_check:
-        exam_check = supabase_verify.table("exams").select("teacher_id,school_id").eq("id", sub_check["exam_id"]).single().execute().data
-        if exam_check:
-            if exam_check.get("teacher_id") != g.user_id:
-                school_id = g.get("user_school_id")
-                if exam_check.get("school_id") != school_id and g.get("user_role") not in ("super_admin",):
-                    return jsonify({"error": "Tidak punya akses"}), 403
+    # Replaced a hand-rolled check that skipped itself entirely whenever the
+    # submission lookup came back empty, then re-queried the same row. One shared
+    # rule now, resolved in a single query.
     supabase = get_supabase()
-    sub = supabase.table("submissions").select("exam_id").eq("id", submission_id).single().execute().data
+    sub, err = _guard_submission(supabase, submission_id, as_json=_wants_json())
+    if err:
+        return err
     supabase.table("submissions") \
         .update({"is_published": True, "status": "published"}) \
         .eq("id", submission_id) \
         .execute()
+    if sub.get("student_id"):
+        cache_delete(f"dash:{sub['student_id']}")
     return redirect("/teacher/results?exam_id=" + sub["exam_id"])
 
 
@@ -1665,7 +1816,11 @@ def publish_single(submission_id):
 def export_xlsx():
     exam_id = request.args.get("exam_id")
     supabase = get_supabase()
-    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data or {}
+    # exam_id came straight from the query string with no check, and select("*")
+    # includes the answer key — any teacher could download any school's results.
+    exam, err = _guard_exam(supabase, exam_id, columns="*")
+    if err:
+        return err
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     for s in subs:
         s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
@@ -1679,7 +1834,9 @@ def export_xlsx():
 def export_pdf():
     exam_id = request.args.get("exam_id")
     supabase = get_supabase()
-    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data or {}
+    exam, err = _guard_exam(supabase, exam_id, columns="*")
+    if err:
+        return err
     subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
     for s in subs:
         s["student_name"] = (s.pop("profiles", None) or {}).get("full_name", s.get("student_id", "")[:12])
@@ -1692,7 +1849,12 @@ def export_pdf():
 @teacher_or_admin_required
 def bubble_sheet(exam_id):
     supabase = get_supabase()
-    exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
+    # Restricted to the columns actually used, so the answer key is never fetched
+    # — and the exam must belong to the caller.
+    exam, err = _guard_exam(supabase, exam_id,
+                            columns="total_questions,question_types,subject")
+    if err:
+        return err
     qtypes = exam.get("question_types") or {}
     mcq_count = sum(1 for i in range(exam["total_questions"]) if qtypes.get(str(i), "mcq") == "mcq")
     if mcq_count == 0:
@@ -1746,10 +1908,14 @@ def grading_center():
 def grading_queue(exam_id):
     """Per-exam split-pane grading queue."""
     supabase = get_supabase()
-    exam = supabase.table("exams").select("id,title,subject,question_types,question_weights,answer_key,total_questions").eq("id", exam_id).single().execute().data
-    if not exam:
-        flash("Ujian tidak ditemukan", "error")
-        return redirect("/teacher/grading")
+    # The JSON API behind this page already filtered by owner. The page itself did
+    # not, so its answer key was readable by URL from any school.
+    exam, err = _guard_exam(
+        supabase, exam_id, as_json=_wants_json(), redirect_to="/teacher/grading",
+        columns="id,teacher_id,school_id,title,subject,question_types,"
+                "question_weights,answer_key,total_questions")
+    if err:
+        return err
     return render_template("teacher/grading_queue.html", exam=exam)
 
 
@@ -2329,23 +2495,30 @@ def exam_reprocess_pdf(exam_id):
 
 @teacher_bp.route("/exams/<exam_id>/proctoring")
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def exam_proctoring(exam_id):
     """Proctoring dashboard — live view of student exam progress."""
     supabase = get_supabase()
-    exam = supabase.table("exams").select("id,title,subject,total_questions,duration_minutes,start_at,status").eq("id", exam_id).single().execute().data or {}
+    exam, err = _guard_exam(
+        supabase, exam_id, as_json=_wants_json(), redirect_to="/teacher/exams",
+        columns="id,teacher_id,school_id,title,subject,total_questions,"
+                "duration_minutes,start_at,status")
+    if err:
+        return err
     return render_template("teacher/proctoring.html", exam=exam, exam_id=exam_id)
 
 
 @teacher_bp.route("/api/exams/<exam_id>/proctoring-data")
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def exam_proctoring_data(exam_id):
     """API: return live proctoring data (submissions + violations) for an exam."""
     supabase = get_supabase()
 
-    # Get all students for this exam's class(es)
-    exam = supabase.table("exams").select("class_ids,total_questions").eq("id", exam_id).single().execute().data or {}
+    # Live answers and violation detail for every student in the room — scoped to
+    # the exam's owner (or the school's admin), like the grading queue.
+    exam, err = _guard_exam(supabase, exam_id,
+                            columns="id,teacher_id,school_id,class_ids,total_questions")
+    if err:
+        return err
     class_ids = exam.get("class_ids") or []
     total_q = exam.get("total_questions", 0)
 
@@ -2578,19 +2751,27 @@ def generate_remedial(exam_id):
 
 @teacher_bp.route("/exams/<exam_id>/cheat-analysis")
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def cheat_analysis(exam_id):
     """Cheat pattern detection dashboard."""
+    _, err = _guard_exam(get_supabase(), exam_id, as_json=_wants_json(),
+                         redirect_to="/teacher/exams")
+    if err:
+        return err
     return render_template("teacher/cheat_analysis.html", exam_id=exam_id)
 
 
 @teacher_bp.route("/api/exams/<exam_id>/cheat-data")
 @teacher_or_admin_required
-@require_school_access("exams", "exam_id")
 def cheat_analysis_data(exam_id):
     """API: analyze submissions for cheating patterns."""
     supabase = get_supabase()
-    exam = supabase.table("exams").select("title,question_types,answer_key,total_questions").eq("id", exam_id).single().execute().data or {}
+    # Returns every student's answers and the answer key, so it follows the same
+    # rule — and the row the check loads is the row this handler needs.
+    exam, err = _guard_exam(
+        supabase, exam_id,
+        columns="id,teacher_id,school_id,title,question_types,answer_key,total_questions")
+    if err:
+        return err
 
     answer_key = exam.get("answer_key") or {}
     if isinstance(answer_key, str):
