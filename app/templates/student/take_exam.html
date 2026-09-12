@@ -70,6 +70,18 @@
             </div>
         </div>
         <div class="flex items-center gap-3">
+            {% if recovery_code %}
+            <!-- The way back in from another device. Shown for the whole session
+                 and only while the session is open. -->
+            <button type="button" x-show="!submitted" x-cloak
+                    @click="navigator.clipboard&&navigator.clipboard.writeText('{{ recovery_code }}'); copied=true; setTimeout(()=>copied=false,1500)"
+                    class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition"
+                    title="Simpan angka ini. Masukkan di menu Lanjutkan Ujian untuk meneruskan dari perangkat lain.">
+                <i class="fas fa-key"></i>
+                <span x-show="!copied" class="hidden sm:inline">Kode</span>
+                <span x-text="copied ? 'Tersalin' : '{{ recovery_code }}'" class="font-mono tracking-wider"></span>
+            </button>
+            {% endif %}
             <div x-show="!submitted" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold transition-all"
                  :class="{
                      'bg-emerald-50 text-emerald-600 border border-emerald-200': syncStatus === 'synced',
@@ -277,6 +289,23 @@
                     <hr class="my-2 border-surface-200">
                     <p x-html="examRules.replace(/\n/g, '<br>')" class="font-bold text-surface-800"></p>
                 </div>
+                {% if recovery_code %}
+                <!-- Shown here as well as in the topbar: this is the last moment
+                     the code is guaranteed to be on screen, and on a phone the
+                     topbar has no room for it. -->
+                <hr class="my-2 border-surface-200">
+                <p class="flex items-center gap-2">
+                    <i class="fas fa-key text-amber-500"></i>
+                    <span>Kode lanjutkan Anda:
+                        <strong class="font-mono tracking-widest text-amber-700">{{ recovery_code }}</strong>
+                    </span>
+                </p>
+                <p class="text-[10px] text-surface-400 font-semibold pl-6">
+                    Catat angkanya. Kalau perangkat atau koneksi bermasalah, buka menu
+                    <strong>Lanjutkan Ujian</strong> dan masukkan kode ini untuk meneruskan
+                    tanpa kehilangan jawaban.
+                </p>
+                {% endif %}
             </div>
             <button type="button" @click="agreeExam"
                     class="w-full bg-gradient-to-r from-primary-500 to-primary-600 text-white py-3.5 rounded-xl font-extrabold text-sm hover:from-primary-600 hover:to-primary-700 shadow-lg shadow-primary-500/25 transition">
@@ -918,6 +947,7 @@ function examApp(duration, totalQ) {
         canScrollDown: false,
         syncStatus: navigator.onLine ? 'synced' : 'offline',
         syncLabel: navigator.onLine ? 'Tersinkron' : 'Offline — tersimpan lokal',
+        copied: false,
         lastSyncAt: Date.now(),
         pendingSync: false,
         dirty: false,

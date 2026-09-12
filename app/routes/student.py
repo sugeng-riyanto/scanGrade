@@ -2,12 +2,20 @@ import io
 import json
 import os
 from datetime import datetime, timezone
-from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response
+from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response, flash
 from app.utils.auth import login_required, get_supabase
 from app.utils.cache import cache_get, cache_set
+from app.utils.helpers import row_or_none
+from app.utils.exam_access import result_released, exam_sitting_allowed
+from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
+from app.utils.rate_limiter import limiter
 
 student_bp = Blueprint("student", __name__)
+
+
+def _rate_limit(n):
+    return limiter.limit(n) if limiter else (lambda f: f)
 
 
 @student_bp.route("/dashboard")
@@ -82,6 +90,14 @@ def dashboard():
         if s.get("exams"):
             s["exam"] = s.pop("exams")
         s.setdefault("is_hidden", False)
+        # A mark is not official until the teacher releases it. Blanking it here
+        # keeps the row (so the student still sees the exam is being marked) while
+        # every metric below — average, mastery level, subject averages, trend and
+        # weak areas — reads the same fields, so they all skip it automatically.
+        if not result_released(s):
+            s["score"] = None
+            s["final_score"] = None
+            s["penalty"] = None
         completed_exams.append(s)
         sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
         if sc is not None:
@@ -343,32 +359,13 @@ def take_exam(exam_id):
         except Exception:
             pass
 
-    # Check if exam is published and active
-    if exam.get("status") != "active":
-        flash("Ujian ini belum aktif.", "error")
+    # Published + active + the student's own school and class. This used to
+    # require only ``status == 'active'``, so an exam whose scores were not
+    # published yet could still be opened by navigating straight to its URL.
+    allowed, reason = exam_sitting_allowed(supabase, exam, exam_id, g.user_id)
+    if not allowed:
+        flash(reason, "error")
         return redirect("/student/exams")
-
-    # Check school access: exam must belong to student's school
-    student_school_id = None
-    student_class_id = None
-    try:
-        prof = supabase.table("profiles").select("school_id, class_id").eq("id", g.user_id).single().execute().data or {}
-        student_school_id = prof.get("school_id")
-        student_class_id = prof.get("class_id")
-    except Exception:
-        pass
-    if student_school_id and exam.get("school_id") and str(student_school_id) != str(exam["school_id"]):
-        flash("Ujian ini tidak tersedia untuk sekolah Anda.", "error")
-        return redirect("/student/exams")
-    # Check class_ids assignment
-    exam_class_ids = exam.get("class_ids") or []
-    if isinstance(exam_class_ids, str):
-        try: exam_class_ids = json.loads(exam_class_ids)
-        except: exam_class_ids = []
-    if exam_class_ids and student_class_id:
-        if student_class_id not in exam_class_ids:
-            flash("Ujian ini tidak ditugaskan untuk kelas Anda.", "error")
-            return redirect("/student/exams")
 
     # Check if student already reached max attempts (exclude draft + retracted)
     max_attempts = exam.get("max_attempts", 1)
@@ -443,9 +440,100 @@ def take_exam(exam_id):
             exam_started_at = draft.data[0]["started_at"]
     except Exception:
         pass
-    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at))
+    # The way back in when the phone dies or the WiFi does. Issued with the
+    # session and shown in the exam topbar; never a precondition for opening.
+    recovery_code = issue_code(supabase, g.user_id, exam_id)
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
+
+
+@student_bp.route("/recover")
+@login_required
+def recover_exam_page():
+    """The way back into an exam session that is still open.
+
+    Lists the student's own sessions as links (no code needed when the server
+    already knows who they are) and offers the code form as the fallback for when
+    the exam list is stale, empty, or the exam is no longer on it.
+    """
+    supabase = get_supabase()
+    open_sessions = []
+    try:
+        drafts = supabase.table("submissions").select(
+            "id,exam_id,started_at,exams(id,title,subject,is_published,status,school_id,class_ids)"
+        ).eq("student_id", g.user_id).eq("status", "draft").order("started_at", desc=True).execute().data or []
+        for d in drafts:
+            exam = d.get("exams") or {}
+            if not exam:
+                continue
+            # Only offer what the student may actually open — the page must not
+            # promise a session the rules would refuse.
+            allowed, _reason = exam_sitting_allowed(supabase, exam, d.get("exam_id"), g.user_id)
+            if allowed:
+                open_sessions.append({
+                    "exam_id": d.get("exam_id"),
+                    "title": exam.get("title") or "Ujian",
+                    "subject": exam.get("subject") or "",
+                    "started_at": d.get("started_at"),
+                })
+    except Exception:
+        current_app.logger.exception("Could not list open exam sessions for %s", g.user_id)
+
+    return render_template("student/recover.html", open_sessions=open_sessions)
+
+
+@student_bp.route("/api/recover-exam", methods=["POST"])
+@login_required
+@_rate_limit("20 per minute")
+def api_recover_exam():
+    """Trade a recovery code for the exam it belongs to.
+
+    The code is scoped to the caller and the exam still has to pass the normal
+    sitting rules, so this cannot be used to reach anyone else's session or an
+    exam the student is not entitled to.
+    """
+    supabase = get_supabase()
+    code = ((request.get_json(silent=True) or {}).get("code") or "").strip()
+    if len(code) != 6 or not code.isdigit():
+        return jsonify({"error": "Masukkan 6 angka kode recovery."}), 400
+
+    exam_id = redeem_code(supabase, g.user_id, code)
+    if not exam_id:
+        return jsonify({"error": "Kode tidak ditemukan untuk akun ini. Periksa kembali 6 angkanya."}), 404
+
+    try:
+        exam = row_or_none(
+            supabase.table("exams").select("*").eq("id", exam_id).maybe_single().execute()
+        )
+    except Exception:
+        current_app.logger.exception("Recovery: exam lookup failed for %s", exam_id)
+        return jsonify({"error": "Gagal memuat ujian. Coba lagi."}), 500
+    if not exam:
+        return jsonify({"error": "Ujian untuk kode ini sudah tidak tersedia."}), 404
+
+    allowed, reason = exam_sitting_allowed(supabase, exam, exam_id, g.user_id)
+    if not allowed:
+        return jsonify({"error": reason}), 403
+
+    latest = None
+    try:
+        latest = row_or_none(
+            supabase.table("submissions").select("id,status")
+            .eq("exam_id", exam_id).eq("student_id", g.user_id)
+            .order("created_at", desc=True).limit(1).maybe_single().execute()
+        )
+    except Exception:
+        current_app.logger.exception("Recovery: submission lookup failed for %s", exam_id)
+    if latest and latest.get("status") in ("submitted", "graded", "published"):
+        return jsonify({
+            "error": "Ujian ini sudah Anda kumpulkan.",
+            "redirect": "/student/results",
+        }), 409
+
+    log_activity("update", "submission", exam_id, new_data={"recovered": True},
+                 user_id=g.user_id)
+    return jsonify({"redirect": f"/student/exams/{exam_id}"})
 
 
 @student_bp.route("/exams/<exam_id>/submit", methods=["POST"])
@@ -469,16 +557,14 @@ def submit_exam(exam_id):
     if not exam.get("is_published") or exam.get("status") != "active":
         return jsonify({"error": "Exam is not available for submission"}), 403
 
-    # ── Query 2: GET student class (conditional) ──
-    exam_class_ids = exam.get("class_ids") or []
-    if exam_class_ids:
-        try:
-            prof = supabase.table("profiles").select("class_id").eq("id", g.user_id).single().execute()
-            student_class_id = prof.data.get("class_id") if prof.data else None
-            if student_class_id and student_class_id not in exam_class_ids:
-                return jsonify({"error": "Ujian ini tidak tersedia untuk kelas Anda"}), 403
-        except Exception:
-            pass
+    # ── Query 2: the student's own school and class ──
+    # Replaces a class-only check that skipped itself when the student had no
+    # class_id and swallowed its own errors — and that never checked the SCHOOL at
+    # all, so a student could submit to another school's exam by posting its id and
+    # pollute that school's results. One lookup, so the round-trip cost is the same.
+    allowed, reason = exam_sitting_allowed(supabase, exam, exam_id, g.user_id)
+    if not allowed:
+        return jsonify({"error": reason}), 403
 
     # ── Query 3: GET existing submissions (single query for both checks) ──
     max_attempts = exam.get("max_attempts", 1)
@@ -681,6 +767,16 @@ def results():
                 s["answers"] = {}
         if not isinstance(s.get("answers"), dict):
             s["answers"] = {}
+    # An unreleased result must not ship its marks to the browser. This list renders
+    # every row's score and penalty, and the template hides them with `x-show` —
+    # which still leaves the value in the DOM. So blank them server-side instead of
+    # trusting a display toggle. The status label ('On Progress') already tells the
+    # student the exam is being marked.
+    for s in submissions:
+        if not result_released(s):
+            s["score"] = None
+            s["final_score"] = None
+            s["penalty"] = None
     # Hanya tampilkan 1 submission terbaru per exam (draft boleh standalone)
     seen = {}
     for s in submissions:
@@ -760,8 +856,19 @@ def result_detail(submission_id):
                 submission["exam"][_field] = json.loads(_val)
             except (json.JSONDecodeError, TypeError):
                 submission["exam"][_field] = {}
+
+    # An unreleased result must not carry the answer key to the browser at all.
+    # Hiding it in the template would still put it in the HTML source, and the
+    # student can open this page mid-exam — the draft submission created when the
+    # exam is opened is listed in /student/results and links straight here.
+    released = result_released(submission)
+    if not released:
+        submission.get("exam", {}).pop("answer_key", None)
+    submission["released"] = released
+
     student_name = g.user_name or g.user_email or ""
-    return render_template("student/result_detail.html", submission=submission, student_name=student_name)
+    return render_template("student/result_detail.html", submission=submission,
+                           student_name=student_name, released=released)
 
 
 @student_bp.route("/results/<submission_id>/download-pdf")
@@ -789,6 +896,13 @@ def download_result_pdf(submission_id):
     if submission.get("exams"):
         submission["exam"] = submission.pop("exams")
     submission.setdefault("is_hidden", False)
+
+    # The PDF prints the answer key and per-question marks, so it follows the
+    # same release rule as the on-screen view.
+    if not result_released(submission):
+        flash("Hasil ujian belum dirilis oleh guru.", "error")
+        return redirect("/student/results")
+
     student_name = g.user_name or g.user_email or ""
 
     # Fetch teacher & school info
@@ -997,10 +1111,29 @@ def download_result_pdf(submission_id):
 @login_required
 def retract_submission(submission_id):
     supabase = get_supabase()
-    sub = supabase.table("submissions").select("answers").eq("id", submission_id).eq("student_id", g.user_id).single().execute().data
+    # Scoped to the caller, so another student's submission simply does not match.
+    # ``maybe_single()`` rather than ``single()``: single() RAISES when nothing
+    # matches, which made the 404 below unreachable and answered 500 instead.
+    try:
+        sub = row_or_none(
+            supabase.table("submissions").select("answers,status")
+            .eq("id", submission_id).eq("student_id", g.user_id)
+            .maybe_single().execute()
+        )
+    except Exception:
+        sub = None
     if not sub:
         if request.is_json:
             return jsonify({"error": "Not found"}), 404
+        return redirect("/student/results")
+    # A retraction voids the attempt and lets the exam be retaken, so it may only
+    # be requested while the attempt is still open — never after the result has
+    # been marked or released, which would let a student undo a finished score.
+    if sub.get("status") not in ("draft", "submitted"):
+        if request.is_json:
+            return jsonify({"error": "Hasil sudah dinilai atau dirilis, tidak bisa ditarik."}), 409
+        flash("Hasil sudah dinilai atau dirilis, sehingga tidak bisa ditarik. "
+              "Silakan ajukan banding penalti bila perlu.", "error")
         return redirect("/student/results")
     answers = sub.get("answers")
     if isinstance(answers, str):
