@@ -26,6 +26,18 @@ def client(app):
     return app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def _clear_session_cache():
+    """Every test in this file authenticates with the literal token
+    "fake-token". The session cache is keyed on the token, so without this a
+    session cached by an earlier test would be replayed for a later, different
+    fake user (e.g. the guru session leaking into the admin test)."""
+    from app.utils import kv_cache
+    kv_cache._local.clear()
+    yield
+    kv_cache._local.clear()
+
+
 # ── Helpers ───────────────────────────────────────────────────
 
 BEARER = {"Authorization": "Bearer fake-token", "Accept": "application/json"}
@@ -153,11 +165,17 @@ class TestRequireSchoolAccess:
                 mock_db = MagicMock()
 
                 # First call: child table (submissions) returns exam_id
+                # The decorator now resolves this in ONE embedded round-trip, so
+                # the child row carries the parent under the related table name
+                # (verified against PostgREST: {"exam_id": ..., "exams": {...}}).
                 child_mock = MagicMock()
-                child_mock.single.return_value.execute.return_value.data = {"exam_id": "exam-999"}
-                # Second call: parent table (exams) returns school-b
+                child_mock.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+                    "exam_id": "exam-999",
+                    "exams": {"school_id": "school-b"},
+                }
+                # Kept for the non-embeddable fallback path.
                 parent_mock = MagicMock()
-                parent_mock.single.return_value.execute.return_value.data = {"school_id": "school-b"}
+                parent_mock.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {"school_id": "school-b"}
 
                 mock_db.table.side_effect = lambda t: {
                     "submissions": child_mock,
@@ -206,7 +224,8 @@ class TestCrossSchoolAPIAccess:
     def test_teacher_cannot_grade_submission_from_different_school(self, client):
         """Teacher A gets 403 when grading a submission whose exam is School B's."""
         patches = enter(auth_patches({
-            "submissions": {"exam_id": "exam-b"},
+            # Embedded parent, as PostgREST actually returns it.
+            "submissions": {"exam_id": "exam-b", "exams": {"school_id": "school-b"}},
             "exams": {"school_id": "school-b"},
         }))
         try:

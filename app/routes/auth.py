@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import time
 from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
-from app.utils.auth import login_required, get_supabase, get_auth_client
+from app.utils.auth import login_required, get_supabase, get_auth_client, invalidate_session
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
 from app.utils.rate_limiter import limiter, check_account_limit, rate_limit_message
@@ -212,7 +212,9 @@ def activate():
 # ─── LOGIN (Admin & Super Admin) ─────────────────────
 
 @auth_bp.route("/login", methods=["GET", "POST"])
-@_rate_limit("30 per minute")
+# Per-IP only as a flood backstop; brute force is bounded per ACCOUNT below,
+# because a school shares one NAT'd address and 30/min throttled whole classes.
+@_rate_limit("300 per minute")
 def login():
     if request.method == "GET":
         resp = make_response(render_template("auth/login.html"))
@@ -264,6 +266,11 @@ def login():
         resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
         resp.set_cookie("session_start", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400*7)
     except Exception:
+        # Failed attempts are counted per ACCOUNT. Keying this on the IP would
+        # lock out every colleague behind the same school NAT.
+        allowed, retry = check_account_limit("login_failed", email, ip=request.remote_addr)
+        if not allowed:
+            return render_template("auth/login.html", error=rate_limit_message(retry, "percobaan login"))
         return render_template("auth/login.html", error="Email atau password salah")
     # log_activity outside try/except so audit failures don't block login
     try:
@@ -362,6 +369,10 @@ def login_user():
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
     except Exception:
+        # Same reasoning as /login: throttle the account, not the school's IP.
+        allowed, retry = check_account_limit("login_failed", login_input, ip=request.remote_addr)
+        if not allowed:
+            return render_template("auth/login_user.html", error=rate_limit_message(retry, "percobaan login"))
         return render_template("auth/login_user.html", error="Email atau password salah")
 
 
@@ -717,6 +728,9 @@ def reset_password_exchange():
 @auth_bp.route("/logout")
 def logout():
     uid = getattr(g, "user_id", None)
+    # Drop the cached session first, so the token stops working right away
+    # instead of remaining valid for the remainder of the cache TTL.
+    invalidate_session(request.cookies.get("access_token"))
     try:
         supabase = get_auth_client()
         supabase.auth.sign_out()

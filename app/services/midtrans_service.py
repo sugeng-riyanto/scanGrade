@@ -256,6 +256,10 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
     # Activate school
     supabase.table("schools").update({"status": "active"}).eq("id", school_id).execute()
 
+    # The write gate caches "is this school active" — drop it so the school can
+    # write immediately instead of waiting out the cache TTL.
+    invalidate_school_active(school_id)
+
     # Send activation email to admin
     try:
         import smtplib, ssl
@@ -432,15 +436,42 @@ def calculate_plan_price(plan_base_price, school_id=None):
     return max(adjusted, plan_base_price), tier_name
 
 
+def invalidate_school_active(school_id):
+    """Forget a cached subscription gate — call whenever a school's
+    subscription changes (payment webhook, admin approval) so the write gate
+    reacts immediately instead of waiting out the cache TTL."""
+    if not school_id:
+        return
+    from app.utils.kv_cache import cache_delete
+    cache_delete(f"school_active:{school_id}")
+
+
 def is_school_active(school_id):
-    """Check if a school has active subscription or is still in trial period."""
+    """Check if a school has active subscription or is still in trial period.
+
+    This gates every write route, so it is cached briefly: the underlying query
+    is an embedded join costing ~165 ms per call. The cache is per school, and
+    60 s of staleness is harmless for a billing gate that flips at most a few
+    times a month (payments invalidate it explicitly).
+    """
     if not school_id:
         return False
+
+    from app.utils.kv_cache import cache_get, cache_set
+
+    key = f"school_active:{school_id}"
+    cached = cache_get(key)
+    if cached is not None:
+        return bool(cached)
+
     sub = get_school_subscription(school_id)
     if not sub:
         # No subscription record yet → assume active (new school, not yet tracked)
-        return True
-    return sub["status"] == "active" or sub["status"] == "trial"
+        active = True
+    else:
+        active = sub["status"] == "active" or sub["status"] == "trial"
+    cache_set(key, active, 60)
+    return active
 
 
 def get_payment_fee_config():

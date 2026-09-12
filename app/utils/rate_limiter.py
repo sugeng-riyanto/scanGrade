@@ -118,12 +118,16 @@ ACCOUNT_LIMITS = {
     "register": (5, 3600),        # 5 signups per school (NPSN) per hour
     "forgot_password": (3, 900),  # 3 reset codes per account per 15 min
     "verify_code": (10, 900),     # 10 code attempts per account per 15 min
+    "login_failed": (8, 900),     # 8 failed logins per account per 15 min
 }
 
 ACCOUNT_IP_BACKSTOP = {
     "register": (60, 3600),
     "forgot_password": (60, 900),
     "verify_code": (60, 900),
+    # Wide on purpose: 330 users behind one school IP must be able to sign in,
+    # so a hundred failed attempts is a signal, not a school-wide lockout.
+    "login_failed": (300, 900),
 }
 
 _exempt_paths = {"/health", "/static/"}

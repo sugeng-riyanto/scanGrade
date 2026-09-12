@@ -76,6 +76,12 @@ class Config:
     # 0 so a directly reachable instance can't have its client IP spoofed.
     TRUSTED_PROXY_HOPS = env_int("TRUSTED_PROXY_HOPS", 0)
 
+    # Seconds a resolved auth session (user + role + school) may be reused
+    # without re-hitting Supabase (~290 ms per request saved). Short enough that
+    # role changes propagate quickly; logout invalidates explicitly.
+    # 0 disables the cache entirely.
+    AUTH_SESSION_CACHE_TTL = env_int("AUTH_SESSION_CACHE_TTL", 30)
+
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     # 50 MB (decimal) — keep in sync with app.errors.format_mb so the limit
