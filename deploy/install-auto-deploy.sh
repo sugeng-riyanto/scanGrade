@@ -156,13 +156,41 @@ done
 
 systemctl daemon-reload
 
+# ── 4b. Reload the app, because step 1 already pulled new code and gunicorn is
+#        still serving the old copy. Without this the install would leave
+#        production on stale code *forever*: the next timer tick finds the
+#        checkout already at origin/main and exits without deploying anything.
+say "Reloading $SERVICE so the pulled code is actually running"
+if systemctl reload "$SERVICE" 2>/dev/null; then
+  echo "   reloaded gracefully (SIGHUP)"
+else
+  echo "   reload unsupported — restarting"
+  systemctl restart "$SERVICE"
+fi
+sleep 3
+
+if [ "$(systemctl is-active "$SERVICE")" != "active" ]; then
+  journalctl -u "$SERVICE" -n 25 --no-pager
+  echo "!! $SERVICE did not come back up — the units are installed, but fix this first."
+  exit 7
+fi
+
+PROBE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000/" || true)
+echo "   app answered $PROBE on 127.0.0.1:8000"
+if [ "$PROBE" != "200" ]; then
+  echo "!! the app is not serving; check: journalctl -u $SERVICE -n 50"
+  exit 7
+fi
+
 # ── 5. Turn the timer on. start, not restart: an in-flight run is left alone.
 say "Enabling the timer"
 systemctl enable --now scangrade-deploy.timer >/dev/null
 echo "   scangrade-deploy.timer is $(systemctl is-active scangrade-deploy.timer)"
 
-# ── 6. Prove it works now rather than in two minutes, and report what it found.
-say "Test run"
+# ── 6. Prove the unit can run at all. It will find nothing to deploy (step 1
+#       already pulled), so this checks the mechanics and not the rollback path:
+#       the next real release is the first full end-to-end run.
+say "Test run of the deploy unit"
 systemctl start scangrade-deploy.service || true
 sleep 2
 journalctl -u scangrade-deploy.service -n 20 --no-pager | sed 's/^/   /'
@@ -173,6 +201,7 @@ echo "   deployed commit: $(as_owner git -C "$REPO" rev-parse --short HEAD)"
 echo
 echo "   watch deploys : journalctl -u scangrade-deploy.service -f"
 echo "   next tick     : systemctl list-timers scangrade-deploy.timer"
+echo "   test it live  : push a commit to main, then watch the journal above"
 echo "   deploy now    : systemctl start scangrade-deploy.service"
 echo "   freeze/resume : touch /etc/scangrade-deploy.pause   (rm to resume)"
 echo "   switch it off : systemctl disable --now scangrade-deploy.timer"
