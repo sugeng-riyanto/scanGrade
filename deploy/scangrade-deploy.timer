@@ -1,0 +1,22 @@
+[Unit]
+Description=Poll origin/main for ScanGrade and deploy new commits
+
+[Timer]
+# Nothing on push reaches the VPS: the box pulls. That keeps GitHub out of the
+# server's trust boundary (no inbound SSH, no deploy key stored anywhere) at the
+# cost of a delay of at most one interval.
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=20s
+
+# Stagger so every school running this does not hit GitHub on the same second.
+RandomizedDelaySec=20s
+
+# Don't try to catch up on ticks missed while the box was off: one deploy brings
+# the checkout to origin/main regardless of how many commits were missed.
+Persistent=false
+
+Unit=scangrade-deploy.service
+
+[Install]
+WantedBy=timers.target

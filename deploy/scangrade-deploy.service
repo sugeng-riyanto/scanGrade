@@ -1,0 +1,26 @@
+[Unit]
+Description=ScanGrade auto-deploy — pull origin/main, verify it, reload the app
+Documentation=file:/opt/scangrade/docs/AUTO_DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/scangrade-deploy
+
+# A deploy that needs longer than this is not making progress; the script's own
+# rollback path runs well inside it.
+TimeoutStartSec=900
+
+# Keep the deploy from competing with students taking an exam.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUWeight=50
+
+# Deliberately NOT hardened the way scangrade.service is: this unit has to write
+# to /opt/scangrade and restart another unit, so ProtectSystem=full and
+# NoNewPrivileges would break it. The script it runs refuses arguments, fixes the
+# branch and paths itself, and exits non-zero rather than guessing — that is the
+# boundary here, not the sandbox.
+PrivateTmp=true

@@ -388,20 +388,24 @@ def create_app(env=None):
 
     app._start_time = time.time()
 
-    # Start background cleanup scheduler
-    try:
-        from app.services.cleanup_service import start_cleanup_scheduler
-        start_cleanup_scheduler(interval=1800)
-    except Exception as e:
-        app.logger.warning("Failed to start cleanup scheduler: %s", e)
+    # Both loops run a pass as soon as they start, and the retention one purges.
+    # Constructing the app must not mutate data, so callers that only need an app
+    # object (the test suite, the deploy smoke test) turn this off.
+    if app.config.get("START_BACKGROUND_SCHEDULERS", True):
+        # Start background cleanup scheduler
+        try:
+            from app.services.cleanup_service import start_cleanup_scheduler
+            start_cleanup_scheduler(interval=1800)
+        except Exception as e:
+            app.logger.warning("Failed to start cleanup scheduler: %s", e)
 
-    # Start data retention scheduler (daily purge)
-    try:
-        from app.services.data_retention_service import start_retention_scheduler
-        # Pass the app so the purge loop can push an application context.
-        start_retention_scheduler(interval=86400, app=app)
-    except Exception as e:
-        app.logger.warning("Failed to start retention scheduler: %s", e)
+        # Start data retention scheduler (daily purge)
+        try:
+            from app.services.data_retention_service import start_retention_scheduler
+            # Pass the app so the purge loop can push an application context.
+            start_retention_scheduler(interval=86400, app=app)
+        except Exception as e:
+            app.logger.warning("Failed to start retention scheduler: %s", e)
 
     # CLI commands
     @app.cli.command("purge-data")
