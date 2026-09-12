@@ -77,6 +77,9 @@
     {% set answers = submission.answers or {} %}
 
     <!-- PRINT HEADER -->
+    {# Printing reproduces the marked paper, score included, so it follows the
+       release rule as well — and the PDF route refuses before release anyway. #}
+    {% if released %}
     <div class="print-only print-header" style="display:none;">
         <div class="print-score-box">
             <div class="score-val">{{ score if score is not none else '-' }}</div>
@@ -95,6 +98,7 @@
             <span><strong>Status:</strong> {{ submission.status }}</span>
         </div>
     </div>
+    {% endif %}
 
     <!-- SCREEN HEADER -->
     <div class="flex items-center gap-3 no-print">
@@ -117,16 +121,39 @@
                     <p class="text-sm text-slate-400 font-medium mt-0.5">Dikumpulkan: {{ submission.submitted_at|tz if submission.submitted_at else '-' }}</p>
                 </div>
                 <div class="text-right">
-                    {% if score is not none %}
+                    {% if not released %}
+                    {# The number is the teacher's in-progress marking. Publishing it
+                       before release is not the same thing as an official result, and
+                       it invites students to compare scores during the marking window. #}
+                    <p class="text-2xl font-extrabold text-slate-300">&#8226;&#8226;&#8226;</p>
+                    <p class="text-sm font-bold text-slate-500" x-show="lang!=='en'">Belum dirilis</p>
+                    <p class="text-sm font-bold text-slate-500" x-show="lang==='en'">Not released</p>
+                    {% elif score is not none %}
                     <p class="text-4xl font-extrabold {% if score >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ score }}</p>
+                    <p class="text-sm font-bold text-slate-500" x-text="lang==='en'?'Final Score':'Nilai Akhir'"></p>
                     {% else %}
                     <p class="text-4xl font-extrabold text-slate-400">-</p>
-                    {% endif %}
                     <p class="text-sm font-bold text-slate-500" x-text="lang==='en'?'Final Score':'Nilai Akhir'"></p>
+                    {% endif %}
                 </div>
             </div>
 
             {% set violation_count = submission.violations or 0 %}
+            {% if not released %}
+            {# Fairness: an unreleased result is a work in progress. The score, the
+               answer key and the per-question marks stay server-side until the
+               teacher releases them, so no student gains from reading this page
+               while the exam is still open or still being marked. #}
+            <div class="mt-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <p class="text-sm font-extrabold text-slate-700">
+                    <i class="fas fa-lock mr-1"></i>
+                    <span x-show="lang!=='en'">Hasil belum dirilis</span>
+                    <span x-show="lang==='en'">Result not released yet</span>
+                </p>
+                <p class="text-xs text-slate-500 mt-1" x-show="lang!=='en'">Jawaban Anda sudah tersimpan dan diterima. Setelah guru selesai mengoreksi lalu merilis hasil, nilai, kunci jawaban, dan catatan per soal akan tampil di halaman ini.</p>
+                <p class="text-xs text-slate-500 mt-1" x-show="lang==='en'">Your answers are saved and received. Once your teacher finishes marking and releases the result, your score, the correct answers and per-question feedback will appear here.</p>
+            </div>
+            {% else %}
             <div class="mt-4 grid grid-cols-4 gap-3 text-center text-sm">
                 <div class="bg-emerald-50 p-3 rounded-xl">
                     <p class="text-emerald-700 font-extrabold">{{ submission.score if submission.score is not none else 0 }}</p>
@@ -145,8 +172,12 @@
                     <p class="text-orange-600 font-bold">Final</p>
                 </div>
             </div>
+            {% endif %}
             {% set appeal = (submission.answers or {}).get('_penalty_appeal', {}) %}
-            {% if (submission.penalty or 0) > 0 and submission.status in ('graded', 'published') %}
+            {# An appeal argues against a released penalty. Before release there is no
+               official penalty to argue with, and showing the form would disclose the
+               very penalty the block above deliberately withholds. #}
+            {% if released and (submission.penalty or 0) > 0 and submission.status in ('graded', 'published') %}
             <div class="mt-2" x-data="{ showAppealForm: false, appealReason: '{{ appeal.get("reason", "") }}', appealStatus: '{{ appeal.get("status", "") }}' }">
                 <template x-if="!appealStatus || appealStatus === ''">
                     <button @click="showAppealForm = !showAppealForm" class="w-full text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-2 rounded-xl transition flex items-center justify-center gap-1">
@@ -197,9 +228,13 @@
             {% endif %}
 
             <div class="mt-4 flex flex-wrap gap-2">
+                {% if released %}
+                {# The PDF embeds the answer key, and the route refuses it before release
+                   anyway — hiding the button only keeps the two in agreement. #}
                 <a href="/student/results/{{ submission.id }}/download-pdf" class="text-sm font-extrabold bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2 rounded-xl hover:from-orange-600 hover:to-amber-600 transition inline-flex items-center gap-1">
                     <i class="fas fa-download"></i><span x-text="lang==='en'?'Download PDF':'Unduh PDF'"></span>
                 </a>
+                {% endif %}
                 {% if submission.status in ('submitted', 'draft') %}
                 <form method="POST" action="/student/submissions/{{ submission.id }}/retract" class="inline" onsubmit="return confirm('Yakin tarik jawaban?')">
                     <button type="submit" class="text-sm font-extrabold bg-red-50 text-red-600 px-4 py-2 rounded-xl hover:bg-red-100 transition">
@@ -211,16 +246,15 @@
                     <i class="fas fa-redo mr-1"></i><span x-text="lang==='en'?'Resubmit':'Kirim Ulang'"></span>
                 </a>
                 {% endif %}
-                {% if submission.status in ('submitted', 'draft', 'retracted') %}
-                <button onclick="deleteSubmission('{{ submission.id }}')" class="text-sm font-extrabold bg-slate-100 text-slate-500 px-4 py-2 rounded-xl hover:bg-red-50 hover:text-red-600 transition">
-                    <i class="fas fa-trash mr-1"></i><span x-text="lang==='en'?'Delete':'Hapus'"></span>
-                </button>
-                {% endif %}
+                {# No Delete button: /student/submissions/<id>/delete refuses the murid
+                   role outright, so the button could only ever fail. A control that
+                   cannot succeed is worse than no control. Removal stays with the
+                   teacher/admin, who own the assessment record. #}
             </div>
         </div>
 
         <!-- PRINT: Summary table -->
-        {% if answers is mapping and total_q > 0 %}
+        {% if released and answers is mapping and total_q > 0 %}
         <div class="print-only" style="display:none;">
             <h2 style="font-size:12pt; font-weight:800; margin:12px 0 6px; color:#1e293b;">Ringkasan Jawaban</h2>
             <table class="print-summary-table">
@@ -267,7 +301,7 @@
 
         <!-- QUESTIONS -->
         <div class="p-6 space-y-4">
-            {% if answers is mapping and total_q > 0 %}
+            {% if released and answers is mapping and total_q > 0 %}
             <p class="text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2" x-text="lang==='en'?'Answers per Question':'Jawaban per Soal'"></p>
             {% for i in range(total_q) %}
             {% set q_idx_str = i|string %}
