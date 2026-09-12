@@ -116,6 +116,7 @@ It also stops instead of guessing when:
 
 - the checkout has local changes (it will not clobber hand edits);
 - the update is not a fast-forward (history was rewritten);
+- the release ships a migration and no snapshot of the data can be taken;
 - `requirements.txt` changed and `pip install` failed;
 - the code does not compile;
 - the app cannot construct with all of its blueprints and routes;
@@ -137,6 +138,77 @@ If `ExecReload` is ever removed from the unit, `systemctl reload` fails and the
 script falls back to `restart` — still correct, just blunt. `tests/unit/test_auto_deploy.py`
 pins that line so the fallback cannot become the silent default.
 
+## Rolling back with the data, not just the code
+
+Git can put the code back. It cannot put the data back. So a release that changes
+`supabase/migrations/` is **not allowed to start** without a snapshot taken while
+the old schema is still the one being served:
+
+```
+release changes supabase/migrations — taking a data snapshot first
+snapshot: /var/backups/scangrade/scangrade-db-20260912T134316Z-<commit>.tar.gz
+```
+
+If that snapshot cannot be taken, the release is not deployed (exit 12). It runs
+before the merge, so a refusal leaves nothing half-applied — the checkout is
+simply still on the commit that was working.
+
+On success the archive is named in the journal, and if the release later fails
+verification the rollback message prints the command that puts the data back, at
+the moment someone is already reading the log.
+
+### A migration you paste in by hand is invisible to that check
+
+`supabase/migrations/*.sql` is still applied by hand in the Supabase SQL editor,
+and pasting SQL changes no file — so nothing detects it. Run this first:
+
+```bash
+scangrade-db-snapshot --label before-025   # snapshot now
+scangrade-db-snapshot --list               # what is already there
+```
+
+### Putting the data back
+
+```bash
+scangrade-db-snapshot --restore /var/backups/scangrade/<archive>
+scangrade-db-snapshot --restore <archive> --dry-run    # report only
+```
+
+It reads every writable table in `public` through the PostgREST API with the
+service key the app already has. No database password, no Supabase personal
+access token — nothing to go and find on the day it is needed. Rows are upserted
+by primary key, so running it twice is the same as running it once.
+
+Before it writes anything it takes a snapshot of the **current** state, and
+refuses to continue if it cannot: the state being overwritten is the only copy of
+it.
+
+```
+   capturing the current state first, so this restore is itself undoable...
+   current state saved as scangrade-db-...-pre-restore.tar.gz
+```
+
+### What it restores, and what it cannot
+
+| | |
+|---|---|
+| archives | `/var/backups/scangrade`, mode `0600` inside a `0700` directory, newest 5 kept |
+| order | parents before children, derived from the foreign keys in the PostgREST spec |
+| a cycle | `profiles.class_id` → `classes` and `classes.teacher_id` → `profiles` cannot both be satisfied, since Postgres checks each statement as it runs. Those four back-edges go in as NULL and are re-linked afterwards |
+| identity keys | `notifications` and `notification_recipients` have `GENERATED ALWAYS AS IDENTITY` primary keys, which the API will not accept. Rows that still exist are **reverted in place**; a row that is gone cannot be recreated through the API and is reported as such |
+| auth users | **not** restored — GoTrue never exposes password hashes. `auth_users.ndjson` holds the ids and emails, for recreating an account and resetting its password |
+| the schema | **not** restored. This writes rows into tables that already exist; a migration that drops a column is not undone by it |
+| `updated_at` | re-stamped by the database's own triggers, so restored rows carry a newer timestamp. Every other value comes back identical |
+
+If anything did not come back, the restore exits **3** and prints `INCOMPLETE`
+with the tables and the reason. A restore that reports success while rows are
+missing is worse than one that fails.
+
+The archives hold names, phone numbers and exam answers, so they stay root-only
+and are rotated. An unsecured copy of that data is a breach in its own right —
+prune sooner (lower `--keep`) if your retention policy is shorter than five
+releases.
+
 ## What a deploy still does not do
 
 **The Tailwind stylesheet is a committed build artifact.** The VPS never runs
@@ -146,7 +218,7 @@ production.
 
 Migrations are still manual: SQL in `supabase/migrations/` is applied by hand in
 the Supabase SQL Editor. Deploying code that expects a column before the column
-exists is the failure mode to avoid.
+exists is the failure mode to avoid. Take a snapshot before you paste it.
 
 ## Rolling back by hand
 
@@ -154,6 +226,9 @@ exists is the failure mode to avoid.
 cd /opt/scangrade
 runuser -u scangrade -- git reset --hard <commit>
 systemctl reload scangrade
+
+# and, if that release changed the schema:
+scangrade-db-snapshot --restore /var/backups/scangrade/<archive>
 ```
 
 Then fix `origin/main` — otherwise the next tick will try the same bad release
