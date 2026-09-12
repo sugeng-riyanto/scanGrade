@@ -1,15 +1,20 @@
 import json
 import io
 import os
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
+from app.utils.cache import cache_get, cache_set, cache_delete
 from app.decorators.security import require_school_access
 from app.decorators.subscription import require_subscription
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
+
+logger = logging.getLogger(__name__)
 
 teacher_bp = Blueprint("teacher", __name__)
 
@@ -69,8 +74,13 @@ def _recalculate_scores(exam_id):
                 if question_types.get(str(i), "mcq") != "mcq":
                     question_weights[str(i)] = each
     subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
+    if not subs:
+        return
+    # Pre-compute MCQ count once
+    mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
+    # Build update list — all scoring in Python, then parallel DB writes
+    updates = []
     for sub in subs:
-        # Parse JSON fields in each submission
         for _sf in ("answers", "teacher_feedback"):
             _sv = sub.get(_sf)
             if isinstance(_sv, str):
@@ -98,7 +108,6 @@ def _recalculate_scores(exam_id):
         penalty = float(sub.get("penalty") or 0)
         final = max(0, round(final - penalty, 2))
         mcq_correct = 0
-        mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
         for i in range(total_q):
             qtype = question_types.get(str(i), "mcq")
             key_val = answer_key.get(str(i))
@@ -106,17 +115,30 @@ def _recalculate_scores(exam_id):
                 if _is_mcq_correct(answers.get(str(i)), key_val):
                     mcq_correct += 1
         mcq_score = round((mcq_correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
-        supabase.table("submissions").update({
-            "score": mcq_score,
-            "final_score": final,
-        }).eq("id", sub["id"]).execute()
+        updates.append((sub["id"], mcq_score, final))
+    # Parallel DB updates — 300 subs / 20 threads ≈ 3s instead of 60s serial
+    def _update_one(item):
+        sub_id, sc, fs = item
+        try:
+            supabase.table("submissions").update({"score": sc, "final_score": fs}).eq("id", sub_id).execute()
+        except Exception as exc:
+            logger.warning("_recalculate_scores: failed sub %s: %s", sub_id, exc)
+    max_workers = min(len(updates), 20)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        list(pool.map(_update_one, updates))
 
 
 @teacher_bp.route("/dashboard")
 @teacher_or_admin_required
 def dashboard():
     supabase = get_supabase()
-    res = supabase.table("exams").select("*").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
+    # Try cache first (20s TTL)
+    cache_key = f"t_dash:{g.user_id}"
+    cached = cache_get(cache_key)
+    if cached:
+        return render_template("teacher/dashboard.html", **cached)
+
+    res = supabase.table("exams").select("id,title,subject,question_types,total_questions,status,is_published,created_at,start_at,question_canvas,question_audio").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
     exams = res.data or []
 
     exam_ids = [e["id"] for e in exams]
@@ -187,7 +209,7 @@ def dashboard():
     # Get teacher's school_id (column may not exist in older schema)
     school_id = None
     try:
-        profile = supabase.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
+        profile = supabase.table("profiles").select("school_id").eq("id", g.user_id).single().execute().data or {}
         school_id = profile.get("school_id")
     except Exception:
         pass
@@ -229,12 +251,19 @@ def dashboard():
             pass
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
 
-    return render_template("teacher/dashboard.html", exams=exams, total_students=total_students,
-                           avg_score=avg_score, all_scores=all_scores, user_name=user_name,
-                           assignments=assignments, classes=classes, subjects=subjects,
-                           school_info=school_info, exams_no_key=exams_no_key,
-                           pending_grading=pending_grading, upcoming_exams=upcoming_exams,
-                           grading_progress=grading_progress)
+    template_data = {
+        "exams": exams, "total_students": total_students,
+        "avg_score": avg_score, "all_scores": all_scores, "user_name": user_name,
+        "assignments": assignments, "classes": classes, "subjects": subjects,
+        "school_info": school_info, "exams_no_key": exams_no_key,
+        "pending_grading": pending_grading, "upcoming_exams": upcoming_exams,
+        "grading_progress": grading_progress,
+    }
+    try:
+        cache_set(cache_key, template_data, ttl=20)
+    except Exception:
+        pass
+    return render_template("teacher/dashboard.html", **template_data)
 
 
 @teacher_bp.route("/templates")
@@ -1530,10 +1559,21 @@ def publish_scores(exam_id):
         subs.sort(key=lambda s: (s.get("profiles") or {}).get("full_name", ""))
         return render_template("teacher/publish_preview.html", exam=exam, submissions=subs)
     _recalculate_scores(exam_id)
+    # Get student IDs to invalidate their dashboard caches
+    try:
+        student_subs = supabase.table("submissions").select("student_id").eq("exam_id", exam_id).execute().data or []
+        for s in student_subs:
+            sid = s.get("student_id")
+            if sid:
+                cache_delete(f"dash:{sid}")
+    except Exception:
+        pass
     supabase.table("submissions") \
         .update({"is_published": True, "status": "published"}) \
         .eq("exam_id", exam_id) \
         .execute()
+    # Invalidate teacher dashboard cache
+    cache_delete(f"t_dash:{g.user_id}")
     return redirect("/teacher/results?exam_id=" + exam_id)
 
 
@@ -1865,7 +1905,7 @@ def assignments():
     supabase = get_supabase()
     school_id = None
     try:
-        profile = supabase.table("profiles").select("*").eq("id", g.user_id).single().execute().data or {}
+        profile = supabase.table("profiles").select("school_id").eq("id", g.user_id).single().execute().data or {}
         school_id = profile.get("school_id")
     except Exception:
         pass

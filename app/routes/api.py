@@ -661,6 +661,20 @@ def student_auto_save():
     return jsonify({"saved": True, "at": int(time.time())})
 
 
+def _get_exam_cached(exam_id, supabase):
+    """Cache exam data per-request to avoid repeated queries for the same exam.
+    Multiple students submitting to the same exam = 1 DB query instead of N."""
+    from flask import g as flask_g
+    if not hasattr(flask_g, '_exam_cache'):
+        flask_g._exam_cache = {}
+    if exam_id not in flask_g._exam_cache:
+        flask_g._exam_cache[exam_id] = supabase.table("exams").select(
+            "id,duration_minutes,total_questions,answer_key,question_types,"
+            "question_weights,max_attempts,publish_mode,is_published,status"
+        ).eq("id", exam_id).single().execute().data
+    return flask_g._exam_cache[exam_id]
+
+
 @api_bp.route("/student/sync-draft", methods=["POST"])
 @login_required
 def student_sync_draft():
@@ -684,9 +698,10 @@ def student_sync_draft():
     try:
         from app.utils.auth import get_supabase
         supabase = get_supabase()
-        exam_res = supabase.table("exams").select("duration_minutes").eq("id", exam_id).limit(1).execute()
-        duration = (exam_res.data[0]["duration_minutes"] * 60) if exam_res.data else None
-        existing = supabase.table("submissions").select("id,status,answers,started_at").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
+        # Use cached exam fetch — avoids duplicate queries when many students sync simultaneously
+        exam_data = _get_exam_cached(exam_id, supabase)
+        duration = (exam_data["duration_minutes"] * 60) if exam_data and exam_data.get("duration_minutes") else None
+        existing = supabase.table("submissions").select("id,status,answers,started_at").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute().data
         if existing:
             sub = existing[0]
             if sub.get("status") in ("submitted", "graded", "published"):
