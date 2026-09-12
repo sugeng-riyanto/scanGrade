@@ -27,7 +27,13 @@ worker_tmp_dir = "/dev/shm"  # use RAM for worker heartbeat (faster than disk)
 # ─── Memory ───────────────────────────────────────────────────────
 max_requests = 2000           # recycle worker after 2000 requests (prevent leaks)
 max_requests_jitter = 200     # ±200 jitter to avoid thundering herd
-preload_app = True            # load app once, fork workers (saves RAM)
+# MUST stay False. gevent monkey-patches ssl inside the worker; preloading the
+# app imports httpx/httpcore/ssl in the master first, so the worker's patched
+# ssl breaks every outbound HTTPS call
+# (AuthRetryableError: "super(type, obj): obj must be an instance or subtype of
+# type" from httpcore stream.start_tls) — login, Supabase auth and all API
+# calls failed while the process still looked healthy.
+preload_app = False
 
 # ─── Logging ──────────────────────────────────────────────────────
 accesslog = "/var/log/scangrade/access.log"
