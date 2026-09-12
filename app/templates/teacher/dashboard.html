@@ -171,6 +171,78 @@
     </div>
     {% endif %}
 
+    <!-- Class Analytics -->
+    {% if exam_stats or student_improvement %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- Exam Difficulty Analysis -->
+        {% if exam_stats %}
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-pink-500 flex items-center justify-center shadow-lg shadow-red-200/40">
+                    <i class="fas fa-signal text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Analisis Kesulitan</p>
+                    <p class="text-xs text-surface-400">Rata-rata per ujian</p>
+                </div>
+            </div>
+            <div class="space-y-2">
+                {% for stat in exam_stats %}
+                <div class="flex items-center gap-3">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-bold text-surface-700 truncate">{{ stat.title }}</p>
+                        <div class="w-full bg-surface-100 rounded-full h-1.5 mt-1">
+                            <div class="h-1.5 rounded-full {% if stat.avg >= 80 %}bg-emerald-500{% elif stat.avg >= 70 %}bg-primary-500{% elif stat.avg >= 60 %}bg-amber-500{% else %}bg-red-500{% endif %}" style="width: {{ [stat.avg, 100] | min }}%"></div>
+                        </div>
+                    </div>
+                    <div class="text-right shrink-0">
+                        <p class="text-sm font-extrabold {% if stat.avg >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ stat.avg }}</p>
+                        <p class="text-[10px] text-surface-400">{{ stat.count }} siswa</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Student Improvement -->
+        {% if student_improvement %}
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-200/40">
+                    <i class="fas fa-arrow-trend-up text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Perkembangan Siswa</p>
+                    <p class="text-xs text-surface-400">Nilai awal vs terkini</p>
+                </div>
+            </div>
+            <div class="space-y-2">
+                {% for imp in student_improvement %}
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-surface-100 flex items-center justify-center text-xs font-bold text-surface-600 shrink-0">
+                        {{ imp.student_id[:2]|upper }}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-bold text-surface-700 truncate">Siswa {{ loop.index }}</p>
+                        <p class="text-[10px] text-surface-400">{{ imp.first }} → {{ imp.latest }}</p>
+                    </div>
+                    <div class="text-right shrink-0">
+                        <p class="text-sm font-extrabold {% if imp.diff > 0 %}text-emerald-600{% elif imp.diff < 0 %}text-red-500{% else %}text-surface-400{% endif %}">
+                            {% if imp.diff > 0 %}+{% endif %}{{ imp.diff }}
+                        </p>
+                        <p class="text-[10px] text-surface-400">
+                            {% if imp.diff > 0 %}Naik{% elif imp.diff < 0 %}Turun{% else %}Stabil{% endif %}
+                        </p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <!-- Main Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- Left: Chart + Info -->

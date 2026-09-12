@@ -53,8 +53,7 @@
             </template>
             <template x-if="!showScores">
                 <p class="text-3xl font-extrabold text-surface-300">•••</p>
-            </template>
-            <p class="text-xs font-bold text-surface-500 uppercase tracking-wider mt-1 flex items-center justify-center gap-1">
+            </template>                <p class="text-xs font-bold text-surface-500 uppercase tracking-wider mt-1 flex items-center justify-center gap-1">
                 Rata-rata
                 <button @click="showScores = !showScores" class="text-surface-400 hover:text-surface-600 transition text-sm">
                     <i class="fas" :class="showScores ? 'fa-eye' : 'fa-eye-slash'"></i>
@@ -62,6 +61,84 @@
             </p>
         </div>
     </div>
+
+    <!-- Learning Progress -->
+    {% if completed_exams %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- Mastery Level -->
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-200/40">
+                    <i class="fas fa-trophy text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Tingkat Penguasaan</p>
+                    <p class="text-lg font-extrabold text-surface-800">{{ mastery_level }}</p>
+                </div>
+            </div>
+            {% if subject_averages %}
+            <div class="space-y-3">
+                {% for subject, avg in subject_averages.items() %}
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="font-bold text-surface-600">{{ subject }}</span>
+                        <span class="font-extrabold {% if avg >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ avg }}</span>
+                    </div>
+                    <div class="w-full bg-surface-100 rounded-full h-2">
+                        <div class="h-2 rounded-full {% if avg >= 80 %}bg-emerald-500{% elif avg >= 70 %}bg-primary-500{% elif avg >= 60 %}bg-amber-500{% else %}bg-red-500{% endif %}" style="width: {{ [avg, 100] | min }}%"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Score Trend -->
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-blue-600 flex items-center justify-center shadow-lg shadow-primary-200/40">
+                    <i class="fas fa-chart-line text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Tren Nilai</p>
+                    <p class="text-xs text-surface-400">5 ujian terakhir</p>
+                </div>
+            </div>
+            {% if score_trend %}
+            <div class="flex items-end gap-2 h-24">
+                {% for item in score_trend %}
+                <div class="flex-1 flex flex-col items-center">
+                    <span class="text-[10px] font-bold {% if item.score >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ item.score }}</span>
+                    <div class="w-full {% if item.score >= 80 %}bg-emerald-500{% elif item.score >= 70 %}bg-primary-500{% elif item.score >= 60 %}bg-amber-500{% else %}bg-red-500{% endif %} rounded-t mt-1" style="height: {{ [item.score * 0.8, 10] | max }}px"></div>
+                    <span class="text-[9px] text-surface-400 mt-1 truncate w-full text-center">{{ item.title }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-surface-400 text-center py-4">Belum ada data</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Weak Areas -->
+    {% if weak_areas %}
+    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5">
+        <div class="flex items-center gap-2 mb-3">
+            <i class="fas fa-exclamation-triangle text-amber-600"></i>
+            <h3 class="font-extrabold text-amber-800">Perlu Perhatian</h3>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {% for area in weak_areas[:6] %}
+            <div class="bg-white rounded-xl p-3 border border-amber-200">
+                <p class="text-xs font-bold text-surface-700">{{ area.title }}</p>
+                <p class="text-[10px] text-surface-400">{{ area.subject }}</p>
+                <p class="text-sm font-extrabold text-red-500 mt-1">{{ area.score }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
 
     <!-- Active Whiteboards -->
     {% if active_whiteboards %}
