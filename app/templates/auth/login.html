@@ -31,6 +31,16 @@
         </div>
 
         <div x-data="{ loading: false, showPw: false, email: (typeof localStorage !== 'undefined' ? (localStorage.getItem('sg_login_email') || '') : '') }">
+            {# Flash messages belong HERE. This page is the redirect target of
+               login_required, so a session-expiry notice must be shown on it —
+               otherwise it stays queued in the session and reappears on the next
+               page that renders flashes, reading as that page's own error. #}
+            {% for category, message in get_flashed_messages(with_categories=true) %}
+            <div class="mb-6 p-4 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-sm {% if category == 'success' %}bg-emerald-50 border border-emerald-200 text-emerald-700{% elif category == 'info' %}bg-blue-50 border border-blue-200 text-blue-700{% else %}bg-amber-50 border border-amber-200 text-amber-800{% endif %}" role="alert">
+                <i class="fas {% if category == 'success' %}fa-check-circle{% elif category == 'info' %}fa-circle-info{% else %}fa-clock-rotate-left{% endif %} shrink-0"></i><span>{{ message }}</span>
+            </div>
+            {% endfor %}
+
             {% if error %}
             <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm font-semibold text-red-700 flex items-center gap-2 shadow-sm" role="alert">
                 <i class="fas fa-exclamation-circle shrink-0"></i><span>{{ error }}</span>

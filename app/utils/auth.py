@@ -41,6 +41,27 @@ def _wants_json():
     return "application/json" in accept or request.path.startswith("/api/")
 
 
+def set_auth_cookie(response, key, value, max_age=86400, httponly=True):
+    """Set an auth-bearing cookie, Secure whenever the app is served over HTTPS.
+
+    `access_token` and `refresh_token` are credentials, and they were written
+    without `Secure` while `SESSION_COOKIE_SECURE` already declared that cookies
+    must never travel on plain HTTP. Deriving the flag from that same setting
+    keeps local development on http:// working (where it is False) without
+    leaving the real deployment exposed to a http:// request.
+    """
+    response.set_cookie(
+        key,
+        value,
+        httponly=httponly,
+        secure=bool(current_app.config.get("SESSION_COOKIE_SECURE", False)),
+        samesite="Lax",
+        path="/",
+        max_age=max_age,
+    )
+    return response
+
+
 def check_subscription_write(school_id=None):
     """Check if school subscription is active. Returns (allowed, error_msg).
     If not allowed, returns (False, 'message'). If allowed, returns (True, None)."""
@@ -212,13 +233,19 @@ def login_required(f):
             try:
                 last_act = float(request.cookies.get("last_activity", "0"))
                 if last_act > 0 and now - last_act > to["idle_minutes"] * 60:
-                    return _unauthorized()
+                    return _unauthorized(
+                        "Sesi Anda berakhir karena tidak ada aktivitas selama {} menit. "
+                        "Silakan masuk kembali.".format(to["idle_minutes"])
+                    )
             except Exception:
                 pass
             try:
                 sess_start = float(request.cookies.get("session_start", "0"))
                 if sess_start > 0 and now - sess_start > to["absolute_hours"] * 3600:
-                    return _unauthorized()
+                    return _unauthorized(
+                        "Sesi Anda berakhir karena sudah mencapai batas {} jam. "
+                        "Silakan masuk kembali.".format(to["absolute_hours"])
+                    )
             except Exception:
                 pass
         except Exception:
@@ -338,10 +365,17 @@ def teacher_or_admin_sekolah_required(f):
     return role_required("guru", "admin_sekolah")(f)
 
 
-def _unauthorized():
+def _unauthorized(message=None):
+    """Send the caller back to the login page, saying why.
+
+    A single blanket message made an expired session indistinguishable from a
+    permissions problem: the user was told to "log in first" while logged in.
+    Callers that know the reason (the two session-timeout checks) pass it.
+    """
+    message = message or "Silakan login terlebih dahulu"
     if _wants_json():
-        return jsonify({"error": "Silakan login terlebih dahulu"}), 401
-    flash("Silakan login terlebih dahulu", "error")
+        return jsonify({"error": message}), 401
+    flash(message, "error")
     return redirect("/auth/login")
 
 

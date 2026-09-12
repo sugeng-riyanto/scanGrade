@@ -4,7 +4,7 @@ import os
 import threading
 import time
 from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
-from app.utils.auth import login_required, get_supabase, get_auth_client, invalidate_session
+from app.utils.auth import login_required, get_supabase, get_auth_client, invalidate_session, set_auth_cookie
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
@@ -416,9 +416,15 @@ def login():
         }
         redirect_url = redirect_map.get(role, "/admin/dashboard")
         resp = make_response(redirect(redirect_url))
-        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/", max_age=86400)
-        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
-        resp.set_cookie("session_start", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400*7)
+        # A flash left over from a session that has just ended describes a state
+        # the user is no longer in. The login page is where it belongs, and it is
+        # rendered there; dropping it here keeps it from being replayed on the
+        # next page that renders flashes (e.g. "Silakan login terlebih dahulu"
+        # appearing on a page the user opens while fully logged in).
+        session.pop("_flashes", None)
+        set_auth_cookie(resp, "access_token", res.session.access_token, max_age=86400)
+        set_auth_cookie(resp, "refresh_token", res.session.refresh_token, max_age=86400 * 7)
+        set_auth_cookie(resp, "session_start", str(time.time()), max_age=86400 * 7)
     except Exception as e:
         wrong_password, message = _classify_login_error(e)
         if wrong_password:
@@ -523,9 +529,15 @@ def login_user():
         }
         redirect_url = redirect_map.get(role, "/student/dashboard")
         resp = make_response(redirect(redirect_url))
-        resp.set_cookie("access_token", res.session.access_token, httponly=True, samesite="Lax", path="/", max_age=86400)
-        resp.set_cookie("refresh_token", res.session.refresh_token, httponly=True, samesite="Lax", path="/", max_age=86400*7)
-        resp.set_cookie("session_start", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400*7)
+        # A flash left over from a session that has just ended describes a state
+        # the user is no longer in. The login page is where it belongs, and it is
+        # rendered there; dropping it here keeps it from being replayed on the
+        # next page that renders flashes (e.g. "Silakan login terlebih dahulu"
+        # appearing on a page the user opens while fully logged in).
+        session.pop("_flashes", None)
+        set_auth_cookie(resp, "access_token", res.session.access_token, max_age=86400)
+        set_auth_cookie(resp, "refresh_token", res.session.refresh_token, max_age=86400 * 7)
+        set_auth_cookie(resp, "session_start", str(time.time()), max_age=86400 * 7)
         log_activity("login", "user", res.user.id, new_data={"role": role, "ip": request.remote_addr})
         return resp
     except Exception as e:

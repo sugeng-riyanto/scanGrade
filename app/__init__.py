@@ -502,6 +502,13 @@ def _register_csrf_protection(app):
             return None
         # Validate CSRF token
         if not validate_csrf():
+            # Logged loudly on purpose: a rejected write used to look exactly like a
+            # silent no-op on the client. The anti-cheat event log went 403 on every
+            # send for who knows how long and nothing surfaced it.
+            app.logger.warning(
+                "CSRF rejected: %s %s (accept=%r)",
+                request.method, request.path, (request.headers.get("Accept") or "")[:40],
+            )
             return jsonify({"error": "CSRF token invalid"}), 403
         return None
 
@@ -574,13 +581,16 @@ def _register_request_logging(app):
             _metrics["response_times"].append(duration * 1000)
             if len(_metrics["response_times"]) > _max_times:
                 _metrics["response_times"] = _metrics["response_times"][-500:]
-        # Set refreshed access_token cookie if token was refreshed
+        # Set refreshed access_token cookie if token was refreshed. Through the
+        # shared helper so it carries Secure on HTTPS like the session cookie.
         new_token = getattr(g, "_new_access_token", None)
         if new_token:
-            response.set_cookie("access_token", new_token, httponly=True, samesite="Lax", path="/", max_age=86400)
+            from app.utils.auth import set_auth_cookie
+            set_auth_cookie(response, "access_token", new_token, max_age=86400)
         # Update last_activity timestamp for session timeout tracking
         if g.get("user_id"):
-            response.set_cookie("last_activity", str(time.time()), httponly=True, samesite="Lax", path="/", max_age=86400)
+            from app.utils.auth import set_auth_cookie
+            set_auth_cookie(response, "last_activity", str(time.time()), max_age=86400)
         return response
 
     @app.route("/metrics")
