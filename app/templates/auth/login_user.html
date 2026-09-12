@@ -52,6 +52,15 @@ try {
         </div>
 
         <div x-data="{ showPw: false, role: {{ (role_hint if role_hint in ('guru','murid') else '') | tojson }} }">
+            {# Same as /auth/login: this is where login_required sends an expired
+               session, so the notice must be rendered here or it leaks onto the
+               next page that renders flashes. #}
+            {% for category, message in get_flashed_messages(with_categories=true) %}
+            <div class="mb-6 p-4 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-sm {% if category == 'success' %}bg-emerald-50 border border-emerald-200 text-emerald-700{% elif category == 'info' %}bg-blue-50 border border-blue-200 text-blue-700{% else %}bg-amber-50 border border-amber-200 text-amber-800{% endif %}" role="alert">
+                <i class="fas {% if category == 'success' %}fa-check-circle{% elif category == 'info' %}fa-circle-info{% else %}fa-clock-rotate-left{% endif %} shrink-0"></i><span>{{ message }}</span>
+            </div>
+            {% endfor %}
+
             {% if error %}
             <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm font-semibold text-red-700 flex items-center gap-2 shadow-sm" role="alert">
                 <i class="fas fa-exclamation-circle shrink-0"></i><span>{{ error }}</span>
