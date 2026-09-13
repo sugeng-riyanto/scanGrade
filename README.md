@@ -53,8 +53,7 @@ app/
 │   ├── analytics_service.py # Stats aggregation
 │   ├── export_service.py    # XLSX/PDF export
 │   ├── notification_service.py # WhatsApp/email
-│   ├── ljk_generator.py     # Lembar jawaban generator
-│   └── auth_service.py      # Auth helpers
+│   └── ljk_generator.py     # Lembar jawaban generator
 ├── models/                  # Supabase query helpers
 ├── utils/
 │   └── auth.py              # get_supabase(), get_auth_client(), login_required
