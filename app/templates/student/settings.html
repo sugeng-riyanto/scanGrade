@@ -5,13 +5,15 @@
 <script>window.__profile={{ profile | tojson | safe }}||{};</script>
 <div class="space-y-6" x-data="{
     profile: window.__profile,
-    lang: localStorage.getItem('sg_lang') || 'id',
     loading: true, deletionRequest: null,
     exportLoading: false, exportData: null,
-    pwOld: '', pwNew: '', pwConfirm: '', pwMsg: '',
-    delReason: '', delMsg: '', sending: false,
+    // The `...Ok` flags exist so the styling does not read the message text.
+    // It used to: `pwMsg.includes('berhasil')`. That breaks the moment the
+    // message is translated, and it made a success colour depend on wording.
+    pwOld: '', pwNew: '', pwConfirm: '', pwMsg: '', pwOk: false,
+    delReason: '', delMsg: '', sending: false, delOk: false,
     pdpSettings: { pdp_agreed: false },
-    pdpMsg: '',
+    pdpMsg: '', pdpOk: false,
     savingPdp: false,
     initPdpSettings() {
         if (this.profile) {
@@ -21,6 +23,7 @@
     savePdpSettings() {
         this.savingPdp = true;
         this.pdpMsg = '';
+        this.pdpOk = false;
         fetch('/student/settings/pdp-update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -29,47 +32,52 @@
         .then(r => r.json())
         .then(d => {
             if (d.status === 'success') {
+                this.pdpOk = true;
                 this.pdpMsg = d.message;
                 this.profile.pdp_agreed = this.pdpSettings.pdp_agreed;
             } else {
-                this.pdpMsg = 'Gagal: ' + (d.message || 'unknown error');
+                this.pdpMsg = sgT('Gagal','Failed') + ': ' + (d.message || 'unknown error');
             }
         })
-        .catch(e => { this.pdpMsg = 'Error koneksi: ' + e.message; })
+        .catch(e => { this.pdpMsg = sgT('Error koneksi','Connection error') + ': ' + e.message; })
         .finally(() => { this.savingPdp = false; });
     },
     // password change
     changePassword() {
-        if (!this.pwOld || !this.pwNew) { this.pwMsg = 'Isi semua field'; return; }
-        if (this.pwNew.length < 6) { this.pwMsg = 'Password minimal 6 karakter'; return; }
-        if (this.pwNew !== this.pwConfirm) { this.pwMsg = 'Password tidak cocok'; return; }
+        this.pwOk = false;
+        if (!this.pwOld || !this.pwNew) { this.pwMsg = sgT('Isi semua field','Fill in every field'); return; }
+        if (this.pwNew.length < 6) { this.pwMsg = sgT('Password minimal 6 karakter','Password must be at least 6 characters'); return; }
+        if (this.pwNew !== this.pwConfirm) { this.pwMsg = sgT('Password tidak cocok','Passwords do not match'); return; }
         this.pwMsg = ''; this.sending = true;
         var fd = new FormData();
         fd.append('password', this.pwNew);
         fd.append('current_password', this.pwOld);
         fetch('/student/reset-password', {method:'POST', body: fd})
         .then(r=>r.json()).then(d => {
-            this.pwMsg = d.success ? 'Password berhasil diubah' : 'Gagal: ' + (d.error||'');
+            this.pwOk = !!d.success;
+            this.pwMsg = d.success ? sgT('Password berhasil diubah','Password changed successfully') : sgT('Gagal','Failed') + ': ' + (d.error||'');
             if (d.success) { this.pwOld = ''; this.pwNew = ''; this.pwConfirm = ''; }
-        }).catch(()=>{ this.pwMsg = 'Error koneksi'; }).finally(()=>{ this.sending = false; });
+        }).catch(()=>{ this.pwMsg = sgT('Error koneksi','Connection error'); }).finally(()=>{ this.sending = false; });
     },
     // data export
     exportData() {
         this.exportLoading = true; this.exportData = null;
         fetch('/api/account/export-data')
         .then(r=>r.json()).then(d => { this.exportData = d; })
-        .catch(()=>{ alert('Gagal export data'); })
+        .catch(()=>{ alert(sgT('Gagal export data','Could not export your data')); })
         .finally(()=>{ this.exportLoading = false; });
     },
     // deletion request
     requestDeletion() {
-        if (!confirm('Anda yakin ingin menghapus akun? Data Anda akan dihapus setelah 14 hari.\nTindakan ini tidak dapat dibatalkan setelah diproses.')) return;
+        this.delOk = false;
+        if (!confirm(sgT('Anda yakin ingin menghapus akun? Data Anda akan dihapus setelah 14 hari.\nTindakan ini tidak dapat dibatalkan setelah diproses.','Delete your account? Your data will be removed after 14 days.\nThis cannot be undone once processed.'))) return;
         this.sending = true;
         fetch('/api/account/delete-request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason: this.delReason})})
         .then(r=>r.json()).then(d => {
-            this.delMsg = d.success ? 'Permintaan penghapusan telah dikirim. Cek email Anda untuk konfirmasi.' : 'Gagal: ' + (d.error||'');
+            this.delOk = !!d.success;
+            this.delMsg = d.success ? sgT('Permintaan penghapusan telah dikirim. Cek email Anda untuk konfirmasi.','Your deletion request has been sent. Check your email to confirm.') : sgT('Gagal','Failed') + ': ' + (d.error||'');
             if (d.success) this.checkStatus();
-        }).catch(()=>{ this.delMsg = 'Error koneksi'; }).finally(()=>{ this.sending = false; });
+        }).catch(()=>{ this.delMsg = sgT('Error koneksi','Connection error'); }).finally(()=>{ this.sending = false; });
     },
     cancelDeletion() {
         fetch('/api/account/delete-request/cancel', {method:'POST'})
@@ -84,45 +92,45 @@
     <!-- Tab Navigation -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1">
         <button class="flex-1 py-2.5 text-sm font-bold rounded-lg transition bg-white text-primary-600 shadow-sm">
-            <i class="fas fa-cog mr-1.5"></i>Pengaturan
+            <i class="fas fa-cog mr-1.5"></i><span x-text="t('Pengaturan','Settings')"></span>
         </button>
     </div>
 
     <!-- Ubah Password -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-lock text-primary-500 mr-2"></i>Ubah Password</h3>
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-lock text-primary-500 mr-2"></i><span x-text="t('Ubah Password','Change Password')"></span></h3>
         <form @submit.prevent="changePassword()" class="space-y-4 max-w-md">
             <div>
-                <label class="block text-sm font-bold text-surface-700 mb-1">Password Saat Ini</label>
+                <label class="block text-sm font-bold text-surface-700 mb-1" x-text="t('Password Saat Ini','Current Password')"></label>
                 <input type="password" x-model="pwOld" required class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700">
             </div>
             <div>
-                <label class="block text-sm font-bold text-surface-700 mb-1">Password Baru</label>
+                <label class="block text-sm font-bold text-surface-700 mb-1" x-text="t('Password Baru','New Password')"></label>
                 <input type="password" x-model="pwNew" required minlength="6" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700">
             </div>
             <div>
-                <label class="block text-sm font-bold text-surface-700 mb-1">Konfirmasi Password Baru</label>
+                <label class="block text-sm font-bold text-surface-700 mb-1" x-text="t('Konfirmasi Password Baru','Confirm New Password')"></label>
                 <input type="password" x-model="pwConfirm" required class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-surface-700">
             </div>
             <button type="submit" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="sending">
-                <span x-text="sending ? 'Menyimpan...' : 'Simpan Password'"></span>
+                <span x-text="sending ? t('Menyimpan...','Saving...') : t('Simpan Password','Save Password')"></span>
             </button>
-            <p x-show="pwMsg" class="text-xs font-bold" :class="pwMsg.includes('berhasil') ? 'text-emerald-600' : 'text-red-600'" x-text="pwMsg"></p>
+            <p x-show="pwMsg" class="text-xs font-bold" :class="pwOk ? 'text-emerald-600' : 'text-red-600'" x-text="pwMsg"></p>
         </form>
     </div>
 
     <!-- Ekspor Data -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-download text-primary-500 mr-2"></i>Ekspor Data Pribadi</h3>
-        <p class="text-sm text-surface-600 mb-4">Unduh seluruh data Anda (profil, ujian, pesan, pelanggaran) dalam format JSON. Data tidak termasuk password.</p>
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-download text-primary-500 mr-2"></i><span x-text="t('Ekspor Data Pribadi','Export My Data')"></span></h3>
+        <p class="text-sm text-surface-600 mb-4" x-text="t('Unduh seluruh data Anda (profil, ujian, pesan, pelanggaran) dalam format JSON. Data tidak termasuk password.','Download everything we hold about you (profile, exams, messages, violations) as JSON. Passwords are never included.')"></p>
         <button @click="exportData()" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="exportLoading">
-            <span x-text="exportLoading ? 'Mengumpulkan data...' : 'Ekspor Data Saya'"></span>
+            <span x-text="exportLoading ? t('Mengumpulkan data...','Collecting your data...') : t('Ekspor Data Saya','Export My Data')"></span>
         </button>
         <template x-if="exportData">
             <div class="mt-4">
-                <p class="text-xs font-bold text-emerald-600 mb-2">Data berhasil dikumpulkan. Klik tombol di bawah untuk menyimpan file.</p>
+                <p class="text-xs font-bold text-emerald-600 mb-2" x-text="t('Data berhasil dikumpulkan. Klik tombol di bawah untuk menyimpan file.','Your data is ready. Use the button below to save the file.')"></p>
                 <button @click="(function(){ var a=document.createElement('a'); a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(exportData,null,2)); a.download='scangrade-data-{{ g.user_id[:8] }}.json'; a.click(); })()" class="px-4 py-2 border-2 border-emerald-600 text-emerald-700 rounded-xl font-bold text-xs hover:bg-emerald-50 transition">
-                    <i class="fas fa-save mr-1"></i>Simpan File JSON
+                    <i class="fas fa-save mr-1"></i><span x-text="t('Simpan File JSON','Save JSON File')"></span>
                 </button>
             </div>
         </template>
@@ -130,59 +138,59 @@
 
     <!-- Hapus Akun -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-red-100">
-        <h3 class="font-extrabold text-red-600 mb-4"><i class="fas fa-trash-alt mr-2"></i>Hapus Akun</h3>
+        <h3 class="font-extrabold text-red-600 mb-4"><i class="fas fa-trash-alt mr-2"></i><span x-text="t('Hapus Akun','Delete Account')"></span></h3>
         <template x-if="deletionRequest && deletionRequest.status === 'pending'">
             <div>
                 <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
-                    <p class="text-sm font-bold text-amber-800"><i class="fas fa-clock mr-1"></i>Permintaan penghapusan sedang diproses</p>
-                    <p class="text-xs text-amber-700 mt-1">Diajukan: <span x-text="deletionRequest.requested_at"></span></p>
-                    <p class="text-xs text-amber-700" x-show="deletionRequest.reason">Alasan: <span x-text="deletionRequest.reason"></span></p>
+                    <p class="text-sm font-bold text-amber-800"><i class="fas fa-clock mr-1"></i><span x-text="t('Permintaan penghapusan sedang diproses','Your deletion request is being processed')"></span></p>
+                    <p class="text-xs text-amber-700 mt-1"><span x-text="t('Diajukan:','Requested:')"></span> <span x-text="deletionRequest.requested_at"></span></p>
+                    <p class="text-xs text-amber-700" x-show="deletionRequest.reason"><span x-text="t('Alasan:','Reason:')"></span> <span x-text="deletionRequest.reason"></span></p>
                 </div>
-                <button @click="cancelDeletion()" class="px-4 py-2 border-2 border-amber-600 text-amber-700 rounded-xl font-bold text-xs hover:bg-amber-50 transition">Batalkan Permintaan</button>
+                <button @click="cancelDeletion()" class="px-4 py-2 border-2 border-amber-600 text-amber-700 rounded-xl font-bold text-xs hover:bg-amber-50 transition" x-text="t('Batalkan Permintaan','Cancel Request')"></button>
             </div>
         </template>
         <template x-if="!deletionRequest || deletionRequest.status !== 'pending'">
             <div class="space-y-4 max-w-md">
-                <p class="text-sm text-surface-600">Hapus akun dan seluruh data Anda secara permanen. Proses ini membutuhkan waktu 14 hari sesuai ketentuan PSE Kominfo.</p>
+                <p class="text-sm text-surface-600" x-text="t('Hapus akun dan seluruh data Anda secara permanen. Proses ini membutuhkan waktu 14 hari sesuai ketentuan PSE Kominfo.','Permanently delete your account and all your data. This takes 14 days, as required by the PSE Kominfo rules.')"></p>
                 <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1">Alasan (opsional)</label>
-                    <textarea x-model="delReason" rows="2" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-red-500 text-surface-700 text-sm" placeholder="Ceritakan mengapa Anda ingin menghapus akun..."></textarea>
+                    <label class="block text-sm font-bold text-surface-700 mb-1" x-text="t('Alasan (opsional)','Reason (optional)')"></label>
+                    <textarea x-model="delReason" rows="2" class="w-full px-4 py-2.5 border border-surface-200 rounded-xl focus:ring-2 focus:ring-red-500 text-surface-700 text-sm" :placeholder="t('Ceritakan mengapa Anda ingin menghapus akun...','Tell us why you want to delete your account...')"></textarea>
                 </div>
                 <button @click="requestDeletion()" class="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="sending">
-                    <span x-text="sending ? 'Mengirim...' : 'Ajukan Hapus Akun'"></span>
+                    <span x-text="sending ? t('Mengirim...','Sending...') : t('Ajukan Hapus Akun','Request Account Deletion')"></span>
                 </button>
-                <p x-show="delMsg" class="text-xs font-bold" :class="delMsg.includes('Terkirim') || delMsg.includes('berhasil') ? 'text-emerald-600' : 'text-red-600'" x-text="delMsg"></p>
+                <p x-show="delMsg" class="text-xs font-bold" :class="delOk ? 'text-emerald-600' : 'text-red-600'" x-text="delMsg"></p>
             </div>
         </template>
     </div>
     <!-- Pengaturan Privasi Data Pribadi (PDP) -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-primary-100">
-        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-fingerprint text-primary-500 mr-2"></i>Persetujuan PDP (UU No. 27/2022)</h3>
-        <p class="text-sm text-surface-600 mb-4">Kelola persetujuan pemrosesan data pribadi Anda sesuai Undang-Undang Perlindungan Data Pribadi.</p>
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-fingerprint text-primary-500 mr-2"></i><span x-text="t('Persetujuan PDP (UU No. 27/2022)','Personal Data Consent (Law No. 27/2022)')"></span></h3>
+        <p class="text-sm text-surface-600 mb-4" x-text="t('Kelola persetujuan pemrosesan data pribadi Anda sesuai Undang-Undang Perlindungan Data Pribadi.','Manage your consent to personal-data processing under the Personal Data Protection Law.')"></p>
         <div class="space-y-4 max-w-md">
             <div class="flex items-start gap-3">
                 <input id="pdp_agreed" type="checkbox" x-model="pdpSettings.pdp_agreed" class="mt-1 form-checkbox h-4 w-4 text-primary-600 rounded focus:ring-primary-500 border-surface-300">
-                <label for="pdp_agreed" class="text-sm text-surface-700 leading-relaxed">Saya menyetujui pemrosesan data pribadi saya sesuai dengan <a href="/privacy" target="_blank" class="text-primary-600 hover:underline font-bold">Kebijakan Privasi</a> dan <a href="/terms" target="_blank" class="text-primary-600 hover:underline font-bold">Syarat &amp; Ketentuan</a> ScanGrade.</label>
+                <label for="pdp_agreed" class="text-sm text-surface-700 leading-relaxed"><span x-text="t('Saya menyetujui pemrosesan data pribadi saya sesuai dengan','I consent to the processing of my personal data under the')"></span> <a href="/privacy" target="_blank" class="text-primary-600 hover:underline font-bold" x-text="t('Kebijakan Privasi','Privacy Policy')"></a> <span x-text="t('dan','and')"></span> <a href="/terms" target="_blank" class="text-primary-600 hover:underline font-bold" x-text="t('Syarat & Ketentuan','Terms & Conditions')"></a> ScanGrade.</label>
             </div>
 
             <button @click="savePdpSettings()" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition" :disabled="savingPdp">
-                <span x-text="savingPdp ? 'Menyimpan...' : 'Simpan Persetujuan'"></span>
+                <span x-text="savingPdp ? t('Menyimpan...','Saving...') : t('Simpan Persetujuan','Save Consent')"></span>
             </button>
-            <p x-show="pdpMsg" class="text-xs font-bold" :class="pdpMsg.includes('berhasil') ? 'text-emerald-600' : 'text-red-600'" x-text="pdpMsg"></p>
+            <p x-show="pdpMsg" class="text-xs font-bold" :class="pdpOk ? 'text-emerald-600' : 'text-red-600'" x-text="pdpMsg"></p>
         </div>
     </div>
 
     <!-- Kebijakan Retensi Data -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-6 border border-surface-100">
-        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-clock text-primary-500 mr-2"></i>Kebijakan Retensi Data</h3>
+        <h3 class="font-extrabold text-surface-800 mb-4"><i class="fas fa-clock text-primary-500 mr-2"></i><span x-text="t('Kebijakan Retensi Data','Data Retention Policy')"></span></h3>
         <div class="bg-surface-50 border border-surface-200 rounded-xl p-4 text-xs text-surface-600 space-y-1">
-            <p>ScanGrade mematuhi <strong>UU No. 27/2022 tentang Perlindungan Data Pribadi</strong> dan <strong>PSE Kominfo</strong>.</p>
-            <p class="mt-2 font-bold text-surface-700">Periode Penyimpanan Data:</p>
-            <p>&bull; <strong>Profil &amp; Akun</strong>: Disimpan selama akun aktif. Dihapus 90 hari setelah permintaan penghapusan.</p>
-            <p>&bull; <strong>Hasil Ujian &amp; Jawaban</strong>: Disimpan 5 tahun untuk keperluan akademik.</p>
-            <p>&bull; <strong>Pesan &amp; Percakapan</strong>: Disimpan 2 tahun untuk keperluan komunikasi.</p>
-            <p>&bull; <strong>Log Pelanggaran</strong>: Disimpan 2 tahun untuk audit.</p>
-            <p>&bull; <strong>Draft Ujian</strong>: Dihapus otomatis setelah 30 hari.</p>
+            <p><span x-text="t('ScanGrade mematuhi','ScanGrade complies with')"></span> <strong x-text="t('UU No. 27/2022 tentang Perlindungan Data Pribadi','Law No. 27/2022 on Personal Data Protection')"></strong> <span x-text="t('dan','and')"></span> <strong>PSE Kominfo</strong>.</p>
+            <p class="mt-2 font-bold text-surface-700" x-text="t('Periode Penyimpanan Data:','Retention periods:')"></p>
+            <p>&bull; <strong x-text="t('Profil & Akun','Profile & Account')"></strong><span x-text="t(': Disimpan selama akun aktif. Dihapus 90 hari setelah permintaan penghapusan.',': kept while the account is active, then deleted 90 days after a deletion request.')"></span></p>
+            <p>&bull; <strong x-text="t('Hasil Ujian & Jawaban','Exam Results & Answers')"></strong><span x-text="t(': Disimpan 5 tahun untuk keperluan akademik.',': kept for 5 years for academic records.')"></span></p>
+            <p>&bull; <strong x-text="t('Pesan & Percakapan','Messages & Conversations')"></strong><span x-text="t(': Disimpan 2 tahun untuk keperluan komunikasi.',': kept for 2 years for communication.')"></span></p>
+            <p>&bull; <strong x-text="t('Log Pelanggaran','Violation Logs')"></strong><span x-text="t(': Disimpan 2 tahun untuk audit.',': kept for 2 years for auditing.')"></span></p>
+            <p>&bull; <strong x-text="t('Draft Ujian','Exam Drafts')"></strong><span x-text="t(': Dihapus otomatis setelah 30 hari.',': deleted automatically after 30 days.')"></span></p>
         </div>
     </div>
 
@@ -191,39 +199,39 @@
         <div class="flex items-center gap-3 mb-4">
             <div class="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600"><i class="fas fa-balance-scale"></i></div>
             <div>
-                <h3 class="font-extrabold text-surface-800">Hak Subjek Data UU PDP</h3>
-                <p class="text-xs text-surface-500">Undang-Undang No. 27 Tahun 2022</p>
+                <h3 class="font-extrabold text-surface-800" x-text="t('Hak Subjek Data UU PDP','Your Data Rights')"></h3>
+                <p class="text-xs text-surface-500" x-text="t('Undang-Undang No. 27 Tahun 2022','Law No. 27 of 2022')"></p>
             </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
-                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-info-circle text-primary-500 text-xs"></i> Hak Informasi</p>
-                <p class="text-xs text-surface-500 mt-1">Ketahui data apa yang kami kumpulkan di <a href="/privacy" class="text-primary-600 underline">Kebijakan Privasi</a></p>
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-info-circle text-primary-500 text-xs"></i> <span x-text="t('Hak Informasi','Right to Information')"></span></p>
+                <p class="text-xs text-surface-500 mt-1"><span x-text="t('Ketahui data apa yang kami kumpulkan di','See what we collect in the')"></span> <a href="/privacy" class="text-primary-600 underline" x-text="t('Kebijakan Privasi','Privacy Policy')"></a></p>
             </div>
             <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
-                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-download text-primary-500 text-xs"></i> Hak Akses &amp; Portabilitas</p>
-                <p class="text-xs text-surface-500 mt-1">Unduh data Anda via "Ekspor Data Saya" di atas</p>
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-download text-primary-500 text-xs"></i> <span x-text="t('Hak Akses & Portabilitas','Right of Access & Portability')"></span></p>
+                <p class="text-xs text-surface-500 mt-1" x-text="t('Unduh data Anda via &quot;Ekspor Data Saya&quot; di atas','Download your data with &quot;Export My Data&quot; above')"></p>
             </div>
             <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
-                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-edit text-primary-500 text-xs"></i> Hak Perbaikan</p>
-                <p class="text-xs text-surface-500 mt-1">Update profil Anda atau hubungi guru</p>
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-edit text-primary-500 text-xs"></i> <span x-text="t('Hak Perbaikan','Right to Rectification')"></span></p>
+                <p class="text-xs text-surface-500 mt-1" x-text="t('Update profil Anda atau hubungi guru','Update your profile, or ask your teacher')"></p>
             </div>
             <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
-                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-trash-alt text-primary-500 text-xs"></i> Hak Penghapusan</p>
-                <p class="text-xs text-surface-500 mt-1">Ajukan via form "Hapus Akun" di atas</p>
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-trash-alt text-primary-500 text-xs"></i> <span x-text="t('Hak Penghapusan','Right to Erasure')"></span></p>
+                <p class="text-xs text-surface-500 mt-1" x-text="t('Ajukan via form &quot;Hapus Akun&quot; di atas','Use the &quot;Delete Account&quot; form above')"></p>
             </div>
             <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
-                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-pause-circle text-primary-500 text-xs"></i> Hak Pembatasan</p>
-                <p class="text-xs text-surface-500 mt-1">Hubungi <a href="/privacy#kontak" class="text-primary-600 underline">pengendali data</a></p>
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-pause-circle text-primary-500 text-xs"></i> <span x-text="t('Hak Pembatasan','Right to Restriction')"></span></p>
+                <p class="text-xs text-surface-500 mt-1"><span x-text="t('Hubungi','Contact the')"></span> <a href="/privacy#kontak" class="text-primary-600 underline" x-text="t('pengendali data','data controller')"></a></p>
             </div>
             <div class="p-3 rounded-xl bg-surface-50 border border-surface-100">
-                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-times-circle text-primary-500 text-xs"></i> Hak Keberatan</p>
-                <p class="text-xs text-surface-500 mt-1">Hubungi kami jika keberatan dengan pemrosesan data</p>
+                <p class="font-bold text-surface-700 flex items-center gap-1.5"><i class="fas fa-times-circle text-primary-500 text-xs"></i> <span x-text="t('Hak Keberatan','Right to Object')"></span></p>
+                <p class="text-xs text-surface-500 mt-1" x-text="t('Hubungi kami jika keberatan dengan pemrosesan data','Contact us if you object to how your data is processed')"></p>
             </div>
         </div>
         <div class="mt-3 flex items-center gap-4 text-xs text-surface-400">
-            <a href="/privacy" class="text-primary-600 hover:underline font-medium"><i class="fas fa-external-link-alt mr-1"></i>Kebijakan Privasi</a>
-            <a href="/terms" class="text-primary-600 hover:underline font-medium"><i class="fas fa-external-link-alt mr-1"></i>Syarat &amp; Ketentuan</a>
+            <a href="/privacy" class="text-primary-600 hover:underline font-medium"><i class="fas fa-external-link-alt mr-1"></i><span x-text="t('Kebijakan Privasi','Privacy Policy')"></span></a>
+            <a href="/terms" class="text-primary-600 hover:underline font-medium"><i class="fas fa-external-link-alt mr-1"></i><span x-text="t('Syarat & Ketentuan','Terms & Conditions')"></span></a>
         </div>
     </div>
 

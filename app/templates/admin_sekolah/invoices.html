@@ -2,7 +2,7 @@
 {% block title %}Invoice - ScanGrade{% endblock %}
 {% block page_title %}Invoice &amp; Bukti Pembayaran{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+<div class="space-y-6">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}
@@ -13,7 +13,7 @@
     <div class="bg-gradient-to-r from-primary-600 to-primary-700 rounded-2xl p-5 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
             <h2 class="font-extrabold text-lg">{{ school_info.get('name', '-') }}</h2>
-            <p class="text-primary-200 text-sm font-medium">NPSN: {{ school_info.get('npsn', '-') }} · {{ invoices|length }} invoice</p>
+            <p class="text-primary-200 text-sm font-medium" x-text="'NPSN: {{ school_info.get('npsn', '-') }} · ' + '{{ invoices|length }} ' + t('invoice','invoices')"></p>
         </div>
     </div>
 

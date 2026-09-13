@@ -16,7 +16,7 @@
             <i class="fas fa-arrow-right text-amber-600 text-xl"></i>
             <div>
                 <p class="font-bold text-amber-800">{{ source_name }} <span class="text-amber-400 mx-2">→</span> {{ target_name }}</p>
-                <p class="text-xs text-amber-600">{{ students|length }} murid akan dipindahkan</p>
+                <p class="text-xs text-amber-600" x-text="'{{ students|length }} ' + t('murid akan dipindahkan','students will be moved')"></p>
             </div>
         </div>
 
@@ -42,10 +42,13 @@
             <input type="hidden" name="school_year_id" value="{{ school_year_id }}">
             {% endif %}
             <div class="flex gap-3">
-                <a href="/admin-sekolah/promote" class="flex-1 px-4 py-3 border-2 border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-50 transition text-center">Batal</a>
+                <a href="/admin-sekolah/promote" class="flex-1 px-4 py-3 border-2 border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-50 transition text-center" x-text="t('Batal','Cancel')"></a>
+                <!-- A confirm() dialog is user-visible text, so it follows the toggle too.
+                     `@click` runs before the browser's default submit, so cancelling it
+                     here stops the form exactly as `return confirm(...)` did. -->
                 <button type="submit" class="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-xl font-bold hover:from-emerald-600 hover:to-green-600 shadow-lg transition"
-                        onclick="return confirm('Yakin ingin memindahkan {{ students|length }} murid?')">
-                    <i class="fas fa-check mr-1"></i>Konfirmasi & Pindahkan
+                        @click="if (!confirm(t('Yakin ingin memindahkan {{ students|length }} murid?','Move {{ students|length }} students?'))) $event.preventDefault()">
+                    <i class="fas fa-check mr-1"></i><span x-text="t('Konfirmasi & Pindahkan','Confirm & Move')"></span>
                 </button>
             </div>
         </form>

@@ -2,7 +2,7 @@
 {% block title %}Dashboard Sekolah - ScanGrade{% endblock %}
 {% block page_title %}Dashboard Sekolah{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+<div class="space-y-6">
     <!-- Welcome -->
     <div class="rounded-2xl p-6 bg-gradient-to-r from-primary-600 to-primary-700 text-white relative overflow-hidden shadow-lg shadow-primary-500/30">
         <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
@@ -15,12 +15,12 @@
     {% if active_year %}
     <div class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm font-semibold text-emerald-700 flex items-center gap-2 animate-slide-down">
         <i class="fas fa-calendar-check text-emerald-500"></i>
-        Tahun Ajaran Aktif: <strong>{{ active_year.name }}</strong> ({{ active_year.start_date[:10] }} - <span x-text="{{ active_year.end_date[:10] }}"></span>)
+        <span x-text="t('Tahun Ajaran Aktif:','Active Academic Year:')"></span> <strong>{{ active_year.name }}</strong> ({{ active_year.start_date[:10] }} - <span x-text="'{{ active_year.end_date[:10] }}'"></span>)
     </div>
     {% else %}
     <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm font-semibold text-amber-700 flex items-center gap-2 animate-slide-down">
         <i class="fas fa-exclamation-triangle text-amber-500"></i>
-        Belum ada tahun ajaran aktif. <a href="/admin-sekolah/school-years" class="underline font-bold">Atur sekarang</a>
+        <span x-text="t('Belum ada tahun ajaran aktif.','No active academic year.')"></span> <a href="/admin-sekolah/school-years" class="underline font-bold" x-text="t('Atur sekarang','Set it up now')"></a>
     </div>
     {% endif %}
 
@@ -30,12 +30,12 @@
         <div class="flex items-center gap-3 mb-5">
             <div class="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600"><i class="fas fa-rocket"></i></div>
             <div>
-                <h2 class="font-extrabold text-primary-800">Selamat Datang! Siapkan Sekolah Anda</h2>
-                <p class="text-xs text-primary-600">Ikuti 3 langkah mudah untuk memulai ScanGrade</p>
+                <h2 class="font-extrabold text-primary-800" x-text="t('Selamat Datang! Siapkan Sekolah Anda','Welcome! Set Up Your School')"></h2>
+                <p class="text-xs text-primary-600" x-text="t('Ikuti 3 langkah mudah untuk memulai ScanGrade','Follow 3 easy steps to get started with ScanGrade')"></p>
             </div>
         </div>
         <div class="flex items-center justify-between mb-6">
-            <template x-for="(s, i) in ['Tahun Ajaran', 'Kelas', 'Data Guru & Murid']" :key="i">
+            <template x-for="(s, i) in (lang === 'en' ? ['Academic Year', 'Classes', 'Teachers & Students'] : ['Tahun Ajaran', 'Kelas', 'Data Guru & Murid'])" :key="i">
                 <div class="flex items-center flex-1">
                     <div class="flex flex-col items-center">
                         <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2"
@@ -51,29 +51,29 @@
         </div>
         <!-- Step 1: Academic Year -->
         <div x-show="step === 1">
-            <p class="text-sm font-bold text-surface-700 mb-3">Langkah 1: Atur Tahun Ajaran</p>
-            <p class="text-xs text-surface-500 mb-4">Tahun ajaran digunakan untuk mengelompokkan data per semester.</p>
-            <a href="/admin-sekolah/school-years" class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition">Atur Tahun Ajaran <i class="fas fa-arrow-right"></i></a>
-            <button @click="step=2" class="ml-2 px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition">Lewati</button>
+            <p class="text-sm font-bold text-surface-700 mb-3" x-text="t('Langkah 1: Atur Tahun Ajaran','Step 1: Set the Academic Year')"></p>
+            <p class="text-xs text-surface-500 mb-4" x-text="t('Tahun ajaran digunakan untuk mengelompokkan data per semester.','The academic year groups data by semester.')"></p>
+            <a href="/admin-sekolah/school-years" class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition"><span x-text="t('Atur Tahun Ajaran','Set Academic Year')"></span> <i class="fas fa-arrow-right"></i></a>
+            <button @click="step=2" class="ml-2 px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition" x-text="t('Lewati','Skip')"></button>
         </div>
         <!-- Step 2: Classes -->
         <div x-show="step === 2">
-            <p class="text-sm font-bold text-surface-700 mb-3">Langkah 2: Buat Kelas</p>
-            <p class="text-xs text-surface-500 mb-4">Buat kelas seperti VII-A, VIII-B, atau sesuai kebutuhan sekolah.</p>
+            <p class="text-sm font-bold text-surface-700 mb-3" x-text="t('Langkah 2: Buat Kelas','Step 2: Create Classes')"></p>
+            <p class="text-xs text-surface-500 mb-4" x-text="t('Buat kelas seperti VII-A, VIII-B, atau sesuai kebutuhan sekolah.','Create classes such as VII-A, VIII-B, or whatever the school needs.')"></p>
             {% if class_count == 0 %}
-            <a href="/admin-sekolah/classes" class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition">Buat Kelas <i class="fas fa-arrow-right"></i></a>
+            <a href="/admin-sekolah/classes" class="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 transition"><span x-text="t('Buat Kelas','Create Class')"></span> <i class="fas fa-arrow-right"></i></a>
             {% endif %}
-            <a href="/admin-sekolah/import" class="ml-2 inline-flex items-center gap-2 px-4 py-2.5 border border-primary-200 text-primary-700 rounded-xl font-bold text-sm hover:bg-primary-50 transition"><i class="fas fa-file-excel"></i> Import dari Excel</a>
-            <button @click="step=3" class="ml-2 px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition">Lewati</button>
+            <a href="/admin-sekolah/import" class="ml-2 inline-flex items-center gap-2 px-4 py-2.5 border border-primary-200 text-primary-700 rounded-xl font-bold text-sm hover:bg-primary-50 transition"><i class="fas fa-file-excel"></i> <span x-text="t('Import dari Excel','Import from Excel')"></span></a>
+            <button @click="step=3" class="ml-2 px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition" x-text="t('Lewati','Skip')"></button>
         </div>
         <!-- Step 3: Teachers & Students -->
         <div x-show="step === 3">
-            <p class="text-sm font-bold text-surface-700 mb-3">Langkah 3: Tambah Guru & Murid</p>
-            <p class="text-xs text-surface-500 mb-4">Tambahkan data guru dan murid secara manual atau import dari Excel.</p>
+            <p class="text-sm font-bold text-surface-700 mb-3" x-text="t('Langkah 3: Tambah Guru & Murid','Step 3: Add Teachers & Students')"></p>
+            <p class="text-xs text-surface-500 mb-4" x-text="t('Tambahkan data guru dan murid secara manual atau import dari Excel.','Add teachers and students manually or import them from Excel.')"></p>
             <div class="flex flex-wrap gap-2">
-                <a href="/admin-sekolah/import" class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition"><i class="fas fa-file-excel"></i> Import Excel</a>
-                <a href="/admin-sekolah/teachers" class="px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition"><i class="fas fa-chalkboard-teacher mr-1"></i>Tambah Guru</a>
-                <a href="/admin-sekolah/students" class="px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition"><i class="fas fa-user-graduate mr-1"></i>Tambah Murid</a>
+                <a href="/admin-sekolah/import" class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition"><i class="fas fa-file-excel"></i> <span x-text="t('Import Excel','Import Excel')"></span></a>
+                <a href="/admin-sekolah/teachers" class="px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition"><i class="fas fa-chalkboard-teacher mr-1"></i><span x-text="t('Tambah Guru','Add Teacher')"></span></a>
+                <a href="/admin-sekolah/students" class="px-4 py-2.5 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition"><i class="fas fa-user-graduate mr-1"></i><span x-text="t('Tambah Murid','Add Student')"></span></a>
             </div>
         </div>
     </div>
@@ -85,8 +85,8 @@
             <div class="flex items-center gap-2 sm:gap-3">
                 <div class="stat-icon bg-primary-50 text-primary-600 shrink-0"><i class="fas fa-user-graduate"></i></div>
                 <div class="min-w-0">
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate">Murid</p>
-                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="{{ student_count }}"></span></p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate" x-text="t('Murid','Students')"></p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="'{{ student_count }}'"></span></p>
                 </div>
             </div>
         </a>
@@ -94,8 +94,8 @@
             <div class="flex items-center gap-2 sm:gap-3">
                 <div class="stat-icon bg-emerald-50 text-emerald-600 shrink-0"><i class="fas fa-chalkboard-teacher"></i></div>
                 <div class="min-w-0">
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate">Guru</p>
-                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="{{ teacher_count }}"></span></p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate" x-text="t('Guru','Teachers')"></p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="'{{ teacher_count }}'"></span></p>
                 </div>
             </div>
         </a>
@@ -103,8 +103,8 @@
             <div class="flex items-center gap-2 sm:gap-3">
                 <div class="stat-icon bg-violet-50 text-violet-600 shrink-0"><i class="fas fa-school"></i></div>
                 <div class="min-w-0">
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate">Kelas</p>
-                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="{{ class_count }}"></span></p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate" x-text="t('Kelas','Classes')"></p>
+                    <p class="text-2xl font-extrabold text-surface-800"><span x-text="'{{ class_count }}'"></span></p>
                 </div>
             </div>
         </a>
@@ -112,7 +112,7 @@
             <div class="flex items-center gap-2 sm:gap-3">
                 <div class="stat-icon bg-amber-50 text-amber-600 shrink-0"><i class="fas fa-calendar"></i></div>
                 <div class="min-w-0">
-                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate">Tahun Ajaran</p>
+                    <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider truncate" x-text="t('Tahun Ajaran','Academic Year')"></p>
                     <p class="text-xl sm:text-2xl font-extrabold text-surface-800 truncate">{{ active_year.name if active_year else "-" }}</p>
                 </div>
             </div>
@@ -121,23 +121,23 @@
 
     <!-- Quick Actions -->
     <div class="card p-6 animate-slide-up" style="animation-delay:100ms">
-        <h3 class="font-extrabold text-surface-800 mb-4">Aksi Cepat</h3>
+        <h3 class="font-extrabold text-surface-800 mb-4" x-text="t('Aksi Cepat','Quick Actions')"></h3>
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <a href="/admin-sekolah/profile" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
                 <div class="w-10 h-10 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center"><i class="fas fa-building"></i></div>
-                <span class="font-bold text-sm text-surface-700">Profil Sekolah</span>
+                <span class="font-bold text-sm text-surface-700" x-text="t('Profil Sekolah','School Profile')"></span>
             </a>
             <a href="/admin-sekolah/import" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
                 <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><i class="fas fa-upload"></i></div>
-                <span class="font-bold text-sm text-surface-700">Import Excel</span>
+                <span class="font-bold text-sm text-surface-700" x-text="t('Import Excel','Import Excel')"></span>
             </a>
             <a href="/admin-sekolah/promote" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
                 <div class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center"><i class="fas fa-arrow-up"></i></div>
-                <span class="font-bold text-sm text-surface-700">Naik Kelas</span>
+                <span class="font-bold text-sm text-surface-700" x-text="t('Naik Kelas','Promote Students')"></span>
             </a>
             <a href="/admin-sekolah/school-years" class="flex items-center gap-3 p-3 rounded-xl bg-surface-50 hover:bg-surface-100 transition border border-surface-200">
                 <div class="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fas fa-calendar-plus"></i></div>
-                <span class="font-bold text-sm text-surface-700">Tahun Ajaran</span>
+                <span class="font-bold text-sm text-surface-700" x-text="t('Tahun Ajaran','Academic Year')"></span>
             </a>
         </div>
     </div>

@@ -4,7 +4,6 @@
 {% set status = tx.status|default('pending') %}
 {% block content %}
 <div class="max-w-lg mx-auto text-center" x-data="{
-    lang: localStorage.getItem('sg_lang') || 'id',
     status: '{{ status }}',
     checking: false
 }"

@@ -2,12 +2,12 @@
 {% block title %}Ujian Saya - ScanGrade{% endblock %}
 {% block page_title %}Ujian Saya{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id', filter: 'all', search: '' }">
+<div class="space-y-6" x-data="{ filter: 'all', search: '' }">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
             <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'My Exams':'Ujian Saya'"></h2>
-            <p class="text-sm text-slate-500 font-medium mt-0.5">{{ exams|length }} ujian</p>
+            <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="'{{ exams|length }} ' + t('ujian','exams')"></p>
         </div>
         <a href="/teacher/exams/new"
            class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 transition">
