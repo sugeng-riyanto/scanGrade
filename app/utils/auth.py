@@ -232,22 +232,31 @@ def login_required(f):
             now = time.time()
             try:
                 last_act = float(request.cookies.get("last_activity", "0"))
-                if last_act > 0 and now - last_act > to["idle_minutes"] * 60:
-                    return _unauthorized(
-                        "Sesi Anda berakhir karena tidak ada aktivitas selama {} menit. "
-                        "Silakan masuk kembali.".format(to["idle_minutes"])
-                    )
             except Exception:
-                pass
+                last_act = 0.0
             try:
                 sess_start = float(request.cookies.get("session_start", "0"))
-                if sess_start > 0 and now - sess_start > to["absolute_hours"] * 3600:
-                    return _unauthorized(
-                        "Sesi Anda berakhir karena sudah mencapai batas {} jam. "
-                        "Silakan masuk kembali.".format(to["absolute_hours"])
-                    )
             except Exception:
-                pass
+                sess_start = 0.0
+
+            # The idle clock can never predate the session it belongs to. This
+            # cookie is only refreshed by an authenticated response, so a browser
+            # that kept one from an earlier session arrives with a stale value —
+            # and logging in does not overwrite it, which meant every re-login was
+            # rejected on its very first request and the account stayed locked out
+            # until the cookie expired 24h later. Signing in issues a fresh
+            # session_start, so clamping to it gives a new login a fresh window.
+            idle_base = max(last_act, sess_start)
+            if idle_base > 0 and now - idle_base > to["idle_minutes"] * 60:
+                return _unauthorized(
+                    "Sesi Anda berakhir karena tidak ada aktivitas selama {} menit. "
+                    "Silakan masuk kembali.".format(to["idle_minutes"])
+                )
+            if sess_start > 0 and now - sess_start > to["absolute_hours"] * 3600:
+                return _unauthorized(
+                    "Sesi Anda berakhir karena sudah mencapai batas {} jam. "
+                    "Silakan masuk kembali.".format(to["absolute_hours"])
+                )
         except Exception:
             # Token expired — try refresh using refresh_token cookie
             token = _refresh_token()

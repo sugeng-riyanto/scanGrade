@@ -155,6 +155,66 @@ def test_absolute_limit_names_the_hour_budget(app, monkeypatch):
     assert "4 jam" in page.get_data(as_text=True)
 
 
+# ── 1b. a new login starts a new idle window ─────────────────────
+
+def _guru_session(monkeypatch):
+    monkeypatch.setattr(authmod, "_session_for", lambda token: {
+        "user_id": "g-1", "email": "guru@x", "name": "Guru", "role": "guru",
+        "school_id": None, "status": "active",
+    })
+
+
+def test_a_stale_idle_cookie_cannot_lock_out_a_fresh_login(app, monkeypatch):
+    """``last_activity`` is refreshed only by an authenticated response, and the
+    login redirect does not go through one — so a browser that kept the cookie
+    from an earlier session arrives with a stale value. Logging in issues a fresh
+    ``session_start``, so the idle window has to restart with it; otherwise the
+    first request after *every* re-login is refused and the account stays locked
+    out until the cookie expires 24 hours later, with no way for the user out.
+    Reproduced against a live server before fixing: re-login, then
+    ``GET /teacher/dashboard`` answered 302 with "tidak ada aktivitas".
+    """
+    _guru_session(monkeypatch)
+
+    client = app.test_client()
+    client.set_cookie("access_token", "tok")
+    client.set_cookie("last_activity", str(time.time() - 2 * 3600))  # earlier session
+    client.set_cookie("session_start", str(time.time()))            # this login
+
+    resp = client.get("/_probe_protected")
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+
+
+def test_the_clamp_does_not_weaken_the_timeout(app, monkeypatch):
+    """If the session itself is idle, both signals are old and it is refused —
+    the fix must restart the clock at login, not ignore the clock."""
+    _guru_session(monkeypatch)
+
+    client = app.test_client()
+    client.set_cookie("access_token", "tok")
+    client.set_cookie("last_activity", str(time.time() - 2 * 3600))
+    client.set_cookie("session_start", str(time.time() - 2 * 3600))
+
+    resp = client.get("/_probe_protected")
+
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/auth/login")
+    assert "60 menit" in client.get("/auth/login").get_data(as_text=True)
+
+
+def test_a_login_with_no_idle_cookie_still_works(app, monkeypatch):
+    """A browser that has ``session_start`` but no ``last_activity`` — a session
+    created before that cookie existed — must not be refused for the absence."""
+    _guru_session(monkeypatch)
+
+    client = app.test_client()
+    client.set_cookie("access_token", "tok")
+    client.set_cookie("session_start", str(time.time()))
+
+    assert client.get("/_probe_protected").status_code == 200
+
+
 # ── 2. the login page must render what it was told ───────────────
 
 def test_login_page_renders_a_flashed_notice(app):
