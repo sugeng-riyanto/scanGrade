@@ -157,10 +157,37 @@ On success the archive is named in the journal, and if the release later fails
 verification the rollback message prints the command that puts the data back, at
 the moment someone is already reading the log.
 
-### A migration you paste in by hand is invisible to that check
+### Applying a migration
 
-`supabase/migrations/*.sql` is still applied by hand in the Supabase SQL editor,
-and pasting SQL changes no file — so nothing detects it. Run this first:
+Pasting SQL into the Supabase SQL editor is how this was done until
+`024_fix_pengumuman_school_id_type.sql` was wrong twice in a row: an `integer`
+holding `1` cannot be cast to `uuid`, and Postgres refuses a subquery inside
+`ALTER COLUMN ... TYPE ... USING`. Both were found mid-edit, once after the
+foreign key had already been dropped.
+
+`deploy/apply_migration.py` runs the file for real and rolls it back first, so the
+mistake happens where it costs nothing:
+
+```bash
+python deploy/apply_migration.py supabase/migrations/025_x.sql            # trial, then roll back
+python deploy/apply_migration.py supabase/migrations/025_x.sql --commit   # trial, then apply
+python deploy/apply_migration.py --status                                 # what has a record
+```
+
+The trial is not optional — `--commit` runs it first in the same invocation. It
+prints the schema delta the migration would make, runs the file a second time to
+show whether applying it twice is safe, and *verifies* the rollback on a fresh
+connection: a difference afterwards is an error, not a warning.
+
+It needs `DIRECT_URL` (the session-mode pooler), because only a real transaction
+can be rolled back, and it refuses to run unless the project in `DIRECT_URL`
+matches the one in `SUPABASE_URL`. `--commit` takes its own snapshot first, and
+records what it applied in `/var/lib/scangrade-migrations`.
+
+### A migration pasted in by hand is invisible to that check
+
+If you still paste SQL by hand, pasting changes no file — so nothing detects it.
+Run this first:
 
 ```bash
 scangrade-db-snapshot --label before-025   # snapshot now
@@ -226,9 +253,15 @@ releases.
 `app/static/css/tailwind.css` with it, or the new classes will be missing in
 production.
 
-Migrations are still manual: SQL in `supabase/migrations/` is applied by hand in
-the Supabase SQL Editor. Deploying code that expects a column before the column
-exists is the failure mode to avoid. Take a snapshot before you paste it.
+Migrations are still applied deliberately rather than by the deploy: nothing in
+`supabase/migrations/` runs itself, so deploying code that expects a column
+before the column exists remains the failure mode to avoid. Use
+`apply_migration.py` (above) — it trials the file, rolls it back, takes a
+recovery point, and only then applies it.
+
+`--status` reports what has a record, but a migration applied before that tool
+existed has none, and it says so rather than guessing. Those can only be settled
+by looking at the schema.
 
 ## Rolling back by hand
 

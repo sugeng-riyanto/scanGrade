@@ -3,10 +3,13 @@
 #
 # Run this BEFORE pasting a migration into the Supabase SQL editor.
 #
+# Prefer `deploy/apply_migration.py`, which trials the file in a rolled-back
+# transaction first and takes its own recovery point; it makes this manual
+# snapshot unnecessary. This script is what is left for SQL applied by hand.
+#
 # The deploy takes its own snapshot when a release changes
 # `supabase/migrations/` — but a migration applied by hand changes no file, so
-# nothing can detect that one. This is the only cover for the path this project
-# actually uses.
+# nothing can detect that one. This is the only cover for that path.
 #
 #   bash deploy/scangrade-db-snapshot.sh --label before-025
 #   bash deploy/scangrade-db-snapshot.sh --list
