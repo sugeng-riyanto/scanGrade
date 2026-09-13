@@ -116,8 +116,12 @@ class IdentityColumnRefused(RuntimeError):
 
 # ── configuration ────────────────────────────────────────────────────────────
 
-def _read_env_file(path: Path) -> dict[str, str]:
-    """Minimal .env reader, matching app.config's tolerance for real-world files."""
+def read_env_file(path: Path) -> dict[str, str]:
+    """Minimal .env reader, matching app.config's tolerance for real-world files.
+
+    Public because ``apply_migration.py`` needs the same tolerance for the same
+    file, and two readers is how two answers to one question start.
+    """
     values: dict[str, str] = {}
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -138,7 +142,7 @@ def load_credentials(repo: Path) -> tuple[str, str]:
     if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_KEY"):
         return os.environ["SUPABASE_URL"].strip(), os.environ["SUPABASE_SERVICE_KEY"].strip()
 
-    env = _read_env_file(repo / ".env")
+    env = read_env_file(repo / ".env")
     url = env.get("SUPABASE_URL", "")
     # A key shaped like a key: everything from a glued-on '#' is garbage and must
     # go, the same rule app.config.env_key applies. A real key never contains '#'.
