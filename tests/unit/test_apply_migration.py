@@ -389,3 +389,224 @@ def test_a_recovery_point_is_taken_before_the_commit_path_applies(monkeypatch, c
                        Path("/tmp"), 5, "026_z", snapshot=True)
 
     assert taken["called"], "the recovery point must be taken before applying"
+
+
+# ── verifying against the schema, which settles what the ledger cannot ───────
+
+def _write_migrations(tmp_path, sources):
+    directory = tmp_path / "migrations"
+    directory.mkdir(exist_ok=True)
+    for name, sql in sources.items():
+        (directory / name).write_text(sql, encoding="utf-8")
+    return directory
+
+
+def _verify(monkeypatch, tmp_path, sources, live, recorded=None):
+    """Run verify against a scripted catalogue. Returns (exit code, captured)."""
+    migrations = _write_migrations(tmp_path, sources)
+    ledger = tmp_path / "ledger"
+    ledger.mkdir(exist_ok=True)
+    for name, payload in (recorded or {}).items():
+        (ledger / f"{Path(name).stem}.json").write_text(
+            json.dumps(payload), encoding="utf-8")
+
+    captured = {}
+
+    def snapshot(cur, extra_schemas=()):
+        captured["extra_schemas"] = extra_schemas
+        return live
+
+    monkeypatch.setattr(app_mig, "schema_snapshot", snapshot)
+    return app_mig.verify(ledger, migrations, object()), captured
+
+
+def test_several_add_column_clauses_name_the_table_once():
+    """`ALTER TABLE t ADD COLUMN a, ADD COLUMN b` names `t` only at the front, so
+    a pattern that expects `ALTER TABLE` before every clause loses half the row."""
+    keys = [key for _, key, _ in app_mig.declared_objects(
+        "ALTER TABLE classes ADD COLUMN a text, ADD COLUMN b int;")]
+
+    assert keys == ["column classes.a", "column classes.b"]
+
+
+def test_every_ddl_kind_is_keyed_the_way_the_snapshot_names_it():
+    """Membership in the snapshot is the whole test, so a key that does not match
+    the snapshot's spelling reports a present object as missing."""
+    keys = {key for _, key, _ in app_mig.declared_objects("""
+        CREATE TABLE IF NOT EXISTS pengumuman (id uuid);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_a ON pengumuman (id);
+        ALTER TABLE pengumuman ADD CONSTRAINT pengumuman_pkey PRIMARY KEY (id);
+        CREATE POLICY "read_own" ON public.pengumuman FOR SELECT USING (true);
+        CREATE OR REPLACE FUNCTION public._is_role(role text) RETURNS boolean
+            AS $$ SELECT true $$ LANGUAGE sql;
+        CREATE TRIGGER trg_touch BEFORE UPDATE ON pengumuman
+            FOR EACH ROW EXECUTE FUNCTION public.touch();
+    """)}
+
+    assert keys == {"table pengumuman", "index idx_a", "constraint pengumuman_pkey",
+                    "policy pengumuman.read_own", "function _is_role",
+                    "trigger trg_touch"}
+
+
+def test_a_schema_qualified_policy_is_keyed_by_its_table_not_its_schema():
+    """`ON storage.objects` is the case that matters: reading the qualifier as the
+    table is how a present storage policy gets reported as absent."""
+    keys = [key for _, key, _ in app_mig.declared_objects(
+        "CREATE POLICY exam_pdfs_select ON storage.objects FOR SELECT USING (true);")]
+
+    assert keys == ["policy objects.exam_pdfs_select"]
+
+
+def test_ddl_inside_a_dollar_body_is_counted_rather_than_guessed():
+    """A policy built by dynamic SQL cannot be read out of the file at all. It is
+    reported as unreadable instead of silently missing, because an object nobody
+    checked must not look like an object that is there."""
+    text, hidden = app_mig.mask_do_bodies(app_mig.strip_sql_comments("""
+        DO $$ BEGIN
+            EXECUTE 'CREATE POLICY built_at_runtime ON pengumuman ...';
+        EXCEPTION WHEN undefined_table THEN NULL; END $$;
+    """))
+
+    assert hidden == 1
+    assert app_mig.declared_objects(text) == []
+
+
+def test_an_object_its_own_file_creates_and_drops_is_not_a_gap(monkeypatch, tmp_path,
+                                                               capsys):
+    """024's `school_id_new` is absent *because* the migration finished. Reporting
+    it as missing would make the one file that worked look like the broken one."""
+    code, _ = _verify(monkeypatch, tmp_path, {"024_x.sql": """
+        ALTER TABLE pengumuman ADD COLUMN school_id_new uuid;
+        UPDATE pengumuman SET school_id_new = NULL;
+        ALTER TABLE pengumuman DROP COLUMN school_id_new;
+    """}, live={"table pengumuman"})
+
+    assert code == 0
+    assert "MISSING" not in capsys.readouterr().out
+
+
+def test_an_object_another_file_replaces_is_reported_as_replaced(monkeypatch, tmp_path,
+                                                                capsys):
+    """With the ledger empty, "absent" has to be told apart from "replaced by a
+    later file" -- otherwise every superseded policy reads as a migration that
+    never ran."""
+    code, _ = _verify(monkeypatch, tmp_path, {
+        "001_old.sql": "CREATE POLICY old_name ON pengumuman FOR SELECT USING (true);",
+        "007_new.sql": (
+            "DROP POLICY old_name ON pengumuman;\n"
+            "CREATE POLICY new_name ON pengumuman FOR SELECT USING (true);"),
+    }, live={"policy pengumuman.new_name"})
+
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "MISSING" not in out
+
+
+def test_a_genuinely_missing_object_is_a_gap_with_its_own_exit_code(monkeypatch,
+                                                                    tmp_path, capsys):
+    code, _ = _verify(monkeypatch, tmp_path, {
+        "014_x.sql": (
+            "CREATE POLICY ai_logs_select_own ON ai_grading_logs FOR SELECT USING (true);")},
+        live={"table ai_grading_logs"})
+
+    out = capsys.readouterr().out
+    assert code == 6, out
+    assert "MISSING  policy ai_grading_logs.ai_logs_select_own" in out
+
+
+def test_a_policy_cannot_be_created_when_its_table_does_not_exist(monkeypatch, tmp_path,
+                                                                 capsys):
+    """This is the 20260608 failure: it declares policies on `activation_codes`,
+    which no migration ever creates, so the file could never have completed. The
+    report names the cause instead of only the symptom."""
+    code, _ = _verify(monkeypatch, tmp_path, {"20260608_x.sql": (
+        "CREATE POLICY codes_select_admin ON activation_codes FOR SELECT USING (true);")},
+        live={})
+
+    out = capsys.readouterr().out
+    assert code == 6
+    assert "its table `activation_codes` does not exist" in out
+
+
+def test_a_file_with_nothing_to_check_is_not_counted_as_missing(monkeypatch, tmp_path,
+                                                               capsys):
+    """`001_initial_schema.sql` is a placeholder ('copy schema.sql here') and
+    `020_backfill_conversations.sql` only moves data. Neither can be settled from
+    the catalogue, and calling either missing would be a false alarm."""
+    code, _ = _verify(monkeypatch, tmp_path, {
+        "001_initial_schema.sql": "-- Migration 001: Initial schema\n-- Copy content from supabase/schema.sql\n",
+        "020_backfill.sql": "UPDATE conversations SET x = 1;\n",
+    }, live={})
+
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "2 with no objects to check" in out
+    assert "MISSING" not in out
+
+
+def test_verify_asks_for_the_storage_schema(monkeypatch, tmp_path):
+    """The app owns policies on `storage.objects`, and a catalogue without that
+    schema reported `003_add_storage_rls.sql` as absent when it is present. This
+    pins the reason `extra_schemas` exists at all."""
+    _, captured = _verify(monkeypatch, tmp_path, {"003_x.sql": "SELECT 1;"}, live={})
+
+    assert captured["extra_schemas"] == ("storage",)
+    assert "ANY(%s)" in SOURCE, (
+        "the catalogue must be asked for a schema list, or storage is invisible")
+
+
+def test_the_report_puts_the_schema_verdict_beside_the_ledger_note(monkeypatch,
+                                                                  tmp_path, capsys):
+    """The point of the mode: 'no record' becomes an answer. A file the ledger has
+    never heard of still reads as IN when its objects are in the schema."""
+    sql = "CREATE TABLE widget (id uuid);\n"
+    code, _ = _verify(monkeypatch, tmp_path, {"026_widget.sql": sql},
+                      live={"table widget"})
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "026_widget.sql" in out and "IN" in out and "no record" in out
+
+
+def test_an_edited_file_is_still_called_out(monkeypatch, tmp_path, capsys):
+    """`applied-then-edited` is a ledger fact and the schema cannot see it, so the
+    report must keep showing both rather than letting the schema verdict replace it."""
+    sql = "CREATE TABLE widget (id uuid);\n"
+    code, _ = _verify(monkeypatch, tmp_path, {"026_widget.sql": sql},
+                      live={"table widget"},
+                      recorded={"026_widget.sql": {"sha256": "0" * 64,
+                                                  "applied_at": "2026-09-13T05:37:43+00:00"}})
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "APPLIED, THEN EDITED" in out
+
+
+def test_the_verify_session_cannot_write(monkeypatch):
+    """Producing a report must not be able to change the thing it reports on."""
+    calls = {}
+
+    class _Conn:
+        def set_session(self, **kwargs):
+            calls.update(kwargs)
+
+    monkeypatch.setattr(app_mig.psycopg2, "connect", lambda url: _Conn())
+
+    app_mig.connect_readonly("postgresql://x")
+
+    assert calls == {"readonly": True, "autocommit": True}
+
+
+def test_verify_never_records_anything_in_the_ledger(monkeypatch, tmp_path):
+    """Only `--commit` writes a ledger entry; a report that did would turn an
+    observation into a claim."""
+    _, _ = _verify(monkeypatch, tmp_path, {"026_widget.sql": "CREATE TABLE w (id uuid);"},
+                   live={"table w"})
+
+    assert list((tmp_path / "ledger").glob("*.json")) == []
+
+
+def test_the_cli_offers_verify_without_needing_a_file():
+    assert 'add_argument("--verify"' in SOURCE
+    assert "if args.verify:" in SOURCE
+    assert "connect_readonly" in SOURCE, "verify must not open a writable session"

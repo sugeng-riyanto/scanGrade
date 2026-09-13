@@ -32,6 +32,7 @@ Usage
     python deploy/apply_migration.py supabase/migrations/025_x.sql
     python deploy/apply_migration.py supabase/migrations/025_x.sql --commit
     python deploy/apply_migration.py --status
+    python deploy/apply_migration.py --verify
 
 Safety rails
 ------------
@@ -50,6 +51,18 @@ Safety rails
 * **``--commit`` takes a recovery point first**, using ``db_snapshot.py`` — the
   same gate the deploy applies to a release that ships SQL. If the snapshot
   cannot be taken, the migration is not applied.
+* **``--verify`` only reads.** It opens the session read-only, takes no snapshot
+  and writes no ledger entry, so reporting on a migration cannot change one.
+
+What the ledger cannot answer
+-----------------------------
+``--status`` reports what this tool has *recorded*, and before this tool existed
+nothing was recorded: on the VPS every file reads "no record", which means
+"unknown", not "not applied". ``--verify`` answers from the schema instead — for
+each file, which of the objects it declares are actually there, which are gone
+because another file replaced them, and which are simply missing. It needs no
+privilege: reading a ledger directory that does not exist is not a privileged
+operation.
 
 Exit codes
 ----------
@@ -59,6 +72,7 @@ Exit codes
   3  refused: the file manages its own transactions
   4  refused: the file needs statements that cannot run in a transaction
   5  refused: the recovery point could not be taken
+  6  ``--verify``: at least one file declares objects that are not in the schema
 """
 
 from __future__ import annotations
@@ -164,20 +178,27 @@ def check_target(url: str, repo: Path) -> str:
 
 # ── schema fingerprints ──────────────────────────────────────────────────────
 
-def schema_snapshot(cur) -> dict[str, str]:
+def schema_snapshot(cur, extra_schemas: tuple[str, ...] = ()) -> dict[str, str]:
     """Every schema object a migration can plausibly touch, as {name: definition}.
 
-    Columns, indexes and constraints cover the usual migration; policies and
-    functions are here because this app relies on row-level security and keeps
-    logic in the database, so a migration that changes either would otherwise
-    look like it changed nothing at all.
+    Columns, indexes and constraints cover the usual migration; policies,
+    triggers and functions are here because this app relies on row-level security
+    and keeps logic in the database, so a migration that changes any of them would
+    otherwise look like it changed nothing at all.
+
+    ``extra_schemas`` exists for ``--verify``. The app also owns RLS policies on
+    ``storage.objects``, and a check that cannot see them calls a file absent when
+    it is present — which is exactly how the first draft of that check reported
+    `003_add_storage_rls.sql`. The dry run passes nothing, so the delta it prints
+    stays the schema it has always reported.
     """
     items: dict[str, str] = {}
+    schemas = ["public", *extra_schemas]
 
     cur.execute("""
         SELECT 'table ' || tablename, 'exists'
-          FROM pg_tables WHERE schemaname = 'public'
-    """)
+          FROM pg_tables WHERE schemaname = ANY(%s)
+    """, (schemas,))
     items.update(cur.fetchall())
 
     cur.execute("""
@@ -192,30 +213,39 @@ def schema_snapshot(cur) -> dict[str, str]:
 
     cur.execute("""
         SELECT 'index ' || indexname, indexdef
-          FROM pg_indexes WHERE schemaname = 'public'
-    """)
+          FROM pg_indexes WHERE schemaname = ANY(%s)
+    """, (schemas,))
     items.update(cur.fetchall())
 
     cur.execute("""
         SELECT 'constraint ' || c.conname, pg_get_constraintdef(c.oid)
           FROM pg_constraint c
           JOIN pg_namespace n ON n.oid = c.connamespace
-         WHERE n.nspname = 'public'
-    """)
+         WHERE n.nspname = ANY(%s)
+    """, (schemas,))
     items.update(cur.fetchall())
 
     cur.execute("""
         SELECT 'policy ' || tablename || '.' || policyname, cmd || ' ' || coalesce(qual, '')
-          FROM pg_policies WHERE schemaname = 'public'
-    """)
+          FROM pg_policies WHERE schemaname = ANY(%s)
+    """, (schemas,))
     items.update(cur.fetchall())
 
     cur.execute("""
         SELECT 'function ' || p.proname, pg_get_function_identity_arguments(p.oid)
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'public'
-    """)
+         WHERE n.nspname = ANY(%s)
+    """, (schemas,))
+    items.update(cur.fetchall())
+
+    cur.execute("""
+        SELECT 'trigger ' || t.tgname, 'on ' || c.relname
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = ANY(%s) AND NOT t.tgisinternal
+    """, (schemas,))
     items.update(cur.fetchall())
 
     return items
@@ -500,6 +530,23 @@ def record(ledger: Path, path: Path, digest: str, delta: list[str],
     return target
 
 
+def ledger_note(entry_path: Path, digest: str) -> str:
+    """What the ledger says about one file — shared by ``--status`` and ``--verify``.
+
+    "no record" is deliberately not "not applied": a migration pasted into the SQL
+    editor was never recorded anywhere, so the ledger cannot speak for it at all.
+    """
+    if not entry_path.exists():
+        return "no record"
+    try:
+        entry = json.loads(entry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "record unreadable"
+    if entry.get("sha256") == digest:
+        return f"applied {str(entry.get('applied_at', ''))[:10]}"
+    return "APPLIED, THEN EDITED"
+
+
 def status(ledger: Path, migrations: Path) -> int:
     files = sorted(migrations.glob("*.sql"))
     if not files:
@@ -511,26 +558,255 @@ def status(ledger: Path, migrations: Path) -> int:
     unrecorded = 0
     for path in files:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        entry_path = ledger / f"{path.stem}.json"
-        if not entry_path.exists():
-            note = "no record"
+        note = ledger_note(ledger / f"{path.stem}.json", digest)
+        if note == "no record":
             unrecorded += 1
-        else:
-            try:
-                entry = json.loads(entry_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                note = "record unreadable"
-            else:
-                if entry.get("sha256") == digest:
-                    note = f"applied {str(entry.get('applied_at', ''))[:10]}"
-                else:
-                    note = "APPLIED, THEN EDITED"
         print(f"{path.name:<58} {note:<30} {digest[:12]}")
     print()
     print(f"{unrecorded} of {len(files)} have no record.")
+    print("Run --verify to settle those against the schema instead.")
     print("No record does not mean 'not applied'. Migrations pasted into the SQL")
     print("editor before this tool existed were never recorded anywhere, so")
     print("`--status` cannot see them; only a schema check can settle those.")
+    return 0
+
+
+# ── verifying against the live schema ────────────────────────────────────────
+#
+# `--status` reports what the ledger recorded, and before this tool existed
+# nothing was recorded — on the VPS every file reads "no record", which means
+# "unknown", not "not applied". So this asks the database instead: for each file,
+# are the objects it declares actually there? Absence has four meanings and only
+# one of them is a problem:
+#
+#   present     the object is in the catalogue
+#   transient   this file creates it and later drops it again, so its absence is
+#               what success looks like — 024's `school_id_new` is the example
+#   superseded  another file drops that name, so the object was replaced
+#   missing     nothing drops it and it is not there: the file did not take effect
+#
+# The reading is deliberately literal. It parses the DDL this project actually
+# writes and reports what it cannot read rather than guessing, because a verifier
+# that is confidently wrong is worse than no verifier at all.
+
+IDENT = r"[a-z_][a-z0-9_$]*"
+DO_BODY = re.compile(r"\$[a-zA-Z_]*\$.*?\$[a-zA-Z_]*\$", re.S)
+DDL_INSIDE_DO = re.compile(r"\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|POLICY|INDEX|COLUMN)\b",
+                           re.I)
+DROPPABLE = ("COLUMN", "POLICY", "INDEX", "CONSTRAINT", "TABLE", "FUNCTION", "TRIGGER")
+
+
+def strip_sql_comments(text: str) -> str:
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    return re.sub(r"--[^\n]*", " ", text)
+
+
+def mask_do_bodies(text: str) -> tuple[str, int]:
+    """Replace ``$$ ... $$`` bodies with a placeholder, counting the DDL hidden in them.
+
+    A policy or table created by dynamic SQL inside a DO block cannot be read out
+    of the file at all, so the count is reported instead of quietly dropping those
+    objects: an object nobody checked must not look like an object that is there.
+    """
+    hidden = 0
+
+    def swap(match: re.Match) -> str:
+        nonlocal hidden
+        if DDL_INSIDE_DO.search(match.group(0)):
+            hidden += 1
+        return " DO_BODY "
+
+    return DO_BODY.sub(swap, text), hidden
+
+
+def sql_statements(text: str) -> list[str]:
+    """Statements, split on `;` after comments and dollar-bodies are gone."""
+    return [stmt.strip() for stmt in text.split(";") if stmt.strip()]
+
+
+def declared_objects(text: str) -> list[tuple[str, str, int]]:
+    """``(kind, key, statement index)`` for each object the file creates.
+
+    Keys are built the way :func:`schema_snapshot` builds them — ``policy
+    classes.x``, ``column classes.x`` — so membership in the snapshot is the
+    entire test, and no second idea of "what exists" has to be kept in step.
+    """
+    found: list[tuple[str, str, int]] = []
+    for index, stmt in enumerate(sql_statements(text)):
+        # `ALTER TABLE t ADD COLUMN a ..., ADD COLUMN b ...` names the table once,
+        # so the clauses are read from the statement rather than the pattern.
+        alter = re.search(
+            rf"\bALTER\s+TABLE\s+(?:ONLY\s+)?(?:{IDENT}\.)?\"?({IDENT})\"?", stmt, re.I)
+        if alter:
+            for column in re.findall(
+                    rf"\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?\"?({IDENT})\"?",
+                    stmt, re.I):
+                found.append(("column", f"column {alter.group(1)}.{column}", index))
+            for constraint in re.findall(
+                    rf"\bADD\s+CONSTRAINT\s+\"?({IDENT})\"?", stmt, re.I):
+                found.append(("constraint", f"constraint {constraint}", index))
+        for table in re.findall(
+                rf"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:{IDENT}\.)?\"?({IDENT})\"?",
+                stmt, re.I):
+            found.append(("table", f"table {table}", index))
+        for index_name in re.findall(
+                rf"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?"
+                rf"(?:IF\s+NOT\s+EXISTS\s+)?\"?({IDENT})\"?", stmt, re.I):
+            found.append(("index", f"index {index_name}", index))
+        for policy, owner in re.findall(
+                rf"\bCREATE\s+POLICY\s+\"?({IDENT})\"?\s+ON\s+(?:{IDENT}\.)?\"?({IDENT})\"?",
+                stmt, re.I):
+            found.append(("policy", f"policy {owner}.{policy}", index))
+        for function in re.findall(
+                rf"\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:{IDENT}\.)?\"?({IDENT})\"?",
+                stmt, re.I):
+            found.append(("function", f"function {function}", index))
+        for trigger in re.findall(rf"\bCREATE\s+TRIGGER\s+\"?({IDENT})\"?", stmt, re.I):
+            found.append(("trigger", f"trigger {trigger}", index))
+
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[str, str, int]] = []
+    for kind, key, index in found:
+        if (kind, key) in seen:
+            continue
+        seen.add((kind, key))
+        unique.append((kind, key, index))
+    return unique
+
+
+def dropped_names(text: str) -> dict[str, list[int]]:
+    """``{name: [statement index, ...]}`` for everything the file drops.
+
+    A ``DROP`` names the object and not always the table it sat on, so matching is
+    by bare name — which is also why a name is only ever used here to *explain* an
+    absence, never to claim a presence.
+    """
+    found: dict[str, list[int]] = {}
+    for index, stmt in enumerate(sql_statements(text)):
+        for kind in DROPPABLE:
+            for name in re.findall(
+                    rf"\bDROP\s+{kind}\s+(?:IF\s+EXISTS\s+)?(?:{IDENT}\.)?\"?({IDENT})\"?",
+                    stmt, re.I):
+                found.setdefault(name, []).append(index)
+    return found
+
+
+def bare_name(key: str) -> str:
+    """`policy classes.x` and `column classes.x` and `index x` -> the name a DROP uses."""
+    return key.split(" ", 1)[1].split(".")[-1]
+
+
+def gap_note(kind: str, key: str, live: dict[str, str]) -> str:
+    """Name the reason an object cannot be created, when the file itself shows one."""
+    if kind == "policy":
+        owner = key.split(" ", 1)[1].split(".")[0]
+        if f"table {owner}" not in live:
+            return f"   (its table `{owner}` does not exist)"
+    return ""
+
+
+def connect_readonly(url: str):
+    """A session that cannot write, so producing a report can never become a change."""
+    conn = psycopg2.connect(url)
+    conn.set_session(readonly=True, autocommit=True)
+    return conn
+
+
+def verify(ledger: Path, migrations: Path, cur) -> int:
+    """Report every file's declared objects against the live catalogue."""
+    files = sorted(migrations.glob("*.sql"))
+    if not files:
+        print(f"no .sql files in {migrations}")
+        return 0
+
+    # `storage` is included because the app owns policies on storage.objects, and
+    # a check that cannot see them calls a present file absent.
+    live = schema_snapshot(cur, extra_schemas=("storage",))
+
+    prepared: dict[str, tuple[int, list[tuple[str, str, int]], dict[str, list[int]]]] = {}
+    droppers: dict[str, set[str]] = {}
+    for path in files:
+        masked, hidden = mask_do_bodies(
+            strip_sql_comments(path.read_text(encoding="utf-8-sig")))
+        dropped = dropped_names(masked)
+        prepared[path.name] = (hidden, declared_objects(masked), dropped)
+        for name in dropped:
+            droppers.setdefault(name, set()).add(path.name)
+
+    width = max(len(path.name) for path in files) + 2
+    print(f"{'file':<{width}} {'schema':<11} {'record':<22} sha256")
+    print("-" * (width + 52))
+
+    gaps: list[tuple[str, list[tuple[str, str]]]] = []
+    unchecked = 0
+    tally = {"IN": 0, "PARTIAL": 0, "OUT": 0, "superseded": 0, "no objects": 0}
+
+    for path in files:
+        hidden, declared, dropped = prepared[path.name]
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        present, explained, gap = 0, 0, []
+
+        for kind, key, index in declared:
+            if key in live:
+                present += 1
+                continue
+            name = bare_name(key)
+            if any(when > index for when in dropped.get(name, ())):
+                explained += 1              # made and unmade by this file, on purpose
+            elif any(who != path.name for who in droppers.get(name, ())):
+                explained += 1              # a different file replaced it
+            else:
+                gap.append((kind, key + gap_note(kind, key, live)))
+
+        if not declared:
+            verdict = "no objects"
+        elif gap:
+            verdict = "PARTIAL" if present else "OUT"
+        elif not present:
+            verdict = "superseded"
+        else:
+            verdict = "IN"
+        tally[verdict] += 1
+        if gap:
+            gaps.append((path.name, [text for _, text in gap]))
+
+        mark = f"  [+{hidden} DO body, not checked]" if hidden else ""
+        print(f"{path.name:<{width}} {verdict:<11} "
+              f"{ledger_note(ledger / f'{path.stem}.json', digest):<22} "
+              f"{digest[:12]}{mark}")
+        if declared:
+            print(f"{'':<{width}} {present}/{len(declared)} declared object(s) present, "
+                  f"{explained} replaced or transient")
+        else:
+            unchecked += 1
+
+    print()
+    print(f"{tally['IN']} in, {tally['PARTIAL']} partial, {tally['OUT']} out, "
+          f"{tally['superseded']} superseded, {tally['no objects']} with no objects "
+          f"to check")
+
+    if gaps:
+        print()
+        print("=== declared objects that exist nowhere and nothing drops ===")
+        for name, missing in gaps:
+            print(f"\n{name}")
+            for text in missing:
+                print(f"    MISSING  {text}")
+
+    if unchecked:
+        print()
+        print(f"{unchecked} file(s) declare no object to check. A data-only")
+        print("migration (`INSERT`/`UPDATE`) or a placeholder ('copy schema.sql here')")
+        print("cannot be settled from the catalogue either way, so neither is counted")
+        print("as missing.")
+
+    print()
+    if gaps:
+        print(f"{len(gaps)} file(s) declare objects the schema does not have.")
+        print("A file that was applied by hand still shows its objects, so this is a")
+        print("statement about the schema, not about how the file got there.")
+        return 6
+    print("Every declared object is present, replaced, or transient.")
     return 0
 
 
@@ -557,16 +833,36 @@ def main() -> int:
                         help="fail unless re-running the file is a no-op")
     parser.add_argument("--status", action="store_true",
                         help="report which migrations have a record")
+    parser.add_argument("--verify", action="store_true",
+                        help="report which migrations are actually in the schema")
     args = parser.parse_args()
 
     repo = Path(args.repo)
     ledger = Path(args.ledger)
+    migrations = repo / "supabase" / "migrations"
 
     if args.status:
-        return status(ledger, repo / "supabase" / "migrations")
+        return status(ledger, migrations)
+
+    if args.verify:
+        url = load_migration_url(repo)
+        ref = check_target(url, repo)
+        print("=" * 74)
+        print("VERIFYING against the live schema")
+        print("=" * 74)
+        print(f"   repo:    {repo}")
+        print(f"   target:  project {ref}")
+        print("   session: read-only — this mode writes nothing, anywhere")
+        print()
+        conn = connect_readonly(url)
+        try:
+            with conn.cursor() as cur:
+                return verify(ledger, migrations, cur)
+        finally:
+            conn.close()
 
     if not args.file:
-        parser.error("give a .sql file, or --status")
+        parser.error("give a .sql file, --status, or --verify")
 
     path = Path(args.file)
     if not path.is_file():

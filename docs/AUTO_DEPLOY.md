@@ -172,6 +172,7 @@ mistake happens where it costs nothing:
 python deploy/apply_migration.py supabase/migrations/025_x.sql            # trial, then roll back
 python deploy/apply_migration.py supabase/migrations/025_x.sql --commit   # trial, then apply
 python deploy/apply_migration.py --status                                 # what has a record
+python deploy/apply_migration.py --verify                                 # what is really in the schema
 ```
 
 The trial is not optional — `--commit` runs it first in the same invocation. It
@@ -183,6 +184,32 @@ It needs `DIRECT_URL` (the session-mode pooler), because only a real transaction
 can be rolled back, and it refuses to run unless the project in `DIRECT_URL`
 matches the one in `SUPABASE_URL`. `--commit` takes its own snapshot first, and
 records what it applied in `/var/lib/scangrade-migrations`.
+
+`--verify` needs none of that. It reads, opening the session read-only, and
+reports for every file in `supabase/migrations/` which of the objects the file
+declares are actually in the database. Absence has four meanings and only one of
+them is a problem:
+
+| verdict | meaning |
+|---|---|
+| `IN` | every declared object is present |
+| `superseded` | another file drops that name, so the object was replaced |
+| `PARTIAL` / `OUT` | some or all declared objects are missing — the file did not take effect |
+| `no objects` | nothing checkable: a data-only file, or a placeholder |
+
+It exists because `--status` cannot answer the question people actually ask. On
+a checkout where migrations were applied by hand, every file reads `no record`,
+which means "unknown" and not "not applied". It needs no privilege either —
+reading a ledger directory that does not exist is not a privileged operation.
+
+Objects created by dynamic SQL inside a `DO $$ ... $$` block cannot be read out
+of a file at all, so they are counted and reported as unreadable rather than
+assumed present. A verifier that is confidently wrong is worse than none.
+
+This is what showed that `20260608_fix_rls_policies.sql` never took effect and
+`20260608_usage_tracking.sql` was never applied: the first declares policies on
+`activation_codes`, a table no migration creates, so the SQL editor rolled the
+whole file back — taking its own `ADD COLUMN` statements with it.
 
 ### A migration pasted in by hand is invisible to that check
 
@@ -260,8 +287,9 @@ before the column exists remains the failure mode to avoid. Use
 recovery point, and only then applies it.
 
 `--status` reports what has a record, but a migration applied before that tool
-existed has none, and it says so rather than guessing. Those can only be settled
-by looking at the schema.
+existed has none, and it says so rather than guessing. `--verify` answers from
+the schema instead: it names the objects a file declares that are not there, and
+distinguishes "this file never took effect" from "a later file replaced this".
 
 ## Rolling back by hand
 
