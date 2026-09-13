@@ -82,20 +82,24 @@ def find_student_by_nisn(supabase, nisn):
     return rows[0] if rows else None
 
 
-def _discard_partial_account(supabase, uid, nisn):
+def discard_partial_account(supabase, uid, identifier):
     """Best-effort removal of an account whose creation did not finish.
 
     Deleting the auth user cascades to ``profiles`` and from there to
     ``students``, so this is the one call that undoes all three writes.
+
+    Public because the older importer in ``app/routes/admin.py`` writes the same
+    two rows in the same order and needs the same undo.
     """
     if not uid:
         return
     try:
         supabase.auth.admin.delete_user(uid)
-        logger.warning("Rolled back a half-created student account (nisn=%s)", nisn)
+        logger.warning("Rolled back a half-created student account (identifier=%s)",
+                       identifier)
     except Exception as e:  # never mask the original failure
-        logger.error("Could not roll back half-created student uid=%s nisn=%s: %s",
-                     uid, nisn, e)
+        logger.error("Could not roll back half-created student uid=%s (%s): %s",
+                     uid, identifier, e)
 
 
 def create_student_account(supabase, *, school_id, nisn, full_name, email,
@@ -145,7 +149,7 @@ def create_student_account(supabase, *, school_id, nisn, full_name, email,
             "class_id": class_id, "status": status,
         }).execute()
     except Exception:
-        _discard_partial_account(supabase, uid, nisn)
+        discard_partial_account(supabase, uid, nisn)
         raise
     return uid
 

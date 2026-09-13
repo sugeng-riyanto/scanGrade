@@ -8,7 +8,8 @@ from app.utils.auth import admin_required, super_admin_required, get_supabase, g
 from app.services.notification_service import notify_approval
 from app.services.audit_service import log_activity, log_create, log_delete, fetch_audit_logs, count_audit_logs, get_activity_summary
 from app.utils.security import sanitize_input
-from app.services.teacher_import import discard_partial_account
+from app.services.student_import import discard_partial_account as discard_student
+from app.services.teacher_import import discard_partial_account as discard_teacher
 
 def _gen_password(length=12) -> str:
     import secrets
@@ -357,6 +358,7 @@ def import_students():
         phone = str(row[3] or "").strip() if len(row) > 3 else ""
         default_email = f"siswa.{nisn or nis or row_idx}@school.local"
         default_pw = _gen_password()
+        uid = None
         try:
             res = supabase.auth.admin.create_user({
                 "email": default_email,
@@ -375,6 +377,9 @@ def import_students():
             supabase.table("profiles").insert(profile_data).execute()
             created += 1
         except Exception as e:
+            # An auth user created moments ago must not outlive a failed profile
+            # write: it could sign in, and it appears in no class list.
+            discard_student(supabase, uid, nisn or nis or full_name)
             errors.append(f"Baris {row_idx} ({full_name}): {e}")
     return jsonify({"success": True, "created": created, "errors": errors})
 
@@ -419,7 +424,7 @@ def import_teachers():
             # This sheet carries no NIP, so there is nothing to pre-check -- but a
             # failed profile write must not leave an account that can sign in and
             # is not a teacher anywhere.
-            discard_partial_account(supabase, uid, full_name)
+            discard_teacher(supabase, uid, full_name)
             errors.append(f"Baris {row_idx} ({full_name}): {e}")
     return jsonify({"success": True, "created": created, "errors": errors})
 
