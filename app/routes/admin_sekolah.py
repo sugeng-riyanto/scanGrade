@@ -12,6 +12,8 @@ from app.utils.auth import admin_sekolah_required, get_supabase, subscription_wr
 from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
+from app.services.student_import import create_student_account
+from app.services.teacher_import import create_teacher_account
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -262,7 +264,7 @@ def import_excel():
         flash(f"Gagal membaca file: {e}", "error")
         return redirect("/admin-sekolah/import")
 
-    results = {"students": 0, "teachers": 0, "subjects": 0, "errors": []}
+    results = {"students": 0, "teachers": 0, "subjects": 0, "subjects_updated": 0, "errors": []}
     sheet_names_lower = {s.lower(): s for s in wb.sheetnames}
 
     # ── Sheet: Murid / Students ──
@@ -287,7 +289,10 @@ def import_excel():
             break
 
     log_activity("import", "school", sid, new_data={"students": results["students"], "teachers": results["teachers"], "subjects": results["subjects"], "errors": len(results["errors"])}, user_id=g.user_id)
-    msg = f"Impor selesai: {results['students']} murid, {results['teachers']} guru, {results['subjects']} mapel. {len(results['errors'])} error."
+    subj_msg = f"{results['subjects']} mapel"
+    if results.get("subjects_updated"):
+        subj_msg += f" ({results['subjects_updated']} diperbarui)"
+    msg = f"Impor selesai: {results['students']} murid, {results['teachers']} guru, {subj_msg}. {len(results['errors'])} error."
     if results["errors"]:
         msg += " " + results["errors"][0]
     flash(msg, "success" if not results["errors"] else "warning")
@@ -330,24 +335,20 @@ def _import_students(ws, sid, supabase, results):
             user_email = email or _generate_email(nama, _get_email_domain(sid))
             user_pw = _gen_password()
 
-            res = supabase.auth.admin.create_user({
-                "email": user_email,
-                "password": user_pw,
-                "user_metadata": {"role": "murid", "full_name": nama},
-                "email_confirm": True,
-            })
-            uid = res.user.id
-            supabase.table("profiles").upsert({
-                "id": uid, "full_name": nama, "phone": hp, "role": "murid",
-                "nisn": nisn, "class_id": class_id, "status": "active", "school_id": sid,
-            }).execute()
-            supabase.table("students").upsert({
-                "id": uid, "school_id": sid, "class_id": class_id, "nisn": nisn,
-                "status": "active",
-            }).execute()
+            # This sheet used to have no duplicate-NISN check at all, and the
+            # writes ran straight through: create_user, then profiles, then
+            # students -- so a NISN already used elsewhere was only rejected by
+            # the global index *after* the account existed. The helper checks the
+            # NISN globally first and rolls the account back if a write fails.
+            create_student_account(
+                supabase, school_id=sid, nisn=nisn, full_name=nama,
+                email=user_email, password=user_pw, class_id=class_id, phone=hp,
+            )
             results["students"] += 1
         except Exception as e:
-            results["errors"].append(f"Baris {row_idx}: {e}")
+            results["errors"].append(
+                f"Baris {row_idx}: {getattr(e, 'user_message', str(e))}"
+            )
 
 
 def _import_teachers(ws, sid, supabase, results):
@@ -394,27 +395,55 @@ def _import_teachers(ws, sid, supabase, results):
             user_email = email or _generate_email(nama, _get_email_domain(sid))
             user_pw = _gen_password()
 
-            res = supabase.auth.admin.create_user({
-                "email": user_email,
-                "password": user_pw,
-                "user_metadata": {"role": "guru", "full_name": nama},
-                "email_confirm": True,
-            })
-            uid = res.user.id
-            supabase.table("profiles").upsert({
-                "id": uid, "full_name": nama, "phone": recovery_email or hp, "role": "guru",
-                "status": "active", "school_id": sid,
-            }).execute()
-            supabase.table("teachers").upsert({
-                "id": uid, "school_id": sid, "employee_id": nip,
-                "subject_id": subject_id,
-            }).execute()
+            # The helper checks the NIP (and NUPTK) globally -- teachers.employee_id
+            # carries no unique index, and auth.login resolves a NIP with .limit(1),
+            # so a duplicate would silently make one of the two teachers unable to
+            # sign in. It also rolls the account back if a write fails.
+            create_teacher_account(
+                supabase, school_id=sid, full_name=nama, email=user_email,
+                password=user_pw, employee_id=nip, subject_id=subject_id,
+                phone=recovery_email or hp,
+            )
             results["teachers"] += 1
         except Exception as e:
-            results["errors"].append(f"Baris {row_idx}: {e}")
+            results["errors"].append(
+                f"Baris {row_idx}: {getattr(e, 'user_message', str(e))}"
+            )
 
 
 def _import_subjects(ws, sid, supabase, results):
+    """Import the "Mata Pelajaran" sheet, updating subjects that already exist.
+
+    Two traps, both reproduced against the live database before being fixed:
+
+    1. A blank `code` must become NULL, not "". The unique index is
+       `(school_id, code) WHERE code IS NOT NULL` and `'' IS NOT NULL`, so an
+       empty string sits *inside* the index and the second code-less subject for
+       one school is rejected:
+       ``409 23505 duplicate key value violates unique constraint
+       "idx_subjects_school_code"``.
+    2. The payload carried no `id` while the primary key *is* `id`, so the
+       default conflict target could never match -- this "upsert" was a plain
+       INSERT, and every re-import duplicated the whole sheet.
+       ``on_conflict="school_id,code"`` is NOT the fix: PostgREST answers 42P10
+       because a *partial* index cannot serve as a conflict arbiter. Resolving
+       the existing row's id instead makes the target correct by construction.
+    """
+    by_code = {}  # code -> existing row
+    by_name = {}  # lowercased name -> existing row
+    try:
+        existing_rows = (
+            supabase.table("subjects").select("id,name,code")
+            .eq("school_id", sid).execute().data or []
+        )
+        for s in existing_rows:
+            by_name[(s.get("name") or "").strip().lower()] = s
+            if s.get("code"):
+                by_code[s["code"]] = s
+    except Exception as e:
+        # Non-fatal: without the lookup a re-import inserts instead of updating.
+        results["errors"].append(f"Gagal membaca daftar mapel: {e}")
+
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         if not row or not row[0]:
             continue
@@ -422,11 +451,30 @@ def _import_subjects(ws, sid, supabase, results):
             name = str(row[0] or "").strip()
             if not name:
                 continue
-            code = str(row[1] or "").strip() if len(row) > 1 else ""
-            supabase.table("subjects").upsert({
-                "school_id": sid, "name": name, "code": code,
-            }).execute()
+            # "" -> None, see note 1 above
+            code = (str(row[1] or "").strip() if len(row) > 1 else "") or None
+
+            target = by_code.get(code) if code else None
+            if target is None:
+                target = by_name.get(name.lower())
+
+            payload = {"school_id": sid, "name": name, "code": code}
+            if target:
+                payload["id"] = target["id"]
+                # the sheet said nothing about the code, so keep the stored one
+                # instead of wiping it with a NULL
+                if code is None and target.get("code"):
+                    payload.pop("code")
+
+            saved = supabase.table("subjects").upsert(payload).execute().data or []
+            current = saved[0] if saved else dict(payload)
+            # remember it so a repeated row inside this same sheet updates too
+            by_name[name.lower()] = current
+            if current.get("code"):
+                by_code[current["code"]] = current
             results["subjects"] += 1
+            if target:
+                results["subjects_updated"] = results.get("subjects_updated", 0) + 1
         except Exception as e:
             results["errors"].append(f"Baris {row_idx}: {e}")
 
@@ -853,27 +901,18 @@ def create_teacher():
 
     try:
         user_email = email or _generate_email(nama, _get_email_domain(sid))
-        res = supabase.auth.admin.create_user({
-            "email": user_email, "password": password,
-            "user_metadata": {"role": "guru", "full_name": nama},
-            "email_confirm": True,
-        })
-        uid = res.user.id
-        supabase.table("profiles").upsert({
-            "id": uid, "full_name": nama, "phone": recovery_email or hp, "role": "guru",
-            "status": "active", "school_id": sid,
-        }).execute()
-        supabase.table("teachers").upsert({
-            "id": uid, "school_id": sid, "employee_id": nip, "subject_id": subject_id,
-            "status": "active",
-        }).execute()
-        supabase.table("teachers").upsert({
-            "id": uid, "school_id": sid, "employee_id": nip, "subject_id": subject_id,
-        }).execute()
+        # One call, because the order matters: auth -> profiles -> teachers. The
+        # old code wrote a `status` column to `teachers`, which does not exist,
+        # so it created the account and then failed every time.
+        uid = create_teacher_account(
+            supabase, school_id=sid, full_name=nama, email=user_email,
+            password=password, employee_id=nip, subject_id=subject_id,
+            phone=recovery_email or hp,
+        )
         log_activity("create", "teacher", uid, new_data={"full_name": nama, "employee_id": nip}, user_id=g.user_id)
         flash(f"Guru berhasil ditambahkan. Email: {user_email}, Password: {password}", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
     return redirect("/admin-sekolah/teachers")
 
 
@@ -1012,25 +1051,15 @@ def create_student():
 
     try:
         user_email = email or _generate_email(nama, _get_email_domain(sid))
-        res = supabase.auth.admin.create_user({
-            "email": user_email, "password": password,
-            "user_metadata": {"role": "murid", "full_name": nama},
-            "email_confirm": True,
-        })
-        uid = res.user.id
-        supabase.table("profiles").upsert({
-            "id": uid, "full_name": nama, "role": "murid",
-            "phone": recovery_email,
-            "class_id": class_id, "status": "active", "school_id": sid,
-        }).execute()
-        supabase.table("students").upsert({
-            "id": uid, "school_id": sid, "class_id": class_id, "nisn": nisn,
-            "status": "active",
-        }).execute()
+        uid = create_student_account(
+            supabase, school_id=sid, nisn=nisn, full_name=nama,
+            email=user_email, password=password, class_id=class_id,
+            phone=recovery_email,
+        )
         log_activity("create", "student", uid, new_data={"full_name": nama, "nisn": nisn, "class_id": class_id}, user_id=g.user_id)
         flash(f"Murid berhasil ditambahkan. Email: {user_email}, Password: {password}", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
     return redirect("/admin-sekolah/students")
 
 

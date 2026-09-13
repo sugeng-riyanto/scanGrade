@@ -11,6 +11,7 @@ from app.utils.helpers import row_or_none
 from app.utils.exam_access import exam_sitting_allowed
 from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
+from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
 from app.utils.rate_limiter import limiter
@@ -1515,17 +1516,6 @@ def api_import_students():
                 kelas = str(row.get("kelas", "")).strip()
                 password = str(row.get("password", "")).strip() or "siswa123"
 
-                # Check duplicate NISN
-                existing = row_or_none(
-                    supabase.table("students")
-                    .select("id").eq("nisn", nisn)
-                    .eq("school_id", school_id).maybe_single().execute()
-                )
-                if existing:
-                    results["failed"] += 1
-                    results["errors"].append({"row": row_num, "nisn": nisn, "message": "NISN sudah terdaftar"})
-                    continue
-
                 # Resolve class from name
                 resolved_class_id = class_id
                 if not resolved_class_id and kelas:
@@ -1537,23 +1527,16 @@ def api_import_students():
                     if c:
                         resolved_class_id = c["id"]
 
-                # Create auth user
-                user_email = email or f"{nisn}@siswa.scan-grade.app"
-                created = supabase.auth.admin.create_user({
-                    "email": user_email, "password": password,
-                    "user_metadata": {"role": "murid", "full_name": nama},
-                    "email_confirm": True,
-                })
-                uid = created.user.id
-
-                supabase.table("profiles").upsert({
-                    "id": uid, "full_name": nama, "role": "murid",
-                    "nisn": nisn, "school_id": school_id, "status": "active",
-                }).execute()
-                supabase.table("students").upsert({
-                    "id": uid, "school_id": school_id, "nisn": nisn,
-                    "class_id": resolved_class_id, "status": "active",
-                }).execute()
+                # The NISN check lived here and was scoped to this school, while
+                # `students.nisn` is UNIQUE across the whole database -- so a NISN
+                # used at another school passed the check and was rejected by the
+                # index afterwards, leaving an auth user and a profile with no
+                # students row. The helper checks globally and rolls back.
+                create_student_account(
+                    supabase, school_id=school_id, nisn=nisn, full_name=nama,
+                    email=email or f"{nisn}@siswa.scan-grade.app",
+                    password=password, class_id=resolved_class_id,
+                )
                 results["success"] += 1
 
             except Exception as e:
@@ -1561,7 +1544,7 @@ def api_import_students():
                 results["errors"].append({
                     "row": row_num,
                     "nisn": str(row.get("nisn", "")),
-                    "message": str(e)[:100],
+                    "message": getattr(e, "user_message", str(e))[:120],
                 })
 
     current_app.logger.info(
@@ -1856,6 +1839,11 @@ def api_create_pengumuman():
         return jsonify({"error": f"Anda tidak bisa mengirim pengumuman ke {target_role}"}), 403
     if role in ("admin_sekolah", "guru"):
         school_id = g.get("user_school_id")
+        # Without a school this row would be written with school_id NULL, which no
+        # reader's school filter matches -- silently invisible rather than a leak.
+        # Say so instead of pretending it was sent.
+        if not school_id:
+            return jsonify({"error": "Akun Anda belum terhubung ke sekolah, pengumuman tidak bisa dikirim"}), 400
 
     payload = {
         "sender_id": uid,
@@ -1883,16 +1871,11 @@ def api_create_pengumuman():
         res = supabase.table("pengumuman").insert(payload).execute()
         return jsonify(res.data[0]), 201
     except Exception as e:
-        err_msg = str(e)
-        # If school_id type mismatch (INT vs UUID), retry with INT 1
-        if "invalid input syntax for type integer" in err_msg and "school_id" in payload:
-            try:
-                payload["school_id"] = 1
-                res = supabase.table("pengumuman").insert(payload).execute()
-                return jsonify(res.data[0]), 201
-            except Exception as e2:
-                return jsonify({"error": f"Gagal: {str(e2)[:100]}"}), 500
-        return jsonify({"error": f"Gagal: {err_msg[:100]}"}), 500
+        # No fallback. The previous retry wrote `school_id = 1` when the INT column
+        # rejected a school UUID, which put every school's broadcast on one value
+        # and made the read filter match all of them. A failure here is a real
+        # failure and must be visible.
+        return jsonify({"error": f"Gagal: {str(e)[:100]}"}), 500
 
 
 @api_bp.route("/pengumuman", methods=["GET"])
@@ -1915,23 +1898,28 @@ def api_list_pengumuman():
         else:
             query = supabase.table("pengumuman").select("*").is_("is_archived", "false").or_("target_role.eq." + role + ",sender_id.eq." + uid)
 
-        # School scope filter (skip for super_admin)
+        # School scope filter (skip for super_admin).
+        #
+        # This used to probe the column and fall back to `.eq("school_id", 1)`,
+        # the single value a legacy INT column accepted. Two ways that leaked
+        # across tenants: the fallback matched *every* school's announcement, and
+        # it also misfired on a correct empty result (`if not probe` is True when
+        # a school simply has no announcements yet). Migration 024 retyped the
+        # column to uuid, so the scope is applied directly and unconditionally.
         if school_id and role != "super_admin":
-            use_int_filter = False
-            try:
-                # Probe: try UUID filter (post-migration 024) — use fresh query, don't mutate
-                probe = supabase.table("pengumuman").select("id").or_("target_role.eq." + role + ",sender_id.eq." + uid).eq("school_id", school_id).limit(1).execute().data or []
-                if not probe:
-                    use_int_filter = True
-            except Exception:
-                use_int_filter = True
-            if use_int_filter:
-                query = query.eq("school_id", 1)
-            else:
-                query = query.eq("school_id", school_id)
+            query = query.eq("school_id", school_id)
 
         data = query.order("created_at", desc=True).limit(limit).offset(offset).execute().data or []
-    except Exception:
+    except Exception as e:
+        # Swallowing this silently made a transient database error look exactly
+        # like "this school has no announcements" -- and it hid a real one while
+        # this very fix was being verified. Still fails soft (announcements are
+        # not worth a 500), but no longer invisibly.
+        # Read the school from `g`, not the local: the exception may have been
+        # raised before `school_id` was assigned, and this handler must not be
+        # the thing that turns a soft failure into a 500.
+        current_app.logger.warning("pengumuman list failed for school=%s: %s",
+                                   g.get("user_school_id"), e)
         data = []
 
     read_ids = set()
@@ -2060,10 +2048,10 @@ def api_pengumuman_read_status(pengumuman_id):
         else:
             target_query = supabase.table("profiles").select("id, full_name").eq("role", target_role)
             if school_id:
-                try:
-                    target_query = target_query.eq("school_id", school_id)
-                except Exception:
-                    target_query = target_query.eq("school_id", 1)
+                # Was a try/except falling back to the legacy `school_id = 1`, which
+                # would list every school's users as this announcement's audience.
+                # The column is uuid since migration 024, so scope it directly.
+                target_query = target_query.eq("school_id", school_id)
         all_targets = target_query.execute().data or []
 
         seen = set()

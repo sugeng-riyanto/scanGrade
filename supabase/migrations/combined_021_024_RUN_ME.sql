@@ -37,17 +37,26 @@ CREATE INDEX IF NOT EXISTS idx_message_hides_notification ON message_hides(notif
 
 
 -- ── MIGRATION 024: Fix pengumuman.school_id type (INT → UUID) ──
-
--- Drop existing FK constraint
-ALTER TABLE pengumuman DROP CONSTRAINT IF EXISTS pengumuman_school_id_fkey;
-
--- Change column type to UUID; drop default first if present
-ALTER TABLE pengumuman ALTER COLUMN school_id DROP DEFAULT;
-ALTER TABLE pengumuman ALTER COLUMN school_id TYPE UUID USING school_id::text::uuid;
-
--- Re-add FK to schools table
-ALTER TABLE pengumuman ADD CONSTRAINT pengumuman_school_id_fkey
-    FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE;
+--
+-- Do NOT run 024 from this bundle. The statement that used to sit here was:
+--
+--     ALTER TABLE pengumuman ALTER COLUMN school_id TYPE UUID
+--         USING school_id::text::uuid;
+--
+-- which cannot run on this database. Existing rows hold the legacy value 1, and
+-- '1' is not a UUID, so it aborts with `invalid input syntax for type uuid: "1"`
+-- -- and it does so *after* dropping the foreign key.
+--
+-- 024 must also remap those legacy rows to their real school (recoverable from
+-- the sender's profile, or failing that from the class) and refuse to continue
+-- when it cannot, because filing an announcement under the wrong school is the
+-- cross-tenant leak that 024 exists to fix.
+--
+-- Run the authoritative file on its own instead:
+--
+--     supabase/migrations/024_fix_pengumuman_school_id_type.sql
+--
+-- It is idempotent: it detects the column already being uuid and returns.
 
 -- Performance indexes for pengumuman_read
 CREATE INDEX IF NOT EXISTS idx_pengumuman_read_pengumuman_id ON pengumuman_read(pengumuman_id);
