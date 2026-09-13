@@ -60,7 +60,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang')||'id' }">
+<div class="space-y-6">
 
     {% set exam = submission.exam or {} %}
     {% set fb = submission.teacher_feedback or {} %}

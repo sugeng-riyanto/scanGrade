@@ -2,7 +2,7 @@
 {% block title %}{% if plan %}Edit Paket{% else %}Tambah Paket{% endif %} - ScanGrade{% endblock %}
 {% block page_title %}{% if plan %}Edit Paket{% else %}Tambah Paket Baru{% endif %}{% endblock %}
 {% block content %}
-<div class="max-w-xl mx-auto" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+<div class="max-w-xl mx-auto">
     <form method="POST" class="card p-6 space-y-4">
         <div class="grid grid-cols-2 gap-4">
             <div class="col-span-2">

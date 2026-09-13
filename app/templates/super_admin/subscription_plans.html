@@ -2,7 +2,7 @@
 {% block title %}Paket Harga - ScanGrade{% endblock %}
 {% block page_title %}Paket Harga{% endblock %}
 {% block content %}
-<div x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
+<div>
     <div class="flex items-center justify-between mb-6">
         <p class="text-sm text-slate-500 font-medium" x-text="lang==='en'?'Manage subscription plans and pricing':'Kelola paket langganan dan harga'"></p>
         <a href="/super-admin/plans/new" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i><span x-text="lang==='en'?'Add Plan':'Tambah Paket'">Tambah Paket</span></a>

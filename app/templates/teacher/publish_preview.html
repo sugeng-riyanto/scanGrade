@@ -63,12 +63,14 @@
 
         <div class="flex items-center gap-3 mt-8 pt-4 border-t border-surface-200">
             <a href="/teacher/results?exam_id={{ exam.id }}" class="flex-1 px-4 py-2.5 border-2 border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition text-center">
-                <i class="fas fa-arrow-left mr-1.5"></i>Kembali
+                <i class="fas fa-arrow-left mr-1.5"></i><span x-text="t('Kembali','Back')"></span>
             </a>
             <form method="POST" action="/teacher/publish/{{ exam.id }}" class="flex-1">
+                <!-- See promote_confirm.html: the confirm() text is user-visible, and
+                     `@click` precedes the default submit so cancelling it holds. -->
                 <button type="submit" class="w-full px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-bold text-sm hover:from-emerald-600 hover:to-green-700 shadow-lg shadow-emerald-200/60 transition"
-                        onclick="return confirm('Yakin ingin mempublikasikan {{ submissions|length }} nilai?')">
-                    <i class="fas fa-check mr-1.5"></i>Publikasikan {{ submissions|length }} Nilai
+                        @click="if (!confirm(t('Yakin ingin mempublikasikan {{ submissions|length }} nilai?','Publish {{ submissions|length }} scores?'))) $event.preventDefault()">
+                    <i class="fas fa-check mr-1.5"></i><span x-text="t('Publikasikan {{ submissions|length }} Nilai','Publish {{ submissions|length }} Scores')"></span>
                 </button>
             </form>
         </div>

@@ -2,11 +2,11 @@
 {% block title %}Pengguna - Admin{% endblock %}
 {% block page_title %}Kelola Pengguna{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id', search: '', roleFilter: '' }">
+<div class="space-y-6" x-data="{ search: '', roleFilter: '' }">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
             <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Manage Users':'Kelola Pengguna'"></h2>
-            <p class="text-sm text-slate-500 font-medium mt-0.5">{{ users|length }} pengguna</p>
+            <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="'{{ users|length }} ' + t('pengguna','users')"></p>
         </div>
     </div>
 

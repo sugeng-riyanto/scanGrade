@@ -3,7 +3,6 @@
 {% block page_title %}Pengaturan{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="{
-    lang: localStorage.getItem('sg_lang') || 'id',
     pwNew: '', pwConfirm: '', pwMsg: '',
     exportLoading: false, exportData: null,
     sending: false, deletionRequest: null,

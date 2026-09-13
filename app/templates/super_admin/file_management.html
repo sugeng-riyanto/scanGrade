@@ -28,7 +28,7 @@
                 <div>
                     <p class="text-xs font-bold text-surface-400">Lokal VPS</p>
                     <p class="text-2xl font-extrabold text-surface-800">{{ local_total_mb }} MB</p>
-                    <p class="text-[10px] font-bold text-surface-400">{{ local_exams|length }} exam</p>
+                    <p class="text-[10px] font-bold text-surface-400" x-text="'{{ local_exams|length }} ' + t('ujian','exams')"></p>
                 </div>
             </div>
         </div>
@@ -66,7 +66,7 @@
             <form method="POST">
                 <input type="hidden" name="action" value="migrate">
                 <button type="submit" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-sm hover:from-amber-600 hover:to-orange-600 transition shadow-lg" onclick="return confirm('Migrate {{ local_total_mb }} MB file ke Supabase Storage?')">
-                    <i class="fas fa-cloud-upload-alt mr-1"></i>Migrate {{ local_exams|length }} Exam ke Supabase
+                    <span x-text="t('Migrate {{ local_exams|length }} Exam ke Supabase','Migrate {{ local_exams|length }} Exams to Supabase')"></span>
                 </button>
             </form>
         </div>
@@ -75,7 +75,7 @@
     <!-- ⭐ File Lokal -->
     <div class="card overflow-hidden">
         <div class="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
-            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-folder-open"></i>File Lokal VPS ({{ local_exams|length }} exam)</h3>
+            <h3 class="font-bold text-surface-800 flex items-center gap-2"><i class="fas fa-folder-open"></i><span x-text="t('File Lokal VPS','Local VPS Files')"></span> <span x-text="'(' + '{{ local_exams|length }} ' + t('ujian','exams') + ')'"></span></h3>
             <span class="text-xs font-bold text-surface-400">{{ local_total_mb }} MB</span>
         </div>
         <div class="p-5">
