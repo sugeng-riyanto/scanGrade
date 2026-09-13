@@ -131,7 +131,31 @@ SAMPLE_EXAMS = [
 
 # ─── HELPERS ─────────────────────────────────────────
 
+def _undo_half_made_account(supabase, uid, label, created_here):
+    """Undo an account this run made, when a later write failed.
+
+    An account is written auth -> profiles -> (teachers|students), and the last
+    write is the one the database can reject, so a failure used to leave an auth
+    user behind: it can sign in and belongs to nothing.
+
+    Only an account created *by this call* is ever deleted. When the email
+    already exists the uid is recovered instead, and deleting that over a
+    transient failure would destroy somebody's real account.
+    """
+    if not created_here:
+        print(f"  ⚠️  {label}: akun sudah ada sebelumnya — tidak dihapus; "
+              f"jalankan `python manage.py seed` lagi untuk melengkapinya")
+        return
+    try:
+        supabase.auth.admin.delete_user(uid)
+        print(f"  ⚠️  {label}: akun setengah jadi dibatalkan")
+    except Exception as e:
+        print(f"  ⚠️  {label}: gagal dibatalkan, periksa manual ({str(e)[:60]})")
+
+
 def _create_user(supabase, data, school_id=None, class_id=None):
+    uid = None
+    created_here = False
     try:
         res = supabase.auth.admin.create_user({
             "email": data["email"], "password": data["password"],
@@ -139,6 +163,7 @@ def _create_user(supabase, data, school_id=None, class_id=None):
             "email_confirm": True,
         })
         uid = res.user.id
+        created_here = True
     except Exception as e:
         if "already" in str(e).lower():
             try:
@@ -160,14 +185,29 @@ def _create_user(supabase, data, school_id=None, class_id=None):
     cid = class_id or data.get("class_id")
     if sid: profile["school_id"] = sid
     if cid: profile["class_id"] = cid
-    supabase.table("profiles").upsert(profile).execute()
+    try:
+        supabase.table("profiles").upsert(profile).execute()
+    except Exception as e:
+        print(f"  ⚠️  {data['email']}: profil gagal ({str(e)[:70]})")
+        _undo_half_made_account(supabase, uid, data["email"], created_here)
+        return None
 
+    # The role row used to fail silently, which left a profile that no class or
+    # teacher list would ever show -- the same half-made account by another route.
     if data["role"] == "guru" and sid:
-        try: supabase.table("teachers").upsert({"id": uid, "school_id": sid}).execute()
-        except: pass
+        try:
+            supabase.table("teachers").upsert({"id": uid, "school_id": sid}).execute()
+        except Exception as e:
+            print(f"  ⚠️  {data['email']}: baris teachers gagal ({str(e)[:70]})")
+            _undo_half_made_account(supabase, uid, data["email"], created_here)
+            return None
     elif data["role"] == "murid" and sid:
-        try: supabase.table("students").upsert({"id": uid, "school_id": sid, "nisn": data.get("nisn","")}).execute()
-        except: pass
+        try:
+            supabase.table("students").upsert({"id": uid, "school_id": sid, "nisn": data.get("nisn","")}).execute()
+        except Exception as e:
+            print(f"  ⚠️  {data['email']}: baris students gagal ({str(e)[:70]})")
+            _undo_half_made_account(supabase, uid, data["email"], created_here)
+            return None
     return uid
 
 
@@ -219,20 +259,32 @@ def _seed_school(supabase, school_conf):
         except Exception as e:
             print(f"   ⚠️  Subject error: {e}")
 
+    # The credentials are printed only for accounts that exist: reporting a login
+    # for an account that failed to be created is how an operator ends up
+    # debugging a password instead of a failed seed.
     uid = _create_user(supabase, {**school_conf["admin"], "school_id": sid})
-    print(f"   👤 Admin: {school_conf['admin']['email']} / {school_conf['admin']['password']}")
+    if uid:
+        print(f"   👤 Admin: {school_conf['admin']['email']} / {school_conf['admin']['password']}")
+    else:
+        print(f"   ❌ Admin GAGAL dibuat: {school_conf['admin']['email']}")
 
     teacher_ids = []
     for t in school_conf.get("teachers", []):
         uid = _create_user(supabase, {**t, "role": "guru", "school_id": sid})
-        if uid: teacher_ids.append(uid)
-        print(f"   👨‍🏫 Guru: {t['email']} / {t['password']}")
+        if uid:
+            teacher_ids.append(uid)
+            print(f"   👨‍🏫 Guru: {t['email']} / {t['password']}")
+        else:
+            print(f"   ❌ Guru GAGAL dibuat: {t['email']}")
 
     class_list = list(class_ids.values())
     for i, s in enumerate(school_conf.get("students", [])):
         cid = class_list[i % len(class_list)] if class_list else None
         uid = _create_user(supabase, {**s, "role": "murid", "school_id": sid, "class_id": cid})
-        print(f"   🧑‍🎓 Murid: {s['email']} / {s['password']}")
+        if uid:
+            print(f"   🧑‍🎓 Murid: {s['email']} / {s['password']}")
+        else:
+            print(f"   ❌ Murid GAGAL dibuat: {s['email']}")
 
     _seed_school_relations(supabase, sid, school_conf, class_ids, subj_map, teacher_ids)
     return sid
