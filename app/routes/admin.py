@@ -8,6 +8,7 @@ from app.utils.auth import admin_required, super_admin_required, get_supabase, g
 from app.services.notification_service import notify_approval
 from app.services.audit_service import log_activity, log_create, log_delete, fetch_audit_logs, count_audit_logs, get_activity_summary
 from app.utils.security import sanitize_input
+from app.services.teacher_import import discard_partial_account
 
 def _gen_password(length=12) -> str:
     import secrets
@@ -400,6 +401,7 @@ def import_teachers():
         phone = str(row[1] or "").strip() if len(row) > 1 else ""
         default_email = f"guru.{full_name.lower().replace(' ', '.')}@school.local"
         default_pw = _gen_password()
+        uid = None
         try:
             res = supabase.auth.admin.create_user({
                 "email": default_email,
@@ -414,6 +416,10 @@ def import_teachers():
             supabase.table("profiles").insert(profile_data).execute()
             created += 1
         except Exception as e:
+            # This sheet carries no NIP, so there is nothing to pre-check -- but a
+            # failed profile write must not leave an account that can sign in and
+            # is not a teacher anywhere.
+            discard_partial_account(supabase, uid, full_name)
             errors.append(f"Baris {row_idx} ({full_name}): {e}")
     return jsonify({"success": True, "created": created, "errors": errors})
 

@@ -65,8 +65,17 @@ class _FakeSupabase:
     """
 
     def __init__(self, existing=None, class_row=None, created_ids=None):
-        self.existing = _Resp(existing) if existing is not None else None
-        self.class_row = _Resp(class_row) if class_row is not None else None
+        # `existing` / `class_row` are plain rows or None.
+        #
+        # The two lookup shapes must be modelled deliberately, because a bare
+        # MagicMock answers *every* chain with a truthy mock: an unconfigured
+        # one makes a lookup look like a hit, so a "no duplicate, import it"
+        # test would fail and a "duplicate, refuse it" test would pass without
+        # ever exercising the real branch.
+        #   .limit(1).execute()            -> a LIST of rows (the global lookup)
+        #   .maybe_single().execute()       -> the row, or None when nothing matched
+        self.existing = existing
+        self.class_row = class_row
         self.created_ids = list(created_ids or ["uid-1", "uid-2", "uid-3"])
         self.created_emails = []
         self.upserts = []
@@ -74,11 +83,16 @@ class _FakeSupabase:
     def table(self, name):
         tbl = MagicMock()
         if name == "students":
+            tbl.select.return_value.eq.return_value.limit.return_value \
+                .execute.return_value = _Resp(
+                    [dict(self.existing)] if self.existing is not None else [])
             tbl.select.return_value.eq.return_value.eq.return_value \
-                .maybe_single.return_value.execute.return_value = self.existing
+                .maybe_single.return_value.execute.return_value = (
+                    _Resp(self.existing) if self.existing is not None else None)
         elif name == "classes":
             tbl.select.return_value.eq.return_value.eq.return_value \
-                .maybe_single.return_value.execute.return_value = self.class_row
+                .maybe_single.return_value.execute.return_value = (
+                    _Resp(self.class_row) if self.class_row is not None else None)
         tbl.upsert.side_effect = lambda payload, *a, **k: (
             self.upserts.append((name, payload)) or MagicMock()
         )

@@ -61,6 +61,95 @@ def validate_csv(file_stream):
     return errors, headers
 
 
+def find_student_by_nisn(supabase, nisn):
+    """Look up a NISN across the **whole** database, not one school.
+
+    ``students.nisn`` is ``TEXT UNIQUE`` globally (migration 007), so a check
+    scoped with ``.eq("school_id", ...)`` answers a different question than the
+    constraint asks: a NISN already used at another school passes the scoped
+    check and is only rejected later, by the index -- after the account has
+    already been created.
+
+    Returns the existing row, or ``None``.
+
+    ``.limit(1)`` rather than ``.maybe_single()``: ``maybe_single`` raises when a
+    query matches more than one row, and this runs before every student insert.
+    """
+    rows = (
+        supabase.table("students").select("id, school_id")
+        .eq("nisn", str(nisn).strip()).limit(1).execute().data or []
+    )
+    return rows[0] if rows else None
+
+
+def _discard_partial_account(supabase, uid, nisn):
+    """Best-effort removal of an account whose creation did not finish.
+
+    Deleting the auth user cascades to ``profiles`` and from there to
+    ``students``, so this is the one call that undoes all three writes.
+    """
+    if not uid:
+        return
+    try:
+        supabase.auth.admin.delete_user(uid)
+        logger.warning("Rolled back a half-created student account (nisn=%s)", nisn)
+    except Exception as e:  # never mask the original failure
+        logger.error("Could not roll back half-created student uid=%s nisn=%s: %s",
+                     uid, nisn, e)
+
+
+def create_student_account(supabase, *, school_id, nisn, full_name, email,
+                           password, class_id=None, phone="", status="active"):
+    """Create one student account: auth user -> profiles -> students.
+
+    The order is forced by foreign keys (``students.id -> profiles.id ->
+    auth.users.id``), and the last step is the one that can be rejected -- by the
+    global ``students.nisn`` index. So the NISN is checked up front across the
+    whole database, and if anything still fails the auth user is deleted, which
+    cascades to its profile and student row.
+
+    Without that rollback a failed row left an auth user plus a profile with no
+    ``students`` row: an account that can sign in but appears in no class list.
+
+    Raises ``ValidationError`` when the NISN is already taken.
+    """
+    nisn = str(nisn).strip()
+    existing = find_student_by_nisn(supabase, nisn)
+    if existing:
+        where = "sekolah ini" if str(existing.get("school_id")) == str(school_id) \
+            else "sekolah lain"
+        raise ValidationError("nisn", f"NISN {nisn} sudah terdaftar di {where}")
+
+    uid = None
+    try:
+        created = supabase.auth.admin.create_user({
+            "email": email,
+            "password": password,
+            "user_metadata": {"role": "murid", "full_name": full_name},
+            "email_confirm": True,
+        })
+        uid = created.user.id
+
+        profile = {
+            "id": uid, "full_name": full_name, "role": "murid",
+            "nisn": nisn, "school_id": school_id, "status": status,
+        }
+        if class_id:
+            profile["class_id"] = class_id
+        if phone:
+            profile["phone"] = phone
+        supabase.table("profiles").upsert(profile).execute()
+
+        supabase.table("students").upsert({
+            "id": uid, "school_id": school_id, "nisn": nisn,
+            "class_id": class_id, "status": status,
+        }).execute()
+    except Exception:
+        _discard_partial_account(supabase, uid, nisn)
+        raise
+    return uid
+
+
 def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=50):
     """Import students from CSV. Returns {success, failed, errors, total}.
     Raises ValidationError if CSV structure is invalid.
@@ -90,16 +179,6 @@ def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=5
             kelas = row.get("kelas", "").strip()
             password = row.get("password", "").strip() or "siswa123"
 
-            # Duplicate NISN check
-            existing = row_or_none(
-                supabase.table("students").select("id").eq("nisn", nisn)
-                .eq("school_id", school_id).maybe_single().execute()
-            )
-            if existing:
-                results["failed"] += 1
-                results["errors"].append({"row": idx, "nisn": nisn, "message": "NISN sudah terdaftar"})
-                continue
-
             # Resolve class_id from name if class_id not provided
             resolved_class_id = class_id
             if not resolved_class_id and kelas:
@@ -110,30 +189,22 @@ def import_students_from_csv(file_stream, school_id, class_id=None, batch_size=5
                 if c:
                     resolved_class_id = c["id"]
 
-            # Create auth user
-            user_email = email or f"{nisn}@siswa.scan-grade.app"
-            created = supabase.auth.admin.create_user({
-                "email": user_email,
-                "password": password,
-                "user_metadata": {"role": "murid", "full_name": nama},
-                "email_confirm": True,
-            })
-            uid = created.user.id
-
-            supabase.table("profiles").upsert({
-                "id": uid, "full_name": nama, "role": "murid",
-                "nisn": nisn, "school_id": school_id, "status": "active",
-            }).execute()
-            supabase.table("students").upsert({
-                "id": uid, "school_id": school_id, "nisn": nisn,
-                "class_id": resolved_class_id, "status": "active",
-            }).execute()
-
+            # The helper checks the NISN globally and rolls the account back if
+            # any of its three writes fails, so a rejected row leaves nothing.
+            create_student_account(
+                supabase, school_id=school_id, nisn=nisn, full_name=nama,
+                email=email or f"{nisn}@siswa.scan-grade.app",
+                password=password, class_id=resolved_class_id,
+            )
             results["success"] += 1
 
         except Exception as e:
             results["failed"] += 1
-            results["errors"].append({"row": idx, "nisn": row.get("nisn", "").strip(), "message": str(e)[:100]})
+            results["errors"].append({
+                "row": idx,
+                "nisn": row.get("nisn", "").strip(),
+                "message": getattr(e, "user_message", str(e))[:120],
+            })
 
     logger.info("CSV import: %d success, %d failed of %d", results["success"], results["failed"], results["total"])
     return results
