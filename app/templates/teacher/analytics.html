@@ -1,10 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Analitik - ScanGrade{% endblock %}
 {% block page_title %}Analitik{% endblock %}
-{% block head_extra %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
-<script>window.chartJsLoaded = true;</script>
-{% endblock %}
+{# Chart.js is loaded once by base.html from the local vendored copy. A second
+   load here re-initialised window.Chart and wiped the theme defaults base.html
+   sets, so this page's charts rendered their labels at #666 on a dark card. #}
 {% block content %}
 <div class="space-y-6" x-data="{ lang: localStorage.getItem('sg_lang') || 'id' }">
     <div>

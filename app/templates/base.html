@@ -21,10 +21,22 @@
     <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
     
     <style>
-        :root { --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-hover: #f8fafc; --text: #1e293b; --text-dim: #64748b; --text-nav: #94a3b8; --border: #e2e8f0; --input: #ffffff; --input-border: #e2e8f0; --shadow: 0 1px 2px rgba(0,0,0,0.03); }
-        .dark { --bg-body: #141626; --bg-card: #1e2038; --bg-hover: #282b45; --text: #e2e8f0; --text-dim: #8892b0; --text-nav: #8892b0; --border: #2d3050; --input: #232540; --input-border: #3d4168; --shadow: 0 1px 3px rgba(0,0,0,0.3); }
+        /* Light: --text-dim was #64748b, which is 4.34:1 on the page background
+           (#f1f5f9) and therefore already below AA for the secondary text it
+           paints; #5d6a7d is 5.01:1 there and 5.49:1 on a card. --text-muted was
+           the same #64748b and failed for the same reason (it paints the small
+           muted labels), so it became #606c80 — 4.85:1 in the worst case, still
+           lighter than --text-dim so the three levels stay distinguishable.
+           Dark: every value below is measured against every surface in
+           tests/unit/test_dark_theme_contrast.py, not chosen by eye. */
+        :root { color-scheme: light; --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-subtle: #f8fafc; --bg-hover: #f1f5f9; --bg-card-translucent: rgba(255,255,255,0.92); --text: #1e293b; --text-dim: #5d6a7d; --text-muted: #606c80; --text-nav: #94a3b8; --border: #e2e8f0; --border-strong: #cbd5e1; --input: #ffffff; --input-border: #cbd5e1; --shadow: 0 1px 2px rgba(0,0,0,0.03); }
+        /* The dark tokens and every dark remap live in the `@media screen` block
+           below — see "Dark theme — screen only" for why print is excluded. */
 * { font-family: 'Inter', system-ui, sans-serif; }
-body { background: var(--bg-body) !important; }
+        /* The text colour belongs on the root element too: templates set `text-*`
+           on what they paint, and anything that does not would otherwise inherit
+           the UA's black — unreadable on `.dark`. */
+        body { background: var(--bg-body) !important; color: var(--text); }
 html { transition: background-color .3s, color .3s; }
 /* Teacher page readability */
 .teacher-content { font-size: 105%; }
@@ -71,46 +83,308 @@ html { transition: background-color .3s, color .3s; }
         .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
         @media (max-width: 1023px) { main { padding-bottom: 4rem; } }
         .dark-header { background: var(--bg-card); }
-        /* Utility dark overrides for inline Tailwind classes used in templates */
-        .dark .bg-white { background: var(--bg-card) !important; }
-        .dark .bg-surface-50 { background: #1a2332 !important; } .dark .bg-surface-100 { background: #1e293b !important; }
-        .dark .border-surface-200 { border-color: var(--border) !important; }
-        .dark .text-surface-500, .dark .text-surface-600 { color: var(--text-dim) !important; }
-        .dark .text-surface-400 { color: #64748b !important; }
-        .dark .text-surface-700, .dark .text-surface-800 { color: var(--text) !important; }
-        .dark .hover\:bg-surface-50:hover, .dark .hover\:bg-surface-100:hover { background: var(--bg-hover) !important; }
-        .dark .divide-surface-50, .dark .divide-surface-100, .dark .divide-surface-200 { border-color: var(--border) !important; }
-        .dark .shadow-sm { box-shadow: var(--shadow) !important; }
-        .dark .shadow-lg, .dark .shadow-xl, .dark .shadow-2xl { box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important; }
-        /* Dark mode for status colors used in badges, alerts */
-        .dark .bg-amber-50 { background: #332211 !important; } .dark .text-amber-400, .dark .text-amber-500, .dark .text-amber-600, .dark .text-amber-700 { color: #fbbf24 !important; }
-        .dark .bg-emerald-50 { background: #0a2e1a !important; } .dark .text-emerald-400, .dark .text-emerald-500, .dark .text-emerald-600, .dark .text-emerald-700 { color: #34d399 !important; }
-        .dark .bg-red-50 { background: #2e0a0a !important; } .dark .text-red-400, .dark .text-red-500, .dark .text-red-600, .dark .text-red-700 { color: #f87171 !important; }
-        .dark .bg-blue-50 { background: #0a1e3d !important; } .dark .text-blue-400, .dark .text-blue-500, .dark .text-blue-600, .dark .text-blue-700 { color: #60a5fa !important; }
-        .dark .bg-orange-50 { background: #331a0a !important; } .dark .text-orange-400, .dark .text-orange-500, .dark .text-orange-600, .dark .text-orange-700 { color: #fb923c !important; }
-        .dark .bg-purple-50 { background: #1a0a33 !important; } .dark .text-purple-400, .dark .text-purple-500, .dark .text-purple-600, .dark .text-purple-700 { color: #a78bfa !important; }
-        .dark .bg-violet-50 { background: #1a0a33 !important; } .dark .text-violet-400, .dark .text-violet-500, .dark .text-violet-600, .dark .text-violet-700 { color: #a78bfa !important; }
-        .dark .bg-primary-50 { background: #0a1e3d !important; } .dark .text-primary-400, .dark .text-primary-500, .dark .text-primary-600, .dark .text-primary-700 { color: #60a5fa !important; }
-        .dark .bg-slate-50 { background: #1a2332 !important; }
-        .dark .text-slate-400, .dark .text-slate-500 { color: #94a3b8 !important; }
-        .dark .text-slate-700, .dark .text-slate-800 { color: #e2e8f0 !important; }
-        .dark .border-slate-200 { border-color: #334155 !important; }
-        .dark .text-stone-400, .dark .text-stone-500 { color: #94a3b8 !important; }
-        .dark .text-stone-600, .dark .text-stone-700 { color: #e2e8f0 !important; }
-        .dark .bg-stone-50 { background: #1a2332 !important; }
-        .dark .border-amber-200 { border-color: #78350f !important; }
-        .dark .border-emerald-200 { border-color: #065f46 !important; }
-        .dark .border-red-200 { border-color: #7f1d1d !important; }
-        .dark .border-blue-200 { border-color: #1e3a5f !important; }
-        .dark .border-orange-200 { border-color: #7c2d12 !important; }
-        .dark .border-purple-200 { border-color: #4c1d95 !important; }
-        .dark .border-violet-200 { border-color: #4c1d95 !important; }
-        .dark .border-stone-200 { border-color: #334155 !important; }
-        .dark .bg-stone-100 { background: #1e293b !important; }
-        .dark .border-surface-100 { border-color: var(--border) !important; }
-        .dark .border-surface-300 { border-color: #334155 !important; }
-        .dark .bg-surface-200 { background: #2d3050 !important; }
+
+        /* ══ Dark theme — screen only ══════════════════════════════════════════
+           The tokens and every remap below live inside `@media screen`.
+
+           Printing is paper, and browsers drop background colours while keeping
+           text colours — so a dark-mode user printing a result sheet got
+           near-white text on a white page, i.e. a blank sheet. Scoping the whole
+           theme to `screen` makes print fall back to the light tokens in `:root`
+           on its own, with no second set of values to keep in step.
+           ═════════════════════════════════════════════════════════════════════ */
+        @media screen {
+        .dark { color-scheme: dark; --bg-body: #0f1117; --bg-card: #191c2b; --bg-subtle: #202436; --bg-hover: #262b41; --bg-card-translucent: rgba(25,28,43,0.92); --text: #e6e9f0; --text-dim: #a8b0c8; --text-muted: #949db5; --text-nav: #8892b0; --border: #2f3448; --border-strong: #3d4460; --input: #1e2233; --input-border: #66738f; --shadow: 0 1px 3px rgba(0,0,0,0.35); }
+
+        /* ══ Dark theme ════════════════════════════════════════════════════════
+           Templates carry light utilities (bg-white, text-slate-600,
+           border-slate-200). Putting a `dark:` variant on every element of 114
+           templates rots the moment somebody adds a card, so the light
+           utilities are remapped here onto the same tokens `.card` and `.input`
+           already use: a component readable in light mode stays readable.
+
+           `:where(.dark)` holds specificity at one class, so a template's own
+           `dark:` utility still wins — the whiteboard chrome asks for
+           `dark:bg-gray-900` and keeps it.
+
+           Measured (WCAG 2.1 AA: 4.5:1 text, 3:1 for a control's boundary):
+             --text        on every surface  11.5 – 15.5
+             --text-dim    on every surface   6.4 –  8.7
+             --text-muted  on every surface   5.1 –  7.0
+             accent text on its own tint      8.5 – 11.7
+             --input-border vs the field      3.1
+           Card borders stay near 1.4 on purpose — 1.4.11 covers a boundary
+           needed to *identify a control*, and a 3:1 hairline on every card
+           reads as a wireframe. The input is the boundary that carries
+           meaning, so it is the one held to 3:1.
+           ═════════════════════════════════════════════════════════════════════ */
+
+        /* ── Neutral surfaces ── */
+        :where(.dark) .bg-white { background: var(--bg-card); }
+        :where(.dark) :is(.bg-surface-50,.bg-surface-100,.bg-slate-50,.bg-slate-100,.bg-stone-50,.bg-stone-100,.bg-gray-50,.bg-gray-100,.bg-zinc-50,.bg-zinc-100) { background: var(--bg-subtle); }
+        :where(.dark) :is(.bg-surface-200,.bg-surface-300,.bg-slate-200,.bg-stone-200,.bg-gray-200) { background: var(--bg-hover); }
+        /* Floating chips that sit over page content (the auth back-button, the
+           exam timer badge). The 5 – 25% whites are decorative shapes on a
+           saturated gradient and are deliberately untouched. */
+        :where(.dark) :is(.bg-white\/60,.bg-white\/70,.bg-white\/80,.bg-white\/90) { background: var(--bg-card-translucent); }
+
+        /* ── Neutral text ── */
+        :where(.dark) :is(.text-surface-600,.text-surface-700,.text-surface-800,.text-surface-900,.text-slate-600,.text-slate-700,.text-slate-800,.text-slate-900,.text-stone-600,.text-stone-700,.text-stone-800,.text-gray-600,.text-gray-700,.text-gray-800) { color: var(--text); }
+        :where(.dark) :is(.text-surface-400,.text-surface-500,.text-slate-400,.text-slate-500,.text-stone-400,.text-stone-500,.text-gray-400,.text-gray-500) { color: var(--text-dim); }
+        :where(.dark) :is(.text-surface-200,.text-surface-300,.text-slate-200,.text-slate-300,.text-stone-200,.text-stone-300) { color: var(--text-muted); }
+
+        /* ── Form controls that carry no fill of their own ────────────────────
+           140 of the 204 text/select/textarea elements in the templates have
+           layout classes only (`flex-1 px-4 py-2 border border-slate-200`) and
+           rely on the browser's default field. On a dark page that is a white
+           slab with the UA's slate-400 placeholder on it — measured 2.54:1, the
+           most visible defect in dark mode. Fixed once here rather than in 140
+           places: the selector is element-level, so `.input` and any `bg-*`/
+           `text-*` a template does apply are classes and still win. `color-scheme`
+           above covers the rest of the native chrome (scrollbars, dropdowns,
+           checkboxes) so it does not fall back to a light widget either.
+           ═════════════════════════════════════════════════════════════════════ */
+        :where(.dark) :is(input, select, textarea):not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="submit"], [type="button"]) { background-color: var(--input); color: var(--text); }
+        :where(.dark) :is(input, select, textarea)::placeholder { color: var(--text-muted); }
+        :where(.dark) select option { background-color: var(--input); color: var(--text); }
+
+        /* ── Neutral borders and dividers ── */
+        :where(.dark) :is(.border-surface-50,.border-surface-100,.border-surface-200,.border-surface-300,.border-slate-50,.border-slate-100,.border-slate-200,.border-slate-300,.border-stone-100,.border-stone-200,.border-stone-300,.border-gray-100,.border-gray-200,.border-gray-300) { border-color: var(--border); }
+        /* A divide- utility colours the *children*, so the override has to as well */
+        :where(.dark) :is(.divide-surface-50,.divide-surface-100,.divide-surface-200,.divide-slate-100,.divide-slate-200,.divide-stone-100,.divide-stone-200,.divide-gray-100,.divide-gray-200) > :not([hidden]) ~ :not([hidden]) { border-color: var(--border); }
+
+        /* ── Hover ────────────────────────────────────────────────────────────
+           A hover state is its own class, so remapping `bg-white` does nothing
+           for `hover:bg-white`: a light row would flash white under the cursor,
+           and `hover:text-primary-700` (38 uses — the most common hover here)
+           would snap to the raw light-mode navy on a dark card. `hover:` is the
+           variant that lands on a surface in both themes, so it is remapped
+           beside the base utility; `focus:` and `active:` accents are saturated
+           hues that already read on dark, and are left alone.
+           ═════════════════════════════════════════════════════════════════════ */
+        :where(.dark) :is(.hover\:bg-surface-50,.hover\:bg-surface-100,.hover\:bg-surface-200,.hover\:bg-slate-50,.hover\:bg-slate-100,.hover\:bg-slate-200,.hover\:bg-stone-50,.hover\:bg-stone-100,.hover\:bg-gray-50,.hover\:bg-gray-100,.hover\:bg-gray-200,.hover\:bg-white):hover { background: var(--bg-hover); }
+        :where(.dark) :is(.hover\:text-surface-600,.hover\:text-surface-700,.hover\:text-slate-600,.hover\:text-slate-700,.hover\:text-stone-600,.hover\:text-stone-700,.hover\:text-gray-600,.hover\:text-gray-700):hover { color: var(--text); }
+        :where(.dark) :is(.hover\:border-surface-200,.hover\:border-surface-300,.hover\:border-slate-300):hover { border-color: var(--border); }
+
+        /* ── Shadows ── */
+        :where(.dark) .shadow-sm { box-shadow: var(--shadow); }
+        :where(.dark) :is(.shadow-lg,.shadow-xl,.shadow-2xl) { box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+
+        /* ══ Semantic hues ═════════════════════════════════════════════════════
+           A tinted badge is `bg-<hue>-100` + `text-<hue>-700`. Remapping only the
+           text — which is what the old list did — produced light text on a light
+           tint, so both halves move together: 50/100/200 become the tint, and
+           200 – 900 the accent that reads on it (the accent* text is what a
+           badge uses; the tinted surface is what it sits on).
+
+           Saturated 400 – 900 *backgrounds* are buttons carrying `text-white`
+           and are deliberately left alone, so this is grouped by property, not
+           by shade.
+           ═════════════════════════════════════════════════════════════════════ */
+
+        /* emerald — success, active, published */
+        :where(.dark) :is(.bg-emerald-50,.bg-emerald-100,.bg-emerald-200) { background: #0d2b1e; }
+        :where(.dark) :is(.hover\:bg-emerald-50,.hover\:bg-emerald-100,.hover\:bg-emerald-200):hover { background: #143a28; }
+        :where(.dark) :is(.text-emerald-200,.text-emerald-300,.text-emerald-400,.text-emerald-500) { color: #34d399; }
+        :where(.dark) :is(.text-emerald-600,.text-emerald-700,.text-emerald-800,.text-emerald-900) { color: #6ee7b7; }
+        :where(.dark) :is(.border-emerald-100,.border-emerald-200,.border-emerald-300,.border-emerald-400) { border-color: #1f6b4a; }
+
+        /* red — danger, wrong answer */
+        :where(.dark) :is(.bg-red-50,.bg-red-100,.bg-red-200) { background: #2e1414; }
+        :where(.dark) :is(.hover\:bg-red-50,.hover\:bg-red-100,.hover\:bg-red-200):hover { background: #3d1a1a; }
+        :where(.dark) :is(.text-red-200,.text-red-300,.text-red-400,.text-red-500) { color: #f87171; }
+        :where(.dark) :is(.text-red-600,.text-red-700,.text-red-800,.text-red-900) { color: #fca5a5; }
+        :where(.dark) :is(.border-red-100,.border-red-200,.border-red-300,.border-red-400) { border-color: #7f2b2b; }
+
+        /* amber — warning, pending */
+        :where(.dark) :is(.bg-amber-50,.bg-amber-100,.bg-amber-200) { background: #2e2410; }
+        :where(.dark) :is(.hover\:bg-amber-50,.hover\:bg-amber-100,.hover\:bg-amber-200):hover { background: #3d3016; }
+        :where(.dark) :is(.text-amber-200,.text-amber-300,.text-amber-400,.text-amber-500) { color: #fbbf24; }
+        :where(.dark) :is(.text-amber-600,.text-amber-700,.text-amber-800,.text-amber-900) { color: #fcd34d; }
+        :where(.dark) :is(.border-amber-100,.border-amber-200,.border-amber-300,.border-amber-400) { border-color: #7c5a1a; }
+
+        /* yellow — caution */
+        :where(.dark) :is(.bg-yellow-50,.bg-yellow-100,.bg-yellow-200) { background: #2a2410; }
+        :where(.dark) :is(.hover\:bg-yellow-50,.hover\:bg-yellow-100):hover { background: #383016; }
+        :where(.dark) :is(.text-yellow-200,.text-yellow-300,.text-yellow-400,.text-yellow-500) { color: #facc15; }
+        :where(.dark) :is(.text-yellow-600,.text-yellow-700,.text-yellow-800) { color: #fde047; }
+        :where(.dark) :is(.border-yellow-100,.border-yellow-200,.border-yellow-300) { border-color: #77681c; }
+
+        /* orange — the school's accent */
+        :where(.dark) :is(.bg-orange-50,.bg-orange-100,.bg-orange-200) { background: #2e1c0e; }
+        :where(.dark) :is(.hover\:bg-orange-50,.hover\:bg-orange-100,.hover\:bg-orange-200):hover { background: #3d2513; }
+        :where(.dark) :is(.text-orange-200,.text-orange-300,.text-orange-400,.text-orange-500) { color: #fb923c; }
+        :where(.dark) :is(.text-orange-600,.text-orange-700,.text-orange-800,.text-orange-900) { color: #fdba74; }
+        :where(.dark) :is(.border-orange-100,.border-orange-200,.border-orange-300,.border-orange-400) { border-color: #7c4a1c; }
+
+        /* green — correct answer */
+        :where(.dark) :is(.bg-green-50,.bg-green-100,.bg-green-200) { background: #0f2a18; }
+        :where(.dark) :is(.hover\:bg-green-50,.hover\:bg-green-100):hover { background: #153a21; }
+        :where(.dark) :is(.text-green-200,.text-green-300,.text-green-400,.text-green-500) { color: #4ade80; }
+        :where(.dark) :is(.text-green-600,.text-green-700,.text-green-800,.text-green-900) { color: #86efac; }
+        :where(.dark) :is(.border-green-100,.border-green-200,.border-green-300,.border-green-400) { border-color: #1f6b39; }
+
+        /* teal */
+        :where(.dark) :is(.bg-teal-50,.bg-teal-100,.bg-teal-200) { background: #0d2a28; }
+        :where(.dark) :is(.hover\:bg-teal-50,.hover\:bg-teal-100):hover { background: #123a37; }
+        :where(.dark) :is(.text-teal-200,.text-teal-300,.text-teal-400,.text-teal-500) { color: #2dd4bf; }
+        :where(.dark) :is(.text-teal-600,.text-teal-700,.text-teal-800,.text-teal-900) { color: #5eead4; }
+        :where(.dark) :is(.border-teal-100,.border-teal-200,.border-teal-300) { border-color: #1a6b64; }
+
+        /* sky */
+        :where(.dark) :is(.bg-sky-50,.bg-sky-100,.bg-sky-200) { background: #0e2436; }
+        :where(.dark) :is(.hover\:bg-sky-50,.hover\:bg-sky-100):hover { background: #133149; }
+        :where(.dark) :is(.text-sky-200,.text-sky-300,.text-sky-400,.text-sky-500) { color: #38bdf8; }
+        :where(.dark) :is(.text-sky-600,.text-sky-700,.text-sky-800,.text-sky-900) { color: #7dd3fc; }
+        :where(.dark) :is(.border-sky-100,.border-sky-200,.border-sky-300) { border-color: #1c5a80; }
+
+        /* blue */
+        :where(.dark) :is(.bg-blue-50,.bg-blue-100,.bg-blue-200) { background: #101f3a; }
+        :where(.dark) :is(.hover\:bg-blue-50,.hover\:bg-blue-100):hover { background: #14294d; }
+        :where(.dark) :is(.text-blue-200,.text-blue-300,.text-blue-400,.text-blue-500) { color: #60a5fa; }
+        :where(.dark) :is(.text-blue-600,.text-blue-700,.text-blue-800,.text-blue-900) { color: #93c5fd; }
+        :where(.dark) :is(.border-blue-100,.border-blue-200,.border-blue-300,.border-blue-400) { border-color: #1e4a86; }
+
+        /* indigo */
+        :where(.dark) :is(.bg-indigo-50,.bg-indigo-100,.bg-indigo-200) { background: #161a38; }
+        :where(.dark) :is(.hover\:bg-indigo-50,.hover\:bg-indigo-100):hover { background: #1d234b; }
+        :where(.dark) :is(.text-indigo-200,.text-indigo-300,.text-indigo-400,.text-indigo-500) { color: #818cf8; }
+        :where(.dark) :is(.text-indigo-600,.text-indigo-700,.text-indigo-800,.text-indigo-900) { color: #a5b4fc; }
+        :where(.dark) :is(.border-indigo-100,.border-indigo-200,.border-indigo-300) { border-color: #2f3a86; }
+
+        /* violet */
+        :where(.dark) :is(.bg-violet-50,.bg-violet-100,.bg-violet-200) { background: #1e1436; }
+        :where(.dark) :is(.hover\:bg-violet-50,.hover\:bg-violet-100,.hover\:bg-violet-200):hover { background: #281a48; }
+        :where(.dark) :is(.text-violet-200,.text-violet-300,.text-violet-400,.text-violet-500) { color: #a78bfa; }
+        :where(.dark) :is(.text-violet-600,.text-violet-700,.text-violet-800,.text-violet-900) { color: #c4b5fd; }
+        :where(.dark) :is(.border-violet-100,.border-violet-200,.border-violet-300) { border-color: #45309f; }
+
+        /* purple */
+        :where(.dark) :is(.bg-purple-50,.bg-purple-100,.bg-purple-200) { background: #1e1436; }
+        :where(.dark) :is(.hover\:bg-purple-50,.hover\:bg-purple-100,.hover\:bg-purple-200):hover { background: #281a48; }
+        :where(.dark) :is(.text-purple-200,.text-purple-300,.text-purple-400,.text-purple-500) { color: #a78bfa; }
+        :where(.dark) :is(.text-purple-600,.text-purple-700,.text-purple-800,.text-purple-900) { color: #c4b5fd; }
+        :where(.dark) :is(.border-purple-100,.border-purple-200,.border-purple-300) { border-color: #45309f; }
+
+        /* rose */
+        :where(.dark) :is(.bg-rose-50,.bg-rose-100,.bg-rose-200) { background: #2e1220; }
+        :where(.dark) :is(.hover\:bg-rose-50,.hover\:bg-rose-100):hover { background: #3d182b; }
+        :where(.dark) :is(.text-rose-200,.text-rose-300,.text-rose-400,.text-rose-500) { color: #fb7185; }
+        :where(.dark) :is(.text-rose-600,.text-rose-700,.text-rose-800,.text-rose-900) { color: #fda4af; }
+        :where(.dark) :is(.border-rose-100,.border-rose-200,.border-rose-300) { border-color: #86203a; }
+
+        /* primary / brand — one palette, so one pair of rules */
+        :where(.dark) :is(.bg-primary-50,.bg-primary-100,.bg-primary-200,.bg-brand-50,.bg-brand-100,.bg-brand-200) { background: #101f3a; }
+        :where(.dark) :is(.hover\:bg-primary-50,.hover\:bg-primary-100,.hover\:bg-brand-50,.hover\:bg-brand-100):hover { background: #14294d; }
+        :where(.dark) :is(.text-primary-200,.text-primary-300,.text-primary-400,.text-primary-500,.text-brand-200,.text-brand-300,.text-brand-400,.text-brand-500) { color: #60a5fa; }
+        :where(.dark) :is(.text-primary-600,.text-primary-700,.text-primary-800,.text-brand-600,.text-brand-700,.text-brand-800) { color: #93c5fd; }
+        :where(.dark) :is(.border-primary-100,.border-primary-200,.border-primary-300,.border-primary-400,.border-brand-100,.border-brand-200,.border-brand-300) { border-color: #1e4a86; }
+
+        /* ── Semantic hover, same pairings as the tints above ── */
+        :where(.dark) :is(.hover\:bg-blue-50,.hover\:bg-blue-100,.hover\:bg-blue-200):hover { background: #14294d; }
+        :where(.dark) :is(.hover\:bg-indigo-50,.hover\:bg-indigo-100,.hover\:bg-indigo-200):hover { background: #1d234b; }
+        :where(.dark) :is(.hover\:text-amber-200,.hover\:text-amber-300,.hover\:text-amber-400,.hover\:text-amber-500):hover { color: #fbbf24; }
+        :where(.dark) :is(.hover\:text-amber-600,.hover\:text-amber-700,.hover\:text-amber-800,.hover\:text-amber-900):hover { color: #fcd34d; }
+        :where(.dark) :is(.hover\:text-blue-200,.hover\:text-blue-300,.hover\:text-blue-400,.hover\:text-blue-500):hover { color: #60a5fa; }
+        :where(.dark) :is(.hover\:text-blue-600,.hover\:text-blue-700,.hover\:text-blue-800,.hover\:text-blue-900):hover { color: #93c5fd; }
+        :where(.dark) :is(.hover\:text-emerald-200,.hover\:text-emerald-300,.hover\:text-emerald-400,.hover\:text-emerald-500):hover { color: #34d399; }
+        :where(.dark) :is(.hover\:text-emerald-600,.hover\:text-emerald-700,.hover\:text-emerald-800,.hover\:text-emerald-900):hover { color: #6ee7b7; }
+        :where(.dark) :is(.hover\:text-orange-200,.hover\:text-orange-300,.hover\:text-orange-400,.hover\:text-orange-500):hover { color: #fb923c; }
+        :where(.dark) :is(.hover\:text-orange-600,.hover\:text-orange-700,.hover\:text-orange-800,.hover\:text-orange-900):hover { color: #fdba74; }
+        :where(.dark) :is(.hover\:text-purple-200,.hover\:text-purple-300,.hover\:text-purple-400,.hover\:text-purple-500):hover { color: #a78bfa; }
+        :where(.dark) :is(.hover\:text-purple-600,.hover\:text-purple-700,.hover\:text-purple-800,.hover\:text-purple-900):hover { color: #c4b5fd; }
+        :where(.dark) :is(.hover\:text-red-200,.hover\:text-red-300,.hover\:text-red-400,.hover\:text-red-500):hover { color: #f87171; }
+        :where(.dark) :is(.hover\:text-red-600,.hover\:text-red-700,.hover\:text-red-800,.hover\:text-red-900):hover { color: #fca5a5; }
+        :where(.dark) :is(.hover\:text-primary-200,.hover\:text-primary-300,.hover\:text-primary-400,.hover\:text-primary-500,.hover\:text-brand-200,.hover\:text-brand-300,.hover\:text-brand-400,.hover\:text-brand-500):hover { color: #60a5fa; }
+        :where(.dark) :is(.hover\:text-primary-600,.hover\:text-primary-700,.hover\:text-primary-800,.hover\:text-brand-600,.hover\:text-brand-700,.hover\:text-brand-800):hover { color: #93c5fd; }
+        :where(.dark) :is(.hover\:border-orange-100,.hover\:border-orange-200,.hover\:border-orange-300,.hover\:border-orange-400):hover { border-color: #7c4a1c; }
+        :where(.dark) :is(.hover\:border-violet-100,.hover\:border-violet-200,.hover\:border-violet-300,.hover\:border-violet-400):hover { border-color: #45309f; }
+        :where(.dark) :is(.hover\:border-primary-100,.hover\:border-primary-200,.hover\:border-primary-300,.hover\:border-primary-400,.hover\:border-brand-100,.hover\:border-brand-200,.hover\:border-brand-300,.hover\:border-brand-400):hover { border-color: #1e4a86; }
+
+        /* ── Light gradient banners ───────────────────────────────────────────
+           `bg-gradient-to-br from-emerald-50 to-white` is a subtle tint in light
+           mode and a glowing band in dark mode. The stops compile to Tailwind's
+           own --tw-gradient-* variables, which a stylesheet cannot set per
+           element, so these are flattened to the tint's dark value instead —
+           at 50→100 the gradient is nearly flat anyway. The neutral rule comes
+           first so that `from-white to-primary-50` resolves to the hue.
+           ═════════════════════════════════════════════════════════════════════ */
+        :where(.dark) :is(.from-white,.to-white,.via-white,.from-surface-50,.from-slate-50,.to-slate-50,.from-stone-50,.to-stone-50) { background-image: none; background-color: var(--bg-subtle); }
+        :where(.dark) :is(.from-card-50) { background-image: none; background-color: var(--bg-card); }
+        :where(.dark) :is(.from-emerald-50,.from-emerald-100,.to-emerald-50,.to-emerald-100,.via-emerald-50) { background-image: none; background-color: #0d2b1e; }
+        :where(.dark) :is(.from-red-50,.from-red-100,.to-red-50,.to-red-100,.via-red-50) { background-image: none; background-color: #2e1414; }
+        :where(.dark) :is(.from-amber-50,.from-amber-100,.to-amber-50,.to-amber-100,.via-amber-50) { background-image: none; background-color: #2e2410; }
+        :where(.dark) :is(.from-yellow-50,.from-yellow-100,.to-yellow-50,.to-yellow-100) { background-image: none; background-color: #2a2410; }
+        :where(.dark) :is(.from-orange-50,.from-orange-100,.to-orange-50,.to-orange-100,.via-orange-50) { background-image: none; background-color: #2e1c0e; }
+        :where(.dark) :is(.from-green-50,.from-green-100,.to-green-50,.to-green-100) { background-image: none; background-color: #0f2a18; }
+        :where(.dark) :is(.from-teal-50,.from-teal-100,.to-teal-50,.to-teal-100) { background-image: none; background-color: #0d2a28; }
+        :where(.dark) :is(.from-cyan-50,.from-cyan-100,.to-cyan-50,.to-cyan-100) { background-image: none; background-color: #0a2a30; }
+        :where(.dark) :is(.from-sky-50,.from-sky-100,.to-sky-50,.to-sky-100) { background-image: none; background-color: #0e2436; }
+        :where(.dark) :is(.from-blue-50,.from-blue-100,.to-blue-50,.to-blue-100,.via-blue-50) { background-image: none; background-color: #101f3a; }
+        :where(.dark) :is(.from-indigo-50,.from-indigo-100,.to-indigo-50,.to-indigo-100) { background-image: none; background-color: #161a38; }
+        :where(.dark) :is(.from-violet-50,.from-violet-100,.to-violet-50,.to-violet-100,.via-violet-50) { background-image: none; background-color: #1e1436; }
+        :where(.dark) :is(.from-purple-50,.from-purple-100,.to-purple-50,.to-purple-100,.via-purple-50) { background-image: none; background-color: #1e1436; }
+        :where(.dark) :is(.from-fuchsia-50,.from-fuchsia-100,.to-fuchsia-50,.to-fuchsia-100) { background-image: none; background-color: #2e1030; }
+        :where(.dark) :is(.from-pink-50,.from-pink-100,.to-pink-50,.to-pink-100) { background-image: none; background-color: #2e1024; }
+        :where(.dark) :is(.from-rose-50,.from-rose-100,.to-rose-50,.to-rose-100) { background-image: none; background-color: #2e1220; }
+        :where(.dark) :is(.from-primary-50,.from-primary-100,.to-primary-50,.to-primary-100,.via-primary-50,.from-brand-50,.from-brand-100,.to-brand-50,.to-brand-100) { background-image: none; background-color: #101f3a; }
+
+        /* ── Chrome that is dark in both modes ── */
+        /* #475569 was 2.36:1 on the sidebar gradient, in light mode too. The
+           sidebar is always dark, so one value serves both themes. */
+        .nav-section-title { color: #8892b0; }
+        .dark ::-webkit-scrollbar-thumb { background: #3a4056; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #4a5470; }
+        }
+
+        /* Print never carries a page wash. The token reset above already fixes the
+           text colours; this stops a slate body being printed on the browsers that
+           do print backgrounds. */
+        @media print {
+            body { background: #ffffff !important; color: #111827 !important; }
+            .no-print { display: none !important; }
+        }
     </style>
+    <script>
+    // Chart.js draws its own labels and grid lines and knows nothing about the
+    // theme: its default tick colour is #666, which is 2.9:1 on a dark card — the
+    // least readable text in the app, on the four pages that have charts. The
+    // colours are read from the same CSS tokens everything else uses rather than
+    // copied here, so there is still one palette.
+    (function () {
+        function colours() {
+            var dark = document.documentElement.classList.contains('dark');
+            var dim = getComputedStyle(document.documentElement)
+                .getPropertyValue('--text-dim').trim();
+            return {
+                text: dim || (dark ? '#a8b0c8' : '#5d6a7d'),
+                grid: dark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.06)'
+            };
+        }
+
+        window.sgApplyChartTheme = function () {
+            if (typeof Chart === 'undefined') return;
+            var c = colours();
+            Chart.defaults.color = c.text;
+            Chart.defaults.borderColor = c.grid;
+            // Repaint what is already on screen; charts created later inherit the
+            // defaults above, so a tab that builds its chart on first open is
+            // correct without any extra wiring.
+            Array.prototype.forEach.call(document.querySelectorAll('canvas'), function (cv) {
+                var chart = Chart.getChart ? Chart.getChart(cv) : null;
+                if (chart) chart.update('none');
+            });
+        };
+
+        window.sgApplyChartTheme();
+
+        // Watching the class, rather than hooking the toggle button, re-themes the
+        // charts however dark mode changed — and keeps this the only place that
+        // needs to know charts follow the theme.
+        new MutationObserver(function () { window.sgApplyChartTheme(); })
+            .observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    })();
+    </script>
     <meta name="csrf-token" content="{{ csrf_token() }}">
     {% block head_extra %}{% endblock %}
 </head>

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Komunikasi - ScanGrade{% endblock %}
-{% block head_extra %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-{% endblock %}
+{# No chart script here: base.html already loads the local vendored Chart.js, and a
+   second copy from the CDN replaced window.Chart and reset its defaults — which is
+   where the dark-mode label colours live, so the read-state charts fell back to #666. #}
 {% block content %}
 <div x-data="{
     activeTab: 'chat',
