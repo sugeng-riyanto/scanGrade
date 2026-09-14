@@ -66,11 +66,34 @@ AFTER=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 echo "   $BEFORE -> $AFTER"
 
 for f in deploy/scangrade-deploy.sh deploy/smoke_test.py deploy/db_snapshot.py \
-         deploy/scangrade-db-snapshot.sh \
+         deploy/scangrade-db-snapshot.sh deploy/theme_gate.sh \
+         tests/unit/test_dark_theme_contrast.py \
          deploy/scangrade-deploy.service deploy/scangrade-deploy.timer \
          deploy/scangrade.service; do
   [ -f "$REPO/$f" ] || { echo "!! missing $REPO/$f — is origin/$BRANCH the right commit?"; exit 6; }
 done
+
+# The deploy runs the theme gate against every release, and treats "the gate
+# cannot run" as a warning rather than a rollback — so a VPS where pytest is
+# missing would keep shipping uncheckable releases and only whisper about it.
+# Proving it here means that warning never has a reason to appear.
+say "Checking the dark-mode readability gate"
+if bash "$REPO/deploy/theme_gate.sh" >/dev/null 2>&1; then
+  echo "   gate runs and passes"
+else
+  rc=$?
+  if [ "$rc" -eq 2 ]; then
+    echo "!! the gate cannot run (exit 2) — the deploy will warn on every release instead of"
+    echo "   checking anything. Usually a missing pytest:"
+    echo "       $REPO/.venv/bin/pip install -r $REPO/requirements.txt"
+    exit 7
+  fi
+  # Exit 1: the gate ran and found something. That is exactly what the deploy
+  # would refuse to ship, so it has to be fixed before this installer is useful.
+  echo "!! the gate found unreadable templates (exit $rc) — run it to see them:"
+  echo "       bash $REPO/deploy/theme_gate.sh"
+  exit 7
+fi
 
 # ── 2. The thing root will actually run.
 say "Installing $DEPLOY_BIN"
