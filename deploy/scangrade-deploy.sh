@@ -8,9 +8,10 @@
 # could be passed in (a branch, a commit, a path) is fixed below instead.
 #
 # It also refuses to leave a broken release running. If the new code does not
-# import, build its routes, or answer on the app port, it puts the previous
-# commit back and restarts that. An unattended deploy that only knows how to
-# move forward is worse than no automation at all.
+# import, build its routes, contain a template that is readable in both themes,
+# or answer on the app port, it puts the previous commit back and restarts that.
+# An unattended deploy that only knows how to move forward is worse than no
+# automation at all.
 #
 # Log: journalctl -u scangrade-deploy.service
 # ─────────────────────────────────────────────────────────────────────────────
@@ -177,6 +178,32 @@ print("app constructs ok (%d routes)" % len(rules))
   exit 9
 fi
 
+# ── Gate 3: is this release readable? ────────────────────────────────────────
+# A template, or a colour utility one of them uses, can leave a page unreadable
+# in dark mode while looking perfectly fine in the mode its author was working
+# in — and nothing errors. It cannot be caught by any of the gates above, by the
+# smoke test below (which checks that pages *answer*, not that they can be read),
+# or by looking at a screenshot in light mode. So it is its own gate, and it runs
+# before the app is reloaded, when rolling back is still free.
+#
+# Exit 2 is "the check could not run" — a missing interpreter, or pytest absent
+# from the venv. That is a problem with the gate, not with the release, so it is
+# logged loudly and does not roll back good code: a broken checker must never be
+# able to take the site down. Exit 1 is a real finding and does.
+THEME_OUT=$(as_owner bash "$REPO/deploy/theme_gate.sh" 2>&1)
+THEME_RC=$?
+if [ "$THEME_RC" -eq 0 ]; then
+  log "$(echo "$THEME_OUT" | tail -1)"
+elif [ "$THEME_RC" -eq 2 ]; then
+  log "theme gate COULD NOT RUN (exit 2) — this release is NOT contrast-checked:"
+  echo "$THEME_OUT" | sed 's/^/    /'
+else
+  log "theme gate FAILED (exit $THEME_RC) — rolling back to $BEFORE"
+  echo "$THEME_OUT" | sed 's/^/    /'
+  as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
+  exit 13
+fi
+
 # ── Reload ───────────────────────────────────────────────────────────────────
 # reload sends SIGHUP: gunicorn finishes in-flight requests (graceful_timeout=30)
 # before retiring the old workers. A hard restart would cut off a student
@@ -209,7 +236,7 @@ if systemctl is-active --quiet "$SERVICE" && probe_app; then
   HEALTHY=1
 fi
 
-# ── Gate 3: sign in as each role and open the pages that matter ──────────────
+# ── Gate 4: sign in as each role and open the pages that matter ──────────────
 # The port answering 200 only says gunicorn is up. It says nothing about whether
 # login still works, whether a page 500s for one role, or whether an RBAC guard
 # was loosened — and "the release is live but teachers cannot open anything" is

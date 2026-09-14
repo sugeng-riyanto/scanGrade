@@ -46,6 +46,56 @@ also how you upgrade the logic after pulling a newer commit.
 The freeze file is the one to reach for during exams: the timer keeps ticking,
 but the script exits immediately, so nothing restarts while students are working.
 
+## The readability gate
+
+Before the app is reloaded, every release is checked for templates that would be
+unreadable in either theme (`deploy/theme_gate.sh`, which runs
+`tests/unit/test_dark_theme_contrast.py`). The templates are written in light
+mode — `text-slate-600` on `bg-white` is the default shape of a card here — and
+`base.html` remaps those utilities onto the theme tokens, so a component that is
+readable in light mode stays readable in dark mode. Three things break that
+silently, and none of them errors:
+
+* a utility used in a template is left out of the remap, so it keeps its light
+  colour on a dark page (a badge ends up light-on-light);
+* a new template renders its own `<html>` instead of extending `base.html`, so it
+  inherits none of the remap;
+* a **tint and the text painted on it** are a sub-AA pair in light mode, which is
+  what ships: `bg-amber-100 text-amber-600` — a warning badge — is 2.86:1, and no
+  remap is involved, because in light mode the compiled palette *is* the theme.
+  `base.html` therefore carries an explicit correction per pair.
+
+That last one is checked against `app/static/css/tailwind.css`, so the gate also
+notices a class a template uses that the last `npm run css:build` did not emit —
+the page would render it as no colour at all.
+
+No other gate can see either one. The app still constructs, every page still
+answers `200`, and a screenshot taken in light mode looks correct. So it is its
+own gate, and it runs **before** the reload — while rolling back still costs
+nothing.
+
+The same check is available as a pre-commit hook, which fails the commit rather
+than the release:
+
+```bash
+bash deploy/install-git-hooks.sh      # once per clone; hooks are not cloned
+```
+
+It runs only when a template or the stylesheet is staged, and
+`git commit --no-verify` skips it.
+
+| Result | Outcome |
+|---|---|
+| every template and utility is readable | deploy |
+| a template, utility or tint pair is unreadable in either theme | roll back (exit 13) |
+| the gate could not run at all (exit 2) | **warn only**, and say so in the journal |
+
+The last row is deliberate: a missing interpreter or a `pytest` that never got
+installed is a fault in the gate, not in the release, and a broken checker must
+never be able to take the site down. It is logged loudly instead, and
+`install-auto-deploy.sh` proves the gate runs at install time so that warning has
+no reason to appear.
+
 ## The smoke test that gates a release
 
 After the app is reloaded, the deploy signs in as each of the four roles and
@@ -120,6 +170,7 @@ It also stops instead of guessing when:
 - `requirements.txt` changed and `pip install` failed;
 - the code does not compile;
 - the app cannot construct with all of its blueprints and routes;
+- a template would be unreadable in either theme;
 - the app does not answer `200` on `127.0.0.1:8000` afterwards.
 
 Each of those is a distinct non-zero exit, visible in the journal. On the last
