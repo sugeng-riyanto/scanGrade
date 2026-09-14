@@ -258,6 +258,20 @@ TRANSLATED = [
     # the only page a stranger sees. It is also the page with no authenticated
     # chrome, so it carries its own language button.
     "landing.html",
+    # The three role tutorials and the public demo page. They are the pages a
+    # school reads before it signs up, so they carry the same contract: no
+    # hardcoded Indonesian left behind.
+    "tutorial_guru.html",
+    "tutorial_murid.html",
+    "tutorial_admin_sekolah.html",
+    "demo.html",
+    # The exam paper itself. It is the page a student sits in front of for an
+    # hour, and the one place the toggle was *unreachable*: the terms modal and
+    # the fullscreen blocker both cover the whole page, so the navbar's button
+    # sits behind them. The exam bar now carries its own control, and everything
+    # the student reads during the paper — rules, overlays, tool labels, the
+    # offline and penalty messages — follows the choice.
+    "student/take_exam.html",
 ]
 
 # Near-certain Indonesian markers, chosen as function words and domain nouns that
@@ -295,6 +309,7 @@ INDONESIAN_MARKERS = {
 }
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z'-]+")
+_EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
 _T_CALL = re.compile(r"\bt\(\s*'[^']*'\s*,\s*'[^']*'\s*\)")
 _TERNARY = re.compile(r"lang\s*===?\s*'en'\s*\?[^:]*:[^,\"'>]*")
 
@@ -313,7 +328,11 @@ def _visible_strings(text: str) -> list[str]:
     text = _TERNARY.sub(" ", text)
     found = re.findall(r">([^<>{}]+)<", text)
     found += re.findall(r'(?:placeholder|title|aria-label)="([^"]*)"', text)
-    return found
+    # Demo credentials are data, not copy. An address like
+    # `guru_mtk_smp@scan-grade.app` is the same string in both languages, and its
+    # local part contains a marker word, so scanning it would report the demo page
+    # as untranslated forever.
+    return [c for c in found if not _EMAIL.match(c.strip())]
 
 
 def _markers_in(chunk: str) -> set[str]:
@@ -488,3 +507,97 @@ def test_a_text_binding_never_escapes_a_quote():
         "these bindings contain a backslash, which the browser passes to Alpine "
         "verbatim — the expression throws and the element renders empty. Rephrase "
         "the string instead of escaping it:\n  " + "\n  ".join(offenders))
+
+
+# ── the exam paper: a switch made mid-exam has to finish the job ──────────
+#
+# t() inside a template expression is re-evaluated when `lang` changes, which is
+# why every translated page needed nothing more than the pair. The exam is the one
+# page that also shows strings that were *stored* in component state before the
+# click — the sync label, a violation banner, the device bar — and sgT() picked its
+# language at the moment it built them. Nothing re-evaluates a stored string, so
+# without a rebuild hook one click leaves half the exam bar in the old language.
+
+def _exam() -> str:
+    return (ROOT / "app" / "templates" / "student" / "take_exam.html").read_text(encoding="utf-8")
+
+
+def _method_body(text: str, name: str) -> str:
+    """The body of a component method; the templates indent them by 8 spaces."""
+    match = re.search(
+        rf"\n {{8}}{re.escape(name)}\([^)]*\)\s*\{{(.*?)\n {{8}}\}},", text, re.S)
+    return match.group(1) if match else ""
+
+
+def test_the_exam_page_rebuilds_what_it_stores_when_the_language_changes():
+    """Everything the exam shows for longer than a click: the sync label, the
+    violation banner and the device bar. All three must be reachable from the
+    `lang` watcher, or the toggle is only half a feature on the one page a student
+    sits in front of for an hour."""
+    text = _exam()
+
+    assert "$watch('lang'" in text, \
+        "the exam page never reacts to a language switch"
+    assert "relabelLocale" in text, "there is no rebuild hook for stored strings"
+
+    # Statements that store an sgT-built string into component state. Comments are
+    # removed first: this file discusses sgT() in prose right beside the calls, and
+    # a scan that reads prose reports whichever label the paragraph happens to sit
+    # above. `=(?!=)` keeps `this.x === y` from reading as an assignment.
+    code = re.sub(r"//[^\n]*", " ", text)
+    code = re.sub(r"<!--.*?-->", " ", code, flags=re.S)
+    stored, pending = set(), ""
+    for line in code.splitlines():
+        pending += line + "\n"
+        if ";" not in line:
+            continue
+        if "sgT(" in pending:
+            stored |= set(re.findall(r"this\.(\w+)\s*=(?!=)", pending))
+        pending = ""
+
+    # What relabelLocale rebuilds, including the one level of methods it calls.
+    chain = _method_body(text, "relabelLocale")
+    for called in re.findall(r"this\.(\w+)\(", chain):
+        chain += _method_body(text, called)
+    rebuilt = set(re.findall(r"this\.(\w+)\s*=(?!=)", chain))
+
+    # The device labels are re-probed rather than re-rendered from state, so they
+    # are covered by the watcher re-running the two closures initStatusBar stashes.
+    devices = {"connectionLabel", "audioInputLabel", "audioOutputLabel"}
+    assert "_refreshConnection" in chain and "_refreshAudio" in chain, \
+        ("relabelLocale must re-run the device probes, or the device bar keeps the "
+         "language it was probed in (Cellular / '… terdeteksi')")
+
+    bar = _method_body(text, "initStatusBar")
+    for stash in ("this._refreshConnection = ", "this._refreshAudio = "):
+        assert stash in bar, f"{stash.strip()} — the probe is discarded, not kept"
+
+    missed = sorted(stored - rebuilt - devices)
+    assert not missed, (
+        "these labels are stored in the language they were built in, and nothing "
+        "rebuilds them when the student switches mid-exam:\n  " + "\n  ".join(missed))
+
+
+def test_no_exam_label_is_born_in_one_language():
+    """`name: sgT(...)` inside x-data is assembled once, at page load, and sgT()
+    does not re-read <html lang> afterwards — so the value can never follow the
+    toggle. The exam bar's sync label was written exactly that way."""
+    strangers = re.findall(r"^\s{8}(\w+):\s*[^,;\n]*sgT\(", _exam(), re.M)
+
+    assert not strangers, (
+        "this label is fixed at page load and cannot follow a mid-exam switch; "
+        "store a key and rebuild it from the `lang` watcher instead:\n  "
+        + "\n  ".join(strangers))
+
+
+def test_the_language_control_is_reachable_while_the_paper_is_open():
+    """The blockers are the point: the agreement modal is the first thing a student
+    sees, and the fullscreen overlay covers the whole page — including the navbar,
+    whose button is therefore unreachable at exactly the moment an English reader
+    needs it. The exam carries its own control in all three places."""
+    buttons = len(re.findall(r"""@click="setLang\(lang === 'id' \? 'en' : 'id'\)""", _exam()))
+
+    assert buttons >= 3, (
+        f"the exam has {buttons} language control(s); it needs one in the exam bar, "
+        "one in the fullscreen overlay and one in the agreement modal, because each "
+        "of the latter two covers the bar")
