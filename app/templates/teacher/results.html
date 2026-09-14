@@ -20,6 +20,11 @@
             <a href="/teacher/export/bubble-sheet/{{ exam_id }}" class="border-2 border-stone-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-stone-50 text-[11px] sm:text-sm font-bold text-stone-600 transition whitespace-nowrap">
                 <i class="fas fa-print mr-1 text-orange-600"></i><span class="hidden sm:inline">LJK</span>
             </a>
+            {# The sheet a school files: identity, statistics, ranked roster, signature.
+               Opens as its own document so printing does not print the app. #}
+            <a href="/teacher/results/print?exam_id={{ exam_id }}" target="_blank" rel="noopener" class="bg-stone-800 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-stone-900 text-[11px] sm:text-sm font-bold transition whitespace-nowrap">
+                <i class="fas fa-file-signature mr-1"></i><span class="hidden sm:inline" x-text="t('Cetak Daftar Nilai','Print Report')"></span>
+            </a>
             <a href="/teacher/exams/{{ exam_id }}/answer-keys" class="border-2 border-amber-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-amber-50 text-[11px] sm:text-sm font-bold text-amber-700 transition whitespace-nowrap">
                 <i class="fas fa-key mr-1"></i><span class="hidden sm:inline">Kunci</span>
             </a>

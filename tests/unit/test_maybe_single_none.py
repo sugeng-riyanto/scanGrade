@@ -182,12 +182,20 @@ def test_import_resolves_class_by_name_when_missing(monkeypatch, import_module):
 # allowed through, or a real offender would slip past.
 _RHS = r"(?:[^=]|\b\w+=(?!=))"
 
+# The scan may not cross a definition. Without this the window is a pure
+# proximity heuristic, and an unrelated assignment a few hundred characters
+# above a *wrapped* call reads as that call's target: `parsed = json.loads(v)` in
+# one helper, then `return row_or_none(...maybe_single().execute())` in the next,
+# reported as an unwrapped call that does not exist. A real offender is one
+# statement, so it never spans a `def`.
+_WINDOW = rf"(?:(?!\ndef ){_RHS}){{0,400}}?"
+
 UNWRAPPED = re.compile(
     # `(?<![=!<>+\-*/%])` / `(?!=)` keep comparison operators (==, !=, ...) from
     # being mistaken for an assignment, and `(?<!\w)` keeps the `=` in a keyword
     # argument from being mistaken for one (it is not followed by a `row_or_none`
     # call, so it would otherwise report a wrapped call as unwrapped).
-    rf"(?<![=!<>+\-*/%])(?<!\w)=(?!=)\s*(?!\s*row_or_none\b){_RHS}{{0,400}}?maybe_single\(\)\s*\.execute\(\)",
+    rf"(?<![=!<>+\-*/%])(?<!\w)=(?!=)\s*(?!\s*row_or_none\b){_WINDOW}maybe_single\(\)\s*\.execute\(\)",
     re.DOTALL,
 )
 
@@ -237,3 +245,35 @@ def test_static_guard_actually_detects_the_bad_idiom(tmp_path):
     # a ternary packed with == must not look like an assignment
     ternary = 'rec = row_or_none(\n    q.eq("a" if t == "one" else "b", x).maybe_single().execute()\n)\n'
     assert not UNWRAPPED.search(ternary)
+
+    # An assignment in one function is not the caller of a call in the next one.
+    # This is the shape that produced a false positive: a JSON helper sitting a
+    # few hundred characters above the fetch helpers, whose every call *is*
+    # wrapped. The window must stop at the `def`.
+    neighbouring_functions = (
+        "def as_dict(value):\n"
+        "    if isinstance(value, str):\n"
+        "        parsed = json.loads(value)\n"
+        "        return parsed\n"
+        "    return {}\n"
+        "\n"
+        "\n"
+        "def fetch(supabase, uid):\n"
+        "    return row_or_none(supabase.table('p').select('id').eq('id', uid).maybe_single().execute())\n"
+    )
+    assert len(neighbouring_functions) < 400, "keep the case inside the scan window"
+    assert not UNWRAPPED.search(neighbouring_functions)
+
+    # ...and an offender inside a function is still caught, so the clause above
+    # cannot be used to hide a real one behind a `def`.
+    offender_in_a_function = (
+        "def as_dict(value):\n"
+        "    parsed = json.loads(value)\n"
+        "    return parsed\n"
+        "\n"
+        "\n"
+        "def fetch(supabase, uid):\n"
+        "    row = supabase.table('p').select('id').eq('id', uid).maybe_single().execute()\n"
+        "    return row.data\n"
+    )
+    assert UNWRAPPED.search(offender_in_a_function)
