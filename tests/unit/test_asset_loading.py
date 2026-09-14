@@ -161,11 +161,20 @@ def test_partials_bring_no_assets_of_their_own():
 
 def test_a_standalone_page_loads_what_it_uses():
     """The inverse failure: a page with no `extends` inherits nothing, so a
-    directive it uses with nothing to interpret it is simply inert markup."""
+    directive it uses with nothing to interpret it is simply inert markup.
+
+    Two conditions, not one. Whether a page renders its own document is decided
+    by looking for the tag in the file's text, and text includes prose: a comment
+    explaining which element carries `lang` made `landing.html` — which extends
+    base.html and inherits Alpine from it — read as standalone. A page that
+    extends base.html cannot be one, whatever it says about itself, so it is
+    skipped before the text is examined. That also makes the failure message
+    below true: it claims these pages do not extend base.html.
+    """
     offenders = []
     for path in _pages():
         text = path.read_text(encoding="utf-8", errors="replace")
-        if "<html" not in text.lower() or path == BASE:
+        if path == BASE or _extends_base(text) or "<html" not in text.lower():
             continue
         urls = " ".join(u for _, _, u in _assets(text)).lower()
         if re.search(r"\bx-data=|\bx-init=|@click=", text) and "alpine" not in urls:
@@ -182,11 +191,17 @@ INJECTS_SCRIPT = re.compile(r"createElement\(\s*['\"]script['\"]\s*\)")
 
 # Runtime-injected scripts are invisible to every check above, because a static
 # scan cannot see a URL assembled in JavaScript — and the one site that exists
-# builds it from a Jinja variable. It is a payment SDK that must come from the
-# provider, so it is legitimate; pinning the list means the next one has to be
-# argued for rather than slipping in beside it.
+# builds it from a Jinja variable. It is Midtrans Snap.js, which used to be
+# loaded from the provider and is now served from `app/static/vendor/midtrans/`
+# with the CDN only as a fallback (see tests/unit/test_snap_vendored.py), so the
+# old justification — "a payment SDK that must come from the provider" — no
+# longer applies and a new site must not borrow it.
+#
+# The rule stands anyway, for a different reason: the URL is still assembled in
+# JavaScript, so nothing here can see it. Pinning the list means the next one
+# has to be argued for rather than slipping in beside it.
 KNOWN_RUNTIME_SCRIPTS = {
-    "admin_sekolah/payment.html",  # Midtrans Snap.js, loaded from snap_url
+    "admin_sekolah/payment.html",  # Midtrans Snap.js, local-first with CDN fallback
 }
 
 
@@ -201,8 +216,9 @@ def test_runtime_script_injection_is_a_short_known_list():
     assert not new, (
         "these templates build a <script> at runtime, where the static checks in "
         "this file cannot see whether it duplicates a library base.html already "
-        "loads. Confirm it is a third-party SDK that cannot be vendored, then add "
-        "it to KNOWN_RUNTIME_SCRIPTS:\n  " + "\n  ".join(sorted(new)))
+        "loads. Prefer vendoring the file under app/static/vendor/ (that is what "
+        "Snap.js does); if it genuinely must be fetched at runtime, add it to "
+        "KNOWN_RUNTIME_SCRIPTS with the reason:\n  " + "\n  ".join(sorted(new)))
 
 
 def test_the_standalone_exemption_is_real():
