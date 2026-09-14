@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # ─── ScanGrade auto-deploy ───────────────────────────────────────────────────
-# Installed as /usr/local/bin/scangrade-deploy by deploy/install-auto-deploy.sh
-# and run every couple of minutes by scangrade-deploy.timer.
+# Run every couple of minutes by scangrade-deploy.timer, through the launcher
+# deploy/install-auto-deploy.sh installs as /usr/local/bin/scangrade-deploy. The
+# launcher execs *this* file in the checkout rather than a copy of it, so this is
+# the script that runs and a fix here takes effect on the next tick — Gate 0
+# below refuses to run at all from a copy that has drifted from it.
 #
 # It takes NO arguments, on purpose: this is the one thing root runs unattended,
 # so it must not be usable as a general-purpose command runner. Anything that
@@ -53,6 +56,46 @@ if [ -e "$PAUSE_FILE" ]; then
   log "paused by $PAUSE_FILE — not deploying"
   exit 0
 fi
+
+# ── Gate 0: is this the checkout's runner, or a snapshot of an older one? ────
+# runner-identity:start
+# /usr/local/bin/scangrade-deploy is a launcher that execs this file, so what
+# runs is always the commit the checkout is on. It used to be an installed
+# *copy*, and a copy stops receiving fixes the moment it lands: every later
+# change to the gates below stayed on GitHub while the timer kept deploying with
+# the logic of whatever commit was current the day it was installed. Nothing
+# compared the two, so the drift was invisible until somebody re-ran the
+# installer by hand — which is the manual step this automation exists to remove.
+#
+# So a copy is refused. Running this file straight from the checkout is the
+# normal case, and a copy that still matches the checkout is the same code and
+# harmless; what must never pass quietly is a copy that *differs*, because that
+# is a deploy about to run yesterday's logic.
+#
+# The comparison is against the checkout as it stands now, before anything is
+# fetched or merged, so an ordinary update to this very file cannot look like a
+# mismatch. (Exec'ing it in place is safe even when the pull rewrites it: bash
+# reads a script file into its buffer up front — measured on a 28 KB script that
+# was replaced, and shrunk to 75 bytes, mid-run: all 120 iterations executed, no
+# mixed lines — so there is no need to stage a private copy, which would only add
+# a file that could itself go stale.)
+#
+# It sits after the pause check deliberately: a frozen box is deploying nothing,
+# and a fault in a file nobody is running is not worth a journal line every two
+# minutes.
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+REPO_RUNNER=$(readlink -f "$REPO/deploy/scangrade-deploy.sh" 2>/dev/null || echo "$REPO/deploy/scangrade-deploy.sh")
+if [ "$SELF" != "$REPO_RUNNER" ] && ! cmp -s "$SELF" "$REPO_RUNNER"; then
+  log "REFUSING: this is an installed COPY of the runner, not the checkout's"
+  log "    running : $SELF"
+  log "    checkout: $REPO_RUNNER"
+  log "    a copy stops receiving fixes the moment it is installed, so this box"
+  log "    would keep deploying with the logic of an older commit — including"
+  log "    gates that have since been added or corrected."
+  log "    fix once, as root:  bash $REPO/deploy/install-auto-deploy.sh"
+  exit 14
+fi
+# runner-identity:end
 
 [ -d "$REPO/.git" ] || { log "$REPO is not a git checkout — refusing"; exit 3; }
 [ -x "$REPO/.venv/bin/gunicorn" ] || { log "no virtualenv at $REPO/.venv — refusing"; exit 3; }

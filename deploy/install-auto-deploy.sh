@@ -65,8 +65,9 @@ as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH" || {
 AFTER=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 echo "   $BEFORE -> $AFTER"
 
-for f in deploy/scangrade-deploy.sh deploy/smoke_test.py deploy/db_snapshot.py \
-         deploy/scangrade-db-snapshot.sh deploy/theme_gate.sh deploy/claims_gate.py \
+for f in deploy/scangrade-deploy.sh deploy/entrypoint.sh deploy/smoke_test.py \
+         deploy/db_snapshot.py deploy/scangrade-db-snapshot.sh deploy/theme_gate.sh \
+         deploy/claims_gate.py \
          tests/unit/test_dark_theme_contrast.py \
          deploy/scangrade-deploy.service deploy/scangrade-deploy.timer \
          deploy/scangrade.service; do
@@ -95,13 +96,46 @@ else
   exit 7
 fi
 
-# ── 2. The thing root will actually run.
-say "Installing $DEPLOY_BIN"
-install -m 0755 -o root -g root "$REPO/deploy/scangrade-deploy.sh" "$DEPLOY_BIN"
-bash -n "$DEPLOY_BIN"
-echo "   syntax ok"
+# ── 2. The thing root will actually run: a LAUNCHER, not a copy.
+#
+#       This step used to be `install … "$REPO/deploy/scangrade-deploy.sh"
+#       "$DEPLOY_BIN"`, which installs a snapshot. A snapshot stops receiving
+#       fixes the moment it lands: every later change to the deploy logic sat on
+#       GitHub while the timer kept deploying with the version of the day it was
+#       installed, and nothing compared the two — so the only way to deliver a
+#       script fix was for a human to re-run this installer as root, the very
+#       step automatic deployment exists to remove. Worse, the snapshot for
+#       `scangrade-db-snapshot` was silently broken when run from
+#       /usr/local/bin: the wrapper derives the checkout from its own location,
+#       so it looked for /usr/local/.venv/bin/python and refused to take the
+#       snapshot at exactly the moment one was wanted.
+#
+#       deploy/entrypoint.sh execs the checkout's own copy instead, choosing the
+#       target by the name it was installed under. What root runs is therefore
+#       always the commit the checkout is on, and re-running this installer is
+#       needed only to change the arrangement itself (a new unit, a new path),
+#       never to deliver a script fix.
+install_launcher() {
+  local bin="$1" tmp
+  tmp=$(mktemp)
+  sed "s|@REPO@|$REPO|" "$REPO/deploy/entrypoint.sh" > "$tmp"
+  if grep -q '@REPO@' "$tmp"; then
+    rm -f "$tmp"
+    echo "!! the launcher still contains the @REPO@ placeholder after rendering"
+    exit 8
+  fi
+  install -m 0755 -o root -g root "$tmp" "$bin"
+  rm -f "$tmp"
+  bash -n "$bin"
+}
 
-# ── 2b. Snapshots, and the one the deploy cannot take by itself.
+say "Installing $DEPLOY_BIN and $SNAPSHOT_BIN (launchers, not copies)"
+install_launcher "$DEPLOY_BIN"
+install_launcher "$SNAPSHOT_BIN"
+echo "   both exec $REPO/deploy/*.sh, so the runner cannot lag behind the repo"
+echo "   (a copy that differs from the checkout now refuses to run: exit 14)"
+
+# ── 2b. Where the snapshots go.
 #       The deploy captures a release that changes supabase/migrations — but
 #       migrations here are pasted into the Supabase SQL editor by hand, and that
 #       changes no file, so nothing can detect it. This is the command to run
@@ -111,17 +145,11 @@ echo "   syntax ok"
 #       they live in a root-only directory and the rotation keeps the newest
 #       $BACKUP_KEEP. UU PDP treats an unsecured copy as a breach of its own;
 #       docs/AUTO_DEPLOY.md records the retention.
-say "Installing $SNAPSHOT_BIN"
+say "Snapshot directory"
 mkdir -p "$BACKUP_DIR"
 chmod 0700 "$BACKUP_DIR"
-# Copied out of the checkout, not generated here. This step used to write its own
-# inline copy of the wrapper, which is two versions of one script: whatever the
-# repo version gains, the installed one silently lacks. The repo copy is the
-# source of truth, and it also runs in place — from the checkout — so the command
-# works even on a host where nobody has run this installer.
-install -m 0755 -o root -g root "$REPO/deploy/scangrade-db-snapshot.sh" "$SNAPSHOT_BIN"
-bash -n "$SNAPSHOT_BIN"
-echo "   installed; archives in $BACKUP_DIR (mode 0700, newest $BACKUP_KEEP)"
+echo "   $BACKUP_DIR (mode 0700, newest $BACKUP_KEEP)"
+echo "   $SNAPSHOT_BIN execs $REPO/deploy/scangrade-db-snapshot.sh"
 
 # ── 3. Smoke-test credentials.
 #       They cannot live in the repo (deployment-specific, and passwords), so
@@ -351,6 +379,8 @@ journalctl -u scangrade-deploy.service -n 20 --no-pager | sed 's/^/   /'
 say "Done"
 echo "   $SERVICE is $(systemctl is-active $SERVICE) on 127.0.0.1:8000"
 echo "   deployed commit: $(as_owner git -C "$REPO" rev-parse --short HEAD)"
+echo "   runner        : $DEPLOY_BIN execs this checkout, so a fix to the deploy"
+echo "                   script is live on the next tick — no install step needed"
 echo
 echo "   watch deploys : journalctl -u scangrade-deploy.service -f"
 echo "   next tick     : systemctl list-timers scangrade-deploy.timer"
