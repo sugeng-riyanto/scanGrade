@@ -1353,6 +1353,82 @@ def reject_retraction(submission_id):
     return redirect(url_for("teacher.retraction_requests"))
 
 
+# The mark the roster colours green and calls a pass. One constant, because the
+# printed sheet has to agree with the screen it was printed from.
+PASS_MARK = 70
+
+
+def _teacher_exams(supabase, user_role, school_id):
+    """The exams this caller may pick from the results page."""
+    query = supabase.table("exams").select("id,title,subject").eq("teacher_id", g.user_id)
+    if user_role == "admin_sekolah" and school_id:
+        query = supabase.table("exams").select("id,title,subject").eq("school_id", school_id)
+    return query.execute().data or []
+
+
+def _exam_results(supabase, exam_id):
+    """Every row the results page and the printed sheet both show.
+
+    Returns ``(subs, scan_subs, online_subs, stats)``. Two renderings of one
+    exam's results must not be able to disagree, so the deduplication, the
+    source split and the statistics are computed here once instead of in each
+    caller.
+    """
+    subs = supabase.table("submissions").select("*, profiles(full_name)") \
+        .eq("exam_id", exam_id).execute().data or []
+
+    for s in subs:
+        if s.get("profiles"):
+            s["student_name"] = s.pop("profiles").get("full_name", "")
+
+    # Deduplicate: keep latest per (student_id, source)
+    seen = {}
+    for s in sorted(subs, key=lambda x: x.get("submitted_at", "") or "", reverse=True):
+        sid = s.get("student_id", "")
+        ans = s.get("answers") or {}
+        if isinstance(ans, str):
+            try:
+                ans = json.loads(ans)
+            except Exception:
+                ans = {}
+        # Written back, so a row is the same shape wherever it is read: the
+        # printed sheet looks up the NISN on a scan submission, and a row that
+        # still held its JSON as text would print a dash instead of a number.
+        s["answers"] = ans
+        source = "scan" if isinstance(ans, dict) and ans.get("_nisn") else "online"
+        key = (sid, source)
+        if key not in seen:
+            s["_source"] = source
+            seen[key] = s
+    subs = list(seen.values())
+    scan_subs = [s for s in subs if s.get("_source") == "scan"]
+    online_subs = [s for s in subs if s.get("_source") != "scan"]
+
+    scores = [_final_score(s) for s in subs]
+    passed = [v for v in scores if v >= PASS_MARK]
+    stats = {
+        "avg": round(sum(scores) / len(scores), 1) if scores else 0,
+        "max": max(scores) if scores else 0,
+        "min": min(scores) if scores else 0,
+        "count": len(scores),
+        "passed": len(passed),
+        "pass_rate": round(100 * len(passed) / len(scores)) if scores else 0,
+        "threshold": PASS_MARK,
+    }
+    return subs, scan_subs, online_subs, stats
+
+
+def _final_score(submission):
+    """The number the app scores a submission by, wherever it is ranked."""
+    value = submission.get("final_score")
+    if value is None:
+        value = submission.get("score")
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 @teacher_bp.route("/results")
 @teacher_or_admin_required
 def results():
@@ -1375,50 +1451,103 @@ def results():
     if err:
         return err
 
-    subs = supabase.table("submissions").select("*, profiles(full_name)").eq("exam_id", exam_id).execute().data or []
-    query = supabase.table("exams").select("id,title,subject").eq("teacher_id", g.user_id)
-    if user_role == "admin_sekolah" and school_id:
-        query = supabase.table("exams").select("id,title,subject").eq("school_id", school_id)
-    exams = query.execute().data or []
+    exams = _teacher_exams(supabase, user_role, school_id)
     exam = next((e for e in exams if e["id"] == exam_id), {})
-
-    for s in subs:
-        if s.get("profiles"):
-            s["student_name"] = s.pop("profiles").get("full_name", "")
-
-    # Deduplicate: keep latest per (student_id, source)
-    seen = {}
-    for s in sorted(subs, key=lambda x: x.get("submitted_at", "") or "", reverse=True):
-        sid = s.get("student_id", "")
-        ans = s.get("answers") or {}
-        if isinstance(ans, str):
-            try:
-                ans = json.loads(ans)
-            except Exception:
-                ans = {}
-        source = "scan" if isinstance(ans, dict) and ans.get("_nisn") else "online"
-        key = (sid, source)
-        if key not in seen:
-            s["_source"] = source
-            seen[key] = s
-    subs = list(seen.values())
-    scan_subs = [s for s in subs if s.get("_source") == "scan"]
-    online_subs = [s for s in subs if s.get("_source") != "scan"]
-
-    if subs:
-        scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs]
-        stats = {
-            "avg": round(sum(scores) / len(scores), 1),
-            "max": max(scores),
-            "min": min(scores),
-            "count": len(scores),
-        "question_texts": request.form.get("question_texts", "{}"),
-        "pdf_url": request.form.get("pdf_preview_url", ""),
-    }
-    else:
-        stats = {"avg": 0, "max": 0, "min": 0, "count": 0}
+    subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id)
 
     return render_template("teacher/results.html", submissions=subs, stats=stats, exam_id=exam_id, exams=exams, exam=exam, scan_subs=scan_subs, online_subs=online_subs)
+
+
+@teacher_bp.route("/results/print")
+@teacher_or_admin_required
+def results_print():
+    """One exam's results as a document to print and file.
+
+    The results page prints as the app: a toolbar, a row of buttons and cards.
+    What a school actually files is a sheet — exam identity, class statistics,
+    the ranked roster and somewhere to sign — so this renders that instead.
+    """
+    from app.services.report_card_service import print_stamp, profile_name, school_for
+
+    exam_id = request.args.get("exam_id")
+    if not exam_id:
+        return redirect("/teacher/results")
+
+    supabase = get_supabase()
+    # Same guard as the screen page: the sheet carries every student's name and
+    # mark, so it cannot be the route that is easier to reach.
+    exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=False,
+                            redirect_to="/teacher/results")
+    if err:
+        return err
+
+    subs, scan_subs, online_subs, stats = _exam_results(supabase, exam_id)
+    roster = sorted(subs, key=_final_score, reverse=True)
+
+    return render_template(
+        "teacher/print_exam_report.html",
+        exam=exam,
+        roster=roster,
+        stats=stats,
+        class_names=_class_names(supabase, exam.get("class_ids")),
+        school=school_for(supabase, exam.get("school_id")),
+        teacher_name=profile_name(supabase, exam.get("teacher_id")),
+        printed_on=print_stamp(),
+        pass_mark=PASS_MARK,
+    )
+
+
+@teacher_bp.route("/submissions/<submission_id>/print")
+@teacher_or_admin_required
+def print_submission_card(submission_id):
+    """The report card a teacher hands back, as a document.
+
+    This is what the marking view's print button used to attempt: printing a
+    submission from that page printed the marking interface, canvas tools and
+    all. The sheet is the same one the student prints, so the copy in the file
+    and the copy at home cannot disagree.
+
+    It is not gated on release — the marking is the teacher's own record, and
+    printing before the result is announced is a normal use. The sheet says so
+    on its face when that is the case.
+    """
+    from app.services.report_card_service import load_report_card, print_stamp
+
+    supabase = get_supabase()
+    _, err = _guard_submission(supabase, submission_id, as_json=False,
+                               redirect_to="/teacher/results")
+    if err:
+        return err
+
+    card = load_report_card(supabase, submission_id)
+    if not card:
+        flash("Submission tidak ditemukan", "error")
+        return redirect("/teacher/results")
+    return render_template("print/report_card.html", printed_on=print_stamp(),
+                           show_key=True, **card)
+
+
+def _class_names(supabase, class_ids):
+    """Names for the classes an exam was assigned to, best effort.
+
+    A sheet that cannot resolve a class name still prints; it just omits the
+    line, which is better than refusing to print a list of marks.
+    """
+    ids = [c for c in (class_ids or []) if c]
+    if isinstance(class_ids, str):
+        try:
+            ids = [c for c in json.loads(class_ids) if c]
+        except (json.JSONDecodeError, TypeError):
+            ids = []
+    if not ids:
+        return []
+    try:
+        rows = supabase.table("classes").select("id,name").in_("id", ids).execute().data or []
+    except Exception:
+        logger.exception("Could not resolve class names for %s", ids)
+        return []
+    named = {row["id"]: row.get("name", "") for row in rows}
+    return [named[i] for i in ids if named.get(i)]
 
 
 @teacher_bp.route("/grade-question/<exam_id>/<int:question_index>")

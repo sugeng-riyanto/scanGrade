@@ -869,6 +869,31 @@ def result_detail(submission_id):
                            student_name=student_name, released=released)
 
 
+@student_bp.route("/results/<submission_id>/print")
+@login_required
+def print_result_card(submission_id):
+    """The report card as a document to print, not a picture of the app.
+
+    The screen page can be printed too, but it prints the interface around the
+    result: toolbars, navigation and controls the paper has no use for. This
+    renders the same result as a plain document.
+
+    It follows the release rule for the same reason the screen and the PDF do —
+    the sheet carries the answer key and the per-question marks.
+    """
+    from app.services.report_card_service import load_report_card, print_stamp
+
+    card = load_report_card(get_supabase(), submission_id, student_id=g.user_id)
+    if not card:
+        flash("Hasil tidak ditemukan.", "error")
+        return redirect("/student/results")
+    if not card["released"]:
+        flash("Hasil ujian belum dirilis oleh guru.", "error")
+        return redirect("/student/results")
+    return render_template("print/report_card.html", printed_on=print_stamp(),
+                           show_key=True, **card)
+
+
 @student_bp.route("/results/<submission_id>/download-pdf")
 @login_required
 def download_result_pdf(submission_id):

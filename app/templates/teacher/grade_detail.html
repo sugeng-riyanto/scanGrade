@@ -56,7 +56,9 @@
             <button type="button" @click="gradeAllEssays()" class="text-sm font-bold text-emerald-600 hover:text-emerald-700 px-3 py-1.5 hover:bg-emerald-50 rounded-xl transition" title="Koreksi semua essay dengan AI">
                 <i class="fas fa-robot mr-1"></i>✨ Essay
             </button>
-            <button onclick="window.print()" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition"><i class="fas fa-print mr-1"></i>Print</button>
+            {# Opens the student's report card instead of printing this page: the
+               marking interface is not what a teacher wants on paper. #}
+            <a href="/teacher/submissions/{{ submission.id }}/print" target="_blank" rel="noopener" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition"><i class="fas fa-print mr-1"></i>Print</a>
             <button type="button" @click="saveAll()" class="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2 rounded-xl hover:from-orange-600 hover:to-amber-600 text-sm font-bold shadow-lg shadow-orange-200/50 transition">
                 <i class="fas fa-save mr-1.5"></i>Simpan
             </button>
@@ -460,10 +462,10 @@
                 </template>
             </div>
             <div class="grid grid-cols-5 gap-[2px] mb-[2px]">
-                <button type="button" @click="calcMem('MC')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">MC</button>
-                <button type="button" @click="calcMem('MR')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">MR</button>
-                <button type="button" @click="calcMem('M+')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">M+</button>
-                <button type="button" @click="calcMem('M-')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-500 transition">M-</button>
+                <button type="button" @click="calcMem('MC')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">MC</button>
+                <button type="button" @click="calcMem('MR')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">MR</button>
+                <button type="button" @click="calcMem('M+')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">M+</button>
+                <button type="button" @click="calcMem('M-')" class="py-1 text-[8px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition">M-</button>
                 <button type="button" @click="calcParen('(')" class="py-1 text-[9px] font-extrabold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition">(</button>
             </div>
             <div class="grid grid-cols-4 gap-[2px]">

@@ -1,0 +1,233 @@
+{#
+  One exam's results as a sheet a school can file.
+
+  Printing the results page prints the application: the toolbar, the export
+  buttons and the stat cards, spread over several sheets with the roster broken
+  across page boundaries. What gets filed and signed is a document — who sat
+  what, the class statistics, the ranked list, and a place to sign — so this is
+  a separate document rather than a print stylesheet on the screen.
+
+  It is standalone on purpose: no base.html, no navigation, no Alpine. The
+  toolbar below is the only part of it that is not paper, and print drops it.
+#}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daftar Nilai - {{ exam.get('title', 'Ujian') }}</title>
+<style>
+    @page { size: A4; margin: 14mm 12mm; }
+
+    * { box-sizing: border-box; }
+    body {
+        font-family: Helvetica, Arial, sans-serif; color: #111827;
+        background: #e5e7eb; font-size: 10pt; line-height: 1.45; margin: 0;
+    }
+    .sheet {
+        background: #fff; max-width: 210mm; margin: 0 auto; padding: 14mm 12mm;
+        box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    }
+
+    .toolbar {
+        position: sticky; top: 0; z-index: 50; background: #0f172a; color: #fff;
+        padding: 8px 14px; display: flex; align-items: center; gap: 10px;
+        justify-content: space-between; font-size: 9pt;
+    }
+    .toolbar .hint { color: #cbd5e1; }
+    .toolbar button {
+        font: inherit; font-weight: bold; cursor: pointer; border: 0;
+        border-radius: 8px; padding: 7px 14px; background: #2563eb; color: #fff;
+    }
+    .toolbar button.ghost { background: #1e293b; color: #cbd5e1; }
+
+    .letterhead { border-bottom: 3px solid #111827; padding-bottom: 8pt; margin-bottom: 10pt; }
+    .letterhead table { width: 100%; border-collapse: collapse; }
+    .letterhead td { vertical-align: middle; }
+    .letterhead .logo { width: 64pt; }
+    .letterhead .logo img { max-width: 58pt; max-height: 58pt; }
+    .school-name { font-size: 15pt; font-weight: bold; }
+    .school-meta { font-size: 8.5pt; color: #475569; }
+
+    .doc-title { text-align: center; margin: 10pt 0 10pt; }
+    .doc-title h1 { font-size: 12pt; margin: 0; letter-spacing: .6pt; text-transform: uppercase; }
+    .doc-title .sub { font-size: 9pt; color: #475569; margin-top: 2pt; }
+
+    table.ident { width: 100%; border-collapse: collapse; margin-bottom: 10pt; font-size: 9.5pt; }
+    table.ident td { padding: 1.5pt 0; vertical-align: top; }
+    table.ident td.k { width: 22%; color: #475569; }
+    table.ident td.s { width: 2%; color: #475569; }
+
+    .stats { width: 100%; border-collapse: separate; border-spacing: 5pt 0; margin: 10pt 0 12pt; }
+    .stats td { text-align: center; padding: 6pt 4pt; border-radius: 6pt; background: #f8fafc; border: 1pt solid #e2e8f0; }
+    .stats td .v { font-size: 13pt; font-weight: bold; }
+    .stats td .l { font-size: 7pt; font-weight: bold; color: #475569; text-transform: uppercase; letter-spacing: .3pt; }
+    .stats td.ok { background: #ecfdf5; border-color: #a7f3d0; }
+    .stats td.ok .v { color: #059669; }
+    .stats td.warn { background: #fffbeb; border-color: #fcd34d; }
+    .stats td.warn .v { color: #b45309; }
+
+    table.data { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+    table.data th {
+        background: #f1f5f9; border: .75pt solid #cbd5e1; padding: 4pt 5pt;
+        text-align: left; font-weight: bold;
+    }
+    table.data td { border: .75pt solid #cbd5e1; padding: 4pt 5pt; }
+    /* Repeat the header on every sheet, and never split a student across two. */
+    table.data thead { display: table-header-group; }
+    table.data tr { page-break-inside: avoid; }
+    .center { text-align: center; }
+    .ok { color: #059669; font-weight: bold; }
+    .no { color: #dc2626; font-weight: bold; }
+    .muted { color: #64748b; }
+    .status { font-size: 7.5pt; font-weight: bold; }
+    .empty { text-align: center; color: #94a3b8; padding: 20pt; }
+
+    .sign { width: 100%; border-collapse: collapse; margin-top: 20pt; page-break-inside: avoid; }
+    .sign td { width: 50%; text-align: center; font-size: 9pt; vertical-align: top; }
+    .sign .space { height: 42pt; }
+    .sign .line { border-top: .75pt solid #111827; margin: 0 12pt; padding-top: 2pt; }
+    .doc-footer {
+        margin-top: 14pt; padding-top: 5pt; border-top: .75pt solid #cbd5e1;
+        font-size: 7pt; color: #94a3b8; text-align: center;
+    }
+
+    @media print {
+        body { background: #fff; }
+        .toolbar { display: none !important; }
+        .sheet { box-shadow: none; max-width: none; margin: 0; padding: 0; }
+    }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+    <span class="hint">Daftar nilai siap dicetak — ukuran A4.</span>
+    <span>
+        <button onclick="window.print()">Cetak</button>
+        <button class="ghost" onclick="window.close()">Tutup</button>
+    </span>
+</div>
+
+{# Indonesian labels for the raw status values, so the sheet reads as a school
+   document rather than as a database dump. #}
+{% set status_id = {
+    'draft': 'Draft', 'submitted': 'Terkumpul', 'graded': 'Dinilai',
+    'published': 'Dirilis', 'retracted': 'Ditarik'
+} %}
+
+<div class="sheet">
+
+    <div class="letterhead">
+        <table>
+            <tr>
+                {% if school and school.get('logo_url') %}
+                <td class="logo"><img src="{{ school.logo_url }}" alt="Logo"></td>
+                {% endif %}
+                <td>
+                    <div class="school-name">{{ school.get('name', '') }}</div>
+                    <div class="school-meta">
+                        {{ school.get('address', '') }}{% if school.get('city') %}, {{ school.get('city') }}{% endif %}
+                        {% if school.get('province') %} &middot; {{ school.get('province') }}{% endif %}
+                        {% if school.get('npsn') %}<br>NPSN: {{ school.get('npsn') }}{% endif %}
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="doc-title">
+        <h1>Daftar Nilai Hasil Ujian</h1>
+        <div class="sub">{{ exam.get('title', 'Ujian') }}</div>
+    </div>
+
+    <table class="ident">
+        <tr>
+            <td class="k">Mata Pelajaran</td><td class="s">:</td><td>{{ exam.get('subject', '-') }}</td>
+            <td class="k">Guru</td><td class="s">:</td><td>{{ teacher_name or '-' }}</td>
+        </tr>
+        <tr>
+            <td class="k">Kelas</td><td class="s">:</td>
+            <td>{{ class_names | join(', ') if class_names else '-' }}</td>
+            <td class="k">Jumlah Soal</td><td class="s">:</td><td>{{ exam.get('total_questions', 0) }} butir</td>
+        </tr>
+        <tr>
+            <td class="k">Tanggal Ujian</td><td class="s">:</td>
+            <td>{{ (exam.get('started_at') or exam.get('created_at'))[:10] if (exam.get('started_at') or exam.get('created_at')) else '-' }}</td>
+            <td class="k">Ambang Tuntas</td><td class="s">:</td><td>{{ pass_mark }}</td>
+        </tr>
+    </table>
+
+    <table class="stats">
+        <tr>
+            <td><div class="v">{{ stats.count }}</div><div class="l">Peserta</div></td>
+            <td><div class="v">{{ stats.avg }}</div><div class="l">Rata-rata</div></td>
+            <td class="ok"><div class="v">{{ stats.max }}</div><div class="l">Tertinggi</div></td>
+            <td class="warn"><div class="v">{{ stats.min }}</div><div class="l">Terendah</div></td>
+            <td class="ok"><div class="v">{{ stats.passed }}</div><div class="l">Tuntas</div></td>
+            <td><div class="v">{{ stats.pass_rate }}%</div><div class="l">Ketuntasan</div></td>
+        </tr>
+    </table>
+
+    <table class="data">
+        <thead>
+            {# One numbering column, not two: the roster is sorted by final score, so
+               a separate "rank" column would only repeat it — and would misreport
+               ties as an order it cannot actually justify. #}
+            <tr>
+                <th class="center" style="width:7%">No</th>
+                <th style="width:30%">Nama Siswa</th>
+                <th class="center" style="width:13%">NISN</th>
+                <th class="center" style="width:9%">Skor MCQ</th>
+                <th class="center" style="width:8%">Penalti</th>
+                <th class="center" style="width:9%">Pelanggaran</th>
+                <th class="center" style="width:9%">Nilai Akhir</th>
+                <th class="center" style="width:11%">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for s in roster %}
+            {% set ans = s.get('answers') if s.get('answers') is mapping else {} %}
+            {% set final = s.get('final_score') if s.get('final_score') is not none else s.get('score') %}
+            <tr>
+                <td class="center">{{ loop.index }}</td>
+                <td>{{ s.student_name or (s.student_id or '-')[:8] }}</td>
+                <td class="center">{{ ans.get('_nisn') or '&mdash;'|safe }}</td>
+                <td class="center">{{ s.get('score') if s.get('score') is not none else 0 }}</td>
+                <td class="center {{ 'no' if (s.get('penalty') or 0) else 'muted' }}">{{ s.get('penalty') or 0 }}</td>
+                <td class="center {{ 'no' if (s.get('violations') or 0) else 'muted' }}">{{ s.get('violations') or 0 }}</td>
+                <td class="center">
+                    <span class="{{ 'ok' if final is not none and final >= pass_mark else 'no' }}">{{ final if final is not none else '-' }}</span>
+                </td>
+                <td class="center status">{{ status_id.get(s.get('status'), s.get('status') or '-') }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="8" class="empty">Belum ada nilai untuk ujian ini.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <table class="sign">
+        <tr>
+            <td>
+                <div>Mengetahui,</div>
+                <div>Kepala Sekolah</div>
+                <div class="space"></div>
+                <div class="line">(............................................)</div>
+            </td>
+            <td>
+                <div>{{ school.get('city', '') }}{% if school.get('city') %}, {% endif %}{{ printed_on }}</div>
+                <div>Guru Mata Pelajaran</div>
+                <div class="space"></div>
+                <div class="line">{{ teacher_name or '(............................................)' }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <div class="doc-footer">
+        Dicetak dari ScanGrade pada {{ printed_on }} &middot; {{ roster|length }} peserta
+    </div>
+
+</div>
+</body>
+</html>

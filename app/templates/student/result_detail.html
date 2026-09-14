@@ -234,6 +234,11 @@
                 <a href="/student/results/{{ submission.id }}/download-pdf" class="text-sm font-extrabold bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2 rounded-xl hover:from-orange-600 hover:to-amber-600 transition inline-flex items-center gap-1">
                     <i class="fas fa-download"></i><span x-text="lang==='en'?'Download PDF':'Unduh PDF'"></span>
                 </a>
+                {# A separate document, not this page in print mode: the report card
+                   has no navigation, no buttons and no tabs to waste paper on. #}
+                <a href="/student/results/{{ submission.id }}/print" target="_blank" rel="noopener" class="text-sm font-extrabold bg-white border-2 border-stone-200 text-stone-600 px-4 py-2 rounded-xl hover:bg-stone-50 transition inline-flex items-center gap-1">
+                    <i class="fas fa-print"></i><span x-text="lang==='en'?'Print report card':'Cetak rapor'"></span>
+                </a>
                 {% endif %}
                 {% if submission.status in ('submitted', 'draft') %}
                 <form method="POST" action="/student/submissions/{{ submission.id }}/retract" class="inline" onsubmit="return confirm('Yakin tarik jawaban?')">
