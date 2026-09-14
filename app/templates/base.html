@@ -27,9 +27,14 @@
            the same #64748b and failed for the same reason (it paints the small
            muted labels), so it became #606c80 — 4.85:1 in the worst case, still
            lighter than --text-dim so the three levels stay distinguishable.
+           --input-border was #cbd5e1, which is 1.36:1 against the page: a field is
+           identified by its border here, because its white fill is 1.06:1 on
+           #f1f5f9, so 3:1 was required and not met. #7c8ca2 is the lightest
+           slate tone that clears it against both surfaces (3.13:1 on the page,
+           3.43:1 on a card) — the dark theme's own border is held to 3:1 too.
            Dark: every value below is measured against every surface in
            tests/unit/test_dark_theme_contrast.py, not chosen by eye. */
-        :root { color-scheme: light; --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-subtle: #f8fafc; --bg-hover: #f1f5f9; --bg-card-translucent: rgba(255,255,255,0.92); --text: #1e293b; --text-dim: #5d6a7d; --text-muted: #606c80; --text-nav: #94a3b8; --border: #e2e8f0; --border-strong: #cbd5e1; --input: #ffffff; --input-border: #cbd5e1; --shadow: 0 1px 2px rgba(0,0,0,0.03); }
+        :root { color-scheme: light; --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-subtle: #f8fafc; --bg-hover: #f1f5f9; --bg-card-translucent: rgba(255,255,255,0.92); --text: #1e293b; --text-dim: #5d6a7d; --text-muted: #606c80; --text-nav: #94a3b8; --border: #e2e8f0; --border-strong: #cbd5e1; --input: #ffffff; --input-border: #7c8ca2; --shadow: 0 1px 2px rgba(0,0,0,0.03); }
         /* The dark tokens and every dark remap live in the `@media screen` block
            below — see "Dark theme — screen only" for why print is excluded. */
 * { font-family: 'Inter', system-ui, sans-serif; }
@@ -84,6 +89,63 @@ html { transition: background-color .3s, color .3s; }
         @media (max-width: 1023px) { main { padding-bottom: 4rem; } }
         .dark-header { background: var(--bg-card); }
 
+        /* ══ Light mode — the tint/accent pairs ═════════════════════════════════
+           The dark remap further down answers "this light utility is wrong on a
+           dark page". Light mode has the mirror problem, and it cannot be
+           answered by remapping a utility on its own: `text-amber-600` is
+           perfect on a white card and only fails on a `-50`/`-100` tint of its
+           own hue — 2.86:1 on `bg-amber-100`, which is exactly what a warning
+           badge is. Measured across the tree, 24 such pairs sat below AA.
+
+           So each rule names *both* halves of the pair. The accent keeps its
+           hue and steps down a shade or two; the tint is untouched, because the
+           tint is the design. Only `color` moves, so a saturated fill such as
+           `bg-emerald-600` on a button keeps its colour and its white label.
+
+           Two details are load-bearing:
+
+           * `:where()` around the background half holds each rule at one class
+             of specificity — the same as `:where(.dark) .text-amber-600` in the
+             remap below. Equal specificity means source order decides, and the
+             remap is later, so dark mode still gets the dark value.
+           * These sit *outside* `@media screen`, unlike the dark theme. Print
+             drops the remap and keeps the light palette, so a badge has to stay
+             readable on paper too.
+
+           Out of scope, deliberately: a white label on a saturated fill
+           (`bg-amber-500 text-white`, 2.15:1) is the app's button surface — the
+           same one the dark theme keeps saturated — and a test holds those to a
+           white or black label instead of to 4.5:1. Text that inherits its
+           surface from an ancestor cannot be attributed statically at all;
+           that is what the `--text*` tokens are for, not this block.
+           ═════════════════════════════════════════════════════════════════════ */
+        :where(.bg-gray-100).text-gray-400 { color: #4b5563; }      /* 2.31 → 6.87 */
+        :where(.bg-stone-100).text-stone-400 { color: #57534e; }    /* 2.31 → 6.99 */
+        :where(.bg-slate-100).text-slate-400 { color: #475569; }    /* 2.34 → 6.92 */
+        :where(.bg-surface-100).text-surface-400 { color: #475569; }  /* 2.34 → 6.92 */
+        :where(.bg-stone-50).text-stone-400 { color: #78716c; }     /* 2.41 → 4.59 */
+        :where(.bg-surface-50).text-surface-400 { color: #64748b; }  /* 2.45 → 4.55 */
+        :where(.bg-white).text-surface-400 { color: #64748b; }      /* 2.56 → 4.76 */
+        :where(.bg-amber-100).text-amber-600 { color: #b45309; }    /* 2.86 → 4.51 */
+        :where(.bg-amber-50).text-amber-600 { color: #b45309; }     /* 3.07 → 4.84 */
+        :where(.bg-orange-50).text-orange-600 { color: #c2410c; }   /* 3.35 → 4.88 */
+        :where(.bg-orange-200).text-orange-700 { color: #9a3412; }  /* 3.83 → 5.40 */
+        :where(.bg-emerald-100).text-emerald-600 { color: #047857; }  /* 3.32 → 4.84 */
+        :where(.bg-emerald-50).text-emerald-600 { color: #047857; }  /* 3.58 → 5.21 */
+        :where(.bg-purple-50).text-purple-500 { color: #9333ea; }   /* 3.69 → 5.02 */
+        :where(.bg-violet-100).text-violet-500 { color: #7c3aed; }  /* 3.57 → 4.80 */
+        :where(.bg-primary-100).text-primary-600 { color: #1d4ed8; }  /* 4.24 → 5.49 */
+        :where(.bg-red-50).text-red-500 { color: #b91c1c; }         /* 3.44 → 5.91 */
+        :where(.bg-red-50).text-red-600 { color: #b91c1c; }         /* 4.41 → 5.91 */
+        :where(.bg-red-100).text-red-600 { color: #b91c1c; }        /* 3.95 → 5.30 */
+        :where(.bg-red-200).text-red-700 { color: #991b1b; }        /* 4.47 → 5.74 */
+        :where(.bg-green-200).text-green-700 { color: #166534; }    /* 4.14 → 5.88 */
+        :where(.bg-yellow-200).text-yellow-700 { color: #854d0e; }  /* 4.23 → 5.89 */
+        :where(.bg-surface-100).text-surface-500 { color: #475569; }  /* 4.34 → 6.92 */
+        :where(.bg-surface-200).text-surface-500 { color: #475569; }  /* 3.86 → 6.15 */
+        :where(.bg-slate-100).text-slate-500 { color: #475569; }    /* 4.34 → 6.92 */
+        :where(.bg-slate-200).text-slate-500 { color: #475569; }    /* 3.86 → 6.15 */
+
         /* ══ Dark theme — screen only ══════════════════════════════════════════
            The tokens and every remap below live inside `@media screen`.
 
@@ -122,7 +184,10 @@ html { transition: background-color .3s, color .3s; }
         /* ── Neutral surfaces ── */
         :where(.dark) .bg-white { background: var(--bg-card); }
         :where(.dark) :is(.bg-surface-50,.bg-surface-100,.bg-slate-50,.bg-slate-100,.bg-stone-50,.bg-stone-100,.bg-gray-50,.bg-gray-100,.bg-zinc-50,.bg-zinc-100) { background: var(--bg-subtle); }
-        :where(.dark) :is(.bg-surface-200,.bg-surface-300,.bg-slate-200,.bg-stone-200,.bg-gray-200) { background: var(--bg-hover); }
+        :where(.dark) :is(.bg-surface-200,.bg-surface-300,.bg-slate-200,.bg-slate-300,.bg-stone-200,.bg-stone-300,.bg-gray-200,.bg-gray-300) { background: var(--bg-hover); }
+        /* -300 is the same "track" shade as -200 here: a hairline divider between
+           two toolbar buttons, the off state of a toggle, and the seat of a
+           status badge. On a dark page any of those in grey is a bright scratch. */
         /* Floating chips that sit over page content (the auth back-button, the
            exam timer badge). The 5 – 25% whites are decorative shapes on a
            saturated gradient and are deliberately untouched. */
@@ -151,7 +216,7 @@ html { transition: background-color .3s, color .3s; }
         /* ── Neutral borders and dividers ── */
         :where(.dark) :is(.border-surface-50,.border-surface-100,.border-surface-200,.border-surface-300,.border-slate-50,.border-slate-100,.border-slate-200,.border-slate-300,.border-stone-100,.border-stone-200,.border-stone-300,.border-gray-100,.border-gray-200,.border-gray-300) { border-color: var(--border); }
         /* A divide- utility colours the *children*, so the override has to as well */
-        :where(.dark) :is(.divide-surface-50,.divide-surface-100,.divide-surface-200,.divide-slate-100,.divide-slate-200,.divide-stone-100,.divide-stone-200,.divide-gray-100,.divide-gray-200) > :not([hidden]) ~ :not([hidden]) { border-color: var(--border); }
+        :where(.dark) :is(.divide-surface-50,.divide-surface-100,.divide-surface-200,.divide-slate-50,.divide-slate-100,.divide-slate-200,.divide-stone-50,.divide-stone-100,.divide-stone-200,.divide-gray-100,.divide-gray-200) > :not([hidden]) ~ :not([hidden]) { border-color: var(--border); }
 
         /* ── Hover ────────────────────────────────────────────────────────────
            A hover state is its own class, so remapping `bg-white` does nothing
@@ -238,6 +303,13 @@ html { transition: background-color .3s, color .3s; }
         :where(.dark) :is(.text-sky-600,.text-sky-700,.text-sky-800,.text-sky-900) { color: #7dd3fc; }
         :where(.dark) :is(.border-sky-100,.border-sky-200,.border-sky-300) { border-color: #1c5a80; }
 
+        /* cyan */
+        :where(.dark) :is(.bg-cyan-50,.bg-cyan-100,.bg-cyan-200) { background: #0a2a30; }
+        :where(.dark) :is(.hover\:bg-cyan-50,.hover\:bg-cyan-100):hover { background: #0e3a42; }
+        :where(.dark) :is(.text-cyan-200,.text-cyan-300,.text-cyan-400,.text-cyan-500) { color: #22d3ee; }
+        :where(.dark) :is(.text-cyan-600,.text-cyan-700,.text-cyan-800,.text-cyan-900) { color: #67e8f9; }
+        :where(.dark) :is(.border-cyan-100,.border-cyan-200,.border-cyan-300) { border-color: #155e6b; }
+
         /* blue */
         :where(.dark) :is(.bg-blue-50,.bg-blue-100,.bg-blue-200) { background: #101f3a; }
         :where(.dark) :is(.hover\:bg-blue-50,.hover\:bg-blue-100):hover { background: #14294d; }
@@ -257,7 +329,7 @@ html { transition: background-color .3s, color .3s; }
         :where(.dark) :is(.hover\:bg-violet-50,.hover\:bg-violet-100,.hover\:bg-violet-200):hover { background: #281a48; }
         :where(.dark) :is(.text-violet-200,.text-violet-300,.text-violet-400,.text-violet-500) { color: #a78bfa; }
         :where(.dark) :is(.text-violet-600,.text-violet-700,.text-violet-800,.text-violet-900) { color: #c4b5fd; }
-        :where(.dark) :is(.border-violet-100,.border-violet-200,.border-violet-300) { border-color: #45309f; }
+        :where(.dark) :is(.border-violet-100,.border-violet-200,.border-violet-300,.border-violet-400) { border-color: #45309f; }
 
         /* purple */
         :where(.dark) :is(.bg-purple-50,.bg-purple-100,.bg-purple-200) { background: #1e1436; }
@@ -277,8 +349,8 @@ html { transition: background-color .3s, color .3s; }
         :where(.dark) :is(.bg-primary-50,.bg-primary-100,.bg-primary-200,.bg-brand-50,.bg-brand-100,.bg-brand-200) { background: #101f3a; }
         :where(.dark) :is(.hover\:bg-primary-50,.hover\:bg-primary-100,.hover\:bg-brand-50,.hover\:bg-brand-100):hover { background: #14294d; }
         :where(.dark) :is(.text-primary-200,.text-primary-300,.text-primary-400,.text-primary-500,.text-brand-200,.text-brand-300,.text-brand-400,.text-brand-500) { color: #60a5fa; }
-        :where(.dark) :is(.text-primary-600,.text-primary-700,.text-primary-800,.text-brand-600,.text-brand-700,.text-brand-800) { color: #93c5fd; }
-        :where(.dark) :is(.border-primary-100,.border-primary-200,.border-primary-300,.border-primary-400,.border-brand-100,.border-brand-200,.border-brand-300) { border-color: #1e4a86; }
+        :where(.dark) :is(.text-primary-600,.text-primary-700,.text-primary-800,.text-primary-900,.text-brand-600,.text-brand-700,.text-brand-800,.text-brand-900) { color: #93c5fd; }
+        :where(.dark) :is(.border-primary-100,.border-primary-200,.border-primary-300,.border-primary-400,.border-brand-100,.border-brand-200,.border-brand-300,.border-brand-400) { border-color: #1e4a86; }
 
         /* ── Semantic hover, same pairings as the tints above ── */
         :where(.dark) :is(.hover\:bg-blue-50,.hover\:bg-blue-100,.hover\:bg-blue-200):hover { background: #14294d; }

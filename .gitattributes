@@ -9,3 +9,8 @@
 *.md text eol=lf
 *.service text eol=lf
 *.timer text eol=lf
+# The git hooks carry no extension, so `*.sh` never matched them. Left to
+# core.autocrlf they are checked out as CRLF on Windows, and a hook whose first
+# line ends with a carriage return is not a shebang — it fails with "bad
+# interpreter" on the Linux box that runs it.
+deploy/git-hooks/* text eol=lf
