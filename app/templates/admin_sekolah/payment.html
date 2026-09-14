@@ -3,7 +3,15 @@
 {% block page_title %}Pembayaran{% endblock %}
 {% set is_production = settings.get('is_production', false) %}
 {% set client_key = settings.get('client_key', '') %}
-{% set snap_url = 'https://app.midtrans.com/snap/snap.js' if is_production else 'https://app.sandbox.midtrans.com/snap/snap.js' %}
+{% set snap_remote = 'https://app.midtrans.com/snap/snap.js' if is_production else 'https://app.sandbox.midtrans.com/snap/snap.js' %}
+{# Snap.js finds its own <script> tag by matching the URL against its API host
+   (which carries a scheme and can never match a same-origin path) or against
+   the bare string `veritrans.co.id`, then reads `data-client-key` off the tag
+   it found. The `veritrans.co.id` directory is therefore load-bearing, not
+   decoration: rename it and the client key silently becomes empty and the
+   payment iframe loads without a merchant. Guarded by
+   tests/unit/test_snap_vendored.py. #}
+{% set snap_local = url_for('static', filename='vendor/midtrans/' ~ ('production' if is_production else 'sandbox') ~ '/veritrans.co.id/snap.js') %}
 {% set base_price = base_price|default(gross_amount) %}
 {% set fi = fee_info|default({}) %}
 {% set fee_total = (fi.get('fee_percent_amount', 0) + fi.get('fee_flat', 0)) %}
@@ -92,18 +100,46 @@
 </div>
 
 <script>
-// Load Snap.js
-(function() {
-    var s = document.createElement('script');
-    s.src = '{{ snap_url }}?client_key={{ client_key }}';
-    s.onload = function() {
-        console.log('Snap.js loaded');
-        document.getElementById('pay-button').disabled = false;
-    };
-    s.onerror = function() {
-        document.getElementById('pay-button').innerText = 'Gagal memuat. Refresh halaman.';
-    };
-    document.head.appendChild(s);
+// Snap.js — self-hosted, with the provider's CDN as a fallback.
+//
+// The SDK is served from our own origin so a school on a shaky connection, or
+// behind a filter that blocks app.midtrans.com, can still open the payment
+// page: the file is same-origin, hashed into the static cache for a week, and
+// is the one asset this page cannot work without. If it is missing or corrupt
+// (a bad deploy, a truncated file) the CDN is tried second, so vendoring can
+// only ever add availability, never remove it.
+//
+// `data-client-key` is not decoration: the SDK reads it off whichever <script>
+// tag it recognises as its own, so it has to sit on the tag we append.
+(function () {
+    var CLIENT_KEY = '{{ client_key }}';
+    var SOURCES = [
+        '{{ snap_local }}',
+        '{{ snap_remote }}?client_key={{ client_key }}'
+    ];
+    var payButton = document.getElementById('pay-button');
+
+    function giveUp() {
+        if (payButton) payButton.innerText = 'Gagal memuat. Refresh halaman.';
+    }
+
+    function load(i) {
+        if (i >= SOURCES.length) { giveUp(); return; }
+        var s = document.createElement('script');
+        s.src = SOURCES[i];
+        s.setAttribute('data-client-key', CLIENT_KEY);
+        // Two ways to fail, both advance: `onerror` fires when the file is
+        // missing or unreachable, while a 200 that is not the SDK (a proxy
+        // error page, say) leaves `window.snap` undefined.
+        s.onerror = function () { load(i + 1); };
+        s.onload = function () {
+            if (!window.snap) { load(i + 1); return; }
+            if (payButton) payButton.disabled = false;
+        };
+        document.head.appendChild(s);
+    }
+
+    load(0);
 })();
 
 function openMidtrans() {
