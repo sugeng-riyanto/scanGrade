@@ -111,8 +111,24 @@ def test_the_toggle_goes_through_setlang():
 
 
 def test_the_toggle_starts_from_the_stored_choice():
-    assert re.search(r"lang:\s*localStorage\.getItem\('sg_lang'\)\s*\|\|\s*'id'", SOURCE), \
-        "the initial value must still come from localStorage, defaulting to Indonesian"
+    """A stored choice wins; otherwise the app's English default applies.
+
+    The default lives in base.html and is the same on every page — the landing
+    route no longer asks for English, because asking would be a second source of
+    truth that could disagree with this one. It stays a Jinja `default(..., true)`
+    so a page that says nothing gets `en` rather than an empty string, which
+    `t()` would read as "not English" by accident.
+    """
+    assert re.search(
+        r"lang:\s*localStorage\.getItem\('sg_lang'\)\s*\|\|\s*"
+        r"'\{\{\s*default_lang\|default\('en', true\)\s*\}\}'", SOURCE), \
+        "the initial value must come from localStorage, then the page default"
+
+    # The element the browser reads must be right *before* Alpine runs, or a
+    # stored-Indonesian session flashes English and reports the wrong language to
+    # a screen reader on the first pass.
+    assert '<html lang="{{ default_lang|default(\'en\', true) }}"' in SOURCE, \
+        "the document language must come from the same default as the scope"
 
 
 def test_the_page_language_attribute_is_restored_on_load():
@@ -238,6 +254,10 @@ TRANSLATED = [
     "admin_sekolah/students.html",
     "student/settings.html",
     "teacher/ai_settings.html",
+    # The one page whose default is English rather than Indonesian, because it is
+    # the only page a stranger sees. It is also the page with no authenticated
+    # chrome, so it carries its own language button.
+    "landing.html",
 ]
 
 # Near-certain Indonesian markers, chosen as function words and domain nouns that
@@ -388,10 +408,36 @@ def test_translated_pages_carry_no_hardcoded_indonesian():
         "component method:\n  " + "\n  ".join(leftovers))
 
 
+def test_every_page_opens_in_english_by_default():
+    """The whole app opens in English, decided in exactly one place.
+
+    `default_lang` survives as a per-route override so a page could ever ask for
+    Indonesian — but nothing does, and that is the assertion. A route passing it
+    would re-create the very thing this guards against: two places deciding the
+    default, drifting apart. Pinning "no route overrides it" is also stronger
+    than pinning "the landing route passes en", because the path that is *absent*
+    cannot keep passing after base.html changes.
+    """
+    overrides = {
+        str(path.relative_to(ROOT)).replace("\\", "/")
+        for path in sorted((ROOT / "app").rglob("*.py"))
+        if "default_lang" in path.read_text(encoding="utf-8", errors="replace")
+    }
+
+    assert overrides == set(), (
+        "base.html decides the language for every page; a route that passes "
+        f"`default_lang` introduces a second default: {sorted(overrides)}")
+    assert "{{ default_lang|default('en', true) }}" in SOURCE, \
+        "base.html must open in English"
+    assert SOURCE.count("default_lang|default('en', true)") == 2, \
+        ("both the <html lang> element and the Alpine scope must read the same "
+         "default, or the button label and the page can disagree")
+
+
 def test_the_translated_list_only_grows_with_intent():
     """Every entry is a page someone converted. Pinning the count makes a silently
     dropped entry visible, the same way the count guard above does for counts."""
-    assert len(TRANSLATED) >= 5
+    assert len(TRANSLATED) >= 6
     for rel in TRANSLATED:
         text = (ROOT / "app" / "templates" / rel).read_text(encoding="utf-8")
         assert EXTENDS_BASE.search(text), \
@@ -414,3 +460,31 @@ def test_messages_built_outside_a_template_can_be_translated():
         "the stored language must be applied before Alpine, like the dark class is"
     assert "document.documentElement.lang = this.lang" in SOURCE, \
         "Alpine's init must keep the attribute in sync after a toggle"
+
+
+def test_a_text_binding_never_escapes_a_quote():
+    """A backslash in a text binding is a runtime error that renders nothing.
+
+    The browser hands Alpine the attribute text verbatim, backslash and all, so an
+    apostrophe written as backslash-quote closes the JavaScript string early. Alpine
+    throws while evaluating, and the element is left **empty** — no message on the
+    page, nothing a smoke test would notice, just one paragraph quietly missing.
+    That is exactly what happened to the landing page's stability note, which is why
+    this exists: the English had to be rephrased to avoid the apostrophe.
+
+    A backslash has no legitimate use in a text binding, and none of the templates
+    contain one, so the rule is absolute rather than a pattern to argue with.
+    """
+    binding = re.compile(r'(?:x-text|:placeholder|:title|:aria-label)="([^"]*)"')
+    offenders = []
+    for path in TEMPLATES:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in binding.finditer(text):
+            if "\\" in match.group(1):
+                line = text[:match.start()].count("\n") + 1
+                offenders.append(f"{path.name}:{line}  {match.group(1)[:70]}")
+
+    assert not offenders, (
+        "these bindings contain a backslash, which the browser passes to Alpine "
+        "verbatim — the expression throws and the element renders empty. Rephrase "
+        "the string instead of escaping it:\n  " + "\n  ".join(offenders))

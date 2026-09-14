@@ -1,5 +1,12 @@
 <!DOCTYPE html>
-<html lang="id" class="h-full">
+{# The whole app opens in English. This is resolved on the element the browser
+   reads, so the document is right *before* JS runs: no flash of the wrong
+   language, and a screen reader gets the real one on the first pass.
+
+   `default_lang` stays as the seam for a page that ever needs to open in
+   Indonesian; nothing passes it today, so English is the one source of truth.
+   A stored choice still wins, in the script below. #}
+<html lang="{{ default_lang|default('en', true) }}" class="h-full">
 <script>if(localStorage.getItem('theme')==='dark'||(!localStorage.getItem('theme')&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');var sgStoredLang=localStorage.getItem('sg_lang');if(sgStoredLang)document.documentElement.lang=sgStoredLang</script>
 <head>
     <meta charset="UTF-8">
@@ -482,7 +489,7 @@ html { transition: background-color .3s, color .3s; }
         // own copy, so English only appeared after a manual reload. Components
         // now inherit this scope instead of redeclaring it — see
         // tests/unit/test_language_toggle.py, which fails if one comes back.
-        lang: localStorage.getItem('sg_lang') || 'id',
+        lang: localStorage.getItem('sg_lang') || '{{ default_lang|default('en', true) }}',
         setLang(next) {
             this.lang = next;
             localStorage.setItem('sg_lang', next);
@@ -957,8 +964,8 @@ function linkify(text) {
     <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-surface-400">
         <p>&copy; 2026 ScanGrade. All rights reserved.</p>
         <div class="flex items-center gap-4 flex-wrap justify-center">
-            <a href="/privacy" target="_blank" rel="noopener" class="hover:text-primary-600 transition font-medium">Kebijakan Privasi</a>
-            <a href="/terms" target="_blank" rel="noopener" class="hover:text-primary-600 transition font-medium">Syarat &amp; Ketentuan</a>
+            <a href="/privacy" target="_blank" rel="noopener" class="hover:text-primary-600 transition font-medium" x-text="t('Kebijakan Privasi','Privacy Policy')"></a>
+            <a href="/terms" target="_blank" rel="noopener" class="hover:text-primary-600 transition font-medium" x-text="t('Syarat &amp; Ketentuan','Terms &amp; Conditions')"></a>
             <span id="dpo-footer" class="text-surface-400 hidden"><i class="fas fa-user-shield mr-1"></i> DPO: <span id="dpo-name"></span></span>
             <span id="pse-footer" class="text-surface-400 hidden"><i class="fas fa-certificate mr-1"></i> <span id="pse-number"></span></span>
         </div>

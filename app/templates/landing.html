@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}ScanGrade - Koreksi Ujian Digital{% endblock %}
+{% block title %}ScanGrade — Digital Exam Platform{% endblock %}
 {% block head_extra %}
 <style>
 .hero-glow { animation: glow 3s ease-in-out infinite; }
@@ -7,7 +7,12 @@
 </style>
 {% endblock %}
 {% block content_noauth %}
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
+{# The tab title is the one string a page cannot bind with x-text, because the
+   <title> element lives in <head> — outside any Alpine scope. It is rendered
+   server-side in the page's default language, and this effect keeps it in step
+   when the reader toggles: x-effect re-runs because it reads `lang`. #}
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50"
+     x-effect="document.title = t('ScanGrade — Platform Ujian Digital', 'ScanGrade — Digital Exam Platform')">
     <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
         <div class="flex items-center gap-2">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/30">
@@ -16,8 +21,17 @@
             <span class="font-extrabold text-lg text-surface-800">ScanGrade</span>
         </div>
         <div class="flex items-center gap-3">
-            <a href="/auth/login-user" class="px-4 py-2 text-sm font-bold text-surface-600 hover:text-surface-700 transition">Masuk</a>
-            <a href="/auth/register" class="px-5 py-2.5 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 transition">Daftar Sekolah</a>
+            <!-- The landing page has its own header, so it carries its own language
+                 button: base.html's lives in the authenticated chrome, which this
+                 page never renders. Same convention — the label names the language
+                 you would switch *to*, read from the same `lang` the content uses. -->
+            <button @click="setLang(lang === 'id' ? 'en' : 'id')" type="button"
+                    class="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-surface-500 hover:text-primary-600 border border-surface-200 rounded-lg transition"
+                    title="Bahasa / Language">
+                <i class="fas fa-globe"></i><span x-text="lang === 'id' ? 'EN' : 'ID'"></span>
+            </button>
+            <a href="/auth/login-user" class="px-4 py-2 text-sm font-bold text-surface-600 hover:text-surface-700 transition" x-text="t('Masuk','Log in')"></a>
+            <a href="/auth/register" class="px-5 py-2.5 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 transition" x-text="t('Daftar Sekolah','Register School')"></a>
         </div>
     </header>
 
@@ -28,19 +42,17 @@
                 <i class="fas fa-robot"></i> AI-Powered Essay Grading
             </div>
             <h1 class="text-4xl lg:text-5xl font-extrabold text-surface-900 leading-tight">
-                Platform Ujian Digital<br>
+                <span x-text="t('Platform Ujian Digital','Digital Exam Platform')"></span><br>
                 <span class="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-primary-400">All-in-One</span>
             </h1>
-            <p class="mt-4 text-lg text-surface-500 font-medium max-w-2xl mx-auto leading-relaxed">
-                Dari pembuatan soal, anti-cheat otomatis, koreksi esai dengan AI, 
-                hingga analitik real-time — semua dalam satu platform.
-            </p>
+            <p class="mt-4 text-lg text-surface-500 font-medium max-w-2xl mx-auto leading-relaxed"
+               x-text="t('Dari pembuatan soal, anti-cheat otomatis, koreksi esai dengan AI, hingga analitik real-time — semua dalam satu platform.','From authoring questions, automatic anti-cheat and AI essay grading to real-time analytics — all in one platform.')"></p>
             <div class="mt-8 flex items-center justify-center gap-4 flex-wrap">
                 <a href="/auth/register" class="px-8 py-3.5 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-extrabold shadow-lg shadow-primary-500/30 hover:from-primary-600 hover:to-primary-700 transition text-sm">
-                    <i class="fas fa-school mr-2"></i>Daftarkan Sekolah
+                    <i class="fas fa-school mr-2"></i><span x-text="t('Daftarkan Sekolah','Register Your School')"></span>
                 </a>
                 <a href="/auth/login-user" class="px-8 py-3.5 border-2 border-surface-200 text-surface-700 rounded-xl font-extrabold hover:border-primary-300 hover:text-primary-700 transition text-sm">
-                    <i class="fas fa-sign-in-alt mr-2"></i>Masuk
+                    <i class="fas fa-sign-in-alt mr-2"></i><span x-text="t('Masuk','Log in')"></span>
                 </a>
             </div>
             <div class="mt-6 flex items-center justify-center gap-3 flex-wrap">
@@ -57,17 +69,17 @@
                 {% endif %}
                 {% if show_tg %}
                 <a href="/tutorial/guru" class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
-                    <i class="fas fa-chalkboard-teacher"></i>Tutorial Guru
+                    <i class="fas fa-chalkboard-teacher"></i><span x-text="t('Tutorial Guru','Teacher Tutorial')"></span>
                 </a>
                 {% endif %}
                 {% if show_ts %}
                 <a href="/tutorial/murid" class="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200">
-                    <i class="fas fa-user-graduate"></i>Tutorial Siswa
+                    <i class="fas fa-user-graduate"></i><span x-text="t('Tutorial Siswa','Student Tutorial')"></span>
                 </a>
                 {% endif %}
                 {% if show_ta %}
                 <a href="/tutorial/admin-sekolah" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition border border-blue-200">
-                    <i class="fas fa-school"></i>Tutorial Admin
+                    <i class="fas fa-school"></i><span x-text="t('Tutorial Admin','Admin Tutorial')"></span>
                 </a>
                 {% endif %}
                 {% if not ds or ds.demo_enabled %}
@@ -84,57 +96,57 @@
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 transform hover:scale-110 transition-transform duration-300">
                     <i class="fas fa-pen-fancy text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm">3 Tipe Soal</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">MCQ, Esai Teks (paragraph), dan Esai Canvas — lengkap dengan upload PDF soal.</p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('3 Tipe Soal','3 Question Types')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('MCQ, Esai Teks (paragraph), dan Esai Canvas — lengkap dengan upload PDF soal.','MCQ, Text Essay (paragraph) and Canvas Essay — complete with PDF question upload.')"></p>
             </div>
             <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
                     <i class="fas fa-robot text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Koreksi AI</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">AI grading untuk esai teks. Guru tinggal review. Support Gemini, OpenAI, DeepSeek, Groq.</p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Koreksi AI','AI Grading')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('AI grading untuk esai teks. Guru tinggal review. Support Gemini, OpenAI, DeepSeek, Groq.','AI grading for text essays. The teacher just reviews. Supports Gemini, OpenAI, DeepSeek, Groq.')"></p>
             </div>
             <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
                     <i class="fas fa-shield-alt text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Anti-Cheat</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">Deteksi tab switch, watermark, blokir copy-paste, auto-submit saat maksimal pelanggaran.</p>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Deteksi tab switch, watermark, blokir copy-paste, auto-submit saat maksimal pelanggaran.','Tab-switch detection, watermark, copy-paste blocked, auto-submit at the violation limit.')"></p>
             </div>
             <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
                     <i class="fas fa-ruler text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Alat Ukur Digital</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">Ruler 30cm, busur 180°, segitiga siku 45°, jangka — transparan, bisa digeser & diputar.</p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Alat Ukur Digital','Digital Tools')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Ruler 30cm, busur 180°, segitiga siku 45°, jangka — transparan, bisa digeser & diputar.','30cm ruler, 180° protractor, 45° set square, compass — transparent, draggable and rotatable.')"></p>
             </div>
             <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-red-500 to-rose-500 flex items-center justify-center shadow-lg shadow-red-500/20">
                     <i class="fas fa-chart-bar text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Analitik & Export</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">Distribusi nilai, soal tersulit, export XLSX/PDF dengan canvas siswa.</p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Analitik & Export','Analytics & Export')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Distribusi nilai, soal tersulit, export XLSX/PDF dengan canvas siswa.','Score distribution, hardest questions, XLSX/PDF export including student canvas work.')"></p>
             </div>
             <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center shadow-lg shadow-teal-500/20">
                     <i class="fas fa-school text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Multi-Sekolah</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">Setiap sekolah punya NPSN sendiri. Data terpisah, aman, dan terisolasi.</p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Multi-Sekolah','Multi-School')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Setiap sekolah punya NPSN sendiri. Data terpisah, aman, dan terisolasi.','Every school has its own NPSN. Data is separate, safe and isolated.')"></p>
             </div>
             <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500 to-cyan-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
                     <i class="fas fa-credit-card text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Pembayaran Online</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">Midtrans terintegrasi. Billing otomatis, activation code, trial 14 hari.</p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Pembayaran Online','Online Payment')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Midtrans terintegrasi. Billing otomatis, activation code, trial 14 hari.','Midtrans integrated. Automatic billing, activation codes, 14-day trial.')"></p>
             </div>
             <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
                     <i class="fas fa-calculator text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Kalkulator Ilmiah</h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed">Scientific calculator dengan trigonometri, logaritma, memory — bisa diaktifkan per ujian.</p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Kalkulator Ilmiah','Scientific Calculator')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Scientific calculator dengan trigonometri, logaritma, memory — bisa diaktifkan per ujian.','Scientific calculator with trigonometry, logarithms and memory — enabled per exam.')"></p>
             </div>
         </div>
 
@@ -142,116 +154,121 @@
         <div class="mt-16 bg-white rounded-3xl p-8 lg:p-12 shadow-lg shadow-surface-200/40 border border-surface-100">
             <div class="text-center mb-8">
                 <span class="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-100 rounded-full text-blue-700 text-xs font-bold shadow-sm">
-                    <i class="fas fa-chart-bar"></i> Kinerja Terukur
+                    <i class="fas fa-chart-bar"></i> <span x-text="t('Kinerja Terukur','Measured Performance')"></span>
                 </span>
-                <h2 class="text-2xl lg:text-3xl font-extrabold text-surface-900 mt-3">Skalabilitas</h2>
-                <p class="text-sm text-surface-500 font-medium mt-1">Hasil uji coba 500 siswa menggunakan platform secara bersamaan:</p>
+                <h2 class="text-2xl lg:text-3xl font-extrabold text-surface-900 mt-3" x-text="t('Skalabilitas','Scalability')"></h2>
+                <p class="text-sm text-surface-500 font-medium mt-1" x-text="t('Hasil uji coba 500 siswa menggunakan platform secara bersamaan:','Results of a trial with 500 students using the platform at the same time:')"></p>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 <div class="text-center p-5 bg-gradient-to-br from-blue-50 to-blue-50 rounded-2xl border border-blue-100">
                     <div class="text-3xl font-extrabold text-blue-600">46.698</div>
-                    <div class="text-xs font-bold text-blue-700 mt-1">Akses Terproses</div>
-                    <div class="text-[10px] text-blue-400 mt-0.5">beban puncak 10 menit</div>
+                    <div class="text-xs font-bold text-blue-700 mt-1" x-text="t('Akses Terproses','Requests Processed')"></div>
+                    <div class="text-[10px] text-blue-400 mt-0.5" x-text="t('beban puncak 10 menit','over a 10-minute peak')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-emerald-50 to-emerald-50 rounded-2xl border border-emerald-100">
                     <div class="text-3xl font-extrabold text-emerald-600">0%</div>
-                    <div class="text-xs font-bold text-emerald-700 mt-1">Tingkat Error</div>
-                    <div class="text-[10px] text-emerald-400 mt-0.5">dari total akses&#42;</div>
+                    <div class="text-xs font-bold text-emerald-700 mt-1" x-text="t('Tingkat Error','Error Rate')"></div>
+                    <div class="text-[10px] text-emerald-400 mt-0.5" x-text="t('dari total akses*','of all requests*')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-amber-50 to-amber-50 rounded-2xl border border-amber-100">
-                    <div class="text-3xl font-extrabold text-amber-600">&lt; 1 detik</div>
-                    <div class="text-xs font-bold text-amber-700 mt-1">Waktu Respon</div>
-                    <div class="text-[10px] text-amber-400 mt-0.5">rata-rata tiap akses</div>
+                    <div class="text-3xl font-extrabold text-amber-600" x-text="t('< 1 detik','< 1 second')"></div>
+                    <div class="text-xs font-bold text-amber-700 mt-1" x-text="t('Waktu Respon','Response Time')"></div>
+                    <div class="text-[10px] text-amber-400 mt-0.5" x-text="t('rata-rata tiap akses','average per request')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-primary-50 to-primary-50 rounded-2xl border border-primary-100">
                     <div class="text-3xl font-extrabold text-primary-600">500</div>
-                    <div class="text-xs font-bold text-primary-700 mt-1">Siswa Serentak</div>
-                    <div class="text-[10px] text-primary-400 mt-0.5">durasi 10 menit</div>
+                    <div class="text-xs font-bold text-primary-700 mt-1" x-text="t('Siswa Serentak','Concurrent Students')"></div>
+                    <div class="text-[10px] text-primary-400 mt-0.5" x-text="t('durasi 10 menit','10-minute duration')"></div>
                 </div>
             </div>
             <div class="mt-6 text-center text-[11px] text-slate-400 leading-relaxed space-y-1">
-                <p>&#42; Uji coba menggunakan Locust (alat uji beban) terhadap server produksi <span class="text-slate-500">scangrade.web.id</span>. Seratus persen request berstatus 2xx. Waktu respon adalah rata-rata dari seluruh endpoint.</p>
-                <p>Server stabil; kendala hanya mungkin dari jaringan siswa. Setara 1 sesi ujian 2 jam untuk 500 siswa.</p>
+                <p><span x-text="t('* Uji coba menggunakan Locust (alat uji beban) terhadap server produksi','* The trial used Locust (a load-testing tool) against the production server')"></span> <span class="text-slate-500">scangrade.web.id</span><span x-text="t('. Seratus persen request berstatus 2xx. Waktu respon adalah rata-rata dari seluruh endpoint.','. One hundred percent of requests returned 2xx. Response time is the average across all endpoints.')"></span></p>
+                <p x-text="t('Server stabil; kendala hanya mungkin dari jaringan siswa. Setara 1 sesi ujian 2 jam untuk 500 siswa.','The server stayed stable; the only obstacle is the network on the student side. Equivalent to one 2-hour exam session for 500 students.')"></p>
             </div>
 
             <!-- 1000 user result -->
             <div class="mt-6 border-t border-slate-100 dark:border-slate-700 pt-6">
                 <div class="text-center mb-4">
                     <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-violet-100 to-fuchsia-100 dark:from-violet-900/40 dark:to-fuchsia-900/40 rounded-full text-violet-700 dark:text-violet-300 text-[10px] font-bold shadow-sm">
-                        <i class="fas fa-rocket text-[9px]"></i> Uji Lanjutan &mdash; 1.000 Siswa Serentak
+                        <i class="fas fa-rocket text-[9px]"></i> <span x-text="t('Uji Lanjutan — 1.000 Siswa Serentak','Further Test — 1,000 Concurrent Students')"></span>
                     </span>
                 </div>
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <div class="text-center p-4 rounded-2xl border-2 border-blue-200 dark:border-blue-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
                         <div class="text-2xl font-extrabold" style="color:#2563eb">74.923</div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5">Akses Terproses</div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500">beban puncak 10 menit</div>
+                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Akses Terproses','Requests Processed')"></div>
+                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('beban puncak 10 menit','over a 10-minute peak')"></div>
                     </div>
                     <div class="text-center p-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
                         <div class="text-2xl font-extrabold" style="color:#059669">&lt; 11%</div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5">Tingkat Error</div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500">dari total akses</div>
+                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Tingkat Error','Error Rate')"></div>
+                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('dari total akses','of all requests')"></div>
                     </div>
                     <div class="text-center p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
-                        <div class="text-2xl font-extrabold" style="color:#d97706">&lt; 5 dtk</div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5">Waktu Respon</div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500">rata-rata tiap akses</div>
+                        <div class="text-2xl font-extrabold" style="color:#d97706" x-text="t('< 5 dtk','< 5 s')"></div>
+                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Waktu Respon','Response Time')"></div>
+                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('rata-rata tiap akses','average per request')"></div>
                     </div>
                     <div class="text-center p-4 rounded-2xl border-2 border-violet-200 dark:border-violet-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
                         <div class="text-2xl font-extrabold" style="color:#7c3aed">1.000</div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5">Siswa Serentak</div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500">durasi 10 menit</div>
+                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Siswa Serentak','Concurrent Students')"></div>
+                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('durasi 10 menit','10-minute duration')"></div>
                     </div>
                 </div>
                 <div class="mt-3 text-center text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed max-w-2xl mx-auto">
-                    Uji 1.000 user menunjukkan server tetap responsif. Error 11% disebabkan <strong class="text-slate-500 dark:text-slate-400">rate limiter keamanan</strong>, bukan kegagalan server. Response time rata-rata &lt;5 detik di bawah beban maksimal. Untuk produksi 1.000+ siswa bersamaan, disarankan upgrade VPS ke 2GB RAM.
+                    <span x-text="t('Uji 1.000 user menunjukkan server tetap responsif. Error 11% disebabkan','The 1,000-user test shows the server stays responsive. The 11% error rate came from')"></span>
+                    <strong class="text-slate-500 dark:text-slate-400" x-text="t('rate limiter keamanan','the security rate limiter')"></strong>
+                    <span x-text="t(', bukan kegagalan server. Response time rata-rata kurang dari 5 detik di bawah beban maksimal. Untuk produksi 1.000+ siswa bersamaan, disarankan upgrade VPS ke 2GB RAM.',', not from a server failure. Average response time is under 5 seconds at peak load. For production with 1,000+ concurrent students, upgrading the VPS to 2GB RAM is recommended.')"></span>
                 </div>
             </div>
         </div>
 
         <!-- CTA -->
         <div class="mt-16 text-center bg-gradient-to-r from-primary-600 to-primary-500 rounded-3xl p-10 lg:p-14 shadow-xl shadow-primary-500/20">
-            <h2 class="text-2xl lg:text-3xl font-extrabold text-white">Siap digitalisasi ujian?</h2>
-            <p class="mt-2 text-primary-200 font-medium">Daftarkan sekolah Anda dan dapatkan trial gratis 14 hari.</p>
+            <h2 class="text-2xl lg:text-3xl font-extrabold text-white" x-text="t('Siap digitalisasi ujian?','Ready to take your exams digital?')"></h2>
+            <p class="mt-2 text-primary-200 font-medium" x-text="t('Daftarkan sekolah Anda dan dapatkan trial gratis 14 hari.','Register your school and get a free 14-day trial.')"></p>
             <div class="mt-6 flex items-center justify-center gap-4 flex-wrap">
                 <a href="/auth/register" class="px-8 py-3.5 bg-white text-primary-700 rounded-xl font-extrabold hover:bg-primary-50 transition shadow-lg text-sm">
-                    <i class="fas fa-school mr-2"></i>Daftar Sekolah
+                    <i class="fas fa-school mr-2"></i><span x-text="t('Daftar Sekolah','Register School')"></span>
                 </a>
                 <a href="/pricing" class="px-8 py-3.5 border-2 border-white/30 text-white rounded-xl font-extrabold hover:bg-white/10 transition text-sm">
-                    <i class="fas fa-tag mr-2"></i>Lihat Harga
+                    <i class="fas fa-tag mr-2"></i><span x-text="t('Lihat Harga','View Pricing')"></span>
                 </a>
             </div>
         </div>
 
         <!-- Demo Request -->
         <div class="mt-12 max-w-lg mx-auto bg-white rounded-2xl p-8 shadow-lg shadow-surface-200/40 border border-surface-100">
-            <h3 class="text-lg font-extrabold text-surface-800 text-center">Mau lihat langsung?</h3>
-            <p class="text-xs text-surface-500 text-center mt-1 font-medium">Isi form di bawah, tim kami akan demo-kan langsung.</p>
+            <h3 class="text-lg font-extrabold text-surface-800 text-center" x-text="t('Mau lihat langsung?','Want to see it in action?')"></h3>
+            <p class="text-xs text-surface-500 text-center mt-1 font-medium" x-text="t('Isi form di bawah, tim kami akan demo-kan langsung.','Fill in the form below and our team will give you a live demo.')"></p>
             <form id="demo-form" class="mt-5 space-y-3" onsubmit="return submitDemo(event)">
-                <input type="text" name="school_name" required placeholder="Nama Sekolah"
+                <input type="text" name="school_name" required :placeholder="t('Nama Sekolah','School Name')"
                        class="w-full px-4 py-2.5 border border-surface-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary-500">
                 <input type="email" name="email" required placeholder="Email"
                        class="w-full px-4 py-2.5 border border-surface-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary-500">
-                <input type="tel" name="phone" placeholder="No. WhatsApp (opsional)"
+                <input type="tel" name="phone" :placeholder="t('No. WhatsApp (opsional)','WhatsApp Number (optional)')"
                        class="w-full px-4 py-2.5 border border-surface-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary-500">
                 <button type="submit"
                         class="w-full py-3 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-extrabold shadow-lg shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 transition text-sm">
-                    <i class="fas fa-paper-plane mr-2"></i>Minta Demo
+                    <i class="fas fa-paper-plane mr-2"></i><span x-text="t('Minta Demo','Request a Demo')"></span>
                 </button>
             </form>
             <div id="demo-success" class="hidden mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
                 <i class="fas fa-check-circle text-emerald-500 text-2xl"></i>
-                <p class="text-sm font-bold text-emerald-700 mt-1">Terima kasih! Kami akan menghubungi Anda.</p>
+                <p class="text-sm font-bold text-emerald-700 mt-1" x-text="t('Terima kasih! Kami akan menghubungi Anda.','Thank you! We will get in touch.')"></p>
             </div>
         </div>
 
         <script>
+        // window.sgT, not t(): this is plain JS outside an Alpine expression, so it
+        // has no scope to read `lang` from. sgT reads the <html lang> attribute that
+        // setLang() keeps in sync — see base.html.
         async function submitDemo(e) {
             e.preventDefault();
             const form = e.target;
             const btn = form.querySelector('button');
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Mengirim...';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>' + window.sgT('Mengirim...', 'Sending...');
             try {
                 const res = await fetch('/api/demo-request', {
                     method: 'POST',
@@ -263,15 +280,15 @@
                 document.getElementById('demo-success').classList.remove('hidden');
             } catch (err) {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Minta Demo';
-                alert('Gagal mengirim. Coba lagi.');
+                btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>' + window.sgT('Minta Demo', 'Request a Demo');
+                alert(window.sgT('Gagal mengirim. Coba lagi.', 'Could not send. Please try again.'));
             }
         }
         </script>
 
         <!-- Footer -->
         <div class="mt-12 text-center text-xs text-surface-400">
-            <p>© 2026 ScanGrade. Dibuat dengan <i class="fas fa-heart text-red-400"></i> untuk pendidikan Indonesia.</p>
+            <p>© 2026 ScanGrade. <span x-text="t('Dibuat dengan','Made with')"></span> <i class="fas fa-heart text-red-400"></i> <span x-text="t('untuk pendidikan Indonesia.','for Indonesian education.')"></span></p>
         </div>
     </main>
 </div>

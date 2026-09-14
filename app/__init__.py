@@ -308,6 +308,10 @@ def create_app(env=None):
                 return redirect(redirect_map.get(role, "/student/dashboard"))
             except Exception:
                 pass
+        # No language argument: English is base.html's default for every page, so
+        # asking for it here would be a second source of truth — and the one that
+        # could silently disagree. The toggle writes `sg_lang`, so a visitor who
+        # picks Indonesian keeps it across the whole app.
         resp = make_response(render_template("landing.html"))
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
