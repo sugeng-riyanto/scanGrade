@@ -17,19 +17,19 @@
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
                 <i class="fas fa-user-graduate text-white text-sm"></i>
             </div>
-            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-amber-600">Siswa</span></span>
+            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-amber-600" x-text="t('Siswa','Student')"></span></span>
         </div>
         <div class="flex items-center gap-3">
-            <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i>Beranda</a>
-            <a href="/auth/login-user?role=murid" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-amber-500/25 hover:from-amber-600 hover:to-orange-600 transition"><i class="fas fa-sign-in-alt mr-1"></i>Masuk sebagai Siswa</a>
+            <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i><span x-text="t('Beranda','Home')"></span></a>
+            <a href="/auth/login-user?role=murid" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-amber-500/25 hover:from-amber-600 hover:to-orange-600 transition"><i class="fas fa-sign-in-alt mr-1"></i><span x-text="t('Masuk sebagai Siswa','Log in as Student')"></span></a>
         </div>
     </header>
 
     <main class="max-w-5xl mx-auto px-6 py-12">
         <div class="text-center mb-16">
-            <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-amber-100 rounded-full text-amber-700 text-xs font-bold mb-4">📝 Untuk Siswa</div>
-            <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900">Cara Mengerjakan Ujian</h1>
-            <p class="mt-3 text-lg text-surface-500 max-w-2xl mx-auto">Panduan lengkap — dari login, menjawab soal, hingga melihat nilai.</p>
+            <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-amber-100 rounded-full text-amber-700 text-xs font-bold mb-4" x-text="t('📝 Untuk Siswa','📝 For Students')"></div>
+            <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900" x-text="t('Cara Mengerjakan Ujian','How to Take an Exam')"></h1>
+            <p class="mt-3 text-lg text-surface-500 max-w-2xl mx-auto" x-text="t('Panduan lengkap — dari login, menjawab soal, hingga melihat nilai.','The complete guide — from logging in and answering questions to seeing your score.')"></p>
         </div>
 
         <div class="space-y-8 demo-step">
@@ -37,11 +37,11 @@
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
                 <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>1</span></div>
                 <div class="flex-1">
-                    <h3 class="text-xl font-extrabold text-surface-800">Login &amp; Pilih Ujian</h3>
-                    <p class="mt-2 text-surface-500">Masuk dengan akun dari sekolah. Di dashboard, klik ujian yang tersedia. Kamu hanya akan melihat ujian untuk kelasmu.</p>
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Login dan Pilih Ujian','Log In and Pick an Exam')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Masuk dengan akun dari sekolah. Di dashboard, klik ujian yang tersedia. Kamu hanya akan melihat ujian untuk kelasmu.','Log in with the account your school gave you. On the dashboard, open one of the available exams. You only see exams for your own class.')"></p>
                     <div class="mt-4 p-4 bg-amber-50 rounded-xl flex items-start gap-3">
                         <i class="fas fa-lightbulb text-amber-500 mt-0.5"></i>
-                        <p class="text-sm text-amber-800 font-medium">Jawaban tersimpan otomatis — aman meskipun internet terputus.</p>
+                        <p class="text-sm text-amber-800 font-medium" x-text="t('Jawaban tersimpan otomatis — aman meskipun internet terputus.','Answers are saved automatically — safe even if the internet drops.')"></p>
                     </div>
                 </div>
             </div>
@@ -50,20 +50,20 @@
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
                 <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>2</span></div>
                 <div class="flex-1">
-                    <h3 class="text-xl font-extrabold text-surface-800">Jenis Soal &amp; Cara Jawab</h3>
-                    <p class="mt-2 text-surface-500">Ada 3 tipe soal:</p>
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Jenis Soal dan Cara Menjawab','Question Types and How to Answer')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Ada 3 tipe soal:','There are 3 question types:')"></p>
                     <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div class="p-4 bg-blue-50 rounded-xl">
                             <p class="text-sm font-bold text-blue-800 flex items-center gap-2"><i class="fas fa-check-circle text-blue-600"></i>MCQ</p>
-                            <p class="text-xs text-blue-600 mt-1">Klik A, B, C, D, atau E. Jawaban terpilih menyala oranye.</p>
+                            <p class="text-xs text-blue-600 mt-1" x-text="t('Klik A, B, C, D, atau E. Jawaban terpilih menyala oranye.','Click A, B, C, D or E. The chosen answer turns orange.')"></p>
                         </div>
                         <div class="p-4 bg-blue-50 rounded-xl">
-                            <p class="text-sm font-bold text-blue-800 flex items-center gap-2"><i class="fas fa-align-left text-blue-600"></i>Esai Teks</p>
-                            <p class="text-xs text-blue-600 mt-1">Tulis jawaban paragraf di kotak teks yang tersedia. Panjang bebas.</p>
+                            <p class="text-sm font-bold text-blue-800 flex items-center gap-2"><i class="fas fa-align-left text-blue-600"></i><span x-text="t('Esai Teks','Text Essay')"></span></p>
+                            <p class="text-xs text-blue-600 mt-1" x-text="t('Tulis jawaban paragraf di kotak teks yang tersedia. Panjang bebas.','Write a paragraph in the text box provided. Any length you like.')"></p>
                         </div>
                         <div class="p-4 bg-emerald-50 rounded-xl">
-                            <p class="text-sm font-bold text-emerald-800 flex items-center gap-2"><i class="fas fa-paint-brush text-emerald-600"></i>Esai Canvas</p>
-                            <p class="text-xs text-emerald-600 mt-1">Gambar &amp; tulis langsung di atas halaman PDF dengan berbagai alat.</p>
+                            <p class="text-sm font-bold text-emerald-800 flex items-center gap-2"><i class="fas fa-paint-brush text-emerald-600"></i><span x-text="t('Esai Canvas','Canvas Essay')"></span></p>
+                            <p class="text-xs text-emerald-600 mt-1" x-text="t('Gambar dan tulis langsung di atas halaman PDF dengan berbagai alat.','Draw and write straight onto the PDF page with a range of tools.')"></p>
                         </div>
                     </div>
                 </div>
@@ -73,21 +73,21 @@
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
                 <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>3</span></div>
                 <div class="flex-1">
-                    <h3 class="text-xl font-extrabold text-surface-800">Tools Menggambar &amp; Mengukur</h3>
-                    <p class="mt-2 text-surface-500">Untuk soal Esai Canvas, gunakan alat-alat ini:</p>
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Tools Menggambar dan Mengukur','Drawing and Measuring Tools')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Untuk soal Esai Canvas, gunakan alat-alat ini:','For Canvas Essays, use these tools:')"></p>
                     <div class="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
-                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-pencil-alt text-amber-600"></i><p class="text-xs font-bold mt-1">Pena</p></div>
-                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-slash text-amber-600"></i><p class="text-xs font-bold mt-1">Garis</p></div>
-                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-eraser text-amber-600"></i><p class="text-xs font-bold mt-1">Hapus</p></div>
-                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-ruler text-blue-600"></i><p class="text-xs font-bold mt-1">Ruler 30cm</p></div>
-                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-drafting-compass text-blue-600"></i><p class="text-xs font-bold mt-1">Busur 180°</p></div>
-                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-draw-polygon text-blue-600"></i><p class="text-xs font-bold mt-1">Siku 45°</p></div>
-                        <div class="p-3 bg-purple-50 rounded-xl text-center"><i class="fas fa-circle text-purple-600"></i><p class="text-xs font-bold mt-1">Jangka</p></div>
-                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-font text-emerald-600"></i><p class="text-xs font-bold mt-1">Teks</p></div>
-                        <div class="p-3 bg-slate-100 rounded-xl text-center"><i class="fas fa-calculator text-slate-600"></i><p class="text-xs font-bold mt-1">Kalkulator*</p></div>
-                        <div class="p-3 bg-slate-100 rounded-xl text-center"><i class="fas fa-undo text-slate-600"></i><p class="text-xs font-bold mt-1">Undo</p></div>
+                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-pencil-alt text-amber-600"></i><p class="text-xs font-bold mt-1" x-text="t('Pena','Pen')"></p></div>
+                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-slash text-amber-600"></i><p class="text-xs font-bold mt-1" x-text="t('Garis','Line')"></p></div>
+                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-eraser text-amber-600"></i><p class="text-xs font-bold mt-1" x-text="t('Hapus','Erase')"></p></div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-ruler text-blue-600"></i><p class="text-xs font-bold mt-1" x-text="t('Ruler 30cm','30cm Ruler')"></p></div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-drafting-compass text-blue-600"></i><p class="text-xs font-bold mt-1" x-text="t('Busur 180°','180° Protractor')"></p></div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-draw-polygon text-blue-600"></i><p class="text-xs font-bold mt-1" x-text="t('Siku 45°','45° Set Square')"></p></div>
+                        <div class="p-3 bg-purple-50 rounded-xl text-center"><i class="fas fa-circle text-purple-600"></i><p class="text-xs font-bold mt-1" x-text="t('Jangka','Compass')"></p></div>
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-font text-emerald-600"></i><p class="text-xs font-bold mt-1" x-text="t('Teks','Text')"></p></div>
+                        <div class="p-3 bg-slate-100 rounded-xl text-center"><i class="fas fa-calculator text-slate-600"></i><p class="text-xs font-bold mt-1" x-text="t('Kalkulator*','Calculator*')"></p></div>
+                        <div class="p-3 bg-slate-100 rounded-xl text-center"><i class="fas fa-undo text-slate-600"></i><p class="text-xs font-bold mt-1" x-text="t('Undo','Undo')"></p></div>
                     </div>
-                    <p class="mt-2 text-xs text-surface-400">*Kalkulator hanya jika diaktifkan guru.</p>
+                    <p class="mt-2 text-xs text-surface-400" x-text="t('*Kalkulator hanya jika diaktifkan guru.','*The calculator only appears when the teacher enables it.')"></p>
                 </div>
             </div>
 
@@ -96,18 +96,18 @@
                 <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>4</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Anti-Cheat</h3>
-                    <p class="mt-2 text-surface-500">Jangan berpindah tab selama ujian. Sistem mendeteksi dan memberi sanksi bertahap:</p>
+                    <p class="mt-2 text-surface-500" x-text="t('Jangan berpindah tab selama ujian. Sistem mendeteksi dan memberi sanksi bertahap:','Do not switch tabs during the exam. The system detects it and applies graduated penalties:')"></p>
                     {% set base = 5 %}
                     {% set maxv = 5 %}
                     <div class="mt-4 space-y-2">
-                        <div class="flex items-center gap-3 p-3 bg-green-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-green-200 flex items-center justify-center text-sm font-bold text-green-700">1x</span><span class="text-sm text-green-800 font-medium">Peringatan (0 poin)</span></div>
-                        <div class="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-yellow-200 flex items-center justify-center text-sm font-bold text-yellow-700">2x</span><span class="text-sm text-yellow-800 font-medium">-{{ base }} poin</span></div>
-                        <div class="flex items-center gap-3 p-3 bg-orange-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center text-sm font-bold text-orange-700">3x</span><span class="text-sm text-orange-800 font-medium">-{{ base * 2 }} poin</span></div>
-                        <div class="flex items-center gap-3 p-3 bg-red-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-red-200 flex items-center justify-center text-sm font-bold text-red-700">4x+</span><span class="text-sm text-red-800 font-medium">-{{ base * 3 }} poin per pelanggaran</span></div>
+                        <div class="flex items-center gap-3 p-3 bg-green-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-green-200 flex items-center justify-center text-sm font-bold text-green-700">1x</span><span class="text-sm text-green-800 font-medium" x-text="t('Peringatan (0 poin)','Warning (0 points)')"></span></div>
+                        <div class="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-yellow-200 flex items-center justify-center text-sm font-bold text-yellow-700">2x</span><span class="text-sm text-yellow-800 font-medium" x-text="t('-{{ base }} poin','-{{ base }} points')"></span></div>
+                        <div class="flex items-center gap-3 p-3 bg-orange-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center text-sm font-bold text-orange-700">3x</span><span class="text-sm text-orange-800 font-medium" x-text="t('-{{ base * 2 }} poin','-{{ base * 2 }} points')"></span></div>
+                        <div class="flex items-center gap-3 p-3 bg-red-50 rounded-xl"><span class="w-8 h-8 rounded-full bg-red-200 flex items-center justify-center text-sm font-bold text-red-700">4x+</span><span class="text-sm text-red-800 font-medium" x-text="t('-{{ base * 3 }} poin per pelanggaran','-{{ base * 3 }} points per violation')"></span></div>
                     </div>
                     <div class="mt-3 p-3 bg-red-50/50 rounded-xl flex items-start gap-2">
                         <i class="fas fa-exclamation-triangle text-red-500 mt-0.5"></i>
-                        <p class="text-sm text-red-700 font-medium">Maksimal {{ maxv }} pelanggaran → ujian otomatis dikumpulkan.</p>
+                        <p class="text-sm text-red-700 font-medium" x-text="t('Maksimal {{ maxv }} pelanggaran → ujian otomatis dikumpulkan.','At most {{ maxv }} violations → the exam is submitted automatically.')"></p>
                     </div>
                 </div>
             </div>
@@ -116,12 +116,12 @@
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
                 <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>5</span></div>
                 <div class="flex-1">
-                    <h3 class="text-xl font-extrabold text-surface-800">Kumpulkan &amp; Lihat Nilai</h3>
-                    <p class="mt-2 text-surface-500">Klik "Kumpulkan" setelah selesai. Jika guru mengatur publikasi otomatis, nilai langsung muncul. Jika manual, tunggu guru mengoreksi. Download PDF hasil ujianmu kapan saja.</p>
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Kumpulkan dan Lihat Nilai','Submit and See Your Score')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Klik Kumpulkan setelah selesai. Jika guru mengatur publikasi otomatis, nilai langsung muncul. Jika manual, tunggu guru mengoreksi. Download PDF hasil ujianmu kapan saja.','Click Submit when you are done. If the teacher publishes automatically your score appears at once; if not, wait for the teacher to finish grading. You can download the PDF of your exam at any time.')"></p>
                     <div class="mt-4 flex flex-wrap gap-3">
-                        <span class="px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-check"></i>Kumpulkan</span>
-                        <span class="px-4 py-2 bg-emerald-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-chart-bar"></i>Lihat Nilai</span>
-                        <span class="px-4 py-2 bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-download"></i>Download PDF</span>
+                        <span class="px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-check"></i><span x-text="t('Kumpulkan','Submit')"></span></span>
+                        <span class="px-4 py-2 bg-emerald-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-chart-bar"></i><span x-text="t('Lihat Nilai','See Score')"></span></span>
+                        <span class="px-4 py-2 bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-download"></i><span x-text="t('Download PDF','Download PDF')"></span></span>
                     </div>
                 </div>
             </div>
@@ -129,9 +129,9 @@
 
         <!-- CTA -->
         <div class="mt-12 text-center bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-8 lg:p-12 shadow-xl">
-            <h2 class="text-2xl font-extrabold text-white">Siap ujian?</h2>
-            <p class="mt-2 text-amber-100">Masuk dengan akun yang diberikan sekolah Anda.</p>
-            <a href="/auth/login-user?role=murid" class="mt-4 inline-flex items-center gap-2 px-8 py-3.5 bg-white text-amber-700 rounded-xl font-extrabold hover:bg-amber-50 transition">Masuk sebagai Siswa <i class="fas fa-arrow-right"></i></a>
+            <h2 class="text-2xl font-extrabold text-white" x-text="t('Siap ujian?','Ready for the exam?')"></h2>
+            <p class="mt-2 text-amber-100" x-text="t('Masuk dengan akun yang diberikan sekolah Anda.','Log in with the account your school gave you.')"></p>
+            <a href="/auth/login-user?role=murid" class="mt-4 inline-flex items-center gap-2 px-8 py-3.5 bg-white text-amber-700 rounded-xl font-extrabold hover:bg-amber-50 transition"><span x-text="t('Masuk sebagai Siswa','Log in as Student')"></span> <i class="fas fa-arrow-right"></i></a>
         </div>
     </main>
 </div>

@@ -66,7 +66,7 @@
         <div class="flex items-center gap-3">
             <div>
                 <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-surface-800">{{ exam.title }}</h1>
-                <span class="text-[10px] text-surface-400 font-semibold">{{ exam.subject }} &middot; {{ exam.total_questions }} soal</span>
+                <span class="text-[10px] text-surface-400 font-semibold">{{ exam.subject }} &middot; {{ exam.total_questions }} <span x-text="t('soal','questions')"></span></span>
             </div>
         </div>
         <div class="flex items-center gap-3">
@@ -75,9 +75,9 @@
                  still know, and use one tab. -->
             <span x-show="otherTabOpen && !submitted" x-cloak
                   class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-200"
-                  title="Ujian ini terbuka di lebih dari satu tab. Pelanggaran dihitung dari tab yang sedang Anda lihat. Gunakan satu tab saja.">
+                  :title="t('Ujian ini terbuka di lebih dari satu tab. Pelanggaran dihitung dari tab yang sedang Anda lihat. Gunakan satu tab saja.','This exam is open in more than one tab. Violations are counted on the tab you are watching. Please use one tab only.')">
                 <i class="fas fa-clone"></i>
-                <span class="hidden sm:inline">2 tab terbuka</span>
+                <span class="hidden sm:inline" x-text="t('2 tab terbuka','2 tabs open')"></span>
             </span>
             {% if recovery_code %}
             <!-- The way back in from another device. Shown for the whole session
@@ -85,10 +85,10 @@
             <button type="button" x-show="!submitted" x-cloak
                     @click="navigator.clipboard&&navigator.clipboard.writeText('{{ recovery_code }}'); copied=true; setTimeout(()=>copied=false,1500)"
                     class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition"
-                    title="Simpan angka ini. Masukkan di menu Lanjutkan Ujian untuk meneruskan dari perangkat lain.">
+                    :title="t('Simpan angka ini. Masukkan di menu Lanjutkan Ujian untuk meneruskan dari perangkat lain.','Keep this number. Enter it under Resume Exam to continue from another device.')">
                 <i class="fas fa-key"></i>
-                <span x-show="!copied" class="hidden sm:inline">Kode</span>
-                <span x-text="copied ? 'Tersalin' : '{{ recovery_code }}'" class="font-mono tracking-wider"></span>
+                <span x-show="!copied" class="hidden sm:inline" x-text="t('Kode','Code')"></span>
+                <span x-text="copied ? t('Tersalin','Copied') : '{{ recovery_code }}'" class="font-mono tracking-wider"></span>
             </button>
             {% endif %}
             <div x-show="!submitted" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold transition-all"
@@ -106,9 +106,18 @@
                 }"></i>
                 <span x-text="syncLabel"></span>
             </div>
+            <!-- The language control lives here as well as in the navbar. Both the
+                 terms modal and the fullscreen blocker cover the whole page, so the
+                 navbar's button is unreachable at exactly the moment a student who
+                 reads English needs it. This one is always in the exam's own bar. -->
+            <button type="button" @click="setLang(lang === 'id' ? 'en' : 'id')"
+                    class="text-[10px] font-extrabold px-2 py-1 rounded-lg border border-surface-200 text-surface-500 hover:bg-surface-50 hover:text-surface-700 transition"
+                    :title="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                    :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                    x-text="lang === 'id' ? 'EN' : 'ID'"></button>
             <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="formatTime(timeLeft)" :class="timeLeft < 60 ? 'text-red-500' : 'text-primary-600'"></div>
             <button x-show="!submitted" @click="submitExam()" :disabled="submitting" class="bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                <i class="fas mr-1.5" :class="submitting ? 'fa-spinner fa-spin' : 'fa-check'"></i><span x-text="submitting ? (lang==='en'?'Sending...':'Mengirim...') : (lang==='en'?'Submit':'Kumpulkan')"></span>
+                <i class="fas mr-1.5" :class="submitting ? 'fa-spinner fa-spin' : 'fa-check'"></i><span x-text="submitting ? t('Mengirim...','Sending...') : t('Kumpulkan','Submit')"></span>
             </button>
         </div>
     </div>
@@ -116,26 +125,26 @@
     <!-- Device Status Bar -->
     <div x-show="!submitted && !showExamAgreement"
          class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex items-center gap-3 text-[10px] font-bold text-surface-500 border border-surface-100 shadow-sm pointer-events-none select-none">
-        <div class="flex items-center gap-1.5" title="Battery">
+        <div class="flex items-center gap-1.5" :title="t('Baterai','Battery')">
             <i class="fas" :class="deviceCharging ? 'fa-bolt text-amber-500' : deviceBattery > 50 ? 'fa-battery-three-quarters text-emerald-500' : deviceBattery > 20 ? 'fa-battery-half text-amber-500' : 'fa-battery-quarter text-red-500'"></i>
             <span x-text="deviceBattery + '%'" :class="deviceBattery < 20 ? 'text-red-500' : ''"></span>
         </div>
         <span class="text-surface-200">|</span>
-        <div class="flex items-center gap-1.5" title="Jaringan">
+        <div class="flex items-center gap-1.5" :title="t('Jaringan','Network')">
             <i class="fas" :class="connectionType === 'wifi' ? 'fa-wifi text-primary-500' : connectionType === 'ethernet' ? 'fa-network-wired text-primary-500' : connectionType === 'unknown' || !connectionType ? 'fa-question-circle text-surface-300' : 'fa-signal text-primary-500'"></i>
             <span x-text="connectionLabel"></span>
         </div>
         <span class="text-surface-200">|</span>
-        <div class="flex items-center gap-1.5" title="Audio">
+        <div class="flex items-center gap-1.5" :title="t('Keluaran audio','Audio output')">
             <i class="fas fa-volume-up text-surface-400"></i>
-            <span x-text="audioOutputs > 0 ? audioOutputLabel || audioOutputs+' output' : 'Tidak terdeteksi'"></span>
+            <span x-text="audioOutputs > 0 ? audioOutputLabel || audioOutputs+' output' : t('Tidak terdeteksi','Not detected')"></span>
         </div>
         <span class="text-surface-200">|</span>
-        <div class="flex items-center gap-1.5" title="Mikrofon">
+        <div class="flex items-center gap-1.5" :title="t('Mikrofon','Microphone')">
             <i class="fas fa-microphone text-surface-400"></i>
-            <span x-text="audioInputs > 0 ? audioInputLabel || audioInputs+' input' : 'Tidak terdeteksi'"></span>
+            <span x-text="audioInputs > 0 ? audioInputLabel || audioInputs+' input' : t('Tidak terdeteksi','Not detected')"></span>
         </div>
-        <span class="ml-auto text-surface-300 text-[8px]">Status perangkat</span>
+        <span class="ml-auto text-surface-300 text-[8px]" x-text="t('Status perangkat','Device status')"></span>
     </div>
 
     <!-- Violation Banner -->
@@ -167,7 +176,7 @@
                 <p x-show="totalPenalty > 0" class="text-xs font-bold mt-1" :class="{
                     'text-red-600': violationType === 'severe',
                     'text-amber-600': violationType === 'penalty'
-                }">Total penalti: -<span x-text="totalPenalty"></span> poin (<span x-text="violationCount"></span> pelanggaran)</p>
+                }" x-text="t('Total penalti','Total penalty') + ': -' + totalPenalty + ' ' + t('poin','points') + ' (' + violationCount + ' ' + t('pelanggaran','violations') + ')'"></p>
             </div>
             <button @click="showViolationBanner = false" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
         </div>
@@ -183,36 +192,40 @@
     <div x-show="fullscreenBlocked && !submitted" x-cloak
          class="fixed inset-0 z-[90] bg-surface-900/95 backdrop-blur-sm flex items-center justify-center p-6"
          @click.self="resumeFullscreen()">
-        <div class="max-w-md w-full bg-white rounded-2xl p-6 text-center shadow-2xl border border-surface-200">
+        <div class="relative max-w-md w-full bg-white rounded-2xl p-6 text-center shadow-2xl border border-surface-200">
+            <!-- This overlay covers the exam bar, so the language control has to
+                 exist inside it too, or a student who reads English is locked into
+                 Indonesian for as long as they are out of fullscreen. -->
+            <div class="absolute top-3 right-3">
+                <button type="button" @click="setLang(lang === 'id' ? 'en' : 'id')"
+                        class="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg border border-surface-200 text-surface-500 hover:bg-surface-50 hover:text-surface-700 transition"
+                        :title="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                        :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                        x-text="lang === 'id' ? 'EN' : 'ID'"></button>
+            </div>
             <div class="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl">
                 <i class="fas fa-expand"></i>
             </div>
-            <h2 class="mt-4 text-lg font-extrabold text-surface-800">Kembalikan ke Layar Penuh</h2>
-            <p class="mt-1 text-sm text-surface-500 font-medium">
-                Ujian ini harus dikerjakan dalam layar penuh. Jendela yang diperkecil,
-                di-restore, atau keluar dari layar penuh berhenti di sini.
-            </p>
-            <p x-show="violationCount > 0" class="mt-3 text-xs font-bold text-amber-700">
-                Pelanggaran: <span x-text="violationCount"></span><span x-show="totalPenalty > 0">
-                    &middot; total penalti: -<span x-text="totalPenalty"></span> poin</span>
-            </p>
+            <h2 class="mt-4 text-lg font-extrabold text-surface-800" x-text="t('Kembalikan ke Layar Penuh','Return to Fullscreen')"></h2>
+            <p class="mt-1 text-sm text-surface-500 font-medium"
+               x-text="t('Ujian ini harus dikerjakan dalam layar penuh. Jendela yang diperkecil, di-restore, atau keluar dari layar penuh berhenti di sini.','This exam has to be taken in fullscreen. A window that is shrunk, restored, or leaves fullscreen stops here.')"></p>
+            <p x-show="violationCount > 0" class="mt-3 text-xs font-bold text-amber-700"
+               x-text="t('Pelanggaran','Violations') + ': ' + violationCount + (totalPenalty > 0 ? ' · ' + t('total penalti','total penalty') + ': -' + totalPenalty + ' ' + t('poin','points') : '')"></p>
             <button type="button" @click="resumeFullscreen()"
                     class="mt-5 w-full bg-primary-600 hover:bg-primary-700 text-white py-3 rounded-xl font-extrabold shadow-lg transition">
-                <i class="fas fa-expand mr-1"></i> Masuk Layar Penuh
+                <i class="fas fa-expand mr-1"></i> <span x-text="t('Masuk Layar Penuh','Enter Fullscreen')"></span>
             </button>
-            <p x-show="fullscreenRetryFailed" class="mt-3 text-xs font-bold text-amber-700">
-                Browser menolak layar penuh. Tekan <strong>F11</strong>, atau hubungi pengawas.
-            </p>
-            <p class="mt-3 text-[11px] text-surface-400 font-semibold">
-                Waktu ujian tetap berjalan selama layar ini tampil.
-            </p>
+            <p x-show="fullscreenRetryFailed" class="mt-3 text-xs font-bold text-amber-700"
+               x-text="t('Browser menolak layar penuh — tekan F11, atau hubungi pengawas.','The browser refused fullscreen — press F11, or call your proctor.')"></p>
+            <p class="mt-3 text-[11px] text-surface-400 font-semibold"
+               x-text="t('Waktu ujian tetap berjalan selama layar ini tampil.','The exam clock keeps running while this screen is up.')"></p>
         </div>
     </div>
 
     <!-- Penalty indicator in topbar -->
     <template x-if="totalPenalty > 0 && !submitted">
         <div class="bg-red-50 border border-red-200 rounded-xl px-3 py-1 text-xs font-extrabold text-red-600 flex items-center gap-1">
-            <i class="fas fa-exclamation-triangle"></i>Penalti: -<span x-text="totalPenalty"></span>
+            <i class="fas fa-exclamation-triangle"></i><span x-text="t('Penalti','Penalty') + ': -' + totalPenalty"></span>
         </div>
     </template>
 
@@ -293,43 +306,53 @@
 
     <!-- Agreement Modal -->
     <div x-show="showExamAgreement && !submitted" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div class="relative bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <!-- Same reason as the fullscreen overlay: this modal covers the exam
+                 bar, and it is the *first* thing a student sees on this exam. A
+                 language switch reachable only after agreeing is not reachable. -->
+            <div class="absolute top-3 right-3">
+                <button type="button" @click="setLang(lang === 'id' ? 'en' : 'id')"
+                        class="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg border border-surface-200 text-surface-500 hover:bg-surface-50 hover:text-surface-700 transition"
+                        :title="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                        :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                        x-text="lang === 'id' ? 'EN' : 'ID'"></button>
+            </div>
             <div class="text-center mb-4">
                 <div class="w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg shadow-primary-500/20">
                     <i class="fas fa-file-contract text-3xl text-white"></i>
                 </div>
-                <h2 class="text-xl font-extrabold text-surface-800">Ketentuan Ujian</h2>
+                <h2 class="text-xl font-extrabold text-surface-800" x-text="t('Ketentuan Ujian','Exam Rules')"></h2>
                 <p class="text-xs text-surface-400 font-semibold mt-1">{{ exam.title }}</p>
             </div>
             <div class="bg-surface-50 rounded-2xl p-4 mb-4 text-xs leading-relaxed text-surface-700 font-semibold space-y-2">
-                <p><i class="fas fa-hourglass-half text-primary-500 mr-1.5"></i>Durasi: <strong>{{ exam.duration_minutes }}</strong> menit</p>
-                <p><i class="fas fa-list-ol text-primary-500 mr-1.5"></i>Jumlah soal: <strong>{{ exam.total_questions }}</strong></p>
+                <p><i class="fas fa-hourglass-half text-primary-500 mr-1.5"></i><span x-text="t('Durasi','Duration')"></span>: <strong>{{ exam.duration_minutes }}</strong> <span x-text="t('menit','minutes')"></span></p>
+                <p><i class="fas fa-list-ol text-primary-500 mr-1.5"></i><span x-text="t('Jumlah soal','Questions')"></span>: <strong>{{ exam.total_questions }}</strong></p>
                 <template x-if="antiCheat.penalty_per_violation > 0">
                     <div>
-                        <p class="font-extrabold text-surface-800 mb-1"><i class="fas fa-exclamation-triangle text-amber-500 mr-1.5"></i>Sistem Anti-Cheat:</p>
+                        <p class="font-extrabold text-surface-800 mb-1"><i class="fas fa-exclamation-triangle text-amber-500 mr-1.5"></i><span x-text="t('Sistem Anti-Cheat','Anti-cheat system')"></span>:</p>
                         <ul class="space-y-0.5 ml-5 list-disc text-surface-500">
-                            <li>Yang dihitung: <strong>berpindah tab/aplikasi</strong> dan <strong>keluar dari layar penuh</strong></li>
-                            <li>Pelanggaran ke-1: <strong class="text-amber-600">Peringatan</strong> (0 poin)</li>
-                            <li>Pelanggaran ke-2: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation"></span> poin</strong></li>
-                            <li>Pelanggaran ke-3: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*2"></span> poin</strong></li>
-                            <li>Pelanggaran ke-4+: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*3"></span> poin</strong> per pelanggaran</li>
+                            <li><span x-text="t('Yang dihitung','Counted')"></span>: <strong x-text="t('berpindah tab/aplikasi','switching tab or app')"></strong> <span x-text="t('dan','and')"></span> <strong x-text="t('keluar dari layar penuh','leaving fullscreen')"></strong></li>
+                            <li><span x-text="t('Pelanggaran ke-1','Violation 1')"></span>: <strong class="text-amber-600" x-text="t('Peringatan','Warning')"></strong> <span x-text="t('(0 poin)','(0 points)')"></span></li>
+                            <li><span x-text="t('Pelanggaran ke-2','Violation 2')"></span>: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation"></span> <span x-text="t('poin','points')"></span></strong> <span x-text="t('per pelanggaran','per violation')"></span></li>
+                            <li><span x-text="t('Pelanggaran ke-3','Violation 3')"></span>: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*2"></span> <span x-text="t('poin','points')"></span></strong> <span x-text="t('per pelanggaran','per violation')"></span></li>
+                            <li><span x-text="t('Pelanggaran ke-4+','Violation 4+')"></span>: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*3"></span> <span x-text="t('poin','points')"></span></strong> <span x-text="t('per pelanggaran','per violation')"></span></li>
                             <template x-if="antiCheat.max_violations > 0 && antiCheat.auto_submit_on_max">
-                                <li>Maksimal <span x-text="antiCheat.max_violations"></span> pelanggaran → ujian <strong>otomatis dikumpulkan</strong></li>
+                                <li><span x-text="t('Maksimal','At most')"></span> <span x-text="antiCheat.max_violations"></span> <span x-text="t('pelanggaran','violations')"></span> → <span x-text="t('ujian','exam')"></span> <strong x-text="t('otomatis dikumpulkan','submitted automatically')"></strong></li>
                             </template>
                         </ul>
                     </div>
                 </template>
                 <template x-if="antiCheat.fullscreen_required">
-                    <p><i class="fas fa-expand text-primary-500 mr-1.5"></i><strong>Wajib layar penuh.</strong> Jendela yang diperkecil, di-restore, atau keluar dari layar penuh akan <strong>menghentikan ujian</strong> sampai kembali ke layar penuh.</p>
+                    <p><i class="fas fa-expand text-primary-500 mr-1.5"></i><strong x-text="t('Wajib layar penuh.','Fullscreen required.')"></strong> <span x-text="t('Jendela yang diperkecil, di-restore, atau keluar dari layar penuh akan','A window that is shrunk or restored, or that leaves fullscreen, will')"></span> <strong x-text="t('menghentikan ujian','stop the exam')"></strong> <span x-text="t('sampai kembali ke layar penuh.','until fullscreen returns.')"></span></p>
                 </template>
                 <template x-if="antiCheat.block_right_click">
-                    <p><i class="fas fa-mouse-pointer text-primary-500 mr-1.5"></i>Klik kanan dinonaktifkan</p>
+                    <p><i class="fas fa-mouse-pointer text-primary-500 mr-1.5"></i><span x-text="t('Klik kanan dinonaktifkan','Right-click is disabled')"></span></p>
                 </template>
                 <template x-if="antiCheat.block_copy_paste">
-                    <p><i class="fas fa-copy text-primary-500 mr-1.5"></i>Copy-paste diblokir</p>
+                    <p><i class="fas fa-copy text-primary-500 mr-1.5"></i><span x-text="t('Copy-paste diblokir','Copy-paste is blocked')"></span></p>
                 </template>
                 <template x-if="antiCheat.watermark_name">
-                    <p><i class="fas fa-user-tag text-primary-500 mr-1.5"></i>Nama Anda akan tampil sebagai watermark</p>
+                    <p><i class="fas fa-user-tag text-primary-500 mr-1.5"></i><span x-text="t('Nama Anda akan tampil sebagai watermark','Your name is shown as a watermark')"></span></p>
                 </template>
                 <div x-show="examRules">
                     <hr class="my-2 border-surface-200">
@@ -342,22 +365,18 @@
                 <hr class="my-2 border-surface-200">
                 <p class="flex items-center gap-2">
                     <i class="fas fa-key text-amber-500"></i>
-                    <span>Kode lanjutkan Anda:
+                    <span><span x-text="t('Kode lanjutkan Anda','Your resume code')"></span>:
                         <strong class="font-mono tracking-widest text-amber-700">{{ recovery_code }}</strong>
                     </span>
                 </p>
-                <p class="text-[10px] text-surface-400 font-semibold pl-6">
-                    Catat angkanya. Kalau perangkat atau koneksi bermasalah, buka menu
-                    <strong>Lanjutkan Ujian</strong> dan masukkan kode ini untuk meneruskan
-                    tanpa kehilangan jawaban.
-                </p>
+                <p class="text-[10px] text-surface-400 font-semibold pl-6" x-text="t('Catat angkanya. Kalau perangkat atau koneksi bermasalah, buka menu Lanjutkan Ujian dan masukkan kode ini untuk meneruskan tanpa kehilangan jawaban.','Write it down. If the device or the connection fails, open Resume Exam and enter this code to carry on without losing your answers.')"></p>
                 {% endif %}
             </div>
             <button type="button" @click="agreeExam"
                     class="w-full bg-gradient-to-r from-primary-500 to-primary-600 text-white py-3.5 rounded-xl font-extrabold text-sm hover:from-primary-600 hover:to-primary-700 shadow-lg shadow-primary-500/25 transition">
-                <i class="fas fa-check-circle mr-1.5"></i>Saya Setuju & Mulai Ujian
+                <i class="fas fa-check-circle mr-1.5"></i><span x-text="t('Saya Setuju & Mulai Ujian','I agree & start the exam')"></span>
             </button>
-            <p class="text-center text-[10px] text-surface-400 font-bold mt-3">Dengan menyetujui, Anda siap mengikuti ujian sesuai ketentuan di atas</p>
+            <p class="text-center text-[10px] text-surface-400 font-bold mt-3" x-text="t('Dengan menyetujui, Anda siap mengikuti ujian sesuai ketentuan di atas','By agreeing you are ready to take the exam under the rules above')"></p>
         </div>
     </div>
 
@@ -368,28 +387,28 @@
                 <div class="w-16 h-16 bg-gradient-to-br from-orange-500 to-orange-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg shadow-orange-500/20">
                     <i class="fas fa-check-circle text-3xl text-white"></i>
                 </div>
-                <h2 class="text-xl font-extrabold text-surface-800">Konfirmasi Kumpulkan</h2>
+                <h2 class="text-xl font-extrabold text-surface-800" x-text="t('Konfirmasi Kumpulkan','Confirm submission')"></h2>
                 <p class="text-xs text-surface-400 font-semibold mt-1">{{ exam.title }}</p>
             </div>
             <div class="bg-surface-50 rounded-2xl p-4 mb-4 text-xs font-semibold text-surface-700 space-y-3">
                 <div class="flex items-center justify-between">
-                    <span class="text-surface-500">Soal terjawab</span>
+                    <span class="text-surface-500" x-text="t('Soal terjawab','Questions answered')"></span>
                     <span class="font-extrabold text-surface-800" x-text="answeredCount + '/' + totalQ"></span>
                 </div>
                 <div class="flex items-center justify-between">
-                    <span class="text-surface-500">Waktu tersisa</span>
+                    <span class="text-surface-500" x-text="t('Waktu tersisa','Time left')"></span>
                     <span class="font-extrabold" :class="timeLeft < 60 ? 'text-red-500' : 'text-primary-600'" x-text="formatTime(timeLeft)"></span>
                 </div>
                 <div class="flex items-center justify-between">
-                    <span class="text-surface-500">Penalti</span>
-                    <span class="font-extrabold" :class="totalPenalty > 0 ? 'text-red-500' : 'text-emerald-500'" x-text="totalPenalty > 0 ? '-' + totalPenalty + ' poin' : 'Tidak ada'"></span>
+                    <span class="text-surface-500" x-text="t('Penalti','Penalty')"></span>
+                    <span class="font-extrabold" :class="totalPenalty > 0 ? 'text-red-500' : 'text-emerald-500'" x-text="totalPenalty > 0 ? '-' + totalPenalty + ' ' + t('poin','points') : t('Tidak ada','None')"></span>
                 </div>
                 <hr class="border-surface-200">
                 <label class="flex items-start gap-3 cursor-pointer group">
                     <input type="checkbox" x-model="submitChecks.reviewed"
                            class="mt-0.5 w-4 h-4 rounded border-surface-300 text-primary-500 focus:ring-primary-500 cursor-pointer">
                     <span class="text-surface-600 group-hover:text-surface-800 transition text-xs leading-relaxed">
-                        Saya sudah <strong>memeriksa seluruh jawaban</strong> dan yakin tidak ada yang terlewat
+                        <span x-text="t('Saya sudah','I have')"></span> <strong x-text="t('memeriksa seluruh jawaban','checked every answer')"></strong> <span x-text="t('dan yakin tidak ada yang terlewat','and I am sure nothing was missed')"></span>
                     </span>
                 </label>
                 <label class="flex items-start gap-3 cursor-pointer group">
@@ -397,20 +416,20 @@
                            class="mt-0.5 w-4 h-4 rounded border-surface-300 text-primary-500 focus:ring-primary-500 cursor-pointer"
                            x-bind:disabled="!submitChecks.reviewed">
                     <span class="text-surface-600 group-hover:text-surface-800 transition text-xs leading-relaxed">
-                        Saya <strong>yakin ingin mengumpulkan</strong> ujian ini dan tidak dapat mengubah jawaban lagi
+                        <span x-text="t('Saya','I')"></span> <strong x-text="t('yakin ingin mengumpulkan','want to submit')"></strong> <span x-text="t('ujian ini dan tidak dapat mengubah jawaban lagi','this exam and can no longer change my answers')"></span>
                     </span>
                 </label>
             </div>
             <div class="flex gap-2">
                 <button type="button" @click="showSubmitConfirm = false"
                         class="flex-1 bg-surface-100 hover:bg-surface-200 text-surface-600 py-3 rounded-xl font-extrabold text-sm transition">
-                    Batal
+                    <span x-text="t('Batal','Cancel')"></span>
                 </button>
                 <button type="button" @click="_executeSubmit()"
                         :disabled="!submitChecks.sure"
                         class="flex-1 bg-gradient-to-r from-primary-500 to-primary-600 text-white py-3 rounded-xl font-extrabold text-sm transition"
                         :class="submitChecks.sure ? 'hover:from-primary-600 hover:to-primary-700 shadow-lg shadow-primary-500/25' : 'opacity-50 cursor-not-allowed'">
-                    <i class="fas fa-check mr-1.5"></i>Kumpulkan
+                    <i class="fas fa-check mr-1.5"></i><span x-text="t('Kumpulkan','Submit')"></span>
                 </button>
             </div>
         </div>
@@ -427,8 +446,8 @@
             </button>
             <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-2.5 sticky-questions overflow-y-auto border border-surface-100 scroll-smooth flex-1" style="max-height:calc(100vh - 170px)" x-ref="sidebarScroll">
                 <div class="flex items-center justify-between mb-2.5 px-0.5">
-                    <span class="text-xs font-extrabold text-stone-500 uppercase tracking-wider">Soal</span>
-                    <span class="text-[10px] font-bold text-stone-400 bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ + ' terjawab'"></span>
+                    <span class="text-xs font-extrabold text-stone-500 uppercase tracking-wider" x-text="t('Soal','Questions')"></span>
+                    <span class="text-[10px] font-bold text-stone-400 bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ + ' ' + t('terjawab','answered')"></span>
                 </div>
                 <div class="grid grid-cols-4 gap-1.5">
                         <template x-for="(q, i) in questions" :key="i">
@@ -471,39 +490,39 @@
                     <div x-show="currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
                             <i class="fas fa-pencil-alt"></i>
-                            <span>Soal #<span x-text="i+1"></span> <span x-text="(questions[i]||{}).type === 'mcq' ? '— Corat-coret pada halaman PDF' : '— Canvas + PDF'"></span></span>
-                            <span class="ml-auto" x-text="totalPages>0 ? (pageLabel ? pageLabel + ' — ' : '') + 'Hal '+page+'/'+totalPages : ''"></span>
+                            <span><span x-text="t('Soal #','Question #')"></span><span x-text="i+1"></span> <span x-text="(questions[i]||{}).type === 'mcq' ? t('— Corat-coret pada halaman PDF','— Scribble over the PDF page') : '— Canvas + PDF'"></span></span>
+                            <span class="ml-auto" x-text="totalPages>0 ? (pageLabel ? pageLabel + ' — ' : '') + t('Hal ','Page ') + page + '/' + totalPages : ''"></span>
                         </div>
                         <div class="draw-toolbar px-3 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100 flex-wrap">
-                            <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1">Gambar:</span>
-                            <button type="button" @click="setEssayCanvasMode(i, 'pen')" :class="essayCanvasMode[i] === 'pen' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Pena bebas"><i class="fas fa-pencil-alt mr-1"></i>Pena</button>
-                            <button type="button" @click="setEssayCanvasMode(i, 'line')" :class="essayCanvasMode[i] === 'line' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Garis lurus"><i class="fas fa-slash mr-1"></i>Garis</button>
-                            <button type="button" @click="setEssayCanvasMode(i, 'eraser')" :class="essayCanvasMode[i] === 'eraser' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Hapus"><i class="fas fa-eraser mr-1"></i>Hapus</button>
-                            <button type="button" @click="setEssayCanvasMode(i, 'text')" :class="essayCanvasMode[i] === 'text' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Teks"><i class="fas fa-font mr-1"></i>Teks</button>
-                            <input type="color" :value="essayCanvasColor[i]" @input="essayCanvasColor[i] = $event.target.value; if(canvasDraw[i]) canvasDraw[i].ctx.strokeStyle = $event.target.value" class="w-6 h-6 border rounded cursor-pointer p-0.5 ml-1" title="Warna">
-                            <select x-model="essayLineWidth[i]" class="text-[9px] font-bold border rounded px-1 py-0.5 bg-white w-14 ml-1" title="Ketebalan">
+                            <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1" x-text="t('Gambar:','Draw:')"></span>
+                            <button type="button" @click="setEssayCanvasMode(i, 'pen')" :class="essayCanvasMode[i] === 'pen' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Pena bebas','Freehand pen')"><i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Pena','Pen')"></span></button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'line')" :class="essayCanvasMode[i] === 'line' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Garis lurus','Straight line')"><i class="fas fa-slash mr-1"></i><span x-text="t('Garis','Line')"></span></button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'eraser')" :class="essayCanvasMode[i] === 'eraser' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Hapus','Erase')"><i class="fas fa-eraser mr-1"></i><span x-text="t('Hapus','Eraser')"></span></button>
+                            <button type="button" @click="setEssayCanvasMode(i, 'text')" :class="essayCanvasMode[i] === 'text' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Teks','Text box')"><i class="fas fa-font mr-1"></i><span x-text="t('Teks','Text')"></span></button>
+                            <input type="color" :value="essayCanvasColor[i]" @input="essayCanvasColor[i] = $event.target.value; if(canvasDraw[i]) canvasDraw[i].ctx.strokeStyle = $event.target.value" class="w-6 h-6 border rounded cursor-pointer p-0.5 ml-1" :title="t('Warna','Colour')">
+                            <select x-model="essayLineWidth[i]" class="text-[9px] font-bold border rounded px-1 py-0.5 bg-white w-14 ml-1" :title="t('Ketebalan','Thickness')">
                                 <template x-for="sz in [1,1.5,2,2.5,3,4,5]"><option :value="sz" x-text="sz"></option></template>
                             </select>
                             <span class="w-px h-4 bg-stone-300 mx-1"></span>
-                            <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1">Alat:</span>
-                            <button type="button" @click="toggleRuler(i)" :class="showRuler[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Penggaris — gambar garis lurus"><i class="fas fa-ruler mr-1"></i>Ruler</button>
-                            <button type="button" @click="toggleProtractor(i)" :class="showProtractor[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Busur — ukur sudut"><i class="fas fa-drafting-compass mr-1"></i>Busur</button>
-                            <button type="button" @click="toggleTriangle(i)" :class="showTriangle[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Segitiga — siku 45°"><i class="fas fa-draw-polygon mr-1"></i>Siku</button>
-                            <button type="button" @click="toggleCompass(i)" :class="essayCanvasMode[i] === 'compass' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Jangka — gambar lingkaran"><i class="fas fa-circle mr-1"></i>Jangka</button>
+                            <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1" x-text="t('Alat:','Tools:')"></span>
+                            <button type="button" @click="toggleRuler(i)" :class="showRuler[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Penggaris — gambar garis lurus','Ruler — draw a straight line')"><i class="fas fa-ruler mr-1"></i><span x-text="t('Ruler','Ruler')"></span></button>
+                            <button type="button" @click="toggleProtractor(i)" :class="showProtractor[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Busur — ukur sudut','Protractor — measure an angle')"><i class="fas fa-drafting-compass mr-1"></i><span x-text="t('Busur','Protractor')"></span></button>
+                            <button type="button" @click="toggleTriangle(i)" :class="showTriangle[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Segitiga — siku 45°','Set square — 45° right angle')"><i class="fas fa-draw-polygon mr-1"></i><span x-text="t('Siku','Set square')"></span></button>
+                            <button type="button" @click="toggleCompass(i)" :class="essayCanvasMode[i] === 'compass' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Jangka — gambar lingkaran','Compass — draw a circle')"><i class="fas fa-circle mr-1"></i><span x-text="t('Jangka','Compass')"></span></button>
                             <span class="w-px h-4 bg-stone-300 mx-1"></span>
                             <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-2.5 py-1.5 text-[11px] font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-25"><i class="fas fa-undo mr-1"></i></button>
                             <button type="button" @click="clearCanvas(i)" class="px-2.5 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-50"><i class="fas fa-trash-alt mr-1"></i></button>
                             <template x-if="antiCheat.allow_calculator">
-                                <button type="button" @click="toggleCalculator" :class="showCalculator ? 'bg-orange-100 ring-2 ring-orange-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" title="Kalkulator Ilmiah"><i class="fas fa-calculator mr-1"></i>Kalk</button>
+                                <button type="button" @click="toggleCalculator" :class="showCalculator ? 'bg-orange-100 ring-2 ring-orange-400' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Kalkulator Ilmiah','Scientific calculator')"><i class="fas fa-calculator mr-1"></i><span x-text="t('Kalk','Calc')"></span></button>
                             </template>
-                            <span class="text-[10px] font-bold text-stone-400 ml-auto" x-text="((hasDrawn[i]||{})[page-1] ? '✏️ ' : '') + ((textBoxes[i]||{})[page-1]?.length || 0) + ' teks'"></span>
+                            <span class="text-[10px] font-bold text-stone-400 ml-auto" x-text="((hasDrawn[i]||{})[page-1] ? '✏️ ' : '') + ((textBoxes[i]||{})[page-1]?.length || 0) + ' ' + t('teks','text')"></span>
                         </div>
                         <div class="flex items-center justify-end gap-2 px-4 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100" x-show="pages.length > 0">
                             <button type="button" @click="prevPage" :disabled="page <= 1"
                                     class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-left text-[9px]"></i>
                             </button>
-                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="(pageLabel ? pageLabel + ' — ' : '') + 'Hal ' + page + ' / ' + totalPages"></span>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="(pageLabel ? pageLabel + ' — ' : '') + t('Hal ','Page ') + page + ' / ' + totalPages"></span>
                             <button type="button" @click="nextPage" :disabled="page >= totalPages"
                                     class="px-2.5 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
                                 <i class="fas fa-chevron-right text-[9px]"></i>
@@ -516,7 +535,7 @@
                                 <div x-show="pages.length === 0" class="flex items-center justify-center text-stone-300 border-2 border-dashed rounded-xl mb-3" style="height:300px">
                                     <div class="text-center">
                                         <i class="fas fa-image text-4xl mb-2"></i>
-                                        <p class="text-sm font-semibold">PDF belum diupload — kanvas kosong</p>
+                                        <p class="text-sm font-semibold" x-text="t('PDF belum diupload — kanvas kosong','No PDF uploaded — the canvas is empty')"></p>
                                     </div>
                                 </div>
                                 <canvas :id="'ec-canvas-' + i"
@@ -534,18 +553,18 @@
                                       </svg>
                                       <!-- Drag handle on left overhang -->
                                       <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*4/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
-                                           @mousedown.stop="startToolDrag(i,'ruler',$event)" @touchstart.stop="startToolDrag(i,'ruler',$event)" title="Seret">
+                                           @mousedown.stop="startToolDrag(i,'ruler',$event)" @touchstart.stop="startToolDrag(i,'ruler',$event)" :title="t('Seret','Drag')">
                                          <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
                                       <!-- Rotate handle on right overhang -->
                                       <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*434/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
-                                           @mousedown.stop="startToolRotate(i,'ruler',$event)" @touchstart.stop="startToolRotate(i,'ruler',$event)" title="Putar">
+                                           @mousedown.stop="startToolRotate(i,'ruler',$event)" @touchstart.stop="startToolRotate(i,'ruler',$event)" :title="t('Putar','Rotate')">
                                          <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
                                       <!-- Close + angle below ruler body -->
                                       <div class="tool-controlbar" :style="'left:'+((rulerX[i]||50)-2)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)+2)+'px;pointer-events:none;'">
                                          <span class="text-stone-400 text-[8px] font-bold pointer-events-none" x-text="Math.round(rulerAngle[i]||0)+'°'"></span>
-                                         <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:4px" @click="showRuler[i]=false" title="Tutup"></div>
+                                         <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:4px" @click="showRuler[i]=false" :title="t('Tutup','Close')"></div>
                                       </div>
                                    </div>
                                  <!-- Protractor overlay -->
@@ -565,25 +584,25 @@
                                           <g class="tool-angle-marks"></g>
                                      </svg>
                                        <div class="tool-controlbar flex items-center gap-0.5 bg-slate-800/80 text-white rounded-lg px-1.5 py-0.5 text-[9px] font-bold pointer-events-none whitespace-nowrap" :style="'left:'+Math.max(0,(protractorX[i]||80)-2)+'px;top:'+((protractorY[i]||50)-18)+'px;'">
-                                          <i class="tool-ctrl-btn drag fas fa-grip-lines" style="position:static;width:16px;height:16px;font-size:7px;border-radius:3px" @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" title="Seret"></i>
+                                          <i class="tool-ctrl-btn drag fas fa-grip-lines" style="position:static;width:16px;height:16px;font-size:7px;border-radius:3px" @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" :title="t('Seret','Drag')"></i>
                                           <span class="text-white font-bold text-[8px]" x-text="(protractorSize[i]||350)+'px'"></span>
                                           <span class="text-stone-300 mx-0.5">|</span>
                                           <span class="text-orange-300 text-[8px]" x-text="'∠'+Math.round(protractorAngle[i]||0)+'°'"></span>
-                                          <i class="tool-ctrl-btn close fas fa-times" style="position:static;width:14px;height:14px;font-size:7px;border-radius:3px;margin-left:2px" @click="showProtractor[i]=false" title="Tutup"></i>
+                                          <i class="tool-ctrl-btn close fas fa-times" style="position:static;width:14px;height:14px;font-size:7px;border-radius:3px;margin-left:2px" @click="showProtractor[i]=false" :title="t('Tutup','Close')"></i>
                                        </div>
                                         <!-- Protractor drag handle (center point) -->
                                         <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
-                                             @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" title="Seret">
+                                             @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" :title="t('Seret','Drag')">
                                            <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                         </div>
                                         <!-- Protractor rotate handle (top of arc) -->
                                         <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*155/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
-                                            @mousedown.stop="startToolRotate(i,'protractor',$event)" @touchstart.stop="startToolRotate(i,'protractor',$event)" title="Putar">
+                                            @mousedown.stop="startToolRotate(i,'protractor',$event)" @touchstart.stop="startToolRotate(i,'protractor',$event)" :title="t('Putar','Rotate')">
                                           <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                        </div>
                                        <!-- Protractor resize handle (right end of baseline) -->
                                        <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*390/400-8)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-8)+'px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,120,0.7);border:2px solid rgba(255,255,255,0.3);z-index:6;pointer-events:auto;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;'"
-                                            @mousedown.stop="startProtractorResize(i,$event)" @touchstart.stop="startProtractorResize(i,$event)" title="Perbesar/perkecil">
+                                            @mousedown.stop="startProtractorResize(i,$event)" @touchstart.stop="startProtractorResize(i,$event)" :title="t('Perbesar/perkecil','Resize')">
                                           <i class="fas fa-expand-alt text-white" style="font-size:6px;pointer-events:none"></i>
                                        </div>
                                  </div>
@@ -594,9 +613,9 @@
                                           viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet">
                                       </svg>
                                      <div class="tool-controlbar" :style="'left:'+(compassX[i]||120)+'px;top:'+((compassY[i]||100)-12)+'px;'">
-                                        <i class="tool-ctrl-btn drag fas fa-grip-lines" @mousedown.stop="startToolDrag(i,'compass',$event)" @touchstart.stop="startToolDrag(i,'compass',$event)" title="Seret"></i>
-                                        <i class="tool-ctrl-btn fas fa-sync-alt" style="left:28px;" @mousedown.stop="startToolRotate(i,'compass',$event)" @touchstart.stop="startToolRotate(i,'compass',$event)" title="Putar"></i>
-                                        <i class="tool-ctrl-btn close fas fa-times" style="left:56px;" @click="essayCanvasMode[i]='pen'" title="Tutup"></i>
+                                        <i class="tool-ctrl-btn drag fas fa-grip-lines" @mousedown.stop="startToolDrag(i,'compass',$event)" @touchstart.stop="startToolDrag(i,'compass',$event)" :title="t('Seret','Drag')"></i>
+                                        <i class="tool-ctrl-btn fas fa-sync-alt" style="left:28px;" @mousedown.stop="startToolRotate(i,'compass',$event)" @touchstart.stop="startToolRotate(i,'compass',$event)" :title="t('Putar','Rotate')"></i>
+                                        <i class="tool-ctrl-btn close fas fa-times" style="left:56px;" @click="essayCanvasMode[i]='pen'" :title="t('Tutup','Close')"></i>
                                      </div>
                                 </div>
                                  <!-- Triangle overlay: segitiga siku 45° (seperti ruler) -->
@@ -611,21 +630,21 @@
                                       </svg>
                                        <!-- Drag handle at bottom-right corner -->
                                        <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*322/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*322/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
-                                           @mousedown.stop="startToolDrag(i,'triangle',$event)" @touchstart.stop="startToolDrag(i,'triangle',$event)" title="Seret">
+                                           @mousedown.stop="startToolDrag(i,'triangle',$event)" @touchstart.stop="startToolDrag(i,'triangle',$event)" :title="t('Seret','Drag')">
                                          <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
                                       <!-- Rotate handle at right-angle corner -->
                                       <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*27/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*24/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
-                                           @mousedown.stop="startToolRotate(i,'triangle',$event)" @touchstart.stop="startToolRotate(i,'triangle',$event)" title="Putar">
+                                           @mousedown.stop="startToolRotate(i,'triangle',$event)" @touchstart.stop="startToolRotate(i,'triangle',$event)" :title="t('Putar','Rotate')">
                                          <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
                                       <div class="tool-controlbar" :style="'left:'+((triangleX[i]||160)-4)+'px;top:'+((triangleY[i]||120)+((triangleSize[i]||320)*310/332)+4)+'px;pointer-events:none;'">
                                          <span class="text-stone-400 text-[8px] font-bold ml-1 pointer-events-none" x-text="Math.round(triangleAngle[i]||0)+'°'"></span>
                                          <span class="text-stone-500 mx-0.5 pointer-events-none">|</span>
-                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize[i]=Math.max(200,(triangleSize[i]||320)-30); rebuildTriangle(i)" title="Perkecil">−</div>
+                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize[i]=Math.max(200,(triangleSize[i]||320)-30); rebuildTriangle(i)" :title="t('Perkecil','Smaller')">−</div>
                                          <span class="text-white font-bold text-[7px] pointer-events-none" x-text="(triangleSize[i]||320)+'px'"></span>
-                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize[i]=Math.min(500,(triangleSize[i]||320)+30); rebuildTriangle(i)" title="Perbesar">+</div>
-                                         <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:2px" @click="showTriangle[i]=false" title="Tutup"></div>
+                                         <div class="tool-ctrl-btn" style="position:static;display:inline-flex;width:16px;height:16px;font-size:9px;border-radius:2px;line-height:1" @click="triangleSize[i]=Math.min(500,(triangleSize[i]||320)+30); rebuildTriangle(i)" :title="t('Perbesar','Larger')">+</div>
+                                         <div class="tool-ctrl-btn close fas fa-times" style="position:static;display:inline-flex;width:18px;height:18px;font-size:8px;border-radius:3px;margin-left:2px" @click="showTriangle[i]=false" :title="t('Tutup','Close')"></div>
                                       </div>
                                   </div>
 
@@ -668,12 +687,12 @@
                         <div class="flex items-center justify-end gap-2 px-4 py-3 bg-gradient-to-r from-orange-50/30 to-stone-50 border-t border-stone-100" x-show="pages.length > 0">
                             <button type="button" @click="prevPage" :disabled="page <= 1"
                                     class="px-3 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
-                                <i class="fas fa-chevron-left text-[9px]"></i> Sebelumnya
+                                <i class="fas fa-chevron-left text-[9px]"></i> <span x-text="t('Sebelumnya','Previous')"></span>
                             </button>
-                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="(pageLabel ? pageLabel + ' — ' : '') + 'Hal ' + page + ' / ' + totalPages"></span>
+                            <span class="text-xs font-extrabold text-stone-600 tabular-nums" x-text="(pageLabel ? pageLabel + ' — ' : '') + t('Hal ','Page ') + page + ' / ' + totalPages"></span>
                             <button type="button" @click="nextPage" :disabled="page >= totalPages"
                                     class="px-3 py-1.5 text-xs font-bold border-2 rounded-xl hover:bg-orange-50 disabled:opacity-40 border-stone-200 text-stone-600 transition flex items-center gap-1">
-                                Selanjutnya <i class="fas fa-chevron-right text-[9px]"></i>
+                                <span x-text="t('Selanjutnya','Next')"></span> <i class="fas fa-chevron-right text-[9px]"></i>
                             </button>
                         </div>
                     </div>
@@ -690,9 +709,9 @@
                             <div class="flex items-center justify-between mb-2">
                                 <div class="flex items-center gap-2">
                                     <i class="fab fa-youtube text-red-500"></i>
-                                    <span class="text-xs font-semibold text-stone-600">Video soal</span>
+                                    <span class="text-xs font-semibold text-stone-600" x-text="t('Video soal','Question video')"></span>
                                 </div>
-                                <span class="text-[10px] text-stone-400 bg-white/60 px-2 py-0.5 rounded-full">Putar di sini &mdash; tidak bisa buka tab baru</span>
+                                <span class="text-[10px] text-stone-400 bg-white/60 px-2 py-0.5 rounded-full" x-text="t('Putar di sini — tidak bisa buka tab baru','Plays here — opening a new tab is not allowed')"></span>
                             </div>
                             <div class="relative w-full rounded-lg overflow-hidden bg-black/5" style="padding-bottom:56.25%">
                                 <iframe class="absolute inset-0 w-full h-full"
@@ -713,14 +732,14 @@
                                 </div>
                                 <audio :src="gdriveDirect((questions[i]||{}).audio)" controls class="h-9 w-full max-w-md" preload="none"></audio>
                             </div>
-                            <p class="text-[11px] text-stone-400 mt-1.5 ml-12">Putar audio soal</p>
+                            <p class="text-[11px] text-stone-400 mt-1.5 ml-12" x-text="t('Putar audio soal','Play question audio')"></p>
                         </div>
                     </template>
 
                     <template x-if="(questions[i]||{}).type === 'mcq'">
                         <div class="">
                             <div class="flex items-center gap-3 flex-wrap">
-                                <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
+                                <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
                                 <div class="flex gap-2">
                                     <template x-for="opt in (_shuffledOpts[i] || ['A','B','C','D','E'])">
                                         <button type="button" @click="markAnswered(i, opt)"
@@ -731,7 +750,7 @@
                                     </template>
                                 </div>
                                 <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                                    <i class="fas fa-check text-emerald-500"></i>Terjawab
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
                                 </span>
                             </div>
                         </div>
@@ -739,15 +758,15 @@
                     <template x-if="(questions[i]||{}).type === 'essay_text' || (questions[i]||{}).type === 'essay'">
                         <div class="">
                             <div class="flex items-center gap-2 mb-2 flex-wrap">
-                                <span class="text-sm font-extrabold text-stone-700" x-text="'Soal ' + (i + 1) + ':'"></span>
-                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">Essay Teks</span>
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200" x-text="t('Essay Teks','Text answer')"></span>
                                 <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                                    <i class="fas fa-check text-emerald-500"></i>Terjawab
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
                                 </span>
                             </div>
                             <div class="text-xs font-semibold text-amber-600 bg-amber-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-amber-200/50">
                                 <i class="fas fa-mouse-pointer text-amber-500"></i>
-                                <span>Klik PDF untuk teks &bull; Pilih <strong>Pena</strong> untuk corat-coret</span>
+                                <span x-text="t('Klik PDF untuk teks • Pilih Pena untuk corat-coret','Click the PDF for text • Pick Pen to scribble')"></span>
                             </div>
                         </div>
                     </template>
@@ -756,7 +775,7 @@
                             <!-- Tab: Teks / Canvas -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
                                 <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'text')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
-                                    <i class="fas fa-font mr-1"></i>Teks
+                                    <i class="fas fa-font mr-1"></i><span x-text="t('Teks','Text')"></span>
                                 </button>
                                 <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'text')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-paint-brush mr-1"></i>Canvas
@@ -766,27 +785,27 @@
                             <div x-show="(essayMode[i]||'text')==='text'">
                                 <div class="flex items-center gap-2 mb-2">
                                     <span class="text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                                        <i class="fas fa-align-left mr-0.5"></i>Jawaban Teks
+                                        <i class="fas fa-align-left mr-0.5"></i><span x-text="t('Jawaban Teks','Text answer')"></span>
                                     </span>
-                                    <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + ' karakter, ' + ((paragraphs[i]||[]).length) + ' paragraf)'"></span>
+                                    <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
                                 <!-- Rich text toolbar -->
                                 <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
-                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
-                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
+                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
-                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
+                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
+                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs -->
                                 <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
                                     <template x-for="(para, pIdx) in (paragraphs[i] || [{id:'p0',text:'',html:'<p><br></p>',order:0}])" :key="para.id">
                                         <div class="relative group">
                                             <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
-                                                <span class="text-[10px] font-semibold text-surface-400" x-text="'Paragraf ' + (pIdx + 1)"></span>
+                                                <span class="text-[10px] font-semibold text-surface-400" x-text="t('Paragraf ','Paragraph ') + (pIdx + 1)"></span>
                                                 <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
                                             <div :ref="'para_' + para.id"
@@ -802,7 +821,7 @@
                             <!-- Canvas mode -->
                             <div x-show="(essayMode[i]||'text')==='canvas'" class="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-emerald-200/50">
                                 <i class="fas fa-paint-brush text-emerald-500"></i>
-                                <span>Gambar &amp; teks pada halaman PDF di atas</span>
+                                <span x-text="t('Gambar & teks pada halaman PDF di atas','Drawing and text over the PDF page above')"></span>
                             </div>
                         </div>
                     </template>
@@ -811,7 +830,7 @@
                             <!-- Tab: Teks / Canvas (default Canvas untuk essay_canvas) -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
                                 <button type="button" @click="essayMode[i]='text'" :class="(essayMode[i]||'canvas')==='text' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
-                                    <i class="fas fa-font mr-1"></i>Teks
+                                    <i class="fas fa-font mr-1"></i><span x-text="t('Teks','Text')"></span>
                                 </button>
                                 <button type="button" @click="essayMode[i]='canvas'" :class="(essayMode[i]||'canvas')==='canvas' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-1.5 text-[11px] font-bold rounded-md transition text-center">
                                     <i class="fas fa-paint-brush mr-1"></i>Canvas
@@ -821,26 +840,26 @@
                             <div x-show="(essayMode[i]||'canvas')==='text'">
                                 <div class="flex items-center gap-2 mb-2">
                                     <span class="text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                                        <i class="fas fa-align-left mr-0.5"></i>Jawaban Teks
+                                        <i class="fas fa-align-left mr-0.5"></i><span x-text="t('Jawaban Teks','Text answer')"></span>
                                     </span>
-                                    <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + ' karakter, ' + ((paragraphs[i]||[]).length) + ' paragraf)'"></span>
+                                    <span class="text-xs text-slate-400" x-text="'(' + ((answersText[i] || '').length) + t(' karakter, ',' characters, ') + ((paragraphs[i]||[]).length) + t(' paragraf)',' paragraphs)')"></span>
                                 </div>
                                 <div class="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-t-xl">
-                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" title="Tebal">B</button>
-                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" title="Miring">I</button>
-                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" title="Garis bawah">U</button>
+                                    <button type="button" @click="execCmd('bold')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs font-bold text-surface-600" :title="t('Tebal','Bold')">B</button>
+                                    <button type="button" @click="execCmd('italic')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs italic text-surface-600" :title="t('Miring','Italic')">I</button>
+                                    <button type="button" @click="execCmd('underline')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs underline text-surface-600" :title="t('Garis bawah','Underline')">U</button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar"><i class="fas fa-list-ul"></i></button>
-                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" title="Daftar nomor"><i class="fas fa-list-ol"></i></button>
+                                    <button type="button" @click="execCmd('insertUnorderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar','Bullet list')"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" @click="execCmd('insertOrderedList')" class="w-7 h-7 rounded hover:bg-surface-200 text-xs text-surface-600" :title="t('Daftar nomor','Numbered list')"><i class="fas fa-list-ol"></i></button>
                                     <span class="w-px h-4 bg-surface-300 mx-0.5"></span>
-                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" title="Tambah paragraf">+ Paragraf</button>
+                                    <button type="button" @click="addParagraph(i)" class="px-2 h-7 rounded hover:bg-surface-200 text-xs font-semibold text-primary-600" :title="t('Tambah paragraf','Add paragraph')"><span x-text="t('+ Paragraf','+ Paragraph')"></span></button>
                                 </div>
                                 <!-- Paragraphs (Canvas mode) -->
                                 <div class="border border-t-0 border-surface-200 rounded-b-xl divide-y divide-surface-100 bg-white">
                                     <template x-for="(para, pIdx) in (paragraphs[i] || [{id:'p0',text:'',html:'<p><br></p>',order:0}])" :key="para.id">
                                         <div class="relative group">
                                             <div class="flex items-center justify-between px-3 py-1 bg-surface-50/50">
-                                                <span class="text-[10px] font-semibold text-surface-400" x-text="'Paragraf ' + (pIdx + 1)"></span>
+                                                <span class="text-[10px] font-semibold text-surface-400" x-text="t('Paragraf ','Paragraph ') + (pIdx + 1)"></span>
                                                 <button type="button" @click="deleteParagraph(i, pIdx)" x-show="(paragraphs[i]||[]).length > 1" class="text-surface-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
                                             </div>
                                             <div :ref="'para_' + para.id"
@@ -856,7 +875,7 @@
                             <!-- Canvas mode -->
                             <div x-show="(essayMode[i]||'canvas')==='canvas'" class="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl px-4 py-2.5 flex items-center gap-2 border border-emerald-200/50">
                                 <i class="fas fa-paint-brush text-emerald-500"></i>
-                                <span>Gambar &amp; teks pada halaman PDF di atas</span>
+                                <span x-text="t('Gambar & teks pada halaman PDF di atas','Drawing and text over the PDF page above')"></span>
                             </div>
                         </div>
                     </template>
@@ -992,7 +1011,32 @@ function examApp(duration, totalQ) {
         canScrollUp: false,
         canScrollDown: false,
         syncStatus: navigator.onLine ? 'synced' : 'offline',
-        syncLabel: navigator.onLine ? 'Tersinkron' : 'Offline — tersimpan lokal',
+        // Every label below goes through window.sgT() rather than t(): these are
+        // assembled inside component methods, where `this` is the component and the
+        // body scope's reactive t() is out of reach (see base.html). sgT reads the
+        // same choice off <html lang>, so a message assembled *now* — a violation
+        // banner, an alert — already follows the toggle.
+        //
+        // A label that stays on screen is a different problem. sgT() picks its
+        // language at the moment it is called, so a string built before the switch
+        // keeps reading the old language while it is shown, and the exam bar's sync
+        // label is shown for the whole paper. It is therefore stored as a
+        // locale-independent key and rendered by setSyncLabel(); relabelLocale()
+        // rebuilds it — and re-probes the device bar — whenever `lang` changes.
+        syncLabelKey: navigator.onLine ? 'synced' : 'offline',
+        syncLabelExtra: '',
+        syncLabel: '',
+        // Two strings per key, in the order sgT(id, en) takes them.
+        _syncLabels: {
+            syncing: ['Menyinkronkan...', 'Syncing...'],
+            synced: ['Tersinkron', 'Synced'],
+            offline: ['Offline — tersimpan lokal', 'Offline — saved locally'],
+            waiting: ['Menunggu koneksi...', 'Waiting for connection...'],
+            sendingAnswers: ['Mengirim jawaban...', 'Sending answers...'],
+            sending: ['Mengirim...', 'Sending...'],
+            sendingIn: ['Mengirim dalam ', 'Sending in '],
+            sendFailed: ['Gagal kirim — coba lagi', 'Send failed — try again'],
+        },
         copied: false,
         // Anti-cheat bookkeeping — see armAntiCheat() / claimExamFocus().
         _antiCheatArmed: false,
@@ -1029,6 +1073,10 @@ function examApp(duration, totalQ) {
         totalPenalty: 0,
         showViolationBanner: false,
         violationMessage: '',
+        // What the banner above was rendered from, so it can be re-rendered in the
+        // other language while it is still on screen.
+        _bannerCount: 0,
+        _bannerKind: 'tab_switch',
         violationType: 'warning',
         _answerTimestamps: {},
         antiCheat: {{ {
@@ -1072,7 +1120,11 @@ function examApp(duration, totalQ) {
         deviceCharging: false,
         connectionType: 'unknown',
         connectionSpeed: '',
-        connectionLabel: 'Memeriksa...',
+        // Filled by initStatusBar()'s probe, which runs on the same tick. It used to
+        // hold sgT('Memeriksa...','Checking...') — exactly the kind of string a switch
+        // made later cannot reach — and the probe overwrote it anyway, so the
+        // placeholder only ever flashed for a frame.
+        connectionLabel: '',
         audioInputs: 0,
         audioOutputs: 0,
         audioInputLabel: '',
@@ -1093,6 +1145,12 @@ function examApp(duration, totalQ) {
                 }
                 this.$nextTick(() => this.initEcCanvas(val));
             });
+            // The middle of an exam is exactly when a student stops to switch
+            // language, and part of what they are looking at is stored text rather
+            // than a template expression. Rebuild it here so one click finishes the
+            // job instead of leaving the bar half-switched.
+            this.setSyncLabel(this.syncLabelKey, this.syncLabelExtra);
+            this.$watch('lang', () => this.relabelLocale());
             window.addEventListener('online', () => this.onGoOnline());
             window.addEventListener('offline', () => this.onGoOffline());
             window.addEventListener('beforeunload', (e) => {
@@ -1152,14 +1210,14 @@ function examApp(duration, totalQ) {
         },
         onGoOnline() {
             this.syncStatus = 'saving';
-            this.syncLabel = 'Menyinkronkan...';
+            this.setSyncLabel('syncing');
             this.saveToLocal();
             this.$nextTick(() => this.syncToServer());
             if (Object.keys(this.canvasDirty).length > 0) this.syncCanvasToServer();
         },
         onGoOffline() {
             this.syncStatus = 'offline';
-            this.syncLabel = 'Offline — tersimpan lokal';
+            this.setSyncLabel('offline');
             this.saveToLocal();
         },
         markDirty() {
@@ -1473,30 +1531,44 @@ function examApp(duration, totalQ) {
         },
         _applyViolationBanner(n, kind = 'tab_switch') {
             if (n <= 0) return;
-            const base = this.antiCheat.penalty_per_violation || 5;
-            const act = kind === 'fullscreen_exit' ? 'keluar dari layar penuh' : 'berpindah tab';
-            if (n === 1) {
-                this.violationMessage = 'PERINGATAN! Anda ' + act + '. Pelanggaran berikutnya akan dikenakan penalti.';
-                this.violationType = 'warning';
-            } else if (n === 2) {
-                this.violationMessage = 'PELANGGARAN #2 (' + act + ')! Penalti: -' + base + ' poin';
-                this.violationType = 'penalty';
-            } else if (n === 3) {
-                this.violationMessage = 'PELANGGARAN #3 (' + act + ')! Penalti: -' + (base * 2) + ' poin';
-                this.violationType = 'penalty';
-            } else {
-                this.violationMessage = 'PELANGGARAN #' + n + ' (' + act + ')! Penalti: -' + (base * 3) + ' poin';
-                this.violationType = 'severe';
-            }
+            this._bannerCount = n;
+            this._bannerKind = kind;
+            this.violationType = n === 1 ? 'warning' : (n === 2 || n === 3) ? 'penalty' : 'severe';
+            this._renderViolationMessage();
             this.showViolationBanner = true;
             setTimeout(() => { this.showViolationBanner = false; }, 5000);
+        },
+        // The banner can still be on screen when the student switches language, so
+        // its wording is rendered from the count and kind that produced it rather
+        // than assembled once — the same reason syncLabel is a key rather than a
+        // string. relabelLocale() calls this again.
+        _renderViolationMessage() {
+            if (!this._bannerCount) return;
+            if (this._bannerKind === 'max') {
+                this.violationMessage = sgT('PELANGGARAN MAKSIMAL! Ujian otomatis dikumpulkan.','MAXIMUM VIOLATIONS! The exam is being submitted automatically.');
+                return;
+            }
+            const n = this._bannerCount;
+            const base = this.antiCheat.penalty_per_violation || 5;
+            const act = this._bannerKind === 'fullscreen_exit' ? sgT('keluar dari layar penuh','left fullscreen') : sgT('berpindah tab','switched tab');
+            if (n === 1) {
+                this.violationMessage = sgT('PERINGATAN! Anda ','WARNING! You ') + act + sgT('. Pelanggaran berikutnya akan dikenakan penalti.','. The next violation carries a penalty.');
+            } else if (n === 2) {
+                this.violationMessage = sgT('PELANGGARAN #2 (','VIOLATION #2 (') + act + sgT(')! Penalti: -','). Penalty: -') + base + sgT(' poin',' points');
+            } else if (n === 3) {
+                this.violationMessage = sgT('PELANGGARAN #3 (','VIOLATION #3 (') + act + sgT(')! Penalti: -','). Penalty: -') + (base * 2) + sgT(' poin',' points');
+            } else {
+                this.violationMessage = sgT('PELANGGARAN #','VIOLATION #') + n + ' (' + act + sgT(')! Penalti: -','). Penalty: -') + (base * 3) + sgT(' poin',' points');
+            }
         },
         _maybeAutoSubmit() {
             const maxV = this.antiCheat.max_violations || 0;
             if (maxV <= 0 || this.violationCount < maxV) return;
             if (!this.antiCheat.auto_submit_on_max) return;
             if (this.submitted) return;
-            this.violationMessage = 'PELANGGARAN MAKSIMAL! Ujian otomatis dikumpulkan.';
+            this._bannerCount = this.violationCount;
+            this._bannerKind = 'max';
+            this._renderViolationMessage();
             this.violationType = 'severe';
             this.showViolationBanner = true;
             setTimeout(() => { if (!this.submitted) this.submitExam(true); }, 3000);
@@ -1541,14 +1613,21 @@ function examApp(duration, totalQ) {
                     this.connectionType = type;
                     const speed = conn.downlink ? conn.downlink + ' Mbps' : '';
                     this.connectionSpeed = speed;
-                    const labels = { 'wifi': 'WiFi', 'ethernet': 'Ethernet', 'cellular': 'Seluler', '4g': '4G', '3g': '3G', '2g': '2G', 'slow-2g': '2G' };
+                    const labels = { 'wifi': 'WiFi', 'ethernet': 'Ethernet', 'cellular': sgT('Seluler','Cellular'), '4g': '4G', '3g': '3G', '2g': '2G', 'slow-2g': '2G' };
                     this.connectionLabel = (labels[type] || type) + (speed ? ' ' + speed : '');
                 };
                 update();
                 conn.addEventListener('change', update);
+                // Kept, not discarded: 'Cellular' is built with sgT(), and this label
+                // stays on screen for the whole paper — relabelLocale() re-runs it.
+                this._refreshConnection = update;
             } else {
-                this.connectionLabel = navigator.onLine ? 'Online' : 'Offline';
-                this.connectionType = navigator.onLine ? 'wifi' : 'unknown';
+                const update = () => {
+                    this.connectionLabel = navigator.onLine ? 'Online' : 'Offline';
+                    this.connectionType = navigator.onLine ? 'wifi' : 'unknown';
+                };
+                update();
+                this._refreshConnection = update;
             }
             // Audio devices — enumerate tanpa permission
             const updateAudio = () => {
@@ -1560,15 +1639,35 @@ function examApp(duration, totalQ) {
                     // Cari label pertama yang tidak kosong
                     const inLabel = inputs.find(d => d.label)?.label;
                     const outLabel = outputs.find(d => d.label)?.label;
-                    this.audioInputLabel = inLabel || (inputs.length + ' terdeteksi');
-                    this.audioOutputLabel = outLabel || (outputs.length + ' terdeteksi');
+                    this.audioInputLabel = inLabel || (inputs.length + sgT(' terdeteksi',' detected'));
+                    this.audioOutputLabel = outLabel || (outputs.length + sgT(' terdeteksi',' detected'));
                 }).catch(() => {});
             };
             updateAudio();
+            this._refreshAudio = updateAudio;
             // Update saat perangkat ditambah/dicabut
             if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
                 navigator.mediaDevices.addEventListener('devicechange', updateAudio);
             }
+        },
+        // ─── Following a language switch made mid-exam ───────────────────────
+        // A template expression re-renders when `lang` changes. A string already
+        // stored in component state does not, and sgT() picked its language at the
+        // moment it was built — so anything the exam bar shows for more than a
+        // moment is either a key (syncLabel) or state these two rebuild. init()
+        // watches `lang`, so one click finishes the job instead of leaving the bar
+        // half-switched.
+        setSyncLabel(key, extra = '') {
+            this.syncLabelKey = key;
+            this.syncLabelExtra = extra;
+            const pair = this._syncLabels[key] || this._syncLabels.synced;
+            this.syncLabel = sgT(pair[0] + extra, pair[1] + extra);
+        },
+        relabelLocale() {
+            this.setSyncLabel(this.syncLabelKey, this.syncLabelExtra);
+            this._renderViolationMessage();
+            if (this._refreshConnection) this._refreshConnection();
+            if (this._refreshAudio) this._refreshAudio();
         },
         periodicSync() {
             this.saveToLocal();
@@ -2409,7 +2508,7 @@ function examApp(duration, totalQ) {
             if (hash === this.lastSyncHash && Object.keys(this.canvasDirty).length === 0) { this.dirty = false; return; }
             this._syncInFlight = true;
             this.syncStatus = 'saving';
-            this.syncLabel = 'Menyinkronkan...';
+            this.setSyncLabel('syncing');
             var body = { exam_id: '{{ exam.id }}', answers: lightData, light: true };
             // Include ALL dirty canvas pages for device-switch recovery
             body.dirty_canvases = {};
@@ -2440,7 +2539,7 @@ function examApp(duration, totalQ) {
                         this.canvasDirty = {};
                         this.lastSyncAt = Date.now();
                         this.syncStatus = 'synced';
-                        this.syncLabel = 'Tersinkron';
+                        this.setSyncLabel('synced');
                     }
                     // Timer reconciliation: override client timer with server value
                     // Guard: hanya auto-submit jika server confirmed time habis DAN
@@ -2458,7 +2557,7 @@ function examApp(duration, totalQ) {
                     }
                 });
             })
-            .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; this.pendingSync = true; })
+            .catch(() => { this.syncStatus = 'offline'; this.setSyncLabel('offline'); this.pendingSync = true; })
             .finally(() => { this._syncInFlight = false; });
         },
         syncCanvasToServer() {
@@ -2474,8 +2573,8 @@ function examApp(duration, totalQ) {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
             })
-            .then(r => { if (r.ok) { this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.syncLabel = 'Tersinkron'; } else throw new Error(); })
-            .catch(() => { this.syncStatus = 'offline'; this.syncLabel = 'Offline — tersimpan lokal'; })
+            .then(r => { if (r.ok) { this.canvasDirty = {}; this.lastSyncAt = Date.now(); this.syncStatus = 'synced'; this.setSyncLabel('synced'); } else throw new Error(); })
+            .catch(() => { this.syncStatus = 'offline'; this.setSyncLabel('offline'); })
             .finally(() => { this._canvasSyncInFlight = false; });
         },
         loadDraft() {
@@ -2568,8 +2667,8 @@ function examApp(duration, totalQ) {
             if (!navigator.onLine) {
                 localStorage.setItem('exam_pending_submit_' + '{{ exam.id }}', JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
                 this.syncStatus = 'offline';
-                this.syncLabel = 'Menunggu koneksi...';
-                alert('Internet terputus. Jawaban tersimpan lokal dan akan otomatis dikirim saat internet kembali tersedia. JANGAN TUTUP halaman ini.');
+                this.setSyncLabel('waiting');
+                alert(sgT('Internet terputus. Jawaban tersimpan lokal dan akan otomatis dikirim saat internet kembali tersedia. JANGAN TUTUP halaman ini.','No connection. Your answers are saved locally and will be sent automatically once the internet is back. DO NOT CLOSE this page.'));
                 this.submitted = false;
                 this._startOfflineSubmitPoll();
                 return;
@@ -2577,7 +2676,7 @@ function examApp(duration, totalQ) {
             // Staggered submit: random delay 0-15s to distribute server load
             var delay = Math.floor(Math.random() * 15000);
             this.syncStatus = 'saving';
-            this.syncLabel = 'Mengirim dalam ' + Math.ceil(delay / 1000) + 's...';
+            this.setSyncLabel('sendingIn', Math.ceil(delay / 1000) + 's...');
             setTimeout(() => { this._doSubmit(answers); }, delay);
         },
         _startOfflineSubmitPoll() {
@@ -2588,7 +2687,7 @@ function examApp(duration, totalQ) {
                     if (pending) {
                         const parsed = JSON.parse(pending);
                         this.syncStatus = 'saving';
-                        this.syncLabel = 'Mengirim jawaban...';
+                        this.setSyncLabel('sendingAnswers');
                         this.submitted = true;
                         this._doSubmit(parsed.answers_json);
                     }
@@ -2597,7 +2696,7 @@ function examApp(duration, totalQ) {
         },
         _doSubmit(answers) {
             this.syncStatus = 'saving';
-            this.syncLabel = 'Mengirim...';
+            this.setSyncLabel('sending');
             fetch('/student/exams/{{ exam.id }}/submit', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -2613,11 +2712,11 @@ function examApp(duration, totalQ) {
                         if (r.status === 409) {
                             window.location.href = '/student/results';
                         } else {
-                            alert('Gagal kirim: ' + (d.error || 'coba lagi'));
+                            alert(sgT('Gagal kirim: ','Send failed: ') + (d.error || sgT('coba lagi','try again')));
                             this.submitted = false;
                             this.submitting = false;
                             this.syncStatus = 'error';
-                            this.syncLabel = 'Gagal kirim — coba lagi';
+                            this.setSyncLabel('sendFailed');
                         }
                     });
                 }
@@ -2626,9 +2725,9 @@ function examApp(duration, totalQ) {
                 this.submitted = false;
                 this.submitting = false;
                 this.syncStatus = 'offline';
-                this.syncLabel = 'Offline — tersimpan lokal';
+                this.setSyncLabel('offline');
                 localStorage.setItem('exam_pending_submit_' + '{{ exam.id }}', JSON.stringify({ answers_json: answers, timestamp: Date.now() }));
-                alert('Internet terputus. Jawaban tersimpan dan akan otomatis dikirim saat internet kembali. JANGAN TUTUP halaman ini.');
+                alert(sgT('Internet terputus. Jawaban tersimpan dan akan otomatis dikirim saat internet kembali. JANGAN TUTUP halaman ini.','No connection. Your answers are saved and will be sent automatically once the internet is back. DO NOT CLOSE this page.'));
                 this._startOfflineSubmitPoll();
             });
         },
