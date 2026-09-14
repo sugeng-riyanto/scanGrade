@@ -10,20 +10,31 @@ exam page's behaviour a lie:
    The student watched the penalty ladder climb to "PELANGGARAN #3! -10 poin"
    while nothing was recorded and no penalty ever reached a score.
 2. The count that drives the penalty included *every* violation type, so a
-   fullscreen exit — which the UI explicitly promises carries no penalty — pushed
-   the student's next tab switch up the graduated ladder.
+   fullscreen exit — which the UI then promised carried no penalty — pushed the
+   student's next tab switch up the graduated ladder.
 3. The page's counter started at 0 on every load while the ladder lived in the
    database, so a reload handed back warnings already used and moved the
    auto-submit point.
 
 The template guards at the end keep the first and third from coming back.
+
+**The fullscreen policy changed deliberately since (2).** Fullscreen is now
+mandatory for the whole exam and leaving it is charged like a tab switch, because
+the school asked for it: the exam page blocks behind an overlay until fullscreen
+is regained, and *an act the page blocks cannot be an act that carries no
+penalty* — that combination is what let a restored or minimised window go
+unnoticed during an exam. The tests below encode the new policy, so reverting it
+has to be deliberate.
 """
 import pathlib
+import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from app.services.anti_cheat_service import (
+    PENALIZED_VIOLATION_TYPES,
     calculate_graduated_penalty,
     count_penalized_violations,
 )
@@ -54,6 +65,14 @@ class FakeQuery:
 
     def in_(self, col, values):
         self._in = (col, list(values))
+        return self
+
+    # Ordering and limiting do not change a count, and the debounce read only
+    # needs the newest row out of whatever it is handed.
+    def order(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
         return self
 
     def execute(self):
@@ -137,13 +156,20 @@ def test_the_endpoint_lets_the_new_payload_past_the_guard(app):
 
 # ── which violations are charged ─────────────────────────────────
 
-def test_only_tab_switches_are_counted():
+def test_the_acts_that_count_are_tab_switch_and_leaving_fullscreen():
+    """Everything the student can be *charged* for, and nothing they cannot."""
     supa = FakeSupabase([
         log(vtype="tab_switch"), log(vtype="fullscreen_exit"),
         log(vtype="tab_switch"), log(vtype="blur"),
     ])
 
-    assert count_penalized_violations(supa, "stu-1", "exam-1") == 2
+    assert count_penalized_violations(supa, "stu-1", "exam-1") == 3
+
+
+def test_the_penalized_set_is_exactly_those_two():
+    """Pinned so a third type cannot be charged by accident — and so a type that
+    the page only records (a blur, a right-click) cannot start costing points."""
+    assert set(PENALIZED_VIOLATION_TYPES) == {"tab_switch", "fullscreen_exit"}
 
 
 def test_other_students_and_exams_are_not_counted():
@@ -160,25 +186,120 @@ def test_a_lookup_failure_does_not_invent_a_penalty(app):
         assert count_penalized_violations(FakeSupabase([], fail=True), "stu-1", "exam-1") == 0
 
 
-def test_a_fullscreen_exit_does_not_escalate_the_ladder():
-    """The UI promises no penalty for it; the ladder must agree."""
-    only_fullscreen = [log(vtype="fullscreen_exit"), log(vtype="fullscreen_exit")]
-    supa = FakeSupabase(only_fullscreen)
+def test_leaving_fullscreen_climbs_the_same_ladder_as_a_tab_switch():
+    """The first offence of either kind is the warning; the penalty starts at the
+    second. Leaving fullscreen is not a lesser act than switching tabs."""
+    supa = FakeSupabase([log(vtype="fullscreen_exit")])
+    first = count_penalized_violations(supa, "stu-1", "exam-1")
+    assert first == 1
+    assert calculate_graduated_penalty(first, EXAM) == {
+        "penalty": 0, "warning": True, "auto_submit": False,
+        "current_penalty_this_violation": 0,
+    }
 
-    count = count_penalized_violations(supa, "stu-1", "exam-1")
+    supa = FakeSupabase([log(vtype="fullscreen_exit"), log(vtype="fullscreen_exit")])
+    second = count_penalized_violations(supa, "stu-1", "exam-1")
+    assert second == 2
+    assert calculate_graduated_penalty(second, EXAM)["penalty"] == float(
+        EXAM["penalty_per_violation"])
 
-    assert count == 0
-    assert calculate_graduated_penalty(count, EXAM)["penalty"] == 0
 
-
-def test_first_tab_switch_after_a_fullscreen_exit_is_still_a_warning():
-    """It used to be charged as violation #2 because the exit was counted first."""
+def test_the_two_kinds_share_one_counter():
+    """A tab switch after a fullscreen exit is the student's second offence, not
+    their first — the ladder counts acts, not per-type totals."""
     supa = FakeSupabase([log(vtype="fullscreen_exit"), log(vtype="tab_switch")])
 
     count = count_penalized_violations(supa, "stu-1", "exam-1")
 
-    assert count == 1
-    assert calculate_graduated_penalty(count, EXAM)["penalty"] == 0
+    assert count == 2
+    assert calculate_graduated_penalty(count, EXAM)["penalty"] == 5.0
+
+
+# ── the debounce, on a server that is not on UTC ─────────────────
+
+class _LogsOnlySupabase:
+    """Only the one read ``validate_violation_log`` performs."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def table(self, name):
+        assert name == "violation_logs", f"unexpected table {name}"
+        return FakeQuery(self._rows)
+
+
+def _recent_row(value):
+    # The keys the query filters on have to be present, or FakeQuery filters the
+    # row away and the read looks like "no previous event".
+    return _LogsOnlySupabase([{"user_id": "stu-1", "exam_id": "exam-1",
+                               "created_at": value}])
+
+
+def test_one_instant_parses_to_one_epoch_on_any_machine():
+    """The debounce is the only thing between a broken client and an
+    auto-submitted exam, and it silently did nothing. See below.
+
+    Checked as an identity, not against the clock: comparing to `time.time()`
+    would only expose the defect on a machine whose local timezone is not UTC,
+    which is exactly why it survived — development is UTC and the server is WIB.
+    Two spellings of one instant must parse to one epoch wherever this runs.
+    """
+    from app.services import anti_cheat_service as svc
+
+    utc = svc._as_utc_epoch("2026-09-13T13:32:54+00:00")
+    wib = svc._as_utc_epoch("2026-09-13T20:32:54+07:00")
+    zulu = svc._as_utc_epoch("2026-09-13T13:32:54Z")
+    naive = svc._as_utc_epoch("2026-09-13T13:32:54")
+
+    assert utc == wib, "the offset was thrown away, so WIB read as a later instant"
+    assert utc == zulu
+    assert utc == naive, "a column with no offset is UTC here, as it is written"
+    # ...and the value has to be the instant it names, not a local reading of it.
+    assert utc == datetime(2026, 9, 13, 13, 32, 54, tzinfo=timezone.utc).timestamp()
+
+
+@pytest.mark.parametrize("spelling", ["offset", "zulu", "naive"])
+def test_a_second_event_in_the_same_instant_is_rejected(app, spelling):
+    """The same rule through the function that uses it."""
+    from app.services import anti_cheat_service as svc
+
+    now = datetime.now(timezone.utc)
+    value = {
+        "offset": now.isoformat(),
+        "zulu": now.isoformat().replace("+00:00", "Z"),
+        "naive": now.replace(tzinfo=None).isoformat(),
+    }[spelling]
+
+    with app.app_context():
+        app.extensions["supabase"] = _recent_row(value)
+        out = svc.validate_violation_log("stu-1", "exam-1", time.time())
+
+    assert out == {"valid": False, "reason": "rate_limited"}
+
+
+def test_an_event_outside_the_window_is_accepted(app):
+    """The other half: the window must not become a wall. A genuine second act,
+    a minute later, has to be recorded."""
+    from app.services import anti_cheat_service as svc
+
+    old = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+    with app.app_context():
+        app.extensions["supabase"] = _recent_row(old)
+        out = svc.validate_violation_log("stu-1", "exam-1", time.time())
+
+    assert out["valid"] is True
+
+
+def test_an_unreadable_timestamp_does_not_wedge_the_endpoint(app):
+    """A row that cannot be parsed must not crash the log route, and must not be
+    treated as 'just now' either — that would swallow every later event."""
+    from app.services import anti_cheat_service as svc
+
+    with app.app_context():
+        app.extensions["supabase"] = _recent_row("not-a-date")
+        out = svc.validate_violation_log("stu-1", "exam-1", time.time())
+
+    assert out["valid"] is True
 
 
 # ── the endpoint reports what it will charge ─────────────────────
@@ -193,7 +314,8 @@ def _call(client, payload, monkeypatch, supabase):
 def test_count_endpoint_returns_the_penalty(app, monkeypatch):
     from app.routes import api as apimod
 
-    rows = [log(), log(), log(vtype="fullscreen_exit")]
+    # One tab switch plus two fullscreen exits: all three are charged now.
+    rows = [log(), log(vtype="fullscreen_exit"), log(vtype="fullscreen_exit")]
     supa = FakeSupabase(rows)
 
     class _Exams:
@@ -221,8 +343,12 @@ def test_count_endpoint_returns_the_penalty(app, monkeypatch):
         g.user_id, g.user_role = "stu-1", "murid"
         body = apimod.violation_count.__wrapped__().get_json()
 
-    assert body["count"] == 2
-    assert body["penalty"] == 5.0          # 2nd violation = -base
+    assert body["count"] == 3
+    # `penalty` is the running total (0 + base + 2×base); the ladder the student
+    # reads on screen quotes the per-violation figure, which for the third is
+    # 2×base. Keeping the two apart is what the numbers here hold.
+    assert body["penalty"] == 15.0
+    assert body["current_penalty_this_violation"] == 10.0
     assert body["auto_submit"] is False
 
 
@@ -239,8 +365,12 @@ class _TableSupabase:
 def test_page_sends_the_token_in_the_violation_payload():
     src = TEMPLATE.read_text(encoding="utf-8")
 
-    assert "_csrf_token: this._csrfToken()" in src, "the token must travel in the body"
-    assert "'X-CSRF-Token': token" in src
+    # Both halves of the request have to carry it. The body is what makes a
+    # `sendBeacon`-shaped call work and the header is what a `fetch` is checked
+    # against first; the original bug was a body that could not hold either.
+    assert "const token = this._csrfToken();" in src
+    assert "_csrf_token: token" in src, "the token must travel in the body"
+    assert "'X-CSRF-Token': token" in src, "and in the header"
     # The beacon-shaped array was the reason nothing was ever recorded.
     assert "new Blob([JSON.stringify([{" not in src
 
@@ -263,3 +393,119 @@ def test_screen_stays_clear_a_background_tab_cannot_start_counting():
 
     assert "if (document.hidden) return;   // a background tab must not take over" in src
     assert "if (!this._isFocusTab || this.submitted) return;" in src
+
+
+# ── fullscreen is enforced, not merely announced ─────────────────
+
+def _src():
+    return TEMPLATE.read_text(encoding="utf-8")
+
+
+def test_the_fullscreen_state_is_sampled_not_only_listened_for():
+    """The defect this whole change is about.
+
+    Restoring a window down and minimising it are the acts a student uses to put
+    something else on screen, and neither reliably fires `fullscreenchange` or
+    even `resize` — so a listener-only check reported nothing and the exam looked
+    clean. The state has to be sampled as well.
+    """
+    src = _src()
+
+    assert "document.addEventListener('fullscreenchange', check);" in src
+    assert "window.addEventListener('resize'" in src, "a resize must re-check"
+    assert "this._fsWatch = setInterval(check, 2000);" in src, \
+        "the state must also be sampled — no event covers every way out"
+    assert "this.watchFullscreen();" in src, "and the watcher has to be armed"
+
+
+def test_losing_fullscreen_covers_the_exam_until_it_comes_back():
+    """A page cannot maximise a window, so blocking is what 'not allowed' means.
+
+    It also has to be recoverable in one click: the overlay is the only thing on
+    screen, and the click that dismisses it is the user gesture the browser
+    requires before it will grant fullscreen again.
+    """
+    src = _src()
+
+    assert 'x-show="fullscreenBlocked && !submitted"' in src, \
+        "the overlay must disappear with the exam, not outlive the submission"
+    assert "resumeFullscreen()" in src, "and offer the way back"
+    assert "this.requestExamFullscreen();" in src
+    assert "this.fullscreenBlocked = false;" in src, \
+        "only regaining fullscreen may clear it"
+
+
+def test_a_device_without_the_fullscreen_api_is_not_failed_for_it():
+    """iPhone Safari has no Fullscreen API, and a permissions policy can switch it
+    off. Neither is a student's doing, and neither can be fixed by them — so the
+    check stands down rather than blocking an exam they cannot start."""
+    src = _src()
+
+    assert "_fsSupported()" in src
+    assert "document.fullscreenEnabled !== false" in src
+    assert "!this.antiCheat.fullscreen_required || !this._fsSupported()" in src, \
+        "the guard has to be in the check itself, not only where it is armed"
+
+
+def test_one_minimise_is_charged_once():
+    """A minimise makes the document hidden, which the visibility handler already
+    charges. Sampling the fullscreen state while hidden would bill the same act a
+    second time, and an over-charged student is as wrong as an uncaught one.
+    """
+    src = _src()
+
+    assert "// A hidden document is a minimise or a tab switch" in src
+    assert "this._hiddenAbsenceCharged = true;" in src
+    assert "if (this._hiddenAbsenceCharged) {" in src, \
+        "the overlay must be able to go up without charging again"
+
+
+def test_starting_the_exam_is_not_itself_a_violation():
+    """agreeExam() asks for fullscreen on the click that arms the watcher, and the
+    request resolves a moment later. Without a grace window the student's first
+    act of starting is charged."""
+    src = _src()
+
+    assert "_fsGraceMs" in src
+    assert "!this._sawFullscreen && (Date.now() - this._fsArmedAt) < this._fsGraceMs" in src
+
+
+def test_a_reload_does_not_bill_the_browser_dropping_fullscreen():
+    """Measured in the browser: Chrome keeps fullscreen across a same-origin
+    reload, so the new document's first sample is already *in* fullscreen — and
+    the browser then drops it on its own. Treating that as the student having
+    established fullscreen and then left it charged a reload, which is the very
+    action the page supports for crash recovery.
+
+    So arriving in fullscreen must not arm the charge; only a fullscreen reached
+    from outside may.
+    """
+    src = _src()
+
+    assert "_fsWasAbsent: false," in src
+    assert "if (this._fsWasAbsent) this._sawFullscreen = true;" in src, \
+        "an inherited fullscreen must not count as one the student established"
+    assert "this._fsWasAbsent = true;" in src, \
+        "and reaching fullscreen later has to be recognised as such"
+
+
+def test_the_violation_is_recorded_as_the_act_it_was():
+    """The teacher's report can only tell a fullscreen exit from a tab switch if
+    the client names the right type, so the type travels with the request."""
+    src = _src()
+
+    assert "handleViolation(vtype = 'tab_switch')" in src
+    assert "this.handleViolation('fullscreen_exit');" in src
+    assert "violation_type: vtype," in src, "the type must reach the server"
+
+
+def test_the_terms_say_fullscreen_is_required():
+    """The reason the old behaviour was indefensible: the page charged nothing for
+    something it also never asked for. The agreement now says what is required.
+    """
+    src = _src()
+
+    assert "Wajib layar penuh." in src
+    assert "menghentikan ujian" in src
+    assert "keluar dari layar penuh" in src, \
+        "and the ladder must name the acts that are counted"
