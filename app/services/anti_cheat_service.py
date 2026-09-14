@@ -1,17 +1,27 @@
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import current_app
 
 
 RATE_LIMIT_SECONDS = 2
 TIMESTAMP_TOLERANCE = 900
 
-# Only leaving the exam counts toward the penalty. Every other recorded event
-# (a fullscreen exit, say) is a reminder for the student and a note for the
-# teacher: the UI promises it carries no penalty, and counting it here made that
-# promise false while pushing the student's next tab switch up the graduated
-# ladder — their first tab switch was charged as the second violation.
-PENALIZED_VIOLATION_TYPES = ("tab_switch",)
+# Leaving the exam counts, however it is left.
+#
+# `tab_switch` is switching tabs or apps. `fullscreen_exit` is leaving the
+# required fullscreen state — pressing Esc, restoring the window down, or
+# minimising it — which the exam page now blocks behind an overlay rather than
+# only announcing. Both are the same act from the school's point of view
+# (the assessment is no longer on the screen it was put on), so they share the
+# one ladder: a student's first offence of either kind is the warning, and the
+# penalty starts from the second.
+#
+# `fullscreen_exit` used to be recorded but not counted, because the page
+# promised it carried no penalty. That promise is gone: fullscreen is mandatory
+# during an assessed exam, and the page says so on its agreement screen. Rows
+# written under the old policy are indistinguishable in the table, which is why
+# the reason lives here rather than in a migration note.
+PENALIZED_VIOLATION_TYPES = ("tab_switch", "fullscreen_exit")
 
 
 def count_penalized_violations(supabase, user_id: str, exam_id: str) -> int:
@@ -51,7 +61,9 @@ def calculate_graduated_penalty(
         Violation 4+ → penalty_per_violation * 3
 
     Args:
-        violation_count: Number of detected tab switches.
+        violation_count: Charged violations, per PENALIZED_VIOLATION_TYPES — a tab
+            switch or leaving fullscreen, both counted by
+            count_penalized_violations().
         exam_settings: Dict with anti_cheat settings from exam record.
 
     Returns:
@@ -101,6 +113,31 @@ def calculate_graduated_penalty(
     }
 
 
+def _as_utc_epoch(value):
+    """A stored timestamp as a POSIX epoch, or ``None`` if it cannot be read.
+
+    The offset has to survive parsing. This used to truncate the string to 19
+    characters, which strips a trailing `+00:00` and leaves a *naive* datetime
+    that ``.timestamp()`` then reads as local time — on a WIB server that placed
+    the previous event seven hours in the past, so ``now - last_ts`` was always
+    far above the debounce window and the window rejected nothing at all.
+    Measured on the real app: one Esc press produced seven violation rows and
+    -75 points, which is enough to auto-submit an exam nobody left.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            current_app.logger.warning("Unparseable violation timestamp: %r", value)
+            return None
+    if value.tzinfo is None:
+        # The app stores UTC everywhere, so a column without an offset is UTC.
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
 def validate_violation_log(user_id: str, exam_id: str, timestamp: float) -> dict:
     now = time.time()
     if abs(now - timestamp) > TIMESTAMP_TOLERANCE:
@@ -119,13 +156,8 @@ def validate_violation_log(user_id: str, exam_id: str, timestamp: float) -> dict
     )
 
     if recent.data:
-        last_time = recent.data[0]["created_at"]
-        if isinstance(last_time, str):
-            dt = datetime.fromisoformat(last_time[:19] if "T" in last_time else last_time)
-            last_ts = dt.timestamp()
-        else:
-            last_ts = last_time.timestamp()
-        if now - last_ts < RATE_LIMIT_SECONDS:
+        last_ts = _as_utc_epoch(recent.data[0]["created_at"])
+        if last_ts is not None and now - last_ts < RATE_LIMIT_SECONDS:
             current_app.logger.warning(f"Violation rejected for {user_id} exam {exam_id}: rate_limited")
             return {"valid": False, "reason": "rate_limited"}
 
