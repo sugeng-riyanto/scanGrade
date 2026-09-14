@@ -24,7 +24,10 @@
             </div>
         </div>
 
-        <table class="w-full text-sm">
+        <!-- Four columns of names and scores: scroll sideways instead of squeezing
+             them into 40px each, which is what a phone would do otherwise. -->
+        <div class="overflow-x-auto">
+        <table class="w-full text-sm min-w-[560px]">
             <thead>
                 <tr class="border-b border-surface-200">
                     <th class="text-left py-3 px-2 font-extrabold text-surface-600">Nama</th>
@@ -60,6 +63,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
 
         <div class="flex items-center gap-3 mt-8 pt-4 border-t border-surface-200">
             <a href="/teacher/results?exam_id={{ exam.id }}" class="flex-1 px-4 py-2.5 border-2 border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition text-center">

@@ -212,8 +212,11 @@
             <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-chart-bar text-emerald-500"></i>Hasil Terakhir</h3>
             <a href="/student/results" class="text-sm font-bold text-primary-600 hover:text-primary-700 transition">Lihat semua <i class="fas fa-arrow-right ml-1"></i></a>
         </div>
-        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-hidden">
-            <table class="w-full text-sm">
+        <!-- overflow-x-auto, not overflow-hidden: five columns do not fit a phone,
+             and clipping them hides the score and the action behind the card edge
+             with no way to reach them. The table keeps its width and the card scrolls. -->
+        <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-x-auto">
+            <table class="w-full text-sm min-w-[560px]">
                 <thead>
                     <tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
                         <th class="px-5 py-3 font-bold">Ujian</th>

@@ -51,7 +51,7 @@
             <div class="bg-surface-50 border border-surface-200 rounded-xl p-4">
                 <p class="text-xs font-bold text-surface-600 mb-2">Contoh Lengkap: 40% MCQ (5 soal) + 60% Esai (5 soal)</p>
                 <div class="overflow-x-auto">
-                    <table class="w-full text-xs">
+                    <table class="w-full text-xs min-w-[560px]">
                         <thead><tr class="text-surface-500 border-b border-surface-200">
                             <th class="text-left py-1 pr-2">Tipe</th>
                             <th class="text-right px-2">%</th>
@@ -82,7 +82,8 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="border border-surface-200 rounded-xl p-4">
                     <p class="text-xs font-bold text-amber-700 mb-2"><i class="fas fa-list-ol mr-1"></i>Skor MCQ (Otomatis)</p>
-                    <table class="w-full text-xs">
+                    <div class="overflow-x-auto -mx-1 px-1">
+                    <table class="w-full text-xs min-w-[420px]">
                         <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1">Soal</th><th class="text-center px-2">Jawab</th><th class="text-center px-2">Kunci</th><th class="text-center px-2">Benar?</th><th class="text-right">Poin</th></tr></thead>
                         <tbody>
                             <tr class="border-b border-surface-50"><td class="py-1">MCQ 1</td><td class="text-center px-2">A</td><td class="text-center px-2">A</td><td class="text-center px-2 text-emerald-600">&#10003;</td><td class="text-right font-bold">8</td></tr>
@@ -91,10 +92,12 @@
                             <tr><td class="py-1 font-bold text-surface-700">Skor MCQ</td><td colspan="3"></td><td class="text-right font-bold text-amber-700">32</td></tr>
                         </tbody>
                     </table>
+                    </div>
                 </div>
                 <div class="border border-surface-200 rounded-xl p-4">
                     <p class="text-xs font-bold text-emerald-700 mb-2"><i class="fas fa-pencil-alt mr-1"></i>Skor Esai (Guru)</p>
-                    <table class="w-full text-xs">
+                    <div class="overflow-x-auto -mx-1 px-1">
+                    <table class="w-full text-xs min-w-[380px]">
                         <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1">Soal</th><th class="text-center px-2">Nilai</th><th class="text-center px-2">Bobot</th><th class="text-right">Poin</th></tr></thead>
                         <tbody>
                             <tr class="border-b border-surface-50"><td class="py-1">Esai 1</td><td class="text-center px-2">80</td><td class="text-center px-2">12</td><td class="text-right font-bold">9,6</td></tr>
@@ -102,6 +105,7 @@
                             <tr><td class="py-1 font-bold text-surface-700">Skor Esai</td><td colspan="2"></td><td class="text-right font-bold text-emerald-700">48</td></tr>
                         </tbody>
                     </table>
+                    </div>
                 </div>
             </div>
             <div class="mt-3 bg-surface-50 border border-surface-200 rounded-xl p-4 text-xs">
@@ -117,7 +121,7 @@
             </h2>
             <p class="text-sm text-surface-600 mb-3">Penalti dihitung otomatis dari jumlah pelanggaran. Guru bisa <strong>override</strong> di grading queue.</p>
             <div class="overflow-x-auto mb-4">
-                <table class="w-full text-xs">
+                <table class="w-full text-xs min-w-[480px]">
                     <thead><tr class="bg-red-50 text-red-700"><th class="text-left px-4 py-2">Pelanggaran Ke-</th><th class="text-left px-4 py-2">Jenis</th><th class="text-right px-4 py-2">Penalti</th><th class="text-left px-4 py-2">Keterangan</th></tr></thead>
                     <tbody>
                         <tr class="border-b border-surface-100"><td class="px-4 py-2 font-bold">1</td><td class="px-4 py-2">Tab switch / dll</td><td class="text-right px-4 py-2 font-bold text-surface-400">0</td><td class="px-4 py-2 text-surface-500">Peringatan saja</td></tr>
