@@ -7,8 +7,9 @@
         <input type="text" name="q" value="{{ q }}" placeholder="Cari nama/NPSN sekolah..." class="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
         <button type="submit" class="px-5 py-2.5 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition"><i class="fas fa-search mr-1"></i>Cari</button>
     </form>
-    <div class="card overflow-hidden">
-        <table class="w-full text-sm">
+    <!-- Eight columns do not fit a phone; the card scrolls instead of clipping. -->
+    <div class="card overflow-x-auto">
+        <table class="w-full text-sm min-w-[720px]">
             <thead class="bg-slate-50 border-b border-slate-200">
                 <tr>
                     <th class="text-left px-5 py-3 font-bold text-slate-600 text-xs">Nama Sekolah</th>

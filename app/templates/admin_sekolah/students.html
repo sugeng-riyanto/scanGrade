@@ -116,7 +116,7 @@
             <button @click="selected=[]" class="px-3 py-1.5 bg-white text-stone-600 rounded-lg font-bold hover:bg-stone-100 transition text-xs" x-text="t('Batal','Cancel')"></button>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="w-full text-sm min-w-[640px]">
                 <thead class="bg-stone-50 text-xs font-bold text-stone-500 uppercase">
                     <tr>
                         <th class="w-10 px-2 py-3"><input type="checkbox" @click='selectAll = !selectAll; selected = selectAll ? {{ students|map(attribute="id")|list|tojson }} : []' class="w-4 h-4"></th>

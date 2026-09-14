@@ -50,6 +50,32 @@
            the UA's black — unreadable on `.dark`. */
         body { background: var(--bg-body) !important; color: var(--text); }
 html { transition: background-color .3s, color .3s; }
+/* ── Legibility floor ────────────────────────────────────────────────────────
+   The same correction the dark-theme block above applies to colour, applied to
+   size. Templates reached for `text-[9px]`/`text-[10px]` to fit a dense card,
+   and it spread: 546 uses of 8-11px across the templates, measured live at 8px
+   on the login-tip captions. That is not a design choice anyone can read on a
+   phone, and it was invisible on the 27-inch screen it was written on.
+
+   Raising the floor here rather than editing 546 call sites keeps one decision
+   in one place — the same reasoning as the colour remap. `!important` because a
+   stray second stylesheet load is exactly the failure this has to survive.
+
+   6-8px was used for toolbar tooltips that only appear on hover (`Pena`,
+   `Hapus`) and for the icons beside them, so it is here too — a tooltip nobody
+   can read is not a tooltip.
+
+   NOT floored, deliberately: 4-5px is the OMR answer-sheet mockup
+   (tools/generate_answer_sheet.html), where the sizes are part of a miniature of
+   a printed sheet and `[QR]`/`Student Name:` are drawn at paper scale. Those are
+   `text-[4px]`/`text-[5px]` only. */
+.text-\[6px\]  { font-size: 10px !important; }
+.text-\[7px\]  { font-size: 11px !important; }
+.text-\[8px\]  { font-size: 11.5px !important; }
+.text-\[9px\]  { font-size: 12px !important; }
+.text-\[10px\] { font-size: 12px !important; }
+.text-\[11px\] { font-size: 12.5px !important; }
+
 /* Teacher page readability */
 .teacher-content { font-size: 105%; }
 .teacher-content input, .teacher-content select, .teacher-content textarea { font-size: 0.95rem; }

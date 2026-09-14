@@ -68,8 +68,10 @@
 
     {% if submissions %}
     <script id="submissions-data" type="application/json">{{ submissions | tojson | safe }}</script>
-    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-hidden">
-        <table class="w-full text-sm">
+    <!-- Six columns will not fit a phone: the card scrolls sideways instead of
+         clipping the action column out of reach. -->
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 overflow-x-auto">
+        <table class="w-full text-sm min-w-[680px]">
             <thead class="bg-surface-50 border-b border-surface-200">
                 <tr>
                     <th class="text-left px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider cursor-pointer select-none" @click="sortKey='exam'; sortDir=sortDir==='asc'?'desc':'asc'">

@@ -5,13 +5,15 @@
 
 ## Constraints & Preferences
 - Supabase project: `roshkbkbzgfedowozfo` (region: ap-southeast-1)
-- Python 3.12.10, Flask 3.1.1, supabase-py 2.12.0, Alpine.js v3.14.8, Tailwind CSS (CDN), Chart.js 4.4.7
+- Python 3.12.10, Flask 3.1.1, supabase-py 2.12.0, Alpine.js v3.14.8, Tailwind CSS (compiled locally, see below), Chart.js 4.4.7
 - Two Supabase clients: `get_supabase()` (service key) and `get_auth_client()` (anon key)
 - Must support 500 concurrent students with spotty WiFi (3 floors, uneven coverage)
 - Offline-first: localStorage first, sync to server when online
 - `MAX_CONTENT_LENGTH = 50MB`
 - Canvas data saved as PNG (not JPEG — was causing black overlay bug)
 - **Tailwind CSS**: Local compiled CSS (`npm run css:build` after template changes). NOT CDN — users have spotty WiFi.
+- **A Tailwind utility name must never be built at render time.** Tailwind reads the template as text, so `from-{{ color }}-600` matches nothing, generates nothing, and the element silently keeps its ancestor's gradient — that is how two of the three "Log in" buttons on `/demo` shipped as white text on a white box. Name each utility literally; `demo.html` uses `{% set EMAIL_COLOR/COPY_BUTTON/LOGIN_COLOR %}` maps. Guarded twice in `tests/unit/test_tailwind_class_names.py`: no interpolation flush against an identifier inside a class attribute, and every colour utility a class attribute names must exist in the committed `tailwind.css`
+- **Legibility floor + mobile layout**: `base.html` maps `text-[6..11px]` up to ≥12px in one `<style>` block, so 546 call sites did not have to be edited by hand (the only documented below-floor exemption is the OMR answer-sheet mockup in `tools/generate_answer_sheet.html`, where 4-5px *is* the artefact). Every non-print table with ≥4 columns sits in an `overflow-x-auto` container **and** carries a `min-w-[...]` — without the min-width the table squeezes instead of scrolling. Four print documents (`monitor.html`, `print/report_card.html`, `student/result_detail_pdf.html`, `teacher/print_exam_report.html`) are exempt from the table rule because a phone is not their target. Guarded by `tests/unit/test_mobile_layout.py`
 - **Inter font**: Local TTF files in `/static/vendor/inter/`, NOT Google Fonts CDN
 - **Midtrans Snap.js**: vendored at `/static/vendor/midtrans/<build>/veritrans.co.id/snap.js` (build = `production` or `sandbox`), with the CDN only as a load-failure fallback. **The `veritrans.co.id` directory is load-bearing, not decoration**: Snap.js finds its own `<script>` tag by matching that string (or its API host, which carries a scheme and so can never match a same-origin path), then reads `data-client-key` off the tag it found. Rename the directory and the key silently becomes empty — the SDK loads fine, no error is raised, and the payment iframe comes up without a merchant. Guarded by `tests/unit/test_snap_vendored.py`
 - The two Snap.js builds differ **only** in the host they hardcode, so they are not interchangeable: the sandbox build sends payments to sandbox (where they silently do not count), the production build takes real card details

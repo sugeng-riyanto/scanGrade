@@ -2,252 +2,228 @@
 {% block title %}Demo - ScanGrade{% endblock %}
 {% block content_noauth %}
 {% set ds = get_demo_settings() %}
+
+{# ── Credential cards ─────────────────────────────────────────────────────────
+   Ten copies of the same card used to be written out by hand, which is how the
+   email size drifted to 10px on some of them and 12px on others, and how every
+   copy button ended up 13x28px — too small to hit with a thumb, and the whole
+   point of the page is copying these credentials. One definition each, and the
+   numbers stay together: 14px monospace for the address, a 40px tap target for
+   the button, and a two-line layout that survives a 320px screen. #}
+{# ── Tailwind reads this file as text ─────────────────────────────────────────
+   Colours are named one by one, never built as `text-{{ accent }}-700`. An
+   interpolated name matches no utility, so the class compiles to nothing and the
+   element inherits its ancestor's gradient: the demo page's two "Log in" buttons
+   rendered as white boxes with white text, invisible on the very page whose job
+   is to get someone signed in. Spelling every utility out keeps it in the source
+   where both the scanner and `tests/unit/test_tailwind_class_names.py` see it. #}
+{% set EMAIL_COLOR = {
+    'purple':  'text-purple-700',
+    'blue':    'text-blue-700',
+    'emerald': 'text-emerald-700',
+    'amber':   'text-amber-700'
+} %}
+{% set COPY_BUTTON = {
+    'purple':  'border-purple-200 text-purple-500 hover:text-purple-700 hover:bg-purple-50',
+    'blue':    'border-blue-200 text-blue-500 hover:text-blue-700 hover:bg-blue-50',
+    'emerald': 'border-emerald-200 text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50',
+    'amber':   'border-amber-200 text-amber-500 hover:text-amber-700 hover:bg-amber-50'
+} %}
+{% set LOGIN_COLOR = {
+    'purple':  'from-purple-600 to-purple-500 shadow-purple-500/25 hover:shadow-purple-500/40',
+    'blue':    'from-blue-600 to-blue-500 shadow-blue-500/25 hover:shadow-blue-500/40',
+    'emerald': 'from-emerald-600 to-emerald-500 shadow-emerald-500/25 hover:shadow-emerald-500/40',
+    'amber':   'from-amber-600 to-amber-500 shadow-amber-500/25 hover:shadow-amber-500/40'
+} %}
+
+{% macro cred_row(email, accent) %}
+<div class="mt-2 flex items-start gap-2">
+  <div class="flex-1 min-w-0">
+    <code class="block text-sm font-mono font-semibold {{ EMAIL_COLOR[accent] }} break-all select-all leading-snug">{{ email }}</code>
+    <span class="inline-flex items-center gap-1.5 mt-1">
+      <span class="text-xs font-semibold text-surface-500" x-text="t('Password','Password')"></span>
+      <code class="text-sm font-mono font-semibold text-surface-500 select-all">demo123</code>
+    </span>
+  </div>
+  <button @click="copyText('{{ email }}')"
+          class="shrink-0 w-10 h-10 inline-flex items-center justify-center rounded-xl border {{ COPY_BUTTON[accent] }} bg-white active:scale-95 transition shadow-sm"
+          :title="t('Salin email','Copy email')" :aria-label="t('Salin email:','Copy email:') + ' ' + '{{ email }}'">
+    <i class="fas fa-copy text-sm"></i>
+  </button>
+</div>
+{% endmacro %}
+
+{% macro login_link(href, label_id, label_en, color) %}
+<a href="{{ href }}" class="w-full sm:w-auto shrink-0 px-6 py-3 bg-gradient-to-r {{ LOGIN_COLOR[color] }} text-white rounded-xl font-bold text-sm shadow-lg transition flex items-center justify-center gap-2">
+  <i class="fas fa-sign-in-alt"></i><span x-text="t('{{ label_id }}','{{ label_en }}')"></span>
+</a>
+{% endmacro %}
+
 <style>
 @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-@keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(168,85,247,0.15)} 50%{box-shadow:0 0 40px rgba(168,85,247,0.3)} }
 .demo-header { animation: float 4s ease-in-out infinite; }
 .demo-card-hover { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
 .demo-card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(0,0,0,0.08); }
 .cred-cell { transition: all 0.2s; }
-.cred-cell:hover { background: #f8fafc; transform: scale(1.02); }
+.cred-cell:hover { background: #f8fafc; }
 </style>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50" x-data="{ copyText(t) { try{navigator.clipboard.writeText(t)}catch(e){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}clearTimeout(this._ct);var o=document.getElementById('ctoast');if(o)o.remove();var d=document.createElement('div');d.id='ctoast';d.className='fixed top-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg z-50';d.textContent='Tersalin!';document.body.appendChild(d);this._ct=setTimeout(function(){d.remove()},1500)} }">
-    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
-        <a href="/" class="flex items-center gap-2 group">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:shadow-purple-500/40 transition">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50" x-data="{ copyText(t) { try{navigator.clipboard.writeText(t)}catch(e){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}clearTimeout(this._ct);var o=document.getElementById('ctoast');if(o)o.remove();var d=document.createElement('div');d.id='ctoast';d.className='fixed top-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg z-50';d.textContent=window.sgT('Tersalin!','Copied!');document.body.appendChild(d);this._ct=setTimeout(function(){d.remove()},1500)} }">
+    <header class="px-4 sm:px-6 py-4 flex items-center justify-between gap-3 max-w-6xl mx-auto">
+        <a href="/" class="flex items-center gap-2 group min-w-0">
+            <div class="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:shadow-purple-500/40 transition">
                 <i class="fas fa-flask text-white text-sm"></i>
             </div>
-            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-purple-600">Demo</span></span>
+            <span class="font-extrabold text-base sm:text-lg text-surface-800 truncate">ScanGrade <span class="text-purple-600">Demo</span></span>
         </a>
-        <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition flex items-center gap-1.5"><i class="fas fa-arrow-left"></i>Kembali</a>
+        <a href="/" class="shrink-0 px-3 sm:px-4 py-2.5 min-h-[44px] inline-flex items-center text-sm font-bold text-surface-500 hover:text-surface-700 transition gap-1.5"><i class="fas fa-arrow-left"></i><span x-text="t('Kembali','Back')"></span></a>
     </header>
 
-    <main class="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
         <!-- Hero -->
-        <div class="text-center mb-12 demo-header">
+        <div class="text-center mb-10 sm:mb-12 demo-header">
             <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-100 rounded-full text-purple-700 text-xs font-bold mb-4 shadow-sm">
-                <i class="fas fa-flask"></i> Mode Demo
+                <i class="fas fa-flask"></i> <span x-text="t('Mode Demo','Demo Mode')"></span>
             </div>
-            <h1 class="text-4xl sm:text-5xl font-extrabold text-surface-900 leading-tight">
-                Coba ScanGrade<br>
-                <span class="text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-purple-400">Tanpa Daftar</span>
+            <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-surface-900 leading-tight">
+                <span x-text="t('Coba ScanGrade','Try ScanGrade')"></span><br>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-purple-400" x-text="t('Tanpa Daftar','Without Signing Up')"></span>
             </h1>
-            <p class="mt-3 text-surface-500 max-w-xl mx-auto">Gunakan akun demo di bawah untuk menjelajahi semua fitur. Password semua akun: <code class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded font-mono text-sm font-bold">demo123</code></p>
+            <p class="mt-4 text-sm sm:text-base text-surface-500 max-w-xl mx-auto leading-relaxed">
+                <span x-text="t('Gunakan akun demo di bawah untuk menjelajahi semua fitur. Password semua akun:','Use the demo accounts below to explore every feature. The password for all of them:')"></span>
+                <code class="inline-block mt-1 px-2.5 py-1 bg-purple-100 text-purple-700 rounded-lg font-mono text-sm font-bold select-all">demo123</code>
+            </p>
         </div>
 
-        <div class="space-y-8">
+        <div class="space-y-6 sm:space-y-8">
             <!-- ===== SUPER ADMIN ===== -->
             {% if not ds or ds.demo_super_admin %}
-            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-purple-500/5 border border-purple-100 demo-card-hover">
+            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-purple-500/5 border border-purple-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
-                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-purple-500/20">
-                        <i class="fas fa-crown text-white text-2xl"></i>
+                    <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-purple-500/20">
+                        <i class="fas fa-crown text-white text-xl sm:text-2xl"></i>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <h3 class="text-xl font-extrabold text-surface-800">Super Admin</h3>
-                        <p class="text-sm text-surface-500 mt-0.5">Akses penuh ke semua sekolah, pengaturan sistem, dan manajemen pengguna.</p>
+                        <h3 class="text-lg sm:text-xl font-extrabold text-surface-800">Super Admin</h3>
+                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Akses penuh ke semua sekolah, pengaturan sistem, dan manajemen pengguna.','Full access to every school, the system settings and user management.')"></p>
                     </div>
-                    <a href="/auth/login" class="shrink-0 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:from-purple-700 hover:to-purple-600 transition flex items-center gap-2">
-                        <i class="fas fa-sign-in-alt"></i>Login
-                    </a>
+                    {{ login_link('/auth/login', 'Login', 'Log in', 'purple') }}
                 </div>
-                <div class="mt-4 flex flex-wrap items-center gap-2 p-3 sm:p-4 bg-purple-50/50 rounded-2xl border border-purple-100/50">
-                    <span class="text-xs font-bold text-purple-600">Akun:</span>
-                    <code class="px-3 py-1 bg-white rounded-lg text-purple-700 font-mono text-xs border border-purple-100">superadmin@scan-grade.app</code>
-                    <button @click="copyText('superadmin@scan-grade.app')" class="p-1.5 hover:bg-purple-100 rounded-lg transition text-purple-400 hover:text-purple-600" title="Salin email"><i class="fas fa-copy text-xs"></i></button>
-                    <span class="text-xs text-slate-400 mx-1">/</span>
-                    <code class="px-3 py-1 bg-white rounded-lg text-slate-600 font-mono text-xs border border-slate-200">superadmin123</code>
-
+                <div class="mt-4 p-4 bg-purple-50/60 rounded-2xl border border-purple-100/60">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs font-bold text-purple-600" x-text="t('Akun demo:','Demo account:')"></span>
+                        <span class="text-xs font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full" x-text="t('Akses tertinggi','Highest access')"></span>
+                    </div>
+                    {{ cred_row('superadmin@scan-grade.app', 'purple') }}
                 </div>
             </div>
             {% endif %}
 
             <!-- ===== ADMIN SEKOLAH ===== -->
             {% if not ds or ds.demo_admin_sekolah %}
-            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-blue-500/5 border border-blue-100 demo-card-hover">
+            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-blue-500/5 border border-blue-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
-                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/20">
-                        <i class="fas fa-school text-white text-2xl"></i>
+                    <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/20">
+                        <i class="fas fa-school text-white text-xl sm:text-2xl"></i>
                     </div>
                     <div class="flex-1">
-                        <h3 class="text-xl font-extrabold text-surface-800">Admin Sekolah</h3>
-                        <p class="text-sm text-surface-500 mt-0.5">Kelola guru, siswa, kelas, mata pelajaran, dan langganan sekolah.</p>
+                        <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Admin Sekolah','School Admin')"></h3>
+                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Kelola guru, siswa, kelas, mata pelajaran, dan langganan sekolah.','Manage teachers, students, classes, subjects and the school subscription.')"></p>
                     </div>
+                    {{ login_link('/auth/login', 'Login', 'Log in', 'blue') }}
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div class="relative group cred-cell rounded-2xl p-4 border border-blue-100 bg-gradient-to-br from-blue-50/50 to-white transition">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs font-extrabold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full">SMP</span>
-                            <span class="text-[10px] text-blue-400 font-mono">NPSN: 99887711</span>
+                    {% for jenjang, nama, npsn, email in [
+                        ('SMP', 'SMP N 1 ScanGrade', '99887711', 'admin_smp@scan-grade.app'),
+                        ('SMA', 'SMA N 1 ScanGrade', '99887722', 'admin_sma@scan-grade.app'),
+                        ('SMK', 'SMK Teknologi ScanGrade', '99887733', 'admin_smk@scan-grade.app')] %}
+                    <div class="cred-cell rounded-2xl p-4 border border-blue-100 bg-gradient-to-br from-blue-50/50 to-white">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="text-xs font-extrabold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full">{{ jenjang }}</span>
+                            <span class="text-xs text-blue-500 font-mono" x-text="'NPSN: {{ npsn }}'"></span>
                         </div>
-                        <p class="text-sm font-bold text-surface-800">SMP N 1 ScanGrade</p>
-                        <div class="flex items-center gap-1 mt-1.5">
-                            <code class="text-xs font-mono text-blue-700">admin_smp@scan-grade.app</code>
-                            <button @click="copyText('admin_smp@scan-grade.app')" class="p-0.5 hover:bg-blue-100 rounded transition text-blue-300 hover:text-blue-500" title="Salin email"><i class="fas fa-copy text-[10px]"></i></button>
-                        </div>
-                        <code class="block text-xs font-mono text-slate-400 mt-0.5">demo123</code>
-                        <a href="/auth/login" class="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-xl text-[11px] font-bold hover:bg-blue-700 transition shadow-sm"><i class="fas fa-sign-in-alt"></i>Login</a>
+                        <p class="text-sm font-bold text-surface-800 mt-2">{{ nama }}</p>
+                        {{ cred_row(email, 'blue') }}
                     </div>
-                    <div class="relative group cred-cell rounded-2xl p-4 border border-blue-100 bg-gradient-to-br from-blue-50/50 to-white transition">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs font-extrabold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full">SMA</span>
-                            <span class="text-[10px] text-blue-400 font-mono">NPSN: 99887722</span>
-                        </div>
-                        <p class="text-sm font-bold text-surface-800">SMA N 1 ScanGrade</p>
-                        <div class="flex items-center gap-1 mt-1.5">
-                            <code class="text-xs font-mono text-blue-700">admin_sma@scan-grade.app</code>
-                            <button @click="copyText('admin_sma@scan-grade.app')" class="p-0.5 hover:bg-blue-100 rounded transition text-blue-300 hover:text-blue-500" title="Salin email"><i class="fas fa-copy text-[10px]"></i></button>
-                        </div>
-                        <code class="block text-xs font-mono text-slate-400 mt-0.5">demo123</code>
-                        <a href="/auth/login" class="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-xl text-[11px] font-bold hover:bg-blue-700 transition shadow-sm"><i class="fas fa-sign-in-alt"></i>Login</a>
-                    </div>
-                    <div class="relative group cred-cell rounded-2xl p-4 border border-blue-100 bg-gradient-to-br from-blue-50/50 to-white transition">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs font-extrabold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full">SMK</span>
-                            <span class="text-[10px] text-blue-400 font-mono">NPSN: 99887733</span>
-                        </div>
-                        <p class="text-sm font-bold text-surface-800">SMK Teknologi ScanGrade</p>
-                        <div class="flex items-center gap-1 mt-1.5">
-                            <code class="text-xs font-mono text-blue-700">admin_smk@scan-grade.app</code>
-                            <button @click="copyText('admin_smk@scan-grade.app')" class="p-0.5 hover:bg-blue-100 rounded transition text-blue-300 hover:text-blue-500" title="Salin email"><i class="fas fa-copy text-[10px]"></i></button>
-                        </div>
-                        <code class="block text-xs font-mono text-slate-400 mt-0.5">demo123</code>
-                        <a href="/auth/login" class="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-xl text-[11px] font-bold hover:bg-blue-700 transition shadow-sm"><i class="fas fa-sign-in-alt"></i>Login</a>
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
 
             <!-- ===== GURU ===== -->
             {% if not ds or ds.demo_guru %}
-            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-emerald-500/5 border border-emerald-100 demo-card-hover">
+            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-emerald-500/5 border border-emerald-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
-                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
-                        <i class="fas fa-chalkboard-teacher text-white text-2xl"></i>
+                    <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
+                        <i class="fas fa-chalkboard-teacher text-white text-xl sm:text-2xl"></i>
                     </div>
                     <div class="flex-1">
-                        <h3 class="text-xl font-extrabold text-surface-800">Guru</h3>
-                        <p class="text-sm text-surface-500 mt-0.5">Buat ujian, koreksi esai dengan AI, dan lihat analitik hasil belajar.</p>
+                        <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Guru','Teachers')"></h3>
+                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Buat ujian, koreksi esai dengan AI, dan lihat analitik hasil belajar.','Create exams, grade essays with AI and read the analytics on student results.')"></p>
                     </div>
-                    <a href="/auth/login-user?role=guru" class="shrink-0 px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition flex items-center gap-2">
-                        <i class="fas fa-sign-in-alt"></i>Login Semua Guru
-                    </a>
+                    {{ login_link('/auth/login-user?role=guru', 'Login Semua Guru', 'Log in as any Teacher', 'emerald') }}
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMP</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Matematika — Budi</p>
-                        <span class="text-[9px] text-emerald-600 font-semibold">Kelas: VII-A</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-0.5 cursor-pointer hover:text-emerald-600" @click="copyText('guru_mtk_smp@scan-grade.app')">guru_mtk_smp@scan-grade.app</code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {% for jenjang, mapel_id, mapel_en, kelas, email in [
+                        ('SMP', 'Matematika — Budi', 'Mathematics — Budi', 'VII-A', 'guru_mtk_smp@scan-grade.app'),
+                        ('SMP', 'IPA — Siti', 'Science — Siti', 'VII-A', 'guru_ipa_smp@scan-grade.app'),
+                        ('SMA', 'Matematika — Dewi', 'Mathematics — Dewi', 'X-A', 'guru_mtk_sma@scan-grade.app'),
+                        ('SMA', 'Fisika — Eko', 'Physics — Eko', 'X-A', 'guru_fisika_sma@scan-grade.app'),
+                        ('SMA', 'Kimia — Fitri', 'Chemistry — Fitri', 'X-A', 'guru_kimia_sma@scan-grade.app'),
+                        ('SMK', 'Pemrograman — Hendra', 'Programming — Hendra', 'X-RPL', 'guru_prog_smk@scan-grade.app')] %}
+                    <div class="cred-cell rounded-2xl p-4 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-xs font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">{{ jenjang }}</span>
+                            <span class="text-xs font-semibold text-emerald-700" x-text="t('Kelas: {{ kelas }}','Class: {{ kelas }}')"></span>
+                        </div>
+                        <p class="text-sm font-bold text-surface-800 mt-2" x-text="t('{{ mapel_id }}','{{ mapel_en }}')"></p>
+                        {{ cred_row(email, 'emerald') }}
                     </div>
-                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMP</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">IPA — Siti</p>
-                        <span class="text-[9px] text-emerald-600 font-semibold">Kelas: VII-A</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-0.5 cursor-pointer hover:text-emerald-600" @click="copyText('guru_ipa_smp@scan-grade.app')">guru_ipa_smp@scan-grade.app</code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMA</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Matematika — Dewi</p>
-                        <span class="text-[9px] text-emerald-600 font-semibold">Kelas: X-A</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-0.5 cursor-pointer hover:text-emerald-600" @click="copyText('guru_mtk_sma@scan-grade.app')">guru_mtk_sma@scan-grade.app</code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMA</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Fisika — Eko</p>
-                        <span class="text-[9px] text-emerald-600 font-semibold">Kelas: X-A</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-0.5 cursor-pointer hover:text-emerald-600" @click="copyText('guru_fisika_sma@scan-grade.app')">guru_fisika_sma@scan-grade.app</code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMA</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Kimia — Fitri</p>
-                        <span class="text-[9px] text-emerald-600 font-semibold">Kelas: X-A</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-0.5 cursor-pointer hover:text-emerald-600" @click="copyText('guru_kimia_sma@scan-grade.app')">guru_kimia_sma@scan-grade.app</code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">SMK</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Pemrograman — Hendra</p>
-                        <span class="text-[9px] text-emerald-600 font-semibold">Kelas: X-RPL</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-0.5 cursor-pointer hover:text-emerald-600" @click="copyText('guru_prog_smk@scan-grade.app')">guru_prog_smk@scan-grade.app</code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
 
             <!-- ===== MURID ===== -->
             {% if not ds or ds.demo_murid %}
-            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-xl shadow-amber-500/5 border border-amber-100 demo-card-hover">
+            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-amber-500/5 border border-amber-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
-                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">
-                        <i class="fas fa-user-graduate text-white text-2xl"></i>
+                    <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">
+                        <i class="fas fa-user-graduate text-white text-xl sm:text-2xl"></i>
                     </div>
                     <div class="flex-1">
-                        <h3 class="text-xl font-extrabold text-surface-800">Siswa</h3>
-                        <p class="text-sm text-surface-500 mt-0.5">Kerjakan ujian dengan alat gambar, penggaris digital, dan kalkulator ilmiah.</p>
+                        <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Siswa','Students')"></h3>
+                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Kerjakan ujian dengan alat gambar, penggaris digital, dan kalkulator ilmiah.','Take an exam with drawing tools, a digital ruler and a scientific calculator.')"></p>
                     </div>
-                    <a href="/auth/login-user?role=murid" class="shrink-0 px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-amber-500/25 hover:shadow-amber-500/40 transition flex items-center gap-2">
-                        <i class="fas fa-sign-in-alt"></i>Login Semua Siswa
-                    </a>
+                    {{ login_link('/auth/login-user?role=murid', 'Login Semua Siswa', 'Log in as any Student', 'amber') }}
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMP</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Ahmad</p>
-                        <span class="inline-block text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded mt-1">Kelas VII-A ✅ Lihat ujian</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-1 cursor-pointer hover:text-amber-600" @click="copyText('siswa1_smp@scan-grade.app')" title="Klik salin email">siswa1_smp@scan-grade.app <i class="fas fa-copy text-[8px] opacity-50"></i></code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {% for jenjang, nama, kelas, ok, email in [
+                        ('SMP', 'Ahmad', 'VII-A', True, 'siswa1_smp@scan-grade.app'),
+                        ('SMP', 'Bella', 'VII-B', False, 'siswa2_smp@scan-grade.app'),
+                        ('SMA', 'Citra', 'X-A', True, 'siswa1_sma@scan-grade.app'),
+                        ('SMA', 'Doni', 'X-B', False, 'siswa2_sma@scan-grade.app'),
+                        ('SMK', 'Galih', 'X-RPL', True, 'siswa1_smk@scan-grade.app'),
+                        ('SMK', 'Hesti', 'XI-RPL', False, 'siswa2_smk@scan-grade.app')] %}
+                    <div class="cred-cell rounded-2xl p-4 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-xs font-extrabold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{{ jenjang }}</span>
+                            <span class="text-xs font-bold px-2 py-0.5 rounded-full {{ 'text-amber-700 bg-amber-100' if ok else 'text-surface-500 bg-surface-100' }}"
+                                  x-text="t('Kelas {{ kelas }} {{ '✅ Lihat ujian' if ok else '❌ Beda kelas' }}','Class {{ kelas }} {{ '✅ Sees the exam' if ok else '❌ Different class' }}')"></span>
+                        </div>
+                        <p class="text-sm font-bold text-surface-800 mt-2">{{ nama }}</p>
+                        {{ cred_row(email, 'amber') }}
                     </div>
-                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMP</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Bella</p>
-                        <span class="inline-block text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded mt-1">Kelas VII-B ❌ Beda kelas</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-1 cursor-pointer hover:text-amber-600" @click="copyText('siswa2_smp@scan-grade.app')" title="Klik salin email">siswa2_smp@scan-grade.app <i class="fas fa-copy text-[8px] opacity-50"></i></code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMA</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Citra</p>
-                        <span class="inline-block text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded mt-1">Kelas X-A ✅ Lihat ujian</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-1 cursor-pointer hover:text-amber-600" @click="copyText('siswa1_sma@scan-grade.app')" title="Klik salin email">siswa1_sma@scan-grade.app <i class="fas fa-copy text-[8px] opacity-50"></i></code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMA</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Doni</p>
-                        <span class="inline-block text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded mt-1">Kelas X-B ❌ Beda kelas</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-1 cursor-pointer hover:text-amber-600" @click="copyText('siswa2_sma@scan-grade.app')" title="Klik salin email">siswa2_sma@scan-grade.app <i class="fas fa-copy text-[8px] opacity-50"></i></code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMK</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Galih</p>
-                        <span class="inline-block text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded mt-1">Kelas X-RPL ✅ Lihat ujian</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-1 cursor-pointer hover:text-amber-600" @click="copyText('siswa1_smk@scan-grade.app')" title="Klik salin email">siswa1_smk@scan-grade.app <i class="fas fa-copy text-[8px] opacity-50"></i></code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
-                    <div class="cred-cell rounded-xl p-3 border border-amber-100 bg-gradient-to-br from-amber-50/50 to-white transition">
-                        <span class="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">SMK</span>
-                        <p class="text-xs font-bold text-surface-700 mt-1">Hesti</p>
-                        <span class="inline-block text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded mt-1">Kelas XI-RPL ❌ Beda kelas</span>
-                        <code class="block text-[10px] font-mono text-slate-500 mt-1 cursor-pointer hover:text-amber-600" @click="copyText('siswa2_smk@scan-grade.app')" title="Klik salin email">siswa2_smk@scan-grade.app <i class="fas fa-copy text-[8px] opacity-50"></i></code>
-                        <code class="block text-[10px] font-mono text-slate-400">demo123</code>
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
         </div>
 
         <!-- Footer -->
-        <div class="mt-12 text-center">
-            <div class="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-full text-xs text-slate-500">
-                <i class="fas fa-info-circle"></i> Data demo di-reset secara berkala. Jangan gunakan data sensitif.
+        <div class="mt-10 sm:mt-12 text-center">
+            <div class="inline-flex items-start gap-2 px-4 py-2.5 bg-surface-100 rounded-2xl text-xs sm:text-sm text-surface-500 leading-relaxed text-left">
+                <i class="fas fa-info-circle mt-0.5"></i> <span x-text="t('Data demo di-reset secara berkala. Jangan gunakan data sensitif.','Demo data is reset periodically. Do not use it for anything sensitive.')"></span>
             </div>
         </div>
     </main>

@@ -154,7 +154,10 @@
                 <p class="text-xs text-slate-500 mt-1" x-show="lang==='en'">Your answers are saved and received. Once your teacher finishes marking and releases the result, your score, the correct answers and per-question feedback will appear here.</p>
             </div>
             {% else %}
-            <div class="mt-4 grid grid-cols-4 gap-3 text-center text-sm">
+            {# Two columns on a phone: four `p-3` cards across 320px leave ~39px of text
+               width per card, so "MCQ Score" wraps to three lines around its own
+               number. 2x2 keeps each label on one line and the number beside it. #}
+            <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-sm">
                 <div class="bg-emerald-50 p-3 rounded-xl">
                     <p class="text-emerald-700 font-extrabold">{{ submission.score if submission.score is not none else 0 }}</p>
                     <p class="text-emerald-600 font-bold" x-text="lang==='en'?'MCQ Score':'Skor MCQ'"></p>
