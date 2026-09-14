@@ -156,70 +156,68 @@
                 <span class="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-100 rounded-full text-blue-700 text-xs font-bold shadow-sm">
                     <i class="fas fa-chart-bar"></i> <span x-text="t('Kinerja Terukur','Measured Performance')"></span>
                 </span>
-                <h2 class="text-2xl lg:text-3xl font-extrabold text-surface-900 mt-3" x-text="t('Skalabilitas','Scalability')"></h2>
-                <p class="text-sm text-surface-500 font-medium mt-1" x-text="t('Hasil uji coba 500 siswa menggunakan platform secara bersamaan:','Results of a trial with 500 students using the platform at the same time:')"></p>
+                <h2 class="text-2xl lg:text-3xl font-extrabold text-surface-900 mt-3" x-text="t('Kapasitas Terukur','Measured Capacity')"></h2>
+                <p class="text-sm text-surface-500 font-medium mt-1" x-text="t('Hasil uji beban terhadap produksi pada konfigurasi kami: VPS 1 vCPU, 957 MB RAM.','Load-test results against production on our configuration: a 1 vCPU, 957 MB VPS.')"></p>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 <div class="text-center p-5 bg-gradient-to-br from-blue-50 to-blue-50 rounded-2xl border border-blue-100">
-                    <div class="text-3xl font-extrabold text-blue-600">46.698</div>
-                    <div class="text-xs font-bold text-blue-700 mt-1" x-text="t('Akses Terproses','Requests Processed')"></div>
-                    <div class="text-[10px] text-blue-400 mt-0.5" x-text="t('beban puncak 10 menit','over a 10-minute peak')"></div>
+                    <div class="text-3xl font-extrabold text-blue-600">20</div>
+                    <div class="text-xs font-bold text-blue-700 mt-1" x-text="t('Akses per Detik','Requests per Second')"></div>
+                    <div class="text-[10px] text-blue-400 mt-0.5" x-text="t('batas terukur di 1 vCPU','measured ceiling on 1 vCPU')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-emerald-50 to-emerald-50 rounded-2xl border border-emerald-100">
-                    <div class="text-3xl font-extrabold text-emerald-600">0%</div>
-                    <div class="text-xs font-bold text-emerald-700 mt-1" x-text="t('Tingkat Error','Error Rate')"></div>
-                    <div class="text-[10px] text-emerald-400 mt-0.5" x-text="t('dari total akses*','of all requests*')"></div>
+                    <div class="text-3xl font-extrabold text-emerald-600">50</div>
+                    <div class="text-xs font-bold text-emerald-700 mt-1" x-text="t('Murid Serentak','Concurrent Students')"></div>
+                    <div class="text-[10px] text-emerald-400 mt-0.5" x-text="t('sehat: p50 64–962 ms','healthy: p50 64–962 ms')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-amber-50 to-amber-50 rounded-2xl border border-amber-100">
-                    <div class="text-3xl font-extrabold text-amber-600" x-text="t('< 1 detik','< 1 second')"></div>
-                    <div class="text-xs font-bold text-amber-700 mt-1" x-text="t('Waktu Respon','Response Time')"></div>
-                    <div class="text-[10px] text-amber-400 mt-0.5" x-text="t('rata-rata tiap akses','average per request')"></div>
+                    <div class="text-3xl font-extrabold text-amber-600">0</div>
+                    <div class="text-xs font-bold text-amber-700 mt-1" x-text="t('Error Server (5xx)','Server Errors (5xx)')"></div>
+                    <div class="text-[10px] text-amber-400 mt-0.5" x-text="t('bahkan pada 500 sesi','even at 500 sessions')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-primary-50 to-primary-50 rounded-2xl border border-primary-100">
-                    <div class="text-3xl font-extrabold text-primary-600">500</div>
-                    <div class="text-xs font-bold text-primary-700 mt-1" x-text="t('Siswa Serentak','Concurrent Students')"></div>
-                    <div class="text-[10px] text-primary-400 mt-0.5" x-text="t('durasi 10 menit','10-minute duration')"></div>
+                    <div class="text-3xl font-extrabold text-primary-600" x-text="t('< 1 detik','< 1 second')"></div>
+                    <div class="text-xs font-bold text-primary-700 mt-1" x-text="t('Waktu Respon','Response Time')"></div>
+                    <div class="text-[10px] text-primary-400 mt-0.5" x-text="t('sampai ~50 murid serentak','up to ~50 concurrent students')"></div>
                 </div>
-            </div>
-            <div class="mt-6 text-center text-[11px] text-slate-400 leading-relaxed space-y-1">
-                <p><span x-text="t('* Uji coba menggunakan Locust (alat uji beban) terhadap server produksi','* The trial used Locust (a load-testing tool) against the production server')"></span> <span class="text-slate-500">scangrade.web.id</span><span x-text="t('. Seratus persen request berstatus 2xx. Waktu respon adalah rata-rata dari seluruh endpoint.','. One hundred percent of requests returned 2xx. Response time is the average across all endpoints.')"></span></p>
-                <p x-text="t('Server stabil; kendala hanya mungkin dari jaringan siswa. Setara 1 sesi ujian 2 jam untuk 500 siswa.','The server stayed stable; the only obstacle is the network on the student side. Equivalent to one 2-hour exam session for 500 students.')"></p>
             </div>
 
-            <!-- 1000 user result -->
+            <!-- Batas kapasitasnya ditampilkan, bukan diklaim: angka-angka ini hasil ukur -->
+            <div class="mt-8 overflow-x-auto">
+                <table class="w-full text-xs max-w-2xl mx-auto min-w-[480px]">
+                    <thead>
+                        <tr class="text-slate-500 border-b border-slate-200">
+                            <th class="text-left py-2 font-bold" x-text="t('Murid serentak','Concurrent students')"></th>
+                            <th class="text-right py-2 font-bold" x-text="t('Waktu respon p50','Response p50')"></th>
+                            <th class="text-right py-2 font-bold">p95</th>
+                            <th class="text-right py-2 font-bold" x-text="t('Error','Errors')"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-slate-600">
+                        <tr class="border-b border-slate-100"><td class="py-2 font-bold">50</td><td class="text-right">64–962 ms</td><td class="text-right">≤ 3.7 s</td><td class="text-right text-emerald-600">0%</td></tr>
+                        <tr class="border-b border-slate-100"><td class="py-2 font-bold">100</td><td class="text-right">1.4–2.2 s</td><td class="text-right">≤ 4.2 s</td><td class="text-right text-emerald-600">0%</td></tr>
+                        <tr class="border-b border-slate-100"><td class="py-2 font-bold">150</td><td class="text-right">3.7–4.4 s</td><td class="text-right">≤ 15.2 s</td><td class="text-right text-emerald-600">0%</td></tr>
+                        <tr><td class="py-2 font-bold">500*</td><td class="text-right">5.6–7.0 s</td><td class="text-right">≤ 10.8 s</td><td class="text-right text-amber-600">2.31%</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-6 text-center text-[11px] text-slate-400 leading-relaxed space-y-1">
+                <p><span x-text="t('* Diukur 14 Sep 2026 terhadap','* Measured 14 Sep 2026 against')"></span> <span class="text-slate-500">scangrade.web.id</span><span x-text="t(' memakai harness uji beban di repositori ini: satu akun per sesi, identitas diverifikasi lewat /auth/me, tiap baris 60 detik. Halaman murid saja; angkanya dan berkas mentahnya ada di docs/measurements/.',' using the load-test harness in this repository: one account per session, identity verified through /auth/me, 60 seconds per row. Student pages only; the figures and their raw files are in docs/measurements/.')"></span></p>
+                <p x-text="t('Baris 500* berasal dari run 10 menit, bukan 60 detik: 500 murid serentak adalah klaim ketahanan, dan probe singkat tidak bisa menjawabnya.','The 500* row comes from a 10-minute run rather than a 60-second one: 500 students at once is an endurance claim, and a short probe cannot answer it.')"></p>
+                <p x-text="t('Bottleneck yang terukur adalah CPU untuk merender halaman: user time 90–93%, idle 0%. Bukan jaringan, memori, atau database.','The measured bottleneck is CPU spent rendering pages: 90–93% user time, 0% idle. Not network, memory or database.')"></p>
+                <p x-text="t('Pada baris 500*, hanya 174 sesi yang lolos login dan sisanya ditolak 429 oleh rate limiter — server tetap hidup tanpa satu pun error 5xx.','In the 500* row only 174 sessions got past login; the rest were rejected with 429 by the rate limiter — the server stayed up with zero 5xx.')"></p>
+            </div>
+
+            <!-- Sizing: what this configuration can and cannot do -->
             <div class="mt-6 border-t border-slate-100 dark:border-slate-700 pt-6">
                 <div class="text-center mb-4">
-                    <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-violet-100 to-fuchsia-100 dark:from-violet-900/40 dark:to-fuchsia-900/40 rounded-full text-violet-700 dark:text-violet-300 text-[10px] font-bold shadow-sm">
-                        <i class="fas fa-rocket text-[9px]"></i> <span x-text="t('Uji Lanjutan — 1.000 Siswa Serentak','Further Test — 1,000 Concurrent Students')"></span>
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/40 dark:to-orange-900/40 rounded-full text-amber-700 dark:text-amber-300 text-[10px] font-bold shadow-sm">
+                        <i class="fas fa-server text-[9px]"></i> <span x-text="t('Sizing untuk 500+ murid serentak','Sizing for 500+ concurrent students')"></span>
                     </span>
                 </div>
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div class="text-center p-4 rounded-2xl border-2 border-blue-200 dark:border-blue-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
-                        <div class="text-2xl font-extrabold" style="color:#2563eb">74.923</div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Akses Terproses','Requests Processed')"></div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('beban puncak 10 menit','over a 10-minute peak')"></div>
-                    </div>
-                    <div class="text-center p-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
-                        <div class="text-2xl font-extrabold" style="color:#059669">&lt; 11%</div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Tingkat Error','Error Rate')"></div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('dari total akses','of all requests')"></div>
-                    </div>
-                    <div class="text-center p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
-                        <div class="text-2xl font-extrabold" style="color:#d97706" x-text="t('< 5 dtk','< 5 s')"></div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Waktu Respon','Response Time')"></div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('rata-rata tiap akses','average per request')"></div>
-                    </div>
-                    <div class="text-center p-4 rounded-2xl border-2 border-violet-200 dark:border-violet-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300" style="background:var(--bg-card,#fff);">
-                        <div class="text-2xl font-extrabold" style="color:#7c3aed">1.000</div>
-                        <div class="text-[10px] font-bold text-slate-700 dark:text-slate-300 mt-0.5" x-text="t('Siswa Serentak','Concurrent Students')"></div>
-                        <div class="text-[8px] text-slate-400 dark:text-slate-500" x-text="t('durasi 10 menit','10-minute duration')"></div>
-                    </div>
-                </div>
-                <div class="mt-3 text-center text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed max-w-2xl mx-auto">
-                    <span x-text="t('Uji 1.000 user menunjukkan server tetap responsif. Error 11% disebabkan','The 1,000-user test shows the server stays responsive. The 11% error rate came from')"></span>
-                    <strong class="text-slate-500 dark:text-slate-400" x-text="t('rate limiter keamanan','the security rate limiter')"></strong>
-                    <span x-text="t(', bukan kegagalan server. Response time rata-rata kurang dari 5 detik di bawah beban maksimal. Untuk produksi 1.000+ siswa bersamaan, disarankan upgrade VPS ke 2GB RAM.',', not from a server failure. Average response time is under 5 seconds at peak load. For production with 1,000+ concurrent students, upgrading the VPS to 2GB RAM is recommended.')"></span>
-                </div>
+                <p class="text-center text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl mx-auto">
+                    <span x-text="t('Kapasitas mengikuti jumlah core: pada 1 vCPU, terukur ±20 akses per detik. Di konfigurasi 1 vCPU ini, batas yang nyaman adalah ~50 murid serentak per sesi ujian — baris terukur yang masih 0% error dengan p95 3,7 detik; pada 100 p95 naik ke 4,2 detik dan pada 150 ke 15,2 detik. Probe ini membaca halaman saja, sedangkan ujian sungguhan juga mengirim jawaban, jadi batasnya kami jaga konservatif. Untuk ujian dengan 500 murid serentak kami menyarankan server beberapa vCPU, dan kami bantu menghitung kebutuhannya.','Capacity scales with core count: on 1 vCPU the measured ceiling is about 20 requests per second. On this 1 vCPU configuration the comfortable limit is ~50 concurrent students per exam session — the largest measured row still at 0% errors with a 3.7-second p95; at 100 the p95 rises to 4.2 seconds and at 150 to 15.2 seconds. The probe only reads pages, while a real exam also submits answers, so we keep the limit conservative. For exams with 500 concurrent students we recommend a multi-vCPU server, and we will help size it.')"></span>
+                </p>
             </div>
         </div>
 

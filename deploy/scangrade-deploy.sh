@@ -283,6 +283,71 @@ elif [ ! -f "$SMOKE_CONF" ]; then
   log "no $SMOKE_CONF — skipping the per-role smoke test (see docs/AUTO_DEPLOY.md)"
 fi
 
+# ── Gate 5: do the numbers on the landing page still describe this box? ──────
+# The page publishes a capacity table (concurrent students -> p50, p95, errors)
+# that was measured against this deployment once, by hand, and never again. A
+# claim like that lives on regardless of what happens underneath it, which is
+# how 46,698 and 74,923 requests sat on the page with nothing able to produce
+# them. This gate re-measures the page's own lowest rung -- loading more at
+# deploy time would cost the students the deploy is for -- and refuses the
+# release when the box no longer behaves the way the page says.
+#
+# It runs here, after the reload, because the thing being measured is the code
+# that is now serving: a probe before the reload would measure the old release.
+# That also means a failure has to go through the shared rollback path below --
+# resetting the checkout without reloading would leave the rejected release
+# running, and the next tick would fail the same way forever.
+#
+# Exit 2 is "could not measure" (no roster, an unreachable base URL, a box
+# already busy with real students, a divergence that a second probe did not
+# confirm). Never a rollback: an absent or unconfirmed measurement is not
+# evidence of a bad release. Exit 1 is a confirmed divergence and does.
+CLAIMS_CONF="/etc/scangrade-claims.conf"
+if [ "$HEALTHY" != "1" ]; then
+  : # already unhealthy; the rollback path owns it
+elif [ ! -f "$CLAIMS_CONF" ]; then
+  log "no $CLAIMS_CONF — the published capacity claims are NOT re-measured"
+  log "    (see docs/AUTO_DEPLOY.md; install-auto-deploy.sh creates this file)"
+elif ! bash -n "$CLAIMS_CONF" 2>/dev/null; then
+  log "$CLAIMS_CONF has a syntax error — skipping the claims gate"
+else
+  set -a
+  # shellcheck disable=SC1090
+  . "$CLAIMS_CONF"
+  set +a
+
+  CLAIMS_ENV=()
+  for v in CLAIMS_BASE_URL CLAIMS_ROSTER CLAIMS_SESSIONS CLAIMS_DURATION \
+           CLAIMS_MAX_SESSIONS CLAIMS_EVIDENCE; do
+    [ -n "${!v:-}" ] && CLAIMS_ENV+=("$v=${!v}")
+  done
+
+  CLAIMS_ARGS=(--page "$REPO/app/templates/landing.html"
+                --harness "$REPO/loadtest_concurrent.py")
+  CLAIMS_OUT=$(as_owner env "${CLAIMS_ENV[@]}" "$REPO/.venv/bin/python" \
+      "$REPO/deploy/claims_gate.py" "${CLAIMS_ARGS[@]}" 2>&1)
+  CLAIMS_RC=$?
+
+  case "$CLAIMS_RC" in
+    0)
+      log "$(echo "$CLAIMS_OUT" | head -1)" ;;
+    2)
+      log "claims gate could not measure (exit 2) — NOT re-verified this release:"
+      echo "$CLAIMS_OUT" | head -3 | sed 's/^/    /' ;;
+    *)
+      if [ "${CLAIMS_ENFORCE:-false}" = "true" ]; then
+        log "claims gate FAILED — the page promises what this box no longer does:"
+        echo "$CLAIMS_OUT" | sed 's/^/    /'
+        log "rolling $AFTER back rather than publishing numbers we cannot deliver"
+        HEALTHY=0
+      else
+        log "claims gate FAILED but CLAIMS_ENFORCE is not 'true' — keeping the release:"
+        echo "$CLAIMS_OUT" | head -6 | sed 's/^/    /'
+        log "    to enforce it: CLAIMS_ENFORCE=\"true\" in $CLAIMS_CONF"
+      fi ;;
+  esac
+fi
+
 if [ "$HEALTHY" = "1" ]; then
   mkdir -p "$STATE_DIR"
   printf '%s\n%s\n%s\n' "$AFTER" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"

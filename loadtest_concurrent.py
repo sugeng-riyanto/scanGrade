@@ -21,12 +21,17 @@ Usage:
     python loadtest_concurrent.py 5 2                   # smoke test
     python loadtest_concurrent.py 300 30 --roster .freebuff/lt_roster.json
     python loadtest_concurrent.py 300 30 --base http://127.0.0.1:5000
-
 The roster file is written by ``provision_loadtest.py``.
+
+``--json PATH`` writes the same run as one machine-readable object, which is
+what ``deploy/claims_gate.py`` compares the landing page against. It is emitted
+from the same computation that prints the report below, so a reader and a gate
+can never disagree about what the run measured.
 """
 import argparse
 import asyncio
 import json
+import random
 import re
 import sys
 import time
@@ -43,6 +48,18 @@ STUDENT_READS = ["/student/dashboard", "/student/exams", "/student/results", "/s
 TEACHER_READS = ["/teacher/dashboard", "/teacher/exams", "/teacher/results", "/teacher/templates"]
 
 CSRF_RE = re.compile(r'name="csrf-token"\s+content="([^"]+)"')
+EXAM_RE = re.compile(r'/student/exams/([a-f0-9\-]{36})')
+
+# The mix locustfile.py uses, so a sustained run here can be compared with a
+# Locust run of the same shape: (weight, label, path). /student/exams/<id> needs
+# an id read off the exam list, so it is handled separately in the loop.
+STUDENT_MIX = [
+    (5, "GET /student/dashboard", "/student/dashboard"),
+    (8, "GET /student/exams", "/student/exams"),
+    (1, "GET /student/results", "/student/results"),
+    (3, "GET /health", "/health"),
+]
+STUDENT_MIX_TOTAL = sum(w for w, _, _ in STUDENT_MIX) + 4  # +4 = exam detail
 
 
 def page_message(html):
@@ -90,6 +107,10 @@ class Results:
         self.lat = defaultdict(list)
         self.status = defaultdict(Counter)
         self.errors = Counter()
+        # Full time series, so the report can say whether the server degraded
+        # over the run or held steady: (seconds since start, key, ms, status).
+        self.tl = []
+        self.t0 = time.perf_counter()
         self.identity_checked = 0
         self.identity_ok = 0
         self.identity_wrong = Counter()
@@ -100,13 +121,16 @@ class Results:
         self.login_missed = Counter()
 
     def rec(self, key, t0, resp):
-        self.lat[key].append((time.perf_counter() - t0) * 1000)
+        ms = (time.perf_counter() - t0) * 1000
+        self.lat[key].append(ms)
         self.status[key][resp.status_code] += 1
+        self.tl.append((time.perf_counter() - self.t0, key, ms, resp.status_code))
 
     def err(self, key, exc):
         self.lat[key].append(float("nan"))
         self.errors[f"{key}: {type(exc).__name__}"] += 1
         self.status[key]["EXC"] += 1
+        self.tl.append((time.perf_counter() - self.t0, key, float("nan"), "EXC"))
 
 
 def pct(values, p):
@@ -117,9 +141,10 @@ def pct(values, p):
     return vals[idx]
 
 
-async def session(r, acct, password, base, sem):
+async def session(r, acct, password, base, sem, duration=0.0):
     role = acct["role"]
     reads = STUDENT_READS if role == "murid" else TEACHER_READS
+    exam_ids = []
     async with sem:
         async with httpx.AsyncClient(
             timeout=120.0, follow_redirects=True, verify=False,
@@ -167,6 +192,8 @@ async def session(r, acct, password, base, sem):
                 try:
                     resp = await client.get(base + path)
                     r.rec(f"GET {path}", t0, resp)
+                    if path.endswith(("/student/exams", "/teacher/exams")) and resp.status_code == 200:
+                        exam_ids = list(set(EXAM_RE.findall(resp.text)))[:3]
                 except Exception as e:
                     r.err(f"GET {path}", e)
 
@@ -185,8 +212,102 @@ async def session(r, acct, password, base, sem):
                 except Exception as e:
                     r.err("POST settings/pdp-update", e)
 
+            # ── SUSTAINED SESSION (opt-in) ──
+            # The burst above is one page-load sequence. A landing-page claim of
+            # "N students for M minutes" is an endurance claim, so --duration
+            # keeps every session alive for M minutes doing an exam-shaped mix.
+            # A failed login already returned above, so anything here is
+            # authenticated -- which is the point: the published harness could
+            # not tell a logged-in user from a logged-out one.
+            if duration > 0:
+                await sustain(r, client, base, role, exam_ids, duration)
+
+
+def _weighted_choice():
+    weights = [w for w, _, _ in STUDENT_MIX] + [4]
+    idx = random.choices(range(len(weights)), weights=weights, k=1)[0]
+    return None if idx == len(weights) - 1 else STUDENT_MIX[idx][1:]
+
+
+async def sustain(r, client, base, role, exam_ids, duration):
+    """Keep one already-authenticated session busy for `duration` seconds.
+
+    Task mix and wait time mirror locustfile.py (weights 5/8/4/1/1/3, wait
+    1-3s), so the numbers are comparable with the published ones. Teachers get
+    the same shape over their own pages.
+    """
+    deadline = time.perf_counter() + duration
+    while time.perf_counter() < deadline:
+        if role == "murid":
+            pick = _weighted_choice()
+            if pick is None:
+                path = f"/student/exams/{random.choice(exam_ids)}" if exam_ids else "/student/exams"
+                label = "GET /student/exams/<id>"
+            else:
+                label, path = pick
+        else:
+            label = path = random.choice(TEACHER_READS)
+            label = f"GET {path}"
+
+        t0 = time.perf_counter()
+        try:
+            resp = await client.get(base + path)
+            r.rec(label, t0, resp)
+            if path.endswith(("/student/exams", "/teacher/exams")) and resp.status_code == 200:
+                found = list(set(EXAM_RE.findall(resp.text)))[:3]
+                if found:
+                    exam_ids[:] = found
+        except Exception as e:
+            r.err(label, e)
+
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+
+
+def summary(r, wall, n_launched):
+    """The whole run as one object — printed by report(), written by --json.
+
+    One computation with two consumers. A gate that re-derived these numbers by
+    scraping the printed report would drift from it the moment the wording
+    changed, and would fail silently when it did.
+    """
+    # NaN marks a transport error; it is counted as an error, never as a latency.
+    lat = [m for _, _, m, _ in r.tl if m == m]
+    codes = Counter()
+    for st in r.status.values():
+        for k, v in st.items():
+            codes[k] += v
+    total = sum(len(v) for v in r.lat.values())
+    server_err = sum(v for k, v in codes.items() if isinstance(k, int) and k >= 500)
+    rate_limited = codes.get(429, 0)
+    transport = sum(r.errors.values())
+    bad = rate_limited + server_err + transport
+    return {
+        "sessions_launched": n_launched,
+        "logins_ok": r.login_ok,
+        "logins_failed": r.login_failed,
+        "requests_total": total,
+        "status_breakdown": dict(codes),
+        "rate_limited_429": rate_limited,
+        "server_errors_5xx": server_err,
+        "transport_errors": transport,
+        "error_rate_pct": round(100.0 * bad / max(total, 1), 3),
+        "latency_ms": {"p50": pct(lat, 50), "p95": pct(lat, 95), "p99": pct(lat, 99)},
+        "identity_ok": r.identity_ok,
+        "identity_checked": r.identity_checked,
+        "identity_wrong": dict(r.identity_wrong),
+        "per_endpoint": {
+            k: {"n": len(v), "p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99)}
+            for k, v in r.lat.items()
+        },
+        "wall_s": round(wall, 2),
+        "throughput_rps": round(total / wall, 2) if wall > 0 else 0.0,
+    }
+
 
 def report(r, accounts_used, roster_src, wall, n_launched):
+    s = summary(r, wall, n_launched)
+    total = s["requests_total"]
+
     print("\n" + "=" * 82)
     print("PER-ENDPOINT RESULTS  (milliseconds)")
     print("=" * 82)
@@ -196,36 +317,44 @@ def report(r, accounts_used, roster_src, wall, n_launched):
         print(f"{key:<34}{len(r.lat[key]):>5}{pct(r.lat[key], 50):>8.0f}"
               f"{pct(r.lat[key], 95):>8.0f}{pct(r.lat[key], 99):>8.0f}   {st}")
 
-    total = sum(len(v) for v in r.lat.values())
-    code_totals = Counter()
-    for st in r.status.values():
-        for k, v in st.items():
-            code_totals[k] += v
-    server_err = sum(v for k, v in code_totals.items() if isinstance(k, int) and k >= 500)
-    bad = code_totals.get("EXC", 0) + server_err + code_totals.get(429, 0)
-
     print("\n" + "=" * 82)
-    print(f"sessions launched  : {n_launched}")
-    print(f"logins succeeded   : {r.login_ok}   failed: {r.login_failed}")
+    print(f"sessions launched  : {s['sessions_launched']}")
+    print(f"logins succeeded   : {s['logins_ok']}   failed: {s['logins_failed']}")
     print(f"roster             : {roster_src}  ({accounts_used})")
     print(f"TOTAL requests     : {total}")
-    print(f"status breakdown   : {dict(code_totals)}")
-    print(f"429 rate-limited   : {code_totals.get(429, 0)}")
-    print(f"5xx server errors  : {server_err}")
-    print(f"transport errors   : {sum(r.errors.values())}")
+    print(f"status breakdown   : {s['status_breakdown']}")
+    print(f"429 rate-limited   : {s['rate_limited_429']}")
+    print(f"5xx server errors  : {s['server_errors_5xx']}")
+    print(f"transport errors   : {s['transport_errors']}")
     if r.login_missed:
-        print(f"logins not reaching a dashboard ({r.login_failed}):")
+        print(f"logins not reaching a dashboard ({s['logins_failed']}):")
         for where, n in r.login_missed.most_common(5):
             print(f"    {n:>4} x {where}")
-    print(f"error rate         : {bad}/{total} = {100.0 * bad / max(total, 1):.2f}%"
-          f"  (429 + 5xx + transport)")
-    print(f"identity verified  : {r.identity_ok}/{r.identity_checked} via /auth/me user_id")
+    print(f"error rate         : {s['rate_limited_429'] + s['server_errors_5xx'] + s['transport_errors']}"
+          f"/{total} = {s['error_rate_pct']:.2f}%  (429 + 5xx + transport)")
+    print(f"overall latency    : p50={s['latency_ms']['p50']:.0f}ms "
+          f"p95={s['latency_ms']['p95']:.0f}ms p99={s['latency_ms']['p99']:.0f}ms")
+    print(f"identity verified  : {s['identity_ok']}/{s['identity_checked']} via /auth/me user_id")
     if r.identity_wrong:
         print(f"  !! WRONG IDENTITY : {dict(r.identity_wrong)}")
     if r.errors:
         print(f"app errors         : {dict(r.errors)}")
     print(f"wall clock         : {wall:.1f}s")
+    if wall > 0:
+        print(f"throughput         : {s['throughput_rps']:.1f} requests/s")
+    # Did it hold, or degrade? Compare the two halves of the run.
+    if r.tl:
+        span = max(t for t, _, _, _ in r.tl)
+        mid = span / 2.0
+        for label, lo, hi in (("first half", 0.0, mid), ("second half", mid, span + 1)):
+            ms = [m for t, _, m, _ in r.tl if lo <= t < hi and m == m]
+            bad_half = sum(1 for t, _, _, s in r.tl
+                           if lo <= t < hi and (s == "EXC" or s == 429 or (isinstance(s, int) and s >= 500)))
+            if ms:
+                print(f"  {label:<12} n={len(ms):>6} p50={pct(ms, 50):>7.0f}ms "
+                      f"p95={pct(ms, 95):>7.0f}ms  bad={bad_half}")
     print("=" * 82)
+    return s
 
 
 async def main():
@@ -234,6 +363,10 @@ async def main():
     ap.add_argument("n_teachers", nargs="?", type=int, default=30)
     ap.add_argument("--roster", default=str(DEFAULT_ROSTER))
     ap.add_argument("--base", default="https://scangrade.web.id")
+    ap.add_argument("--duration", type=float, default=0.0,
+                    help="keep each session busy for N seconds (endurance mode)")
+    ap.add_argument("--json", default="",
+                    help="write the run summary to this path as JSON")
     args = ap.parse_args()
 
     accounts, password, src = load_roster(args.roster)
@@ -261,9 +394,16 @@ async def main():
     print(f"launching {len(roster)} concurrent sessions "
           f"({args.n_students} murid + {args.n_teachers} guru) against {args.base} ...")
     t0 = time.perf_counter()
-    await asyncio.gather(*(session(r, a, pw, args.base, sem) for a, pw in roster))
-    report(r, f"{len(students)} murid / {len(teachers)} guru", src,
-           time.perf_counter() - t0, len(roster))
+    await asyncio.gather(*(session(r, a, pw, args.base, sem, args.duration)
+                           for a, pw in roster))
+    s = report(r, f"{len(students)} murid / {len(teachers)} guru", src,
+               time.perf_counter() - t0, len(roster))
+    s["base"] = args.base
+    s["duration_s"] = args.duration
+    s["roster_source"] = src
+    if args.json:
+        Path(args.json).write_text(json.dumps(s, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"summary written     : {args.json}")
     return 0
 
 

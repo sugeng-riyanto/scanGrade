@@ -96,6 +96,85 @@ never be able to take the site down. It is logged loudly instead, and
 `install-auto-deploy.sh` proves the gate runs at install time so that warning has
 no reason to appear.
 
+## The gate on the published numbers
+
+The landing page publishes a capacity table — concurrent students against p50,
+p95 and error rate — measured against this deployment. Nothing kept it true. The
+numbers were written by hand and the page carried on advertising them while the
+machine underneath changed, which is how 46,698 and 74,923 requests over a
+ten-minute peak stayed on the page with nothing in the repository able to
+produce either figure.
+
+`deploy/claims_gate.py` closes that: on every release, after the reload, it
+re-measures **the rung the page itself advertises** and compares. It reads the
+claim out of `app/templates/landing.html` rather than from a constant in the
+gate, so editing the page into a bigger promise is what has to be defended.
+
+It runs after the reload because the thing being measured is the code that is
+now serving; a probe before the reload would measure the release being replaced.
+That is also why a confirmed divergence goes through the shared rollback path —
+resetting the checkout without reloading would leave the rejected release
+running and fail the same way on every later tick.
+
+What it measures is narrow, deliberately:
+
+* **the lowest advertised rung only.** Loading 500 sessions at deploy time would
+  cost the students the deploy is for. If the box cannot hold the smallest
+  promise on the page, the rest of the table is not worth measuring.
+* **the worst page endpoint**, not a median over everything. A 50-way login burst
+  is measured too, but it is a different claim, and letting it into the median
+  turns this into a login test the smoke test already runs.
+* **a distribution, not endurance.** The published run lasted minutes; the probe
+  lasts `CLAIMS_DURATION` seconds, so it cannot see degradation over time.
+
+It says all three of those in its own output, so a passing run cannot be read as
+"the whole page is verified".
+
+| Result | Outcome |
+|---|---|
+| measured, and the page still describes this box | deploy |
+| measured, and it does not (confirmed twice) | roll back **if armed** |
+| diverged once, clean on the confirmation run | deploy — contention, not a stale claim |
+| could not measure (exit 2) | **warn only**, and say so in the journal |
+
+The two-strike rule and the `2x` latency slack exist because a measurement on a
+shared box is not a fact about the code alone. They are also bounded: the slack
+is tighter than a gap that has actually been observed here (a probe measured a
+worst-page p50 of 1464 ms against a published 620 ms, and the first version of
+this gate used `3x` and passed it).
+
+It declines to measure, rather than guessing, when the box is already busy — the
+same 1 vCPU serves real students, and loading it during a live exam would both
+disturb the exam and produce a number that means nothing. It judges the *best* of
+several `/health` samples, so a box that has just been reloaded is not mistaken
+for a busy one.
+
+### Arming it
+
+`/etc/scangrade-claims.conf` (root-only) holds the base URL, the roster path, the
+probe size and `CLAIMS_ENFORCE`. The installer proves the plumbing with
+`--check`, runs one real probe, and arms the gate **only** if the page matches
+what it measured — the same discipline as `SMOKE_ENFORCE`, and for the same
+reason: a gate armed against a page that does not match would reject every
+release.
+
+```bash
+# what it needs: one account per session
+cd /opt/scangrade && .venv/bin/python provision_loadtest.py 60 2
+bash /opt/scangrade/deploy/install-auto-deploy.sh     # re-run to arm
+
+# measure by hand, without deploying anything
+.venv/bin/python deploy/claims_gate.py --check
+.venv/bin/python deploy/claims_gate.py --base https://scangrade.web.id
+
+# every run, kept
+cat /var/lib/scangrade-deploy/claims/history.jsonl
+```
+
+The roster is required and lives outside git (`.freebuff/lt_roster.json`), so a
+rollback cannot remove it. No roster means `cannot measure`: the gate says so on
+every release rather than passing silently.
+
 ## The smoke test that gates a release
 
 After the app is reloaded, the deploy signs in as each of the four roles and
