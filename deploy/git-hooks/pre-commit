@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# ─── ScanGrade pre-commit — dark-mode readability ────────────────────────────
+#
+# Not installed by default: a hook lives in .git/, which is not committed, so
+# every clone has to opt in once with
+#
+#     bash deploy/install-git-hooks.sh
+#
+# The same check is a hard gate in the VPS auto-deploy, so this is the early
+# warning rather than the only defence: it fails the commit instead of the
+# release.
+#
+# It runs only when a template or the stylesheet changed, so the common commit
+# does not pay for it. `git commit --no-verify` skips it, which is Git's own
+# escape hatch and is deliberate — a second, private bypass flag would be the
+# thing that quietly stops this from ever running.
+# ─────────────────────────────────────────────────────────────────────────────
+set -uo pipefail
+
+REPO=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$REPO" || exit 0
+
+# What is actually being committed, not what happens to be on disk.
+CHANGED=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if ! printf '%s\n' "$CHANGED" | grep -qE '^app/templates/.*\.html$|^app/static/css/'; then
+  exit 0
+fi
+
+# The check reads the working tree, so a partially staged file is judged by what
+# is on disk rather than by the hunk in the index. Staging the whole file — which
+# is what `git add <file>` and every editor integration does — makes the two the
+# same. Splitting a file across commits is the one case where this can disagree,
+# and it errs toward blocking, never toward letting unreadable text through.
+echo "theme gate: template changes staged — checking dark-mode readability…"
+if ! bash "$REPO/deploy/theme_gate.sh"; then
+  echo
+  echo "Commit blocked. Fix the contrast, or re-run with: git commit --no-verify"
+  exit 1
+fi
+exit 0
