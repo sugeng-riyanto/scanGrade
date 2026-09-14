@@ -13,8 +13,11 @@
 - Canvas data saved as PNG (not JPEG — was causing black overlay bug)
 - **Tailwind CSS**: Local compiled CSS (`npm run css:build` after template changes). NOT CDN — users have spotty WiFi.
 - **Inter font**: Local TTF files in `/static/vendor/inter/`, NOT Google Fonts CDN
+- **Midtrans Snap.js**: vendored at `/static/vendor/midtrans/<build>/veritrans.co.id/snap.js` (build = `production` or `sandbox`), with the CDN only as a load-failure fallback. **The `veritrans.co.id` directory is load-bearing, not decoration**: Snap.js finds its own `<script>` tag by matching that string (or its API host, which carries a scheme and so can never match a same-origin path), then reads `data-client-key` off the tag it found. Rename the directory and the key silently becomes empty — the SDK loads fine, no error is raised, and the payment iframe comes up without a merchant. Guarded by `tests/unit/test_snap_vendored.py`
+- The two Snap.js builds differ **only** in the host they hardcode, so they are not interchangeable: the sandbox build sends payments to sandbox (where they silently do not count), the production build takes real card details
 - Default timezone UTC+7 (WIB), configurable per-user and per-school
-- UI language: Indonesian (default) with English toggle (`localStorage.sg_lang`)
+- UI language: **English (default)** with an Indonesian toggle (`localStorage.sg_lang`) — a stored choice always wins. The default is decided in exactly one place, `base.html` (`default_lang|default('en', true)`), read both by `<html lang>` and by the Alpine `lang` scope; no route passes `default_lang` (a guard in `tests/unit/test_language_toggle.py` fails if one does). Strings are bound inline as `t('Indonesia','English')`; plain JS outside Alpine uses `window.sgT()`
+- 4 standalone documents do NOT inherit base.html and are hardcoded Indonesian (`lang="id"`): `monitor.html`, `print/report_card.html`, `student/result_detail_pdf.html`, `teacher/print_exam_report.html`. They cannot honour the English default
 - Color theme: `primary` (blue) defined in Tailwind config — `brand-*` was previously undefined (invisible buttons/text), now aliased to `primary` palette
 - No direct DB DDL access — migrations must be run manually in Supabase SQL Editor
 - `profiles` table columns: `['id', 'full_name', 'phone', 'role', 'created_at', 'updated_at', 'nisn', 'nis', 'class_id', 'school_id', 'tz_offset']` (migrations 002+013 applied)
@@ -164,7 +167,7 @@
 | **Blokir Screenshot** | Mencegah PrintScreen via `navigator.clipboard.writeText('')` | Form ujian → Pengaturan Anti-Cheat |
 | **Blokir Copy-Paste** | Mencegah copy/paste/cut via `e.preventDefault()` | Form ujian → Pengaturan Anti-Cheat |
 | **Blokir Klik Kanan** | Mencegah context menu via `e.preventDefault()` | Form ujian → Pengaturan Anti-Cheat |
-| **Wajib Fullscreen** | Mendeteksi keluar layar penuh sebagai pelanggaran (`fullscreen_exit`) | Form ujian → Pengaturan Anti-Cheat |
+| **Wajib Fullscreen** | Ujian hanya bisa dikerjakan dalam layar penuh. Keluar dari layar penuh (Esc), me-restore jendela, atau minimize → overlay memblokir ujian sampai kembali ke layar penuh, dan tercatat sebagai `fullscreen_exit` + dihitung di tangga penalti | Form ujian → Pengaturan Anti-Cheat |
 | **Watermark Nama** | Menampilkan nama siswa sebagai watermark di seluruh halaman ujian | Form ujian → Pengaturan Anti-Cheat |
 | **Penalti per Pelanggaran** | Base penalti (default 5 poin) — 1st=warning, 2nd=-base, 3rd=-2×base, 4th+=-3×base | Form ujian → Pengaturan Anti-Cheat |
 | **Maks Pelanggaran** | Jumlah pelanggaran sebelum auto-submit (default 5) | Form ujian → Pengaturan Anti-Cheat |
@@ -172,6 +175,9 @@
 **Catatan Penting:**
 - `block_screenshot` sudah diperbaiki — sekarang gate-nya ke `block_screenshot`, bukan `block_copy_paste`
 - Semua pelanggaran tercatat di tabel `violation_logs` + dihitung server-side di `submit_exam()`
+- Yang **dihitung** ke tangga penalti hanya `tab_switch` dan `fullscreen_exit` (`PENALIZED_VIOLATION_TYPES` di `anti_cheat_service.py`); tipe lain (mis. `blur`) hanya dicatat
+- Fullscreen adalah state yang **dilaporkan tepat** oleh browser (`document.fullscreenElement`). "Jendela maximized" tidak bisa dideteksi halaman web (tidak ada API-nya; `outerWidth/outerHeight` berubah oleh zoom), jadi fullscreen yang diwajibkan
+- Jika browser tidak punya Fullscreen API (Safari iPhone) atau policy mematikannya (`fullscreenEnabled === false`), pemeriksaan ini **berhenti sendiri** — siswa tidak digagalkan karena hal yang tidak bisa ia perbaiki
 - Timer ujian divalidasi server-side via `student_sync_draft()` — jika ada mismatch >300 detik antar device, client di-reject
 - Jika siswa mematikan JavaScript, server tetap hitung penalti dari violation_logs yang sudah tercatat
 
@@ -179,7 +185,7 @@
 | Fitur | Deskripsi | Letak |
 |-------|-----------|-------|
 | **Lihat Flag Kecurangan** | Submission dengan `_flags` berisi `suspicious_speed` atau `device_mismatch` akan terlihat di detail submission | Detail submission → `answers._flags` |
-| **CSP Header** | Content-Security-Policy diperkuat — membatasi script hanya dari `'self'` + `cdn.jsdelivr.net` | `__init__.py` after_request |
+| **CSP Header** | Content-Security-Policy set on every response — currently only `frame-ancestors 'self'`. It does **not** restrict `script-src`/`style-src` (no such directive is emitted), so third-party scripts are not blocked by CSP; the X-Content-Type-Options and X-Frame-Options headers beside it are real | `__init__.py` `add_performance_headers` |
 | **Speed Analysis** | Jika >5 MCQ dijawab dalam <1.5 detik/soal, submission di-flag suspicious | Server-side di `submit_exam()` |
 | **Device Mismatch** | Jika IP atau User-Agent berubah antara first sync dan submit, submission di-flag | Server-side di `submit_exam()` |
 | **Timer Reconciliation** | Server memvalidasi `started_at` — jika selisih >300 detik antar device, sync di-reject (409) | `api.py` → `student_sync_draft()` |
@@ -188,7 +194,9 @@
 | Aturan | Konsekuensi |
 |--------|-------------|
 | Pindah tab / buka aplikasi lain (visibilitychange) | 1st = **PERINGATAN**, 2nd = **-base poin**, 3rd = **-2×base**, 4th+ = **-3×base** |
-| Keluar layar penuh (`fullscreen_exit`) | Langsung dicatat sebagai pelanggaran (warning-style) |
+| Keluar layar penuh via Esc (`fullscreen_exit`) | Overlay memblokir ujian + masuk tangga penalti yang sama (1st = PERINGATAN). Waktu ujian tetap berjalan |
+| Restore-down / perkecil jendela | Terdeteksi (state fullscreen disampel tiap 2 detik, tidak hanya lewat event) → overlay memblokir |
+| Minimize | `visibilitychange` → tangga penalti (dihitung 1× saja, tidak dobel dengan overlay) |
 | Copy/paste/cut | Diblokir — `e.preventDefault()` |
 | Klik kanan | Diblokir — `e.preventDefault()` |
 | PrintScreen | Diblokir (jika guru mengaktifkan `block_screenshot`) |
