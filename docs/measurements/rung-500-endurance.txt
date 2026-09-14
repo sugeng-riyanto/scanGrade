@@ -1,0 +1,36 @@
+roster: 500 murid, 30 guru  [F:\opencode\ScanGrade\scanGrade\.freebuff\lt_roster.json]
+launching 500 concurrent sessions (500 murid + 0 guru) against https://scangrade.web.id ...
+
+==================================================================================
+PER-ENDPOINT RESULTS  (milliseconds)
+==================================================================================
+endpoint                              n     p50     p95     p99   status
+LOGIN murid                         500    5474   34941   37771   {429: 314, 403: 12, 200: 174}
+GET /auth/me                        174    5496    8031    8279   {200: 174}
+GET /student/dashboard             3001    6987   10838   24667   {200: 3001}
+GET /student/exams                 4650    6321    8858   22788   {200: 4650}
+GET /student/results                759    5618    8267   21481   {200: 759}
+GET /student/settings               174    6385    7764    8333   {200: 174}
+POST settings/pdp-update            174   11752   13128   13624   {200: 174}
+GET /health                        1798    5024    7334   20682   {200: 1798}
+GET /student/exams/<id>            2343    6281    9091   23114   {200: 2343}
+
+==================================================================================
+sessions launched  : 500
+logins succeeded   : 174   failed: 326
+roster             : F:\opencode\ScanGrade\scanGrade\.freebuff\lt_roster.json  (500 murid / 30 guru)
+TOTAL requests     : 13573
+status breakdown   : {429: 314, 403: 12, 200: 13247}
+429 rate-limited   : 314
+5xx server errors  : 0
+transport errors   : 0
+logins not reaching a dashboard (326):
+     314 x 429 | Terlalu banyak permintaan. Silakan coba lagi dalam beberapa detik.
+      12 x 403 | (no message)
+error rate         : 314/13573 = 2.31%  (429 + 5xx + transport)
+identity verified  : 174/174 via /auth/me user_id
+wall clock         : 682.2s
+throughput         : 19.9 requests/s
+  first half   n=  6850 p50=   6303ms p95=  13350ms  bad=314
+  second half  n=  6723 p50=   6033ms p95=   9093ms  bad=0
+==================================================================================

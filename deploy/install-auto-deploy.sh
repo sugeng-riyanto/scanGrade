@@ -66,7 +66,7 @@ AFTER=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 echo "   $BEFORE -> $AFTER"
 
 for f in deploy/scangrade-deploy.sh deploy/smoke_test.py deploy/db_snapshot.py \
-         deploy/scangrade-db-snapshot.sh deploy/theme_gate.sh \
+         deploy/scangrade-db-snapshot.sh deploy/theme_gate.sh deploy/claims_gate.py \
          tests/unit/test_dark_theme_contrast.py \
          deploy/scangrade-deploy.service deploy/scangrade-deploy.timer \
          deploy/scangrade.service; do
@@ -182,6 +182,110 @@ if as_owner env "${SMOKE_ENV[@]}" "$REPO/.venv/bin/python" \
 else
   echo "   NOT all accounts signed in -> SMOKE_ENFORCE stays false."
   echo "   Fix the accounts in $SMOKE_CONF, then re-run this installer to arm the gate."
+fi
+
+# ── 3b. The published capacity claims.
+#       The landing page publishes a capacity table measured against this
+#       deployment once. The deploy re-measures the page's lowest rung on every
+#       release and compares it with what the page says. This is the config for
+#       that gate, plus the proof that it can run and passes before it is armed
+#       — a gate armed against a stale roster would reject good releases, which
+#       is exactly what the smoke-test section above is careful to avoid.
+CLAIMS_CONF=/etc/scangrade-claims.conf
+say "Published capacity claims ($CLAIMS_CONF)"
+if [ -f "$CLAIMS_CONF" ]; then
+  echo "   already exists — left untouched"
+else
+  BASE_DEFAULT=$(grep -E '^APP_URL=' "$REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"' | sed 's/[[:space:]]*#.*//')
+  case "$BASE_DEFAULT" in
+    https://*) ;;
+    *) BASE_DEFAULT="https://scangrade.web.id" ;;
+  esac
+
+  cat > "$CLAIMS_CONF" <<EOF
+# Read by scangrade-deploy. Runs the claims gate on every release.
+#
+# The gate re-measures the landing page's own lowest advertised rung and
+# compares it with the numbers the page publishes, so a claim cannot outlive the
+# box that was measured.
+#
+# It must be HTTPS: production sets SESSION_COOKIE_SECURE, so over plain HTTP the
+# session cookie is dropped and every probe would look like a failed login.
+CLAIMS_BASE_URL="$BASE_DEFAULT"
+
+# One account per session is required -- reusing logins turns per-identity rate
+# limiting into errors that look like the server's fault. The roster is written
+# by provision_loadtest.py and lives outside git, so a rollback cannot remove it.
+CLAIMS_ROSTER="$REPO/.freebuff/lt_roster.json"
+
+# Empty = probe the rung the page advertises. Set a number to probe fewer
+# (a lower-bound check, and the gate says so when you do).
+# 30s, not 12: a shorter probe is dominated by the login burst at the start and
+# measures the wrong thing. The published rows are 60-second runs.
+CLAIMS_SESSIONS=""
+CLAIMS_DURATION="30"
+
+# Never load more than this at deploy time, whatever the page claims. Raising it
+# is a deliberate choice: this runs on the box that is serving students.
+CLAIMS_MAX_SESSIONS="60"
+
+# One JSON line per run, so a published number has a history and not a memory.
+CLAIMS_EVIDENCE="/var/lib/scangrade-deploy/claims/history.jsonl"
+
+# CLAIMS_ENFORCE=true lets a confirmed divergence roll the release back.
+# install-auto-deploy.sh sets it only after a probe has actually passed.
+CLAIMS_ENFORCE="false"
+EOF
+  chmod 0600 "$CLAIMS_CONF"
+  chown root:root "$CLAIMS_CONF"
+  echo "   created (mode 0600)"
+fi
+
+mkdir -p /var/lib/scangrade-deploy/claims
+chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/claims
+chmod 0750 /var/lib/scangrade-deploy/claims
+
+say "Checking the claims gate"
+if ! as_owner "$REPO/.venv/bin/python" "$REPO/deploy/claims_gate.py" --check \
+     --page "$REPO/app/templates/landing.html"; then
+  echo "   the gate cannot run yet — see the reason above."
+  echo "   It needs a roster holding one account per session:"
+  echo "       cd $REPO && .venv/bin/python provision_loadtest.py 60 2"
+  echo "   then re-run this installer to arm it."
+else
+  set -a
+  # shellcheck disable=SC1090
+  . "$CLAIMS_CONF"
+  set +a
+  CLAIMS_ENV=()
+  for v in CLAIMS_BASE_URL CLAIMS_ROSTER CLAIMS_SESSIONS CLAIMS_DURATION \
+           CLAIMS_MAX_SESSIONS CLAIMS_EVIDENCE; do
+    [ -n "${!v:-}" ] && CLAIMS_ENV+=("$v=${!v}")
+  done
+
+  # One real probe, before anything is armed. It costs a few seconds of load on
+  # the box you are standing on, and it is the only way to know whether the page
+  # describes this deployment at all.
+  set +e
+  CLAIMS_OUT=$(as_owner env "${CLAIMS_ENV[@]}" "$REPO/.venv/bin/python" \
+      "$REPO/deploy/claims_gate.py" --page "$REPO/app/templates/landing.html" \
+      --harness "$REPO/loadtest_concurrent.py" 2>&1)
+  CLAIMS_RC=$?
+  set -e
+  echo "$CLAIMS_OUT" | sed 's/^/   /'
+
+  case "$CLAIMS_RC" in
+    0)
+      sed -i 's/^CLAIMS_ENFORCE=.*/CLAIMS_ENFORCE="true"/' "$CLAIMS_CONF"
+      echo "   the page matches this deployment -> CLAIMS_ENFORCE=true" ;;
+    2)
+      echo "   the gate could not measure (exit 2) -> CLAIMS_ENFORCE stays false."
+      echo "   That is not a verdict on the page; fix the measurement and re-run." ;;
+    *)
+      echo "   the page does NOT describe this deployment -> CLAIMS_ENFORCE stays false."
+      echo "   Fix one of the two, then re-run this installer to arm the gate:"
+      echo "       publish the numbers you measure, or find what made this box slower" ;;
+  esac
 fi
 
 # ── 4. Unit files. Back up anything we replace: this is the file that keeps the
