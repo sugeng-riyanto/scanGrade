@@ -413,15 +413,34 @@ def test_the_rollback_path_names_the_recovery_point():
 
 
 def test_installer_installs_the_manual_snapshot_command():
-    installer = INSTALL_SH.read_text(encoding="utf-8")
+    """It has to be installed, and it has to be the repo's wrapper — not this
+    script's own idea of one, and not a snapshot of one either.
 
-    assert 'install -m 0755 -o root -g root "$REPO/deploy/scangrade-db-snapshot.sh"' \
-        in installer, "the installer does not install the manual snapshot command"
+    The installer used to write its own copy of the wrapper (two versions of one
+    script: /usr/local/bin kept a wrapper the repo had moved on from, and it was
+    only noticed because the backup directory was missing), and then it *copied*
+    the repo wrapper there. The copy had a second defect that stayed quiet until
+    somebody needed a recovery point: the wrapper derives the checkout from its
+    own location, so from /usr/local/bin it looked for /usr/local/.venv/bin/python
+    and refused to take the snapshot.
+
+    A launcher closes both, because what it runs is the file in the checkout.
+    """
+    installer = INSTALL_SH.read_text(encoding="utf-8")
+    entrypoint = (DEPLOY / "entrypoint.sh").read_text(encoding="utf-8")
+
     assert 'cat > "$SNAPSHOT_BIN" <<EOF' not in installer, (
-        "the installer generates its own copy of the wrapper again. That is two "
-        "versions of one script, and the installed one drifts silently — which is "
-        "exactly what happened: /usr/local/bin kept a wrapper the repo had moved on "
-        "from, and it was only noticed because the backup directory was missing"
+        "the installer generates its own copy of the wrapper again"
+    )
+    assert 'install_launcher "$SNAPSHOT_BIN"' in installer, (
+        "the installer does not install the manual snapshot command"
+    )
+    assert 'TARGET="$REPO/deploy/scangrade-db-snapshot.sh"' in entrypoint, (
+        "the installed name must exec the checkout's wrapper"
+    )
+    assert '"$@"' in entrypoint, (
+        "the snapshot command takes --list/--label/--restore, so the launcher has "
+        "to forward its arguments"
     )
 
 

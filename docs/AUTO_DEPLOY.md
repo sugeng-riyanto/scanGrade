@@ -16,8 +16,9 @@ bash /opt/scangrade/deploy/install-auto-deploy.sh
 ```
 
 It fast-forwards the checkout first, then installs `/usr/local/bin/scangrade-deploy`
-from the repo copy, installs the units, enables the timer, and does one test run
-so you find out immediately whether it works instead of in two minutes.
+and `/usr/local/bin/scangrade-db-snapshot` as **launchers** (see below), installs
+the units, enables the timer, and does one test run so you find out immediately
+whether it works instead of in two minutes.
 
 **The very first time**, the checkout does not contain the installer yet, so run
 the copy that was handed over instead — it pulls the same commit before it
@@ -27,8 +28,55 @@ installs anything:
 bash /tmp/sgdeploy2/install-auto-deploy.sh
 ```
 
-Safe to re-run afterwards: it re-reads the automation from the checkout, so it is
-also how you upgrade the logic after pulling a newer commit.
+Safe to re-run afterwards, but you should not need to: the runner it installs is
+not a copy of anything, so a fix to the deploy logic reaches the box the same way
+the rest of the code does.
+
+## The runner is never a copy
+
+The installed `/usr/local/bin/scangrade-deploy` is `deploy/entrypoint.sh`, rendered
+with this checkout's path. It execs `deploy/scangrade-deploy.sh` **from the
+checkout**, choosing its target by the name it was installed under. So what root
+runs is always the commit the checkout is on: pushing a fix to the deploy script
+puts it in effect on the next tick, with nobody opening a console.
+
+It used to be installed as a copy instead, and a copy is a snapshot:
+
+* every later fix to the gates — a corrected probe, a new rollback path — stayed
+  on GitHub while the timer kept deploying with the logic of whatever commit was
+  current the day it was installed, and nothing compared the two, so the drift
+  was invisible;
+* the only way to deliver a script fix was to re-run the installer as root, which
+  is the manual step automatic deployment exists to remove;
+* `/usr/local/bin/scangrade-db-snapshot` was quietly broken from that path: the
+  wrapper derives the checkout from its own location, so the copy looked for
+  `/usr/local/.venv/bin/python` and refused to take the snapshot at exactly the
+  moment one was wanted.
+
+**A stale copy now refuses to run.** Gate 0 of the deploy compares the file it is
+running with `deploy/scangrade-deploy.sh` in the checkout *before* it fetches or
+merges anything, and stops with exit 14 if they differ:
+
+```
+REFUSING: this is an installed COPY of the runner, not the checkout's
+    running : /usr/local/bin/scangrade-deploy
+    checkout: /opt/scangrade/deploy/scangrade-deploy.sh
+    fix once, as root:  bash /opt/scangrade/deploy/install-auto-deploy.sh
+```
+
+A copy that still matches the checkout byte-for-byte is the same code and runs
+normally, so a box installed before this change keeps deploying until its runner
+is genuinely out of date. When you see exit 14 (or the unit in
+`systemctl --failed`), re-run the installer once and it is gone for good.
+
+**A copy installed before this change cannot refuse anything**, because the check
+arrived with this commit — that box has no launcher and no Gate 0, so it goes on
+deploying with the logic of the day it was installed, silently, until the
+installer is re-run. If your VPS was installed earlier, do that once:
+
+```bash
+bash /opt/scangrade/deploy/install-auto-deploy.sh
+```
 
 ## Operating it
 
@@ -243,6 +291,8 @@ are fixed in the script itself.
 
 It also stops instead of guessing when:
 
+- it is running from an installed copy that differs from the checkout (exit 14)
+  — see [The runner is never a copy](#the-runner-is-never-a-copy);
 - the checkout has local changes (it will not clobber hand edits);
 - the update is not a fast-forward (history was rewritten);
 - the release ships a migration and no snapshot of the data can be taken;

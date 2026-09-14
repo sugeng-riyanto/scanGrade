@@ -20,6 +20,7 @@ one is easy to lose in an innocent-looking edit:
 """
 import os
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -30,8 +31,11 @@ DEPLOY = ROOT / "deploy"
 import subprocess
 import sys
 
+BASH = shutil.which("bash")
+
 DEPLOY_SH = DEPLOY / "scangrade-deploy.sh"
 INSTALL_SH = DEPLOY / "install-auto-deploy.sh"
+ENTRYPOINT_SH = DEPLOY / "entrypoint.sh"
 SMOKE_PY = DEPLOY / "smoke_test.py"
 APP_SERVICE = DEPLOY / "scangrade.service"
 DEPLOY_SERVICE = DEPLOY / "scangrade-deploy.service"
@@ -378,6 +382,215 @@ def test_smoke_config_is_not_in_the_repo():
         assert "smoke" not in line or line.endswith("smoke_test.py") or line.endswith("test_auto_deploy.py"), (
             f"{line} looks like a tracked smoke credential file"
         )
+
+
+# ── the installed entry point is a launcher, never a copy ────────
+#
+# /usr/local/bin/scangrade-deploy used to be a *copy* of the script in the
+# checkout, installed by install-auto-deploy.sh. A copy stops receiving fixes the
+# day it lands: the gates below could grow, correct themselves or change what
+# they refuse, and root would go on running the version of that afternoon — with
+# nothing comparing the two. The fix was to ship a launcher instead, and these
+# guards hold the arrangement in place.
+
+def _render_launcher(directory: Path, repo: Path, name: str) -> Path:
+    """What install-auto-deploy.sh does: substitute the checkout into the
+    launcher and install it under one of the two names it answers to."""
+    rendered = ENTRYPOINT_SH.read_text(encoding="utf-8").replace("@REPO@", str(repo))
+    path = directory / name
+    path.write_text(rendered, encoding="utf-8")
+    return path
+
+
+def test_the_installer_installs_a_launcher_rather_than_a_copy():
+    install = INSTALL_SH.read_text(encoding="utf-8")
+
+    for copied in ("scangrade-deploy.sh", "scangrade-db-snapshot.sh"):
+        assert not re.search(rf"^install[^\n]*\b{copied}\b", install, re.M), (
+            f"{copied} is installed as a *copy* again. A copy stops receiving "
+            "fixes the moment it is installed, and nothing compares it to the "
+            "checkout, so the drift is silent. Install the launcher instead."
+        )
+
+    assert "deploy/entrypoint.sh" in install, "the installer does not know the launcher"
+    for bin_path in ('install_launcher "$DEPLOY_BIN"', 'install_launcher "$SNAPSHOT_BIN"'):
+        assert bin_path in install, f"{bin_path} is missing — that entry point stays a copy"
+
+
+def test_the_launcher_is_rendered_and_never_installed_unrendered():
+    """The placeholder is the only per-host thing in the launcher, and a launcher
+    installed with it left in would exec `@REPO@/deploy/...` forever."""
+    entry = ENTRYPOINT_SH.read_text(encoding="utf-8")
+    install = INSTALL_SH.read_text(encoding="utf-8")
+
+    code = "\n".join(ln for ln in entry.splitlines() if not ln.strip().startswith("#"))
+    assert code.count("@REPO@") == 1, "the placeholder must appear exactly once in code"
+    assert 'REPO="@REPO@"' in code
+    assert re.search(r"sed\s+\"s\|@REPO@\|", install), (
+        "the installer no longer renders the placeholder the launcher is written with"
+    )
+    guard = install.index("grep -q '@REPO@'")
+    assert "exit" in install[guard:guard + 300], (
+        "an unrendered launcher must fail the install, not reach root's PATH"
+    )
+
+
+def test_the_launcher_holds_no_deploy_logic_of_its_own():
+    """The launcher must stay a launcher. The moment it grows a gate, a retry or
+    a rollback, there are two runners in the world again — which is the problem."""
+    entry = ENTRYPOINT_SH.read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in entry.splitlines()
+                     if ln.strip() and not ln.strip().startswith("#"))
+
+    assert len(code.splitlines()) < 40, \
+        f"the launcher has grown to {len(code.splitlines())} lines of code"
+    # `snapshot` is not in the list on purpose: naming the two entry points is
+    # this file's whole job. What may not appear is deploy *work*.
+    for borrowed in ("git ", "systemctl", "runuser", "flock", "claims", "smoke"):
+        assert borrowed not in code, (
+            f"the launcher runs {borrowed!r} — that is the deploy script's job, "
+            "and doing it here is how the two versions start to drift"
+        )
+
+
+def test_the_deploy_refuses_a_copy_before_it_touches_anything():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+
+    assert "runner-identity:start" in script and "runner-identity:end" in script, (
+        "Gate 0's delimiters also let it be tested on its own; keep them"
+    )
+    assert re.search(r'if \[ "\$SELF" != "\$REPO_RUNNER" \] && ! cmp -s', script), (
+        "the refusal no longer compares the running file to the checkout's — a "
+        "condition that stopped being evaluated (or was changed to `true`) would "
+        "still leave the log line, and the message, in place"
+    )
+    refusal = script.index("REFUSING")
+    for later in ('fetch --quiet origin', "merge --ff-only"):
+        assert refusal < script.index(later), (
+            f"the copy check runs after {later!r} — by then the checkout has moved "
+            "and a stale runner has already deployed with old logic"
+        )
+    assert "install-auto-deploy.sh" in script[refusal - 400:refusal + 900], \
+        "the refusal has to name the one command that fixes it"
+
+
+IDENTITY_START = "# runner-identity:start"
+IDENTITY_END = "# runner-identity:end"
+
+
+def _identity_harness(repo: Path) -> str:
+    """Gate 0, lifted out of the script and given the two things it needs: the
+    checkout path and a log(). It is run with $0 set by the caller."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    block = script.split(IDENTITY_START, 1)[1].split(IDENTITY_END, 1)[0]
+    return f'set -uo pipefail\nREPO="{repo}"\nlog() {{ echo "$*"; }}\n{block}\necho REACHED_END\n'
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the guard")
+def test_gate_0_refuses_a_stale_copy_and_allows_the_checkout(tmp_path):
+    """Three cases, because only the middle one is a bug:
+
+    * a copy that differs from the checkout — a deploy about to run yesterday's
+      logic, refused with exit 14;
+    * the checkout's own file — the normal case, and it must pass;
+    * a copy that still matches byte-for-byte — the same code, so it passes. A
+      host installed before this change keeps deploying until its runner is
+      actually out of date, instead of stopping on the first tick.
+    """
+    repo = tmp_path / "repo"
+    (repo / "deploy").mkdir(parents=True)
+    checkout = repo / "deploy" / "scangrade-deploy.sh"
+    checkout.write_text("#!/usr/bin/env bash\n# the checkout's runner\n", encoding="utf-8")
+
+    installed = tmp_path / "scangrade-deploy"
+    installed.write_text("#!/usr/bin/env bash\n# a copy installed months ago\n", encoding="utf-8")
+
+    stale = subprocess.run([BASH, "-c", _identity_harness(repo), str(installed)],
+                           capture_output=True, text=True)
+    assert stale.returncode == 14, stale
+    assert "REFUSING" in stale.stdout
+    assert "install-auto-deploy.sh" in stale.stdout
+    assert "REACHED_END" not in stale.stdout, "it refused but carried on"
+
+    from_checkout = subprocess.run([BASH, "-c", _identity_harness(repo), str(checkout)],
+                                   capture_output=True, text=True)
+    assert from_checkout.returncode == 0 and "REACHED_END" in from_checkout.stdout
+    assert "REFUSING" not in from_checkout.stdout
+
+    same = tmp_path / "scangrade-deploy-identical"
+    same.write_text(checkout.read_text(encoding="utf-8"), encoding="utf-8")
+    matching = subprocess.run([BASH, "-c", _identity_harness(repo), str(same)],
+                              capture_output=True, text=True)
+    assert matching.returncode == 0 and "REACHED_END" in matching.stdout, matching
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the launcher")
+def test_the_launcher_cannot_lag_behind_the_checkout(tmp_path):
+    """The property the whole arrangement exists for: no matter when a fix lands
+    in the repo, the installed entry point runs it — because there is nothing
+    installed to fall out of date."""
+    repo = tmp_path / "repo"
+    (repo / "deploy").mkdir(parents=True)
+    target = repo / "deploy" / "scangrade-deploy.sh"
+    # Deliberately not executable: the scripts are committed 0644, so the
+    # launcher has to work without the bit.
+    target.write_text('#!/usr/bin/env bash\necho "v1 ran with $# argument(s)"\n', encoding="utf-8")
+
+    bins = tmp_path / "bin"
+    bins.mkdir()
+    launcher = _render_launcher(bins, repo, "scangrade-deploy")
+
+    first = subprocess.run([BASH, str(launcher)], capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.strip() == "v1 ran with 0 argument(s)"
+
+    target.write_text('#!/usr/bin/env bash\necho "v2 ran with $# argument(s)"\n', encoding="utf-8")
+    second = subprocess.run([BASH, str(launcher)], capture_output=True, text=True)
+    assert second.stdout.strip() == "v2 ran with 0 argument(s)", (
+        "the installed path kept running the old script — it is a copy again"
+    )
+
+    # Steerable? No: the deploy takes no arguments, and the launcher drops them
+    # rather than passing them along.
+    steered = subprocess.run([BASH, str(launcher), "--branch", "evil"],
+                             capture_output=True, text=True)
+    assert steered.stdout.strip() == "v2 ran with 0 argument(s)", steered.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the launcher")
+def test_the_snapshot_entry_point_passes_its_own_flags_through(tmp_path):
+    """Unlike the deploy, this one *is* a command — --list, --label, --restore —
+    so the launcher has to forward, or the snapshot becomes unusable."""
+    repo = tmp_path / "repo"
+    (repo / "deploy").mkdir(parents=True)
+    (repo / "deploy" / "scangrade-db-snapshot.sh").write_text(
+        '#!/usr/bin/env bash\necho "snapshot called with: $*"\n', encoding="utf-8")
+
+    bins = tmp_path / "bin"
+    bins.mkdir()
+    launcher = _render_launcher(bins, repo, "scangrade-db-snapshot")
+
+    run = subprocess.run([BASH, str(launcher), "--list"], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "snapshot called with: --list"
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the launcher")
+def test_the_launcher_fails_loudly_when_it_cannot_do_its_job(tmp_path):
+    """Two silent-failure modes to close: an installed name it does not know, and
+    a checkout that is not there. Either one, quiet, is a deploy that never runs."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    bins = tmp_path / "bin"
+    bins.mkdir()
+
+    unknown = _render_launcher(bins, repo, "scangrade-something-else")
+    run = subprocess.run([BASH, str(unknown)], capture_output=True, text=True)
+    assert run.returncode == 64 and "unknown launcher name" in run.stderr
+
+    missing = _render_launcher(bins, repo, "scangrade-deploy")
+    run = subprocess.run([BASH, str(missing)], capture_output=True, text=True)
+    assert run.returncode == 3 and "is missing" in run.stderr
 
 
 @pytest.mark.parametrize("name", ["env_bool"])
