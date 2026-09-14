@@ -55,7 +55,12 @@ class TestUnsupportedFiguresAreGone:
     target from the PRD, which is a target and says so; nothing measured them.
     """
 
-    DEAD = ["46.698", "74.923", "Seratus persen request berstatus 2xx"]
+    DEAD = [
+        "46.698", "74.923",          # as they were written
+        "46,698", "74,923",          # and in the other thousand-separator style
+        "46698", "74923",            # and with no separator at all
+        "Seratus persen request berstatus 2xx",
+    ]
 
     def test_the_withdrawn_numbers_are_not_back(self):
         body = page()

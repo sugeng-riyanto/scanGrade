@@ -154,10 +154,10 @@
         <div class="mt-16 bg-white rounded-3xl p-8 lg:p-12 shadow-lg shadow-surface-200/40 border border-surface-100">
             <div class="text-center mb-8">
                 <span class="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-100 rounded-full text-blue-700 text-xs font-bold shadow-sm">
-                    <i class="fas fa-chart-bar"></i> <span x-text="t('Kinerja Terukur','Measured Performance')"></span>
+                    <i class="fas fa-chart-bar"></i> <span x-text="t('Bukti, bukan klaim','Evidence, not a claim')"></span>
                 </span>
-                <h2 class="text-2xl lg:text-3xl font-extrabold text-surface-900 mt-3" x-text="t('Kapasitas Terukur','Measured Capacity')"></h2>
-                <p class="text-sm text-surface-500 font-medium mt-1" x-text="t('Hasil uji beban terhadap produksi pada konfigurasi kami: VPS 1 vCPU, 957 MB RAM.','Load-test results against production on our configuration: a 1 vCPU, 957 MB VPS.')"></p>
+                <h2 class="text-2xl lg:text-3xl font-extrabold text-surface-900 mt-3" x-text="t('Kinerja Terukur','Measured Performance')"></h2>
+                <p class="text-sm text-surface-500 font-medium mt-1" x-text="t('Diukur 14 Sep 2026 pada produksi scangrade.web.id: VPS 1 vCPU, 957 MB RAM, 3 worker gevent. Angka di bawah ini hasil ukur, bukan proyeksi.','Measured 14 Sep 2026 on production at scangrade.web.id: a 1 vCPU, 957 MB VPS running 3 gevent workers. The figures below are measured, not projected.')"></p>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 <div class="text-center p-5 bg-gradient-to-br from-blue-50 to-blue-50 rounded-2xl border border-blue-100">
@@ -168,7 +168,7 @@
                 <div class="text-center p-5 bg-gradient-to-br from-emerald-50 to-emerald-50 rounded-2xl border border-emerald-100">
                     <div class="text-3xl font-extrabold text-emerald-600">50</div>
                     <div class="text-xs font-bold text-emerald-700 mt-1" x-text="t('Murid Serentak','Concurrent Students')"></div>
-                    <div class="text-[10px] text-emerald-400 mt-0.5" x-text="t('sehat: p50 64–962 ms','healthy: p50 64–962 ms')"></div>
+                    <div class="text-[10px] text-emerald-400 mt-0.5" x-text="t('disarankan, 0% error: p50 64–962 ms','recommended, 0% errors: p50 64–962 ms')"></div>
                 </div>
                 <div class="text-center p-5 bg-gradient-to-br from-amber-50 to-amber-50 rounded-2xl border border-amber-100">
                     <div class="text-3xl font-extrabold text-amber-600">0</div>
@@ -202,10 +202,10 @@
                 </table>
             </div>
             <div class="mt-6 text-center text-[11px] text-slate-400 leading-relaxed space-y-1">
-                <p><span x-text="t('* Diukur 14 Sep 2026 terhadap','* Measured 14 Sep 2026 against')"></span> <span class="text-slate-500">scangrade.web.id</span><span x-text="t(' memakai harness uji beban di repositori ini: satu akun per sesi, identitas diverifikasi lewat /auth/me, tiap baris 60 detik. Halaman murid saja; angkanya dan berkas mentahnya ada di docs/measurements/.',' using the load-test harness in this repository: one account per session, identity verified through /auth/me, 60 seconds per row. Student pages only; the figures and their raw files are in docs/measurements/.')"></span></p>
-                <p x-text="t('Baris 500* berasal dari run 10 menit, bukan 60 detik: 500 murid serentak adalah klaim ketahanan, dan probe singkat tidak bisa menjawabnya.','The 500* row comes from a 10-minute run rather than a 60-second one: 500 students at once is an endurance claim, and a short probe cannot answer it.')"></p>
-                <p x-text="t('Bottleneck yang terukur adalah CPU untuk merender halaman: user time 90–93%, idle 0%. Bukan jaringan, memori, atau database.','The measured bottleneck is CPU spent rendering pages: 90–93% user time, 0% idle. Not network, memory or database.')"></p>
-                <p x-text="t('Pada baris 500*, hanya 174 sesi yang lolos login dan sisanya ditolak 429 oleh rate limiter — server tetap hidup tanpa satu pun error 5xx.','In the 500* row only 174 sessions got past login; the rest were rejected with 429 by the rate limiter — the server stayed up with zero 5xx.')"></p>
+                <p><span x-text="t('* Uji beban terhadap produksi','* Load tests against production')"></span> <span class="text-slate-500">scangrade.web.id</span><span x-text="t(', 14 Sep 2026, memakai harness di repositori ini: satu akun per sesi, identitas diverifikasi lewat /auth/me, dan baris 50/100/150 masing-masing dijaga 60 detik. Yang diukur hanya halaman murid — ini angka baca, belum termasuk kiriman jawaban ujian.',' on 14 Sep 2026, using the harness in this repository: one account per session, identity verified through /auth/me, and each of the 50/100/150 rows held for 60 seconds. Only student pages are measured — these are read figures and do not include answer submission.')"></span></p>
+                <p x-text="t('Baris 500* dijalankan 10 menit (682 detik, 13.573 request), bukan 60 detik: 500 murid serentak adalah klaim ketahanan dan probe singkat tidak bisa menjawabnya.','The 500* row ran for 10 minutes (682 seconds, 13,573 requests), not 60: 500 students at once is an endurance claim and a short probe cannot answer it.')"></p>
+                <p x-text="t('Pada run 500* hanya 174 sesi yang lolos login; sisanya ditolak 429 oleh pembatasan login per-IP di nginx, bukan oleh aplikasi. Server tidak mengeluarkan satu pun error 5xx sepanjang run itu.','In the 500* run only 174 sessions got past login; the rest were refused with 429 by the per-IP login limit at nginx, not by the application. The server produced no 5xx at all during that run.')"></p>
+                <p x-text="t('Karena itu error 2,31% pada baris 500* adalah penolakan login tersebut — baris 50, 100 dan 150 semuanya 0%. Bottleneck terukurnya CPU untuk merender halaman: user time 90–93%, idle 0%, bukan jaringan, memori, atau database. Angka dan berkas mentahnya ada di docs/measurements/.','The 2.31% error rate on the 500* row is those refused logins — the 50, 100 and 150 rows are all 0%. The measured bottleneck is CPU spent rendering pages: 90–93% user time, 0% idle, not network, memory or database. The figures and their raw files are in docs/measurements/.')"></p>
             </div>
 
             <!-- Sizing: what this configuration can and cannot do -->
