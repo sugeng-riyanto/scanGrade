@@ -21,8 +21,20 @@ TEMPLATES = sorted((ROOT / "app" / "templates").rglob("*.html"))
 BASE = ROOT / "app" / "templates" / "base.html"
 SOURCE = BASE.read_text(encoding="utf-8")
 
-DECLARATION = re.compile(r"lang:\s*localStorage\.getItem\('sg_lang'\)")
-CONSUMES = re.compile(r"\blang\s*===?\s*'en'")
+# A page builds its own language from one of exactly two places: localStorage
+# (the original copy-pasted form) or `document.documentElement.lang`. Matching on
+# the *source* rather than on one literal spelling is what closes the hole this
+# guard had: `/tools/device-preview` declared
+# `lang: document.documentElement.lang === 'id' ? 'id' : 'en'` and no test said a
+# word, because the old pattern only knew the localStorage form.
+#
+# A `lang:` whose value comes from another object (`lang: d.lang || lang`) is data
+# being carried through a form, not a component property shadowing the scope, so
+# it is deliberately not matched.
+DECLARATION = re.compile(r"\blang:\s*(?:localStorage|document)\b")
+# Either comparison counts as consuming the scope: a binding that reads
+# `lang === 'id'` is just as broken by a shadow as one that reads `lang === 'en'`.
+CONSUMES = re.compile(r"\blang\s*===?\s*'(?:en|id)'")
 EXTENDS_BASE = re.compile(r"""\{%-?\s*extends\s+["']base\.html["']""")
 
 
@@ -66,12 +78,17 @@ def test_every_consumer_of_lang_is_inside_the_base_scope():
     inside base.html's `<body>`. A standalone template would silently get
     `undefined`, and `undefined === 'en'` is false, so it would always render
     Indonesian with no error."""
+    # A partial has no scope of its own — Jinja inlines it wherever it is used, so
+    # a macro in `auth/_chrome.html` reads the caller's `lang` and `t()`. The
+    # underscore is the convention that says "this is included, not rendered", and
+    # the per-page check below is what keeps a partial from being used somewhere
+    # with no scope: every page that imports one still has to extend base.html.
     orphans = []
     for path in TEMPLATES:
         text = path.read_text(encoding="utf-8", errors="replace")
         if not CONSUMES.search(text):
             continue
-        if path == BASE or EXTENDS_BASE.search(text):
+        if path == BASE or EXTENDS_BASE.search(text) or path.name.startswith("_"):
             continue
         orphans.append(str(path.relative_to(ROOT)).replace("\\", "/"))
 
@@ -258,6 +275,10 @@ TRANSLATED = [
     "super_admin/dashboard.html",
     "admin_sekolah/dashboard.html",
     "admin_sekolah/import.html",
+    # The exam builder. It is where a teacher spends the most time in the app —
+    # title, classes, weightings, media, anti-cheat and the AI upload path are all
+    # on this one page, so it was also the largest block of Indonesian left.
+    "teacher/exam_form.html",
     "admin_sekolah/students.html",
     "student/settings.html",
     "teacher/ai_settings.html",
@@ -279,6 +300,32 @@ TRANSLATED = [
     # the student reads during the paper — rules, overlays, tool labels, the
     # offline and penalty messages — follows the choice.
     "student/take_exam.html",
+    # The capacity status page. A school reads it *before* deciding, next to the
+    # landing page's capacity block, so it carries the same contract: the numbers
+    # come from docs/measurements/ and the sentences come in both languages.
+    "public/capacity.html",
+    # The entry door. Every auth page renders `content_noauth`, which carries no
+    # navbar — so the toggle in the authenticated chrome is simply absent, and the
+    # first page a stranger ever meets would have been copy for one reader. Each
+    # one carries its own control from `auth/_chrome.html`, the same convention the
+    # landing page and /capacity use.
+    "auth/login.html",
+    "auth/login_user.html",
+    "auth/register.html",
+    "auth/forgot_password.html",
+    "auth/verify_code.html",
+    "auth/reset_password.html",
+    "auth/set_new_password.html",
+    "auth/activate.html",
+    "auth/activate_success.html",
+    "auth/register_success.html",
+    "auth/reset_password_success.html",
+    "auth/reset_success.html",
+    # The device preview. It is an internal tool, but it is the page someone opens
+    # *while* judging a layout, so a label in one language there is a label the
+    # reviewer reads in the wrong one — and its own instructions are the copy that
+    # explains what the three frames mean.
+    "tools/device_preview.html",
 ]
 
 # Near-certain Indonesian markers, chosen as function words and domain nouns that
@@ -304,6 +351,11 @@ INDONESIAN_MARKERS = {
     # ("panduan", "import" and "data" are all unremarkable) and would sit in the
     # Indonesian column unnoticed while every other string was converted.
     "panduan", "petunjuk", "keterangan", "catatan", "penting", "contoh",
+    # Short Indonesian words an English sentence cannot contain. `kode` was added
+    # with the auth door: "Kode salah. Coba lagi." and "Kode aktivasi ..." are
+    # exactly the alerts a half-translated login page shows in English mode, and
+    # neither carried a marker — the guard walked past both.
+    "kode", "salah",
     "klik", "kolom", "tombol", "formulir", "tautan", "isi", "pengguna",
     "kelola", "aturan", "laporan", "tertarik", "lanjutan", "masih", "telah",
     "sedang", "dapat", "dipakai", "digunakan", "dibuat", "dihapus", "gratis",
@@ -568,9 +620,18 @@ def test_every_page_opens_in_english_by_default():
 
 
 def test_the_translated_list_only_grows_with_intent():
-    """Every entry is a page someone converted. Pinning the count makes a silently
-    dropped entry visible, the same way the count guard above does for counts."""
-    assert len(TRANSLATED) >= 6
+    """Every entry is a page someone converted, and the list is *the* contract.
+
+    An exact count, not a floor. A floor of 6 passed while a page was deleted from
+    the list, and deleting an entry is how a page silently stops being translated:
+    the sweep then has nothing to check, so nothing fails, and nobody notices until
+    a reader in the other language does. Bumping this number is the deliberate act
+    that says "this page is translated now".
+    """
+    assert len(TRANSLATED) == 30, (
+        f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
+        f"you translate another one — and if you *removed* a page, put it back, "
+        f"because dropping it turns the sweep off for that page: {TRANSLATED}")
     for rel in TRANSLATED:
         text = (ROOT / "app" / "templates" / rel).read_text(encoding="utf-8")
         assert EXTENDS_BASE.search(text), \
