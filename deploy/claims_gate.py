@@ -334,21 +334,30 @@ def compare(rung: Rung, measured: dict, sessions: int,
     return reasons
 
 
-def verdict(first: list[str], second: list[str] | None) -> tuple[int, str]:
+def verdict(first: list[str], second: list[str] | None,
+            diverged_from: str = "the published numbers",
+            ok: str = "the published numbers still describe this deployment",
+            other: str = "a stale claim") -> tuple[int, str]:
     """Two strikes, because one measurement on a shared box is not evidence.
 
     `second` is None when the confirmation run could not be made (no roster,
     unreachable base) — then the divergence is reported but not enforced.
+
+    The three phrases are parameters because this rule is shared: the claims gate
+    compares a measurement with a number printed on a page, and the performance
+    gate compares a release with the release before it. A shared verdict that
+    printed the wrong noun would send whoever reads the journal looking for a
+    claim to update when the thing that changed was the code.
     """
     if not first:
-        return EXIT_OK, "the published numbers still describe this deployment"
+        return EXIT_OK, ok
     if second is None:
         return EXIT_CANNOT_RUN, ("the first probe diverged but a confirmation run could not be "
                                  "made — not rolling back on a single measurement")
     if second:
-        return EXIT_DIVERGED, "both probes diverged from the published numbers"
+        return EXIT_DIVERGED, f"both probes diverged from {diverged_from}"
     return EXIT_OK, ("the first probe diverged, the confirmation run did not — treating it as "
-                     "contention on a shared box, not as a stale claim")
+                     f"contention on a shared box, not as {other}")
 
 
 # ── running the harness ──────────────────────────────────────────────────────
