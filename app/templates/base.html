@@ -187,6 +187,7 @@
             <a href="/super-admin/omr-test" class="nav-item {% if request.path == '/super-admin/omr-test' %}active{% endif %}"><i class="fas fa-microscope"></i><span x-text="t('Uji OMR','OMR Test')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
+            <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
             <a href="/super-admin/reset-school-data" class="nav-item {% if request.path == '/super-admin/reset-school-data' %}active{% endif %}"><i class="fas fa-skull-crossbones text-red-400"></i><span class="text-red-400" x-text="t('Reset Sekolah','Reset School')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
@@ -217,6 +218,7 @@
             <a href="/admin-sekolah/invoices" class="nav-item {% if request.path == '/admin-sekolah/invoices' %}active{% endif %}"><i class="fas fa-file-invoice"></i><span x-text="t('Invoice','Invoices')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
+            <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
 
 {% elif g.user_role == 'guru' %}
             <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
@@ -245,6 +247,7 @@
             <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span x-text="t('Pengaturan Akun','Account Settings')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
+            <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
             <a href="/teacher/subjects" class="nav-item {% if request.path == '/teacher/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
             {% set _feat = get_school_features() %}
             {% if False and _feat.get('whiteboard_enabled', True) %}
@@ -576,6 +579,7 @@ function linkify(text) {
         <div class="flex items-center gap-4 flex-wrap justify-center">
             <a href="/privacy" target="_blank" rel="noopener" class="hover:text-primary-600 transition font-medium" x-text="t('Kebijakan Privasi','Privacy Policy')"></a>
             <a href="/terms" target="_blank" rel="noopener" class="hover:text-primary-600 transition font-medium" x-text="t('Syarat &amp; Ketentuan','Terms &amp; Conditions')"></a>
+            <a href="/capacity" class="hover:text-primary-600 transition font-medium" x-text="t('Status Kapasitas','Capacity Status')"></a>
             <span id="dpo-footer" class="text-surface-400 hidden"><i class="fas fa-user-shield mr-1"></i> DPO: <span id="dpo-name"></span></span>
             <span id="pse-footer" class="text-surface-400 hidden"><i class="fas fa-certificate mr-1"></i> <span id="pse-number"></span></span>
         </div>
