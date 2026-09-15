@@ -84,6 +84,14 @@ DEFAULT_SESSIONS = 20
 DEFAULT_DURATION = 20.0
 DEFAULT_TEACHERS = 2
 
+# The wording claims_gate.verdict() uses for *this* gate's question. Without it,
+# a refusal would read "both probes diverged from the published numbers" and send
+# whoever opens the journal looking for a claim to correct when the code is what
+# changed. A test asserts the phrase and that it does not say "published".
+VERDICT_WORDS = {"diverged_from": "the previous release",
+                 "ok": "the release is not slower than the previous one",
+                 "other": "a regression"}
+
 
 # ── the baseline ─────────────────────────────────────────────────────────────
 
@@ -361,7 +369,7 @@ def main() -> int:
                                    args.error_slack)
             print("perf gate: confirmation probe — " + describe(again, baseline))
 
-    code, why_code = cg.verdict(reasons, confirmed)
+    code, why_code = cg.verdict(reasons, confirmed, **VERDICT_WORDS)
 
     if code == EXIT_OK:
         print(f"perf gate: OK — {describe(measured, baseline)}")

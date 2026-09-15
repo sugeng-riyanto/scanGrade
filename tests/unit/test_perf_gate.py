@@ -506,6 +506,17 @@ class TestTheConfReachesTheGate:
         assert not missing, (
             f"the deploy sources the conf but does not pass these to the gate: {missing}")
 
+    def test_the_verdict_names_what_was_compared(self):
+        """The verdict rule is shared with the claims gate, so the nouns have to
+        be this gate's: a refusal that says "the published numbers" would send
+        someone looking for a claim to correct when the code is what changed."""
+        _, why = gate.cg.verdict(["slow"], ["slow"], **gate.VERDICT_WORDS)
+        assert "the previous release" in why and "published" not in why, why
+        _, ok = gate.cg.verdict([], None, **gate.VERDICT_WORDS)
+        assert "not slower" in ok, ok
+        _, contention = gate.cg.verdict(["slow"], [], **gate.VERDICT_WORDS)
+        assert "not as a regression" in contention, contention
+
     def test_the_two_gates_agree_on_what_an_exit_code_means(self):
         assert gate.EXIT_OK == claims.EXIT_OK == 0
         assert gate.EXIT_REGRESSED == claims.EXIT_DIVERGED == 1
