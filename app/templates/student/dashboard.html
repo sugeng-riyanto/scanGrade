@@ -22,7 +22,7 @@
                 <i class="fas fa-school text-white text-lg"></i>
             </div>
             <div>
-                <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Kelas</p>
+                <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="t('Kelas','Class')"></p>
                 <p class="font-extrabold text-surface-800 text-xl">{{ student_class.name if student_class else '-' }}</p>
             </div>
         </div>
@@ -31,7 +31,7 @@
                 <i class="fas fa-book-open text-white text-lg"></i>
             </div>
             <div>
-                <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Mapel</p>
+                <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="t('Mapel','Subject')"></p>
                 <p class="font-extrabold text-surface-800 text-xl">{{ subject_count }}</p>
             </div>
         </div>
@@ -41,11 +41,11 @@
     <div class="grid grid-cols-3 gap-4">
         <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
             <p class="text-3xl font-extrabold text-primary-600">{{ available_exams|length }}</p>
-            <p class="text-xs font-bold text-surface-500 uppercase tracking-wider mt-1">Tersedia</p>
+            <p class="text-xs font-bold text-surface-500 uppercase tracking-wider mt-1" x-text="t('Tersedia','Available')"></p>
         </div>
         <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
             <p class="text-3xl font-extrabold text-emerald-600">{{ completed_exams|length }}</p>
-            <p class="text-xs font-bold text-surface-500 uppercase tracking-wider mt-1">Selesai</p>
+            <p class="text-xs font-bold text-surface-500 uppercase tracking-wider mt-1" x-text="t('Selesai','Completed')"></p>
         </div>
         <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
             <template x-if="showScores">
@@ -54,7 +54,7 @@
             <template x-if="!showScores">
                 <p class="text-3xl font-extrabold text-surface-300">•••</p>
             </template>                <p class="text-xs font-bold text-surface-500 uppercase tracking-wider mt-1 flex items-center justify-center gap-1">
-                Rata-rata
+                <span x-text="t('Rata-rata','Average')"></span>
                 <button @click="showScores = !showScores" class="text-surface-400 hover:text-surface-600 transition text-sm">
                     <i class="fas" :class="showScores ? 'fa-eye' : 'fa-eye-slash'"></i>
                 </button>
@@ -72,7 +72,7 @@
                     <i class="fas fa-trophy text-white text-sm"></i>
                 </div>
                 <div>
-                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Tingkat Penguasaan</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="t('Tingkat Penguasaan','Mastery Level')"></p>
                     <p class="text-lg font-extrabold text-surface-800">{{ mastery_level }}</p>
                 </div>
             </div>
@@ -100,8 +100,8 @@
                     <i class="fas fa-chart-line text-white text-sm"></i>
                 </div>
                 <div>
-                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider">Tren Nilai</p>
-                    <p class="text-xs text-surface-400">5 ujian terakhir</p>
+                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="t('Tren Nilai','Score Trend')"></p>
+                    <p class="text-xs text-surface-400" x-text="t('5 ujian terakhir','Last 5 exams')"></p>
                 </div>
             </div>
             {% if score_trend %}
@@ -115,7 +115,7 @@
                 {% endfor %}
             </div>
             {% else %}
-            <p class="text-sm text-surface-400 text-center py-4">Belum ada data</p>
+            <p class="text-sm text-surface-400 text-center py-4" x-text="t('Belum ada data','No data yet')"></p>
             {% endif %}
         </div>
     </div>
@@ -125,7 +125,7 @@
     <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5">
         <div class="flex items-center gap-2 mb-3">
             <i class="fas fa-exclamation-triangle text-amber-600"></i>
-            <h3 class="font-extrabold text-amber-800">Perlu Perhatian</h3>
+            <h3 class="font-extrabold text-amber-800" x-text="t('Perlu Perhatian','Needs Attention')"></h3>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {% for area in weak_areas[:6] %}
@@ -144,7 +144,7 @@
     {% if active_whiteboards %}
     <div>
         <div class="flex items-center gap-2 mb-4">
-            <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-chalkboard text-violet-500"></i>Papan Tulis Aktif</h3>
+            <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-chalkboard text-violet-500"></i><span x-text="t('Papan Tulis Aktif','Active Whiteboards')"></span></h3>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {% for wb in active_whiteboards %}
@@ -168,7 +168,7 @@
     <!-- Available Exams -->
     <div>
         <div class="flex items-center gap-2 mb-4">
-            <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-file-alt text-primary-500"></i>Ujian Tersedia</h3>
+            <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-file-alt text-primary-500"></i><span x-text="t('Ujian Tersedia','Available Exams')"></span></h3>
             {% if available_exams %}<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-primary-50 text-primary-700 border border-primary-200">{{ available_exams|length }}</span>{% endif %}
         </div>
         {% if available_exams %}
@@ -185,12 +185,12 @@
                     <h3 class="font-bold text-surface-800 mb-1">{{ e.title }}</h3>
                     <p class="text-sm text-surface-500 font-medium">{{ e.subject or '-' }}</p>
                     <div class="flex gap-3 mt-3 text-xs text-surface-500 font-semibold">
-                        <span><i class="fas fa-question-circle mr-1"></i>{{ e.total_questions }} soal</span>
+                        <span><i class="fas fa-question-circle mr-1"></i><span x-text="t('{{ e.total_questions }} soal','{{ e.total_questions }} questions')"></span></span>
                         <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes }} min</span>
                     </div>
                     <a href="/student/exams/{{ e.id }}"
                        class="mt-4 block text-center bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition">
-                        <i class="fas fa-play mr-1"></i>Mulai Ujian
+                        <i class="fas fa-play mr-1"></i><span x-text="t('Mulai Ujian','Start Exam')"></span>
                     </a>
                 </div>
             </div>
@@ -199,8 +199,8 @@
         {% else %}
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-10 text-center text-surface-400">
             <div class="w-16 h-16 mx-auto rounded-full bg-surface-100 flex items-center justify-center mb-3"><i class="fas fa-inbox text-surface-300 text-2xl"></i></div>
-            <p class="font-bold text-surface-500">Tidak ada ujian tersedia</p>
-            <p class="text-sm mt-1">Cek kembali nanti atau hubungi guru Anda</p>
+            <p class="font-bold text-surface-500" x-text="t('Tidak ada ujian tersedia','No exams available')"></p>
+            <p class="text-sm mt-1" x-text="t('Cek kembali nanti atau hubungi guru Anda','Check back later or ask your teacher')"></p>
         </div>
         {% endif %}
     </div>
@@ -209,8 +209,8 @@
     {% if completed_exams %}
     <div>
         <div class="flex items-center justify-between mb-4">
-            <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-chart-bar text-emerald-500"></i>Hasil Terakhir</h3>
-            <a href="/student/results" class="text-sm font-bold text-primary-600 hover:text-primary-700 transition">Lihat semua <i class="fas fa-arrow-right ml-1"></i></a>
+            <h3 class="font-extrabold text-surface-800 flex items-center gap-2"><i class="fas fa-chart-bar text-emerald-500"></i><span x-text="t('Hasil Terakhir','Recent Results')"></span></h3>
+            <a href="/student/results" class="text-sm font-bold text-primary-600 hover:text-primary-700 transition"><span x-text="t('Lihat semua','See all')"></span> <i class="fas fa-arrow-right ml-1"></i></a>
         </div>
         <!-- overflow-x-auto, not overflow-hidden: five columns do not fit a phone,
              and clipping them hides the score and the action behind the card edge
@@ -219,11 +219,11 @@
             <table class="w-full text-sm min-w-[560px]">
                 <thead>
                     <tr class="text-left text-surface-500 bg-surface-50 border-b border-surface-100">
-                        <th class="px-5 py-3 font-bold">Ujian</th>
-                        <th class="px-5 py-3 font-bold text-center">Nilai</th>
-                        <th class="px-5 py-3 font-bold text-center text-red-600">Penalti</th>
-                        <th class="px-5 py-3 font-bold text-center">Status</th>
-                        <th class="px-5 py-3 font-bold text-center">Aksi</th>
+                        <th class="px-5 py-3 font-bold" x-text="t('Ujian','Exam')"></th>
+                        <th class="px-5 py-3 font-bold text-center" x-text="t('Nilai','Score')"></th>
+                        <th class="px-5 py-3 font-bold text-center text-red-600" x-text="t('Penalti','Penalty')"></th>
+                        <th class="px-5 py-3 font-bold text-center" x-text="t('Status','Status')"></th>
+                        <th class="px-5 py-3 font-bold text-center" x-text="t('Aksi','Action')"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -252,7 +252,7 @@
                         <td class="px-5 py-3 text-center">
                             {% if s.status in ('graded', 'published') %}
                             <a href="/student/results" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-50 text-primary-700 hover:bg-primary-100 transition">
-                                <i class="fas fa-eye"></i> Lihat
+                                <i class="fas fa-eye"></i> <span x-text="t('Lihat','View')"></span>
                             </a>
                             {% endif %}
                         </td>

@@ -196,7 +196,7 @@
                     </div>
                     <div class="text-right shrink-0">
                         <p class="text-sm font-extrabold {% if stat.avg >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ stat.avg }}</p>
-                        <p class="text-[10px] text-surface-400">{{ stat.count }} siswa</p>
+                        <p class="text-[10px] text-surface-400" x-text="t('{{ stat.count }} siswa','{{ stat.count }} students')"></p>
                     </div>
                 </div>
                 {% endfor %}
@@ -223,16 +223,22 @@
                         {{ imp.student_id[:2]|upper }}
                     </div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-xs font-bold text-surface-700 truncate">Siswa {{ loop.index }}</p>
+                        <p class="text-xs font-bold text-surface-700 truncate" x-text="t('Siswa {{ loop.index }}','Student {{ loop.index }}')"></p>
                         <p class="text-[10px] text-surface-400">{{ imp.first }} → {{ imp.latest }}</p>
                     </div>
                     <div class="text-right shrink-0">
                         <p class="text-sm font-extrabold {% if imp.diff > 0 %}text-emerald-600{% elif imp.diff < 0 %}text-red-500{% else %}text-surface-400{% endif %}">
                             {% if imp.diff > 0 %}+{% endif %}{{ imp.diff }}
                         </p>
-                        <p class="text-[10px] text-surface-400">
-                            {% if imp.diff > 0 %}Naik{% elif imp.diff < 0 %}Turun{% else %}Stabil{% endif %}
-                        </p>
+                        {# Three branches rather than a Jinja ternary inside t(): the pair
+                           has to sit outside `{% %}`, where the language guard can read it. #}
+                        {% if imp.diff > 0 %}
+                        <p class="text-[10px] text-surface-400" x-text="t('Naik','Up')"></p>
+                        {% elif imp.diff < 0 %}
+                        <p class="text-[10px] text-surface-400" x-text="t('Turun','Down')"></p>
+                        {% else %}
+                        <p class="text-[10px] text-surface-400" x-text="t('Stabil','Steady')"></p>
+                        {% endif %}
                     </div>
                 </div>
                 {% endfor %}
@@ -318,7 +324,8 @@
                             <p class="font-bold text-sm text-surface-800">{{ a.subjects.name if a.subjects else "-" }}</p>
                             <p class="text-xs text-surface-500 font-medium">{{ a.classes.name if a.classes else "-" }}</p>
                         </div>
-                        <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML" hx-confirm="Hapus?"
+                        <button hx-delete="/teacher/assignments/{{ a.id }}" hx-target="closest div" hx-swap="outerHTML"
+                                :hx-confirm="t('Hapus kelas & mapel ini?','Remove this class & subject?')"
                                 class="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-red-500 transition p-1"><i class="fas fa-times text-xs"></i></button>
                     </div>
                     {% endfor %}

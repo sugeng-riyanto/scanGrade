@@ -249,6 +249,13 @@ def test_the_button_label_offers_the_other_language():
 # would just assert the whole app is translated, which it is not yet — that
 # failure would be noise, and noise is how a guard gets switched off.
 TRANSLATED = [
+    # Every role's landing page. These are the cards a user sees first and the
+    # ones reported as "content di dalam cards belum eng/id": a card body here is
+    # an Alpine binding, so the text-node-only sweep never looked at it.
+    "student/dashboard.html",
+    "teacher/dashboard.html",
+    "admin/dashboard.html",
+    "super_admin/dashboard.html",
     "admin_sekolah/dashboard.html",
     "admin_sekolah/import.html",
     "admin_sekolah/students.html",
@@ -282,7 +289,7 @@ INDONESIAN_MARKERS = {
     "yang", "dan", "atau", "tidak", "belum", "sudah", "akan", "untuk",
     "dengan", "dari", "pada", "adalah", "bisa", "harus", "jika", "saat",
     "setelah", "sebelum", "semua", "lain", "juga", "hanya", "lebih",
-    "paling", "oleh", "agar", "karena", "serta", "para", "secara",
+    "paling", "oleh", "agar", "karena", "serta", "secara",
     "setiap", "melalui", "tanpa", "sesuai", "antara", "tersebut", "minimal",
     "maksimal", "silakan", "murid", "guru", "kelas", "ujian", "nilai",
     "sekolah", "mapel", "soal", "jawaban", "siswa", "pengumuman",
@@ -300,34 +307,141 @@ INDONESIAN_MARKERS = {
     "klik", "kolom", "tombol", "formulir", "tautan", "isi", "pengguna",
     "kelola", "aturan", "laporan", "tertarik", "lanjutan", "masih", "telah",
     "sedang", "dapat", "dipakai", "digunakan", "dibuat", "dihapus", "gratis",
-    "berbayar", "saldo", "tahun", "bulan", "hari", "menit", "label",
+    "berbayar", "saldo", "tahun", "bulan", "hari", "menit",
+    # `label` and `para` are deliberately absent although both are Indonesian
+    # words. They are also English — `label` is a form field (`p.append('label',
+    # …)`), an HTML attribute and an object key (`k.label`); `para` is a
+    # paragraph variable (`para_`, `para.id`). Matching them reported code as
+    # untranslated copy, and a guard that fails on code is one somebody deletes.
+    # The recall lost is nil: a real string that contains them (`Label Kelas`,
+    # `Para Siswa`) still carries `kelas` / `siswa`.
     # Privacy / compliance vocabulary on the student settings page. `privacy` and
     # `policy` are English words and deliberately absent; only the Indonesian
     # spellings are listed.
     "kebijakan", "ketentuan", "syarat", "privasi", "retensi", "pemrosesan",
     "persetujuan", "pribadi", "subjek", "penghapusan", "penyimpanan",
+    # Card vocabulary. Found by translating the five dashboards: a string like
+    # "Aksi Cepat" or "Tren Nilai" carries no marker from the sets above, so the
+    # guard walked past it while the card stayed Indonesian in English mode.
+    # Each is Indonesian and has no English reading (unlike `label`/`para`).
+    "aksi", "tersedia", "rata", "terakhir", "perhatian", "papan", "tingkat",
+    "penguasaan", "penalti", "tren", "mulai", "terbit", "draf", "terkini",
+    "menunggu", "pengumpulan", "pendidik", "didik",
 }
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z'-]+")
 _EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
 _T_CALL = re.compile(r"\bt\(\s*'[^']*'\s*,\s*'[^']*'\s*\)")
-_TERNARY = re.compile(r"lang\s*===?\s*'en'\s*\?[^:]*:[^,\"'>]*")
+# `lang === 'en' ? 'English' : 'Indonesia'` in full, both arms included. The
+# old pattern stopped at the first quote after the colon — its class excluded `'`
+# — so it blanked the English half and left the Indonesian one to be reported as
+# a leftover on every page that used the idiom. Text nodes never showed it,
+# because the colon sentence was inside an attribute; reading bindings exposed it.
+_TERNARY = re.compile(
+    r"""lang\s*===?\s*'en'\s*\?[^:]*:\s*(?:'[^']*'|`[^`]*`|[^,"'>]*)""")
+
+# `window.sgT()` is the escape hatch for messages a component method builds (see
+# the test at the bottom of this file). It is a translation, not a leftover.
+_SGT_CALL = re.compile(r"\bsgT\(\s*'[^']*'\s*,\s*'[^']*'\s*\)")
+
+# ── what a card actually shows ───────────────────────────────────
+#
+# Reading text nodes alone was not enough. A card body here is mostly an Alpine
+# binding — `<p x-text="t('Total','Total')">`, or a value out of `x-data` that a
+# later `x-text` renders — so an entire untranslated card can sit in a template
+# with no text node to find. The sweep reads, as well:
+#
+#   * the string literals inside a binding that renders text (x-text, x-html,
+#     title, placeholder, aria-label, alt, value) and inside `x-data`,
+#   * the string literals in every <script>, which is where alert bodies, status
+#     lines and `.textContent` writes live.
+#
+# It reads the *literals* rather than the whole expression, because an expression
+# is mostly code: `k.label || k.provider` contains the Indonesian marker `label`
+# while rendering nothing Indonesian, and reporting it would fail a page that is
+# perfectly translated.
+_ALPINE_VALUE = re.compile(
+    r"""\b(?:x-text|x-html|title|placeholder|aria-label|alt|value|x-data)\s*=\s*"([^"]*)\"""",
+    re.I,
+)
+_SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script>", re.S | re.I)
+_JS_LITERAL = re.compile(r"'([^'\\\n]*)'")
+def _strip_js_comments(region: str) -> str:
+    """Line comments out, but only when no quote precedes them on the line.
+
+    An Alpine value can hold a URL — `x-data="{ url: 'https://…' }"` — and `//`
+    there is a string, not a comment. Cutting from it would delete everything
+    after it in the attribute, which is how a scanner starts *hiding* the strings
+    it was written to find.
+    """
+    kept = []
+    for line in region.split("\n"):
+        cut = line.find("//")
+        if cut != -1 and not any(q in line[:cut] for q in "'\"`"):
+            line = line[:cut]
+        kept.append(line)
+    return "\n".join(kept)
+
+# Jinja is blanked before anything is read, not skipped. Two defects hid behind
+# the old behaviour: a text node that *contains* Jinja — `<p>Halo {{ nama }}!</p>`
+# — never matched the text-node pattern at all, so the guard walked straight past
+# it; and a t() call whose argument holds a Jinja ternary
+# (`t('Kelas {{ x }} {{ 'a' if ok else 'b' }}', 'Class …')`) has quotes inside the
+# braces, which made the literal reader split the pair and report both halves.
+_JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", re.S)
+
+# ── the three bilingual shapes this app writes ───────────────────
+#
+# An Indonesian literal in a binding or a script is a translation only when its
+# partner is right there. These are the shapes that count, and the set is
+# deliberately small enough to read:
+#
+#     t('Indonesia', 'English')          sgT('Indonesia', 'English')
+#     ['Indonesia', 'English']           (a label pair, see take_exam's _syncLabels)
+#     { id: 'Indonesia', en: 'English' } (a catalogue entry, see ai_settings)
+#     { badgeId: '…', badgeEn: '…' }     (the same, keyed by suffix)
+#
+# The partner has to look English — `['Simpan','Batal']` is two Indonesian
+# strings, not a translation, and must not be excused by looking like one.
+_PAIR_ARRAY = re.compile(r"\[\s*'([^']*)'\s*,\s*'([^']*)'\s*\]")
+_PAIR_KEY = re.compile(r"\b\w*(?:Id|En|id|en)\s*:\s*'([^']*)'")
+
+
+def _english_partner(chunk: str) -> bool:
+    return not _markers_in(chunk)
+
+
+def _literals_in(region: str) -> list[str]:
+    """The literals a region renders, minus the Indonesian half of each pair."""
+    for pattern in (_T_CALL, _SGT_CALL, _TERNARY):
+        region = pattern.sub(" ", region)
+    excused = set()
+    for m in _PAIR_ARRAY.finditer(region):
+        if _english_partner(m.group(2)):
+            excused.update((m.group(1), m.group(2)))
+    for m in _PAIR_KEY.finditer(region):
+        excused.add(m.group(1))
+    return [lit for lit in _JS_LITERAL.findall(region) if lit not in excused]
 
 
 def _visible_strings(text: str) -> list[str]:
-    """Text nodes and user-facing attributes, with the bilingual ones removed.
+    """Text nodes and the strings a card renders, with the bilingual ones removed.
 
-    The t() calls and ternaries *contain* Indonesian on one side by design;
-    scanning them unreduced would report every translated string as untranslated.
-    Comments are dropped for the same reason: prose about the fix is not UI.
+    The t() calls, sgT() calls, ternaries and pair shapes *contain* Indonesian on
+    one side by design; scanning them unreduced would report every translated
+    string as untranslated. Comments are dropped for the same reason: prose about
+    the fix is not UI.
     """
     text = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
-    text = re.sub(r"\{#.*?#\}", " ", text, flags=re.S)
-    text = re.sub(r"//[^\n]*", " ", text)
+    text = _JINJA.sub(lambda m: "\n" * m.group(0).count("\n") + " ", text)
     text = _T_CALL.sub(" ", text)
+    text = _SGT_CALL.sub(" ", text)
     text = _TERNARY.sub(" ", text)
     found = re.findall(r">([^<>{}]+)<", text)
-    found += re.findall(r'(?:placeholder|title|aria-label)="([^"]*)"', text)
+    for region in _ALPINE_VALUE.findall(text):
+        found += _literals_in(_strip_js_comments(region))
+    for m in _SCRIPT_BODY.finditer(text):
+        found += _literals_in(_strip_js_comments(m.group(1)))
     # Demo credentials are data, not copy. An address like
     # `guru_mtk_smp@scan-grade.app` is the same string in both languages, and its
     # local part contains a marker word, so scanning it would report the demo page
