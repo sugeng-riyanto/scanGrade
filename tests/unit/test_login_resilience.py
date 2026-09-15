@@ -15,11 +15,29 @@ invisible in production.
 These tests pin the two behaviours that fix that:
   1. only genuine credential failures consume the account/IP throttle;
   2. rate limits are retried with backoff instead of failing the user.
+
+Since the auth door became bilingual the classified message is an ``(id, en)``
+pair — the page renders both halves and lets Alpine choose, because the language
+lives in localStorage where the server cannot see it. Each assertion below
+therefore reads *both* halves: a message that is honest in one language and wrong
+in the other is the same defect this file exists for, just harder to spot.
 """
 import pytest
 from unittest.mock import MagicMock
 
 from app.routes import auth as authmod
+
+
+def _pair(message):
+    """The two halves of a classified message, or a loud failure.
+
+    A bare string here means a route went back to a literal — which renders
+    Indonesian in both modes and raises nothing, so it has to be an error in the
+    test rather than something the next assertion happens to miss.
+    """
+    assert isinstance(message, (tuple, list)) and len(message) == 2, (
+        f"a classified login message must be an (id, en) pair, got {message!r}")
+    return message
 
 
 class AuthError(Exception):
@@ -41,13 +59,17 @@ class TestClassifyLoginError:
     def test_wrong_password_is_reported_as_such(self):
         wrong, msg = authmod._classify_login_error(BAD_CREDS())
         assert wrong is True
-        assert msg == "Email atau password salah"
+        assert _pair(msg) == ("Email atau password salah", "Wrong email or password")
 
     def test_rate_limit_is_not_a_wrong_password(self):
         wrong, msg = authmod._classify_login_error(RATE_LIMITED())
         assert wrong is False, "must not charge this to the account's login budget"
-        assert "salah" not in msg.lower()
-        assert "sibuk" in msg.lower()
+        id_text, en_text = _pair(msg)
+        assert "salah" not in id_text.lower()
+        assert "wrong password" not in en_text.lower()
+        assert "sibuk" in id_text.lower()
+        assert "busy" in en_text.lower(), \
+            "the English half must say the same thing, not the other diagnosis"
 
     def test_rate_limit_is_detected_without_a_status_code(self):
         """GoTrue's message alone must be enough — the status isn't always set."""
@@ -66,7 +88,9 @@ class TestClassifyLoginError:
     def test_server_and_network_faults_are_transient(self, exc):
         wrong, msg = authmod._classify_login_error(exc)
         assert wrong is False
-        assert "sementara" in msg.lower()
+        id_text, en_text = _pair(msg)
+        assert "sementara" in id_text.lower()
+        assert "temporary" in en_text.lower()
 
 
 # ── retry ────────────────────────────────────────────────────────

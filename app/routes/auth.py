@@ -8,7 +8,8 @@ from app.utils.auth import login_required, get_supabase, get_auth_client, invali
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
-from app.utils.rate_limiter import limiter, check_account_limit, rate_limit_message
+from app.utils.rate_limiter import limiter, check_account_limit
+from app.utils.auth_messages import auth_error, rate_limit_error
 
 # Module-level logger: the login helpers below can be exercised outside a request
 # context, and a logging call must never be the thing that breaks a login.
@@ -39,22 +40,22 @@ def register():
     position = request.form.get("position", "")
 
     if not all([npsn, school_name, wa, email, password, position]):
-        return render_template("auth/register.html", error="Semua field wajib diisi")
+        return render_template("auth/register.html", error=auth_error("all_required"))
 
     if len(password) < 6:
-        return render_template("auth/register.html", error="Password minimal 6 karakter")
+        return render_template("auth/register.html", error=auth_error("password_short"))
 
     # ── Consent check (UU PDP) ──
     consent = request.form.get("consent")
     if not consent:
-        return render_template("auth/register.html", error="Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi")
+        return render_template("auth/register.html", error=auth_error("tos_required"))
 
     # Per-ACCOUNT throttle on the school (NPSN), not the client IP: several
     # schools can share one NAT'd address, so an IP-keyed limit would let one
     # school's retries block another's first attempt.
     allowed, retry = check_account_limit("register", npsn)
     if not allowed:
-        return render_template("auth/register.html", error=rate_limit_message(retry, "percobaan pendaftaran"))
+        return render_template("auth/register.html", error=rate_limit_error("registration", retry))
 
     supabase = get_supabase()
 
@@ -68,14 +69,17 @@ def register():
         if existing_npsn.data:
             dup = existing_npsn.data[0]
             if dup.get("status") == "pending":
-                return render_template("auth/register.html", error="NPSN ini sudah memiliki permohonan pendaftaran yang menunggu verifikasi")
-            return render_template("auth/register.html", error=f"NPSN ini sudah terdaftar untuk sekolah '{dup.get('school_name', '')}'. Hubungi Super Admin.")
+                return render_template("auth/register.html", error=auth_error("npsn_pending"))
+            return render_template("auth/register.html",
+                                   error=auth_error("npsn_taken", school=dup.get("school_name", "")))
     except Exception:
         pass
     try:
         existing_school = supabase.table("schools").select("id", "name").eq("npsn", npsn).execute()
         if existing_school.data:
-            return render_template("auth/register.html", error=f"NPSN ini sudah terdaftar untuk sekolah '{existing_school.data[0].get('name', '')}'")
+            return render_template("auth/register.html",
+                                   error=auth_error("npsn_taken_plain",
+                                                    school=existing_school.data[0].get("name", "")))
     except Exception:
         pass
 
@@ -93,9 +97,10 @@ def register():
     except Exception as e:
         err = str(e)
         if "already exists" in err.lower() or "duplicate" in err.lower():
-            return render_template("auth/register.html", error="Email sudah terdaftar")
+            return render_template("auth/register.html", error=auth_error("email_taken"))
         current_app.logger.error(f"Register step 1 (create_user) failed: {err}")
-        return render_template("auth/register.html", error=f"Gagal membuat akun: {err[:200]}")
+        return render_template("auth/register.html",
+                               error=auth_error("account_create_failed", reason=err[:200]))
 
     # ── Step 2: Create/update profile ──
     try:
@@ -121,7 +126,7 @@ def register():
             admin_client.auth.admin.delete_user(uid)
         except Exception:
             pass
-        return render_template("auth/register.html", error="Gagal menyimpan data profil")
+        return render_template("auth/register.html", error=auth_error("profile_save_failed"))
 
     # ── Step 3: Create registration request ──
     try:
@@ -143,7 +148,7 @@ def register():
     except Exception as e:
         current_app.logger.error(f"Register step 3 (reg request) failed: {e}")
         # Don't rollback — profile already created
-        return render_template("auth/register.html", error="Gagal membuat permohonan registrasi. Silakan hubungi admin.")
+        return render_template("auth/register.html", error=auth_error("request_create_failed"))
 
     try:
         log_activity("register", "user", uid, new_data={"email": email, "school_name": school_name, "role": "admin_sekolah", "status": "pending"})
@@ -165,10 +170,10 @@ def activate():
     code = request.form.get("code", "").strip().replace(" ", "").upper()
 
     if not email or not code:
-        return render_template("auth/activate.html", error="Email dan kode aktivasi wajib diisi", email=email)
+        return render_template("auth/activate.html", error=auth_error("activate_required"), email=email)
 
     if len(code) != 12 or not code.isalnum():
-        return render_template("auth/activate.html", error="Kode aktivasi harus 12 karakter alfanumerik", email=email)
+        return render_template("auth/activate.html", error=auth_error("activate_code_shape"), email=email)
 
     supabase = get_supabase()
 
@@ -187,14 +192,14 @@ def activate():
 
         req = req_res.data
         if not req:
-            return render_template("auth/activate.html", error="Kode aktivasi tidak valid atau sudah digunakan", email=email)
+            return render_template("auth/activate.html", error=auth_error("activate_code_used"), email=email)
 
         # Check expiry
         expires_at = req.get("expires_at")
         if expires_at:
             expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
             if expires_dt < datetime.now(timezone.utc):
-                return render_template("auth/activate.html", error="Kode aktivasi sudah kedaluwarsa. Silakan hubungi admin.", email=email)
+                return render_template("auth/activate.html", error=auth_error("activate_code_expired_contact"), email=email)
 
         # Update request
         supabase.table("school_registration_requests") \
@@ -214,7 +219,7 @@ def activate():
         return render_template("auth/activate_success.html")
     except Exception as e:
         current_app.logger.error(f"Activation error: {e}")
-        return render_template("auth/activate.html", error="Kode aktivasi tidak valid atau sudah kedaluwarsa", email=email)
+        return render_template("auth/activate.html", error=auth_error("activate_code_expired"), email=email)
 
 
 # ─── Login failure handling ──────────────────────────
@@ -329,12 +334,11 @@ def _is_transient_auth_error(exc) -> bool:
 def _classify_login_error(exc):
     """Return (credentials_are_wrong, message_shown_to_the_user)."""
     if not _is_transient_auth_error(exc):
-        return True, "Email atau password salah"
+        return True, auth_error("login_bad_credentials")
     text = str(exc).lower()
     if "rate limit" in text or getattr(exc, "status", None) == 429:
-        return False, ("Server autentikasi sedang sibuk (batas permintaan). "
-                       "Tunggu beberapa detik, lalu coba lagi.")
-    return False, "Gagal masuk karena gangguan sementara. Silakan coba lagi sebentar lagi."
+        return False, auth_error("login_auth_busy")
+    return False, auth_error("login_transient")
 
 
 def _sign_in_with_retry(supabase_auth, email, password):
@@ -379,7 +383,7 @@ def login():
     password = request.form.get("password", "")
 
     if not email or not password:
-        return render_template("auth/login.html", error="Email dan password wajib diisi")
+        return render_template("auth/login.html", error=auth_error("login_required_fields"))
 
     supabase_auth = get_auth_client()
     supabase = get_supabase()
@@ -402,7 +406,7 @@ def login():
                 return redirect(f"/auth/activate?email={email}&pending=1")
 
             if role not in ("super_admin", "admin_sekolah"):
-                return render_template("auth/login.html", error="Halaman ini untuk Admin. Guru/Murid silakan masuk di halaman login terpisah.")
+                return render_template("auth/login.html", error=auth_error("login_wrong_page"))
 
         except Exception:
             role = res.user.user_metadata.get("role", "admin_sekolah")
@@ -432,7 +436,7 @@ def login():
             # would lock out every colleague behind the same school NAT.
             allowed, retry = check_account_limit("login_failed", email, ip=request.remote_addr)
             if not allowed:
-                return render_template("auth/login.html", error=rate_limit_message(retry, "percobaan login"))
+                return render_template("auth/login.html", error=rate_limit_error("login", retry))
         else:
             # A transient failure must NOT consume the account's budget: doing so
             # let a rate-limit spike ban a school from logging in for 15 minutes.
@@ -460,7 +464,7 @@ def login_user():
     password = request.form.get("password", "")
 
     if not login_input or not password:
-        return render_template("auth/login_user.html", error="Email/NISN dan password wajib diisi")
+        return render_template("auth/login_user.html", error=auth_error("login_user_required"))
 
     supabase_auth = get_auth_client()
     supabase = get_supabase()
@@ -518,7 +522,7 @@ def login_user():
 
             if role not in ("guru", "murid"):
                 return render_template("auth/login_user.html",
-                                       error="Halaman ini untuk Guru/Murid. Admin silakan masuk di halaman login utama.")
+                                       error=auth_error("login_user_wrong_page"))
 
         except Exception:
             role = res.user.user_metadata.get("role", "murid")
@@ -547,7 +551,7 @@ def login_user():
         if wrong_password:
             allowed, retry = check_account_limit("login_failed", login_input, ip=request.remote_addr)
             if not allowed:
-                return render_template("auth/login_user.html", error=rate_limit_message(retry, "percobaan login"))
+                return render_template("auth/login_user.html", error=rate_limit_error("login", retry))
         else:
             logger.warning("Login transient failure for %s: %s", login_input, e)
         return render_template("auth/login_user.html", error=message)
@@ -623,14 +627,14 @@ def forgot_password():
 
     email = request.form.get("email", "").strip().lower()
     if not email:
-        return render_template("auth/forgot_password.html", error="Email aktif atau NISN wajib diisi")
+        return render_template("auth/forgot_password.html", error=auth_error("forgot_required"))
 
     # Per-ACCOUNT throttle (the email/NISN itself). This endpoint sends mail, so
     # it needs a real limit — but keyed to the account, so a class of students
     # behind one school IP can each request their own code.
     allowed, retry = check_account_limit("forgot_password", email)
     if not allowed:
-        return render_template("auth/forgot_password.html", error=rate_limit_message(retry, "permintaan kode"))
+        return render_template("auth/forgot_password.html", error=rate_limit_error("code_request", retry))
 
     supabase = get_supabase()
 
@@ -710,7 +714,7 @@ def forgot_password():
             pass
 
     if not user_data:
-        return render_template("auth/forgot_password.html", error="Email atau NISN tidak ditemukan. Hubungi admin sekolah.")
+        return render_template("auth/forgot_password.html", error=auth_error("forgot_not_found"))
 
     # Generate 6-digit code (uppercase + digits)
     import random, string
@@ -744,7 +748,7 @@ https://scangrade.web.id"""
         )
     except Exception as e:
         current_app.logger.error(f"Failed to send reset code: {e}")
-        return render_template("auth/forgot_password.html", error="Gagal mengirim email. Coba lagi nanti.")
+        return render_template("auth/forgot_password.html", error=auth_error("forgot_email_failed"))
 
     return render_template("auth/verify_code.html", email=target_email, auth_email=user_data["auth_email"])
 
@@ -761,21 +765,21 @@ def verify_reset_code():
     code = request.form.get("code", "").strip().upper()
 
     if not email or not code:
-        return render_template("auth/verify_code.html", email=email, error="Kode wajib diisi")
+        return render_template("auth/verify_code.html", email=email, error=auth_error("code_required"))
 
     # Per-ACCOUNT throttle (not per-IP): caps brute-forcing one account's reset
     # code while letting a whole class verify their own codes from a shared IP.
     allowed, retry = check_account_limit("verify_code", email)
     if not allowed:
         return render_template("auth/verify_code.html", email=email,
-                               error=rate_limit_message(retry, "percobaan kode"))
+                               error=rate_limit_error("code_trial", retry))
 
     stored = _get_reset_code(email)
     if not stored:
-        return render_template("auth/verify_code.html", email=email, error="Kode tidak valid atau sudah kedaluwarsa. Minta kode baru.")
+        return render_template("auth/verify_code.html", email=email, error=auth_error("code_invalid"))
 
     if stored != code:
-        return render_template("auth/verify_code.html", email=email, error="Kode salah. Coba lagi.")
+        return render_template("auth/verify_code.html", email=email, error=auth_error("code_wrong"))
 
     # Code OK — consume it to prevent replay, and set session marker
     _delete_reset_code(email)
@@ -790,16 +794,16 @@ def set_new_password():
     confirm = request.form.get("confirm_password", "")
 
     if not password or not confirm:
-        return render_template("auth/set_new_password.html", email=email, error="Semua field wajib diisi")
+        return render_template("auth/set_new_password.html", email=email, error=auth_error("all_required"))
     if password != confirm:
-        return render_template("auth/set_new_password.html", email=email, error="Password tidak cocok")
+        return render_template("auth/set_new_password.html", email=email, error=auth_error("password_mismatch"))
     if len(password) < 6:
-        return render_template("auth/set_new_password.html", email=email, error="Password minimal 6 karakter")
+        return render_template("auth/set_new_password.html", email=email, error=auth_error("password_short"))
 
     # Verify session marker (code was consumed during verification)
     session_email = session.get("reset_email", "")
     if not session_email or session_email != email:
-        return render_template("auth/set_new_password.html", email=email, error="Sesi kedaluwarsa. Ulangi proses reset.")
+        return render_template("auth/set_new_password.html", email=email, error=auth_error("reset_session_expired"))
 
     # Find user and update password
     supabase = get_supabase()
@@ -832,7 +836,7 @@ def set_new_password():
         pass
 
     if not user_id:
-        return render_template("auth/set_new_password.html", email=email, error="User tidak ditemukan")
+        return render_template("auth/set_new_password.html", email=email, error=auth_error("reset_user_missing"))
 
     try:
         auth_client.admin.update_user_by_id(user_id, {"password": password})
@@ -849,7 +853,7 @@ def set_new_password():
         return render_template("auth/reset_success.html", redirect_url=redirect_url, role=role)
     except Exception as e:
         current_app.logger.error(f"Reset password error: {e}")
-        return render_template("auth/set_new_password.html", email=email, error="Gagal mereset password. Coba lagi.")
+        return render_template("auth/set_new_password.html", email=email, error=auth_error("reset_failed"))
 
 
 # ─── RESET PASSWORD ──────────────────────────────────
@@ -863,18 +867,18 @@ def reset_password():
     confirm = request.form.get("confirm_password", "")
 
     if not password or not confirm:
-        return render_template("auth/reset_password.html", error="Semua field wajib diisi")
+        return render_template("auth/reset_password.html", error=auth_error("all_required"))
 
     if password != confirm:
-        return render_template("auth/reset_password.html", error="Password tidak cocok")
+        return render_template("auth/reset_password.html", error=auth_error("password_mismatch"))
 
     if len(password) < 6:
-        return render_template("auth/reset_password.html", error="Password minimal 6 karakter")
+        return render_template("auth/reset_password.html", error=auth_error("password_short"))
 
     access_token = request.form.get("access_token", "") or request.args.get("access_token", "")
 
     if not access_token:
-        return render_template("auth/reset_password.html", error="Token reset tidak ditemukan. Silakan ulangi proses reset password.")
+        return render_template("auth/reset_password.html", error=auth_error("reset_token_missing"))
 
     supabase = get_auth_client()
     try:
@@ -883,7 +887,7 @@ def reset_password():
         return render_template("auth/reset_password_success.html")
     except Exception as e:
         current_app.logger.error(f"Reset password error: {e}")
-        return render_template("auth/reset_password.html", error="Gagal mereset password. Token mungkin kedaluwarsa.")
+        return render_template("auth/reset_password.html", error=auth_error("reset_token_expired"))
 
 
 # ─── RESET PASSWORD (client-side token exchange) ─────
