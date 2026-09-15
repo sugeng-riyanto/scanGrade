@@ -101,6 +101,29 @@ were refused `429` by the per-IP login burst limit at nginx, not by the app — 
 the row carries the 2.3% that refusal rate implies, and the row is starred on the
 page for exactly that reason.
 
+## The same files, on a page
+
+`https://scangrade.web.id/capacity` renders this directory through
+`app/services/capacity_service.py`: one row per rung, one card per run, each with
+its harness, its date and a download link to the raw file, plus what the two
+deploy gates measured on the box itself. It is the same evidence the landing
+page's table is held to, in full.
+
+**Adding a measurement is the whole update.** Drop a file in here and commit it:
+the page grows a row, and nothing in a template has to be edited. There is one
+thing to get right — a JSON artifact may carry `measured_at`, which is what the
+page prints as the run's date; without it the date comes from the file's git
+commit, and if neither exists the page says *date not recorded* rather than
+borrowing the file's mtime (which a fresh clone would set to today).
+
+A file that is not a measurement of a rung — this README, a console transcript,
+the box's own loopback samples — is listed on the page as a supporting file, so
+the set a reader can check is the set that is there. `docs/measurements/` is
+served only through `/capacity/evidence/<name>`, as `text/plain`, from the list
+the report built; `tests/unit/test_capacity_page.py` holds the page to these files
+a second time, independently of the service, and refuses a page that invents a
+figure, a date or a recommendation.
+
 ## What the numbers do not say
 
 * **Reads only.** A real exam also submits canvas + text answers, which is heavier
