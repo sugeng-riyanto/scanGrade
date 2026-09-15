@@ -206,6 +206,12 @@
                 <p x-text="t('Baris 500* dijalankan 10 menit (682 detik, 13.573 request), bukan 60 detik: 500 murid serentak adalah klaim ketahanan dan probe singkat tidak bisa menjawabnya.','The 500* row ran for 10 minutes (682 seconds, 13,573 requests), not 60: 500 students at once is an endurance claim and a short probe cannot answer it.')"></p>
                 <p x-text="t('Pada run 500* hanya 174 sesi yang lolos login; sisanya ditolak 429 oleh pembatasan login per-IP di nginx, bukan oleh aplikasi. Server tidak mengeluarkan satu pun error 5xx sepanjang run itu.','In the 500* run only 174 sessions got past login; the rest were refused with 429 by the per-IP login limit at nginx, not by the application. The server produced no 5xx at all during that run.')"></p>
                 <p x-text="t('Karena itu error 2,31% pada baris 500* adalah penolakan login tersebut — baris 50, 100 dan 150 semuanya 0%. Bottleneck terukurnya CPU untuk merender halaman: user time 90–93%, idle 0%, bukan jaringan, memori, atau database. Angka dan berkas mentahnya ada di docs/measurements/.','The 2.31% error rate on the 500* row is those refused logins — the 50, 100 and 150 rows are all 0%. The measured bottleneck is CPU spent rendering pages: 90–93% user time, 0% idle, not network, memory or database. The figures and their raw files are in docs/measurements/.')"></p>
+                <p class="pt-1">
+                    <a href="/capacity" class="inline-flex items-center gap-1.5 text-[11px] font-bold text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 underline decoration-dotted">
+                        <i class="fas fa-file-lines text-[10px]"></i>
+                        <span x-text="t('Status kapasitas lengkap: setiap run, tanggal, dan berkas mentahnya','Full capacity status: every run, its date and the raw file')"></span>
+                    </a>
+                </p>
             </div>
 
             <!-- Sizing: what this configuration can and cannot do -->
