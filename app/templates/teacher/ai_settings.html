@@ -390,7 +390,7 @@ function wizardApp() {
             fetch('/teacher/api/ai/wizard-status').then(r => r.json()).then(d => {
                 if (d.demo_available && !d.has_active) {
                     this.newKey = 'DEMO';
-                    this.keyLabel = 'Demo Gratis';
+                    this.keyLabel = sgT('Demo Gratis', 'Free Demo');
                 }
                 // Load saved keys from the page server data
                 const serverKeys = {{ keys | tojson | safe }};

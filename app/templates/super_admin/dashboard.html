@@ -7,29 +7,27 @@
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <div class="bg-gradient-to-br from-purple-50 to-purple-100/30 rounded-2xl p-4 border border-purple-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-purple-700">{{ total_schools }}</p>
-            <p class="text-xs font-bold text-purple-500 mt-1">Sekolah</p>
-        
-    
-    </div>
+            <p class="text-xs font-bold text-purple-500 mt-1" x-text="t('Sekolah','Schools')"></p>
+        </div>
         <div class="bg-gradient-to-br from-blue-50 to-blue-100/30 rounded-2xl p-4 border border-blue-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-blue-700">{{ total_users }}</p>
-            <p class="text-xs font-bold text-blue-500 mt-1">Total User</p>
+            <p class="text-xs font-bold text-blue-500 mt-1" x-text="t('Total User','Total Users')"></p>
         </div>
         <div class="bg-gradient-to-br from-emerald-50 to-emerald-100/30 rounded-2xl p-4 border border-emerald-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-emerald-700">{{ total_teachers }}</p>
-            <p class="text-xs font-bold text-emerald-500 mt-1">Guru</p>
+            <p class="text-xs font-bold text-emerald-500 mt-1" x-text="t('Guru','Teachers')"></p>
         </div>
         <div class="bg-gradient-to-br from-amber-50 to-amber-100/30 rounded-2xl p-4 border border-amber-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-amber-700">{{ total_students }}</p>
-            <p class="text-xs font-bold text-amber-500 mt-1">Siswa</p>
+            <p class="text-xs font-bold text-amber-500 mt-1" x-text="t('Siswa','Students')"></p>
         </div>
         <div class="bg-gradient-to-br from-orange-50 to-orange-100/30 rounded-2xl p-4 border border-orange-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-orange-700">{{ total_exams }}</p>
-            <p class="text-xs font-bold text-orange-500 mt-1">Ujian</p>
+            <p class="text-xs font-bold text-orange-500 mt-1" x-text="t('Ujian','Exams')"></p>
         </div>
         <div class="bg-gradient-to-br from-rose-50 to-rose-100/30 rounded-2xl p-4 border border-rose-200/50 shadow-sm">
             <p class="text-2xl font-extrabold text-rose-700">{{ total_subs }}</p>
-            <p class="text-xs font-bold text-rose-500 mt-1">Submission</p>
+            <p class="text-xs font-bold text-rose-500 mt-1" x-text="t('Pengumpulan','Submissions')"></p>
         </div>
     </div>
 
@@ -37,8 +35,8 @@
         <!-- Registration Requests -->
         <div class="card">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fas fa-school-circle-check text-purple-500"></i>Registrasi Sekolah</h3>
-                <a href="/admin/registration-requests" class="text-xs font-bold text-purple-600 hover:text-purple-700">Lihat Semua →</a>
+                <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fas fa-school-circle-check text-purple-500"></i><span x-text="t('Registrasi Sekolah','School Registrations')"></span></h3>
+                <a href="/admin/registration-requests" class="text-xs font-bold text-purple-600 hover:text-purple-700"><span x-text="t('Lihat Semua','View All')"></span> →</a>
             </div>
             <div class="p-5">
                 {% if pending_requests > 0 %}
@@ -47,10 +45,10 @@
                         <i class="fas fa-clock text-amber-600"></i>
                     </div>
                     <div>
-                        <p class="text-sm font-bold text-amber-800">{{ pending_requests }} registrasi menunggu</p>
-                        <p class="text-xs font-medium text-amber-600">Perlu approval dari Super Admin</p>
+                        <p class="text-sm font-bold text-amber-800" x-text="t('{{ pending_requests }} registrasi menunggu','{{ pending_requests }} registration(s) waiting')"></p>
+                        <p class="text-xs font-medium text-amber-600" x-text="t('Perlu persetujuan Super Admin','Needs Super Admin approval')"></p>
                     </div>
-                    <a href="/admin/registration-requests" class="ml-auto px-4 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition">Proses</a>
+                    <a href="/admin/registration-requests" class="ml-auto px-4 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition" x-text="t('Proses','Review')"></a>
                 </div>
                 {% endif %}
                 <div class="space-y-2">
@@ -63,7 +61,7 @@
                         <span class="badge text-xs {% if r.status == 'pending' %}bg-amber-200 text-amber-800{% elif r.status == 'approved' %}bg-emerald-200 text-emerald-800{% else %}bg-red-200 text-red-800{% endif %}"><span x-text="r.status"></span></span>
                     </div>
                     {% else %}
-                    <p class="text-sm text-slate-400 text-center py-4">Tidak ada registrasi</p>
+                    <p class="text-sm text-slate-400 text-center py-4" x-text="t('Tidak ada registrasi','No registrations')"></p>
                     {% endfor %}
                 </div>
                 <div class="border-t border-slate-100 pt-4 mt-2">
@@ -82,20 +80,20 @@
         <!-- Schools -->
         <div class="card">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fas fa-school text-blue-500"></i>Sekolah</h3>
-                <a href="/super-admin/schools" class="text-xs font-bold text-blue-600 hover:text-blue-700">Lihat Semua →</a>
+                <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fas fa-school text-blue-500"></i><span x-text="t('Sekolah','Schools')"></span></h3>
+                <a href="/super-admin/schools" class="text-xs font-bold text-blue-600 hover:text-blue-700"><span x-text="t('Lihat Semua','View All')"></span> →</a>
             </div>
             <div class="p-5 space-y-2">
                 {% for s in schools %}
                 <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition">
                     <div>
                         <p class="text-sm font-bold text-slate-800">{{ s.name }}</p>
-                        <p class="text-xs text-slate-400">{{ s.npsn or "-" }} · dibuat <span x-text="s.created_at[:10]"></span></p>
+                        <p class="text-xs text-slate-400">{{ s.npsn or "-" }} · <span x-text="t('dibuat','created')"></span> <span x-text="s.created_at[:10]"></span></p>
                     </div>
                     <span class="badge text-xs {% if s.status == 'active' %}bg-emerald-100 text-emerald-700{% else %}bg-red-100 text-red-700{% endif %}"><span x-text="s.status"></span></span>
                 </div>
                 {% else %}
-                <p class="text-sm text-slate-400 text-center py-4">Belum ada sekolah</p>
+                <p class="text-sm text-slate-400 text-center py-4" x-text="t('Belum ada sekolah','No schools yet')"></p>
                 {% endfor %}
             </div>
         </div>
@@ -104,17 +102,17 @@
     <!-- Recent Audit Logs -->
     <div class="card">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-slate-500"></i>Aktivitas Terkini</h3>
-            <a href="/super-admin/logs" class="text-xs font-bold text-slate-600 hover:text-slate-700">Lihat Semua →</a>
+            <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fas fa-history text-slate-500"></i><span x-text="t('Aktivitas Terkini','Recent Activity')"></span></h3>
+            <a href="/super-admin/logs" class="text-xs font-bold text-slate-600 hover:text-slate-700"><span x-text="t('Lihat Semua','View All')"></span> →</a>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full text-sm min-w-[480px]">
                 <thead class="bg-slate-50 border-b border-slate-200">
                     <tr>
-                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs">Waktu</th>
-                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs">User</th>
-                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs">Aksi</th>
-                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs">Detail</th>
+                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs" x-text="t('Waktu','Time')"></th>
+                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs" x-text="t('User','User')"></th>
+                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs" x-text="t('Aksi','Action')"></th>
+                        <th class="text-left px-5 py-2 font-bold text-slate-600 text-xs" x-text="t('Detail','Detail')"></th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-50">
@@ -126,7 +124,7 @@
                         <td class="px-5 py-2 text-xs text-slate-400">{{ log.entity_type }} {{ log.entity_id[:8] if log.entity_id else "" }}</td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4" class="text-center py-8 text-slate-400">Belum ada aktivitas</td></tr>
+                    <tr><td colspan="4" class="text-center py-8 text-slate-400" x-text="t('Belum ada aktivitas','No activity yet')"></td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -137,24 +135,27 @@
 {% block scripts %}
 <script>
 function resetDemoPasswords() {
-    if (!confirm('Yakin reset SEMUA password demo ke default?\n\nSuper Admin: superadmin123\nGuru/Murid/Admin: demo123')) return;
+    if (!confirm(sgT('Yakin reset SEMUA password demo ke default?\n\nSuper Admin: superadmin123\nGuru/Murid/Admin: demo123',
+                       'Reset ALL demo passwords to default?\n\nSuper Admin: superadmin123\nTeacher/Student/Admin: demo123'))) return;
     const btn = event.target.closest('button');
-    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mereset...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + sgT('Mereset...', 'Resetting...');
     fetch('/super-admin/reset-demo-passwords', {method:'POST', headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]')?.content||''}})
         .then(r => r.json()).then(d => {
-            alert(`✅ ${d.ok} dari ${d.total} password berhasil direset ke default.`);
+            alert(sgT('password berhasil direset ke default: ', 'passwords reset to default: ') + d.ok + '/' + d.total);
         btn.disabled = false; btn.innerHTML = '<i class="fas fa-key"></i> Reset Password';
-    }).catch(() => { alert('Gagal'); btn.disabled = false; });
+    }).catch(() => { alert(sgT('Gagal', 'Failed')); btn.disabled = false; });
 }
 function resetDemoData() {
-    if (!confirm('⚠️ Reset SEMUA data demo?\n\nUser accounts TIDAK akan dihapus.\nData ujian, submission, kelas akan direset.\nJalankan seed setelahnya.')) return;
+    if (!confirm(sgT('⚠️ Reset SEMUA data demo?\n\nAkun pengguna TIDAK akan dihapus.\nData ujian, pengumpulan, kelas akan direset.\nJalankan seed setelahnya.',
+                       '⚠️ Reset ALL demo data?\n\nUser accounts will NOT be deleted.\nExams, submissions and classes will be reset.\nRun the seed afterwards.'))) return;
     const btn = event.target.closest('button');
-    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mereset...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + sgT('Mereset...', 'Resetting...');
     fetch('/super-admin/reset-demo-data', {method:'POST', headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]')?.content||''}})
         .then(r => r.json()).then(d => {
-            alert(`✅ ${d.message || 'Data berhasil direset. Jalankan seed untuk mengisi ulang.'}`);
+            alert(d.message || sgT('Data berhasil direset. Jalankan seed untuk mengisi ulang.',
+                                    'Data reset. Run the seed to fill it again.'));
             btn.disabled = false; btn.innerHTML = '<i class="fas fa-refresh"></i> Reset All Data';
-        }).catch(() => { alert('Gagal'); btn.disabled = false; });
+        }).catch(() => { alert(sgT('Gagal', 'Failed')); btn.disabled = false; });
 }
 </script>
 {% endblock %}
