@@ -391,6 +391,73 @@ else
   esac
 fi
 
+# ── Gate 6: is this release slower than the last one at a reference load? ─────
+# Gate 5 compares the box with a number written in an HTML file, at the rung that
+# page advertises. That question is about the claim, and it cannot see a release
+# that makes every page 40% slower while staying inside the published bound: five
+# of those in a row are a box that no longer does what it did, and each one passes
+# a claim check on its own.
+#
+# This gate asks the other question — did *this release* cost us response time? —
+# by running a small fixed load (20 students, 20s: this is the box that serves
+# students, so the deploy does not get to load it like a benchmark) and comparing
+# the result with the last release that passed. The baseline is written only when
+# a release passes, so a bad release cannot become the new normal.
+#
+# It runs after the reload for the same reason Gate 5 does: what is measured is
+# the code that is now serving, and a failure therefore belongs to the shared
+# rollback path below.
+#
+# Exit 2 is "could not measure" again — no roster, no baseline yet, a reference
+# load that changed, a box already busy, a divergence a second probe did not
+# confirm. Never a rollback. The first run after installation has no baseline, so
+# that release becomes one and passes: the gate arms itself rather than needing an
+# operator to remember it.
+PERF_CONF="/etc/scangrade-perf.conf"
+if [ "$HEALTHY" != "1" ]; then
+  : # already unhealthy; the rollback path owns it
+elif [ ! -f "$PERF_CONF" ]; then
+  log "no $PERF_CONF — this release is NOT compared with the previous one"
+  log "    (see docs/AUTO_DEPLOY.md; install-auto-deploy.sh creates this file)"
+elif ! bash -n "$PERF_CONF" 2>/dev/null; then
+  log "$PERF_CONF has a syntax error — skipping the performance gate"
+else
+  set -a
+  # shellcheck disable=SC1090
+  . "$PERF_CONF"
+  set +a
+
+  PERF_ENV=()
+  for v in PERF_BASE_URL PERF_ROSTER PERF_SESSIONS PERF_TEACHERS PERF_DURATION \
+           PERF_BASELINE PERF_EVIDENCE; do
+    [ -n "${!v:-}" ] && PERF_ENV+=("$v=${!v}")
+  done
+
+  PERF_OUT=$(as_owner env "${PERF_ENV[@]}" "$REPO/.venv/bin/python" \
+      "$REPO/deploy/perf_gate.py" --harness "$REPO/loadtest_concurrent.py" \
+      --commit "$AFTER" 2>&1)
+  PERF_RC=$?
+
+  case "$PERF_RC" in
+    0)
+      log "$(echo "$PERF_OUT" | grep -m1 '^perf gate: OK' || echo 'perf gate: OK')" ;;
+    2)
+      log "perf gate could not measure (exit 2) — this release is NOT compared:"
+      echo "$PERF_OUT" | grep -m2 '^perf gate' | sed 's/^/    /' ;;
+    *)
+      if [ "${PERF_ENFORCE:-false}" = "true" ]; then
+        log "perf gate FAILED — this release is slower than the last one that passed:"
+        echo "$PERF_OUT" | grep -E '^perf gate|^    -' | sed 's/^/    /'
+        log "rolling $AFTER back rather than serving it"
+        HEALTHY=0
+      else
+        log "perf gate FAILED but PERF_ENFORCE is not 'true' — keeping the release:"
+        echo "$PERF_OUT" | grep -E '^perf gate|^    -' | head -8 | sed 's/^/    /'
+        log "    to enforce it: PERF_ENFORCE=\"true\" in $PERF_CONF"
+      fi ;;
+  esac
+fi
+
 if [ "$HEALTHY" = "1" ]; then
   mkdir -p "$STATE_DIR"
   printf '%s\n%s\n%s\n' "$AFTER" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"

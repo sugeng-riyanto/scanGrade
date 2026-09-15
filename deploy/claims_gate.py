@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import subprocess
 import sys
@@ -87,6 +88,25 @@ ERROR_SLACK_PCT = 1.0      # advertised 0% may measure up to 1% before it counts
 MIN_LOGIN_SUCCESS = 0.80   # below this we have no measurement, only a login problem
 MIN_IDENTITY_CHECKS = 0.80 # sessions must be shown to be their own account
 BOX_QUIET_MS = 2000.0      # a /health slower than this means the box is not idle
+
+
+def env_default(name: str, fallback):
+    """The setting from the environment, because that is how the deploy passes it.
+
+    scangrade-deploy.sh sources /etc/scangrade-claims.conf and passes each
+    CLAIMS_* setting as an environment variable. This function is three lines and
+    its absence was expensive: every run read only its argparse defaults, so
+    CLAIMS_BASE_URL arrived, was ignored, and the gate ended at "no --base URL" —
+    exit 2, "could not measure", on every release. /var/lib/scangrade-deploy/claims
+    did not exist because the gate had never once measured anything, and nothing
+    anywhere said so: exit 2 is deliberately not a rollback, and the deploy logged
+    a reassuring one-liner.
+
+    tests/unit/test_perf_gate.py asserts the wiring on both gates, so a future
+    setting added to the conf file cannot be silently dropped the same way.
+    """
+    value = os.environ.get(name)
+    return value if value not in (None, "") else fallback
 
 
 class ClaimsError(Exception):
@@ -439,27 +459,29 @@ def _fmt_line(measured: dict, rung: Rung) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Re-measure the landing page's capacity claim.")
-    ap.add_argument("--page", default=str(DEFAULT_PAGE))
-    ap.add_argument("--harness", default=str(DEFAULT_HARNESS))
-    ap.add_argument("--roster", default=str(DEFAULT_ROSTER))
-    ap.add_argument("--base", default="", help="base URL to measure (must be https in production)")
-    ap.add_argument("--sessions", type=int, default=0,
+    ap.add_argument("--page", default=env_default("CLAIMS_PAGE", str(DEFAULT_PAGE)))
+    ap.add_argument("--harness", default=env_default("CLAIMS_HARNESS", str(DEFAULT_HARNESS)))
+    ap.add_argument("--roster", default=env_default("CLAIMS_ROSTER", str(DEFAULT_ROSTER)))
+    ap.add_argument("--base", default=env_default("CLAIMS_BASE_URL", ""),
+                    help="base URL to measure (must be https in production)")
+    ap.add_argument("--sessions", type=int, default=env_default("CLAIMS_SESSIONS", 0),
                     help="override the number of concurrent students to launch")
-    ap.add_argument("--max-sessions", type=int, default=60,
+    ap.add_argument("--max-sessions", type=int,
+                    default=env_default("CLAIMS_MAX_SESSIONS", 60),
                     help="never load more than this, whatever the page claims")
-    ap.add_argument("--teachers", type=int, default=1)
+    ap.add_argument("--teachers", type=int, default=env_default("CLAIMS_TEACHERS", 1))
     # 30s, not 12: a probe shorter than this is dominated by the login burst at
     # the start (50 logins compete for the same box) and measures the wrong
     # thing. The published rows are 60-second runs; this stays short because it
     # runs on the box that is serving students.
-    ap.add_argument("--duration", type=float, default=30.0)
+    ap.add_argument("--duration", type=float, default=env_default("CLAIMS_DURATION", 30.0))
     ap.add_argument("--latency-slack", type=float, default=LATENCY_SLACK)
     ap.add_argument("--error-slack", type=float, default=ERROR_SLACK_PCT)
     ap.add_argument("--quiet-ms", type=float, default=BOX_QUIET_MS)
     ap.add_argument("--check", action="store_true",
                     help="validate the plumbing only: no load, no network")
     ap.add_argument("--json-out", default="", help="write the measurement here")
-    ap.add_argument("--evidence-file", default="")
+    ap.add_argument("--evidence-file", default=env_default("CLAIMS_EVIDENCE", ""))
     args = ap.parse_args()
 
     page = Path(args.page)

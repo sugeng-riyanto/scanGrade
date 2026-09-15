@@ -67,8 +67,8 @@ echo "   $BEFORE -> $AFTER"
 
 for f in deploy/scangrade-deploy.sh deploy/entrypoint.sh deploy/smoke_test.py \
          deploy/db_snapshot.py deploy/scangrade-db-snapshot.sh deploy/theme_gate.sh \
-         deploy/claims_gate.py \
-         tests/unit/test_dark_theme_contrast.py \
+         deploy/claims_gate.py deploy/perf_gate.py \
+         tests/unit/test_dark_theme_contrast.py tests/unit/test_theme_stylesheet.py \
          deploy/scangrade-deploy.service deploy/scangrade-deploy.timer \
          deploy/scangrade.service; do
   [ -f "$REPO/$f" ] || { echo "!! missing $REPO/$f — is origin/$BRANCH the right commit?"; exit 6; }
@@ -314,6 +314,94 @@ else
       echo "   Fix one of the two, then re-run this installer to arm the gate:"
       echo "       publish the numbers you measure, or find what made this box slower" ;;
   esac
+fi
+
+# ── 3c. The release-to-release performance gate.
+#       Gate 5 (above) compares this box with a number written on the landing
+#       page, at the rung the page advertises. It cannot see a release that makes
+#       every page 40% slower while staying inside that bound. This gate compares
+#       the release with the last release that passed, at a small fixed load, and
+#       refuses one whose response time regressed. Config for that gate:
+PERF_CONF=/etc/scangrade-perf.conf
+say "Release-to-release performance ($PERF_CONF)"
+if [ -f "$PERF_CONF" ]; then
+  echo "   already exists — left untouched"
+else
+  BASE_DEFAULT=$(grep -E '^APP_URL=' "$REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | sed 's/[[:space:]]*#.*//')
+  case "$BASE_DEFAULT" in
+    https://*) ;;
+    *) BASE_DEFAULT="https://scangrade.web.id" ;;
+  esac
+
+  cat > "$PERF_CONF" <<EOF
+# Read by scangrade-deploy. Runs the performance gate on every release.
+#
+# The gate runs a SMALL reference load -- 20 concurrent students for 20 seconds --
+# and compares the result with the last release that passed. It is deliberately
+# small: this is the 1 vCPU that serves students, and the deploy does not get to
+# load it the way a benchmark would. At 20 sessions the box is far from saturated,
+# so latency tracks per-request cost, which is the thing a release can change.
+# The advertised rung stays the claims gate's job (Gate 5).
+#
+# It must be HTTPS: production sets SESSION_COOKIE_SECURE, so over plain HTTP the
+# session cookie is dropped and every probe would look like a failed login.
+PERF_BASE_URL="$BASE_DEFAULT"
+
+# One account per session is required -- reusing logins turns per-identity rate
+# limiting into errors that look like the server's fault. Written by
+# provision_loadtest.py, outside git, so a rollback cannot remove it.
+PERF_ROSTER="$REPO/.freebuff/lt_roster.json"
+PERF_SESSIONS="20"
+PERF_TEACHERS="2"
+PERF_DURATION="20"
+
+# The reference measurement. Written only when a release PASSES, so a slow
+# release cannot become the thing the next one is judged against. Delete it, or
+# run the gate with --rebaseline, when a slower release is a deliberate trade.
+PERF_BASELINE="/var/lib/scangrade-deploy/perf/baseline.json"
+
+# One JSON line per run, so "it got slower" has a history and not a memory.
+PERF_EVIDENCE="/var/lib/scangrade-deploy/perf/history.jsonl"
+
+# True from the start, unlike CLAIMS_ENFORCE, and that difference is the point:
+# with no baseline yet the gate writes one and passes, so arming it cannot reject
+# anything. From the second release on, a confirmed regression rolls the release
+# back.
+PERF_ENFORCE="true"
+EOF
+  chmod 0600 "$PERF_CONF"
+  chown root:root "$PERF_CONF"
+  echo "   created (mode 0600)"
+fi
+
+mkdir -p /var/lib/scangrade-deploy/perf
+chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/perf
+chmod 0750 /var/lib/scangrade-deploy/perf
+
+say "Checking the performance gate"
+# The conf is read and passed the same way scangrade-deploy reads it, so "the gate
+# can run" is established with the settings that will actually be used rather than
+# with the gate's defaults. (Reading the conf and then not passing it is exactly
+# how the claims gate shipped unable to measure anything — see env_default() in
+# deploy/claims_gate.py.)
+set -a
+# shellcheck disable=SC1090
+. "$PERF_CONF"
+set +a
+set +e
+PERF_OUT=$(as_owner env PERF_BASE_URL="${PERF_BASE_URL:-}" PERF_ROSTER="${PERF_ROSTER:-}" \
+    PERF_SESSIONS="${PERF_SESSIONS:-}" PERF_TEACHERS="${PERF_TEACHERS:-}" \
+    PERF_DURATION="${PERF_DURATION:-}" PERF_BASELINE="${PERF_BASELINE:-}" \
+    PERF_EVIDENCE="${PERF_EVIDENCE:-}" \
+    "$REPO/.venv/bin/python" "$REPO/deploy/perf_gate.py" --check 2>&1)
+PERF_RC=$?
+echo "$PERF_OUT" | sed 's/^/   /'
+if [ "$PERF_RC" -ne 0 ]; then
+  echo "   the gate cannot run yet — see the reason above."
+  echo "   It needs a roster holding one account per session:"
+  echo "       cd $REPO && .venv/bin/python provision_loadtest.py 25 3"
+  echo "   The first release after this one writes the baseline and passes;"
+  echo "   from then on a confirmed regression rolls the release back."
 fi
 
 # ── 4. Unit files. Back up anything we replace: this is the file that keeps the
