@@ -6,6 +6,8 @@ import time
 from flask import g, request, jsonify, current_app, redirect, flash
 from supabase import Client
 
+from app.utils.auth_messages import auth_error, first
+
 # Role-based session timeout (OWASP + UU PDP standard)
 SESSION_TIMEOUTS = {
     "super_admin":    {"idle_minutes": 15,  "absolute_hours": 4},
@@ -260,13 +262,11 @@ def login_required(f):
             idle_base = max(last_act, sess_start)
             if idle_base > 0 and now - idle_base > to["idle_minutes"] * 60:
                 return _unauthorized(
-                    "Sesi Anda berakhir karena tidak ada aktivitas selama {} menit. "
-                    "Silakan masuk kembali.".format(to["idle_minutes"])
+                    auth_error("session_idle", minutes=to["idle_minutes"])
                 )
             if sess_start > 0 and now - sess_start > to["absolute_hours"] * 3600:
                 return _unauthorized(
-                    "Sesi Anda berakhir karena sudah mencapai batas {} jam. "
-                    "Silakan masuk kembali.".format(to["absolute_hours"])
+                    auth_error("session_absolute", hours=to["absolute_hours"])
                 )
         except Exception:
             # Token expired — try refresh using refresh_token cookie
@@ -395,10 +395,16 @@ def _unauthorized(message=None):
     A single blanket message made an expired session indistinguishable from a
     permissions problem: the user was told to "log in first" while logged in.
     Callers that know the reason (the two session-timeout checks) pass it.
+
+    The message is an ``(id, en)`` pair from ``auth_messages``, because the page
+    that shows it is rendered long before the language is known — it lives in
+    ``localStorage``, which the server never sees. The login template renders
+    whichever half the reader chose. An API caller gets the Indonesian half: its
+    ``error`` field is a string and a client that reads it would get an array.
     """
-    message = message or "Silakan login terlebih dahulu"
+    message = message or auth_error("session_required")
     if _wants_json():
-        return jsonify({"error": message}), 401
+        return jsonify({"error": first(message)}), 401
     flash(message, "error")
     return redirect("/auth/login")
 

@@ -1,0 +1,44 @@
+{# The bits every /auth page needs and base.html cannot give it.
+
+   These pages render the `content_noauth` branch, which carries no navbar — so the
+   toggle that lives in the authenticated chrome is not on them at all. A stranger
+   meets an auth page *first*, which is exactly where a bilingual page with no way
+   to switch is copy for one reader.
+
+   A partial has no Alpine scope of its own: it is inlined where it is used, so
+   `lang` and `t()` below resolve from the caller's <body>. #}
+
+{# The language control. The label names the language you would switch *to*, read
+   from the same `lang` the content uses — same convention as the landing page and
+   /capacity. #}
+{% macro lang_button() %}
+<button @click="setLang(lang === 'id' ? 'en' : 'id')" type="button"
+        class="fixed top-4 right-4 lg:top-6 lg:right-6 h-10 px-3 rounded-xl bg-white/80 backdrop-blur-sm shadow-md border border-slate-200 flex items-center justify-center gap-1.5 text-slate-500 hover:text-primary-600 hover:border-primary-200 hover:shadow-lg transition-all z-50 text-xs font-bold"
+        :title="t('Ganti bahasa','Switch language')">
+    <i class="fas fa-globe text-sm"></i><span x-text="lang === 'id' ? 'EN' : 'ID'"></span>
+</button>
+{% endmacro %}
+
+{# A message the server built, in whichever language the reader chose.
+
+   The language is in localStorage, so the server cannot know it at render time —
+   the route supplies an (id, en) pair and this picks a half. Both halves are
+   rendered by Jinja and chosen by Alpine, rather than interpolated into an Alpine
+   expression, because a school name containing an apostrophe would close that
+   JavaScript string early and leave the alert empty.
+
+   Anything that is *not* a pair — a Supabase error, a message built somewhere
+   the catalogue does not own — is shown as it arrived, in both languages. That is
+   data, not copy.
+
+   `x-cloak` on both spans because the app's default language is English: without
+   it an Indonesian reader would see the English half flash before Alpine hid it,
+   and with it the alert behaves like every `x-text` on the page — empty for the
+   first paint, correct immediately after. #}
+{% macro alert_body(value) -%}
+{%- if value is sequence and value is not string -%}
+<span x-show="lang!=='en'" x-cloak>{{ value[0] }}</span><span x-show="lang==='en'" x-cloak>{{ value[1] }}</span>
+{%- else -%}
+<span>{{ value }}</span>
+{%- endif -%}
+{% endmacro %}

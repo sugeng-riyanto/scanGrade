@@ -1,16 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Password Berhasil Diubah - ScanGrade{% endblock %}
+{% from "auth/_chrome.html" import lang_button %}
+{% block title %}Password Changed - ScanGrade{% endblock %}
 {% block content_noauth %}
-<div class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center p-4">
+<div class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center p-4 relative"
+     x-effect="document.title = t('Password Berhasil Diubah - ScanGrade', 'Password Changed - ScanGrade')">
+    {{ lang_button() }}
     <div class="w-full max-w-md text-center">
         <div class="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center mb-6 shadow-lg shadow-emerald-200/60">
             <i class="fas fa-check-circle text-4xl text-emerald-600"></i>
         </div>
-        <h1 class="text-3xl font-extrabold text-surface-800 mb-3">Password Berhasil Diubah!</h1>
-        <p class="text-surface-500 mb-2">Password Anda telah berhasil diperbarui.</p>
-        <p class="text-sm text-surface-400 mb-8">Anda akan diarahkan ke halaman login dalam beberapa detik.</p>
+        <h1 class="text-3xl font-extrabold text-surface-800 mb-3" x-text="t('Password Berhasil Diubah!','Password Changed!')"></h1>
+        <p class="text-surface-500 mb-2" x-text="t('Password Anda telah berhasil diperbarui.','Your password has been updated.')"></p>
+        <p class="text-sm text-surface-400 mb-8" x-text="t('Anda akan diarahkan ke halaman login dalam beberapa detik.','You will be taken to the login page in a few seconds.')"></p>
         <a href="/auth/login{% if role == 'guru' %}-user{% endif %}" class="inline-flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-8 py-3 rounded-xl font-extrabold shadow-lg shadow-primary-500/25 transition">
-            <i class="fas fa-sign-in-alt"></i>Masuk Sekarang
+            <i class="fas fa-sign-in-alt"></i><span x-text="t('Masuk Sekarang','Log in now')"></span>
         </a>
     </div>
 </div>

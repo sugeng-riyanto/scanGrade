@@ -242,10 +242,9 @@ def check_account_limit(scope, account, ip=None):
     return True, 0
 
 
-def rate_limit_message(retry_after, what="permintaan"):
-    """User-facing message mirroring the hook's wording, in minutes."""
-    minutes = max(1, (int(retry_after) + 59) // 60)
-    return f"Terlalu banyak {what}. Coba lagi dalam {minutes} menit."
+# The user-facing wording for a rate limit lives in app/utils/auth_messages.py
+# now (`rate_limit_error`) — it is an (id, en) pair, because the auth page cannot
+# know which language to render. This module's job is the limit itself.
 
 
 def _cleanup_memory_limits():
