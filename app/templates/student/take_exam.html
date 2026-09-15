@@ -435,21 +435,89 @@
         </div>
     </div>
 
-    <div class="flex gap-3">
-        <!-- Left Sidebar: Question Navigation -->
-        <div class="shrink-0 flex flex-col items-center gap-1" style="width:150px">
+    <!-- How to move around the paper, and what stays on screen. Two layouts:
+         'classic' keeps the questions as the axis and gives each question its own
+         page strip; 'rail' makes the pages the axis, the way a paper booklet is
+         flipped, which is what a question spread over four A4 pages needs. The
+         choice is remembered per device, like the language, so it is made once. -->
+    <div x-show="!submitted && !showExamAgreement" x-cloak class="flex items-center flex-wrap gap-2 mb-2">
+        <div class="flex items-center rounded-xl border border-surface-200 bg-white overflow-hidden shadow-sm">
+            <button type="button" @click="setExamLayout('classic')"
+                    class="px-2.5 py-1 text-[10px] font-extrabold transition"
+                    :class="examLayout === 'classic' ? 'bg-primary-500 text-white' : 'text-surface-500 hover:bg-surface-100'"
+                    :title="t('Daftar soal di kolom kiri','Question list on the left')"
+                    x-text="t('Klasik','Classic')"></button>
+            <button type="button" @click="setExamLayout('rail')"
+                    class="px-2.5 py-1 text-[10px] font-extrabold border-l border-surface-200 transition"
+                    :class="examLayout === 'rail' ? 'bg-primary-500 text-white' : 'text-surface-500 hover:bg-surface-100'"
+                    :title="t('Rel halaman di kolom kiri','Page rail on the left')"
+                    x-text="t('Halaman','Pages')"></button>
+        </div>
+        <!-- The column can go away, and the count goes with it: on a small laptop
+             the rail and the paper fight for the same width, and the student
+             should decide who wins. -->
+        <button type="button" @click="toggleChrome()"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-surface-200 bg-white text-[10px] font-extrabold text-surface-500 hover:bg-surface-100 shadow-sm transition"
+                x-text="chromeHidden ? t('Tampilkan kolom','Show column') : t('Sembunyikan kolom','Hide column')"></button>
+        <span class="ml-auto text-[10px] font-bold text-surface-400 tabular-nums"
+              x-text="t('Soal ','Question ') + (currentQ + 1) + '/' + totalQ + ' · ' + t('Hal ','Page ') + page + '/' + (totalPages || 1)"></span>
+    </div>
+
+    <div class="flex gap-3 items-start">
+        <!-- The left column: the question list, or the rail of page thumbnails.
+             Every page is a button, so the page you are on and the question that
+             owns it are never more than one tap apart — and the whole column
+             collapses to a strip that brings it back. -->
+        <div x-show="!chromeHidden"
+             class="shrink-0 flex flex-col items-center gap-1"
+             :style="examLayout === 'rail' ? 'width:132px' : 'width:150px'">
             <!-- Scroll Up -->
             <button type="button" @click="scrollSidebar(-60)"
                     class="w-full flex items-center justify-center py-1 text-stone-400 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition disabled:opacity-20"
                     :disabled="!canScrollUp">
                 <i class="fas fa-chevron-up text-xs"></i>
             </button>
-            <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-2.5 sticky-questions overflow-y-auto border border-surface-100 scroll-smooth flex-1" style="max-height:calc(100vh - 170px)" x-ref="sidebarScroll">
+            <div class="w-full bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-2.5 sticky-questions overflow-y-auto border border-surface-100 scroll-smooth flex-1" style="max-height:calc(100vh - 170px)" x-ref="sidebarScroll">
                 <div class="flex items-center justify-between mb-2.5 px-0.5">
-                    <span class="text-xs font-extrabold text-stone-500 uppercase tracking-wider" x-text="t('Soal','Questions')"></span>
+                    <span class="text-xs font-extrabold text-stone-500 uppercase tracking-wider" x-text="examLayout === 'rail' && railMode === 'pages' ? t('Halaman','Pages') : t('Soal','Questions')"></span>
                     <span class="text-[10px] font-bold text-stone-400 bg-stone-100 rounded-full px-2 py-0.5" x-text="answeredCount + '/' + totalQ + ' ' + t('terjawab','answered')"></span>
                 </div>
-                <div class="grid grid-cols-4 gap-1.5">
+                <!-- Rail only: the pages, or the question list. Both live in this
+                     one column, so the sidebar is never left behind — hiding the
+                     rail never hides the way to answer a question. -->
+                <div x-show="examLayout === 'rail'" class="flex gap-0.5 bg-surface-100 rounded-lg p-0.5 mb-2">
+                    <button type="button" @click="setRailMode('pages')"
+                            class="flex-1 py-1 text-[10px] font-extrabold rounded-md transition"
+                            :class="railMode === 'pages' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'"
+                            x-text="t('Halaman','Pages')"></button>
+                    <button type="button" @click="setRailMode('questions')"
+                            class="flex-1 py-1 text-[10px] font-extrabold rounded-md transition"
+                            :class="railMode === 'questions' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'"
+                            x-text="t('Soal','Questions')"></button>
+                </div>
+                <!-- A page, the way the paper has them: turn to it, and the badge
+                     names the question that page belongs to. The thumbnails are
+                     separate small files, so opening the rail does not download the
+                     exam a second time. -->
+                <div x-show="examLayout === 'rail' && railMode === 'pages'" class="space-y-1.5">
+                    <template x-for="(u, pi) in pages" :key="'rail-page-' + pi">
+                        <button type="button" @click="goToPage(pi + 1)"
+                                class="relative w-full rounded-lg overflow-hidden border-2 transition"
+                                :class="page === pi + 1 ? 'border-primary-500 ring-2 ring-primary-200' : 'border-surface-200 hover:border-primary-300'">
+                            <img :src="thumbFor(u)" loading="lazy" decoding="async"
+                                 class="w-full block bg-surface-50" alt=""
+                                 @error="if (!$event.target.dataset.fallback) { $event.target.dataset.fallback = '1'; $event.target.src = u; }">
+                            <span class="absolute top-0.5 left-0.5 text-[8px] font-extrabold px-1 rounded bg-black/60 text-white" x-text="pi + 1"></span>
+                            <span x-show="pageOwner(pi + 1) >= 0"
+                                  class="absolute top-0.5 right-0.5 text-[8px] font-extrabold px-1 rounded bg-primary-500 text-white"
+                                  x-text="'S' + (pageOwner(pi + 1) + 1)"></span>
+                        </button>
+                    </template>
+                    <p x-show="pages.length === 0" class="text-[10px] font-semibold text-surface-400 text-center py-3"
+                       x-text="t('Ujian ini tanpa halaman PDF','This exam has no PDF pages')"></p>
+                </div>
+                <div x-show="examLayout === 'classic' || railMode === 'questions'"
+                     class="grid gap-1.5" :class="examLayout === 'rail' ? 'grid-cols-3 gap-1' : 'grid-cols-4'">
                         <template x-for="(q, i) in questions" :key="i">
                             <button type="button" @click="currentQ = i"
                                     class="q-btn w-full aspect-square text-xs rounded-xl font-bold border relative"
@@ -468,7 +536,6 @@
                                       x-show="QUESTION_PAGES[i]" x-text="'Hlm '+QUESTION_PAGES[i]"></span>
                             </button>
                         </template>
-                    </div>
                 </div>
             </div>
             <!-- Scroll Down -->
@@ -478,8 +545,18 @@
                 <i class="fas fa-chevron-down text-xs"></i>
             </button>
             <!-- Answered count button -->
-            <div class="text-[9px] font-bold text-stone-400 text-center bg-stone-100 rounded-full px-2 py-0.5 w-full" x-text="answeredCount + '/' + totalQ"></div>
+            <div class="text-[9px] font-bold text-stone-400 text-center bg-stone-100 rounded-full px-2 py-0.5 w-full" x-text="answeredCount + '/' + totalQ + ' ' + t('terjawab','answered')"></div>
         </div>
+
+        <!-- Collapsed: a strip that brings the column back, keeping the count in
+             sight. Without it, hiding the column would be a one-way door. -->
+        <button type="button" x-show="chromeHidden" @click="toggleChrome()"
+                class="shrink-0 flex flex-col items-center gap-2 py-2 px-1.5 rounded-xl bg-white border border-surface-200 text-surface-400 hover:text-primary-600 hover:border-primary-300 shadow-sm transition"
+                :title="t('Tampilkan kolom soal','Show the question column')">
+            <i class="fas fa-chevron-right text-[10px]"></i>
+            <span class="text-[10px] font-extrabold" style="writing-mode:vertical-rl" x-text="t('Soal','Questions')"></span>
+            <span class="text-[10px] font-extrabold tabular-nums" x-text="answeredCount + '/' + totalQ"></span>
+        </button>
 
         <!-- Main Content Area -->
         <div class="flex-1 min-w-0">
@@ -883,6 +960,7 @@
             </template>
             </div>
     </form>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -1010,6 +1088,17 @@ function examApp(duration, totalQ) {
         snapTriangle: {},
         canScrollUp: false,
         canScrollDown: false,
+        // ─── How the paper is navigated, and what chrome stays open ─────────
+        // Two layouts, chosen per device and remembered like the language:
+        // 'classic' keeps the question list in the left column and gives each
+        // question its own page strip; 'rail' makes the pages the axis, the way a
+        // paper booklet is flipped, which is what a question spread over four
+        // pages needs. Rail mode also switches the same column between the pages
+        // and the question list, so neither is ever out of reach.
+        examLayout: (function () { try { return localStorage.getItem('sg_exam_layout') === 'rail' ? 'rail' : 'classic'; } catch (e) { return 'classic'; } })(),
+        railMode: (function () { try { return localStorage.getItem('sg_exam_rail_mode') === 'questions' ? 'questions' : 'pages'; } catch (e) { return 'pages'; } })(),
+        railCollapsed: (function () { try { return localStorage.getItem('sg_exam_rail_hidden') === '1'; } catch (e) { return false; } })(),
+        navCollapsed: (function () { try { return localStorage.getItem('sg_exam_nav_hidden') === '1'; } catch (e) { return false; } })(),
         syncStatus: navigator.onLine ? 'synced' : 'offline',
         // Every label below goes through window.sgT() rather than t(): these are
         // assembled inside component methods, where `this` is the component and the
@@ -1138,8 +1227,14 @@ function examApp(duration, totalQ) {
             this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 15000);
             this.$watch('currentQ', (val, oldVal) => {
                 if (oldVal !== undefined) this.closeAllTools(oldVal);
+                // Move the paper only when the question does not live on the page
+                // being read. Jumping to the range start on every switch threw away
+                // a page the student had chosen — paging ahead inside a long
+                // question and then touching the question list yanked them back.
                 var rng = this.parsePageRange(QUESTION_PAGES[val] || '');
-                if (rng.length > 0) this.page = Math.max(1, Math.min(rng[0], this.totalPages));
+                if (rng.length > 0 && rng.indexOf(this.page) === -1) {
+                    this.page = Math.max(1, Math.min(rng[0], this.totalPages));
+                }
                 if (this.questions[val] && this.questions[val].canvas && this.showCanvas[val] && this.questions[val]?.type !== 'essay_text') {
                     this.$nextTick(() => this.initCanvas(val));
                 }
@@ -1675,6 +1770,75 @@ function examApp(duration, totalQ) {
         },
         periodicCanvasSync() {
             if (Object.keys(this.canvasDirty).length > 0 && navigator.onLine) this.syncCanvasToServer();
+        },
+        // ─── Layout, rail and page jumping ───────────────────────────────────
+        // Persisted per device: a student who has chosen how the paper is shown
+        // should not have to choose again on the next exam.
+        _remember(key, value) {
+            try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }
+        },
+        // A getter, not a method: it is used bare in the template (`x-show="!chromeHidden"`),
+        // and a bare method name is a truthy function object — `!chromeHidden` then reads
+        // as false for ever, which hid the whole column instead of showing it.
+        get chromeHidden() {
+            return this.examLayout === 'rail' ? this.railCollapsed : this.navCollapsed;
+        },
+        setExamLayout(v) {
+            this.examLayout = (v === 'rail') ? 'rail' : 'classic';
+            this._remember('sg_exam_layout', this.examLayout);
+            this.$nextTick(() => this.updateScrollState());
+        },
+        setRailMode(v) {
+            this.railMode = (v === 'questions') ? 'questions' : 'pages';
+            this._remember('sg_exam_rail_mode', this.railMode);
+            this.$nextTick(() => this.updateScrollState());
+        },
+        toggleChrome() {
+            if (this.examLayout === 'rail') {
+                this.railCollapsed = !this.railCollapsed;
+                this._remember('sg_exam_rail_hidden', this.railCollapsed ? '1' : '0');
+            } else {
+                this.navCollapsed = !this.navCollapsed;
+                this._remember('sg_exam_nav_hidden', this.navCollapsed ? '1' : '0');
+            }
+            this.$nextTick(() => this.updateScrollState());
+        },
+        // Which question a page belongs to, or -1 when the teacher set no range.
+        pageOwner(p) {
+            for (let i = 0; i < this.questions.length; i++) {
+                if (this.parsePageRange(QUESTION_PAGES[i] || '').indexOf(p) !== -1) return i;
+            }
+            return -1;
+        },
+        // The rail's small copy of a page, derived from the page's own name so
+        // there is no second column in the database and no migration: the route
+        // writes the file next to its page and NGINX serves it as static. An exam
+        // uploaded before that happened falls back to the full page in @error.
+        thumbFor(url) {
+            return String(url || '').replace(/page_(\d+)\.png$/, 'thumb_$1.png');
+        },
+        // Turn to a page. When that page belongs to another question the student
+        // means "this part of the booklet", so the question follows the page —
+        // which is also why the currentQ watcher leaves the page alone when it is
+        // already inside the question's range.
+        goToPage(p) {
+            const last = this.totalPages || 1;
+            p = Math.max(1, Math.min(parseInt(p, 10) || 1, last));
+            const owner = this.pageOwner(p);
+            if (owner >= 0 && owner !== this.currentQ) {
+                this._saveCurrentPage();
+                this.page = p;
+                this.currentQ = owner;
+                this.closeAllTools();
+                this.$nextTick(() => this._restorePage(owner, p - 1));
+                this.updateScrollState();
+                return;
+            }
+            if (p === this.page) return;
+            this._saveCurrentPage();
+            this.page = p;
+            this.closeAllTools();
+            this.$nextTick(() => this._restorePage());
         },
         scrollSidebar(amount) {
             const el = this.$refs.sidebarScroll;

@@ -9,6 +9,7 @@ from app.utils.helpers import row_or_none
 from app.utils.exam_access import result_released, exam_sitting_allowed
 from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
+from app.services.pdf_service import ensure_page_thumbs
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, school_features,
                                  school_subject_count)
@@ -390,6 +391,10 @@ def take_exam(exam_id):
                 exam[_field] = {}
     # Strip answer_key from exam before passing to template (students must not see correct answers)
     safe_exam = {k: v for k, v in exam.items() if k != "answer_key"}
+    # The page rail renders every page at once, so it is given thumbnails rather
+    # than the full pages. Idempotent and cheap when they already exist; it only
+    # does work for an exam uploaded before thumbnails were generated.
+    ensure_page_thumbs(exam_id, exam.get("pdf_page_urls"))
     # Persist exam start time for accurate timer across refresh
     started_at = None
     try:

@@ -1,13 +1,19 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Edit' if exam else 'Buat' }} Exam - ScanGrade{% endblock %}
-{% block page_title %}{{ 'Edit' if exam else 'Buat' }} Ujian{% endblock %}
+{% block title %}{{ 'Edit' if exam else 'Create' }} Exam - ScanGrade{% endblock %}
+{# `page_title` is defined here and rendered by nothing — base.html has no such
+   block — so it stays a single string rather than growing a toggle it can never
+   show. The visible heading below is the one that follows the language. #}
+{% block page_title %}{{ 'Edit' if exam else 'Create' }} Exam{% endblock %}
 {% block content %}
 <div class="max-w-7xl mx-auto teacher-content">
     <div class="flex items-center gap-3 mb-6">
         <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20"><i class="fas fa-file-pen text-white text-lg"></i></div>
         <div>
-            <h1 class="text-2xl font-extrabold text-surface-800">{{ 'Edit' if exam else 'Buat' }} Ujian</h1>
-            <p class="text-sm text-surface-500 font-medium">Isi data ujian, tambah soal, upload PDF, lalu publikasikan ke kelas</p>
+            <h1 class="text-2xl font-extrabold text-surface-800"
+                x-text="t('{{ 'Edit' if exam else 'Buat' }} Ujian','{{ 'Edit' if exam else 'Create' }} Exam')"></h1>
+            <p class="text-sm text-surface-500 font-medium"
+               x-text="t('Isi data ujian, tambah soal, upload PDF, lalu publikasikan ke kelas',
+                        'Fill in the exam details, add questions, upload a PDF, then publish it to your classes')"></p>
         </div>
         <a href="{{ url_for('teacher.my_exams') }}" class="ml-auto text-surface-400 hover:text-surface-600 p-2 hover:bg-surface-100 rounded-xl transition">
             <i class="fas fa-times text-lg"></i>
@@ -44,7 +50,7 @@
                 <button type="button" @click="aiMode = true"
                         class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-200"
                         :class="aiMode ? 'bg-white text-primary-700 shadow-sm border border-primary-200 ring-1 ring-primary-200' : 'text-surface-400 hover:text-surface-600'">
-                    <i class="fas fa-robot"></i> AI <span class="text-[9px] font-normal text-primary-500">(deteksi otomatis)</span>
+                    <i class="fas fa-robot"></i> AI <span class="text-[9px] font-normal text-primary-500" x-text="t('(deteksi otomatis)','(auto-detect)')"></span>
                 </button>
             </div>
 
@@ -57,12 +63,21 @@
                         <i class="fas fa-robot text-primary-600 text-sm"></i>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-xs font-extrabold text-primary-800">Mode AI Aktif &mdash; Cara Kerja Koreksi Essay</p>
+                        <p class="text-xs font-extrabold text-primary-800"
+                           x-text="t('Mode AI Aktif — Cara Kerja Koreksi Esai','AI Mode Active — How Essay Marking Works')"></p>
                         <ul class="text-[10px] text-primary-700 mt-1.5 space-y-1">
-                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> Siswa <strong class="text-primary-900">wajib mengetik jawaban</strong> di kotak teks untuk setiap soal essay</li>
-                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> Canvas/coretan tetap tersedia untuk gambar diagram/rumus &mdash; <strong class="text-primary-900">tidak dibaca AI</strong></li>
-                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> AI baca teks &rarr; saran skor + feedback otomatis</li>
-                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span> Guru tetap kendali: setuju, edit, atau ignore</li>
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span>
+                                <span x-text="t('Siswa wajib mengetik jawaban di kotak teks untuk setiap soal esai',
+                                                 'Students must type their answer in the text box for every essay question')"></span></li>
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span>
+                                <span x-text="t('Canvas/coretan tetap tersedia untuk gambar diagram/rumus — tidak dibaca AI',
+                                                 'The canvas stays available for diagrams and formulas — not read by AI')"></span></li>
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span>
+                                <span x-text="t('AI baca teks → saran skor + feedback otomatis',
+                                                 'AI reads the text → suggested score + automatic feedback')"></span></li>
+                            <li class="flex items-start gap-1.5"><span class="text-primary-500 mt-0.5">&bull;</span>
+                                <span x-text="t('Guru tetap kendali: setuju, edit, atau abaikan',
+                                                 'The teacher stays in control: accept, edit, or ignore')"></span></li>
                         </ul>
                     </div>
                 </div>
@@ -73,10 +88,10 @@
                 <div class="flex items-center gap-3 mb-5">
                     <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg shadow-rose-200/60 shrink-0"><i class="fas fa-file-pdf text-white text-sm"></i></div>
                     <div class="flex-1 min-w-0">
-                        <h3 class="font-extrabold text-surface-800 text-sm">Upload PDF Soal</h3>
+                        <h3 class="font-extrabold text-surface-800 text-sm" x-text="t('Upload PDF Soal','Upload the exam PDF')"></h3>
                         <p class="text-[10px] text-surface-400 truncate">
-                            <span x-show="!aiMode">PDF untuk tampilan ujian siswa</span>
-                            <span x-show="aiMode">AI akan baca soal, deteksi MCQ & Essay otomatis</span>
+                            <span x-show="!aiMode" x-text="t('PDF untuk tampilan ujian siswa','The PDF students see during the exam')"></span>
+                            <span x-show="aiMode" x-text="t('AI akan baca soal, deteksi MCQ & Esai otomatis','AI will read the questions and detect MCQ & essays automatically')"></span>
                         </p>
                     </div>
                     <!-- Language picker (AI mode) — inline buttons -->
@@ -96,7 +111,7 @@
                     </div>
                     <div x-show="aiMode && !pdfUrl" class="shrink-0">
                         <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-bold bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm">
-                            <i class="fas fa-magic"></i> AI Siap
+                            <i class="fas fa-magic"></i> <span x-text="t('AI Siap','AI ready')"></span>
                         </span>
                     </div>
 
@@ -108,9 +123,11 @@
                             <input type="checkbox" x-model="useVision" name="use_vision" value="true" class="w-4 h-4 text-violet-600 rounded border-violet-300">
                             <div class="flex-1">
                                 <span class="text-xs font-extrabold text-violet-800 flex items-center gap-1.5">
-                                    <i class="fas fa-eye"></i>Gunakan Gemini Vision OCR
+                                    <i class="fas fa-eye"></i><span x-text="t('Gunakan Gemini Vision OCR','Use Gemini Vision OCR')"></span>
                                 </span>
-                                <p class="text-[9px] text-violet-600 mt-0.5">Untuk PDF scan / gambar / tulisan tangan. Membutuhkan API Key Gemini aktif.</p>
+                                <p class="text-[9px] text-violet-600 mt-0.5"
+                                   x-text="t('Untuk PDF scan / gambar / tulisan tangan. Membutuhkan API Key Gemini aktif.',
+                                            'For scanned, image, or handwritten PDFs. Needs an active Gemini API key.')"></p>
                             </div>
                         </label>
                     </div>
@@ -119,8 +136,8 @@
                         <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-rose-50 to-pink-50 flex items-center justify-center group-hover:scale-110 transition-transform mb-3 border border-rose-100">
                             <i class="fas fa-cloud-upload-alt text-2xl text-rose-400"></i>
                         </div>
-                        <p class="text-sm font-bold text-surface-600">Seret PDF ke sini atau <span class="text-primary-600 underline underline-offset-2">klik untuk upload</span></p>
-                        <p class="text-[10px] text-surface-400 mt-1">PDF soal ujian — maksimal 20MB</p>
+                        <p class="text-sm font-bold text-surface-600"><span x-text="t('Seret PDF ke sini atau','Drag a PDF here or')"></span> <span class="text-primary-600 underline underline-offset-2" x-text="t('klik untuk upload','click to upload')"></span></p>
+                        <p class="text-[10px] text-surface-400 mt-1" x-text="t('PDF soal ujian — maksimal 20MB','Exam PDF — 20MB maximum')"></p>
                         <input type="file" name="pdf" accept=".pdf" x-ref="pdfInput" @change="uploadPDF($event.target.files[0])" class="hidden">
                     </div>
                 </div>
@@ -134,7 +151,7 @@
                             <div class="absolute inset-0 flex items-center justify-center"><i class="fas fa-file-pdf text-primary-500 text-sm"></i></div>
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-bold text-primary-700" x-text="loadingText">AI sedang memproses PDF...</p>
+                            <p class="text-sm font-bold text-primary-700" x-text="loadingText">AI is processing the PDF...</p>
                             <p class="text-[10px] text-primary-500 mt-0.5 flex items-center gap-2">
                                 <span x-text="loadingStep"></span>
                                 <span class="text-primary-300">|</span>
@@ -152,8 +169,8 @@
                     <!-- Step labels -->
                     <div class="mt-2 flex justify-between text-[8px] font-bold text-primary-400">
                         <span :class="loadingStep >= 1 ? 'text-primary-700' : ''">📄 PDF → Markdown</span>
-                        <span :class="loadingStep >= 2 ? 'text-primary-700' : ''">🤖 Klasifikasi</span>
-                        <span :class="loadingStep >= 3 ? 'text-primary-700' : ''">🔑 Kunci Jawaban</span>
+                        <span :class="loadingStep >= 2 ? 'text-primary-700' : ''" x-text="t('🤖 Klasifikasi','🤖 Classifying')">🤖 Classifying</span>
+                        <span :class="loadingStep >= 3 ? 'text-primary-700' : ''" x-text="t('🔑 Kunci Jawaban','🔑 Answer key')">🔑 Answer key</span>
                     </div>
                 </div>
 
@@ -164,31 +181,32 @@
                             <i class="fas fa-check text-emerald-600 text-sm"></i>
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-extrabold text-emerald-800">PDF berhasil diupload</p>
+                            <p class="text-sm font-extrabold text-emerald-800" x-text="t('PDF berhasil diunggah','PDF uploaded')"></p>
                             <p class="text-[10px] text-emerald-600 truncate" x-text="pdfUrl ? pdfUrl.split('/').pop() : ''"></p>
                         </div>
                         <div class="flex gap-1.5 shrink-0">
                             <span x-show="mcqCount > 0" class="text-[9px] font-bold px-2 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200" x-text="mcqCount + ' MCQ'"></span>
                             <span x-show="essayCount > 0" class="text-[9px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200" x-text="essayCount + ' Essay'"></span>
-                            <span class="text-[9px] font-bold px-2 py-1 rounded-full bg-surface-100 text-surface-600 border border-surface-200" x-text="(mcqCount + essayCount) + ' soal'"></span>
+                            <span class="text-[9px] font-bold px-2 py-1 rounded-full bg-surface-100 text-surface-600 border border-surface-200"
+                                  x-text="(mcqCount + essayCount) + ' ' + t('soal','questions')"></span>
                         </div>
                     </div>
 
                     <!-- Steps after upload -->
                     <div x-show="aiMode && questions.length > 0" class="p-4 rounded-xl bg-primary-50 border border-primary-200">
-                        <p class="text-xs font-bold text-primary-800 mb-3">Langkah selanjutnya:</p>
+                        <p class="text-xs font-bold text-primary-800 mb-3" x-text="t('Langkah selanjutnya:','What happens next:')"></p>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
                                 <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">1</span>
-                                <span class="text-[10px] font-bold text-surface-700">Review deteksi soal</span>
+                                <span class="text-[10px] font-bold text-surface-700" x-text="t('Periksa deteksi soal','Review the detected questions')"></span>
                             </div>
                             <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
                                 <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">2</span>
-                                <span class="text-[10px] font-bold text-surface-700">Klik "Terapkan ke Form"</span>
+                                <span class="text-[10px] font-bold text-surface-700" x-text="t('Klik “Terapkan ke Formulir”','Click “Apply to form”')"></span>
                             </div>
                             <div class="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-primary-100">
                                 <span class="w-6 h-6 rounded-full bg-primary-600 text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">3</span>
-                                <span class="text-[10px] font-bold text-surface-700">Isi judul & simpan</span>
+                                <span class="text-[10px] font-bold text-surface-700" x-text="t('Isi judul & simpan','Fill in the title & save')"></span>
                             </div>
                         </div>
                     </div>
@@ -198,12 +216,12 @@
                         <template x-if="!applied">
                             <button @click="applyToForm()"
                                     class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-primary-300/30 transition-all active:scale-95">
-                                <i class="fas fa-check-circle"></i> Terapkan Ke Form
+                                <i class="fas fa-check-circle"></i> <span x-text="t('Terapkan Ke Formulir','Apply to Form')"></span>
                             </button>
                         </template>
                         <template x-if="applied">
                             <span class="inline-flex items-center gap-1.5 px-5 py-2.5 bg-emerald-100 text-emerald-700 rounded-xl text-xs font-extrabold border border-emerald-200">
-                                <i class="fas fa-check-circle"></i> Sudah diterapkan ke form
+                                <i class="fas fa-check-circle"></i> <span x-text="t('Sudah diterapkan ke formulir','Applied to the form')"></span>
                             </span>
                         </template>
                         <button @click="downloadMarkdown('md')"
@@ -212,7 +230,7 @@
                         </button>
                         <button @click="reset()"
                                 class="inline-flex items-center gap-1.5 px-4 py-2.5 border-2 border-surface-200 rounded-xl text-xs font-bold text-surface-600 hover:bg-surface-50 transition-all active:scale-95">
-                            <i class="fas fa-redo"></i> Upload Ulang
+                            <i class="fas fa-redo"></i> <span x-text="t('Unggah Ulang','Upload again')"></span>
                         </button>
                     </div>
                 </div>
@@ -223,7 +241,7 @@
                         <i class="fas fa-exclamation-circle text-red-500 text-sm"></i>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-sm font-bold text-red-800">Gagal memproses PDF</p>
+                        <p class="text-sm font-bold text-red-800" x-text="t('Gagal memproses PDF','Could not process the PDF')"></p>
                         <p class="text-xs text-red-600 mt-0.5" x-text="errorMsg"></p>
                     </div>
                     <button @click="errorMsg = ''; loading = false" class="text-red-400 hover:text-red-600 shrink-0">&times;</button>
@@ -247,7 +265,7 @@
                     });
                     window.addEventListener('key-done', e => { generatingKey = false; keyGenerated = true; });
                     window.addEventListener('key-start', e => { generatingKey = true; keyGenerated = false; keyFailed = false; keyError = ''; });
-                    window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; keyError = (e.detail?.error || '') + '. Cek API key di Pengaturan AI, atau upload PDF dengan mode AI aktif.'; });
+                    window.addEventListener('key-failed', e => { generatingKey = false; keyFailed = true; keyError = (e.detail?.error || '') + sgT('. Cek API key di Pengaturan AI, atau unggah PDF dengan mode AI aktif.', '. Check the API key in AI Settings, or upload a PDF with AI mode on.'); });
                     window.addEventListener('pdf-error', e => { pdfStatus = 'error'; });
                     window.addEventListener('pdf-reset', e => { pdfStatus = 'empty'; pdfName = ''; hasAI = false; qCount = 0; generatingKey = false; keyGenerated = false; keyFailed = false; keyError = ''; });
                  "
@@ -259,8 +277,8 @@
                         <i class="fas fa-file-pdf text-surface-400 text-sm"></i>
                     </div>
                     <div class="flex-1">
-                        <p class="text-sm font-bold text-surface-500">Belum upload PDF</p>
-                        <p class="text-[10px] text-surface-400">Upload PDF soal untuk tampilan ujian siswa</p>
+                        <p class="text-sm font-bold text-surface-500" x-text="t('Belum ada PDF','No PDF uploaded yet')"></p>
+                        <p class="text-[10px] text-surface-400" x-text="t('Unggah PDF soal untuk tampilan ujian siswa','Upload the exam PDF that students will see')"></p>
                     </div>
                 </div>
 
@@ -271,25 +289,26 @@
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-sm font-extrabold text-emerald-800">✅ PDF berhasil diupload</span>
+                            <span class="text-sm font-extrabold text-emerald-800" x-text="t('✅ PDF berhasil diunggah','✅ PDF uploaded')"></span>
                             <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 truncate max-w-[200px]" x-text="pdfName"></span>
                         </div>
                         <p class="text-[10px] text-emerald-600 mt-0.5">
-                            <span x-text="qCount > 0 ? qCount + ' soal' : 'PDF siap'"></span>
+                            <span x-text="qCount > 0 ? qCount + ' ' + t('soal','questions') : t('PDF siap','PDF ready')"></span>
                             <span x-show="aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-700 border border-primary-200">AI</span>
                             <span x-show="!aiClassified" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-surface-100 text-surface-500 border border-surface-200">Manual</span>
                             <!-- Answer key generation status (AI mode only) -->
                             <span x-show="generatingKey" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 animate-pulse">
-                                <i class="fas fa-spinner fa-spin mr-0.5"></i>Membuat kunci jawaban...
+                                <i class="fas fa-spinner fa-spin mr-0.5"></i><span x-text="t('Membuat kunci jawaban...','Building the answer key...')"></span>
                             </span>
                             <span x-show="keyGenerated" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-                                <i class="fas fa-check mr-0.5"></i>Kunci siap
+                                <i class="fas fa-check mr-0.5"></i><span x-text="t('Kunci siap','Answer key ready')"></span>
                             </span>
-                            <span x-show="keyFailed" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200" title="Klik untuk atur API key">
-                                <i class="fas fa-times mr-0.5"></i>Kunci gagal
+                            <span x-show="keyFailed" class="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200"
+                                  :title="t('Klik untuk mengatur API key','Click to set the API key')">
+                                <i class="fas fa-times mr-0.5"></i><span x-text="t('Kunci gagal','Answer key failed')"></span>
                             </span>
                             <span x-show="keyError && keyFailed" class="ml-2 text-[9px] text-red-500 max-w-[300px] truncate" x-text="keyError"></span>
-                            <a x-show="keyFailed" href="/teacher/ai-settings" class="ml-1 text-[9px] font-bold text-primary-600 hover:text-primary-700 underline">Atur API Key →</a>
+                            <a x-show="keyFailed" href="/teacher/ai-settings" class="ml-1 text-[9px] font-bold text-primary-600 hover:text-primary-700 underline" x-text="t('Atur API Key →','Set the API key →')"></a>
                         </p>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
@@ -320,7 +339,7 @@
                         <div x-show="aiMode && keyGenerated" class="relative" x-data="{ open: false }">
                             <button @click="open = !open" @click.outside="open = false"
                                     class="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition">
-                                <i class="fas fa-key text-amber-600 mr-0.5"></i>Kunci
+                                <i class="fas fa-key text-amber-600 mr-0.5"></i><span x-text="t('Kunci','Key')"></span>
                                 <i class="fas fa-chevron-down text-[8px] ml-0.5"></i>
                             </button>
                             <div x-show="open" class="absolute right-0 top-full mt-1 w-36 bg-white rounded-xl shadow-lg border border-surface-200 overflow-hidden z-20">
@@ -342,8 +361,8 @@
                         <i class="fas fa-exclamation-triangle text-red-500 text-sm"></i>
                     </div>
                     <div class="flex-1">
-                        <p class="text-sm font-bold text-red-700">Gagal upload PDF</p>
-                        <p class="text-[10px] text-red-500">Coba upload ulang atau gunakan format PDF yang valid</p>
+                        <p class="text-sm font-bold text-red-700" x-text="t('Gagal mengunggah PDF','PDF upload failed')"></p>
+                        <p class="text-[10px] text-red-500" x-text="t('Coba unggah ulang atau gunakan format PDF yang valid','Try uploading again, or use a valid PDF')"></p>
                     </div>
                 </div>
             </div>
@@ -352,16 +371,16 @@
             function pdfUpload() {
                 return {
                     loading: false, preview: '', questions: [], mcqCount: 0, essayCount: 0, pdfUrl: '', pdfId: '', errorMsg: '', applied: false,
-                    loadingText: 'AI sedang memproses PDF...',
+                    loadingText: sgT('AI sedang memproses PDF...', 'AI is processing the PDF...'),
                     loadingStep: 0, loadingTime: 0, loadingProgress: 0, _timer: null,
                     useVision: false,
                     async uploadPDF(file) {
                         if (!file) return;
-                        if (file.type !== 'application/pdf') { this.errorMsg = 'Hanya file PDF yang didukung'; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
+                        if (file.type !== 'application/pdf') { this.errorMsg = sgT('Hanya file PDF yang didukung', 'Only PDF files are supported'); window.dispatchEvent(new CustomEvent('pdf-error')); return; }
                         this.loading = true; this.preview = ''; this.questions = []; this.errorMsg = '';
                         this.loadingStep = 0; this.loadingTime = 0; this.loadingProgress = 0;
                         // Start timed progress
-                        this.loadingText = '📄 Mengkonversi PDF ke Markdown...';
+                        this.loadingText = sgT('📄 Mengonversi PDF ke Markdown...', '📄 Converting the PDF to Markdown...');
                         this.loadingStep = 1;
                         this._timer = setInterval(() => {
                             this.loadingTime++;
@@ -377,17 +396,28 @@
                         fd.append('lang', lang);
                         fd.append('ai_mode', aiMode ? 'true' : 'false');
                         try {
-                            this.loadingText = '🤖 Menganalisis soal dengan AI...';
+                            this.loadingText = sgT('🤖 Menganalisis soal dengan AI...', '🤖 Analysing the questions with AI...');
                             this.loadingStep = 2;
                             const r = await fetch('/teacher/exams/parse-pdf', { method: 'POST', body: fd });
-                            this.loadingText = '🔑 Membuat kunci jawaban...';
+                            this.loadingText = sgT('🔑 Membuat kunci jawaban...', '🔑 Building the answer key...');
                             this.loadingStep = 3;
                             const d = await r.json();
                             if (this._timer) { clearInterval(this._timer); this._timer = null; }
                             this.loadingProgress = 100;
                             if (d.error) { this.errorMsg = d.error; this.loading = false; window.dispatchEvent(new CustomEvent('pdf-error')); return; }
                             this.preview = d.preview_html;
-                            this.questions = d.questions || [];
+                            // Each parsed question carries the PDF page it was printed
+                            // on, so the page field arrives filled. The teacher
+                            // corrects a range instead of typing one for every question.
+                            this.questions = (d.questions || []).map(function(q) {
+                                var copy = Object.assign({}, q);
+                                copy.pages = q.pages || (q.page ? String(q.page) : '');
+                                // Remember that this one is the parser's guess, so the
+                                // form can say so and the teacher knows which numbers
+                                // to check first. Cleared by the first keystroke.
+                                copy._pageAuto = !!copy.pages;
+                                return copy;
+                            });
                             this.mcqCount = d.mcq_count;
                             this.essayCount = d.essay_count;
                             this.pdfUrl = d.pdf_url || '';
@@ -400,7 +430,7 @@
                                 mcqCount: d.mcq_count || 0,
                                 essayCount: d.essay_count || 0,
                                 pdfUrl: d.pdf_url || '',
-                                _questions: d.questions || [],
+                                _questions: this.questions,
                                 aiClassified: d.ai_classified || false,
                                 markdown: d.markdown || '',
                                 answerKey: d.answer_key || {},
@@ -448,7 +478,7 @@
                                     { detail: { error: d.answer_key_error || '' } }
                                 ));
                             }
-                        } catch(e) { if (this._timer) { clearInterval(this._timer); this._timer = null; } this.errorMsg = 'Gagal: ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
+                        } catch(e) { if (this._timer) { clearInterval(this._timer); this._timer = null; } this.errorMsg = sgT('Gagal', 'Failed') + ': ' + e.message; window.dispatchEvent(new CustomEvent('pdf-error')); }
                         finally { this.loading = false; }
                     },
                     reset() {
@@ -501,7 +531,7 @@
             let _scanData = null;
             window.addEventListener('pdf-uploaded', e => { _scanData = e.detail; });
             function downloadMarkdown(fmt) {
-                if (!_scanData || !_scanData.markdown) { alert('Upload PDF dulu'); return; }
+                if (!_scanData || !_scanData.markdown) { alert(sgT('Unggah PDF dulu', 'Upload a PDF first')); return; }
                 const ext = fmt === 'qmd' ? '.qmd' : '.md';
                 const base = (_scanData.pdfName || 'exam').replace('.pdf', '');
                 let content = _scanData.markdown;
@@ -515,7 +545,7 @@
                 a.click();
             }
             function downloadAnswerKey(fmt) {
-                if (!_scanData || !_scanData.answerKeyGenerated) { alert('Kunci jawaban belum tersedia'); return; }
+                if (!_scanData || !_scanData.answerKeyGenerated) { alert(sgT('Kunci jawaban belum tersedia', 'No answer key available yet')); return; }
                 const ext = fmt === 'qmd' ? '.qmd' : '.md';
                 const base = (_scanData.pdfName || 'exam').replace('.pdf', '');
                 let txt = '# Answer Key\n\n';
@@ -533,7 +563,7 @@
                 a.click();
             }
             async function generateKeyNow() {
-                if (!_scanData || !_scanData.markdown) { alert('Data belum siap'); return; }
+                if (!_scanData || !_scanData.markdown) { alert(sgT('Data belum siap', 'The data is not ready yet')); return; }
                 window.dispatchEvent(new CustomEvent('key-start'));
                 try {
                     const r = await fetch('/teacher/exams/generate-key', {
@@ -562,12 +592,13 @@
                 <div class="card p-6 space-y-4">
                     <div class="grid grid-cols-1 gap-3 sm:gap-4">
                         <div class="sm:col-span-2">
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Judul Ujian</label>
-                            <input type="text" name="title" x-model="examTitle" value="{{ exam.title if exam else '' }}" required placeholder="Contoh: Ulangan Harian - Persamaan Linear"
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Judul Ujian','Exam Title')"></label>
+                            <input type="text" name="title" x-model="examTitle" value="{{ exam.title if exam else '' }}" required
+                                   :placeholder="t('Contoh: Ulangan Harian - Persamaan Linear','e.g. Mid-term Test - Linear Equations')"
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
                         </div>
                         <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Mata Pelajaran</label>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Mata Pelajaran','Subject')"></label>
                             {% if subjects %}
                             <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
                                 {% for s in subjects %}
@@ -578,24 +609,24 @@
                                 </label>
                                 {% endfor %}
                             </div>
-                            <p class="text-[10px] text-slate-400 mt-1"><i class="fas fa-check-circle text-primary-500 mr-0.5"></i>Mapel sesuai assign admin. Pilih salah satu.</p>
+                            <p class="text-[10px] text-slate-400 mt-1"><i class="fas fa-check-circle text-primary-500 mr-0.5"></i><span x-text="t('Mapel sesuai assign admin. Pilih salah satu.','Subjects are assigned by your admin. Pick one.')"></span></p>
                             {% else %}
-                            <p class="text-sm text-slate-400 italic">Belum ada mata pelajaran yang diassign.</p>
+                            <p class="text-sm text-slate-400 italic" x-text="t('Belum ada mata pelajaran yang diassign.','No subjects have been assigned yet.')"></p>
                             {% endif %}
                         </div>
                         <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Durasi</label>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Durasi','Duration')"></label>
                             <select name="duration_minutes" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
                                 {% for m in [10,15,20,25,30,40,45,50,60,75,90,100,120,150,180] %}
-                                <option value="{{ m }}" {% if (exam.duration_minutes or 60) == m %}selected{% endif %}>{{ m }} menit</option>
+                                <option value="{{ m }}" {% if (exam.duration_minutes or 60) == m %}selected{% endif %} x-text="'{{ m }} ' + t('menit','minutes')">{{ m }} minutes</option>
                                 {% endfor %}
-                                 <option value="0" {% if exam and exam.duration_minutes == 0 %}selected{% endif %}>Tak terbatas</option>
+                                 <option value="0" {% if exam and exam.duration_minutes == 0 %}selected{% endif %} x-text="t('Tak terbatas','Unlimited')">Unlimited</option>
                             </select>
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-extrabold text-slate-700 mb-2">Kelas Tujuan</label>
+                        <label class="block text-sm font-extrabold text-slate-700 mb-2" x-text="t('Kelas Tujuan','Target Classes')"></label>
                         {% if classes %}
                         <div class="grid grid-cols-2 gap-1.5 sm:gap-2" x-data='{ selected: {{ (exam.class_ids or []) | tojson }} }'>
                             {% for c in classes %}
@@ -609,26 +640,26 @@
                             {% endfor %}
                         </div>
                         {% else %}
-                        <p class="text-sm text-slate-400 italic">Belum ada kelas. Admin sekolah harus menambahkan kelas terlebih dahulu.</p>
+                        <p class="text-sm text-slate-400 italic" x-text="t('Belum ada kelas. Admin sekolah harus menambahkan kelas terlebih dahulu.','No classes yet. Your school admin has to add classes first.')"></p>
                         {% endif %}
                     </div>
 
                     <div>
-                        <label class="block text-sm font-extrabold text-slate-700 mb-1">Deskripsi (opsional)</label>
-                        <textarea name="description" rows="2" placeholder="Petunjuk atau catatan untuk siswa"
+                        <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Deskripsi (opsional)','Description (optional)')"></label>
+                        <textarea name="description" rows="2" :placeholder="t('Petunjuk atau catatan untuk siswa','Instructions or notes for students')"
                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">{{ exam.description if exam else '' }}</textarea>
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Mulai (jadwal)</label>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Mulai (jadwal)','Starts (scheduled)')"></label>
             <input type="datetime-local" name="start_at" id="start_at_input"
                    value="{% if exam and exam.start_at %}{{ (exam.start_at[:19] + '+00:00') | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
-            <p class="text-xs text-slate-400 mt-1">Kosongkan = langsung aktif</p>
+            <p class="text-xs text-slate-400 mt-1" x-text="t('Kosongkan = langsung aktif','Leave empty = active immediately')"></p>
             <script>!function(){var e=document.getElementById('start_at_input');if(e&&!e.value){var t=new Date();t.setMinutes(t.getMinutes()-t.getTimezoneOffset());e.value=t.toISOString().slice(0,16)}}();</script>
                         </div>
                         <div>
-                            <label class="block text-sm font-extrabold text-slate-700 mb-1">Max Attempt</label>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Percobaan Maksimal','Max attempts')"></label>
                             <input type="number" name="max_attempts" value="{{ exam.max_attempts or 1 }}" min="1" max="10"
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
                         </div>
@@ -640,12 +671,16 @@
                     <div class="flex items-start gap-3">
                         <i class="fas fa-lightbulb text-amber-500 mt-0.5"></i>
                         <div class="text-sm text-slate-700">
-                            <p class="font-bold text-rose-800 mb-1"><i class="fas fa-headphones mr-1"></i>Tips Media Listening</p>
+                            <p class="font-bold text-rose-800 mb-1"><i class="fas fa-headphones mr-1"></i><span x-text="t('Tips Media Listening','Listening Media Tips')"></span></p>
                             <ul class="text-xs space-y-1 text-slate-600">
-                                <li>&#8226; Upload file <strong>mp3/ogg/wav</strong> ke Google Drive &rarr; <strong class="text-slate-800">Bagikan</strong> &rarr; <strong class="text-slate-800">Akses umum</strong> &rarr; <strong class="text-slate-800">Salin link</strong> &rarr; Tempel di kolom Audio</li>
-                                <li>&#8226; Untuk YouTube: Buka video &rarr; <strong class="text-slate-800">Salin URL dari browser</strong> &rarr; Tempel di kolom YouTube</li>
-                                <li>&#8226; Pastikan Google Drive di-set <strong class="text-slate-800">Anyone with the link</strong> dan video YouTube <strong class="text-slate-800">tidak private/blocked</strong></li>
-                                <li>&#8226; Siswa tidak bisa membuka YouTube di tab baru &mdash; video diputar di dalam halaman ujian</li>
+                                <li>&#8226; <span x-text="t('Unggah berkas mp3/ogg/wav ke Google Drive → Bagikan → Akses umum → Salin link → tempel di kolom Audio',
+                                                              'Upload an mp3/ogg/wav file to Google Drive → Share → General access → Copy link → paste it into the Audio field')"></span></li>
+                                <li>&#8226; <span x-text="t('Untuk YouTube: buka videonya → salin URL dari browser → tempel di kolom YouTube',
+                                                              'For YouTube: open the video → copy the URL from the browser → paste it into the YouTube field')"></span></li>
+                                <li>&#8226; <span x-text="t('Pastikan Google Drive di-set “Anyone with the link” dan videonya tidak bersifat private/blocked',
+                                                              'Make sure the Drive file is set to “Anyone with the link” and the video is not private or blocked')"></span></li>
+                                <li>&#8226; <span x-text="t('Siswa tidak bisa membuka YouTube di tab baru — video diputar di dalam halaman ujian',
+                                                              'Students cannot open YouTube in a new tab — the video plays inside the exam page')"></span></li>
                             </ul>
                         </div>
                     </div>
@@ -653,31 +688,33 @@
 
                 <div class="card p-6" x-data="questionManager()">
                     <div class="flex items-center justify-between mb-4">
-                        <h2 class="text-lg font-extrabold text-slate-800">Soal & Kunci Jawaban</h2>
+                        <h2 class="text-lg font-extrabold text-slate-800" x-text="t('Soal & Kunci Jawaban','Questions & Answer Key')"></h2>
                         <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-extrabold"
                              :class="totalPct === 100 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'">
                             <i :class="totalPct === 100 ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle'"></i>
-                            <span x-text="totalPct === 100 ? 'Total 100 poin' : totalPct + ' / 100 poin'"></span>
+                            <span x-text="totalPct === 100 ? t('Total 100 poin','100 points total') : totalPct + t(' / 100 poin',' / 100 points')"></span>
                         </div>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 p-3 sm:p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
                         <div>
-                            <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i>Bobot MCQ</label>
+                            <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i><span x-text="t('Bobot MCQ','MCQ Weight')"></span></label>
                             <div class="flex items-center gap-2">
                                 <input type="number" x-model.number="_mcqPct" min="0" max="100" step="1"
                                        class="w-20 px-3 py-2 border-2 border-amber-200 rounded-xl text-center font-extrabold text-amber-700 focus:border-amber-400">
                                 <span class="text-sm font-bold text-slate-500">%</span>
-                                <span class="text-xs font-bold text-slate-400" x-text="mcqCount + ' soal x ' + mcqPerQ.toFixed(1) + ' poin'"></span>
+                                <span class="text-xs font-bold text-slate-400"
+                                      x-text="mcqCount + ' ' + t('soal ×','questions ×') + ' ' + mcqPerQ.toFixed(1) + ' ' + t('poin','points')"></span>
                             </div>
                         </div>
                         <div>
-                            <label class="text-xs font-extrabold text-emerald-700 mb-1 flex items-center gap-1"><i class="fas fa-pencil-alt"></i>Bobot Esai</label>
+                            <label class="text-xs font-extrabold text-emerald-700 mb-1 flex items-center gap-1"><i class="fas fa-pencil-alt"></i><span x-text="t('Bobot Esai','Essay Weight')"></span></label>
                             <div class="flex items-center gap-2">
                                 <input type="number" x-model.number="_essayPct" min="0" max="100" step="1"
                                        class="w-20 px-3 py-2 border-2 border-emerald-200 rounded-xl text-center font-extrabold text-emerald-700 focus:border-emerald-400">
                                 <span class="text-sm font-bold text-slate-500">%</span>
-                                <span class="text-xs font-bold text-slate-400" x-text="essayCount + ' soal x ' + essayPerQ.toFixed(1) + ' poin'"></span>
+                                <span class="text-xs font-bold text-slate-400"
+                                      x-text="essayCount + ' ' + t('soal ×','questions ×') + ' ' + essayPerQ.toFixed(1) + ' ' + t('poin','points')"></span>
                             </div>
                         </div>
                     </div>
@@ -685,11 +722,11 @@
                     <div class="flex flex-wrap gap-2 mb-4">
                         <button type="button" @click="addMcq()"
                                 class="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-amber-200 transition">
-                            <i class="fas fa-plus-circle"></i>Tambah MCQ
+                            <i class="fas fa-plus-circle"></i><span x-text="t('Tambah MCQ','Add MCQ')"></span>
                         </button>
                         <button type="button" @click="addEssay()"
                                 class="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-emerald-200 transition">
-                            <i class="fas fa-pencil-alt"></i>Tambah Esai
+                            <i class="fas fa-pencil-alt"></i><span x-text="t('Tambah Esai','Add Essay')"></span>
                         </button>
                         <button type="button" @click="normalizeTo100()"
                                 class="flex items-center gap-2 bg-primary-50 hover:bg-primary-100 text-primary-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-primary-200 transition">
@@ -700,7 +737,7 @@
                     <template x-if="questions.length === 0">
                         <div class="text-center py-8 text-slate-400">
                             <i class="fas fa-inbox text-3xl mb-2"></i>
-                            <p class="text-sm font-bold">Belum ada soal. Klik tombol di atas untuk menambahkan.</p>
+                            <p class="text-sm font-bold" x-text="t('Belum ada soal. Klik tombol di atas untuk menambahkan.','No questions yet. Use the buttons above to add some.')"></p>
                         </div>
                     </template>
 
@@ -709,10 +746,10 @@
                             <div class="p-4 bg-slate-50 rounded-2xl border-2 border-slate-200 question-item">
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
-                                        <span class="text-sm font-extrabold text-slate-700" x-text="'Soal ' + (i + 1)"></span>
+                                        <span class="text-sm font-extrabold text-slate-700" x-text="t('Soal','Question') + ' ' + (i + 1)"></span>
                                         <span class="text-xs px-2 py-1 rounded-full font-extrabold"
                                               :class="q.type === 'mcq' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
-                                              x-text="q.type === 'mcq' ? 'MCQ' : 'Esai'"></span>
+                                              x-text="q.type === 'mcq' ? 'MCQ' : t('Esai','Essay')"></span>
                                         <span x-show="q.bonus" class="text-xs px-2 py-1 rounded-full font-extrabold bg-purple-100 text-purple-700">Bonus</span>
                                         <span x-show="q.audio || q.youtube" class="text-xs px-2 py-1 rounded-full font-extrabold bg-rose-100 text-rose-700">
                                             <i class="fas fa-headphones mr-0.5"></i>Media
@@ -724,17 +761,35 @@
                                         </button>
                                     </div>
                                 </div>
-                                <!-- Page Range (wajib diisi) -->
+                                <!-- Page Range. Not required, and that is the point:
+                                     the number is a convenience for the student — it
+                                     decides which page the paper turns to when they
+                                     pick this question, and names the question on the
+                                     rail's page thumbnails. A question with no page
+                                     still works, so demanding a number before the
+                                     form may be saved forced a teacher who did not
+                                     know one to invent it. -->
                                 <div class="mb-2">
-                                    <input type="text" :name="'pages_' + i" x-model="q.pages" required
-                                           placeholder="Halaman PDF (contoh: 1-3 atau 1,2,3)"
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <label class="text-[11px] font-bold text-slate-500"
+                                               :for="'pages_' + i"
+                                               x-text="t('Halaman PDF','PDF page')"></label>
+                                        <span x-show="q._pageAuto && q.pages"
+                                              class="text-[10px] px-1.5 py-0.5 rounded-full font-extrabold bg-primary-50 text-primary-600"
+                                              x-text="t('terisi otomatis','filled automatically')"></span>
+                                        <span class="text-[10px] font-semibold text-slate-400"
+                                              x-text="t('halaman tempat soal ini dicetak — dikosongkan pun tetap jalan','the page this question is printed on — optional')"></span>
+                                    </div>
+                                    <input type="text" :id="'pages_' + i" :name="'pages_' + i" x-model="q.pages"
+                                           @input="q._pageAuto = false"
+                                           :placeholder="t('contoh: 3 atau 3-4','e.g. 3 or 3-4')"
                                            class="w-full text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-primary-500 transition">
                                 </div>
 
                                 <!-- Media: Audio + YouTube -->
                                 <div class="mb-2 border border-slate-200 rounded-xl overflow-hidden">
                                     <button type="button" @click="q._showMedia = !q._showMedia" class="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 transition">
-                                        <span><i class="fas fa-headphones text-rose-500 mr-1.5"></i>Media Pendukung (audio/video)</span>
+                                        <span><i class="fas fa-headphones text-rose-500 mr-1.5"></i><span x-text="t('Media Pendukung (audio/video)','Supporting media (audio/video)')"></span></span>
                                         <i class="fas" :class="q._showMedia ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
                                     </button>
                                     <div x-show="q._showMedia" class="px-3 pb-3 space-y-2 border-t border-slate-200 pt-2">
@@ -745,22 +800,24 @@
                                             <input type="url" :name="'audio_' + i" x-model="q.audio" placeholder="https://drive.google.com/file/d/..."
                                                    class="w-full text-xs border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-rose-400 transition mt-1">
                                             <p class="text-xs text-slate-400 mt-0.5">
-                                                &#8226; Upload file audio (mp3, ogg, wav) ke Google Drive &rarr; Share &rarr; <strong class="text-slate-600">General access: Anyone with the link</strong> &rarr; Copy link
+                                                &#8226; <span x-text="t('Unggah berkas audio (mp3, ogg, wav) ke Google Drive → Share → General access: Anyone with the link → Copy link',
+                                                              'Upload the audio file (mp3, ogg, wav) to Google Drive → Share → General access: Anyone with the link → Copy link')"></span>
                                             </p>
                                             <div x-show="q.audio" class="mt-1 flex items-center gap-2">
                                                 <audio :src="gdriveDirect(q.audio)" controls class="h-8 w-full max-w-xs"></audio>
-                                                <a :href="q.audio" target="_blank" class="text-xs text-rose-600 hover:underline">Buka link</a>
+                                                <a :href="q.audio" target="_blank" class="text-xs text-rose-600 hover:underline" x-text="t('Buka link','Open link')"></a>
                                             </div>
                                         </div>
                                         <div>
                                             <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
                                                 <i class="fab fa-youtube text-red-500"></i>YouTube (video)
                                             </label>
-                                            <input type="url" :name="'youtube_' + i" x-model="q.youtube" placeholder="https://youtu.be/xxx atau https://youtube.com/watch?v=..."
+                                            <input type="url" :name="'youtube_' + i" x-model="q.youtube" :placeholder="t('https://youtu.be/xxx atau https://youtube.com/watch?v=...','https://youtu.be/xxx or https://youtube.com/watch?v=...')"
                                                    class="w-full text-xs border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-red-400 transition mt-1">
                                             <p class="text-xs text-slate-400 mt-0.5">
-                                                &#8226; Copy URL dari browser saat membuka video YouTube (tidak perlu login)
-                                                <br>&#8226; Pastikan video tidak <strong class="text-slate-600">private</strong>
+                                                &#8226; <span x-text="t('Salin URL dari browser saat membuka video YouTube (tidak perlu login)',
+                                                              'Copy the URL from the browser while the YouTube video is open (no login needed)')"></span>
+                                                <br>&#8226; <span x-text="t('Pastikan video tidak bersifat private','Make sure the video is not private')"></span>
                                             </p>
                                             <div x-show="q.youtube" class="mt-1">
                                                 <div class="relative" style="padding-bottom:56.25%">
@@ -773,7 +830,7 @@
 
                                 <div x-show="q.type === 'mcq'" class="mcq-options space-y-2">
                                     <div class="flex items-center justify-between">
-                                        <label class="text-xs font-extrabold text-slate-500">Kunci Jawaban:</label>
+                                        <label class="text-xs font-extrabold text-slate-500" x-text="t('Kunci Jawaban:','Answer key:')"></label>
                                         <label class="flex items-center gap-1.5 cursor-pointer">
                                             <input type="checkbox" x-model="q.bonus" @change="onBonusToggle(i)" class="w-4 h-4 text-purple-600 border-slate-300 rounded">
                                             <span class="text-xs font-extrabold" :class="q.bonus ? 'text-purple-700' : 'text-slate-400'">Bonus</span>
@@ -791,7 +848,8 @@
                                 </div>
 
                                 <div x-show="q.type === 'essay'" class="text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
-                                    <i class="fas fa-pencil-alt mr-1"></i>Siswa mengetik jawaban (wajib) + menggambar di atas PDF (opsional)
+                                    <i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Siswa mengetik jawaban (wajib) + menggambar di atas PDF (opsional)',
+                                                                                            'Students type their answer (required) + draw on the PDF (optional)')"></span>
                                 </div>
                             </div>
                         </template>
@@ -824,15 +882,15 @@
                         <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
                             <i class="fas fa-shield-alt text-primary-600"></i>Anti-Cheat
                         </h2>
-                        <span class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">Selalu Aktif</span>
+                        <span class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200" x-text="t('Selalu Aktif','Always on')"></span>
                     </div>
                     <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-3 text-xs sm:text-sm">
                         <label class="flex items-center gap-2">
-                            <span class="font-bold text-slate-600">Penalti per Pelanggaran:</span>
+                            <span class="font-bold text-slate-600" x-text="t('Penalti per Pelanggaran:','Penalty per violation:')"></span>
                             <input type="number" name="penalty_per_violation" x-model="penalty_per_violation" min="1" max="50" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
                         </label>
                         <label class="flex items-center gap-2">
-                            <span class="font-bold text-slate-600">Maks Pelanggaran:</span>
+                            <span class="font-bold text-slate-600" x-text="t('Maks Pelanggaran:','Max violations:')"></span>
                             <input type="number" name="max_violations" x-model="max_violations" min="1" max="20" class="w-16 text-center border-2 border-slate-200 rounded-lg px-2 py-1 font-bold">
                         </label>
                     </div>
@@ -840,32 +898,32 @@
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="fullscreen_required ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="fullscreen_required" name="fullscreen_required" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Wajib Fullscreen</span>
+                            <span class="font-bold text-slate-700" x-text="t('Wajib Fullscreen','Fullscreen required')"></span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="watermark_name ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="watermark_name" name="watermark_name" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Watermark Nama</span>
+                            <span class="font-bold text-slate-700" x-text="t('Watermark Nama','Name watermark')"></span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="block_copy_paste ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="block_copy_paste" name="block_copy_paste" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Blokir Copy-Paste</span>
+                            <span class="font-bold text-slate-700" x-text="t('Blokir Copy-Paste','Block copy-paste')"></span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="block_right_click ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="block_right_click" name="block_right_click" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Blokir Klik Kanan</span>
+                            <span class="font-bold text-slate-700" x-text="t('Blokir Klik Kanan','Block right-click')"></span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="auto_submit_on_max ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="auto_submit_on_max" name="auto_submit_on_max" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Auto-Submit</span>
+                            <span class="font-bold text-slate-700" x-text="t('Auto-Submit','Auto-submit')"></span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="allow_calculator ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="allow_calculator" name="allow_calculator" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Kalkulator Ilmiah</span>
+                            <span class="font-bold text-slate-700" x-text="t('Kalkulator Ilmiah','Scientific calculator')"></span>
                         </label>
                         <label 
                     </div>
@@ -874,18 +932,18 @@
                 <!-- Pengaturan Soal -->
                 <div class="card p-5" x-data="{ randomize_questions: true, randomize_options: true }">
                     <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2 mb-4">
-                        <i class="fas fa-random text-emerald-600"></i>Pengaturan Soal
+                        <i class="fas fa-random text-emerald-600"></i><span x-text="t('Pengaturan Soal','Question settings')"></span>
                     </h2>
                     <div class="flex flex-wrap gap-3 text-sm">
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="randomize_questions ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="randomize_questions" name="randomize_questions" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Acak Urutan Soal</span>
+                            <span class="font-bold text-slate-700" x-text="t('Acak Urutan Soal','Shuffle question order')"></span>
                         </label>
                         <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
                                :class="randomize_options ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
                             <input type="checkbox" x-model="randomize_options" name="randomize_options" value="true" class="w-4 h-4 text-primary-600 rounded">
-                            <span class="font-bold text-slate-700">Acak Urutan Opsi</span>
+                            <span class="font-bold text-slate-700" x-text="t('Acak Urutan Opsi','Shuffle option order')"></span>
                         </label>
                     </div>
                 </div>
@@ -893,13 +951,13 @@
                 <div class="flex flex-col sm:flex-row justify-end gap-2">
                     <button type="submit" name="action" value="save_active"
                             class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-3 rounded-xl font-extrabold text-sm transition flex items-center gap-2"
-                            title="Simpan sebagai draft — siswa belum bisa lihat">
-                        <i class="fas fa-save"></i>Simpan
+                            :title="t('Simpan sebagai draf — siswa belum bisa melihatnya','Save as a draft — students cannot see it yet')">
+                        <i class="fas fa-save"></i><span x-text="t('Simpan','Save')"></span>
                     </button>
                     <button type="submit" name="action" value="publish"
                             class="bg-gradient-to-r from-emerald-600 to-emerald-500 text-white px-5 py-3 rounded-xl font-extrabold shadow-lg hover:from-emerald-700 hover:to-emerald-600 transition flex items-center gap-2"
-                            title="Publikasikan sekarang — siswa langsung bisa kerjakan">
-                        <i class="fas fa-paper-plane"></i>Publish &amp; Kirim ke Kelas
+                            :title="t('Publikasikan sekarang — siswa langsung bisa mengerjakannya','Publish now — students can start immediately')">
+                        <i class="fas fa-paper-plane"></i><span x-text="t('Publish &amp; Kirim ke Kelas','Publish &amp; Send to Classes')"></span>
                     </button>
                 </div>
             </form>
@@ -908,7 +966,7 @@
         <div class="lg:col-span-1">
             {% if exam and exam.id %}
             <div class="card p-6 space-y-4 sticky top-20">
-                <h3 class="font-extrabold text-slate-800">Aksi</h3>
+                <h3 class="font-extrabold text-slate-800" x-text="t('Aksi','Actions')"></h3>
                 <div class="space-y-2">
                     <a href="{{ url_for('teacher.preview_exam', exam_id=exam.id) }}"
                        class="block text-sm bg-primary-600 text-white px-3 py-2.5 rounded-xl hover:bg-primary-700 font-extrabold text-center shadow-lg transition">
@@ -916,19 +974,19 @@
                     </a>
                     <a href="{{ url_for('teacher.bubble_sheet', exam_id=exam.id) }}"
                        class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-print mr-1"></i>Cetak LJK
+                        <i class="fas fa-print mr-1"></i><span x-text="t('Cetak LJK','Print answer sheet')"></span>
                     </a>
                     <a href="{{ url_for('teacher.results', exam_id=exam.id) }}"
                        class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-chart-bar mr-1"></i>Hasil
+                        <i class="fas fa-chart-bar mr-1"></i><span x-text="t('Hasil','Results')"></span>
                     </a>
                     <a href="{{ url_for('teacher.upload_exam_pdf', exam_id=exam.id) }}"
                        class="block text-sm font-extrabold text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-xl transition">
-                        <i class="fas fa-upload mr-1"></i>{{ 'Ganti PDF' if exam.pdf_url else 'Upload PDF' }}
+                        <i class="fas fa-upload mr-1"></i><span x-text="t('{{ 'Ganti PDF' if exam.pdf_url else 'Unggah PDF' }}','{{ 'Replace PDF' if exam.pdf_url else 'Upload PDF' }}')"></span>
                     </a>
                     <button type="button" onclick="deleteExam('{{ exam.id }}')"
                             class="block w-full text-sm font-extrabold text-red-600 hover:bg-red-50 px-3 py-2 rounded-xl text-left transition">
-                        <i class="fas fa-trash mr-1"></i>Hapus
+                        <i class="fas fa-trash mr-1"></i><span x-text="t('Hapus','Delete')"></span>
                     </button>
                 </div>
             </div>
@@ -1046,7 +1104,7 @@ function prepareSubmit() {
 }
 
 function deleteExam(id) {
-    if (confirm('Hapus ujian ini?')) {
+    if (confirm(sgT('Hapus ujian ini?', 'Delete this exam?'))) {
         fetch('/teacher/exams/' + id, {method:'DELETE'}).then(() => window.location.href='/teacher/exams');
     }
 }
