@@ -220,6 +220,104 @@ def _recalculate_scores(exam_id):
         list(pool.map(_update_one, updates))
 
 
+# Answer-key values that mean "this question is not scored automatically". The
+# app writes `essay`; the variants are here because older rows carry them.
+_NON_MCQ_KEY = {"", "essay", "essay_text", "essay_canvas", "essay_canvas_page"}
+
+
+def _as_dict(value) -> dict:
+    """A jsonb column can come back as a JSON *string*.
+
+    `exams.answer_key` is written with `json.dumps(...)`, so the column holds a
+    JSON string inside jsonb and PostgREST returns it as one. Every reader in this
+    file guards for that separately; this names it once.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value) -> list:
+    """The list-valued counterpart of :func:`_as_dict` (`pdf_page_urls`)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return []
+    return value if isinstance(value, list) else []
+
+
+def _normalise_exam_json(exam_data: dict) -> dict:
+    """Parse the jsonb columns the exam builder reads before it sees them.
+
+    `question_pages` is written with `json.dumps`, so it arrives as a JSON
+    *string*; the builder does `question_pages[i]` for each question, and
+    indexing a string by `'0'`..`'9'` returns a **character**. The exam-edit form
+    therefore showed `{`, `"`, `0`, `"` … in the page fields — five pages of
+    nonsense that the teacher could not even recognise as wrong, and that saving
+    wrote back over the real mapping. A page range that has turned into `"{"`
+    parses to no pages at all, which silently stops the student's paper from
+    turning.
+    """
+    for field in ("question_types", "answer_key", "question_weights", "question_pages",
+                  "question_audio", "question_canvas", "question_texts"):
+        if isinstance(exam_data.get(field), str):
+            exam_data[field] = _as_dict(exam_data.get(field))
+    if isinstance(exam_data.get("pdf_page_urls"), str):
+        exam_data["pdf_page_urls"] = _as_list(exam_data.get("pdf_page_urls"))
+    return exam_data
+
+
+def _needs_answer_key(exam: dict) -> bool:
+    """Is the dashboard's warning actually true of this exam?
+
+    The card says the students' scores will be 0. That is what happens when an
+    exam has MCQ questions and no answer to score them with: `student.py` builds
+    `mcq_count` from the *key*, so with no key the whole MCQ half scores 0 however
+    well the student answered. So the test is the same one the scoring path makes
+    — for each question the exam calls MCQ, is there an answer in the key?
+
+    It used to be `if not exam.get("answer_key")`, read off a row that never
+    carried the column. Commit fb9aef2 trimmed this route's `select("*")` to an
+    explicit column list and left `answer_key` out, so every exam with an MCQ
+    question was reported as missing its key — permanently, and nothing a teacher
+    did could clear it.
+
+    A *partially* filled key is deliberately not flagged: it does not produce 0,
+    it produces an inflated score (the denominator is the number of answers the
+    key has), which is a different defect and not what this card claims.
+    """
+    qtypes = _as_dict(exam.get("question_types"))
+    mcq = [index for index, kind in qtypes.items() if kind == "mcq"]
+    if not mcq:
+        return False                     # nothing here is scored automatically
+
+    key = _as_dict(exam.get("answer_key"))
+    for index in mcq:
+        value = key.get(str(index), key.get(index))
+        if isinstance(value, list) and any(v not in (None, "") for v in value):
+            return False                 # a multi-answer MCQ is still an answer
+        if isinstance(value, str) and value.strip() and value.strip() not in _NON_MCQ_KEY:
+            return False                 # a choice, or "bonus"
+    return True
+
+
+def _invalidate_teacher_dashboard() -> None:
+    """Drop this teacher's cached dashboard row.
+
+    The dashboard caches for 20 seconds, so without this a teacher saves an
+    answer key, comes back, and sees the page exactly as it was — which is what
+    "I filled it in and nothing changed" looked like from the outside.
+    """
+    try:
+        cache_delete(f"t_dash:{g.user_id}")
+    except Exception:
+        pass
+
+
 @teacher_bp.route("/dashboard")
 @teacher_or_admin_required
 def dashboard():
@@ -230,7 +328,10 @@ def dashboard():
     if cached:
         return render_template("teacher/dashboard.html", **cached)
 
-    res = supabase.table("exams").select("id,title,subject,question_types,total_questions,status,is_published,created_at,start_at,question_canvas,question_audio").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
+    # `answer_key` is here because the "no answer key" card below reads it:
+    # leaving a column out of the list while the code below still reads it made
+    # that warning permanent. See _needs_answer_key().
+    res = supabase.table("exams").select("id,title,subject,question_types,answer_key,total_questions,status,is_published,created_at,start_at,question_canvas,question_audio").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
     exams = res.data or []
 
     exam_ids = [e["id"] for e in exams]
@@ -285,21 +386,9 @@ def dashboard():
                 except:
                     pass
 
-        # Exams with missing answer keys and MCQ
-        exams_no_key = []
-        for e in exams:
-            ak = e.get("answer_key")
-            if not ak or ak == "{}" or ak == {}:
-                qt = e.get("question_types")
-                if isinstance(qt, str):
-                    try: qt = json.loads(qt)
-                    except: qt = {}
-                if qt:
-                    has_mcq = any(v == "mcq" for v in (qt.values() if isinstance(qt, dict) else []))
-                    if has_mcq:
-                        exams_no_key.append(e)
-                    elif not qt:
-                        exams_no_key.append(e)
+        # Exams the warning on the card is true about: MCQ questions, no answer
+        # set to score them with, so the students' MCQ score is 0.
+        exams_no_key = [e for e in exams if _needs_answer_key(e)]
 
     # ── Class Analytics ──
     # Per-exam performance breakdown (sorted by avg — hardest first)
@@ -398,7 +487,7 @@ def exam_parse_pdf():
 
         # Step 1: PDF → Clean Markdown
         try:
-            from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html, generate_answer_key, is_scanned_pdf
+            from app.services.pdf_parser import pdf_to_markdown, classify_with_ai, classify_heuristic, generate_preview_html, generate_answer_key, is_scanned_pdf, question_pages
         except ImportError:
             return jsonify({"error": "Library tidak tersedia. Jalankan: pip install pymupdf"}), 500
 
@@ -453,6 +542,13 @@ def exam_parse_pdf():
 
             if not questions:
                 questions = classify_heuristic(parsed["markdown"])
+
+            # Step 2b: the page each question is printed on. The document was
+            # already split into pages before classification — the teacher asking
+            # for it by hand was asking for an answer the parser had thrown away.
+            # Every question this cannot locate simply keeps no page, and the
+            # builder's field stays empty for the teacher to fill as before.
+            question_pages(questions, parsed.get("pages") or [])
 
             parsed["questions"] = questions
             parsed["mcq_count"] = sum(1 for q in questions if q.get("type") == "mcq")
@@ -828,6 +924,9 @@ def exam_form():
         flash("✅ Ujian berhasil dipublikasikan! Siswa sekarang bisa mengerjakan.", "success")
     else:
         flash("✅ Ujian berhasil disimpan.", "success")
+    # A new exam is a new row on the dashboard, including its own "no answer key"
+    # card if it has MCQ questions.
+    _invalidate_teacher_dashboard()
     return redirect("/teacher/exams" if action == "publish" else f"/teacher/exams/{exam_id}")
 
 
@@ -844,9 +943,10 @@ def exam_detail(exam_id):
         return err
     if request.method == "DELETE":
         supabase.table("exams").delete().eq("id", exam_id).execute()
+        _invalidate_teacher_dashboard()
         return jsonify({"success": True})
     if request.method == "GET":
-        exam_data = exam_row
+        exam_data = _normalise_exam_json(exam_row)
         exam_data.setdefault("question_weights", {})
         sid = g.get("user_school_id")
         subjects = []
@@ -995,6 +1095,9 @@ def exam_detail(exam_id):
 
     _recalculate_scores(exam_id)
     log_activity("update", "exam", exam_id, new_data={"title": title, "status": data.get("status")}, user_id=g.user_id)
+    # Everything the dashboard shows about this exam just changed — its key, its
+    # question types, its status — and that page is cached for 20 seconds.
+    _invalidate_teacher_dashboard()
     return redirect("/teacher/exams" if action in ("publish", "save_active") else f"/teacher/exams/{exam_id}")
 
 
@@ -1108,6 +1211,7 @@ def toggle_exam_status(exam_id):
         return err
     new_status = "draft" if exam["status"] == "active" else "active"
     supabase.table("exams").update({"status": new_status}).eq("id", exam_id).execute()
+    _invalidate_teacher_dashboard()
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
         return jsonify({"success": True, "status": new_status})
     return redirect(request.referrer or "/teacher/exams")
@@ -1127,6 +1231,7 @@ def toggle_exam_visibility(exam_id):
         return err
     new_val = not exam["is_published"]
     supabase.table("exams").update({"is_published": new_val}).eq("id", exam_id).execute()
+    _invalidate_teacher_dashboard()
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
         return jsonify({"success": True, "is_published": new_val})
     return redirect(request.referrer or "/teacher/exams")
@@ -1148,6 +1253,7 @@ def delete_exam(exam_id):
     supabase.table("analytics_cache").delete().eq("exam_id", exam_id).execute()
     supabase.table("submissions").delete().eq("exam_id", exam_id).execute()
     supabase.table("exams").delete().eq("id", exam_id).execute()
+    _invalidate_teacher_dashboard()
     log_activity("delete", "exam", exam_id, user_id=g.user_id)
     if request.headers.get("Accept", "") == "application/json" or request.is_json:
         return jsonify({"success": True})
@@ -1217,6 +1323,8 @@ def answer_keys(exam_id):
             _recalculate_scores(exam_id)
         except Exception:
             pass
+        # The dashboard's warning is about this key, and that page is cached.
+        _invalidate_teacher_dashboard()
         flash("Kunci jawaban berhasil disimpan & nilai diperbarui!", "success")
         return redirect(f"/teacher/exams/{exam_id}/answer-keys")
 
@@ -1855,7 +1963,7 @@ def publish_scores(exam_id):
         .eq("exam_id", exam_id) \
         .execute()
     # Invalidate teacher dashboard cache
-    cache_delete(f"t_dash:{g.user_id}")
+    _invalidate_teacher_dashboard()
     return redirect("/teacher/results?exam_id=" + exam_id)
 
 

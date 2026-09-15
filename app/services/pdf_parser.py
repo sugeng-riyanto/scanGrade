@@ -356,6 +356,46 @@ def _simple_parse(text: str) -> List[Dict]:
     return questions
 
 
+_WS_RUN = re.compile(r"\s+")
+
+
+def _flat(text: str) -> str:
+    """Whitespace-insensitive form of a page or a question, for matching."""
+    return _WS_RUN.sub(" ", text or "").strip().lower()
+
+
+def question_pages(questions: List[Dict], pages_md: List[str]) -> List[Dict]:
+    """Give every question the PDF page it starts on, in place, and return them.
+
+    The page is *derivable*, and it used to be typed: the exam builder asked the
+    teacher for a range per question ("1-3"), the student's paper did not move when
+    they switched question unless that field had been filled, and the parser that
+    had already split the document into pages threw that structure away — the
+    classification ran on the joined markdown, so the page boundaries were gone by
+    the time a question existed.
+
+    A question is located by its own opening text: the first page whose markdown
+    contains it wins, because a question that runs across a page break must at
+    least start where it is first printed. A question whose text cannot be found
+    keeps no page at all, which is the honest answer — the teacher's field stays
+    empty and the student pages by hand, exactly as before.
+    """
+    flat_pages = [_flat(p) for p in (pages_md or [])]
+    for q in questions or []:
+        needle = _flat(q.get("full_text") or q.get("text") or "")
+        if not needle:
+            continue
+        # Matched on the opening rather than all of it: `text` is truncated by the
+        # classifier, and the tail of a long question often continues onto the
+        # next page — where the whole string would not be found at all.
+        probe = needle[:120]
+        for idx, page in enumerate(flat_pages):
+            if probe in page:
+                q["page"] = idx + 1
+                break
+    return questions
+
+
 def _heuristic_type(text: str, total_q: int = None) -> str:
     score = 0
     if re.search(r'\([a-fA-F]\)', text): score += 4
