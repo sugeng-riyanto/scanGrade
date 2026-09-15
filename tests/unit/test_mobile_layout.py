@@ -8,9 +8,10 @@ with a thumb.
 
 Four rules, each one a defect that was measured rather than imagined:
 
-1. **A legibility floor.** 9-11px classes render at >= 12px because base.html
-   says so, in one place, instead of 546 call sites being edited. A size below
-   the floor must be listed here with the reason it is exempt.
+1. **A legibility floor.** 9-11px classes render at >= 12px because
+   app/static/css/theme.css says so, in one place, instead of 546 call sites
+   being edited. A size below the floor must be listed here with the reason it
+   is exempt.
 2. **Wide tables scroll.** A 5-8 column table in a card that clips overflow
    hides the score and the action column off-screen with no way to reach them.
    That was true of 27 of the 58 tables in the app.
@@ -30,9 +31,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = ROOT / "app" / "templates"
-BASE = TEMPLATES / "base.html"
 DEMO = TEMPLATES / "demo.html"
-SOURCE = BASE.read_text(encoding="utf-8")
+# The floor rules were a `<style>` block in base.html until they moved into the
+# stylesheet base.html links. Reading the file base.html points at, rather than
+# the template, is what keeps the check honest across that move: a re-inlined
+# block would leave floor_rules() reading an empty file and failing there.
+THEME_CSS = ROOT / "app" / "static" / "css" / "theme.css"
 
 
 def app_templates():
@@ -45,8 +49,8 @@ COMMENT = re.compile(r"<!--.*?-->|/\*.*?\*/", re.S)
 def rendered(path):
     """The template with comments blanked out — a comment paints no text.
 
-    base.html documents the floor by naming the classes it does not floor, so a
-    naive scan reads its own explanation as an offence. Comments are replaced by
+    Comments that mention a size, or that name the classes the floor does not
+    lift, are read by a naive scan as offences. They are replaced by
     the same number of newlines they contained, which keeps every offset and
     line number valid for the code around them — slicing positions out of a
     comment-stripped string while reading the raw one is how the first version of
@@ -72,13 +76,16 @@ BELOW_FLOOR_EXEMPT = {
 
 
 def floor_rules():
-    """{px size: replacement font-size} as base.html declares them."""
+    """{px size: replacement font-size} as the stylesheet declares them."""
+    assert THEME_CSS.is_file(), (
+        f"{THEME_CSS.relative_to(ROOT)} is missing — the floor lives there now")
     return {float(px): size for px, size in
-            re.findall(r"\.text-\\\[(\d+)px\\\]\s*\{\s*font-size:\s*([\d.]+)px", SOURCE)}
+            re.findall(r"\.text-\\\[(\d+)px\\\]\s*\{\s*font-size:\s*([\d.]+)px",
+                       THEME_CSS.read_text(encoding="utf-8"))}
 
 
 class TestTheLegibilityFloor:
-    def test_base_html_declares_the_floor(self):
+    def test_the_stylesheet_declares_the_floor(self):
         rules = floor_rules()
         for px in (6, 7, 8, 9, 10, 11):
             assert px in rules, (
@@ -103,7 +110,7 @@ class TestTheLegibilityFloor:
         assert not offenders, (
             "these templates paint text below the floor with no exemption:\n  "
             + "\n  ".join(offenders[:12])
-            + "\n\nEither raise the size, add a floor rule in base.html, or add the "
+            + "\n\nEither raise the size, add a floor rule in theme.css, or add the "
             "file to BELOW_FLOOR_EXEMPT with the reason it is not a defect."
         )
 

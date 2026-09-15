@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ─── ScanGrade — the readability gate ────────────────────────────────────────
 #
-# Runs two static checks and exits non-zero if either would ship a page nobody
-# can read:
+# Runs three static checks and exits non-zero if any would ship a page nobody
+# can read — or cost every page for no reason:
 #
 #   tests/unit/test_dark_theme_contrast.py
 #     a template, or a colour a template paints, that is unreadable — in dark
@@ -16,8 +16,14 @@
 #     ancestor's styling: white text on a white box, no error anywhere. It also
 #     catches a stale tailwind.css, which is committed rather than built here.
 #
-# Both belong in this gate because both fail the same way — invisibly, with the
-# page answering 200 and the other theme looking fine.
+#   tests/unit/test_theme_stylesheet.py
+#     the app's own stylesheet put back *inside* base.html as a <style> block,
+#     where it cannot be cached and rides in every page's HTML — or linked
+#     before tailwind.css, which silently stops the dark remap from winning the
+#     cascade.
+#
+# All three belong in this gate because they fail the same way — invisibly, with
+# the page answering 200 and the other theme looking fine.
 #
 # It exists as a script rather than a bare pytest line because two places run it
 # and they must run the *same* thing: the pre-commit hook (deploy/git-hooks/) and
@@ -25,9 +31,9 @@
 # the app is reloaded). Two copies of "how the gate runs" is how one of them
 # quietly stops running.
 #
-# The checks are static — they read the templates and parse base.html's
-# stylesheet. No database, no network, no running app, so this is safe to run
-# anywhere and takes a couple of seconds.
+# The checks are static — they read the templates and parse the stylesheets.
+# No database, no network, no running app, so this is safe to run anywhere and
+# takes a couple of seconds.
 #
 # Usage:  bash deploy/theme_gate.sh
 # ─────────────────────────────────────────────────────────────────────────────
@@ -35,7 +41,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py"
 
 for check in $TESTS; do
   if [ ! -f "$REPO/$check" ]; then
@@ -69,7 +75,7 @@ OUTPUT=$("$PY" -m pytest $TESTS -q -p no:cacheprovider --no-header 2>&1)
 RC=$?
 
 if [ "$RC" -eq 0 ]; then
-  echo "theme gate: OK — readable in both themes, and every utility a template names is compiled"
+  echo "theme gate: OK — readable in both themes, every named utility is compiled, and the stylesheet stays a cached file"
   exit 0
 fi
 
@@ -87,13 +93,18 @@ theme gate: FAILED — this release would ship an invisible or unreadable elemen
 The check names every offender, and the fix depends on which rule failed:
 
   in dark mode — a light utility with no treatment:
-  * add the utility to the dark remap in app/templates/base.html, or
+  * add the utility to the dark remap in app/static/css/theme.css, or
   * give the element an explicit dark: variant, or
   * declare a new standalone page (see STANDALONE_PAGES in the check file).
 
   in light mode — a tint and the text painted on it:
-  * add the pair to the light-mode block in app/templates/base.html; the rule
+  * add the pair to the light-mode block in app/static/css/theme.css; the rule
     names both classes, so the tint stays as designed and only the accent moves.
+
+  the stylesheet is back inside base.html, or linked out of order:
+  * move the rules into app/static/css/theme.css and keep its <link> after
+    tailwind.css — an inline block is re-sent on every page and cannot be
+    cached, and the wrong order loses the dark remap with no error.
 
   a utility that is named but never generated:
   * run `npm run css:build` if the committed stylesheet is stale; or

@@ -243,6 +243,14 @@ def create_app(env=None):
         return school_features(sid) if sid else {}
     app.jinja_env.globals["get_school_features"] = get_school_features
 
+    # Stylesheet URLs carry a content hash. nginx serves /static/ with
+    # `immutable, max-age=31536000`, which is right for a phone on a weak
+    # signal — but a stylesheet that keeps its URL is then never re-fetched, so
+    # an edit to it would reach only browsers that had never loaded it. See
+    # app/utils/asset_version.py.
+    from app.utils.asset_version import asset_v
+    app.jinja_env.globals["asset_v"] = asset_v
+
     @app.template_global()
     def school_favicon(school_info=None):
         """Generate a simple SVG favicon from school initials or default."""
