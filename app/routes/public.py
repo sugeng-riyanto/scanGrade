@@ -1,7 +1,8 @@
-"""Public-facing routes — landing, pricing, demo request."""
+"""Public-facing routes — landing, pricing, demo request, capacity evidence."""
 
 from datetime import datetime, timezone
-from flask import Blueprint, render_template, request, jsonify, flash, redirect
+from flask import (Blueprint, abort, jsonify, render_template, request,
+                   send_file)
 from app.utils.auth import get_supabase
 from app.utils.logger import get_logger
 
@@ -54,6 +55,40 @@ def demo_request():
     except Exception as e:
         logger.warning("Failed to save demo request: %s", e)
         return jsonify({"success": True, "message": "Terima kasih! Kami akan menghubungi Anda."})
+
+
+@public_bp.route("/capacity")
+def capacity():
+    """The measured capacity of this deployment, read from the committed evidence.
+
+    Deliberately public and deliberately not a marketing page: the figures, their
+    dates and their configuration are rendered from `docs/measurements/` by
+    `app/services/capacity_service.py`, the same reader
+    `tests/unit/test_landing_claims.py` holds the landing page to. A school can
+    check the number against the file it came from, and the file is downloadable
+    from this page.
+    """
+    from app.services.capacity_service import report
+
+    return render_template("public/capacity.html", cap=report())
+
+
+@public_bp.route("/capacity/evidence/<name>")
+def capacity_evidence(name):
+    """One committed artifact, as text.
+
+    The whitelist is the report's own file list, so the only files reachable here
+    are the ones the page displays. Served as ``text/plain`` on purpose: an
+    artifact is evidence to read, not a document to execute in a visitor's
+    browser.
+    """
+    from app.services.capacity_service import artifact_path
+
+    path = artifact_path(name)
+    if path is None:
+        abort(404)
+    return send_file(path, mimetype="text/plain", as_attachment=False,
+                     download_name=path.name)
 
 
 @public_bp.route("/privacy")

@@ -36,6 +36,7 @@ import re
 import sys
 import time
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -282,6 +283,12 @@ def summary(r, wall, n_launched):
     transport = sum(r.errors.values())
     bad = rate_limited + server_err + transport
     return {
+        # The date the run happened, so the artifact can be dated by itself. The
+        # evidence page falls back to this file's git commit date when it is absent
+        # (`rung-050.json` predates the field) and says "date not recorded" when
+        # neither exists — it must never fall back to the file's mtime, because a
+        # fresh clone stamps every file with the checkout time.
+        "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sessions_launched": n_launched,
         "logins_ok": r.login_ok,
         "logins_failed": r.login_failed,

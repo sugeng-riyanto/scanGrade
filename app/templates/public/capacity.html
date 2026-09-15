@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}Capacity Status - ScanGrade{% endblock %}
+{% block page_title %}Capacity Status{% endblock %}
+
+{#
+  One body, rendered on both sides of base.html's authenticated/anonymous split.
+  The copy is bilingual through t('id','en') like the rest of the app, and every
+  figure comes from `cap` — the report `app/services/capacity_service.py` parses
+  out of docs/measurements/. There is no number written into this file: that is
+  what the 46,698 and 74,923 figures on the marketing page got wrong, and why
+  tests/unit/test_capacity_page.py recomputes every figure on this page from the
+  artifacts.
+#}
+{% macro body(standalone) %}
+{# The tab title is the one string a page cannot bind, because <title> lives in
+   <head> — outside any Alpine scope. Rendered in the default language and kept in
+   step by an effect that reads `lang`, the same way the landing page does it. #}
+<div class="max-w-5xl mx-auto space-y-6 px-4 py-6 lg:px-0"
+     x-effect="document.title = t('Status Kapasitas - ScanGrade', 'Capacity Status - ScanGrade')">
+
+    {% if standalone %}
+    <!-- A stranger gets no navbar, so this page carries its own language button.
+         Same convention as the landing page: the label names the language you
+         would switch *to*, read from the same `lang` the content uses. -->
+    <header class="flex items-center justify-between gap-3">
+        <a href="/" class="flex items-center gap-2">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-md">
+                <i class="fas fa-graduation-cap text-white text-xs"></i>
+            </div>
+            <span class="font-extrabold text-surface-800">ScanGrade</span>
+        </a>
+        <div class="flex items-center gap-2">
+            <button @click="setLang(lang === 'id' ? 'en' : 'id')" type="button"
+                    class="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-surface-500 hover:text-primary-600 border border-surface-200 rounded-lg transition"
+                    title="Bahasa / Language">
+                <i class="fas fa-globe"></i><span x-text="lang === 'id' ? 'EN' : 'ID'"></span>
+            </button>
+            <a href="/" class="px-3 py-2 text-xs font-bold text-surface-500 hover:text-primary-600 transition"
+               x-text="t('Beranda','Home')"></a>
+        </div>
+    </header>
+    {% endif %}
+
+    <!-- What this page is -->
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-100 p-6 lg:p-8">
+        <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-bold">
+            <i class="fas fa-chart-bar"></i>
+            <span x-text="t('Bukti, bukan klaim','Evidence, not a claim')"></span>
+        </span>
+        <h1 class="mt-3 text-2xl lg:text-3xl font-extrabold text-surface-900"
+            x-text="t('Status Kapasitas','Capacity Status')"></h1>
+        <p class="mt-2 text-sm text-surface-600 leading-relaxed"
+           x-text="t('Semua angka di halaman ini dibaca dari berkas pengukuran yang tersimpan di repositori (docs/measurements/), bukan diketik ke dalam templat. Menambah satu berkas pengukuran berarti menambah satu baris di tabel di bawah — tidak ada angka yang perlu disunting di kode.','Every figure here is read from the measurement files committed in the repository (docs/measurements/), not typed into a template. Adding one measurement file adds a row to the table below — no number in the code has to be edited.')"></p>
+        <p class="mt-3 text-xs text-surface-500">
+            <span x-text="t('Pengukuran terakhir','Last measurement')"></span>:
+            <strong class="text-surface-700">{{ cap.measured_at or '—' }}</strong>
+            <span class="mx-1">·</span>
+            <span x-text="t('berkas terbaca','files read')"></span>:
+            <strong class="text-surface-700">{{ cap.count }}</strong>
+        </p>
+    </div>
+
+    <!-- The configuration, then what it carries -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="text-center p-5 bg-white rounded-2xl border border-surface-100 shadow-sm">
+            <div class="text-2xl lg:text-3xl font-extrabold text-blue-600">{{ cap.machine.vcpu }} vCPU</div>
+            <div class="text-xs font-bold text-blue-700 mt-1" x-text="t('Konfigurasi diukur','Measured on')"></div>
+            <div class="text-[11px] text-surface-400 mt-0.5">{{ cap.machine.memory_mb }} MB · {{ cap.machine.workers }} {{ cap.machine.worker_class }}</div>
+        </div>
+        <div class="text-center p-5 bg-white rounded-2xl border border-surface-100 shadow-sm">
+            <div class="text-2xl lg:text-3xl font-extrabold text-emerald-600">{{ cap.comfortable }}</div>
+            <div class="text-xs font-bold text-emerald-700 mt-1" x-text="t('Murid serentak','Concurrent students')"></div>
+            <div class="text-[11px] text-surface-400 mt-0.5">
+                <span x-text="t('paling nyaman','most comfortable')"></span>{% if cap.comfortable_row %}: {{ cap.comfortable_row.error_text }} <span x-text="t('error','errors')"></span>{% endif %}
+            </div>
+        </div>
+        <div class="text-center p-5 bg-white rounded-2xl border border-surface-100 shadow-sm">
+            <div class="text-2xl lg:text-3xl font-extrabold text-amber-600">{{ cap.machine.ceiling_rps }}</div>
+            <div class="text-xs font-bold text-amber-700 mt-1" x-text="t('Akses per detik','Requests per second')"></div>
+            <div class="text-[11px] text-surface-400 mt-0.5" x-text="t('batas CPU, bukan jaringan','a CPU ceiling, not the network')"></div>
+        </div>
+        <div class="text-center p-5 bg-white rounded-2xl border border-surface-100 shadow-sm">
+            <div class="text-2xl lg:text-3xl font-extrabold text-primary-600">0</div>
+            <div class="text-xs font-bold text-primary-700 mt-1" x-text="t('Error server 5xx','Server errors 5xx')"></div>
+            <div class="text-[11px] text-surface-400 mt-0.5" x-text="t('di setiap rung terukur','at every measured rung')"></div>
+        </div>
+    </div>
+
+    <!-- The curve, each row with the file it came from -->
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-100 p-6 lg:p-8">
+        <h2 class="text-lg font-extrabold text-surface-900" x-text="t('Kurva terukur','The measured curve')"></h2>
+        <p class="text-xs text-surface-500 mt-1 leading-relaxed"
+           x-text="t('Yang diukur hanya halaman murid — inilah arti “murid serentak”. p50 adalah rentang antar halaman murid, p95 adalah halaman terburuknya. Bila satu rung diukur lebih dari sekali, angka yang dipakai adalah yang terburuk, bukan yang terbaik.','Only student pages are measured — that is what “concurrent students” means. p50 is the range across the student pages, p95 is the worst of them. Where a rung was measured more than once, the figure shown is the worst of those runs, not the best.')"></p>
+
+        <div class="mt-4 overflow-x-auto">
+            <table id="capacity-curve" class="w-full text-xs min-w-[560px]">
+                <thead>
+                    <tr class="text-slate-500 border-b border-slate-200">
+                        <th class="text-left py-2 font-bold" x-text="t('Murid serentak','Concurrent students')"></th>
+                        <th class="text-right py-2 font-bold" x-text="t('Waktu respon p50','Response p50')"></th>
+                        <th class="text-right py-2 font-bold">p95</th>
+                        <th class="text-right py-2 font-bold" x-text="t('Error','Errors')"></th>
+                        <th class="text-left py-2 pl-4 font-bold" x-text="t('Bukti','Evidence')"></th>
+                    </tr>
+                </thead>
+                <tbody class="text-slate-600">
+                    {% for r in cap.rungs %}
+                    <tr class="border-b border-slate-100 align-top">
+                        <td class="py-2.5 font-bold">{{ r.students }}{% if r.refused %}<sup class="text-amber-600">*</sup>{% endif %}</td>
+                        <td class="text-right py-2.5">{{ r.p50_text }}</td>
+                        <td class="text-right py-2.5">{{ r.p95_text }}</td>
+                        <td class="text-right py-2.5 {% if r.error_rate_pct > 0 %}text-amber-600 font-bold{% else %}text-emerald-600{% endif %}">{{ r.error_text }}</td>
+                        <td class="py-2.5 pl-4">
+                            {% for name in r.artifacts %}
+                            <a href="/capacity/evidence/{{ name }}" target="_blank" rel="noopener"
+                               class="font-mono text-[11px] text-primary-600 hover:text-primary-700 underline decoration-dotted">{{ name }}</a>{% if not loop.last %}<span class="text-surface-300"> · </span>{% endif %}
+                            {% endfor %}
+                            <div class="text-[11px] text-surface-400 mt-0.5">
+                                {% for d in r.dates %}{{ d }}{% if not loop.last %}, {% endif %}{% endfor %}
+                                {% if not r.dates %}<span x-text="t('tanggal tidak tercatat','date not recorded')"></span>{% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not cap.rungs %}
+                    <tr><td colspan="5" class="py-6 text-center text-surface-400"
+                            x-text="t('Belum ada berkas pengukuran yang bisa dibaca di server ini.','No readable measurement file on this server yet.')"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if cap.rungs | selectattr('refused') | list %}
+        <p class="mt-4 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+            <strong>*</strong>
+            <span x-text="t('Pada rung ini sebagian sesi ditolak 429 oleh pembatasan login per-IP di nginx sebelum mencapai aplikasi, jadi angka error di atas adalah laju penolakan itu. Angkanya ada di berkasnya sendiri.','On this rung some sessions were refused 429 by the per-IP login limit at nginx before reaching the application, so the error figure above is that refusal rate. The counts are in the file itself.')"></span>
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- One card per run: what it did, not just what it measured -->
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-100 p-6 lg:p-8">
+        <h2 class="text-lg font-extrabold text-surface-900" x-text="t('Setiap run, apa adanya','Each run, as it happened')"></h2>
+        <p class="text-xs text-surface-500 mt-1 leading-relaxed"
+           x-text="t('Satu akun per sesi, login sungguhan, identitas diverifikasi lewat /auth/me. Kolom “ditolak” berarti sesi yang tidak sampai ke dashboard — angka itu ikut dilaporkan, bukan disembunyikan.','One account per session, real logins, identity confirmed through /auth/me. A “refused” figure is sessions that never reached a dashboard — reported rather than dropped.')"></p>
+
+        <div class="mt-4 space-y-4">
+            {% for m in cap.measurements %}
+            <div class="border border-surface-100 rounded-xl p-4">
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                        <a href="/capacity/evidence/{{ m.name }}" target="_blank" rel="noopener"
+                           class="font-mono text-xs font-bold text-primary-600 hover:text-primary-700 underline decoration-dotted">{{ m.name }}</a>
+                        <div class="text-[11px] text-surface-500 mt-0.5">
+                            <span x-text="t('harness','harness')"></span>: <span class="font-mono">{{ m.tool }}</span>
+                            <span class="mx-1">·</span>
+                            {{ m.at or '—' }}
+                            {% if m.at_source == 'git' %}<span x-text="t('(dari riwayat commit)','(from the commit history)')"></span>{% endif %}
+                            {% if m.at_source == 'unknown' %}<span x-text="t('(tanggal tidak tercatat)','(date not recorded)')"></span>{% endif %}
+                        </div>
+                    </div>
+                    <div class="text-xs font-bold text-surface-700">{{ m.rung }} <span x-text="t('murid','students')"></span></div>
+                </div>
+
+                <dl class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs">
+                    <div><dt class="text-surface-400" x-text="t('Sesi login','Sessions signed in')"></dt><dd class="font-bold text-surface-700">{{ m.logins_ok }}</dd></div>
+                    <div><dt class="text-surface-400" x-text="t('Request','Requests')"></dt><dd class="font-bold text-surface-700">{{ m.requests_total }}</dd></div>
+                    <div><dt class="text-surface-400" x-text="t('Durasi','Duration')"></dt><dd class="font-bold text-surface-700">{{ '%.0f'|format(m.duration_s) }} s</dd></div>
+                    <div><dt class="text-surface-400" x-text="t('Rentang p50','p50 range')"></dt><dd class="font-bold text-surface-700">{{ m.p50_text }}</dd></div>
+                    <div><dt class="text-surface-400" x-text="t('Halaman terburuk p95','Worst page p95')"></dt><dd class="font-bold text-surface-700">{{ m.p95_text }}</dd></div>
+                    <div><dt class="text-surface-400" x-text="t('Error','Errors')"></dt><dd class="font-bold {% if m.error_rate_pct > 0 %}text-amber-600{% else %}text-emerald-600{% endif %}">{{ '%g'|format(m.error_rate_pct) }}%</dd></div>
+                    <div><dt class="text-surface-400" x-text="t('Ditolak 429','Refused 429')"></dt><dd class="font-bold text-surface-700">{{ m.rate_limited_429 }}</dd></div>
+                    <div><dt class="text-surface-400" x-text="t('Error 5xx','5xx errors')"></dt><dd class="font-bold text-surface-700">{{ m.server_errors_5xx }}</dd></div>
+                    {% if m.identity_checked %}
+                    <div><dt class="text-surface-400" x-text="t('Identitas terbukti','Identity confirmed')"></dt><dd class="font-bold text-surface-700">{{ m.identity_ok }}/{{ m.identity_checked }}</dd></div>
+                    {% endif %}
+                    {% if m.logins_failed %}
+                    <div><dt class="text-surface-400" x-text="t('Login tidak sampai dashboard','Logins that never landed')"></dt><dd class="font-bold text-amber-600">{{ m.logins_failed }}</dd></div>
+                    {% endif %}
+                </dl>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- What the deploy itself measures, on every release -->
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-100 p-6 lg:p-8">
+        <h2 class="text-lg font-extrabold text-surface-900" x-text="t('Uji beban otomatis setiap rilis','Automatic load test on every release')"></h2>
+        {% if cap.deploy.available %}
+        <p class="text-xs text-surface-500 mt-1 leading-relaxed"
+           x-text="t('Dua gerbang di pipeline deploy mengukur server ini sendiri: satu membandingkan dengan baris yang diiklankan halaman ini, satu lagi dengan rilis terakhir yang lulus. Catatan di bawah datang dari server produksi, bukan dari berkas di repositori.','Two gates in the deploy pipeline measure this server: one compares it with the row this page advertises, the other with the most recent release that passed. The records below come from the production server, not from files in the repository.')"></p>
+
+        {% if cap.deploy.claims %}
+        <div class="mt-4 rounded-xl border border-surface-100 p-4">
+            <div class="text-xs font-bold text-surface-700">
+                <span x-text="t('Gerbang klaim','Claims gate')"></span>
+                <span class="ml-2 px-2 py-0.5 rounded-full text-[11px] {% if cap.deploy.claims.verdict == 'ok' %}bg-emerald-50 text-emerald-700{% else %}bg-amber-50 text-amber-700{% endif %}">{{ cap.deploy.claims.verdict }}</span>
+            </div>
+            <dl class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs">
+                <div><dt class="text-surface-400" x-text="t('Kapan','When')"></dt><dd class="font-bold text-surface-700">{{ cap.deploy.claims.at or '—' }}</dd></div>
+                <div><dt class="text-surface-400" x-text="t('Rung diuji','Rung probed')"></dt><dd class="font-bold text-surface-700">{{ cap.deploy.claims.students or '—' }} <span x-text="t('murid','students')"></span></dd></div>
+                <div><dt class="text-surface-400" x-text="t('p50 terukur','Measured p50')"></dt><dd class="font-bold text-surface-700">{{ '%.0f'|format(cap.deploy.claims.p50_ms or 0) }} ms</dd></div>
+                <div><dt class="text-surface-400" x-text="t('p95 terukur','Measured p95')"></dt><dd class="font-bold text-surface-700">{{ '%.0f'|format(cap.deploy.claims.p95_ms or 0) }} ms</dd></div>
+            </dl>
+            <p class="mt-2 text-[11px] text-surface-400">{{ cap.deploy.claims.reason }}</p>
+        </div>
+        {% endif %}
+
+        {% if cap.deploy.perf %}
+        <div class="mt-4 overflow-x-auto">
+            <table class="w-full text-xs min-w-[520px]">
+                <thead>
+                    <tr class="text-slate-500 border-b border-slate-200">
+                        <th class="text-left py-2 font-bold" x-text="t('Rilis','Release')"></th>
+                        <th class="text-left py-2 font-bold" x-text="t('Kapan','When')"></th>
+                        <th class="text-right py-2 font-bold" x-text="t('Sesi','Sessions')"></th>
+                        <th class="text-right py-2 font-bold" x-text="t('Halaman','Pages')"></th>
+                        <th class="text-right py-2 font-bold">p50</th>
+                        <th class="text-right py-2 font-bold">p95</th>
+                        <th class="text-right py-2 font-bold" x-text="t('Error','Errors')"></th>
+                    </tr>
+                </thead>
+                <tbody class="text-slate-600">
+                    {% for p in cap.deploy.perf %}
+                    <tr class="border-b border-slate-100">
+                        <td class="py-2 font-mono">{{ p.commit or '—' }}</td>
+                        <td class="py-2">{{ p.at or '—' }}</td>
+                        <td class="text-right py-2">{{ p.sessions }}</td>
+                        <td class="text-right py-2">{{ p.endpoints }}</td>
+                        <td class="text-right py-2">{{ '%.0f'|format(p.p50_ms or 0) }} ms</td>
+                        <td class="text-right py-2">{{ '%.0f'|format(p.p95_ms or 0) }} ms</td>
+                        <td class="text-right py-2 {% if p.error_pct and p.error_pct > 0 %}text-amber-600 font-bold{% else %}text-emerald-600{% endif %}">{{ '%g'|format(p.error_pct or 0) }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% else %}
+        <p class="mt-2 text-xs text-surface-500 leading-relaxed"
+           x-text="t('Belum ada catatan gerbang di server ini — mesin pengembangan, atau belum ada rilis yang melewati gerbang sejak pencatatan dimulai. Bagian ini muncul sendiri begitu ada catatan.','No gate record on this server yet — a development machine, or no release has been through the gates since they started recording. This section appears on its own once there is one.')"></p>
+        {% endif %}
+    </div>
+
+    <!-- What these numbers do not say -->
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-100 p-6 lg:p-8">
+        <h2 class="text-lg font-extrabold text-surface-900" x-text="t('Yang tidak dikatakan angka ini','What these figures do not say')"></h2>
+        <ul class="mt-3 space-y-2 text-xs text-surface-600 leading-relaxed list-disc list-inside">
+            <li x-text="t('Ini angka baca. Ujian sungguhan juga mengirim jawaban — gambar kanvas dan teks — yang lebih berat daripada membuka halaman. Karena itu batas nyamannya dijaga konservatif.','These are read figures. A real exam also submits answers — canvas drawings and text — which is heavier than opening a page. The comfortable limit is kept conservative for that reason.')"></li>
+            <li x-text="t('Semua run berasal dari satu jaringan, jadi lonjakan login mengenai batas per-IP di nginx. Sekolah dengan satu alamat NAT akan tampak sama, dan itulah sebabnya ada batas per-akun.','Every run came from one network, so the login burst hits the per-IP limit at nginx. A school behind one NAT looks the same, which is why per-account limits exist.')"></li>
+            <li x-text="t('Harness memberi jeda 1–3 detik per sesi, jadi ini latensi di bawah beban, bukan laju maksimum server. Batas ±20 akses per detik diukur terpisah dengan vmstat di bawah beban 500 sesi.','The harness paces each session with 1–3 second waits, so these are latencies under load and not the maximum rate of the box. The ~20 requests per second ceiling was measured separately with vmstat under a 500-session load.')"></li>
+            <li x-text="t('Ini potret satu malam di satu server, bukan janji. Berkasnya bisa dibuat ulang dengan perintah di docs/measurements/README.md, dan halaman ini ikut berubah begitu berkas barunya di-commit.','This is one evening on one server, not a promise. The files can be regenerated with the commands in docs/measurements/README.md, and this page changes as soon as a new file is committed.')"></li>
+        </ul>
+        <p class="mt-4 text-[11px] text-surface-400 leading-relaxed">
+            <span x-text="t('Berkas mentahnya bisa dibuka dari tautan di tabel di atas, atau dari repositori di','The raw files are downloadable from the links above, or from the repository at')"></span>
+            <span class="font-mono">docs/measurements/</span>
+            <span x-text="t('— termasuk berkas pendukung yang tidak dipakai sebagai baris tabel.','— including the supporting files that are not used as table rows.')"></span>
+        </p>
+        {% if cap.supporting %}
+        <p class="mt-2 text-[11px] text-surface-400">
+            <span x-text="t('Berkas pendukung','Supporting files')"></span>:
+            {% for s in cap.supporting %}<a href="/capacity/evidence/{{ s.name }}" target="_blank" rel="noopener" class="font-mono text-primary-600 hover:text-primary-700 underline decoration-dotted">{{ s.name }}</a>{% if not loop.last %}<span class="text-surface-300"> · </span>{% endif %}{% endfor %}
+        </p>
+        {% endif %}
+    </div>
+
+</div>
+{% endmacro %}
+
+{% block content %}{{ body(false) }}{% endblock %}
+{% block content_noauth %}{{ body(true) }}{% endblock %}
