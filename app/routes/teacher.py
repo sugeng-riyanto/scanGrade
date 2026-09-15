@@ -15,6 +15,8 @@ from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
+from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
+                                 school_subjects, teacher_assignments_for)
 
 logger = logging.getLogger(__name__)
 
@@ -332,56 +334,25 @@ def dashboard():
         student_improvement.append({"student_id": sid, "first": sc["first"], "latest": sc["latest"], "diff": round(diff, 1)})
     student_improvement.sort(key=lambda x: x["diff"], reverse=True)
 
-    # Get teacher's school_id (column may not exist in older schema)
-    school_id = None
-    try:
-        profile = supabase.table("profiles").select("school_id").eq("id", g.user_id).single().execute().data or {}
-        school_id = profile.get("school_id")
-    except Exception:
-        pass
+    # The session carries the school, so no profile round-trip here.
+    school_id = g.get("user_school_id")
 
-    # Get assignments and available classes/subjects (tables may not exist)
-    assignments = []
-    classes = []
-    subjects = []
-    if school_id:
-        try:
-            assignments = supabase.table("teacher_assignments") \
-                .select("*, classes(id, name, grade_level), subjects(id, name, code)") \
-                .eq("teacher_id", g.user_id) \
-                .eq("school_id", school_id) \
-                .execute().data or []
-        except Exception:
-            pass
-        try:
-            classes = supabase.table("classes").select("id, name, grade_level") \
-                .eq("school_id", school_id) \
-                .order("name").execute().data or []
-        except Exception:
-            pass
-        try:
-            subjects = supabase.table("subjects").select("id, name, code") \
-                .eq("school_id", school_id) \
-                .eq("is_active", True) \
-                .order("name").execute().data or []
-        except Exception:
-            pass
+    # Assignments, classes and subjects are the same on every dashboard load and
+    # the last two are identical for every teacher in the school, so they come
+    # from the shared cache. A teacher who assigns a class invalidates their own
+    # list at the write, so this is not a delay they can observe.
+    classes = school_classes(school_id)
+    subjects = school_subjects(school_id)
+    assignments = teacher_assignments_for(g.user_id, school_id)
 
     user_name = g.user_name or g.user_email or ""
-    # School info for header
-    school_info = {}
-    if school_id:
-        try:
-            school_info = supabase.table("schools").select("name, npsn, logo_url").eq("id", school_id).single().execute().data or {}
-        except Exception:
-            pass
     avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else "-"
 
     template_data = {
         "exams": exams, "total_students": total_students,
         "avg_score": avg_score, "all_scores": all_scores, "user_name": user_name,
         "assignments": assignments, "classes": classes, "subjects": subjects,
-        "school_info": school_info, "exams_no_key": exams_no_key,
+        "exams_no_key": exams_no_key,
         "pending_grading": pending_grading, "upcoming_exams": upcoming_exams,
         "grading_progress": grading_progress,
         "exam_stats": exam_stats[:6],
@@ -2236,12 +2207,7 @@ def teacher_update_profile():
 @teacher_or_admin_required
 def assignments():
     supabase = get_supabase()
-    school_id = None
-    try:
-        profile = supabase.table("profiles").select("school_id").eq("id", g.user_id).single().execute().data or {}
-        school_id = profile.get("school_id")
-    except Exception:
-        pass
+    school_id = g.get("user_school_id")
     if not school_id:
         if request.is_json or request.headers.get("HX-Request"):
             return jsonify({"error": "School not found"}), 400
@@ -2269,6 +2235,9 @@ def assignments():
                 "school_id": school_id,
             }, on_conflict="teacher_id,class_id,subject_id").execute()
             aid = res.data[0]["id"] if res.data else None
+            # The teacher's own list and the school's subject count are cached;
+            # an assignment the teacher just made must appear immediately.
+            invalidate_teacher_assignments(g.user_id, school_id)
             log_activity("create", "teacher_assignment", aid, new_data={"class_id": class_id, "subject_id": subject_id}, user_id=g.user_id)
             if request.is_json or request.headers.get("HX-Request"):
                 return jsonify({"success": True})
@@ -2278,15 +2247,7 @@ def assignments():
                 return jsonify({"error": str(e)}), 400
             return redirect("/teacher/dashboard")
 
-    try:
-        assignments = supabase.table("teacher_assignments") \
-            .select("*, classes(id, name, grade_level), subjects(id, name, code)") \
-            .eq("teacher_id", g.user_id) \
-            .eq("school_id", school_id) \
-            .execute().data or []
-    except Exception:
-        assignments = []
-    return jsonify(assignments)
+    return jsonify(teacher_assignments_for(g.user_id, school_id))
 
 
 @teacher_bp.route("/assignments/<assignment_id>", methods=["DELETE"])
@@ -2297,6 +2258,7 @@ def delete_assignment(assignment_id):
     supabase = get_supabase()
     try:
         supabase.table("teacher_assignments").delete().eq("id", assignment_id).eq("teacher_id", g.user_id).execute()
+        invalidate_teacher_assignments(g.user_id, g.get("user_school_id"))
         log_activity("delete", "teacher_assignment", assignment_id, user_id=g.user_id)
         return jsonify({"success": True})
     except Exception as e:

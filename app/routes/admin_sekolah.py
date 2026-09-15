@@ -13,6 +13,7 @@ from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
 from app.services.student_import import create_student_account
+from app.utils.req_cache import invalidate_class, invalidate_school
 from app.services.teacher_import import create_teacher_account
 
 def _gen_password(length=12) -> str:
@@ -148,6 +149,8 @@ def profile():
             data["logo_url"] = logo_url
         try:
             supabase.table("schools").update(data).eq("id", sid).execute()
+            # The school row (name, logo, feature flags) is cached school-wide.
+            invalidate_school(sid)
             log_activity("update", "school", sid, new_data=data, user_id=g.user_id)
             flash("Profil sekolah berhasil diperbarui", "success")
         except Exception as e:
@@ -644,6 +647,7 @@ def create_class():
             "teacher_id": wali_id, "school_year_id": year_id, "created_by": g.user_id,
         }).execute()
         cid = res.data[0]["id"] if res.data else None
+        invalidate_school(sid)          # the class list is cached per school
         log_activity("create", "class", cid, new_data={"name": name, "grade_level": grade_level}, user_id=g.user_id)
         flash("Kelas berhasil ditambahkan", "success")
     except Exception as e:
@@ -667,6 +671,8 @@ def edit_class(class_id):
     data["school_year_id"] = year_id if year_id else None
     try:
         supabase.table("classes").update(data).eq("id", class_id).execute()
+        invalidate_class(class_id)
+        invalidate_school(g.get("user_school_id"))
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -680,6 +686,8 @@ def delete_class(class_id):
     try:
         supabase.table("students").update({"class_id": None}).eq("class_id", class_id).execute()
         supabase.table("classes").delete().eq("id", class_id).execute()
+        invalidate_class(class_id)
+        invalidate_school(g.get("user_school_id"))
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -731,6 +739,10 @@ def admin_subject_delete(subject_id):
     try:
         supabase.table("teacher_assignments").delete().eq("subject_id", subject_id).execute()
         supabase.table("subjects").delete().eq("id", subject_id).execute()
+        # Deleting a subject removes its assignments, so the school's subject
+        # count moves too. The per-teacher assignment lists expire on their own
+        # 60 s TTL — their keys name a teacher this route never saw.
+        invalidate_school(g.get("user_school_id"))
         log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
         return jsonify({"success": True})
     except Exception as e:
@@ -794,6 +806,7 @@ def promote():
                 "name": new_name, "grade_level": new_level or src.get("grade_level", ""),
                 "school_id": sid, "school_year_id": year_id,
             }).execute()
+            invalidate_school(sid)
             target_class_id = res.data[0]["id"] if res.data else None
 
         if not target_class_id:

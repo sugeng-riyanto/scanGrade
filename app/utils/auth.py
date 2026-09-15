@@ -116,14 +116,20 @@ def _jwt_expired(token):
 
 
 def _fetch_session(token):
-    """The two Supabase round-trips: validate the token, then read the profile."""
+    """The two Supabase round-trips: validate the token, then read the profile.
+
+    ``class_id`` rides along because almost every student page wants it (the
+    dashboard, the exam list, the whiteboard) and each of them was fetching the
+    same profile row again to get it — three or four extra round-trips per page
+    for a column this query already had in hand.
+    """
     user = get_auth_client().auth.get_user(token)
     meta = user.user.user_metadata or {}
     try:
         pd = (
             get_supabase()
             .table("profiles")
-            .select("role, school_id, status")
+            .select("role, school_id, status, class_id")
             .eq("id", user.user.id)
             .single()
             .execute()
@@ -136,12 +142,16 @@ def _fetch_session(token):
     school_id = pd.get("school_id") or meta.get("school_id")
     if school_id == "None":
         school_id = None
+    class_id = pd.get("class_id") or meta.get("class_id")
+    if class_id in ("None", ""):
+        class_id = None
     return {
         "user_id": user.user.id,
         "email": user.user.email,
         "name": meta.get("full_name", ""),
         "role": _normalize_role(pd.get("role") or meta.get("role", "murid")),
         "school_id": school_id,
+        "class_id": class_id,
         "status": pd.get("status", "active"),
     }
 
@@ -170,6 +180,7 @@ def _apply_session(data, token):
     g.user_name = data.get("name", "")
     g.user_role = data.get("role", "murid")
     g.user_school_id = data.get("school_id")
+    g.user_class_id = data.get("class_id")
     g.user_status = data.get("status", "active")
 
 
@@ -291,12 +302,16 @@ def _refresh_token():
             g.user_role = _normalize_role(pd.get("role", "murid"))
             g.user_school_id = pd.get("school_id") or res.user.user_metadata.get("school_id")
             if g.user_school_id == "None": g.user_school_id = None
+            g.user_class_id = pd.get("class_id")
+            if g.user_class_id in ("None", ""): g.user_class_id = None
             g.user_status = pd.get("status", "active")
         else:
             meta = res.user.user_metadata
             g.user_role = _normalize_role(meta.get("role", "murid"))
             g.user_school_id = meta.get("school_id")
             if g.user_school_id == "None": g.user_school_id = None
+            g.user_class_id = meta.get("class_id")
+            if g.user_class_id == "None": g.user_class_id = None
             g.user_status = "active"
         g._new_access_token = token
         return token

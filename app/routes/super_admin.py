@@ -7,6 +7,7 @@ from flask import Blueprint, render_template, g, request, jsonify, redirect, fla
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
+from app.utils.req_cache import invalidate_school
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
 
@@ -122,6 +123,9 @@ def toggle_school_whiteboard(school_id):
             supabase.table("schools").update({"features": feat}).eq("id", school_id).execute()
         except Exception:
             supabase.table("schools").update({"features": json.dumps(feat)}).eq("id", school_id).execute()
+        # Cached for every page in the school: a toggle that only appeared after
+        # the TTL expired would look like the button did nothing.
+        invalidate_school(school_id)
         return jsonify({"success": True, "enabled": new_val})
     except Exception as e:
         return jsonify({"error": str(e)[:80]}), 500
@@ -133,6 +137,7 @@ def api_suspend_school(school_id):
     supabase = get_supabase()
     supabase.table("schools").update({"status": "suspended"}).eq("id", school_id).execute()
     supabase.table("profiles").update({"status": "suspended"}).eq("school_id", school_id).execute()
+    invalidate_school(school_id)
     return jsonify({"success": True})
 
 
@@ -143,6 +148,7 @@ def api_extend_trial(school_id):
     from datetime import datetime, timedelta, timezone
     new_expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     supabase.table("schools").update({"trial_expires_at": new_expiry, "status": "active"}).eq("id", school_id).execute()
+    invalidate_school(school_id)
     return jsonify({"success": True, "expires": new_expiry})
 
 
@@ -814,6 +820,7 @@ def reset_school_data():
 
             # 3. Delete teacher_assignments
             supabase.table("teacher_assignments").delete().eq("school_id", school_id).execute()
+            invalidate_school(school_id)
 
             # 4. Get and delete teacher profiles
             teachers = supabase.table("profiles").select("id").eq("school_id", school_id).eq("role", "guru").execute().data or []
