@@ -223,6 +223,81 @@ The roster is required and lives outside git (`.freebuff/lt_roster.json`), so a
 rollback cannot remove it. No roster means `cannot measure`: the gate says so on
 every release rather than passing silently.
 
+**The conf file reaches the gate through the environment, and that is worth
+knowing.** The deploy sources `/etc/scangrade-claims.conf` and passes every
+`CLAIMS_*` setting as an environment variable; `claims_gate.py` reads them with
+`env_default()`. It did not always: the gate originally read only `argv`, so
+`CLAIMS_BASE_URL` arrived, was ignored, and every production run ended at
+`no --base URL` — exit 2, "could not measure", on a gate that looked installed
+and healthy. That is why `/var/lib/scangrade-deploy/claims` had never been created. `tests/unit/test_perf_gate.py` now fails if the installer writes a
+setting its gate never reads.
+
+## The gate on the release before this one
+
+The claims gate compares this box with a number printed on the landing page, at
+the rung that page advertises. It cannot see a release that costs 40% of every
+page's response time while staying inside the published bound — and five of those
+in a row are a box that no longer does what it did, each one passing on its own.
+
+`deploy/perf_gate.py` asks that other question. It runs a **small fixed
+reference load** — 20 concurrent students for 20 seconds by default — and
+compares the result with **the last release that passed**. Same harness, same
+box, same load, so the two numbers cancel and what is left is what the release
+changed. It is small on purpose: this is the 1 vCPU that serves students, and the
+deploy does not get to load it the way a benchmark would. At 20 sessions the box
+is far from saturated, so latency tracks per-request cost rather than queueing,
+which is the thing a release can change. The advertised rung stays the claims
+gate's job.
+
+| Result | Outcome |
+|---|---|
+| no baseline yet | **deploy**, and this release becomes the baseline |
+| same or faster, within slack | deploy, and the baseline moves up to this release |
+| slower (confirmed twice) | roll back **if `PERF_ENFORCE=true`** |
+| divergent once, clean on the confirmation run | deploy — contention, not a regression |
+| could not measure (exit 2) | **warn only**, and the baseline is left alone |
+
+The baseline is written **only when a release passes**. If a refused release
+became the yardstick, the next release would be measured against it and the
+regression would be permanent and invisible. A deliberate slowdown (more work per
+page, a feature worth its cost) is recorded with `--rebaseline`, so the trade is
+stated rather than assumed.
+
+A changed reference load, a box that is already busy, or a divergence a second
+probe did not confirm are all `could not measure`. None of them is evidence
+against the release, none of them rolls anything back, and the gate says so out
+loud on every release — a gate that can only say "could not measure" is a gate
+that is off.
+
+### Arming it
+
+`/etc/scangrade-perf.conf` (root-only) holds the base URL, the roster path, the
+reference load, the baseline path and `PERF_ENFORCE`. Unlike the claims gate it
+is armed from the first release, and that difference is deliberate: with no
+baseline the gate writes one and passes, so arming it cannot reject anything.
+From the second release on, a confirmed regression rolls the release back.
+
+```bash
+# the reference load needs one account per session, like any probe
+cd /opt/scangrade && .venv/bin/python provision_loadtest.py 25 3
+bash /opt/scangrade/deploy/install-auto-deploy.sh   # writes the conf, checks it
+
+# measure by hand, without deploying anything
+.venv/bin/python deploy/perf_gate.py --check
+.venv/bin/python deploy/perf_gate.py --base https://scangrade.web.id
+
+# the reference measurement, and every run beside it
+cat /var/lib/scangrade-deploy/perf/baseline.json
+cat /var/lib/scangrade-deploy/perf/history.jsonl
+```
+
+Measured on this box on 15 Sep 2026, three consecutive runs at the reference load
+against production: the first wrote a baseline of p50 1026 ms / p95 1547 ms; the
+second compared against it and read p50 735 ms (0.72x), so it passed and moved
+the baseline; the third was forced through the refusal path with a slack no
+measurement can meet, and left the baseline byte-identical — `md5` unchanged —
+which is the property the whole design rests on.
+
 ## The smoke test that gates a release
 
 After the app is reloaded, the deploy signs in as each of the four roles and
