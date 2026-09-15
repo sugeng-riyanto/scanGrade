@@ -2,7 +2,8 @@
 
 There are 114 templates and ~440 colour utilities, and they are written in light
 mode: `text-slate-600` on `bg-white` is the default shape of a card here. Rather
-than a `dark:` variant on every element, base.html remaps those light utilities
+than a `dark:` variant on every element, the stylesheet base.html links
+(app/static/css/theme.css) remaps those light utilities
 onto the theme tokens, so a component that is readable in light mode stays
 readable in dark mode. Two things can go wrong, and both are silent:
 
@@ -49,11 +50,26 @@ def contrast(fg: str, bg: str) -> float:
 
 
 # ── reading the stylesheet ───────────────────────────────────────────────────
+#
+# These rules used to live in a `<style>` block inside base.html. They are a
+# file now — app/static/css/theme.css, linked from base.html — because an
+# inline block rides inside every page: it cannot be cached, nginx re-gzips it
+# on each request, and a phone on a weak signal re-downloads it on every
+# navigation. The rules are the same rules, so the checks below read the same
+# CSS from its new home rather than relaxing by a single assertion.
+#
+# tests/unit/test_theme_stylesheet.py is the guard for that move: it fails if
+# the block is ever inlined into base.html again, if the file is linked before
+# tailwind.css (whose utilities it overrides), or if a Jinja tag appears in it
+# (which would silently stop it from being a static file at all).
+THEME_CSS = ROOT / "app" / "static" / "css" / "theme.css"
+
 
 def style_block() -> str:
-    match = re.search(r"<style>(.*?)</style>", SOURCE, re.S)
-    assert match, "base.html has no <style> block"
-    return match.group(1)
+    assert THEME_CSS.is_file(), (
+        f"{THEME_CSS.relative_to(ROOT)} is missing — the app's tokens, dark-mode "
+        "remap and legibility floor live there, and base.html links it")
+    return THEME_CSS.read_text(encoding="utf-8")
 
 
 CSS = style_block()
@@ -62,7 +78,7 @@ CSS = style_block()
 def tokens(selector: str) -> dict[str, str]:
     """The `--custom` properties declared for one selector."""
     match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", CSS)
-    assert match, f"no {selector} block in base.html"
+    assert match, f"no {selector} block in {THEME_CSS.relative_to(ROOT)}"
     return {name: value.strip()
             for name, value in re.findall(r"--([a-z-]+)\s*:\s*([^;]+);", match.group(1))}
 
@@ -292,7 +308,7 @@ def _css_no_comments() -> str:
 def _media_body(css: str, condition: str) -> str:
     """The text inside `@media <condition> { ... }`, brace-matched."""
     match = re.search(r"@media\s+" + re.escape(condition) + r"\s*\{", css)
-    assert match, f"no `@media {condition}` block in base.html"
+    assert match, f"no `@media {condition}` block in {THEME_CSS.relative_to(ROOT)}"
     start = match.end() - 1
     depth = 0
     for i in range(start, len(css)):
@@ -408,7 +424,8 @@ def test_a_new_page_cannot_skip_the_theme_by_forgetting_to_extend_base():
 
     assert not undeclared, (
         "these templates render their own document, so they inherit none of the "
-        "dark-mode remap in base.html and every light class in them stays light. "
+        "dark-mode remap in app/static/css/theme.css and every light class in them "
+        "stays light. "
         "Either extend base.html, or add one with a reason to STANDALONE_PAGES:\n  "
         + "\n  ".join(sorted(undeclared)))
 
@@ -649,7 +666,7 @@ def test_the_remap_does_not_shadow_explicit_dark_utilities():
 # on a white card and fails only on a tint of its own hue.
 #
 # The dark half of the story is a remap, so the light half is a correction: a
-# rule in base.html that names *both* halves of one pair. That is also what makes
+# rule in that stylesheet that names *both* halves of one pair. That is also what makes
 # it fixable rather than just reportable — the accent steps down a shade or two
 # and the tint stays as designed.
 
@@ -700,7 +717,7 @@ def _stylesheet_palette() -> dict[str, dict[str, str]]:
 
 LIGHT_PALETTE = _stylesheet_palette()
 
-# `:where(.bg-amber-100).text-amber-600 { color: #b45309 }` in base.html.
+# `:where(.bg-amber-100).text-amber-600 { color: #b45309 }` in theme.css.
 CORRECTION_RULE = re.compile(
     r"^\s*:where\(\.(bg-[a-z0-9-]+)\)\.(text-[a-z0-9-]+)\s*"
     r"\{\s*color:\s*(#[0-9a-fA-F]{6})\s*;\s*\}", re.M)
@@ -780,7 +797,7 @@ def _scan_class_pairs() -> tuple[dict[tuple[str, str], list[tuple[str, int, str]
 
     Also returns the palette utilities seen, which is the set the coverage check
     has to measure: it comes from `class` attributes alone, so it cannot be
-    satisfied by a class that only base.html's own remap mentions.
+    satisfied by a class that only the stylesheet's own remap mentions.
     """
     pairs: dict[tuple[str, str], list[tuple[str, int, str]]] = {}
     observed: set[str] = set()
@@ -879,7 +896,7 @@ def test_every_tint_and_the_text_painted_on_it_is_readable_in_light_mode():
     assert not offenders, (
         "these background/text pairs are painted on one element and do not "
         "clear their contrast minimum in light mode. Darken the accent in the "
-        "light-mode block in base.html — the rule names both halves of the "
+        "light-mode block in theme.css — the rule names both halves of the "
         "pair, so the tint can stay as designed:\n  "
         + "\n  ".join(
             f"{fill} + {ink} is {ratio:.2f}:1 (needs {needed}), "
