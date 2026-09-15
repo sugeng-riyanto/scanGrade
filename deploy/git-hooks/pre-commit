@@ -32,7 +32,7 @@ fi
 # is what `git add <file>` and every editor integration does — makes the two the
 # same. Splitting a file across commits is the one case where this can disagree,
 # and it errs toward blocking, never toward letting unreadable text through.
-echo "theme gate: template changes staged — checking readability and class names…"
+echo "theme gate: template or stylesheet changes staged — checking readability, class names and the cached stylesheet…"
 if ! bash "$REPO/deploy/theme_gate.sh"; then
   echo
   echo "Commit blocked. Fix the contrast, or re-run with: git commit --no-verify"
