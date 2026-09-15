@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 # ─── ScanGrade — the readability gate ────────────────────────────────────────
 #
-# Runs the contrast checks in tests/unit/test_dark_theme_contrast.py and exits
-# non-zero if a template, or a colour a template paints, would ship unreadable
-# text — in dark mode (a utility with no remap) or in light mode (a tint and the
-# accent on it, such as `bg-amber-100 text-amber-600` at 2.86:1).
+# Runs two static checks and exits non-zero if either would ship a page nobody
+# can read:
+#
+#   tests/unit/test_dark_theme_contrast.py
+#     a template, or a colour a template paints, that is unreadable — in dark
+#     mode (a utility with no remap) or in light mode (a tint and the accent on
+#     it, such as `bg-amber-100 text-amber-600` at 2.86:1).
+#
+#   tests/unit/test_tailwind_class_names.py
+#     a Tailwind utility whose *name* is built at render time — `from-{{ colour }}`
+#     in Jinja, or `'from-' + colour` in Alpine or a script. Tailwind reads the
+#     template as text, generates nothing, and the element silently keeps its
+#     ancestor's styling: white text on a white box, no error anywhere. It also
+#     catches a stale tailwind.css, which is committed rather than built here.
+#
+# Both belong in this gate because both fail the same way — invisibly, with the
+# page answering 200 and the other theme looking fine.
 #
 # It exists as a script rather than a bare pytest line because two places run it
 # and they must run the *same* thing: the pre-commit hook (deploy/git-hooks/) and
@@ -21,12 +34,15 @@
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TESTS="tests/unit/test_dark_theme_contrast.py"
+# Word-split on purpose: pytest takes them as separate paths.
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py"
 
-if [ ! -f "$REPO/$TESTS" ]; then
-  echo "theme gate: $TESTS is missing — the check cannot run, which is not a pass" >&2
-  exit 2
-fi
+for check in $TESTS; do
+  if [ ! -f "$REPO/$check" ]; then
+    echo "theme gate: $check is missing — the check cannot run, which is not a pass" >&2
+    exit 2
+  fi
+done
 
 # The interpreter differs by platform: a Linux checkout has .venv/bin/python, a
 # Windows one (Git Bash, where the pre-commit hook runs) has
@@ -49,11 +65,11 @@ fi
 # -p no:cacheprovider keeps the gate from writing .pytest_cache into a checkout
 # the deploy has just declared clean; a dirty tree there blocks the next release.
 cd "$REPO" || exit 2
-OUTPUT=$("$PY" -m pytest "$TESTS" -q -p no:cacheprovider --no-header 2>&1)
+OUTPUT=$("$PY" -m pytest $TESTS -q -p no:cacheprovider --no-header 2>&1)
 RC=$?
 
 if [ "$RC" -eq 0 ]; then
-  echo "theme gate: OK — every template and colour utility is readable in both themes"
+  echo "theme gate: OK — readable in both themes, and every utility a template names is compiled"
   exit 0
 fi
 
@@ -66,9 +82,9 @@ if [ "$RC" -eq 5 ]; then
 fi
 
 cat >&2 <<'EOF'
-theme gate: FAILED — this release would show unreadable text.
+theme gate: FAILED — this release would ship an invisible or unreadable element.
 
-The check names every offender, and the fix depends on which half failed:
+The check names every offender, and the fix depends on which rule failed:
 
   in dark mode — a light utility with no treatment:
   * add the utility to the dark remap in app/templates/base.html, or
@@ -79,9 +95,13 @@ The check names every offender, and the fix depends on which half failed:
   * add the pair to the light-mode block in app/templates/base.html; the rule
     names both classes, so the tint stays as designed and only the accent moves.
 
-Do not skip this: the failure is invisible to every other check. The app still
-compiles, every page still answers 200, and a screenshot in the other theme
-looks correct.
+  a utility that is named but never generated:
+  * run `npm run css:build` if the committed stylesheet is stale; or
+  * name the class literally instead of assembling it at render time — a
+    `{% set %}` map, a whole class string per branch, or just the full name.
+
+Do not skip this: neither failure is visible to any other check. The app still
+compiles, every page still answers 200, and nothing in the console complains.
 
 EOF
 echo "$OUTPUT" >&2
