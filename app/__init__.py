@@ -227,28 +227,20 @@ def create_app(env=None):
         return result
     app.jinja_env.globals["get_whatsapp_number"] = get_whatsapp_number
 
-    _features_cache = {}
     def get_school_features(school_id=None):
-        """Return features dict for a school (whiteboard_enabled, etc.), cached per request."""
+        """Feature flags for a school (whiteboard_enabled, …).
+
+        A shared row, not a per-request one: it is identical for every student
+        and teacher in the school, and a student page reads it on every load, so
+        a school was paying one round-trip per page view for the same JSON.
+
+        The dict this replaced was keyed by `id(request)` and never cleared — it
+        grew for the life of the worker, and CPython reusing a request object's
+        address could have served a request another request's features.
+        """
+        from app.utils.req_cache import school_features
         sid = school_id or getattr(g, "user_school_id", None)
-        if not sid:
-            return {}
-        req_key = f"feat_{id(request)}_{sid}"
-        if req_key in _features_cache:
-            return _features_cache[req_key]
-        try:
-            supabase = app.extensions["supabase"]
-            data = supabase.table("schools").select("features").eq("id", sid).single().execute().data or {}
-            result = data.get("features") or {}
-            if isinstance(result, str):
-                import json
-                result = json.loads(result)
-        except Exception:
-            result = {}
-        if not isinstance(result, dict):
-            result = {}
-        _features_cache[req_key] = result
-        return result
+        return school_features(sid) if sid else {}
     app.jinja_env.globals["get_school_features"] = get_school_features
 
     @app.template_global()

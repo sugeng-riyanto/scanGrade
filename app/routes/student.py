@@ -10,8 +10,32 @@ from app.utils.exam_access import result_released, exam_sitting_allowed
 from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
 from app.utils.rate_limiter import limiter
+from app.utils.req_cache import (active_whiteboards_for, class_row, school_features,
+                                 school_subject_count)
 
 student_bp = Blueprint("student", __name__)
+
+# Read once, use everywhere: the dashboard needs both the available list and the
+# result cards, and it used to fetch the same submissions row set three times.
+SUBMISSION_COLUMNS = ("id, exam_id, student_id, score, max_score, violations, penalty, "
+                      "final_score, status, is_published, submitted_at, graded_at, "
+                      "exams(id, title, question_types, total_questions)")
+
+
+def _student_submissions(supabase, student_id):
+    """Every submission this student has, in one round-trip.
+
+    Retracted rows are included on purpose: the page derives both the
+    "already answered, so hide it from the list" set and the result cards from
+    this one read, and `status` is on the row.
+    """
+    try:
+        return (supabase.table("submissions").select(SUBMISSION_COLUMNS)
+                .eq("student_id", student_id)
+                .order("submitted_at", desc=True).execute().data) or []
+    except Exception as e:
+        current_app.logger.error(f"Submissions query error: {e}")
+        return []
 
 
 def _rate_limit(n):
@@ -32,16 +56,19 @@ def dashboard():
         return render_template("student/dashboard.html", **cached)
 
     available_exams = []
-    submitted_ids = set()
-    student_class_id = None
-    student_school_id = None
-    try:
-        prof = supabase.table("profiles").select("class_id, school_id").eq("id", g.user_id).single().execute()
-        if prof.data:
-            student_class_id = prof.data.get("class_id")
-            student_school_id = prof.data.get("school_id")
-    except Exception:
-        pass
+    # The session already carries both of these columns, so the page does not ask
+    # for the profile again — it used to, three separate times on this page.
+    student_class_id = g.get("user_class_id")
+    student_school_id = g.get("user_school_id")
+
+    # One submissions read for the whole page. This was three — one for the
+    # available list, one for retracted, one for the result cards — over the same
+    # rows, at ~100-165 ms each, when the row already carries `status`.
+    subs = _student_submissions(supabase, g.user_id)
+    submitted_ids = {s["exam_id"] for s in subs
+                     if s.get("status") in ("submitted", "graded", "published")}
+    submitted_ids -= {s["exam_id"] for s in subs if s.get("status") == "retracted"}
+
     try:
         query = supabase.table("exams").select("id,title,subject,start_at,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
         if student_school_id:
@@ -67,25 +94,15 @@ def dashboard():
             else:
                 if not cids:
                     available_exams.append(e)
-        subs_ids = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
-        submitted_ids = {s["exam_id"] for s in subs_ids}
-        # Exclude retracted
-        retracted = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).eq("status", "retracted").execute().data or []
-        submitted_ids -= {s["exam_id"] for s in retracted}
     except Exception as e:
         current_app.logger.error(f"Dashboard query error: {e}")
     available_exams = [e for e in available_exams if e["id"] not in submitted_ids]
-
-    subs = []
-    try:
-        subs = supabase.table("submissions").select("id, exam_id, student_id, score, max_score, violations, penalty, final_score, status, is_published, submitted_at, graded_at, exams(id, title, question_types, total_questions)").eq("student_id", g.user_id).neq("status", "retracted").order("submitted_at", desc=True).execute().data or []
-    except Exception as e:
-        current_app.logger.error(f"Dashboard submissions query error: {e}")
     completed_exams = []
     all_scores = []
     for s in subs:
-        # Only show submitted/graded/published in dashboard (hide drafts)
-        if s.get("status") in ("draft",):
+        # Only show submitted/graded/published in dashboard (hide drafts, and
+        # retracted rows, which now arrive in this same read)
+        if s.get("status") in ("draft", "retracted"):
             continue
         if s.get("exams"):
             s["exam"] = s.pop("exams")
@@ -151,55 +168,26 @@ def dashboard():
     else:
         mastery_level = "Belum Ada Data"
 
-    # Get student's class info
+    # Class and subject count come out of the shared cache: the class row is the
+    # same for every student in the class, and the count is the same for the whole
+    # school, so neither is worth a query per page view. (The count was asked
+    # *twice* here with an identical filter, and the second answer overwrote the
+    # first.)
     student_class = None
     subject_count = 0
-    try:
-        profile = supabase.table("profiles").select("class_id, school_id").eq("id", g.user_id).single().execute().data or {}
-        if profile.get("class_id"):
-            cls = supabase.table("classes").select("name, grade_level").eq("id", profile["class_id"]).single().execute().data
-            if cls:
-                student_class = cls
-        if profile.get("school_id"):
-            cnt = supabase.table("teacher_assignments").select("id", count="exact") \
-                .eq("school_id", profile["school_id"]) \
-                .execute()
-            subject_count = cnt.count or 0
-            if student_class and student_class.get("name"):
-                class_subj = supabase.table("teacher_assignments").select("id", count="exact") \
-                    .eq("school_id", profile["school_id"]) \
-                    .execute()
-                subject_count = class_subj.count or 0
-    except Exception:
-        pass
+    if student_class_id:
+        student_class = class_row(student_class_id) or None
+    if student_school_id:
+        subject_count = school_subject_count(student_school_id)
 
-    # School info
-    school_info = {}
-    try:
-        profile = supabase.table("profiles").select("school_id").eq("id", g.user_id).single().execute().data or {}
-        if profile.get("school_id"):
-            school_info = supabase.table("schools").select("name, npsn, logo_url").eq("id", profile["school_id"]).single().execute().data or {}
-    except Exception:
-        pass
-    # Active whiteboards for student's class (only if enabled by super admin)
+    # Active whiteboards for student's class (only if the school has it enabled).
+    # The feature flag rides on the cached school row; the board list is cached
+    # per class for 30 s, so a class of 30 students costs one query.
     active_whiteboards = []
     if student_class_id and student_school_id:
         try:
-            # Check school feature toggle
-            feat = supabase.table("schools").select("features").eq("id", student_school_id).single().execute().data or {}
-            f = feat.get("features") or {}
-            if isinstance(f, str):
-                f = json.loads(f)
-            if not f.get("whiteboard_enabled", True):
-                pass  # whiteboard disabled for this school
-            else:
-                wbs = supabase.table("whiteboards").select("id,title,status,created_at") \
-                    .eq("class_id", student_class_id) \
-                    .eq("school_id", student_school_id) \
-                    .eq("status", "active") \
-                    .order("created_at", desc=True) \
-                    .limit(5).execute()
-                active_whiteboards = wbs.data or []
+            if school_features(student_school_id).get("whiteboard_enabled", True):
+                active_whiteboards = active_whiteboards_for(student_class_id, student_school_id)
         except Exception:
             pass
 
@@ -210,7 +198,6 @@ def dashboard():
         "user_name": user_name,
         "student_class": student_class,
         "subject_count": subject_count,
-        "school_info": school_info,
         "active_whiteboards": active_whiteboards,
         "subject_averages": subject_averages,
         "score_trend": score_trend,
@@ -270,20 +257,18 @@ def exam_list():
     if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
 
-    # Get student's class_id and school_id
-    student_class_id = None
-    student_school_id = None
-    try:
-        prof = supabase.table("profiles").select("class_id, school_id").eq("id", g.user_id).single().execute()
-        if prof.data:
-            student_class_id = prof.data.get("class_id")
-            student_school_id = prof.data.get("school_id")
-    except Exception:
-        pass
+    # Class and school come from the session: this page is opened repeatedly
+    # during an exam, and it used to spend a profile round-trip on two columns
+    # the token check had already read.
+    student_class_id = g.get("user_class_id")
+    student_school_id = g.get("user_school_id")
 
     exams = []
     try:
-        query = supabase.table("exams").select("*").eq("is_published", True).eq("status", "active")
+        # Only the columns the card renders: `select("*")` shipped the whole exam
+        # row — which carries question_canvas JSON — to every student's browser
+        # context, and made the response bigger to parse for nothing.
+        query = supabase.table("exams").select("id,title,subject,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         res = query.order("created_at", desc=True).execute()
@@ -314,12 +299,14 @@ def exam_list():
 
     submitted_ids = set()
     try:
-        # Only hide exams that have been submitted/graded/published — NOT drafts
-        subs = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
-        submitted_ids = {s["exam_id"] for s in subs}
-        # Also exclude retracted but allow draft to still show
-        retracted = supabase.table("submissions").select("exam_id").eq("student_id", g.user_id).eq("status", "retracted").execute().data or []
-        submitted_ids -= {s["exam_id"] for s in retracted}
+        # One read where there were two: `status` is on the row, so the
+        # "answered" set and the retracted set come from the same query. Only
+        # submitted/graded/published hide an exam (a draft still shows), and a
+        # retracted one comes back into the list.
+        subs = supabase.table("submissions").select("exam_id, status").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "retracted"]).execute().data or []
+        submitted_ids = {s["exam_id"] for s in subs
+                         if s.get("status") in ("submitted", "graded", "published")}
+        submitted_ids -= {s["exam_id"] for s in subs if s.get("status") == "retracted"}
     except Exception as e:
         current_app.logger.error(f"Submission query error: {e}")
     exams = [e for e in exams if e["id"] not in submitted_ids]

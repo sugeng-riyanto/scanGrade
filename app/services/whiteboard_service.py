@@ -5,6 +5,7 @@ from io import BytesIO
 from datetime import datetime, timezone
 from flask import current_app, g
 from app.utils.auth import get_supabase
+from app.utils.req_cache import invalidate_boards
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'static', 'uploads', 'whiteboard')
 
@@ -45,6 +46,9 @@ def create_whiteboard(title: str, class_id: str, student_ids: list = None) -> di
     }
     result = supabase.table("whiteboards").insert(data).execute()
     wb = result.data[0]
+    # The class's "active boards" list is cached for 30 s; a board the teacher
+    # has just opened should not wait that long to appear on 30 dashboards.
+    invalidate_boards(class_id)
 
     if student_ids:
         members = [
@@ -91,15 +95,33 @@ def list_whiteboards(role: str = "teacher") -> list:
     return result.data or []
 
 
+def _invalidate_board_class(whiteboard_id: str) -> None:
+    """Drop the cached board list for the class this board belongs to.
+
+    Reads the class id back rather than being told it: this runs on a write
+    (a teacher closing or deleting a board), where one extra round-trip costs
+    nothing next to leaving 30 dashboards showing a board that has ended.
+    """
+    try:
+        row = (get_supabase().table("whiteboards").select("class_id")
+               .eq("id", whiteboard_id).single().execute().data) or {}
+        invalidate_boards(row.get("class_id"))
+    except Exception:
+        pass
+
+
 def update_whiteboard(whiteboard_id: str, data: dict) -> dict | None:
     supabase = get_supabase()
     result = supabase.table("whiteboards").update(data).eq("id", whiteboard_id).execute()
+    if "status" in data:
+        _invalidate_board_class(whiteboard_id)
     return result.data[0] if result.data else None
 
 
 def delete_whiteboard(whiteboard_id: str) -> bool:
     """Delete whiteboard and all associated files."""
     supabase = get_supabase()
+    _invalidate_board_class(whiteboard_id)
     supabase.table("whiteboards").delete().eq("id", whiteboard_id).execute()
 
     path = os.path.join(UPLOAD_DIR, whiteboard_id)
