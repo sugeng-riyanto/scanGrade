@@ -1,9 +1,32 @@
 """Tools blueprint: Answer Sheet Generator and other utility tools."""
-from flask import Blueprint, render_template, request, jsonify, send_file
+from functools import wraps
+
+from flask import Blueprint, render_template, request, jsonify, send_file, g, current_app
 from app.utils.auth import login_required
 from app.services.answer_sheet_generator import generate_answer_sheet
+from app.services.device_preview import (
+    DEVICE_NAMES,
+    DEVICE_WIDTHS,
+    preview_exclusions,
+    preview_sections,
+)
 
 tools_bp = Blueprint("tools", __name__, url_prefix="/tools")
+
+# Internal tools are for the people who run the school's account, not for the
+# students sitting an exam. `login_required` alone let any pupil open them.
+STAFF_ROLES = ("super_admin", "admin_sekolah", "guru")
+
+
+def staff_required(f):
+    """Staff only: no student reaches an internal tool."""
+    @wraps(f)
+    @login_required
+    def wrapper(*args, **kwargs):
+        if g.get("user_role") not in STAFF_ROLES:
+            return jsonify({"error": "Not available for this role"}), 403
+        return f(*args, **kwargs)
+    return wrapper
 
 
 @tools_bp.route("/generate-answer-sheet", methods=["GET", "POST"])
@@ -52,3 +75,31 @@ def generate_answer_sheet_route():
         )
 
     return render_template("tools/generate_answer_sheet.html")
+
+
+@tools_bp.route("/device-preview")
+@staff_required
+def device_preview():
+    """Every main page at 320 / 375 / 768 px, side by side.
+
+    The list comes from the app's own URL map, so this page never needs editing
+    when a page is added. The frames load with the *viewer's* session, so a page
+    belonging to another role redirects — which the page says out loud instead of
+    quietly showing something else.
+    """
+    # `_get_current_object()` because the URL map belongs to the app, not to the
+    # request-scoped proxy.
+    app = current_app._get_current_object()
+    groups = preview_sections(app)
+    first = next((p["url"] for grp in groups for p in grp["pages"]), "/")
+    return render_template(
+        "tools/device_preview.html",
+        groups=groups,
+        # The URLs this preview does not render, with the reason — the page says
+        # what it covers *and* what it leaves out, so an omission is a decision on
+        # screen rather than a gap in the list.
+        exclusions=preview_exclusions(app),
+        widths=DEVICE_WIDTHS,
+        names=DEVICE_NAMES,
+        selected=request.args.get("page") or first,
+    )
