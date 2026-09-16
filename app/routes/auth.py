@@ -4,7 +4,8 @@ import os
 import threading
 import time
 from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
-from app.utils.auth import login_required, get_supabase, get_auth_client, invalidate_session, set_auth_cookie
+from app.utils.auth import (login_required, get_supabase, get_auth_client, invalidate_session,
+                            set_auth_cookie, login_door_for, session_role, _extract_token)
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
@@ -849,7 +850,11 @@ def set_new_password():
             "guru": "/teacher/dashboard",
             "murid": "/student/dashboard",
         }
-        redirect_url = role_redirects.get(role, "/auth/login-user")
+        # The fallback is the door this role belongs on, from the one mapping —
+        # not a third copy of the URL. A known role never reaches it, but a role
+        # the table does not list (a new one, or a profile read that came back
+        # empty) must still land somewhere that can sign that reader in.
+        redirect_url = role_redirects.get(role) or login_door_for(role)
         return render_template("auth/reset_success.html", redirect_url=redirect_url, role=role)
     except Exception as e:
         current_app.logger.error(f"Reset password error: {e}")
@@ -923,9 +928,16 @@ def reset_password_exchange():
 @auth_bp.route("/logout")
 def logout():
     uid = getattr(g, "user_id", None)
-    # Drop the cached session first, so the token stops working right away
-    # instead of remaining valid for the remainder of the cache TTL.
-    invalidate_session(request.cookies.get("access_token"))
+    token = _extract_token()
+    # Read the door from the token's own session, *before* the session is dropped.
+    # Not from `g.user_role`: no hook fills it on this route (only
+    # `login_required` does, and logout must keep working for a session that has
+    # already expired), so reading it here answered None for everyone and every
+    # role was sent to the admin door. See `session_role` in app/utils/auth.py.
+    door = login_door_for(session_role(token), request.path)
+    # Drop the cached session before anything else, so the token stops working
+    # right away instead of remaining valid for the remainder of the cache TTL.
+    invalidate_session(token)
     try:
         supabase = get_auth_client()
         supabase.auth.sign_out()
@@ -933,7 +945,7 @@ def logout():
         pass
     if uid:
         log_activity("logout", "user", uid)
-    resp = make_response(redirect("/auth/login-user" if g.get("user_role") in ("guru", "murid") else "/auth/login"))
+    resp = make_response(redirect(door))
     resp.delete_cookie("access_token", path="/")
     resp.delete_cookie("refresh_token", path="/")
     return resp

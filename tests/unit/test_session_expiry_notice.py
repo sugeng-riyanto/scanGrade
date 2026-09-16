@@ -199,8 +199,11 @@ def test_the_clamp_does_not_weaken_the_timeout(app, monkeypatch):
     resp = client.get("/_probe_protected")
 
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/auth/login")
-    assert "60 menit" in client.get("/auth/login").get_data(as_text=True)
+    # A guru is refused, and lands on the door that says so: the admin page
+    # heading "Masuk Admin" is not where a teacher should be told to log in
+    # again. See tests/unit/test_login_door.py.
+    assert resp.headers["Location"].endswith("/auth/login-user")
+    assert "60 menit" in client.get("/auth/login-user").get_data(as_text=True)
 
 
 def test_a_login_with_no_idle_cookie_still_works(app, monkeypatch):

@@ -331,14 +331,20 @@ def _seed_school_relations(supabase, sid, school_conf, class_ids, subj_map, teac
             except: pass
 
 
-def _seed_exams(supabase, school_id, school_conf):
-    teachers = []
-    try:
-        for t in school_conf.get("teachers", []):
-            prof = supabase.table("profiles").select("id").eq("email", t["email"]).execute()
-            if prof.data: teachers.append(prof.data[0]["id"])
-    except: pass
-    if not teachers: return
+def _seed_exams(supabase, school_id, school_conf, teacher_ids=None):
+    # The ids the seeding just created, not a lookup by email: `profiles` stores
+    # no address (they live in `auth.users`), so filtering it on `email` is a
+    # 42703 — swallowed by the `except`, which left this function with no
+    # teachers and quietly seeded no exams at all.
+    teachers = list(teacher_ids or [])
+    if not teachers:
+        try:
+            teachers = [p["id"] for p in supabase.table("profiles").select("id") \
+                       .eq("school_id", school_id).eq("role", "guru").execute().data or []]
+        except Exception:
+            teachers = []
+    if not teachers:
+        return
 
     class_ids = []
     class_ids_all = []

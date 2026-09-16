@@ -2,6 +2,7 @@ import traceback
 
 from flask import jsonify, request, redirect, render_template
 from app.errors import ScanGradeException
+from app.utils.auth import login_door_for
 from app.utils.logger import get_logger
 
 logger = get_logger("error_handlers")
@@ -35,7 +36,9 @@ def register_error_handlers(app):
     def unauthorized(e):
         if _wants_json():
             return jsonify({"success": False, "error": "UNAUTHORIZED", "message": "Silakan login terlebih dahulu"}), 401
-        return redirect("/auth/login")
+        # Same rule as `_unauthorized`: a 401 carries no role, but the URL the
+        # reader was opening belongs to one, and that decides which door to show.
+        return redirect(login_door_for(path=request.path))
 
     @app.errorhandler(403)
     def forbidden(e):

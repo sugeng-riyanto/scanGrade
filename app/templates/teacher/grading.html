@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Koreksi - ScanGrade{% endblock %}
 {% block page_title %}Pusat Koreksi{% endblock %}
@@ -14,7 +15,7 @@
             <div>
                 <h3 class="font-extrabold text-slate-800">{{ eg.title }}</h3>
                 <p class="text-xs text-slate-500 font-medium mt-0.5">
-                    <span x-text="'{{ eg.pending|length }} ' + t('perlu koreksi','need grading') + '  •  ' + '{{ eg.graded|length }} ' + t('selesai','graded')"></span>
+                    <span :lang="lang" x-text="'{{ eg.pending|length }} ' + t('perlu koreksi','need grading') + '  •  ' + '{{ eg.graded|length }} ' + t('selesai','graded')"></span>
                 </p>
             </div>
             <div class="flex items-center gap-2">
@@ -43,7 +44,7 @@
             </div>
             {% endfor %}
             {% if eg.pending|length > 5 %}
-            <div class="px-5 py-2 text-center text-xs text-slate-400" x-text="'+ ' + '{{ eg.pending|length - 5 }} ' + t('lainnya','more')"></div>
+            <div class="px-5 py-2 text-center text-xs text-slate-400" :lang="lang" x-text="'+ ' + '{{ eg.pending|length - 5 }} ' + t('lainnya','more')"></div>
             {% endif %}
         </div>
         {% else %}

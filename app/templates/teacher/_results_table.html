@@ -24,7 +24,7 @@
            for "Penalti". Two columns, wrapping to 2x2. #}
         <div class="grid grid-cols-2 gap-1 text-center text-[10px]">
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Skor</span><br><span class="font-extrabold text-stone-700">{{ s.score if s.score is not none else '-' }}</span></div>
-            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Penalti</span><br><span class="font-extrabold text-red-500">{{ s.penalty if s.penalty is not none else 0 }}</span></div>
+            <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400" x-text="t('Penalti','Penalty')"></span><br><span class="font-extrabold text-red-500">{{ s.penalty if s.penalty is not none else 0 }}</span></div>
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">NISN</span><br><span class="font-extrabold text-violet-600 text-[9px]">{{ ans.get('_nisn', '-') if is_scan_section else '-' }}</span></div>
         </div>
@@ -51,14 +51,14 @@
         <thead>
             <tr class="text-left text-stone-500 border-b border-stone-200">
                 <th class="pb-3 font-extrabold w-8">#</th>
-                <th class="pb-3 font-extrabold">Siswa</th>
-                <th class="pb-3 font-extrabold text-center">Skor</th>
-                <th class="pb-3 font-extrabold text-center">Penalti</th>
+                <th class="pb-3 font-extrabold" x-text="t('Siswa','Student')"></th>
+                <th class="pb-3 font-extrabold text-center" x-text="t('Skor','Score')"></th>
+                <th class="pb-3 font-extrabold text-center" x-text="t('Penalti','Penalty')"></th>
                 <th class="pb-3 font-extrabold text-center">Final</th>
                 {% if is_scan_section %}<th class="pb-3 font-extrabold text-center">NISN</th>{% endif %}
-                <th class="pb-3 font-extrabold text-center">Waktu</th>
-                <th class="pb-3 font-extrabold text-center">Status</th>
-                <th class="pb-3 font-extrabold text-center">Aksi</th>
+                <th class="pb-3 font-extrabold text-center" x-text="t('Waktu','Time')"></th>
+                <th class="pb-3 font-extrabold text-center" x-text="t('Status','Status')"></th>
+                <th class="pb-3 font-extrabold text-center" x-text="t('Aksi','Actions')"></th>
             </tr>
         </thead>
         <tbody>

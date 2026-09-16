@@ -10,11 +10,18 @@
 
 {# The language control. The label names the language you would switch *to*, read
    from the same `lang` the content uses — same convention as the landing page and
-   /capacity. #}
+   /capacity.
+
+   The aria-label says it in words, because the visible text is a two-letter code:
+   a screen reader announcing "ID" tells the listener nothing about what pressing
+   it does. A language switch names its *target* in the target language, so the
+   label is a ternary rather than a `t()` pair — `t()` would render the current
+   language, which is the language the reader already has. #}
 {% macro lang_button() %}
 <button @click="setLang(lang === 'id' ? 'en' : 'id')" type="button"
         class="fixed top-4 right-4 lg:top-6 lg:right-6 h-10 px-3 rounded-xl bg-white/80 backdrop-blur-sm shadow-md border border-slate-200 flex items-center justify-center gap-1.5 text-slate-500 hover:text-primary-600 hover:border-primary-200 hover:shadow-lg transition-all z-50 text-xs font-bold"
-        :title="t('Ganti bahasa','Switch language')">
+        :title="t('Ganti bahasa','Switch language')"
+        :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'">
     <i class="fas fa-globe text-sm"></i><span x-text="lang === 'id' ? 'EN' : 'ID'"></span>
 </button>
 {% endmacro %}
@@ -34,10 +41,17 @@
    `x-cloak` on both spans because the app's default language is English: without
    it an Indonesian reader would see the English half flash before Alpine hid it,
    and with it the alert behaves like every `x-text` on the page — empty for the
-   first paint, correct immediately after. #}
+   first paint, correct immediately after.
+
+   Each half carries its own `lang`. Both halves are in the document at once and
+   Alpine only *hides* one, so a screen reader that reads the tree before Alpine
+   runs — or a reader with scripting off, where `x-cloak` is the only thing hiding
+   anything — otherwise announces a message twice, in the same voice, in two
+   languages. Declaring each half means it is pronounced correctly whichever one
+   is read. #}
 {% macro alert_body(value) -%}
 {%- if value is sequence and value is not string -%}
-<span x-show="lang!=='en'" x-cloak>{{ value[0] }}</span><span x-show="lang==='en'" x-cloak>{{ value[1] }}</span>
+<span lang="id" x-show="lang!=='en'" x-cloak>{{ value[0] }}</span><span lang="en" x-show="lang==='en'" x-cloak>{{ value[1] }}</span>
 {%- else -%}
 <span>{{ value }}</span>
 {%- endif -%}

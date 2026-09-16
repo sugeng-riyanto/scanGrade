@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Kelola Ujian - ScanGrade{% endblock %}
 {% block page_title %}Kelola Ujian{% endblock %}
@@ -5,7 +6,7 @@
 <div class="space-y-6" x-data="{ filter:'all', search:'' }">
     <div>
         <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Manage Exams':'Kelola Ujian'"></h2>
-        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="'{{ exams|length }} ' + t('ujian','exams')"></p>
+        <p class="text-sm text-slate-500 font-medium mt-0.5" :lang="lang" x-text="'{{ exams|length }} ' + t('ujian','exams')"></p>
     </div>
 
     <div class="flex flex-col sm:flex-row gap-3">

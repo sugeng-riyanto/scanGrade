@@ -277,8 +277,19 @@ def export_user_data(user_id: str):
     except Exception:
         result["submissions"] = []
     try:
-        messages = supabase.table("notification_recipients").select("read_at, notifications!inner(id, title, message, sender_role, created_at)").eq("recipient_id", user_id).order("created_at", desc=True).execute().data or []
-        result["messages_received"] = [r.get("notifications", {}) for r in messages]
+        # `notification_recipients` has no `created_at` — it is a link row with
+        # `read_at` — so ordering *it* by that name is a 42703 and this whole
+        # export silently came back empty. The time a message was sent is on the
+        # notification; the list is sorted by it here rather than asking
+        # PostgREST to order an embedded table.
+        messages = supabase.table("notification_recipients") \
+            .select("read_at, notifications!inner(id, title, message, sender_role, created_at)") \
+            .eq("recipient_id", user_id).execute().data or []
+        rows = [r.get("notifications") or {} for r in messages]
+        for row, link in zip(rows, messages):
+            row["read_at"] = link.get("read_at")
+        result["messages_received"] = sorted(
+            rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)
     except Exception:
         result["messages_received"] = []
     try:
@@ -287,7 +298,14 @@ def export_user_data(user_id: str):
     except Exception:
         result["messages_sent"] = []
     try:
-        violations = supabase.table("violation_logs").select("id, exam_id, violation_type, penalty, created_at").eq("student_id", user_id).order("created_at", desc=True).execute().data or []
+        # A violation log holds `user_id`, not `student_id`, and no `penalty`:
+        # the marks a violation cost are computed at submit time and recorded on
+        # the submission, so there is nothing per row to export. Both wrong names
+        # failed the request, which is why an export contained no violations at
+        # all. `metadata` carries the detail that was recorded with the event.
+        violations = supabase.table("violation_logs") \
+            .select("id, exam_id, violation_type, metadata, created_at") \
+            .eq("user_id", user_id).order("created_at", desc=True).execute().data or []
         result["violations"] = violations
     except Exception:
         result["violations"] = []

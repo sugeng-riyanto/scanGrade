@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Invoice - ScanGrade{% endblock %}
 {% block page_title %}Invoice &amp; Bukti Pembayaran{% endblock %}
@@ -13,7 +14,7 @@
     <div class="bg-gradient-to-r from-primary-600 to-primary-700 rounded-2xl p-5 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
             <h2 class="font-extrabold text-lg">{{ school_info.get('name', '-') }}</h2>
-            <p class="text-primary-200 text-sm font-medium" x-text="'NPSN: {{ school_info.get('npsn', '-') }} · ' + '{{ invoices|length }} ' + t('invoice','invoices')"></p>
+            <p class="text-primary-200 text-sm font-medium" :lang="lang" x-text="'NPSN: {{ school_info.get('npsn', '-') }} · ' + '{{ invoices|length }} ' + t('invoice','invoices')"></p>
         </div>
     </div>
 
