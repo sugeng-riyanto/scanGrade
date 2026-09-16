@@ -21,7 +21,7 @@ def whiteboard_list():
     whiteboards = []
     classes = []
     try:
-        whiteboards = list_whiteboards(role="teacher")
+        whiteboards = list_whiteboards(view="teacher")
         supabase = get_supabase()
         for wb in whiteboards:
             try:

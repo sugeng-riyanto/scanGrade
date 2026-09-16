@@ -13,7 +13,7 @@ whiteboard_student_bp = Blueprint("whiteboard_student", __name__)
 @whiteboard_student_bp.route("/whiteboard")
 @login_required
 def whiteboard_list():
-    whiteboards = list_whiteboards(role="student")
+    whiteboards = list_whiteboards(view="student")
     return render_template("student/whiteboard_list.html", whiteboards=whiteboards)
 
 

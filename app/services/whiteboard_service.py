@@ -76,14 +76,23 @@ def get_whiteboard(whiteboard_id: str) -> dict | None:
     return result.data if result.data else None
 
 
-def list_whiteboards(role: str = "teacher") -> list:
-    """List whiteboards for teacher or student."""
+def list_whiteboards(view: str = "teacher") -> list:
+    """The boards this caller should see: `"teacher"` means "the ones I own",
+    `"student"` means "the ones my class is in".
+
+    The parameter is a **view**, not a role, and it used to be called `role` — which is
+    the trap the name carried: the database's role vocabulary is `guru`/`murid`
+    (`super_admin`/`admin_sekolah` beside them), so a caller passing `g.user_role`
+    would have compared `'guru' == 'teacher'` and quietly received the student branch.
+    Both callers pass a literal, so nothing was broken; the name is what made it a
+    matter of luck.
+    """
     supabase = get_supabase()
     sid = _school_id()
     if not sid:
         return []
 
-    if role == "teacher":
+    if view == "teacher":
         result = supabase.table("whiteboards").select("*").eq("school_id", sid).eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
     else:
         profile = supabase.table("profiles").select("class_id").eq("id", g.user_id).single().execute().data
