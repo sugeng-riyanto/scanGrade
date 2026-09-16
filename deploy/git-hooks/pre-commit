@@ -23,7 +23,18 @@ cd "$REPO" || exit 0
 # What is actually being committed, not what happens to be on disk.
 CHANGED=$(git diff --cached --name-only --diff-filter=ACMR)
 
-if ! printf '%s\n' "$CHANGED" | grep -qE '^app/templates/.*\.html$|^app/static/css/'; then
+# tailwind.config.js and package.json are in this list because they change what
+# the stylesheet build produces: a colour changed in the config, or a flag added
+# to `css:build`, leaves the committed tailwind.css stale exactly the way a new
+# template class does. The gate is only worth running when its subject moved.
+#
+# The SQL and the Python are in it for the schema contract, which answers two
+# different questions from the same two directories: a `select` naming a column no
+# file creates (PostgREST refuses it, the page renders empty) and a policy any
+# caller can satisfy without a session (the anon key is public, so `USING (true)`
+# on `exams` handed out answer keys). A commit that touches neither is judged by
+# neither.
+if ! printf '%s\n' "$CHANGED" | grep -qE '^app/templates/.*\.html$|^app/static/css/|^tailwind\.config\.js$|^package\.json$|^app/.*\.py$|^supabase/.*\.sql$|^deploy/schema_contract\.py$'; then
   exit 0
 fi
 

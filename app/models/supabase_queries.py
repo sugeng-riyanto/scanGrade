@@ -99,10 +99,15 @@ def get_subject(subject_id: str) -> dict | None:
 
 # ── Teachers ────────────────────────────────────
 def list_teachers(school_id: str) -> list:
+    # `profiles` has no `email` — addresses live in `auth.users`, which a joined
+    # select cannot reach. Asking for one is not a column that reads as `None`:
+    # PostgREST refuses the whole request with 42703, and a caller's `except`
+    # turns that into an empty list, which is how the audit page sat empty for
+    # weeks. The name is what these rows carry; an address is a second lookup.
     res = (
         get_supabase()
         .table("teachers")
-        .select("*, profiles!inner(id, full_name, email, phone, status)")
+        .select("*, profiles!inner(id, full_name, phone, status)")
         .eq("school_id", school_id)
         .execute()
     )
@@ -119,7 +124,7 @@ def list_students(school_id: str, class_id: str | None = None) -> list:
     q = (
         get_supabase()
         .table("students")
-        .select("*, profiles!inner(id, full_name, email, phone, status), classes(name)")
+        .select("*, profiles!inner(id, full_name, phone, status), classes(name)")
         .eq("school_id", school_id)
     )
     if class_id:
