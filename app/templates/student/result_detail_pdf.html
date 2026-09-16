@@ -128,32 +128,33 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
         {% set raw_val = answers.get(i|string, '') %}
         {% set student_ans = raw_val['answer'] if raw_val is mapping and 'answer' in raw_val else raw_val %}
         {% set is_bonus = correct == 'bonus' %}
-{% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
-{% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
+{# The grader decides, and `q_answer_text()` renders a letter, a pair list or a
+   chip order — a PDF that compares letters cannot show a matching answer. #}
+{% set is_correct = correct is not none and correct != '' and q_correct(qtype, correct, student_ans) %}
 {% set teacher_score = fb_scores.get(q_idx_str, '') %}
 {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
 {% set qweight = question_weights.get(q_idx_str, 0) %}
 {% set essay_ans = raw_val if raw_val is mapping else {} %}
 {% set has_merged = mp.get(q_idx_str) %}
 
-<div class="q-block {% if qtype == 'mcq' and submission.status in ('graded', 'published') %}{% if is_correct %}correct-border{% else %}wrong-border{% endif %}{% endif %}">
+<div class="q-block {% if q_is_objective(qtype) and submission.status in ('graded', 'published') %}{% if is_correct %}correct-border{% else %}wrong-border{% endif %}{% endif %}">
     <div class="q-header">
         <span class="q-num">Soal #{{ i + 1 }}
             {% if qweight %} <span class="weight-badge">{{ qweight }} poin</span>{% endif %}
         </span>
-        <span class="q-type {{ 'mcq' if qtype == 'mcq' else 'essay' }}">{{ 'MCQ' if qtype == 'mcq' else 'ESAI' }}</span>
+        <span class="q-type {{ 'mcq' if q_is_objective(qtype) else 'essay' }}">{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}BENAR/SALAH{% elif q_kind(qtype) == 'match' %}MENJODOHKAN{% elif q_kind(qtype) == 'dragdrop' %}SUSUN KATA{% else %}ESAI{% endif %}</span>
     </div>
     <div class="q-body">
-        {% if qtype == 'mcq' %}
+        {% if q_is_objective(qtype) %}
             <div class="mcq-answer">
                 <span class="label">Jawaban: </span>
-                <span class="value {% if submission.status in ('graded','published') %}{% if is_correct %}correct{% else %}wrong{% endif %}{% endif %}">{{ student_ans or '-' }}</span>
+                <span class="value {% if submission.status in ('graded','published') %}{% if is_correct %}correct{% else %}wrong{% endif %}{% endif %}">{{ q_answer_text(qtype, student_ans) or '-' }}</span>
                 {% if submission.status in ('graded', 'published') %}
                 {% if is_bonus %}
                 <span style="color:#7c3aed; font-weight:bold; margin-left:8px;">★ Bonus</span>
-                {% elif correct_list %}
+                {% elif correct is not none and correct != '' %}
                 <span class="label" style="margin-left:12px;">Kunci: </span>
-                <span class="value correct">{{ correct_list | join(', ') }}</span>
+                <span class="value correct">{{ q_answer_text(qtype, correct) }}</span>
                 {% endif %}
                 {% if is_correct %}<span style="color:#059669; margin-left:8px;">✓</span>
                 {% else %}<span style="color:#dc2626; margin-left:8px;">✗</span>{% endif %}

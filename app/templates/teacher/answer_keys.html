@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Kunci Jawaban - {{ exam.title }}{% endblock %}
 {% block content %}
@@ -16,16 +17,16 @@
     <form id="answer-form" method="POST">
         <input type="hidden" name="answer_key" id="answer-key-input" :value="getJson()">
 
-        {% if questions|selectattr("type", "equalto", "mcq")|list|length == 0 %}
+        {% if questions|selectattr("kind", "equalto", "choice")|list|length == 0 %}
         <div class="card p-8 text-center">
             <div class="text-4xl mb-3">&#x1F4DD;</div>
             <p class="font-semibold">Tidak ada soal pilihan ganda</p>
-            <p class="text-sm text-gray-500 mt-1">Ujian ini hanya memiliki soal esai yang dinilai manual</p>
+            <p class="text-sm text-gray-500 mt-1">Kunci tipe soal lain diatur di editor ujian</p>
         </div>
         {% else %}
         <div class="space-y-3">
             {% for q in questions %}
-            {% if q.type == 'mcq' %}
+            {% if q.kind == 'choice' %}
             <div class="card p-4">
                 <div class="flex items-center justify-between mb-3">
                     <span class="font-bold text-sm">Soal {{ q.index + 1 }}</span>
@@ -58,6 +59,35 @@
             </button>
         </div>
         {% endif %}
+
+        {# The other objective types are keyed in the exam builder, where their
+           content lives. Listing them here keeps this page honest about what it
+           does not edit — and it no longer writes `essay` over them. #}
+        {% set others = questions|rejectattr("kind", "equalto", "choice")|list %}
+        {% if others %}
+        <div class="card p-4 mt-4">
+            <h2 class="font-bold text-sm mb-1">Kunci tipe soal lain</h2>
+            <p class="text-xs text-gray-500 mb-3">Hanya-baca di sini. Ubah di editor ujian agar kontennya ikut tersimpan.</p>
+            <div class="space-y-2">
+                {% for q in others %}
+                <div class="flex items-start gap-3 p-3 rounded-xl bg-gray-50 border border-gray-200">
+                    <span class="text-xs font-bold text-gray-500 shrink-0">Soal {{ q.index + 1 }}</span>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0
+                        {% if q.kind == 'truefalse' %}bg-primary-50 text-primary-700
+                        {% elif q.kind == 'match' %}bg-violet-50 text-violet-700
+                        {% elif q.kind == 'dragdrop' %}bg-rose-50 text-rose-700
+                        {% else %}bg-amber-50 text-amber-700{% endif %}">
+                        {% if q.kind == 'truefalse' %}Benar / Salah{% elif q.kind == 'match' %}Menjodohkan{% elif q.kind == 'dragdrop' %}Susun Kata{% else %}Esai{% endif %}
+                    </span>
+                    <span class="text-xs font-mono font-bold text-gray-700 flex-1 break-words">{{ q.answer_text or 'Belum diatur' }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            <a href="/teacher/exams/{{ exam.id }}" class="inline-block mt-3 text-xs font-bold text-primary-600 hover:underline">
+                <i class="fas fa-pen-to-square mr-1"></i>Buka editor ujian
+            </a>
+        </div>
+        {% endif %}
     </form>
 </div>
 
@@ -67,7 +97,7 @@ function answerKeyEditor() {
         keys: {},
         init() {
             {% for q in questions %}
-            {% if q.type == 'mcq' %}
+            {% if q.kind == 'choice' %}
             {% if q.is_bonus %}
             this.keys[{{ q.index }}] = 'bonus';
             {% elif q.is_multi %}

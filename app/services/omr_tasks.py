@@ -6,15 +6,23 @@ import zipfile
 import logging
 import uuid
 from app.celery_app import celery_app
+from app.services.question_types import grade_answer, key_has_answer
 
 logger = logging.getLogger("app")
 
 
-def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "") -> dict:
-    """Shared OMR pipeline: process → grade → debug image."""
+def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "",
+             page_index: int = 0) -> dict:
+    """Shared OMR pipeline: process → grade → debug image.
+
+    `page_index` is which page of a multi-page sheet this image is: the grid
+    repeats across pages, so a reader that ignores it reads page 1's bubbles
+    twice and calls the second set page 2's answers.
+    """
     from app.services.omr_service import process_scan, load_image, draw_debug_image, find_registration_marks
 
-    result = process_scan(image_data, total_questions=total_questions, preprocess=True)
+    result = process_scan(image_data, total_questions=total_questions,
+                          preprocess=True, page_index=page_index)
     if "error" in result:
         return result
 
@@ -23,19 +31,29 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "") ->
         from app.utils.auth import get_supabase
         try:
             supabase = get_supabase()
-            exam = supabase.table("exams").select("answer_key").eq("id", exam_id).single().execute().data
+            # `question_types` rides along with the key: the grader needs the kind
+            # of each question, and a column missing from a select list reads as
+            # absent rather than as an error (see AGENTS.md).
+            exam = supabase.table("exams").select("answer_key,question_types").eq("id", exam_id).single().execute().data
             if exam and exam.get("answer_key"):
                 key = exam["answer_key"]
                 if isinstance(key, str):
                     key = json.loads(key)
+                qtypes = exam.get("question_types") or {}
+                if isinstance(qtypes, str):
+                    qtypes = json.loads(qtypes)
                 detected = result.get("answers", {})
                 correct = 0
+                graded = 0
                 for k, v in key.items():
-                    if k in detected and detected[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
+                    if not key_has_answer(qtypes.get(str(k)), v):
+                        continue
+                    graded += 1
+                    if k in detected and grade_answer(qtypes.get(str(k)), v, detected[k]):
                         correct += 1
-                mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
-                result["score"] = round((correct / max(mcq_count, 1)) * 100, 2)
+                result["score"] = round((correct / max(graded, 1)) * 100, 2)
                 result["correct"] = correct
+                result["graded"] = graded
         except Exception as e:
             logger.warning("OMR grading failed: %s", e)
 
@@ -44,7 +62,8 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "") ->
         img = load_image(image_data)
         if img is not None:
             corners = find_registration_marks(img)
-            debug_jpg = draw_debug_image(img, corners, result.get("answers"))
+            debug_jpg = draw_debug_image(img, corners, result.get("answers"),
+                                         page_index=page_index)
             import base64
             result["debug_image"] = base64.b64encode(debug_jpg).decode()
     except Exception as e:
@@ -54,12 +73,13 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "") ->
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=5)
-def process_omr_scan(self, image_path: str, total_questions: int = 50, exam_id: str = ""):
+def process_omr_scan(self, image_path: str, total_questions: int = 50,
+                     exam_id: str = "", page_index: int = 0):
     """Process a single OMR scan image."""
     try:
         with open(image_path, "rb") as f:
             image_data = f.read()
-        return _run_omr(image_data, total_questions, exam_id)
+        return _run_omr(image_data, total_questions, exam_id, page_index=page_index)
     except Exception as e:
         logger.error("OMR task failed: %s", e, exc_info=True)
         try:
@@ -69,7 +89,8 @@ def process_omr_scan(self, image_path: str, total_questions: int = 50, exam_id: 
 
 
 @celery_app.task(bind=True, max_retries=1)
-def process_bulk_scan(self, zip_path: str, total_questions: int = 50, exam_id: str = ""):
+def process_bulk_scan(self, zip_path: str, total_questions: int = 50,
+                      exam_id: str = "", page_index: int = 0):
     """Process a ZIP file containing multiple LJK scans as background task."""
     from PIL import Image
 
@@ -98,10 +119,16 @@ def process_bulk_scan(self, zip_path: str, total_questions: int = 50, exam_id: s
                     img.save(clean, format=fmt)
                     image_data = clean.getvalue()
 
-                    omr_result = _run_omr(image_data, total_questions, exam_id)
+                    omr_result = _run_omr(image_data, total_questions, exam_id,
+                                          page_index=page_index)
 
                     entry = {
                         "filename": fname,
+                        # Which page this image was, and which questions it
+                        # covered, so a 2-page sheet can be merged per student.
+                        "page_index": omr_result.get("page_index", 0),
+                        "first_question": omr_result.get("first_question"),
+                        "last_question": omr_result.get("last_question"),
                         "nisn": omr_result.get("nisn", "????????"),
                         "nisn_confidence": omr_result.get("nisn_confidence", 0),
                         "answers": omr_result.get("answers", {}),

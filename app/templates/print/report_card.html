@@ -264,18 +264,20 @@
             {% set raw = answers.get(qkey, '') %}
             {% set student_ans = raw['answer'] if raw is mapping and 'answer' in raw else raw %}
             {% set is_bonus = correct == 'bonus' %}
-            {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
-            {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
+            {# The grader decides, and `q_answer_text()` renders whatever shape the key
+               has — a letter, a list of pairs, a chip order. Comparing letters here
+               is what made a matching answer print as "—" and "wrong". #}
+            {% set is_correct = correct is not none and correct != '' and q_correct(qtype, correct, student_ans) %}
             {% set teacher_score = fb_scores.get(qkey, '') %}
             {% set teacher_comment = fb_comments.get(qkey, '') %}
             {% set qweight = question_weights.get(qkey, 0) %}
             {% set essay = raw if raw is mapping else {} %}
             <tr>
                 <td class="center"><strong>{{ i + 1 }}</strong></td>
-                <td>{{ 'MCQ' if qtype == 'mcq' else 'Esai' }}</td>
+                <td>{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}Benar/Salah{% elif q_kind(qtype) == 'match' %}Menjodohkan{% elif q_kind(qtype) == 'dragdrop' %}Susun Kata{% else %}Esai{% endif %}</td>
                 <td>
-                    {% if qtype == 'mcq' %}
-                        <strong>{{ student_ans or '-' }}</strong>
+                    {% if q_is_objective(qtype) %}
+                        <strong>{{ q_answer_text(qtype, student_ans) or '-' }}</strong>
                     {% elif essay.get('text') %}
                         {{ essay.text[:280] }}{% if essay.text|length > 280 %}&hellip;{% endif %}
                     {% elif essay.get('pages') %}
@@ -286,13 +288,13 @@
                 </td>
                 {% if show_key %}
                 <td>
-                    {% if qtype == 'mcq' %}
+                    {% if q_is_objective(qtype) %}
                         {% if is_bonus %}<span class="bonus">Bonus (semua benar)</span>
-                        {% else %}<span class="ok">{{ correct_list | join(', ') if correct_list else '-' }}</span>{% endif %}
+                        {% else %}<span class="ok">{{ q_answer_text(qtype, correct) or '-' }}</span>{% endif %}
                     {% else %}<span class="muted">&mdash;</span>{% endif %}
                 </td>
                 <td class="center">
-                    {% if qtype == 'mcq' %}
+                    {% if q_is_objective(qtype) %}
                         <span class="{{ 'ok' if is_correct else 'no' }}">{{ 'B' if is_bonus else ('&#10003;'|safe if is_correct else '&#10007;'|safe) }}</span>
                     {% else %}<span class="muted">&mdash;</span>{% endif %}
                 </td>
@@ -331,7 +333,8 @@
         {% set s_pages = (raw.get('pages') if raw is mapping else {}) or {} %}
         {% set ov_pages = fb_overlay.get(i|string, {}) or {} %}
         <div style="font-size:9pt; font-weight:bold; margin: 6pt 0 4pt;">
-            Soal #{{ i + 1 }} &mdash; {{ 'Esai' if (question_types or {}).get(i|string, 'mcq') != 'mcq' else 'MCQ' }}
+            {% set _qt = (question_types or {}).get(i|string, 'mcq') %}
+            Soal #{{ i + 1 }} &mdash; {% if q_kind(_qt) == 'choice' %}MCQ{% elif q_kind(_qt) == 'truefalse' %}Benar/Salah{% elif q_kind(_qt) == 'match' %}Menjodohkan{% elif q_kind(_qt) == 'dragdrop' %}Susun Kata{% else %}Esai{% endif %}
             {% set ts = fb_scores.get(i|string, '') %}
             {% if ts is defined and ts != '' %}<span class="ok">&nbsp;&middot; Skor {{ ts }}</span>{% endif %}
         </div>

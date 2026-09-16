@@ -3,6 +3,8 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from app.services.question_types import is_essay
+
 logger = logging.getLogger("app")
 
 
@@ -239,7 +241,10 @@ def grade_bulk_essays(teacher_id: str, exam_id: str, submission_ids: list = None
 
         for i in range(total_q):
             qi = str(i)
-            if qtypes.get(qi, "mcq") != "mcq":
+            # Only teacher-marked questions are sent for AI marking. Asking
+            # "not MCQ" pulled the objective types in too, and a true/false question
+            # would have been handed to a language model as a free-text essay.
+            if is_essay(qtypes.get(qi)):
                 ans_data = answers.get(qi, {})
                 if isinstance(ans_data, dict):
                     student_ans = ans_data.get("answer", "")

@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Detail Hasil - ScanGrade{% endblock %}
 {% block page_title %}Detail Hasil{% endblock %}
@@ -282,18 +283,23 @@
                     {% set raw_ans = answers.get(i|string, '') %}
                     {% set student_ans = raw_ans['answer'] if raw_ans is mapping and 'answer' in raw_ans else raw_ans %}
                     {% set is_bonus = correct == 'bonus' %}
-                    {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
-                    {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
+                    {# The grader decides, and `q_answer_text()` renders whatever shape the
+                       key has — a letter, a pair list, a chip order. A report that decides
+                       for itself cannot show a matching answer at all. #}
+                    {% set is_correct = correct is not none and correct != '' and q_correct(qtype, correct, student_ans) %}
                     {% set qweight = question_weights.get(q_idx_str, '') %}
                     {% set teacher_score = fb_scores.get(q_idx_str, '') %}
                     {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
                     <tr>
                         <td>{{ i + 1 }}</td>
-                        <td>{{ 'MCQ' if qtype == 'mcq' else 'Esai' }}</td>
-                        <td>{{ student_ans if student_ans is string else '—' }}</td>
-                        <td>{{ correct_list | join(', ') if correct_list else ('Bonus' if is_bonus else ('Esai' if qtype != 'mcq' else '—')) }}</td>
-                        <td class="{% if is_bonus %}bonus{% elif is_correct %}correct{% elif qtype != 'mcq' %}{% else %}wrong{% endif %}">
-                            {% if is_bonus %}★{% elif is_correct %}✓{% elif qtype != 'mcq' %}—{% else %}✗{% endif %}
+                        {# Each label is a pair, so it flips with the toggle like the rest of
+                           the page — and so a new question type cannot arrive as an
+                           untranslated word. #}
+                        <td>{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}<span x-text="lang==='en'?'True / False':'Benar / Salah'"></span>{% elif q_kind(qtype) == 'match' %}<span x-text="lang==='en'?'Matching':'Menjodohkan'"></span>{% elif q_kind(qtype) == 'dragdrop' %}<span x-text="lang==='en'?'Drag &amp; drop':'Susun Kata'"></span>{% else %}<span x-text="lang==='en'?'Essay':'Esai'"></span>{% endif %}</td>
+                        <td>{{ q_answer_text(qtype, student_ans) or '—' }}</td>
+                        <td>{{ ('Bonus' if is_bonus else q_answer_text(qtype, correct)) or ('Esai' if q_is_essay(qtype) else '—') }}</td>
+                        <td class="{% if is_bonus %}bonus{% elif is_correct %}correct{% elif q_is_essay(qtype) %}{% else %}wrong{% endif %}">
+                            {% if is_bonus %}★{% elif is_correct %}✓{% elif q_is_essay(qtype) %}—{% else %}✗{% endif %}
                         </td>
                         <td>{{ qweight if qweight else '—' }}</td>
                         {% if submission.status in ('graded', 'published') %}
@@ -318,20 +324,19 @@
             {% set raw_val = answers.get(i|string, '') %}
             {% set student_ans = raw_val['answer'] if raw_val is mapping and 'answer' in raw_val else raw_val %}
             {% set is_bonus = correct == 'bonus' %}
-            {% set correct_list = correct if correct is iterable and correct is not string and correct is not mapping else ([correct] if correct and correct not in ('essay', 'essay_text', 'essay_canvas') else []) %}
-            {% set is_correct = (qtype == 'mcq' and (is_bonus or (student_ans in correct_list))) %}
+            {% set is_correct = correct is not none and correct != '' and q_correct(qtype, correct, student_ans) %}
             {% set teacher_score = fb_scores.get(q_idx_str, '') %}
             {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
             {% set teacher_overlay = fb_overlay.get(q_idx_str, {}) %}
             {% set qweight = question_weights.get(q_idx_str, 0) %}
             {% set essay_ans = raw_val if raw_val is mapping else (raw_val|from_json if raw_val is string else {}) %}
 
-            {% if qtype != 'mcq' and student_ans is mapping and student_ans.get('pages') %}
+            {% if q_is_essay(qtype) and student_ans is mapping and student_ans.get('pages') %}
             <div class="print-break"></div>
             {% endif %}
 
             <div class="print-q-block print-avoid-break p-4 rounded-2xl border-2
-                {% if qtype == 'mcq' %}
+                {% if q_is_objective(qtype) %}
                     {% if submission.status in ('graded', 'published') and correct %}
                         {% if is_correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %}
                     {% else %}bg-slate-50 border-slate-200{% endif %}
@@ -341,11 +346,11 @@
                 <div class="print-only" style="display:none;">
                     <div class="print-q-header">
                         <span class="q-num">Soal #{{ i + 1 }}</span>
-                        <span class="q-type {{ 'mcq' if qtype == 'mcq' else 'essay' }}">{{ 'MCQ' if qtype == 'mcq' else 'ESAI' }}</span>
+                        <span class="q-type {{ 'mcq' if q_is_objective(qtype) else 'essay' }}">{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}<span x-text="lang==='en'?'TRUE / FALSE':'BENAR / SALAH'"></span>{% elif q_kind(qtype) == 'match' %}<span x-text="lang==='en'?'MATCHING':'MENJODOHKAN'"></span>{% elif q_kind(qtype) == 'dragdrop' %}<span x-text="lang==='en'?'DRAG &amp; DROP':'SUSUN KATA'"></span>{% else %}<span x-text="lang==='en'?'ESSAY':'ESAI'"></span>{% endif %}</span>
                     </div>
                 </div>
 
-                {% if qtype == 'mcq' %}
+                {% if q_is_objective(qtype) %}
                     <div class="flex items-start gap-3 flex-wrap mb-3 no-print">
                         <span class="font-extrabold text-sm w-10 shrink-0 text-slate-700">#{{ i + 1 }}</span>
                         {% if qweight %}
@@ -353,12 +358,12 @@
                         {% endif %}
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-3 flex-wrap">
-                                <span class="text-sm font-bold">Jawaban: <strong class="{% if submission.status in ('graded', 'published') %}{% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}{% else %}text-amber-700{% endif %}">{{ student_ans or '-' }}</strong></span>
+                                <span class="text-sm font-bold">Jawaban: <strong class="{% if submission.status in ('graded', 'published') %}{% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}{% else %}text-amber-700{% endif %}">{{ q_answer_text(qtype, student_ans) or '-' }}</strong></span>
                                 {% if submission.status in ('graded', 'published') %}
                                 {% if is_bonus %}
                                 <span class="text-sm font-bold text-purple-700"><i class="fas fa-gift mr-1"></i>Bonus</span>
                                 {% else %}
-                                <span class="text-sm font-bold">Kunci: <strong class="text-emerald-700">{{ correct_list | join(', ') }}</strong></span>
+                                <span class="text-sm font-bold">Kunci: <strong class="text-emerald-700">{{ q_answer_text(qtype, correct) }}</strong></span>
                                 {% endif %}
                                 {% if is_correct %}<i class="fas fa-check-circle text-emerald-500 ml-auto"></i>
                                 {% else %}<i class="fas fa-times-circle text-red-500 ml-auto"></i>{% endif %}
@@ -375,7 +380,7 @@
                     <div class="hidden" data-pdf-teacher-score="{{ teacher_score }}" data-pdf-teacher-comment="{{ teacher_comment }}"></div>
                     {% endif %}
                 {% else %}
-                    {# ESSAY question #}
+                    {# ESSAY question — the only family a teacher marks by reading #}
                     <div class="flex items-start gap-3 flex-wrap mb-3 no-print">
                         <span class="font-extrabold text-sm w-10 shrink-0 text-slate-700">#{{ i + 1 }}</span>
                         {% if qweight %}

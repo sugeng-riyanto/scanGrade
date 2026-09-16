@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Preview: {{ exam.title }} - ScanGrade{% endblock %}
 {% block page_title %}Preview{% endblock %}
@@ -41,13 +42,17 @@
             <div class="flex gap-1 flex-wrap pb-1">
                 {% for i in range(exam.total_questions) %}
                 {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
+                {% set qkind = q_kind(qtype) %}
                 {% set has_audio = (exam.question_audio or {}).get(i|string) %}
                 {% set has_canvas = (exam.question_canvas or {}).get(i|string) %}
-                {% set is_essay_bg = qtype in ('essay_text', 'essay_canvas') and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+                {% set is_essay_bg = q_is_essay(qtype) and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
                 <span class="q-btn w-9 h-9 text-xs font-bold rounded-xl border-2 shrink-0 flex items-center justify-center relative cursor-pointer transition"
                       @click="currentQ = {{ i }}"
                       :class="currentQ === {{ i }} ? 'ring-2 ring-orange-400 shadow-lg shadow-orange-200/40' : ''
-                          {% if qtype == 'essay_text' %} bg-amber-50 border-amber-300 text-amber-700
+                          {% if qkind == 'truefalse' %} bg-primary-50 border-primary-300 text-primary-700
+                          {% elif qkind == 'match' %} bg-violet-50 border-violet-300 text-violet-700
+                          {% elif qkind == 'dragdrop' %} bg-rose-50 border-rose-300 text-rose-700
+                          {% elif qtype == 'essay_text' %} bg-amber-50 border-amber-300 text-amber-700
                           {% elif qtype == 'essay_canvas' %} bg-emerald-50 border-emerald-300 text-emerald-700
                           {% else %}bg-white text-stone-600 border-stone-300{% endif %}">
                     {{ i + 1 }}
@@ -62,15 +67,22 @@
         <div class="flex items-center gap-2 flex-wrap">
             {% for i in range(exam.total_questions) %}
             {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
+            {% set qkind = q_kind(qtype) %}
             {% set has_audio = (exam.question_audio or {}).get(i|string) %}
             {% set has_canvas = (exam.question_canvas or {}).get(i|string) %}
-            {% set is_essay_bg = qtype in ('essay_text', 'essay_canvas') and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+            {% set is_essay_bg = q_is_essay(qtype) and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
             <div class="flex items-center gap-1.5 mr-3">
                 <span class="text-xs font-extrabold text-stone-500">#{{ i+1 }}</span>
-                {% if qtype == 'mcq' %}
+                {% if qkind == 'choice' %}
                 {% for opt in ['A','B','C','D','E'] %}
                 <span class="opt-btn px-2 py-0.5 border-2 rounded-lg text-xs font-bold bg-stone-50 text-stone-400 border-stone-200">{{ opt }}</span>
                 {% endfor %}
+                {% elif qkind == 'truefalse' %}
+                <span class="text-xs font-extrabold text-primary-600">(Benar / Salah)</span>
+                {% elif qkind == 'match' %}
+                <span class="text-xs font-extrabold text-violet-600">(Menjodohkan · {{ q_answer_text(qtype, (exam.answer_key or {}).get(i|string)) or 'belum ada pasangan' }})</span>
+                {% elif qkind == 'dragdrop' %}
+                <span class="text-xs font-extrabold text-rose-600">(Susun Kata · {{ q_answer_text(qtype, (exam.answer_key or {}).get(i|string)) or 'belum ada kata' }})</span>
                 {% else %}
                 <span class="text-xs font-extrabold {% if qtype == 'essay_text' %}text-amber-600{% else %}text-emerald-600{% endif %}">
                     {% if qtype == 'essay_text' %}(Teks){% else %}(Canvas){% endif %}
@@ -88,7 +100,7 @@
     {% for i in range(exam.total_questions) %}
     {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
     {% set has_audio = (exam.question_audio or {}).get(i|string) %}
-    {% if qtype in ('essay_text', 'essay_canvas') and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
+    {% if q_is_essay(qtype) and exam.pdf_page_urls and exam.pdf_page_urls|length > 0 %}
     <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 mb-3 p-4 border border-stone-100" x-show="currentQ === {{ i }}" style="display:none">
         <div class="flex items-center gap-2 text-xs font-bold
             {% if qtype == 'essay_text' %}text-amber-700 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-100{% else %}text-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100{% endif %}

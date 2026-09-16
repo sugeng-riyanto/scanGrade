@@ -185,8 +185,8 @@
                             <p class="text-[10px] text-emerald-600 truncate" x-text="pdfUrl ? pdfUrl.split('/').pop() : ''"></p>
                         </div>
                         <div class="flex gap-1.5 shrink-0">
-                            <span x-show="mcqCount > 0" class="text-[9px] font-bold px-2 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200" x-text="mcqCount + ' MCQ'"></span>
-                            <span x-show="essayCount > 0" class="text-[9px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200" x-text="essayCount + ' Essay'"></span>
+                            <span x-show="mcqCount > 0" class="text-[9px] font-bold px-2 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200" x-text="mcqCount + t(' Objektif',' objective')"></span>
+                            <span x-show="essayCount > 0" class="text-[9px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200" x-text="essayCount + t(' Esai',' essay')"></span>
                             <span class="text-[9px] font-bold px-2 py-1 rounded-full bg-surface-100 text-surface-600 border border-surface-200"
                                   x-text="(mcqCount + essayCount) + ' ' + t('soal','questions')"></span>
                         </div>
@@ -698,14 +698,18 @@
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 p-3 sm:p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
                         <div>
-                            <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i><span x-text="t('Bobot MCQ','MCQ Weight')"></span></label>
+                            <!-- One budget for every auto-marked question, whatever its
+                                 kind. Labelling this "MCQ weight" is what made a
+                                 true/false question share the essay's 30% instead. -->
+                            <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i><span x-text="t('Bobot Objektif','Objective Weight')"></span></label>
                             <div class="flex items-center gap-2">
-                                <input type="number" x-model.number="_mcqPct" min="0" max="100" step="1"
+                                <input type="number" x-model.number="_objectivePct" min="0" max="100" step="1"
                                        class="w-20 px-3 py-2 border-2 border-amber-200 rounded-xl text-center font-extrabold text-amber-700 focus:border-amber-400">
                                 <span class="text-sm font-bold text-slate-500">%</span>
                                 <span class="text-xs font-bold text-slate-400"
-                                      x-text="mcqCount + ' ' + t('soal ×','questions ×') + ' ' + mcqPerQ.toFixed(1) + ' ' + t('poin','points')"></span>
+                                      x-text="objectiveCount + ' ' + t('soal ×','questions ×') + ' ' + objectivePerQ.toFixed(1) + ' ' + t('poin','points')"></span>
                             </div>
+                            <p class="text-[10px] font-semibold text-slate-400 mt-1" x-text="t('PG, Benar/Salah, Menjodohkan dan Susun Kata otomatis dinilai — semuanya berbagi bobot ini','Choice, true/false, matching and drag &amp; drop are auto-marked — they all share this weight')"></p>
                         </div>
                         <div>
                             <label class="text-xs font-extrabold text-emerald-700 mb-1 flex items-center gap-1"><i class="fas fa-pencil-alt"></i><span x-text="t('Bobot Esai','Essay Weight')"></span></label>
@@ -719,20 +723,23 @@
                         </div>
                     </div>
 
-                    <div class="flex flex-wrap gap-2 mb-4">
-                        <button type="button" @click="addMcq()"
-                                class="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-amber-200 transition">
-                            <i class="fas fa-plus-circle"></i><span x-text="t('Tambah MCQ','Add MCQ')"></span>
-                        </button>
-                        <button type="button" @click="addEssay()"
-                                class="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-emerald-200 transition">
-                            <i class="fas fa-pencil-alt"></i><span x-text="t('Tambah Esai','Add Essay')"></span>
-                        </button>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <template x-for="c in typeChoices" :key="c.v">
+                            <button type="button" @click="addQuestionOf(c.v)"
+                                    class="flex items-center gap-2 px-3 py-2.5 rounded-xl font-bold text-sm border-2 transition"
+                                    :class="c.btn">
+                                <i class="fas" :class="c.icon"></i>
+                                <span x-text="t('Tambah','Add') + ' ' + t(c.id, c.en)"></span>
+                            </button>
+                        </template>
                         <button type="button" @click="normalizeTo100()"
-                                class="flex items-center gap-2 bg-primary-50 hover:bg-primary-100 text-primary-700 px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-primary-200 transition">
+                                class="flex items-center gap-2 bg-primary-50 hover:bg-primary-100 text-primary-700 px-3 py-2.5 rounded-xl font-bold text-sm border-2 border-primary-200 transition">
                             <i class="fas fa-balance-scale"></i>100%
                         </button>
                     </div>
+                    <p class="text-[11px] font-semibold text-slate-400 mb-4"
+                       x-text="t('Setiap soal punya pilihan tipenya sendiri dan bisa digeser — tombol panah atau tarik ikon ⠿ untuk mengubah urutan.',
+                                 'Every question carries its own type and can be moved — use the arrow buttons or drag the ⠿ handle to reorder.')"></p>
 
                     <template x-if="questions.length === 0">
                         <div class="text-center py-8 text-slate-400">
@@ -743,20 +750,49 @@
 
                     <div id="questions-list" class="space-y-3">
                         <template x-for="(q, i) in questions" :key="q._id">
-                            <div class="p-4 bg-slate-50 rounded-2xl border-2 border-slate-200 question-item">
-                                <div class="flex items-center justify-between mb-2">
-                                    <div class="flex items-center gap-2">
+                            <div class="p-4 bg-slate-50 rounded-2xl border-2 question-item transition"
+                                 :class="dragOver === i ? 'border-primary-400 bg-primary-50/40' : 'border-slate-200'"
+                                 @dragover.prevent="dragOver = i"
+                                 @dragleave="dragOver === i && (dragOver = null)"
+                                 @drop.prevent="onDrop($event, i)">
+                                <div class="flex items-start justify-between gap-2 mb-2">
+                                    <div class="flex items-center gap-2 flex-wrap min-w-0">
                                         <span class="text-sm font-extrabold text-slate-700" x-text="t('Soal','Question') + ' ' + (i + 1)"></span>
-                                        <span class="text-xs px-2 py-1 rounded-full font-extrabold"
-                                              :class="q.type === 'mcq' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
-                                              x-text="q.type === 'mcq' ? 'MCQ' : t('Esai','Essay')"></span>
+                                        <!-- The type is a choice, not a birthmark: a question
+                                             added as a choice question becomes a matching one
+                                             by picking it here, keeping its media and page. -->
+                                        <!-- `x-model` writes `el.value` when the element
+                                             initialises, and a `<select>` whose options are
+                                             still being cloned by `x-for` has only its first
+                                             option — so a true/false question displayed
+                                             "Multiple choice", and nothing ever corrected
+                                             it. The options are re-applied a tick later,
+                                             once they exist, which is what `$nextTick` is
+                                             for. -->
+                                        <select x-model="q.type" @change="onTypeChange(i)"
+                                                x-init="$nextTick(() => { $el.value = String(q.type || SG_QT.default) })"
+                                                class="text-xs font-extrabold rounded-lg border-2 border-slate-200 bg-white px-2 py-1 text-slate-700 focus:border-primary-500 transition max-w-[11rem]">
+                                            <template x-for="c in typeChoices" :key="c.v">
+                                                <option :value="c.v" x-text="t(c.id, c.en)"></option>
+                                            </template>
+                                        </select>
                                         <span x-show="q.bonus" class="text-xs px-2 py-1 rounded-full font-extrabold bg-purple-100 text-purple-700">Bonus</span>
                                         <span x-show="q.audio || q.youtube" class="text-xs px-2 py-1 rounded-full font-extrabold bg-rose-100 text-rose-700">
                                             <i class="fas fa-headphones mr-0.5"></i>Media
                                         </span>
                                     </div>
-                                    <div class="flex items-center gap-2">
-                                        <button type="button" @click="removeQuestion(i)" class="text-slate-400 hover:text-red-500 p-1 transition">
+                                    <div class="flex items-center gap-0.5 shrink-0">
+                                        <button type="button" @click="moveQuestion(i, -1)" :disabled="i === 0"
+                                                class="tap-44 w-9 h-9 rounded-lg text-slate-400 hover:text-primary-600 hover:bg-primary-50 disabled:opacity-25 disabled:hover:bg-transparent transition"
+                                                :title="t('Naikkan','Move up')"><i class="fas fa-arrow-up text-xs"></i></button>
+                                        <button type="button" @click="moveQuestion(i, 1)" :disabled="i === questions.length - 1"
+                                                class="tap-44 w-9 h-9 rounded-lg text-slate-400 hover:text-primary-600 hover:bg-primary-50 disabled:opacity-25 disabled:hover:bg-transparent transition"
+                                                :title="t('Turunkan','Move down')"><i class="fas fa-arrow-down text-xs"></i></button>
+                                        <span draggable="true" @dragstart="onDragStart($event, i)" @dragend="dragFrom = null; dragOver = null"
+                                              class="tap-44 w-9 h-9 rounded-lg text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex items-center justify-center select-none"
+                                              :title="t('Tarik untuk memindah','Drag to move')"><i class="fas fa-grip-vertical text-sm"></i></span>
+                                        <button type="button" @click="removeQuestion(i)" class="tap-44 w-9 h-9 rounded-lg text-slate-400 hover:text-red-500 transition"
+                                                :title="t('Hapus soal','Delete question')">
                                             <i class="fas fa-times-circle text-sm"></i>
                                         </button>
                                     </div>
@@ -828,7 +864,7 @@
                                     </div>
                                 </div>
 
-                                <div x-show="q.type === 'mcq'" class="mcq-options space-y-2">
+                                <div x-show="kindOf(q) === 'choice'" class="mcq-options space-y-2">
                                     <div class="flex items-center justify-between">
                                         <label class="text-xs font-extrabold text-slate-500" x-text="t('Kunci Jawaban:','Answer key:')"></label>
                                         <label class="flex items-center gap-1.5 cursor-pointer">
@@ -839,7 +875,7 @@
                                     <div class="flex gap-2 flex-wrap">
                                         <template x-for="opt in ['A','B','C','D','E']">
                                             <button type="button" @click="toggleAnswer(i, opt)"
-                                                    class="text-sm font-extrabold px-3 py-1.5 rounded-xl border-2 transition"
+                                                    class="tap-44 text-sm font-extrabold px-3 py-1.5 rounded-xl border-2 transition"
                                                     :class="q.bonus ? 'bg-purple-50 border-purple-300 text-purple-700' : (q.answers && q.answers.includes(opt) ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-600')">
                                                 <span x-text="opt"></span>
                                             </button>
@@ -847,7 +883,107 @@
                                     </div>
                                 </div>
 
-                                <div x-show="q.type === 'essay'" class="text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
+                                <!-- True / False: one key, two buttons. -->
+                                <div x-show="kindOf(q) === 'truefalse'" class="space-y-2">
+                                    <label class="text-xs font-extrabold text-slate-500" x-text="t('Kunci Jawaban:','Answer key:')"></label>
+                                    <div class="flex gap-2">
+                                        <button type="button" @click="q.tf = 'true'"
+                                                class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 font-extrabold text-sm transition"
+                                                :class="q.tf === 'true' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-200'">
+                                            <i class="fas fa-check"></i><span x-text="t('Benar','True')"></span>
+                                        </button>
+                                        <button type="button" @click="q.tf = 'false'"
+                                                class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 font-extrabold text-sm transition"
+                                                :class="q.tf === 'false' ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-white border-slate-200 text-slate-600 hover:border-rose-200'">
+                                            <i class="fas fa-times"></i><span x-text="t('Salah','False')"></span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Matching: the pairs are the key *and* the columns the
+                                     student sees; only the pairing is withheld from them. -->
+                                <div x-show="kindOf(q) === 'match'" class="space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <label class="text-xs font-extrabold text-slate-500" x-text="t('Pasangan yang benar:','Correct pairs:')"></label>
+                                        <button type="button" @click="addPair(i)" class="text-xs font-bold text-primary-600 hover:underline">
+                                            <i class="fas fa-plus mr-0.5"></i><span x-text="t('Tambah pasangan','Add pair')"></span>
+                                        </button>
+                                    </div>
+                                    <template x-for="(p, pi) in q.pairs" :key="'pair-' + q._id + '-' + pi">
+                                        <div class="flex items-center gap-2">
+                                            <input type="text" x-model="p.l" :placeholder="t('Kiri','Left')"
+                                                   class="flex-1 min-w-0 text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
+                                            <i class="fas fa-arrow-right text-slate-300 text-xs shrink-0"></i>
+                                            <input type="text" x-model="p.r" :placeholder="t('Kanan','Right')"
+                                                   class="flex-1 min-w-0 text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
+                                            <button type="button" @click="q.pairs.splice(pi, 1)" :disabled="q.pairs.length <= 1"
+                                                    class="tap-44 w-9 h-9 rounded-lg text-slate-300 hover:text-red-500 disabled:opacity-25 transition shrink-0">
+                                                <i class="fas fa-times text-xs"></i>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <div class="pt-1">
+                                        <div class="flex items-center gap-2">
+                                            <input type="text" x-model="q._extraInput" @keydown.enter.prevent="addExtra(i)"
+                                                   :placeholder="t('Pengecoh — kolom kanan yang tidak berpasangan (opsional)','Distractor — a right-hand entry that matches nothing (optional)')"
+                                                   class="flex-1 min-w-0 text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
+                                            <button type="button" @click="addExtra(i)" class="tap-44 w-9 h-9 rounded-lg bg-slate-100 text-slate-500 hover:bg-primary-50 hover:text-primary-600 transition shrink-0">
+                                                <i class="fas fa-plus text-xs"></i>
+                                            </button>
+                                        </div>
+                                        <div class="flex flex-wrap gap-1.5 mt-2" x-show="(q.extra || []).length">
+                                            <template x-for="(x, xi) in q.extra" :key="'x-' + q._id + '-' + xi">
+                                                <span class="inline-flex items-center gap-1 text-[11px] font-bold bg-slate-200 text-slate-600 rounded-full pl-2.5 pr-1 py-1">
+                                                    <span x-text="x"></span>
+                                                    <button type="button" @click="q.extra.splice(xi, 1)" class="tap-44 w-5 h-5 rounded-full hover:bg-slate-300"><i class="fas fa-times text-[9px]"></i></button>
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Drag and drop: the order of these chips IS the answer. -->
+                                <div x-show="kindOf(q) === 'dragdrop'" class="space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <label class="text-xs font-extrabold text-slate-500" x-text="t('Urutan yang benar (atas ke bawah):','Correct order (top to bottom):')"></label>
+                                        <button type="button" @click="addChip(i)" class="text-xs font-bold text-primary-600 hover:underline">
+                                            <i class="fas fa-plus mr-0.5"></i><span x-text="t('Tambah kata','Add word')"></span>
+                                        </button>
+                                    </div>
+                                    <template x-for="(w, wi) in q.order" :key="'word-' + q._id + '-' + wi">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-6 text-[11px] font-extrabold text-slate-400 text-center shrink-0" x-text="wi + 1"></span>
+                                            <input type="text" x-model="q.order[wi]" :placeholder="t('kata atau frasa','word or phrase')"
+                                                   class="flex-1 min-w-0 text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
+                                            <button type="button" @click="moveChip(i, wi, -1)" :disabled="wi === 0"
+                                                    class="tap-44 w-9 h-9 rounded-lg text-slate-400 hover:text-primary-600 disabled:opacity-25 transition shrink-0"><i class="fas fa-arrow-up text-xs"></i></button>
+                                            <button type="button" @click="moveChip(i, wi, 1)" :disabled="wi === q.order.length - 1"
+                                                    class="tap-44 w-9 h-9 rounded-lg text-slate-400 hover:text-primary-600 disabled:opacity-25 transition shrink-0"><i class="fas fa-arrow-down text-xs"></i></button>
+                                            <button type="button" @click="q.order.splice(wi, 1)" :disabled="q.order.length <= 1"
+                                                    class="tap-44 w-9 h-9 rounded-lg text-slate-300 hover:text-red-500 disabled:opacity-25 transition shrink-0"><i class="fas fa-times text-xs"></i></button>
+                                        </div>
+                                    </template>
+                                    <div class="pt-1">
+                                        <div class="flex items-center gap-2">
+                                            <input type="text" x-model="q._extraInput" @keydown.enter.prevent="addExtra(i)"
+                                                   :placeholder="t('Pengecoh — kata yang tidak dipakai (opsional)','Distractor — a word that is not used (optional)')"
+                                                   class="flex-1 min-w-0 text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
+                                            <button type="button" @click="addExtra(i)" class="tap-44 w-9 h-9 rounded-lg bg-slate-100 text-slate-500 hover:bg-primary-50 hover:text-primary-600 transition shrink-0">
+                                                <i class="fas fa-plus text-xs"></i>
+                                            </button>
+                                        </div>
+                                        <div class="flex flex-wrap gap-1.5 mt-2" x-show="(q.extra || []).length">
+                                            <template x-for="(x, xi) in q.extra" :key="'dx-' + q._id + '-' + xi">
+                                                <span class="inline-flex items-center gap-1 text-[11px] font-bold bg-slate-200 text-slate-600 rounded-full pl-2.5 pr-1 py-1">
+                                                    <span x-text="x"></span>
+                                                    <button type="button" @click="q.extra.splice(xi, 1)" class="tap-44 w-5 h-5 rounded-full hover:bg-slate-300"><i class="fas fa-times text-[9px]"></i></button>
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div x-show="kindOf(q) === 'essay'" class="text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
                                     <i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Siswa mengetik jawaban (wajib) + menggambar di atas PDF (opsional)',
                                                                                             'Students type their answer (required) + draw on the PDF (optional)')"></span>
                                 </div>
@@ -999,6 +1135,13 @@
 </div>
 
 <script>
+// The question-type vocabulary, handed over by the server. Writing the names out
+// again here is how a page and the grader stop agreeing about what a true/false
+// question is; see app/services/question_types.py.
+const SG_QT = {{ q_vocabulary() | tojson | safe }};
+function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
+function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; }
+
 function questionManager() {
     return {
         questions: (function() {
@@ -1011,63 +1154,218 @@ function questionManager() {
                 return Object.keys(qtypes).map(function(i) {
                     var t = qtypes[i];
                     var m = amedia[i] || {};
-                    var q = {_id: parseInt(i) + 1, type: t, pages: ppages[i] || '',
+                    var k = akey[i];
+                    // Ids are strings so a restored question can never collide with a
+                    // newly added one — the numbers used to restart at 1, which made
+                    // Alpine's x-for keys duplicate as soon as a question was added.
+                    var q = {_id: 'q' + i, type: t, pages: ppages[i] || '',
                              audio: m.audio || '', youtube: m.youtube || '', _showMedia: false};
-                    if (t === 'mcq') {
-                        var k = akey[i];
+                    var kind = SG_QT.kinds[t] || SG_QT.kinds[SG_QT.default];
+                    if (kind === 'choice') {
                         q.bonus = k === 'bonus';
                         q.answers = Array.isArray(k) ? k : (k && k !== 'essay' ? [k] : ['A']);
+                    } else if (kind === 'truefalse') {
+                        q.tf = (k === 'false' || k === false) ? 'false' : 'true';
+                    } else if (kind === 'match') {
+                        var pairs = (k && k.pairs) || (Array.isArray(k) ? k : []) || [];
+                        q.pairs = pairs.map(function(p) {
+                            return {l: (p && (p.left || p.l)) || '', r: (p && (p.right || p.r)) || ''};
+                        });
+                        if (!q.pairs.length) q.pairs = [{l:'', r:''}];
+                        q.extra = (k && k.extra) || [];
+                    } else if (kind === 'dragdrop') {
+                        q.order = ((k && k.order) || []).slice();
+                        if (!q.order.length) q.order = [''];
+                        q.extra = (k && k.extra) || [];
                     }
+                    q._extraInput = '';
                     return q;
                 });
             } catch(e) { return []; }
         })(),
-        get mcqCount() { return this.questions.filter(q => q.type === 'mcq').length; },
-        get essayCount() { return this.questions.filter(q => q.type !== 'mcq').length; },
-        get mcqPct() { return this._mcqPct != null ? +this._mcqPct : 50; },
+        // ── the vocabulary, from the server ─────────────────────────────────
+        // Not written out here: a second list of type names in JavaScript is how a
+        // page and the grader stop meaning the same thing. `q_vocabulary()` is
+        // app/services/question_types.py's own answer, handed to the page.
+        kindOf(q) { return SG_QT.kinds[(q && q.type) || SG_QT.default] || SG_QT.kinds[SG_QT.default]; },
+        isObjectiveType(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; },
+        // What the teacher may add. The *values* come from the server
+        // (`SG_QT.picker`) — a second hand-written list of type names here is how
+        // a page goes on offering a name the grader no longer answers to. The
+        // words and the look are per *kind* and sit here so the page can switch
+        // them with the toggle; `test_the_pickers_labels_are_the_servers_labels`
+        // holds them equal to `SG_QT.labels`, so they cannot drift either.
+        typeChoices: (function() {
+            const look = {
+                choice:    {id:'Pilihan Ganda', en:'Multiple choice', icon:'fa-check-square',      btn:'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'},
+                truefalse: {id:'Benar / Salah', en:'True / False',    icon:'fa-toggle-on',         btn:'bg-primary-50 hover:bg-primary-100 text-primary-700 border-primary-200'},
+                match:     {id:'Menjodohkan',   en:'Matching',        icon:'fa-arrows-left-right', btn:'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'},
+                dragdrop:  {id:'Susun Kata',    en:'Drag & drop',     icon:'fa-hand-pointer',      btn:'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'},
+                essay:     {id:'Esai',          en:'Essay',           icon:'fa-pencil-alt',        btn:'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'},
+            };
+            return (SG_QT.picker || []).map(function(c) {
+                const l = look[c.kind] || {id:c.id, en:c.en, icon:'fa-question', btn:'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'};
+                return {v: c.v, id: l.id, en: l.en, icon: l.icon, btn: l.btn};
+            });
+        })(),
+        get objectiveCount() { return this.questions.filter(q => this.isObjectiveType(q.type)).length; },
+        get essayCount() { return this.questions.filter(q => !this.isObjectiveType(q.type)).length; },
+        get objectivePct() { return this._objectivePct != null ? +this._objectivePct : 50; },
         get essayPct() { return this._essayPct != null ? +this._essayPct : 50; },
-        get totalPct() { return +this.mcqPct + +this.essayPct; },
-        get mcqPerQ() { return this.mcqCount > 0 ? this.mcqPct / this.mcqCount : 0; },
+        get totalPct() { return +this.objectivePct + +this.essayPct; },
+        get objectivePerQ() { return this.objectiveCount > 0 ? this.objectivePct / this.objectiveCount : 0; },
         get essayPerQ() { return this.essayCount > 0 ? this.essayPct / this.essayCount : 0; },
         get hasEssay() { return this.essayCount > 0; },
-        _cid: 0,
-        _mcqPct: 50,
-        _essayPct: 50,
-        addMcq() {
-            this.questions.push({_id: ++this._cid, type:'mcq', answers:['A'], bonus:false, pages:'', audio:'', youtube:'', _showMedia:false});
-                    },
-        addEssay() {
-            this.questions.push({_id: ++this._cid, type:'essay_canvas', pages:'', audio:'', youtube:'', _showMedia:false});
-                    },
+        // Every id is a string, so a question added after a restore can never
+        // borrow a restored id — that collision is what made Alpine's x-for reuse
+        // the wrong DOM node and draw one question's key inside another's card.
+        _cid: {{ (exam.question_types if exam else {}) | length }},
+        // Seeded from the exam's own weights, so opening an existing exam shows the
+        // split it was saved with instead of a silent 50/50 that saving would write
+        // back over the real one.
+        _objectivePct: (function() {
+            try {
+                var w = {{ (exam.question_weights if exam else {}) | tojson | safe }} || {};
+                var t = {{ (exam.question_types if exam else {}) | tojson | safe }} || {};
+                if (!w || !Object.keys(w).length) return 50;
+                var sum = 0;
+                Object.keys(w).forEach(function(k) { if (sgIsObjective(t[k])) sum += (+w[k] || 0); });
+                return Math.round(sum);
+            } catch (e) { return 50; }
+        })(),
+        _essayPct: (function() {
+            try {
+                var w = {{ (exam.question_weights if exam else {}) | tojson | safe }} || {};
+                var t = {{ (exam.question_types if exam else {}) | tojson | safe }} || {};
+                if (!w || !Object.keys(w).length) return 50;
+                var sum = 0;
+                Object.keys(w).forEach(function(k) { if (!sgIsObjective(t[k])) sum += (+w[k] || 0); });
+                return Math.round(sum);
+            } catch (e) { return 50; }
+        })(),
+        dragFrom: null,
+        dragOver: null,
+        blankQuestion(type) {
+            const q = {_id: 'n' + (++this._cid), type: type, pages: '', audio: '', youtube: '', _showMedia: false};
+            const kind = this.kindOf(q);
+            if (kind === 'choice') { q.answers = ['A']; q.bonus = false; }
+            if (kind === 'truefalse') { q.tf = 'true'; }
+            if (kind === 'match') { q.pairs = [{l:'', r:''}]; q.extra = []; q._extraInput = ''; }
+            if (kind === 'dragdrop') { q.order = ['']; q.extra = []; q._extraInput = ''; }
+            return q;
+        },
+        addQuestionOf(type) { this.questions.push(this.blankQuestion(type)); },
+        addMcq() { this.addQuestionOf('mcq'); },
+        addEssay() { this.addQuestionOf('essay_canvas'); },
         removeQuestion(i) { this.questions.splice(i, 1); },
         toggleAnswer(i, opt) {
             const q = this.questions[i];
-            if (q.type !== 'mcq') return;
+            if (this.kindOf(q) !== 'choice') return;
             if (!q.answers) q.answers = [];
             const idx = q.answers.indexOf(opt);
             if (idx > -1) q.answers.splice(idx, 1); else q.answers.push(opt);
             if (q.answers.length === 0) q.answers.push(opt);
         },
-        onTypeChange(i) { this.questions[i].bonus = false; if (this.questions[i].type !== 'mcq') this.questions[i].answers = []; },
+        addPair(i) { this.questions[i].pairs.push({l:'', r:''}); },
+        addChip(i) { this.questions[i].order.push(''); },
+        moveChip(i, wi, delta) {
+            const arr = this.questions[i].order;
+            const to = wi + delta;
+            if (to < 0 || to >= arr.length) return;
+            const moved = arr.splice(wi, 1)[0];
+            arr.splice(to, 0, moved);
+        },
+        addExtra(i) {
+            const q = this.questions[i];
+            const text = String(q._extraInput || '').trim();
+            if (!text) return;
+            if (!q.extra) q.extra = [];
+            q.extra.push(text);
+            q._extraInput = '';
+        },
+        // ── moving a question ───────────────────────────────────────────────
+        // Buttons for every device (a drag handle is useless with a finger on a
+        // scrolling list) and a real drag for a mouse.
+        moveQuestion(i, delta) {
+            const to = i + delta;
+            if (to < 0 || to >= this.questions.length) return;
+            const moved = this.questions.splice(i, 1)[0];
+            this.questions.splice(to, 0, moved);
+        },
+        onDragStart(e, i) {
+            this.dragFrom = i;
+            try {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', String(i));
+            } catch (err) { /* Firefox needs the payload; a failure here is not fatal */ }
+        },
+        onDrop(e, i) {
+            let from = this.dragFrom;
+            try {
+                const raw = e.dataTransfer.getData('text/plain');
+                if (raw !== '' && raw != null) from = parseInt(raw, 10);
+            } catch (err) { /* fall back to the index we recorded on dragstart */ }
+            this.dragOver = null;
+            this.dragFrom = null;
+            if (from === null || isNaN(from) || from === i) return;
+            const moved = this.questions.splice(from, 1)[0];
+            this.questions.splice(i, 0, moved);
+        },
+        // A question that changes type must not keep an answer from its old one —
+        // an MCQ letter left in a matching question is a key nobody can read.
+        onTypeChange(i) {
+            const q = this.questions[i];
+            const kind = this.kindOf(q);
+            q.bonus = kind === 'choice' ? !!q.bonus : false;
+            if (kind === 'choice' && (!q.answers || !q.answers.length)) q.answers = ['A'];
+            if (kind === 'truefalse' && !q.tf) q.tf = 'true';
+            if (kind === 'match' && (!q.pairs || !q.pairs.length)) q.pairs = [{l:'', r:''}];
+            if (kind === 'dragdrop' && (!q.order || !q.order.length)) q.order = [''];
+            if (kind !== 'choice') q.answers = [];
+            if (kind !== 'match' && kind !== 'dragdrop') q.extra = [];
+        },
         onBonusToggle(i) { if (this.questions[i].bonus) this.questions[i].answers = []; },
         normalizeTo100() {
-            const m = this.mcqCount, e = this.essayCount;
+            const m = this.objectiveCount, e = this.essayCount;
             if (m + e === 0) return;
-            if (m > 0 && e > 0) { this._mcqPct = 70; this._essayPct = 30; }
-            else if (m > 0) { this._mcqPct = 100; this._essayPct = 0; }
-            else { this._mcqPct = 0; this._essayPct = 100; }
+            if (m > 0 && e > 0) { this._objectivePct = 70; this._essayPct = 30; }
+            else if (m > 0) { this._objectivePct = 100; this._essayPct = 0; }
+            else { this._objectivePct = 0; this._essayPct = 100; }
         },
         getTypesJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.type])));
         },
+        // What the answer key holds, per kind. The shape of each is the one
+        // app/services/question_types.py reads back, so the key this page writes
+        // and the key the grader reads cannot disagree.
+        keyFor(q) {
+            const kind = this.kindOf(q);
+            if (kind === 'choice') {
+                return q.bonus ? 'bonus'
+                    : (q.answers && q.answers.length === 1 ? q.answers[0] : (q.answers || ['A']));
+            }
+            if (kind === 'truefalse') return q.tf || 'true';
+            if (kind === 'match') {
+                const out = {pairs: (q.pairs || [])
+                    .map(p => ({left: String(p.l || '').trim(), right: String(p.r || '').trim()}))
+                    .filter(p => p.left && p.right)};
+                const extra = (q.extra || []).map(x => String(x).trim()).filter(Boolean);
+                if (extra.length) out.extra = extra;
+                return out;
+            }
+            if (kind === 'dragdrop') {
+                const out = {order: (q.order || []).map(w => String(w).trim()).filter(Boolean)};
+                const extra = (q.extra || []).map(x => String(x).trim()).filter(Boolean);
+                if (extra.length) out.extra = extra;
+                return out;
+            }
+            return 'essay';
+        },
         getAnswerKeyJson() {
-            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => {
-                if (q.type === 'mcq') return [i, q.bonus ? 'bonus' : (q.answers && q.answers.length === 1 ? q.answers[0] : (q.answers || ['A']))];
-                return [i, 'essay'];
-            })));
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, this.keyFor(q)])));
         },
         getWeightsJson() {
-            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.type === 'mcq' ? this.mcqPerQ : this.essayPerQ])));
+            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, this.isObjectiveType(q.type) ? this.objectivePerQ : this.essayPerQ])));
         },
         getPagesJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.pages || ''])));

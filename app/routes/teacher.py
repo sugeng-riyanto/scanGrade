@@ -13,6 +13,12 @@ from app.decorators.subscription import require_subscription
 from app.utils.exam_access import can_manage_exam
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
+from app.services.question_types import (
+    KIND_CHOICE, KIND_DRAG, KIND_ESSAY, KIND_MATCH, KIND_TRUE_FALSE, MCQ,
+    canonical_type, default_weights, describe_answer, earned_points, essay_marker,
+    grade_answer, has_answer, is_essay, is_objective, key_has_answer, normalise_key,
+    question_kind,
+)
 from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
@@ -112,19 +118,20 @@ def _guard_submission(supabase, submission_id, as_json=True, redirect_to="/teach
 
 
 def _extract_mcq_answer(student_ans):
+    """The letter inside the offline `{"answer": …}` wrapper, or the bare value."""
     if isinstance(student_ans, dict):
-        return student_ans.get('answer', '')
-    return student_ans or ''
+        return student_ans.get("answer", "")
+    return student_ans or ""
+
 
 def _is_mcq_correct(student_ans, key_val):
-    ans = _extract_mcq_answer(student_ans)
-    if key_val == "bonus":
-        return bool(ans and str(ans).strip())
-    if isinstance(key_val, list):
-        if not ans:
-            return False
-        return ans in key_val
-    return ans == key_val
+    """Kept as a name for callers that only ever mean a choice question.
+
+    The rule itself is `question_types.grade_answer`, because the same comparison
+    written out here was written out in six other places — and every one of them
+    classified a true/false question as an essay.
+    """
+    return grade_answer(MCQ, key_val, student_ans)
 
 
 def _recalculate_scores(exam_id):
@@ -144,32 +151,17 @@ def _recalculate_scores(exam_id):
     question_types = exam.get("question_types") or {}
     question_weights = exam.get("question_weights") or {}
     total_q = exam.get("total_questions", 0)
+    # The 70/30 split and the per-question shares are one function now. Writing
+    # them out here is what made this route decide that a true/false question was
+    # an essay and place it in the essay pool — where it earned nothing from the
+    # auto-grader and then had 30% of the paper's marks divided among the wrong
+    # questions.
     if not question_weights and total_q > 0:
-        mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
-        essay_count = total_q - mcq_count
-        mcq_pct = 70
-        essay_pct = 30
-        if mcq_count > 0 and essay_count > 0:
-            pass
-        elif mcq_count == 0:
-            mcq_pct, essay_pct = 0, 100
-        else:
-            mcq_pct, essay_pct = 100, 0
-        if mcq_count > 0:
-            each = round(mcq_pct / mcq_count, 2)
-            for i in range(total_q):
-                if question_types.get(str(i), "mcq") == "mcq":
-                    question_weights[str(i)] = each
-        if essay_count > 0:
-            each = round(essay_pct / essay_count, 2)
-            for i in range(total_q):
-                if question_types.get(str(i), "mcq") != "mcq":
-                    question_weights[str(i)] = each
+        question_weights = default_weights(question_types, total_q)
     subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
     if not subs:
         return
-    # Pre-compute MCQ count once
-    mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
+    objective_count = sum(1 for i in range(total_q) if is_objective(question_types.get(str(i))))
     # Build update list — all scoring in Python, then parallel DB writes
     updates = []
     for sub in subs:
@@ -179,16 +171,8 @@ def _recalculate_scores(exam_id):
                 try: sub[_sf] = json.loads(_sv)
                 except (json.JSONDecodeError, TypeError): sub[_sf] = {}
         answers = sub.get("answers") or {}
-        earned = 0.0
-        for i in range(total_q):
-            qtype = question_types.get(str(i), "mcq")
-            key_val = answer_key.get(str(i))
-            w = float(question_weights.get(str(i), 0))
-            if w <= 0:
-                continue
-            if qtype == "mcq":
-                if _is_mcq_correct(answers.get(str(i)), key_val):
-                    earned += w
+        earned, _graded = earned_points(question_types, answer_key, answers,
+                                       question_weights, total_q)
         fb = sub.get("teacher_feedback") or {}
         fb_scores = fb.get("scores", {}) or {}
         for qi, sv in fb_scores.items():
@@ -199,15 +183,14 @@ def _recalculate_scores(exam_id):
         final = round(min(earned, 100), 2)
         penalty = float(sub.get("penalty") or 0)
         final = max(0, round(final - penalty, 2))
-        mcq_correct = 0
+        correct = 0
         for i in range(total_q):
-            qtype = question_types.get(str(i), "mcq")
             key_val = answer_key.get(str(i))
-            if qtype == "mcq" and key_val:
-                if _is_mcq_correct(answers.get(str(i)), key_val):
-                    mcq_correct += 1
-        mcq_score = round((mcq_correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
-        updates.append((sub["id"], mcq_score, final))
+            if key_has_answer(question_types.get(str(i)), key_val) and \
+                    grade_answer(question_types.get(str(i)), key_val, answers.get(str(i))):
+                correct += 1
+        objective_score = round((correct / max(objective_count, 1)) * 100, 2) if objective_count > 0 else 0
+        updates.append((sub["id"], objective_score, final))
     # Parallel DB updates — 300 subs / 20 threads ≈ 3s instead of 60s serial
     def _update_one(item):
         sub_id, sc, fs = item
@@ -220,9 +203,15 @@ def _recalculate_scores(exam_id):
         list(pool.map(_update_one, updates))
 
 
-# Answer-key values that mean "this question is not scored automatically". The
-# app writes `essay`; the variants are here because older rows carry them.
-_NON_MCQ_KEY = {"", "essay", "essay_text", "essay_canvas", "essay_canvas_page"}
+#: How a question's type reads in a spreadsheet export. A kind, not a type, so
+#: the three new objective types do not each need a row here.
+_QUESTION_KIND_LABELS = {
+    KIND_CHOICE: "MCQ",
+    KIND_TRUE_FALSE: "True/False",
+    KIND_MATCH: "Matching",
+    KIND_DRAG: "Drag & drop",
+    KIND_ESSAY: "Essay",
+}
 
 
 def _as_dict(value) -> dict:
@@ -291,17 +280,19 @@ def _needs_answer_key(exam: dict) -> bool:
     key has), which is a different defect and not what this card claims.
     """
     qtypes = _as_dict(exam.get("question_types"))
-    mcq = [index for index, kind in qtypes.items() if kind == "mcq"]
-    if not mcq:
+    objective = [index for index, kind in qtypes.items() if is_objective(kind)]
+    if not objective:
         return False                     # nothing here is scored automatically
 
     key = _as_dict(exam.get("answer_key"))
-    for index in mcq:
+    for index in objective:
         value = key.get(str(index), key.get(index))
-        if isinstance(value, list) and any(v not in (None, "") for v in value):
-            return False                 # a multi-answer MCQ is still an answer
-        if isinstance(value, str) and value.strip() and value.strip() not in _NON_MCQ_KEY:
-            return False                 # a choice, or "bonus"
+        # `key_has_answer` knows the shape of every objective type. The inline
+        # version here only knew letters, so a matching question's object key read
+        # as "missing" and the card would have told the teacher to go and set a key
+        # they had already set.
+        if key_has_answer(qtypes.get(str(index)), value):
+            return False
     return True
 
 
@@ -367,7 +358,9 @@ def dashboard():
             if isinstance(qt, str):
                 try: qt = json.loads(qt)
                 except: qt = {}
-            has_essay = any(v != "mcq" for v in (qt.values() if isinstance(qt, dict) else [])) if qt else False
+            # Pending grading is about *teacher-marked* questions, so ask which
+            # questions a teacher has to mark rather than which ones are not MCQ.
+            has_essay = any(is_essay(v) for v in (qt.values() if isinstance(qt, dict) else [])) if qt else False
             if has_essay:
                 ungraded = [s for s in exam_subs if s.get("status") in ("submitted", "draft")]
                 pending_grading += len(ungraded)
@@ -551,8 +544,8 @@ def exam_parse_pdf():
             question_pages(questions, parsed.get("pages") or [])
 
             parsed["questions"] = questions
-            parsed["mcq_count"] = sum(1 for q in questions if q.get("type") == "mcq")
-            parsed["essay_count"] = sum(1 for q in questions if q.get("type") == "essay")
+            parsed["mcq_count"] = sum(1 for q in questions if is_objective(q.get("type")))
+            parsed["essay_count"] = sum(1 for q in questions if is_essay(q.get("type")))
 
             # Step 3: Generate answer key
             try:
@@ -711,7 +704,8 @@ def export_scan_results():
             rubric_text = ""
             if q.get("rubric"):
                 rubric_text = "; ".join(f"{r.get('kriteria','')} ({r.get('bobot',0)}%)" for r in q["rubric"])
-            row = [i, "MCQ" if q.get("type") == "mcq" else "Essay", q.get("text", ""), rubric_text]
+            kind = question_kind(q.get("type"))
+            row = [i, _QUESTION_KIND_LABELS.get(kind, "Essay"), q.get("text", ""), rubric_text]
             for col, val in enumerate(row, 1):
                 c = ws.cell(row=i + 1, column=col, value=val)
                 c.border = thin
@@ -812,8 +806,12 @@ def exam_form():
     block_screenshot = request.form.get("block_screenshot", "false") == "true"
     allow_calculator = request.form.get("allow_calculator", "false") == "true"
     for i in range(total_questions):
-        qtype = question_types.get(str(i), "mcq")
-        if qtype != "mcq":
+        qtype = question_types.get(str(i))
+        # A canvas overlay is for a question the student answers by writing on the
+        # paper. That is the essay family, and only the essay family — the three
+        # new objective types are answered with a tap, and painting a canvas over
+        # their part of the paper would cover the question.
+        if is_essay(qtype):
             question_canvas[str(i)] = True
         audio_url = request.form.get(f"audio_{i}", "").strip()
         youtube_url = request.form.get(f"youtube_{i}", "").strip()
@@ -1003,8 +1001,12 @@ def exam_detail(exam_id):
     block_screenshot = request.form.get("block_screenshot", "false") == "true"
     allow_calculator = request.form.get("allow_calculator", "false") == "true"
     for i in range(total_questions):
-        qtype = question_types.get(str(i), "mcq")
-        if qtype != "mcq":
+        qtype = question_types.get(str(i))
+        # A canvas overlay is for a question the student answers by writing on the
+        # paper. That is the essay family, and only the essay family — the three
+        # new objective types are answered with a tap, and painting a canvas over
+        # their part of the paper would cover the question.
+        if is_essay(qtype):
             question_canvas[str(i)] = True
         audio_url = request.form.get(f"audio_{i}", "").strip()
         youtube_url = request.form.get(f"youtube_{i}", "").strip()
@@ -1121,10 +1123,10 @@ def preprocess_exam_essays(exam_id):
     question_texts = exam.get("question_texts") or {}
     for i in range(total_q):
         qi = str(i)
-        if qtypes.get(qi, "mcq") != "mcq":
+        if is_essay(qtypes.get(qi)):
             text = question_texts.get(qi, "")
             rubric = generate_rubric(text)
-            questions.append({"number": i + 1, "type": "essay", "text": text, "rubric": rubric})
+            questions.append({"number": i + 1, "type": essay_marker(qtypes.get(qi)), "text": text, "rubric": rubric})
 
     result = preprocess_exam_questions(exam_id, questions, supabase)
     return jsonify({"success": True, **result})
@@ -1316,6 +1318,25 @@ def answer_keys(exam_id):
             answer_key = json.loads(answer_key)
         except json.JSONDecodeError:
             answer_key = {}
+        qtypes = exam.get("question_types", {}) or {}
+        stored = exam.get("answer_key", {}) or {}
+        if isinstance(stored, str):
+            try:
+                stored = json.loads(stored)
+            except (json.JSONDecodeError, TypeError):
+                stored = {}
+        # This page edits choice keys. It used to write `essay` over every other
+        # question it did not understand — which is now a matching question's pairs
+        # and a drag-and-drop question's word order — so saving a letter here
+        # destroyed a key the builder had set. Merge instead, and keep what the
+        # form did not have a control for.
+        merged = dict(stored)
+        for k, v in answer_key.items():
+            qtype = qtypes.get(str(k))
+            if is_objective(qtype) and question_kind(qtype) != KIND_CHOICE:
+                continue
+            merged[str(k)] = normalise_key(qtype, v)
+        answer_key = merged
         supabase.table("exams").update({"answer_key": json.dumps(answer_key)}).eq("id", exam_id).execute()
         # Recalculate scores
         try:
@@ -1339,6 +1360,10 @@ def answer_keys(exam_id):
         questions.append({
             "index": int(idx),
             "type": qtype,
+            # The family and the readable key are computed here so the page never
+            # has to compare a type name to decide what it is looking at.
+            "kind": question_kind(qtype),
+            "answer_text": describe_answer(qtype, k),
             "key": k,
             "is_bonus": k == "bonus",
             "is_multi": isinstance(k, list),
@@ -1765,23 +1790,8 @@ def grade_detail(submission_id):
         exam = supabase.table("exams").select("*").eq("id", sub["exam_id"]).single().execute().data
         exam.setdefault("question_weights", {})
         if not exam.get("question_weights") and exam.get("total_questions", 0) > 0:
-            qtypes = exam.get("question_types", {})
-            tq = exam["total_questions"]
-            mcq_n = sum(1 for i in range(tq) if qtypes.get(str(i), "mcq") == "mcq")
-            essay_n = tq - mcq_n
-            mp, ep = (70, 30)
-            if mcq_n == 0: mp, ep = 0, 100
-            elif essay_n == 0: mp, ep = 100, 0
-            if mcq_n:
-                e = round(mp / mcq_n, 2)
-                for i in range(tq):
-                    if qtypes.get(str(i), "mcq") == "mcq":
-                        exam["question_weights"][str(i)] = e
-            if essay_n:
-                e = round(ep / essay_n, 2)
-                for i in range(tq):
-                    if qtypes.get(str(i), "mcq") != "mcq":
-                        exam["question_weights"][str(i)] = e
+            exam["question_weights"] = default_weights(
+                _as_dict(exam.get("question_types")), exam["total_questions"])
         student = supabase.table("profiles").select("id,full_name,phone").eq("id", sub["student_id"]).single().execute().data or {}
         # Parse JSON string fields
         for field in ("teacher_feedback", "answers"):
@@ -2064,12 +2074,17 @@ def bubble_sheet(exam_id):
     if err:
         return err
     qtypes = exam.get("question_types") or {}
-    mcq_count = sum(1 for i in range(exam["total_questions"]) if qtypes.get(str(i), "mcq") == "mcq")
-    if mcq_count == 0:
-        mcq_count = exam["total_questions"]
+    # The printed LJK is bubble paper: it can carry a choice question and nothing
+    # else. A matching or drag-and-drop answer has no bubbles to fill, and a
+    # true/false question would need a two-bubble column the sheet does not print,
+    # so the sheet is sized by the choice questions specifically.
+    bubble_count = sum(1 for i in range(exam["total_questions"])
+                       if question_kind(qtypes.get(str(i))) == KIND_CHOICE)
+    if bubble_count == 0:
+        bubble_count = exam["total_questions"]
 
     buf = generate_answer_sheet(
-        total_questions=mcq_count,
+        total_questions=bubble_count,
         subject=exam.get("subject", ""),
         school_name="",
     )
@@ -2146,7 +2161,8 @@ def api_grading_queue(exam_id):
             return jsonify({"error": "Forbidden"}), 403
 
     question_types = exam.get("question_types") or {}
-    essay_indices = [str(i) for i in range(int(exam.get("total_questions", 0))) if question_types.get(str(i), "mcq") in ("essay", "essay_text", "essay_canvas")]
+    essay_indices = [str(i) for i in range(int(exam.get("total_questions", 0)))
+                     if is_essay(question_types.get(str(i)))]
 
     subs = supabase.table("submissions").select("id,student_id,answers,teacher_feedback,score,final_score,status,violations,penalty,submitted_at,profiles!inner(full_name)").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).order("submitted_at", desc=False).execute().data or []
 
@@ -2728,17 +2744,15 @@ def exam_proctoring_data(exam_id):
 
     students = []
     if class_ids:
-        profile_ids = supabase.table("student_classes") \
-            .select("student_id") \
+        # The class a pupil sits in is `profiles.class_id`; there is no
+        # `student_classes` join table in this database, and the request for one
+        # did not return an empty list — PostgREST answers `PGRST205` and the
+        # route raised, so the proctoring panel was a 500 rather than a room.
+        students = supabase.table("profiles") \
+            .select("id,full_name") \
             .in_("class_id", class_ids) \
+            .eq("role", "murid") \
             .execute().data or []
-        sids = [p["student_id"] for p in profile_ids]
-        if sids:
-            profiles = supabase.table("profiles") \
-                .select("id,full_name") \
-                .in_("id", sids) \
-                .execute().data or []
-            students = profiles
 
     # Get submissions for this exam
     subs = supabase.table("submissions") \
@@ -2843,16 +2857,13 @@ def generate_remedial(exam_id):
             except: answers = {}
         for qi in range(total_q):
             qi_str = str(qi)
-            if qtypes.get(qi_str) == "mcq":
+            if is_objective(qtypes.get(qi_str)):
                 q_total[qi_str] = q_total.get(qi_str, 0) + 1
-                if qi_str in answer_key and qi_str in answers:
-                    stu_ans = answers[qi_str]
-                    if isinstance(stu_ans, dict):
-                        stu_ans = stu_ans.get("answer", "")
-                    if stu_ans == answer_key[qi_str]:
-                        q_correct[qi_str] = q_correct.get(qi_str, 0) + 1
+                if qi_str in answer_key and qi_str in answers and \
+                        grade_answer(qtypes.get(qi_str), answer_key[qi_str], answers[qi_str]):
+                    q_correct[qi_str] = q_correct.get(qi_str, 0) + 1
 
-    # Find top 3 most-failed MCQ questions
+    # Find top 3 most-failed objective questions
     fail_rate = []
     for qi in range(total_q):
         qi_str = str(qi)
