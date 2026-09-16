@@ -30,6 +30,70 @@ def _normalize_role(role: str) -> str:
     return ROLE_ALIASES.get(role, role)
 
 
+# ── The two login doors ──────────────────────────────────────────
+# The app has two, and which one a reader belongs on is a property of their role:
+# admins on one, teachers and students on the other. Every path that answers "you
+# are not signed in" has to name one, and naming the wrong one is a dead end —
+# a teacher whose session expired was dropped on a page headed "Masuk Admin" and
+# had to spot the small "Guru/Murid?" link to get anywhere.
+LOGIN_URL_ADMIN = "/auth/login"
+LOGIN_URL_USER = "/auth/login-user"
+USER_ROLES = ("guru", "murid")
+
+# When the role is not known, the URL being opened decides. The space is already
+# partitioned by role, and this only chooses which page to *show*: both doors can
+# sign anyone in, so a misread costs a click rather than an authorization call.
+_PATH_ROLES = (
+    ("/student", "murid"),
+    ("/teacher", "guru"),
+    ("/admin-sekolah", "admin_sekolah"),
+    ("/super-admin", "super_admin"),
+)
+
+
+def login_door_for(role=None, path=None) -> str:
+    """The login page this reader belongs on — the single mapping.
+
+    ``role`` when the role is known, else the role ``path`` belongs to, else the
+    admin door (the one every role can reach, since its page links to the other).
+    """
+    role = _normalize_role(role) if role else None
+    if not role and path:
+        for prefix, prefix_role in _PATH_ROLES:
+            if path.startswith(prefix):
+                role = prefix_role
+                break
+    return LOGIN_URL_USER if role in USER_ROLES else LOGIN_URL_ADMIN
+
+
+def session_role(token):
+    """The role ``token`` belongs to, or ``None`` when it cannot be resolved.
+
+    Needed because ``g.user_role`` is filled by ``login_required`` and by nothing
+    else, so a route that deliberately sits *outside* that decorator sees an empty
+    ``g``. Logout is exactly such a route — clearing the cookies has to work for a
+    session that has already ended — and the role-based redirect it already
+    contained therefore never fired: ``g.get("user_role")`` was always ``None`` and
+    all four roles were sent to the admin door.
+
+    The cache is consulted first on purpose: at logout the token is usually still
+    inside its session TTL (the user just clicked the button on a page that
+    resolved it), and a token that has just expired locally is precisely the case
+    where the cached role is the only thing left that still knows it.
+    """
+    if not token:
+        return None
+    from app.utils.kv_cache import cache_get
+
+    cached = cache_get(_session_key(token))
+    if cached:
+        return cached.get("role")
+    try:
+        return _session_for(token).get("role")
+    except Exception:
+        return None
+
+
 def get_supabase() -> Client:
     return current_app.extensions["supabase"]
 
@@ -406,7 +470,10 @@ def _unauthorized(message=None):
     if _wants_json():
         return jsonify({"error": first(message)}), 401
     flash(message, "error")
-    return redirect("/auth/login")
+    # The door that matches the reader. On an idle or absolute timeout
+    # ``_apply_session`` has already run, so the role is in hand; when the token
+    # itself could not be resolved the URL being opened still says whose it was.
+    return redirect(login_door_for(g.get("user_role"), request.path))
 
 
 def _extract_token():

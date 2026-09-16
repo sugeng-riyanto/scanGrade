@@ -94,7 +94,13 @@ def fetch_audit_logs(
 ):
     supabase = get_supabase()
     try:
-        q = supabase.table("audit_logs").select("*, profiles!left(full_name, email)").order("created_at", desc=True)
+        # `profiles` has no `email` — addresses live in `auth.users`, which a
+        # joined select cannot reach — and asking for one is not a missing
+        # column that reads as `None`: PostgREST refuses the whole request with
+        # 42703, the caller's `except` returns `[]`, and the audit page showed an
+        # empty log for weeks while the table held rows. The name is what the
+        # page prints; an address would have to come from a second lookup.
+        q = supabase.table("audit_logs").select("*, profiles!left(full_name)").order("created_at", desc=True)
         if action:
             q = q.eq("action", action)
         if entity_type:

@@ -7,6 +7,7 @@ from flask import Blueprint, render_template, g, request, jsonify, redirect, fla
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
+from app.services.question_types import grade_answer, key_has_answer
 from app.utils.req_cache import invalidate_school
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
@@ -144,12 +145,34 @@ def api_suspend_school(school_id):
 @super_bp.route("/api/school/<school_id>/extend-trial", methods=["POST"])
 @_sa_required
 def api_extend_trial(school_id):
+    """Give a school another seven days, and say whether it worked.
+
+    This answered `{"success": true, "expires": …}` while the UPDATE was being
+    refused — `schools.trial_expires_at` was not a column — so the school stayed
+    suspended and the operator was told it had been reactivated. The write is
+    confirmed by reading the row back now, and a refused write is reported.
+    """
     supabase = get_supabase()
     from datetime import datetime, timedelta, timezone
     new_expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
-    supabase.table("schools").update({"trial_expires_at": new_expiry, "status": "active"}).eq("id", school_id).execute()
+    try:
+        supabase.table("schools").update(
+            {"trial_expires_at": new_expiry, "status": "active"}
+        ).eq("id", school_id).execute()
+        row = supabase.table("schools").select("id,status,trial_expires_at").eq(
+            "id", school_id).single().execute().data or {}
+    except Exception as exc:
+        current_app.logger.error("extend-trial failed for %s: %s", school_id, exc)
+        return jsonify({
+            "success": False,
+            "error": ("The school could not be reactivated. `schools.trial_expires_at` "
+                      "is missing — apply migration 026."),
+        }), 500
+    if not row.get("trial_expires_at"):
+        return jsonify({"success": False, "error": "The write was not stored."}), 500
     invalidate_school(school_id)
-    return jsonify({"success": True, "expires": new_expiry})
+    return jsonify({"success": True, "expires": row["trial_expires_at"],
+                    "status": row.get("status")})
 
 
 @super_bp.route("/api/school/<school_id>/reset-admin-pw", methods=["POST"])
@@ -1261,16 +1284,22 @@ def omr_test_batch():
             correct = None
             if exam_id and "error" not in result:
                 from app.utils.auth import get_supabase
-                exam = get_supabase().table("exams").select("answer_key").eq("id", exam_id).single().execute().data
+                # `question_types` rides along with the key, and the shared grader
+                # says what is right: comparing letters here is what made a
+                # true/false or matching question unscorable on a scanned sheet.
+                exam = get_supabase().table("exams").select("answer_key,question_types").eq("id", exam_id).single().execute().data
                 if exam and exam.get("answer_key"):
                     key = exam["answer_key"]
                     if isinstance(key, str):
                         key = json.loads(key)
+                    qtypes = exam.get("question_types") or {}
+                    if isinstance(qtypes, str):
+                        qtypes = json.loads(qtypes)
                     detected = result.get("answers", {})
-                    c = sum(1 for k, v in key.items() if k in detected and detected[k] == v)
-                    mcq = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
+                    graded = [k for k, v in key.items() if key_has_answer(qtypes.get(str(k)), v)]
+                    c = sum(1 for k in graded if k in detected and grade_answer(qtypes.get(str(k)), key[k], detected[k]))
                     correct = c
-                    score = round((c / max(mcq, 1)) * 100, 2) if mcq > 0 else 0
+                    score = round((c / max(len(graded), 1)) * 100, 2) if graded else 0
 
             results.append({
                 "filename": f.filename,
@@ -1351,6 +1380,11 @@ def omr_test_calibrate():
 
     # Test with current geometry
     result = process_scan(raw, total_questions=total_questions, preprocess=True)
+    if "error" in result:
+        # Returned rather than treated as an empty read. A calibration tool exists
+        # to explain why a sheet did not scan, and "0 of 50 matched" explains
+        # nothing — it is the same answer a blank sheet gives.
+        return jsonify(result), 422
     answers = result.get("answers", {})
 
     matched = 0
@@ -1507,17 +1541,37 @@ def privacy_settings():
 @super_bp.route("/api/privacy-settings/save", methods=["POST"])
 @_sa_required
 def api_privacy_settings_save():
+    """Save the installation's own settings — DPO contact, PSE number, controller.
+
+    One upsert per key, on `key` (the table's primary key). It used to read
+    `select("id")` — a column this table does not have, so every save took the
+    `except` branch, and the route answered `{"success": true}` either way. A
+    settings page that reports success and stores nothing is worse than one that
+    fails: the operator has no reason to look again.
+    """
     data = request.get_json() or {}
     supabase = get_supabase()
-    allowed = ["dpo_contact", "pse_reg_number", "privacy_policy_version", "data_controller_name", "data_controller_email"]
+    allowed = ["dpo_contact", "pse_reg_number", "privacy_policy_version",
+               "data_controller_name", "data_controller_email"]
+    saved, failed = [], []
     for key, value in data.items():
-        if key in allowed:
-            try:
-                existing = supabase.table("system_settings").select("id").eq("key", key).execute().data
-                if existing:
-                    supabase.table("system_settings").update({"value": str(value)}).eq("key", key).execute()
-                else:
-                    supabase.table("system_settings").insert({"key": key, "value": str(value)}).execute()
-            except Exception:
-                pass
-    return jsonify({"success": True})
+        if key not in allowed:
+            continue
+        try:
+            supabase.table("system_settings").upsert(
+                {"key": key, "value": str(value)}, on_conflict="key"
+            ).execute()
+            saved.append(key)
+        except Exception as exc:
+            current_app.logger.error("privacy setting %s not saved: %s", key, exc)
+            failed.append(key)
+    if failed:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Some settings could not be saved: " + ", ".join(failed)
+                + ". The `system_settings` table is missing — apply migration 026."
+            ),
+            "saved": saved,
+        }), 500
+    return jsonify({"success": True, "saved": saved})

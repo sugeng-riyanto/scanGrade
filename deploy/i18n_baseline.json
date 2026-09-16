@@ -1,0 +1,695 @@
+{
+  "note": "floors: a page may not lose bilingual units, and its coverage may not fall. Written by deploy/i18n_coverage.py --write-baseline, one deliberate act at a time.",
+  "pages": {
+    "admin/audit_logs.html": {
+      "pairs": 0,
+      "leftovers": 8,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "admin/classes.html": {
+      "pairs": 12,
+      "leftovers": 7,
+      "coverage": 63.2,
+      "frozen": true
+    },
+    "admin/compliance.html": {
+      "pairs": 0,
+      "leftovers": 7,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "admin/dashboard.html": {
+      "pairs": 34,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "admin/exams.html": {
+      "pairs": 11,
+      "leftovers": 5,
+      "coverage": 68.8,
+      "frozen": true
+    },
+    "admin/pdp_law.html": {
+      "pairs": 0,
+      "leftovers": 46,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "admin/registration_request_detail.html": {
+      "pairs": 0,
+      "leftovers": 4,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "admin/registration_requests.html": {
+      "pairs": 1,
+      "leftovers": 14,
+      "coverage": 6.7,
+      "frozen": true
+    },
+    "admin/school.html": {
+      "pairs": 22,
+      "leftovers": 1,
+      "coverage": 95.7,
+      "frozen": true
+    },
+    "admin/students.html": {
+      "pairs": 13,
+      "leftovers": 8,
+      "coverage": 61.9,
+      "frozen": true
+    },
+    "admin/teachers.html": {
+      "pairs": 13,
+      "leftovers": 8,
+      "coverage": 61.9,
+      "frozen": true
+    },
+    "admin/users.html": {
+      "pairs": 8,
+      "leftovers": 1,
+      "coverage": 88.9,
+      "frozen": true
+    },
+    "admin_sekolah/classes.html": {
+      "pairs": 1,
+      "leftovers": 15,
+      "coverage": 6.2,
+      "frozen": true
+    },
+    "admin_sekolah/dashboard.html": {
+      "pairs": 29,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "admin_sekolah/import.html": {
+      "pairs": 49,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "admin_sekolah/invoices.html": {
+      "pairs": 1,
+      "leftovers": 5,
+      "coverage": 16.7,
+      "frozen": true
+    },
+    "admin_sekolah/payment.html": {
+      "pairs": 2,
+      "leftovers": 10,
+      "coverage": 16.7,
+      "frozen": true
+    },
+    "admin_sekolah/payment_success.html": {
+      "pairs": 1,
+      "leftovers": 8,
+      "coverage": 11.1,
+      "frozen": true
+    },
+    "admin_sekolah/profile.html": {
+      "pairs": 0,
+      "leftovers": 10,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "admin_sekolah/promote.html": {
+      "pairs": 0,
+      "leftovers": 15,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "admin_sekolah/promote_confirm.html": {
+      "pairs": 4,
+      "leftovers": 3,
+      "coverage": 57.1,
+      "frozen": true
+    },
+    "admin_sekolah/school_years.html": {
+      "pairs": 1,
+      "leftovers": 9,
+      "coverage": 10.0,
+      "frozen": true
+    },
+    "admin_sekolah/students.html": {
+      "pairs": 40,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "admin_sekolah/subjects.html": {
+      "pairs": 0,
+      "leftovers": 5,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "admin_sekolah/subscription.html": {
+      "pairs": 12,
+      "leftovers": 21,
+      "coverage": 36.4,
+      "frozen": true
+    },
+    "admin_sekolah/teachers.html": {
+      "pairs": 0,
+      "leftovers": 26,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "auth/_chrome.html": {
+      "pairs": 1,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/activate.html": {
+      "pairs": 10,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/activate_success.html": {
+      "pairs": 4,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/forgot_password.html": {
+      "pairs": 8,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/login.html": {
+      "pairs": 18,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/login_user.html": {
+      "pairs": 17,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/register.html": {
+      "pairs": 34,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/register_success.html": {
+      "pairs": 12,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/reset_password.html": {
+      "pairs": 6,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/reset_password_success.html": {
+      "pairs": 4,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/reset_success.html": {
+      "pairs": 5,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/set_new_password.html": {
+      "pairs": 8,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/verify_code.html": {
+      "pairs": 7,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "base.html": {
+      "pairs": 147,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "compliance/privacy.html": {
+      "pairs": 0,
+      "leftovers": 216,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "compliance/terms.html": {
+      "pairs": 0,
+      "leftovers": 184,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "demo.html": {
+      "pairs": 22,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "errors/403.html": {
+      "pairs": 0,
+      "leftovers": 2,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "errors/404.html": {
+      "pairs": 0,
+      "leftovers": 3,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "errors/500.html": {
+      "pairs": 0,
+      "leftovers": 2,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "guide/skor.html": {
+      "pairs": 0,
+      "leftovers": 58,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "landing.html": {
+      "pairs": 63,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "pricing.html": {
+      "pairs": 0,
+      "leftovers": 22,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "public/capacity.html": {
+      "pairs": 63,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "shared/comms.html": {
+      "pairs": 5,
+      "leftovers": 81,
+      "coverage": 5.8,
+      "frozen": true
+    },
+    "student/dashboard.html": {
+      "pairs": 26,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "student/exam_list.html": {
+      "pairs": 0,
+      "leftovers": 8,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "student/recover.html": {
+      "pairs": 0,
+      "leftovers": 10,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "student/result_detail.html": {
+      "pairs": 24,
+      "leftovers": 28,
+      "coverage": 46.2,
+      "frozen": true
+    },
+    "student/results.html": {
+      "pairs": 0,
+      "leftovers": 18,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "student/settings.html": {
+      "pairs": 77,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "student/take_exam.html": {
+      "pairs": 232,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "student/whiteboard_canvas.html": {
+      "pairs": 0,
+      "leftovers": 2,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "student/whiteboard_list.html": {
+      "pairs": 0,
+      "leftovers": 4,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/activation_codes.html": {
+      "pairs": 0,
+      "leftovers": 10,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/dashboard.html": {
+      "pairs": 31,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "super_admin/demo_settings.html": {
+      "pairs": 0,
+      "leftovers": 12,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/exams.html": {
+      "pairs": 0,
+      "leftovers": 4,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/feature_flags.html": {
+      "pairs": 0,
+      "leftovers": 2,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/file_management.html": {
+      "pairs": 4,
+      "leftovers": 29,
+      "coverage": 12.1,
+      "frozen": true
+    },
+    "super_admin/logs.html": {
+      "pairs": 0,
+      "leftovers": 8,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/midtrans_settings.html": {
+      "pairs": 11,
+      "leftovers": 4,
+      "coverage": 73.3,
+      "frozen": true
+    },
+    "super_admin/omr_test.html": {
+      "pairs": 1,
+      "leftovers": 16,
+      "coverage": 5.9,
+      "frozen": true
+    },
+    "super_admin/payment_fee_settings.html": {
+      "pairs": 0,
+      "leftovers": 12,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/pricing_settings.html": {
+      "pairs": 1,
+      "leftovers": 38,
+      "coverage": 2.6,
+      "frozen": true
+    },
+    "super_admin/privacy_settings.html": {
+      "pairs": 0,
+      "leftovers": 22,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/reset_school_data.html": {
+      "pairs": 0,
+      "leftovers": 20,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/schools.html": {
+      "pairs": 0,
+      "leftovers": 7,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/subscription_plan_form.html": {
+      "pairs": 0,
+      "leftovers": 4,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/subscription_plans.html": {
+      "pairs": 2,
+      "leftovers": 2,
+      "coverage": 50.0,
+      "frozen": true
+    },
+    "super_admin/trial_settings.html": {
+      "pairs": 6,
+      "leftovers": 2,
+      "coverage": 75.0,
+      "frozen": true
+    },
+    "super_admin/user_management.html": {
+      "pairs": 0,
+      "leftovers": 7,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/users.html": {
+      "pairs": 0,
+      "leftovers": 7,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/whatsapp_settings.html": {
+      "pairs": 0,
+      "leftovers": 5,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/_results_table.html": {
+      "pairs": 7,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/ai_settings.html": {
+      "pairs": 133,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/ai_test_result.html": {
+      "pairs": 0,
+      "leftovers": 3,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/analytics.html": {
+      "pairs": 21,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": true
+    },
+    "teacher/answer_keys.html": {
+      "pairs": 0,
+      "leftovers": 16,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/cheat_analysis.html": {
+      "pairs": 0,
+      "leftovers": 13,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/classes.html": {
+      "pairs": 0,
+      "leftovers": 8,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/dashboard.html": {
+      "pairs": 53,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/exam_form.html": {
+      "pairs": 147,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/exams.html": {
+      "pairs": 18,
+      "leftovers": 5,
+      "coverage": 78.3,
+      "frozen": true
+    },
+    "teacher/grade_detail.html": {
+      "pairs": 0,
+      "leftovers": 27,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/grade_question.html": {
+      "pairs": 0,
+      "leftovers": 15,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/grading.html": {
+      "pairs": 8,
+      "leftovers": 1,
+      "coverage": 88.9,
+      "frozen": true
+    },
+    "teacher/grading_queue.html": {
+      "pairs": 1,
+      "leftovers": 21,
+      "coverage": 4.5,
+      "frozen": true
+    },
+    "teacher/import_students.html": {
+      "pairs": 0,
+      "leftovers": 11,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/penalty_appeals.html": {
+      "pairs": 0,
+      "leftovers": 9,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/preview_exam.html": {
+      "pairs": 0,
+      "leftovers": 9,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/proctoring.html": {
+      "pairs": 0,
+      "leftovers": 5,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/publish_preview.html": {
+      "pairs": 3,
+      "leftovers": 5,
+      "coverage": 37.5,
+      "frozen": true
+    },
+    "teacher/results.html": {
+      "pairs": 3,
+      "leftovers": 9,
+      "coverage": 25.0,
+      "frozen": true
+    },
+    "teacher/retractions.html": {
+      "pairs": 10,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": true
+    },
+    "teacher/scan.html": {
+      "pairs": 1,
+      "leftovers": 69,
+      "coverage": 1.4,
+      "frozen": true
+    },
+    "teacher/settings.html": {
+      "pairs": 0,
+      "leftovers": 38,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/students.html": {
+      "pairs": 8,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": true
+    },
+    "teacher/subjects.html": {
+      "pairs": 0,
+      "leftovers": 5,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/templates.html": {
+      "pairs": 0,
+      "leftovers": 6,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/upload_pdf.html": {
+      "pairs": 0,
+      "leftovers": 5,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/wb_toolbar.html": {
+      "pairs": 2,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/whiteboard_canvas.html": {
+      "pairs": 0,
+      "leftovers": 5,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/whiteboard_list.html": {
+      "pairs": 0,
+      "leftovers": 13,
+      "coverage": 0.0,
+      "frozen": false
+    },
+    "tools/device_preview.html": {
+      "pairs": 14,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "tools/generate_answer_sheet.html": {
+      "pairs": 2,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "tutorial_admin_sekolah.html": {
+      "pairs": 34,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "tutorial_guru.html": {
+      "pairs": 36,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "tutorial_murid.html": {
+      "pairs": 43,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    }
+  }
+}

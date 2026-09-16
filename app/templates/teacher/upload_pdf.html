@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Upload PDF - {{ exam.title }}{% endblock %}
 {% block page_title %}Upload PDF{% endblock %}
@@ -12,7 +13,9 @@
 
     <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-6 border border-stone-100">
         <p class="text-lg font-extrabold text-stone-800 mb-2">{{ exam.title }}</p>
-        <p class="text-sm font-bold text-stone-500 mb-6">{{ exam.subject }} &middot; {{ exam.total_questions }} soal</p>
+        <!-- Jinja renders a None as the word "None": an exam whose teacher never
+             set a subject printed "None \u00b7 5 soal" here too. -->
+        <p class="text-sm font-bold text-stone-500 mb-6">{% if exam.subject %}{{ exam.subject }} &middot; {% endif %}{{ exam.total_questions }} soal</p>
 
         {% if exam.pdf_url %}
         <div class="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">

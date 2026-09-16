@@ -144,7 +144,7 @@ def test_the_toggle_starts_from_the_stored_choice():
     # The element the browser reads must be right *before* Alpine runs, or a
     # stored-Indonesian session flashes English and reports the wrong language to
     # a screen reader on the first pass.
-    assert '<html lang="{{ default_lang|default(\'en\', true) }}"' in SOURCE, \
+    assert "<html lang=\"{{ _content_lang or default_lang|default('en', true) }}\"" in SOURCE, \
         "the document language must come from the same default as the scope"
 
 
@@ -156,6 +156,149 @@ def test_the_page_language_attribute_is_restored_on_load():
     assert init, "base.html has no init()"
     assert "documentElement.lang" in init.group(1), \
         "init() must set documentElement.lang from the stored choice"
+
+
+# ── a page says which language its own copy is in ────────────────
+#
+# The toggle translates what was written as a pair. It cannot translate copy that
+# was never translated, and a page whose words are Indonesian under
+# `<html lang="en">` is read aloud with an English voice: the words are right, the
+# pronunciation is wrong, and nothing reports a failure. Such a page declares
+# `content_lang = 'id'` — before `{% extends %}`, which is where Jinja runs it —
+# and keeps that declaration whatever the reader chose.
+#
+# The decision is cheap and this test makes it mandatory: a new page is either
+# translated, or English already, or it says out loud that its copy is
+# Indonesian. `audit_page_lang.py --templates` measures the copy and exits 1 when
+# a page declines to decide.
+DECLARES_ID = re.compile(r"{%-?\s*set\s+content_lang\s*=\s*'id'\s*%}")
+
+# Copy that was written in English in the first place, so there is nothing to
+# declare. Measured, not assumed: `--templates` scores this one 0 Indonesian
+# markers against 12 English ones.
+ENGLISH_COPY = {
+    "tools/generate_answer_sheet.html",
+}
+
+# The four documents that render their own `<html>` and cannot follow a toggle:
+# they are Indonesian, they say so, and that is the whole point of listing them.
+PRINT_DOCUMENTS = (
+    "monitor.html",
+    "print/report_card.html",
+    "student/result_detail_pdf.html",
+    "teacher/print_exam_report.html",
+)
+
+
+def _pages_extending_base():
+    return [p for p in TEMPLATES
+            if EXTENDS_BASE.search(p.read_text(encoding="utf-8", errors="replace"))
+            and not p.name.startswith("_")]
+
+
+def test_every_page_says_which_language_its_own_copy_is_in():
+    undecided = []
+    for path in _pages_extending_base():
+        rel = path.relative_to(ROOT / "app" / "templates").as_posix()
+        if rel in TRANSLATED or rel in ENGLISH_COPY:
+            continue
+        if not DECLARES_ID.search(path.read_text(encoding="utf-8", errors="replace")):
+            undecided.append(rel)
+
+    assert not undecided, (
+        "these pages neither switch nor say which language their copy is in, so a "
+        "screen reader guesses. Translate the page and put it on TRANSLATED, or "
+        "declare `{% set content_lang = 'id' %}` above its `{% extends %}`:\n  "
+        + "\n  ".join(undecided))
+
+
+def test_a_page_that_can_switch_does_not_freeze_its_language():
+    """The two halves of this contract cannot both be true of one page.
+
+    Declaring Indonesian on a translated page would freeze the document language
+    where the reader can actually switch the copy — the same defect as a page
+    declaring its own `lang` scope, one level up.
+    """
+    frozen = [rel for rel in TRANSLATED
+              if (ROOT / "app" / "templates" / rel).exists()
+              and DECLARES_ID.search(
+                  (ROOT / "app" / "templates" / rel).read_text(
+                      encoding="utf-8", errors="replace"))]
+
+    assert not frozen, (
+        "these pages are translated *and* declared Indonesian, so the toggle "
+        "would change the copy while the document kept claiming Indonesian:\n  "
+        + "\n  ".join(frozen))
+
+
+def test_the_declaration_wins_over_the_toggle():
+    """Switching to English must not make an Indonesian page *claim* English.
+
+    Three places resolve the document language — the pre-paint script, `setLang()`
+    and `init()` — and each has to read the page's declaration, or the cheapest
+    one to forget becomes the one that ships.
+    """
+    assert 'data-content-lang="{{ _content_lang }}"' in SOURCE, \
+        "the declaration has to reach the element the browser reads"
+    assert "if(sgStoredLang&&!document.documentElement.dataset.contentLang)" in SOURCE, \
+        "the pre-paint script must not overwrite an Indonesian declaration"
+
+    set_lang = re.search(r"setLang\(next\)\s*\{(.*?)\n        \}", SOURCE, re.S)
+    assert set_lang and "dataset.contentLang || next" in set_lang.group(1), \
+        "setLang() must keep the declaration, not just the choice"
+
+    init = re.search(r"init\(\)\s*\{(.*?)\n        \}", SOURCE, re.S)
+    assert init and "docLang(this.lang)" in init.group(1), \
+        "init() must resolve the same way setLang() does"
+
+
+def test_the_print_documents_declare_indonesian():
+    """They cannot honour the toggle — so they must not claim English."""
+    for rel in PRINT_DOCUMENTS:
+        text = (ROOT / "app" / "templates" / rel).read_text(
+            encoding="utf-8", errors="replace")
+        assert '<html lang="id"' in text, (
+            f"{rel} prints Indonesian and renders its own <html>; it must say so")
+        assert "extends" not in text.split("<html")[0], (
+            f"{rel} is expected to be a standalone document")
+
+
+def test_every_language_control_says_what_it_does_out_loud():
+    """The visible label is a two-letter code, which announces nothing.
+
+    A screen reader reads this button as "ID" or "EN" — the language it would
+    switch *to* is exactly the information the listener needs and the one piece
+    the text does not carry. `title` is not a substitute: on a touch device there
+    is no hover, and a screen reader may ignore it entirely.
+    """
+    missing = []
+    for path in TEMPLATES:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in re.finditer(r"setLang\(lang === 'id'", text):
+            window = text[match.start():match.start() + 600]
+            end = window.find("</button>")
+            if end != -1:
+                window = window[:end]
+            if "aria-label" not in window:
+                line = text[:match.start()].count("\n") + 1
+                missing.append(f"{path.relative_to(ROOT).as_posix()}:{line}")
+
+    assert not missing, (
+        "these language controls have no accessible name beyond 'ID'/'EN', so a "
+        "screen reader cannot say what they do:\n  " + "\n  ".join(missing))
+
+
+def test_each_half_of_a_message_pair_declares_its_language():
+    """Both halves are in the DOM at once; Alpine only hides one.
+
+    A screen reader reading the tree before Alpine runs — or with scripting off,
+    where `x-cloak` is the only thing hiding anything — otherwise announces the
+    message twice, in one voice, in two languages.
+    """
+    chrome = (ROOT / "app" / "templates" / "auth" / "_chrome.html").read_text(
+        encoding="utf-8")
+    assert '<span lang="id" x-show="lang!==\'en\'"' in chrome
+    assert '<span lang="en" x-show="lang===\'en\'"' in chrome
 
 
 # ── coverage: the chrome on every page ───────────────────────────
@@ -327,6 +470,13 @@ TRANSLATED = [
     # explains what the three frames mean.
     "tools/device_preview.html",
 ]
+# Partials are deliberately *not* on this list, and the assertion below says why:
+# an entry has to extend base.html, because it is the page's own scope that owns
+# `t()`. `teacher/_results_table.html` and `teacher/wb_toolbar.html` render inside
+# translated pages and were found to carry hardcoded Indonesian by
+# deploy/i18n_coverage.py; their copy is guarded by that tool's floor instead —
+# adding them here would have meant relaxing this rule to admit a template with no
+# toggle to honour.
 
 # Near-certain Indonesian markers, chosen as function words and domain nouns that
 # have no English reading. `dan`, `yang`, `tidak`, `murid`, `ujian` and friends do
@@ -417,6 +567,9 @@ _ALPINE_VALUE = re.compile(
     re.I,
 )
 _SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script>", re.S | re.I)
+# Script *and* style bodies, for the text-node pass to skip. Style bodies were
+# never copy; script bodies are read by `_SCRIPT_BODY` before this runs.
+_MARKUP_BODIES = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.S | re.I)
 _JS_LITERAL = re.compile(r"'([^'\\\n]*)'")
 def _strip_js_comments(region: str) -> str:
     """Line comments out, but only when no quote precedes them on the line.
@@ -456,7 +609,14 @@ _JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", re.S)
 # The partner has to look English — `['Simpan','Batal']` is two Indonesian
 # strings, not a translation, and must not be excused by looking like one.
 _PAIR_ARRAY = re.compile(r"\[\s*'([^']*)'\s*,\s*'([^']*)'\s*\]")
-_PAIR_KEY = re.compile(r"\b\w*(?:Id|En|id|en)\s*:\s*'([^']*)'")
+_PAIR_KEY = re.compile(r"\b(?:id|en|\w*Id|\w*En)\s*:\s*'([^']*)'")
+# The `\w*` prefix applies to the *capitalised* suffixes only. Applied to the
+# lowercase ones it made `murid:'Murid'` — a role slug, the same word in both
+# languages — read as a catalogue key, so the sweep excused a string that really
+# does render untranslated in `shared/comms.html`'s role map. Found by comparing
+# this reader with `deploy/i18n_coverage.py` template by template; the equality
+# assertion that keeps them aligned lives in `tests/unit/test_i18n_coverage.py`.
+_PAIR_KEY_COMMENTED_ABOVE = _PAIR_KEY
 
 
 def _english_partner(chunk: str) -> bool:
@@ -489,11 +649,19 @@ def _visible_strings(text: str) -> list[str]:
     text = _T_CALL.sub(" ", text)
     text = _SGT_CALL.sub(" ", text)
     text = _TERNARY.sub(" ", text)
-    found = re.findall(r">([^<>{}]+)<", text)
-    for region in _ALPINE_VALUE.findall(text):
-        found += _literals_in(_strip_js_comments(region))
+    found = []
     for m in _SCRIPT_BODY.finditer(text):
         found += _literals_in(_strip_js_comments(m.group(1)))
+    for region in _ALPINE_VALUE.findall(text):
+        found += _literals_in(_strip_js_comments(region))
+    # Script and style bodies are read *above*, so remove them before the
+    # text-node pass. Leaving them in let a JS **comment** be read as copy: an
+    # apostrophe in `// Alpine's \`t()\` …` opened a literal, the comment ran on
+    # to the next `<`, and base.html came back as carrying an untranslated
+    # string. A comment is not UI, and nothing is hidden by removing it here —
+    # the pass above is where a script's own strings are read.
+    text = _MARKUP_BODIES.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    found += re.findall(r">([^<>{}]+)<", text)
     # Demo credentials are data, not copy. An address like
     # `guru_mtk_smp@scan-grade.app` is the same string in both languages, and its
     # local part contains a marker word, so scanning it would report the demo page
@@ -652,7 +820,9 @@ def test_messages_built_outside_a_template_can_be_translated():
     head = SOURCE.split("<head>", 1)[0]
     assert "document.documentElement.lang=sgStoredLang" in head, \
         "the stored language must be applied before Alpine, like the dark class is"
-    assert "document.documentElement.lang = this.lang" in SOURCE, \
+    # `docLang()` is the one place that resolves choice vs. declared copy, so the
+    # attribute, the pre-paint script and sgT() all read the same answer.
+    assert "document.documentElement.lang = this.docLang(this.lang)" in SOURCE, \
         "Alpine's init must keep the attribute in sync after a toggle"
 
 
