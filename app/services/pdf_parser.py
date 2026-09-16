@@ -8,6 +8,20 @@ import logging
 import io
 from typing import List, Dict
 
+from app.services.question_types import (
+    KIND_CHOICE, KIND_DRAG, KIND_ESSAY, KIND_MATCH, KIND_TRUE_FALSE, is_objective,
+    question_kind,
+)
+
+#: How a question's type reads in the upload preview.
+_PREVIEW_BADGES = {
+    KIND_CHOICE: "MCQ",
+    KIND_TRUE_FALSE: "True/False",
+    KIND_MATCH: "Matching",
+    KIND_DRAG: "Drag & drop",
+    KIND_ESSAY: "Essay",
+}
+
 logger = logging.getLogger("app")
 
 
@@ -487,8 +501,11 @@ def generate_preview_html(parsed: Dict) -> str:
             f'{parsed["mcq_count"] + parsed["essay_count"]} soal</p>')
     html += '<div class="space-y-1 max-h-80 overflow-y-auto">'
     for q in parsed.get("questions", []):
-        badge = "MCQ" if q.get("type") == "mcq" else "Essay"
-        bc = "bg-blue-100 text-blue-700" if q.get("type") == "mcq" else "bg-amber-100 text-amber-700"
+        # The badge names the family, so an extracted true/false question is not
+        # previewed to the teacher as an essay.
+        _objective = is_objective(q.get("type"))
+        badge = _PREVIEW_BADGES[question_kind(q.get("type"))]
+        bc = "bg-blue-100 text-blue-700" if _objective else "bg-amber-100 text-amber-700"
         html += (f'<div class="flex items-center gap-2 p-2 rounded-lg bg-surface-50">'
                  f'<span class="text-sm font-bold text-surface-400 w-8">{q.get("number","?")}.</span>'
                  f'<span class="text-sm font-bold text-surface-600 flex-1 truncate">{q.get("text","")[:100]}</span>'

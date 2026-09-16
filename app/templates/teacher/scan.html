@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Scan LJK - ScanGrade{% endblock %}
 {% block page_title %}Scan LJK{% endblock %}
@@ -47,6 +48,16 @@
             <div id="custom-questions" class="mt-2 hidden">
                 <input type="number" id="manual-qcount" value="50" min="10" max="200"
                        class="w-32 px-3 py-2 border-2 border-surface-200 rounded-xl text-sm font-bold" placeholder="Jumlah soal">
+            </div>
+            <!-- Which page of the sheet this photograph is. Shown only when the
+                 sheet really has more than one page, because the grid repeats:
+                 page 2's question 81 is printed where page 1's question 1 is, so
+                 a scan that does not say which page it is reads the wrong
+                 questions out of a perfectly good photograph. -->
+            <div id="page-select-wrap" class="mt-2 hidden">
+                <label id="page-select-label" class="block text-xs font-bold text-surface-600 mb-1" for="page-select"></label>
+                <select id="page-select" class="w-48 px-3 py-2 border-2 border-surface-200 rounded-xl text-sm font-bold focus:border-primary-500 transition"></select>
+                <p class="text-xs text-surface-500 mt-1" id="page-select-hint"></p>
             </div>
         </div>
 
@@ -351,7 +362,77 @@ document.addEventListener('change', (e) => {
 // Exam select toggle
 document.getElementById('exam-select').addEventListener('change', function() {
     document.getElementById('custom-questions').classList.toggle('hidden', this.value !== '__custom__');
+    refreshPageSelect(currentTotalQ());
 });
+document.getElementById('manual-qcount').addEventListener('input', function() {
+    refreshPageSelect(currentTotalQ());
+});
+
+// ── Which page of the sheet is being photographed ────────────────────────────
+// A sheet with more than 80 questions does not fit on one page, so the app
+// prints it as two (or three) and the teacher photographs each. The page number
+// has to travel with the scan: the answer grid repeats on every page, so page 2's
+// question 81 sits at the same place on the paper as page 1's question 1. A scan
+// that does not say which page it is reads the *wrong questions* from a
+// perfectly good photograph — and the result looked plausible, which is what made
+// it dangerous.
+function sheetPages(totalQ) {
+    // Mirrors omr_layout: the grid caps at 80 questions per page (4 × 20).
+    return Math.max(1, Math.ceil((parseInt(totalQ, 10) || 50) / 80));
+}
+
+function currentTotalQ() {
+    const sel = document.getElementById('exam-select');
+    if (sel.value === '__custom__') {
+        return parseInt(document.getElementById('manual-qcount').value, 10) || 50;
+    }
+    return parseInt(sel.options[sel.selectedIndex].dataset.questions, 10) || 50;
+}
+
+function refreshPageSelect(totalQ) {
+    const wrap = document.getElementById('page-select-wrap');
+    const sel = document.getElementById('page-select');
+    const n = sheetPages(totalQ);
+    if (!wrap || !sel) return;
+    if (n < 2) {                       // one page: the whole sheet, as before
+        wrap.classList.add('hidden');
+        sel.innerHTML = '';
+        return;
+    }
+    const keep = sel.value;
+    sel.innerHTML = '';
+    for (let p = 0; p < n; p++) {
+        const o = document.createElement('option');
+        o.value = String(p);
+        const label = window.sgT
+            ? sgT('Halaman ' + (p + 1) + ' dari ' + n, 'Page ' + (p + 1) + ' of ' + n)
+            : 'Halaman ' + (p + 1) + ' dari ' + n;
+        o.textContent = label;
+        sel.appendChild(o);
+    }
+    if (keep && keep < String(n)) sel.value = keep;
+    const L = document.getElementById('page-select-label');
+    const H = document.getElementById('page-select-hint');
+    if (L) {
+        L.textContent = window.sgT
+            ? sgT('Halaman lembar yang difoto', 'Page of the sheet photographed')
+            : 'Halaman lembar yang difoto';
+    }
+    if (H) {
+        H.textContent = window.sgT
+            ? sgT('LJK lebih dari 80 soal dicetak ' + n + ' halaman. Foto dan simpan tiap halaman — jawabannya digabung, tidak saling menimpa.',
+                  'A sheet over 80 questions prints as ' + n + ' pages. Photograph and save each page — the answers merge, they do not overwrite each other.')
+            : 'LJK lebih dari 80 soal dicetak ' + n + ' halaman. Foto dan simpan tiap halaman.';
+    }
+    wrap.classList.remove('hidden');
+}
+
+function currentSheetPage() {
+    const sel = document.getElementById('page-select');
+    return sel && sel.value ? sel.value : '0';
+}
+
+refreshPageSelect(currentTotalQ());
 
 function showError(msg) {
     document.getElementById('error-text').textContent = msg;
@@ -651,6 +732,7 @@ async function processScan(blob) {
     formData.append('image', blob, 'scan.jpg');
     formData.append('exam_id', examSelect.value === '__custom__' ? '' : examSelect.value);
     formData.append('total_questions', totalQ);
+    formData.append('page', currentSheetPage());
 
     try {
         console.log('📤 Sending scan request...');
@@ -1047,6 +1129,7 @@ async function processBulk(file) {
     fd.append('archive', file);
     fd.append('exam_id', examId);
     fd.append('total_questions', totalQ);
+    fd.append('page', currentSheetPage());
 
     try {
         const resp = await fetch('/api/scan/bulk', { method: 'POST', body: fd });

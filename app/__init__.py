@@ -251,6 +251,42 @@ def create_app(env=None):
     from app.utils.asset_version import asset_v
     app.jinja_env.globals["asset_v"] = asset_v
 
+    # Question types, so a template branches on the *family* of a question rather
+    # than on a comparison with the one type it was written for. That comparison is
+    # how a page decides a new objective type is an essay — it is not the type the
+    # page knows, so it must be an essay — and then renders a canvas for a
+    # true/false question and shows the pupil no way to answer it. The names live in
+    # app/services/question_types.py; these are the four doors a page needs (see the
+    # module docstring).
+    from app.services.question_types import (
+        describe_answer, grade_answer, is_essay, is_objective, public_options,
+        question_kind, vocabulary,
+    )
+    # A report used to decide "is this answer right" with its own comparison of
+    # letters, which cannot express a matching answer at all and marks every one
+    # of them wrong. The grader is the same object the score comes from.
+    app.jinja_env.globals["q_correct"] = grade_answer
+    app.jinja_env.globals["q_is_objective"] = is_objective
+    app.jinja_env.globals["q_is_essay"] = is_essay
+    app.jinja_env.globals["q_kind"] = question_kind
+    app.jinja_env.globals["q_answer_text"] = describe_answer
+    app.jinja_env.globals["q_public_options"] = public_options
+    # The pages that classify a question in JavaScript get the names from here
+    # rather than writing their own list, which is how a Python change and a
+    # JavaScript change stop meaning the same thing.
+    app.jinja_env.globals["q_vocabulary"] = vocabulary
+
+    def q_any_essay(types):
+        """Does this exam contain a question a teacher has to mark by hand?
+
+        A page asking "does this exam have essays" used to ask it with a list of
+        the three essay names, which is a list that stops being right the moment a
+        fourth exists — and reads as an essay icon for a true/false question.
+        """
+        return any(is_essay(value) for value in (types or []))
+
+    app.jinja_env.globals["q_any_essay"] = q_any_essay
+
     @app.template_global()
     def school_favicon(school_info=None):
         """Generate a simple SVG favicon from school initials or default."""

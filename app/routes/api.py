@@ -11,6 +11,9 @@ from app.utils.helpers import row_or_none
 from app.utils.exam_access import exam_sitting_allowed
 from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
+from app.services.question_types import (
+    earned_points, grade_answer, is_essay_marker, is_objective, objective_key_count,
+)
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
@@ -183,22 +186,7 @@ def force_submit():
             total_q = exam.get("total_questions", 0)
             penalty = float(exam.get("penalty_per_violation", 5))
             # Calculate MCQ score
-            earned = 0.0
-            mcq_count = 0
-            for i in range(total_q):
-                qi = str(i)
-                qt = qtypes.get(qi, "mcq")
-                kv = key.get(qi)
-                w = float(weights.get(qi, 0))
-                if qt == "mcq" and kv and w > 0:
-                    mcq_count += 1
-                    ans = answers.get(qi)
-                    if isinstance(ans, dict): ans = ans.get("answer", "")
-                    if kv == "bonus":
-                        if ans and str(ans).strip(): earned += w
-                    elif isinstance(kv, list):
-                        if ans in kv: earned += w
-                    elif ans == kv: earned += w
+            earned, _graded = earned_points(qtypes, key, answers, weights, total_q)
             score = round(min(earned, 100), 2)
             # Get actual penalty from violation logs
             from app.services.anti_cheat_service import (
@@ -320,6 +308,11 @@ def scan_process():
 
     exam_id = request.form.get("exam_id", "")
     total_questions = int(request.form.get("total_questions", 50))
+    # Which page of the sheet this photograph is. A 2-page LJK (over 80
+    # questions) is scanned one page at a time; without this the reader could
+    # not tell page 2 from page 1 and reported page 1's marks as page 2's
+    # answers. See omr_service.read_answers.
+    page_index = max(0, int(request.form.get("page", 0) or 0))
 
     _cleanup_scan_tmp()
 
@@ -342,6 +335,7 @@ def scan_process():
             image_path=scan_temp_path,
             total_questions=total_questions,
             exam_id=exam_id,
+            page_index=page_index,
         )
         current_app.logger.info("OMR task enqueued: %s", task.id)
         return jsonify({
@@ -355,7 +349,8 @@ def scan_process():
         # Fallback to synchronous processing
         from app.services.omr_service import process_scan, draw_debug_image, preprocess_scan
         try:
-            result = process_scan(image_data, total_questions=total_questions, preprocess=True)
+            result = process_scan(image_data, total_questions=total_questions,
+                                  preprocess=True, page_index=page_index)
         except Exception as e2:
             return jsonify({"error": f"Gagal memproses: {str(e2)[:200]}"}), 422
 
@@ -367,20 +362,32 @@ def scan_process():
                 if isinstance(key, str):
                     key = json.loads(key)
                 detected = result.get("answers", {})
+                qtypes = exam.get("question_types") or {}
+                if isinstance(qtypes, str):
+                    qtypes = json.loads(qtypes)
                 correct = 0
+                graded = 0
                 for k, v in key.items():
-                    if k in detected and detected[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
+                    # The key decides which questions the reader may mark, and the
+                    # grader decides whether an answer is right — one comparison of
+                    # letters here is what made a scanned true/false question score
+                    # nothing at all.
+                    if not key_has_answer(qtypes.get(str(k)), v):
+                        continue
+                    graded += 1
+                    if k in detected and grade_answer(qtypes.get(str(k)), v, detected[k]):
                         correct += 1
-                mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
-                result["score"] = round((correct / max(mcq_count, 1)) * 100, 2)
+                result["score"] = round((correct / max(graded, 1)) * 100, 2)
                 result["correct"] = correct
+                result["graded"] = graded
 
         if "error" not in result:
             from app.services.omr_service import load_image, find_registration_marks
             img = load_image(image_data)
             if img is not None:
                 corners = find_registration_marks(img)
-                debug_jpg = draw_debug_image(img, corners, result.get("answers"))
+                debug_jpg = draw_debug_image(img, corners, result.get("answers"),
+                                             page_index=page_index)
                 import base64
                 result["debug_image"] = base64.b64encode(debug_jpg).decode()
                 result["scan_file_id"] = scan_file_id
@@ -558,6 +565,7 @@ def scan_bulk():
             zip_path=zip_path,
             total_questions=total_questions,
             exam_id=exam_id,
+            page_index=max(0, int(request.form.get("page", 0) or 0)),
         )
         current_app.logger.info("Bulk OMR task enqueued: %s (%d images)", task.id, 0)
         return jsonify({
@@ -607,16 +615,25 @@ def scan_bulk_save():
             continue
 
         # Grade
-        exam = supabase.table("exams").select("answer_key").eq("id", exam_id).single().execute().data
+        # `question_types` rides along with the key: the grader needs to know which
+        # kind of question each answer belongs to, and a column left out of a select
+        # list reads as absent rather than as an error (see AGENTS.md).
+        exam = supabase.table("exams").select("answer_key,question_types").eq("id", exam_id).single().execute().data
         key = exam.get("answer_key", {}) if exam else {}
         if isinstance(key, str):
             key = json.loads(key)
+        qtypes = exam.get("question_types") or {} if exam else {}
+        if isinstance(qtypes, str):
+            qtypes = json.loads(qtypes)
         correct = 0
+        graded = 0
         for k, v in key.items():
-            if k in answers and answers[k] == v and v not in ("essay", "essay_text", "essay_canvas"):
+            if not key_has_answer(qtypes.get(str(k)), v):
+                continue
+            graded += 1
+            if k in answers and grade_answer(qtypes.get(str(k)), v, answers[k]):
                 correct += 1
-        mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
-        score = round((correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
+        score = round((correct / max(graded, 1)) * 100, 2) if graded > 0 else 0
 
         enriched = {}
         for k, v in answers.items():
@@ -952,12 +969,17 @@ def grade_batch():
     question_weights = exam.get("question_weights") or {}
     total_q = exam.get("total_questions", 0)
     if not question_weights and total_q > 0:
-        mcq_count = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
-        if mcq_count > 0:
-            each = round(100 / mcq_count, 2)
-            for i in range(total_q):
-                if question_types.get(str(i), "mcq") == "mcq":
-                    question_weights[str(i)] = each
+        # This route's fallback has always been flatter than the student route's:
+        # the objective questions share 100%, and the essays take their marks from
+        # the teacher's own scores below. Kept as-is, only with the family decided
+        # by the shared vocabulary, so a true/false question is not silently left
+        # with no weight at all.
+        objective = [i for i in range(total_q)
+                     if is_objective(question_types.get(str(i)))]
+        if objective:
+            each = round(100 / len(objective), 2)
+            for i in objective:
+                question_weights[str(i)] = each
     subs = supabase.table("submissions").select("id,answers,penalty,teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
     graded = 0
     for sub in subs:
@@ -968,23 +990,8 @@ def grade_batch():
                 try: sub[_sf] = json.loads(_sv)
                 except (json.JSONDecodeError, TypeError): sub[_sf] = {}
         answers = sub.get("answers") or {}
-        earned = 0.0
-        for i in range(total_q):
-            qtype = question_types.get(str(i), "mcq")
-            key_val = answer_key.get(str(i))
-            w = float(question_weights.get(str(i), 0))
-            if w <= 0:
-                continue
-            if qtype == "mcq":
-                ans = answers.get(str(i))
-                if key_val == "bonus":
-                    if ans and str(ans).strip():
-                        earned += w
-                elif isinstance(key_val, list):
-                    if ans in key_val:
-                        earned += w
-                elif ans == key_val:
-                    earned += w
+        earned, _graded = earned_points(
+            question_types, answer_key, answers, question_weights, total_q)
         fb = sub.get("teacher_feedback") or {}
         fb_scores = fb.get("scores", {}) or {}
         for qi, sv in fb_scores.items():
@@ -995,21 +1002,16 @@ def grade_batch():
         final = round(min(earned, 100), 2)
         penalty = float(sub.get("penalty") or 0)
         final = max(0, round(final - penalty, 2))
-        mcq_correct = 0
-        mcq_count_q = sum(1 for i in range(total_q) if question_types.get(str(i), "mcq") == "mcq")
-        for i in range(total_q):
-            qtype = question_types.get(str(i), "mcq")
-            key_val = answer_key.get(str(i))
-            if qtype == "mcq" and key_val:
-                ans = answers.get(str(i))
-                if key_val == "bonus":
-                    if ans and str(ans).strip():
-                        mcq_correct += 1
-                elif isinstance(key_val, list):
-                    if ans in key_val:
-                        mcq_correct += 1
-                elif ans == key_val:
-                    mcq_correct += 1
+        # The denominator stays "every objective question", which is what this
+        # route has always reported; the numerator needs a key to be right against.
+        mcq_count_q = sum(1 for i in range(total_q)
+                          if is_objective(question_types.get(str(i))))
+        mcq_correct = sum(
+            1 for i in range(total_q)
+            if answer_key.get(str(i))
+            and grade_answer(question_types.get(str(i)), answer_key.get(str(i)),
+                             answers.get(str(i)))
+        )
         mcq_score = round((mcq_correct / max(mcq_count_q, 1)) * 100, 2) if mcq_count_q > 0 else 0
         supabase.table("submissions").update({
             "score": mcq_score,
@@ -1122,44 +1124,113 @@ def scan_save():
     except Exception:
         pass
 
+    # ── One sheet, one page at a time ────────────────────────────────────────
+    # A sheet with more than 80 questions is printed as two pages, so it cannot
+    # be one photograph and is scanned page by page. A save must therefore
+    # *merge* the page it saw and leave the rest of the answer set alone —
+    # replacing wholesale meant page 2 erased page 1 — and grading has to run
+    # over the merged set, or the score would come from a single page's
+    # questions. `first_question`/`last_question` come back from the scan
+    # response; with neither, this is one sheet, one page, and the whole answer
+    # set is replaced exactly as it was before.
+    existing = supabase.table("submissions") \
+        .select("*") \
+        .eq("exam_id", exam_id) \
+        .eq("student_id", student_id) \
+        .execute().data
+
+    stored = {}
+    if existing:
+        stored = existing[0].get("answers") or {}
+        if isinstance(stored, str):
+            try:
+                stored = json.loads(stored)
+            except (ValueError, TypeError):
+                stored = {}
+        if not isinstance(stored, dict):
+            stored = {}
+
+    def _qkey(k):
+        """The question number of a stored key, or None for a metadata key."""
+        s = str(k)
+        return int(s) if s.isdigit() else None
+
+    # Only a *filled* saved answer counts as answered, so a page that fills in a
+    # question left blank by an earlier page still counts as new work.
+    stored_marks = set()
+    for k, v in stored.items():
+        q = _qkey(k)
+        if q is None:
+            continue
+        ans = v.get("answer", "") if isinstance(v, dict) else v
+        if ans not in (None, ""):
+            stored_marks.add(q)
+
+    first = data.get("first_question")
+    last = data.get("last_question")
+    if first is None or last is None:
+        covered = {int(k) for k in answers if str(k).isdigit()}
+    else:
+        covered = set(range(int(first), int(last) + 1))
+    covered = {q for q in covered if str(q) in answers}
+    adds_new = bool(covered - stored_marks)
+
+    merged = {k: v for k, v in stored.items() if _qkey(k) not in covered}
+    merged.update(answers)
+
+    stored_review = stored.get("_needs_review") or []
+    if isinstance(stored_review, (str, int)):
+        stored_review = [stored_review]
+    review = sorted({int(q) for q in stored_review
+                     if str(q).lstrip("-").isdigit() and int(q) not in covered}
+                    | {int(q) for q in needs_review
+                       if str(q).lstrip("-").isdigit()})
+
     # Grade MCQ answers (handle string + dict formats, multi-value keys, bonus)
     key = exam.get("answer_key", {})
     if isinstance(key, str):
         key = json.loads(key)
-    detected = answers
+    detected = merged
+    qtypes = exam.get("question_types") or {}
+    if isinstance(qtypes, str):
+        try:
+            qtypes = json.loads(qtypes)
+        except (json.JSONDecodeError, TypeError):
+            qtypes = {}
     correct = 0
     for k, v in key.items():
-        if k not in detected:
+        if is_essay_marker(v) or k not in detected:
             continue
-        ans = detected[k]
-        if isinstance(ans, dict):
-            ans = ans.get('answer', '')
-        if v in ("essay", "essay_text", "essay_canvas"):
-            continue
-        if v == "bonus":
-            if ans and str(ans).strip():
-                correct += 1
-        elif isinstance(v, list):
-            if ans in v:
-                correct += 1
-        elif ans == v:
+        if grade_answer(qtypes.get(str(k)), v, detected[k]):
             correct += 1
-    mcq_count = sum(1 for v in key.values() if v not in ("essay", "essay_text", "essay_canvas"))
+    mcq_count = objective_key_count(key)
     score = round((correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
 
     # Build enriched answers dict with confidence metadata
     enriched_answers = {}
-    for k, v in answers.items():
-        entry = {"answer": v}
-        if k in confidence:
-            entry["confidence"] = confidence[k]
-        if k in needs_review:
-            entry["review"] = True
-        enriched_answers[k] = entry
+    for k, v in merged.items():
+        q = _qkey(k)
+        if q is None:
+            continue
+        if q in covered:
+            entry = {"answer": v}
+            if k in confidence:
+                entry["confidence"] = confidence[k]
+            if str(k) in {str(x) for x in needs_review}:
+                entry["review"] = True
+            enriched_answers[k] = entry
+        elif isinstance(v, dict):
+            # A page this scan did not see keeps its own saved entry, confidence
+            # and review flag included.
+            enriched_answers[k] = v
+        else:
+            enriched_answers[k] = {"answer": v}
     if nisn:
         enriched_answers["_nisn"] = nisn
-    if needs_review:
-        enriched_answers["_needs_review"] = needs_review
+    elif stored.get("_nisn"):
+        enriched_answers["_nisn"] = stored["_nisn"]
+    if review:
+        enriched_answers["_needs_review"] = review
 
     # Save original scan image permanently
     if scan_file_id:
@@ -1176,13 +1247,6 @@ def scan_save():
                     current_app.logger.warning("Failed to move scan image: %s", e)
                 break
 
-    # Check for existing submission and update or create
-    existing = supabase.table("submissions") \
-        .select("*") \
-        .eq("exam_id", exam_id) \
-        .eq("student_id", student_id) \
-        .execute().data
-
     update_data = {
         "answers": enriched_answers,
         "score": score,
@@ -1192,10 +1256,13 @@ def scan_save():
 
     if existing:
         current_status = existing[0].get("status", "")
-        # Don't overwrite already-graded/published submissions
-        if current_status in ("graded", "published"):
+        # Don't overwrite already-graded/published submissions — but a scan of a
+        # page that was never saved is not an overwrite, it is the other half of
+        # the sheet, so it goes through and the union is re-graded. Re-scanning a
+        # page already saved is still refused.
+        if current_status in ("graded", "published") and not adds_new:
             return jsonify({"warning": "Sudah dinilai/dipublikasi, tidak ditimpa", "score": score}), 200
-        new_status = "graded" if current_status != "submitted" else "submitted"
+        new_status = "submitted" if (current_status == "submitted" and not adds_new) else "graded"
         sub = supabase.table("submissions") \
             .update(update_data) \
             .eq("id", existing[0]["id"]) \
@@ -1211,8 +1278,12 @@ def scan_save():
         "score": score,
         "correct": correct,
         "total": mcq_count,
-        "needs_review": len(needs_review),
+        "needs_review": len(review),
         "submission": sub[0] if sub else None,
+        # What this save covered, and how much of the sheet is answered now, so
+        # a two-page sheet can be tracked page by page instead of hoping.
+        "questions_covered": (sorted(covered)[:1] + sorted(covered)[-1:]) if covered else [],
+        "answered": sum(1 for k in enriched_answers if not str(k).startswith("_")),
     })
 
 

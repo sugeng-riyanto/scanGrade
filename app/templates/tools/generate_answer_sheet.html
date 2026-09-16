@@ -168,10 +168,21 @@
                     <div class="bg-white shadow-lg rounded-xl overflow-hidden" style="width:450px; min-height:580px; font-family:'Courier New',monospace;">
                         <!-- Preview Sheet -->
                         <div class="p-4 text-[8px] leading-tight">
-                            <!-- Corner Markers -->
+                            <!-- Registration marks.
+                                 Solid squares, not the L-shaped corner rules this
+                                 preview used to draw: a rule is two thin strokes
+                                 whose apparent thickness changes with distance,
+                                 blur and JPEG, while a filled square is a region
+                                 the scanner can still find in a photo taken by
+                                 hand. The four of them are the sheet's coordinate
+                                 system, so drawing the wrong shape here would
+                                 show teachers a sheet their own scanner cannot
+                                 read. Keep them solid and keep the margin around
+                                 them bare — that quiet ring is what tells a
+                                 registration mark from a filled bubble. -->
                             <div class="flex justify-between mb-2">
-                                <div class="w-4 h-4 border-l-2 border-t-2 border-black"></div>
-                                <div class="w-4 h-4 border-r-2 border-t-2 border-black"></div>
+                                <div class="w-4 h-4 bg-black"></div>
+                                <div class="w-4 h-4 bg-black"></div>
                             </div>
 
                             <!-- Header -->
@@ -233,6 +244,25 @@
                                 </div>
                             </div>
 
+                            <!-- Student ID band: one bubble per digit position, ten
+                                 values down. The scanner reads this off the same
+                                 photograph as the answers, so the preview has to
+                                 show it — a sheet without it cannot be matched to
+                                 a student automatically. -->
+                            <div class="border border-gray-200 rounded p-1 mb-2">
+                                <div class="text-[5px] font-bold text-gray-500 mb-1">Student ID / NISN — fill one bubble per column</div>
+                                <div class="flex justify-between">
+                                    <template x-for="d in 10" :key="'id' + d">
+                                        <div class="flex flex-col gap-[1px]">
+                                            <template x-for="v in 10" :key="'v' + v">
+                                                <div class="rounded-full border border-gray-500 shrink-0" style="width:3.5px;height:3.5px"></div>
+                                            </template>
+                                            <span class="text-[4px] text-gray-400 text-center" x-text="d - 1"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+
                             <!-- Version -->
                             <div class="mb-2 flex items-center gap-2">
                                 <span class="text-[6px] font-bold">Version:</span>
@@ -248,10 +278,13 @@
                                 </div>
                             </div>
 
-                            <!-- Bottom Corner Markers -->
+                            <!-- Bottom registration marks — the same solid squares,
+                                 one near each bottom corner. All four are needed:
+                                 the scanner's page transform is built from exactly
+                                 these four centres. -->
                             <div class="flex justify-between mt-2">
-                                <div class="w-4 h-4 border-l-2 border-b-2 border-black"></div>
-                                <div class="w-4 h-4 border-r-2 border-b-2 border-black"></div>
+                                <div class="w-4 h-4 bg-black"></div>
+                                <div class="w-4 h-4 bg-black"></div>
                             </div>
                         </div>
                     </div>

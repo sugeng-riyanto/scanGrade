@@ -3,6 +3,151 @@
 {% block page_title %}{{ exam.title }}{% endblock %}
 {% block head_extra %}
 <style>
+/* ── the paper gets the width on a phone ──────────────────────────────────
+   The question column is worth its 150px only when it is *beside* the paper.
+   On a 320px screen it leaves about 155px for an A4 page — under a third of it,
+   which is not a paper anyone can read or draw on — so below 640px the column
+   leaves the flow and slides over the paper instead. The shadow is the scrim:
+   a ring of colour the size of the screen, so no second element is needed to
+   dim what is behind it. The strip that reopens the column stays on screen, so
+   putting it away is never a one-way door. */
+.exam-qcol { width: 150px; }
+.exam-qcol--rail { width: 132px; }
+@media (max-width: 640px) {
+    .exam-qcol, .exam-qcol--rail {
+        position: fixed; top: 0; bottom: 0; left: 0; z-index: 85;
+        width: 86vw; max-width: 320px;
+        padding: 8px; background: #fff;
+        box-shadow: 0 0 0 100vmax rgba(15, 23, 42, 0.5);
+        overflow-y: auto; align-items: stretch;
+    }
+    /* the column's own scroll box would be a scroller inside a scroller */
+    .exam-qcol .sticky-questions { position: static !important; max-height: none !important; }
+}
+
+/* The scientific calculator is 288px of fixed chrome with 9px labels. On a
+   phone that is the whole screen, and a 24px button cannot be hit by a thumb.
+   Full width above the bottom nav instead, with buttons a finger can find. */
+@media (max-width: 640px) {
+    .sg-calc {
+        width: auto !important;
+        left: 8px; right: 8px; bottom: 72px;
+        max-height: 74vh; overflow-y: auto;
+    }
+    /* 40px was still under the floor, and the header's close "×" measured 9px
+       wide — a control no thumb can hit. Both axes, not just height: a key that
+       is 44 tall and 9 wide is not a key. */
+    .sg-calc button { min-height: 44px; min-width: 44px; font-size: 14px; }
+    .sg-calc .sg-calc-display { min-height: 62px; }
+    /* The toolbar wrapped to four rows — 205px of an 800px screen, a quarter of
+       the paper spent on chrome. On a phone the same tools become one row the
+       student swipes: nothing is taken away, only stacked the other way. */
+    /* `!important` for the same reason the calculator carries it above: the
+       toolbar element still names `flex-wrap` in its class list at equal
+       specificity, and source order then decides — which is how this stayed
+       four rows while the rule said otherwise. */
+    .draw-toolbar {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        gap: 6px;
+        padding-bottom: 4px;
+    }
+    .draw-toolbar > * { flex: 0 0 auto; }
+    /* a horizontal scroller must not become the *page's* horizontal scroll */
+    .draw-toolbar::-webkit-scrollbar { height: 3px; }
+    .draw-toolbar::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
+    /* 44px is the smallest control a finger hits reliably; the drawing tools
+       were 24px tall, and the option bubbles 30px. */
+    /* Both axes, for the same reason as the calculator's keys above: an icon-only
+       tool with no label measured 37px wide — 44 tall and 37 wide is a control a
+       thumb still misses. The row is already a horizontal scroller, so a wider
+       button costs a swipe, not a row. */
+    .draw-toolbar button { min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 13px; }
+    .draw-toolbar input[type="color"] { width: 44px; height: 44px; }
+    .draw-toolbar select { min-height: 44px; font-size: 13px !important; width: 3.5rem !important; }
+    .opt-btn { min-width: 44px; min-height: 44px; }
+    /* Five options at the floor need 244px of row. The gap was 8px, which asked
+       for 252 and pushed the fifth option onto a line of its own — so a
+       multiple-choice question read as two answers, not one. */
+    .opt-row { gap: 6px; }
+}
+
+/* A tablet is a touch device too, and the width query above only catches phones.
+   Measured at 768px (above the 640px breakpoint, so none of the rules above
+   applied): the calculator's keys were 16px tall with an 8px-wide close button,
+   and the drawing tools 25px — the same defect the phone rules were written to
+   fix, on a bigger screen. `pointer: coarse` asks the question the width query
+   was standing in for — is this a finger? — so a mouse desktop keeps its compact
+   panel while a touch screen gets the floor. */
+@media (pointer: coarse) and (min-width: 641px) {
+    .sg-calc button { min-height: 44px; min-width: 44px; font-size: 14px; }
+    /* The floor makes every tool 44px, which wrapped the row to three of them —
+       157px, a fifth of the screen — where the same tools at 25px fitted in two.
+       Bigger targets are not a reason to charge the paper more room, so the
+       tablet gets the phone's answer: one row, swiped. */
+    .draw-toolbar {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        gap: 6px;
+        padding-bottom: 4px;
+    }
+    .draw-toolbar > * { flex: 0 0 auto; }
+    .draw-toolbar button { min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 13px; }
+    .draw-toolbar input[type="color"] { width: 44px; height: 44px; }
+    .draw-toolbar select { min-height: 44px; }
+    .opt-btn { min-width: 44px; min-height: 44px; }
+}
+
+/* The drafting tools fold behind one button on a phone. `display: contents` so
+   the wrapper is invisible to the layout on a wide screen — the four buttons sit
+   in the toolbar row exactly as they did — and becomes a group that can be put
+   away below 640px. */
+.math-tools { display: contents; }
+.math-tools-toggle { display: none; }
+@media (max-width: 640px) {
+    .math-tools { display: none; }
+    .math-tools.sg-open { display: contents; }
+    .math-tools-toggle {
+        display: inline-flex; align-items: center;
+        min-height: 44px; padding: 8px 12px; font-size: 13px;
+        background: #fff; border: 1.5px solid #e5e7eb; border-radius: 10px; cursor: pointer;
+    }
+    .math-tools-toggle.active { background: #f97316; color: #fff; border-color: #f97316; }
+    /* The collapsed column was a flex item, so it charged a phone 30px plus the
+       12px gap — 42px of a 320px screen — for a button whose only job is to
+       bring the column back. That 42px is exactly what pushed the fifth
+       multiple-choice option onto a second line, and it stayed paid whether the
+       student used the column or not. Out of the flow it costs the paper
+       nothing, and the 32px gutter the page's own padding leaves on the left
+       (16px page + 16px paper) is where it lives, so it covers no paper. */
+    .exam-qstrip {
+        position: fixed;
+        left: 4px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 30;
+        width: 26px;
+        padding: 10px 0;
+        gap: 4px;
+        box-shadow: 0 4px 16px rgba(15, 23, 42, 0.16);
+    }
+    /* Two sticky bars sit above the paper — the app header, and this one — and
+       this one measured 154px on a phone: 19% of the screen, held by four short
+       rows. Title and subject share a line and the padding and Submit come down
+       to phone size. The timer and Submit itself stay: a student needs both for
+       the whole sitting, so they are the two things worth the space. */
+    .sticky-topbar { padding: 8px 10px; }
+    .sg-exam-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .sg-exam-head h1 { max-width: 118px; flex: 0 0 auto; }
+    .sg-exam-head > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sg-submit { padding: 8px 14px !important; font-size: 13px !important; }
+}
 .pdf-container { background: #f8fafc; min-height: 70vh; border-radius: 1rem; }
 .q-btn { transition: all 0.2s; font-weight: 700; }
 .q-btn:hover { transform: scale(1.08); }
@@ -54,22 +199,28 @@
     .pdf-container { min-height: 40vh !important; }
 }
 @media (max-width: 480px) {
-    .opt-btn { padding: 6px 12px !important; font-size: 12px !important; }
-    .q-btn { width: 34px !important; height: 34px !important; font-size: 12px !important; }
+    .opt-btn { padding: 8px 12px !important; font-size: 13px !important; }
+    /* A fixed 34px square was a target no thumb could hit, and it fought the
+       `w-full` the grid already gives the button. A floor, not a size. */
+    .q-btn { min-width: 44px !important; min-height: 44px !important; font-size: 13px !important; }
 }
 </style>
 {% endblock %}
 {% block content %}
 <div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }}, '{{ started_at }}')" data-exam-id="{{ exam.id }}">
     <!-- Top Bar -->
-    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex items-center justify-between border border-surface-100">
-        <div class="flex items-center gap-3">
-            <div>
+    <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex flex-wrap items-center justify-between gap-y-2 border border-surface-100">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="min-w-0 sg-exam-head">
                 <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-surface-800">{{ exam.title }}</h1>
-                <span class="text-[10px] text-surface-400 font-semibold">{{ exam.subject }} &middot; {{ exam.total_questions }} <span x-text="t('soal','questions')"></span></span>
+                <!-- Jinja renders a None as the word "None", so an exam whose
+                     teacher never set a subject told the student "None · 5
+                     questions" — three of the four exams in this database.
+                     A missing subject is not a subject; it is not shown. -->
+                <span class="text-[10px] text-surface-400 font-semibold">{% if exam.subject %}{{ exam.subject }} &middot; {% endif %}{{ exam.total_questions }} <span x-text="t('soal','questions')"></span></span>
             </div>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
             <!-- Two tabs of the same exam used to charge each other a violation for
                  every switch. They no longer double-count, but the student should
                  still know, and use one tab. -->
@@ -116,7 +267,7 @@
                     :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
                     x-text="lang === 'id' ? 'EN' : 'ID'"></button>
             <div x-show="!submitted" class="text-xl font-extrabold tabular-nums" x-text="formatTime(timeLeft)" :class="timeLeft < 60 ? 'text-red-500' : 'text-primary-600'"></div>
-            <button x-show="!submitted" @click="submitExam()" :disabled="submitting" class="bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed">
+            <button x-show="!submitted" @click="submitExam()" :disabled="submitting" class="sg-submit bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed">
                 <i class="fas mr-1.5" :class="submitting ? 'fa-spinner fa-spin' : 'fa-check'"></i><span x-text="submitting ? t('Mengirim...','Sending...') : t('Kumpulkan','Submit')"></span>
             </button>
         </div>
@@ -124,7 +275,7 @@
 
     <!-- Device Status Bar -->
     <div x-show="!submitted && !showExamAgreement"
-         class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex items-center gap-3 text-[10px] font-bold text-surface-500 border border-surface-100 shadow-sm pointer-events-none select-none">
+         class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold text-surface-500 border border-surface-100 shadow-sm pointer-events-none select-none">
         <div class="flex items-center gap-1.5" :title="t('Baterai','Battery')">
             <i class="fas" :class="deviceCharging ? 'fa-bolt text-amber-500' : deviceBattery > 50 ? 'fa-battery-three-quarters text-emerald-500' : deviceBattery > 20 ? 'fa-battery-half text-amber-500' : 'fa-battery-quarter text-red-500'"></i>
             <span x-text="deviceBattery + '%'" :class="deviceBattery < 20 ? 'text-red-500' : ''"></span>
@@ -231,7 +382,7 @@
 
     <!-- Scientific Calculator (standar matematika/fisika) -->
     <div x-show="showCalculator && !submitted && !showExamAgreement" x-transition x-cloak
-         class="fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
+         class="sg-calc fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
          @click.outside="showCalculator = false">
         <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
             <span class="text-[11px] font-extrabold text-slate-200 flex items-center gap-1.5"><i class="fas fa-calculator text-orange-400"></i> Scientific</span>
@@ -245,7 +396,7 @@
         </div>
         <div class="p-1.5 bg-slate-900">
             <!-- 2-line display -->
-            <div class="bg-slate-800 rounded-lg px-2.5 py-1.5 text-right mb-1.5 min-h-[52px]">
+            <div class="sg-calc-display bg-slate-800 rounded-lg px-2.5 py-1.5 text-right mb-1.5 min-h-[52px]">
                 <div class="text-[9px] text-slate-500 font-mono truncate" x-text="calcExpression || ' '"></div>
                 <div class="text-lg font-bold text-white font-mono tracking-wider truncate" x-text="calcInput"></div>
             </div>
@@ -469,8 +620,9 @@
              owns it are never more than one tap apart — and the whole column
              collapses to a strip that brings it back. -->
         <div x-show="!chromeHidden"
-             class="shrink-0 flex flex-col items-center gap-1"
-             :style="examLayout === 'rail' ? 'width:132px' : 'width:150px'">
+             @click.outside="closeColumnOnPhone()"
+             class="shrink-0 flex flex-col items-center gap-1 exam-qcol"
+             :class="examLayout === 'rail' ? 'exam-qcol--rail' : ''">
             <!-- Scroll Up -->
             <button type="button" @click="scrollSidebar(-60)"
                     class="w-full flex items-center justify-center py-1 text-stone-400 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition disabled:opacity-20"
@@ -525,15 +677,27 @@
                                         'bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-200': answered[i],
                                         'bg-white text-stone-500 border-stone-200 hover:border-orange-300 hover:bg-orange-50': !answered[i] && currentQ !== i,
                                         'ring-2 ring-orange-400 ring-offset-1': currentQ === i
-                                    }"
-                                    x-text="i + 1">
+                                    }">
+                                <!-- The number needs a node of its own. `x-text` on the
+                                     button replaced its textContent, which deleted both
+                                     badges below it — and their directives then kept
+                                     re-running on detached elements, throwing one
+                                     ReferenceError per question per load (25 of them on
+                                     a five-question exam). The badges are how the
+                                     column says "this one is an essay" and "this one
+                                     lives on page 3", which is what a phone navigates
+                                     the exam with. -->
+                                <span x-text="i + 1"></span>
+                                <!-- Visibility is a class binding, not `x-show`: a class
+                                     binding is re-evaluated inside the loop's scope,
+                                     which is where `i` and `questions` live. -->
                                 <span class="absolute -top-1.5 -right-1.5 text-[7px] leading-none"
-                                      :class="(questions[i]||{}).type === 'essay_text' ? 'text-amber-500' : (questions[i]||{}).type === 'essay_canvas' ? 'text-emerald-500' : 'text-orange-400'"
-                                      x-show="(questions[i]||{}).type !== 'mcq'">
-                                    <i :class="(questions[i]||{}).type === 'essay_text' ? 'fas fa-font' : 'fas fa-paint-brush'"></i>
+                                      :class="qBadge(i).cls">
+                                    <i :class="qBadge(i).icon"></i>
                                 </span>
                                 <span class="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[6px] font-bold text-stone-400 leading-tight whitespace-nowrap"
-                                      x-show="QUESTION_PAGES[i]" x-text="'Hlm '+QUESTION_PAGES[i]"></span>
+                                      :class="QUESTION_PAGES[i] ? '' : 'hidden'"
+                                      x-text="'Hlm ' + (QUESTION_PAGES[i] || '')"></span>
                             </button>
                         </template>
                 </div>
@@ -551,7 +715,7 @@
         <!-- Collapsed: a strip that brings the column back, keeping the count in
              sight. Without it, hiding the column would be a one-way door. -->
         <button type="button" x-show="chromeHidden" @click="toggleChrome()"
-                class="shrink-0 flex flex-col items-center gap-2 py-2 px-1.5 rounded-xl bg-white border border-surface-200 text-surface-400 hover:text-primary-600 hover:border-primary-300 shadow-sm transition"
+                class="exam-qstrip shrink-0 flex flex-col items-center gap-2 py-2 px-1.5 rounded-xl bg-white border border-surface-200 text-surface-400 hover:text-primary-600 hover:border-primary-300 shadow-sm transition"
                 :title="t('Tampilkan kolom soal','Show the question column')">
             <i class="fas fa-chevron-right text-[10px]"></i>
             <span class="text-[10px] font-extrabold" style="writing-mode:vertical-rl" x-text="t('Soal','Questions')"></span>
@@ -567,10 +731,10 @@
                     <div x-show="currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
                             <i class="fas fa-pencil-alt"></i>
-                            <span><span x-text="t('Soal #','Question #')"></span><span x-text="i+1"></span> <span x-text="(questions[i]||{}).type === 'mcq' ? t('— Corat-coret pada halaman PDF','— Scribble over the PDF page') : '— Canvas + PDF'"></span></span>
+                            <span><span x-text="t('Soal #','Question #')"></span><span x-text="i+1"></span> <span x-text="qKind(i) === 'choice' ? t('— Corat-coret pada halaman PDF','— Scribble over the PDF page') : (qKind(i) === 'essay' ? t('— Canvas + PDF','— Canvas + PDF') : t('— Dijawab di bawah','— Answered below'))"></span></span>
                             <span class="ml-auto" x-text="totalPages>0 ? (pageLabel ? pageLabel + ' — ' : '') + t('Hal ','Page ') + page + '/' + totalPages : ''"></span>
                         </div>
-                        <div class="draw-toolbar px-3 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100 flex-wrap">
+                        <div class="draw-toolbar px-3 py-2 bg-gradient-to-r from-stone-50 to-orange-50/30 border-b border-stone-100">
                             <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1" x-text="t('Gambar:','Draw:')"></span>
                             <button type="button" @click="setEssayCanvasMode(i, 'pen')" :class="essayCanvasMode[i] === 'pen' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Pena bebas','Freehand pen')"><i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Pena','Pen')"></span></button>
                             <button type="button" @click="setEssayCanvasMode(i, 'line')" :class="essayCanvasMode[i] === 'line' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Garis lurus','Straight line')"><i class="fas fa-slash mr-1"></i><span x-text="t('Garis','Line')"></span></button>
@@ -581,11 +745,24 @@
                                 <template x-for="sz in [1,1.5,2,2.5,3,4,5]"><option :value="sz" x-text="sz"></option></template>
                             </select>
                             <span class="w-px h-4 bg-stone-300 mx-1"></span>
+                            <!-- Four drafting instruments plus a colour well and an undo
+                                 row is 301px of an 800px phone screen — 38% of the
+                                 screen spent on chrome before a single question is
+                                 read. On a phone they fold behind one button; the pen,
+                                 the eraser, undo and clear stay one tap away. -->
+                            <button type="button" @click="showMathTools = !showMathTools"
+                                    class="math-tools-toggle px-2.5 py-1.5 text-[11px] font-bold"
+                                    :class="showMathTools ? 'active' : ''"
+                                    :title="t('Alat gambar (penggaris, busur, siku, jangka)','Drafting tools (ruler, protractor, set square, compass)')">
+                                <i class="fas fa-drafting-compass mr-1"></i><span x-text="t('Alat','Tools')"></span>
+                            </button>
+                            <span class="math-tools" :class="showMathTools ? 'sg-open' : ''">
                             <span class="text-[9px] font-extrabold text-stone-400 uppercase tracking-wider mr-1" x-text="t('Alat:','Tools:')"></span>
                             <button type="button" @click="toggleRuler(i)" :class="showRuler[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Penggaris — gambar garis lurus','Ruler — draw a straight line')"><i class="fas fa-ruler mr-1"></i><span x-text="t('Ruler','Ruler')"></span></button>
                             <button type="button" @click="toggleProtractor(i)" :class="showProtractor[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Busur — ukur sudut','Protractor — measure an angle')"><i class="fas fa-drafting-compass mr-1"></i><span x-text="t('Busur','Protractor')"></span></button>
                             <button type="button" @click="toggleTriangle(i)" :class="showTriangle[i] ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Segitiga — siku 45°','Set square — 45° right angle')"><i class="fas fa-draw-polygon mr-1"></i><span x-text="t('Siku','Set square')"></span></button>
                             <button type="button" @click="toggleCompass(i)" :class="essayCanvasMode[i] === 'compass' ? 'active' : ''" class="px-2.5 py-1.5 text-[11px] font-bold" :title="t('Jangka — gambar lingkaran','Compass — draw a circle')"><i class="fas fa-circle mr-1"></i><span x-text="t('Jangka','Compass')"></span></button>
+                            </span>
                             <span class="w-px h-4 bg-stone-300 mx-1"></span>
                             <button type="button" @click="undoCanvas(i)" :disabled="!(canvasHistory[i]?.length > 1)" class="px-2.5 py-1.5 text-[11px] font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-25"><i class="fas fa-undo mr-1"></i></button>
                             <button type="button" @click="clearCanvas(i)" class="px-2.5 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-50"><i class="fas fa-trash-alt mr-1"></i></button>
@@ -813,11 +990,16 @@
                         </div>
                     </template>
 
-                    <template x-if="(questions[i]||{}).type === 'mcq'">
+                    <template x-if="qKind(i) === 'choice'">
                         <div class="">
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="text-sm font-extrabold shrink-0 text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
-                                <div class="flex gap-2">
+                                <!-- Five bubbles at px-5 do not fit a phone: the row
+                                     overflowed and pushed the paper sideways, which
+                                     also drags the drawing layer out of line with it.
+                                     The tighter gap below 640px is what lets all five
+                                     sit on one line, the way an answer sheet reads. -->
+                                <div class="opt-row flex flex-wrap gap-2">
                                     <template x-for="opt in (_shuffledOpts[i] || ['A','B','C','D','E'])">
                                         <button type="button" @click="markAnswered(i, opt)"
                                                 class="opt-btn px-5 py-2 border-2 text-sm font-extrabold cursor-pointer"
@@ -832,7 +1014,120 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="(questions[i]||{}).type === 'essay_text' || (questions[i]||{}).type === 'essay'">
+                    <!-- True / False: two answers, one tap. The question text is on the
+                         paper, so the control only has to be unmissable and big enough
+                         for a finger. -->
+                    <template x-if="qKind(i) === 'truefalse'">
+                        <div>
+                            <div class="flex items-center gap-2 mb-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full border border-primary-200" x-text="t('Benar / Salah','True / False')"></span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 sm:gap-3">
+                                <button type="button" @click="setBoolAnswer(i, 'true')"
+                                        class="tf-btn flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl border-2 font-extrabold text-sm transition"
+                                        :class="(questions[i]||{}).answer === 'true' ? 'bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-white border-stone-200 text-stone-600 hover:border-emerald-300'">
+                                    <i class="fas fa-check"></i><span x-text="t('Benar','True')"></span>
+                                </button>
+                                <button type="button" @click="setBoolAnswer(i, 'false')"
+                                        class="tf-btn flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl border-2 font-extrabold text-sm transition"
+                                        :class="(questions[i]||{}).answer === 'false' ? 'bg-rose-500 border-rose-500 text-white shadow-md shadow-rose-200' : 'bg-white border-stone-200 text-stone-600 hover:border-rose-300'">
+                                    <i class="fas fa-times"></i><span x-text="t('Salah','False')"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Matching: pick a left-hand item, then its partner. Two taps,
+                         no dragging — a finger on a phone cannot hold a chip while it
+                         scrolls to find the other column. -->
+                    <template x-if="qKind(i) === 'match'">
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2 mb-1 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full border border-violet-200" x-text="t('Menjodohkan','Matching')"></span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <p class="text-[11px] font-semibold text-stone-400" x-text="t('Ketuk baris, lalu pilih pasangannya.','Tap a row, then choose its partner.')"></p>
+                            <template x-for="(left, pi) in matchLefts(i)" :key="'ml-' + i + '-' + pi">
+                                <div class="rounded-2xl border-2 overflow-hidden transition"
+                                     :class="matchAnswer(i)[left] ? 'border-emerald-300 bg-emerald-50/40' : 'border-stone-200 bg-white'">
+                                    <button type="button" @click="toggleMatch(i, pi)"
+                                            class="match-row w-full flex items-center gap-2 p-3 text-left">
+                                        <span class="text-xs font-bold text-stone-700 flex-1 min-w-0 break-words" x-text="left"></span>
+                                        <i class="fas fa-arrow-right text-stone-300 text-xs shrink-0"></i>
+                                        <span class="text-xs font-extrabold px-2 py-1.5 rounded-lg shrink-0 max-w-[45%] truncate"
+                                              :class="matchAnswer(i)[left] ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'"
+                                              x-text="matchAnswer(i)[left] || t('Pilih…','Choose…')"></span>
+                                        <i class="fas text-stone-300 text-[10px] shrink-0"
+                                           :class="matchOpen === i + ':' + pi ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                                    </button>
+                                    <div x-show="matchOpen === i + ':' + pi" x-cloak class="px-2 pb-2 pt-1 border-t border-stone-200 flex flex-wrap gap-1.5">
+                                        <template x-for="r in matchRights(i)" :key="'mr-' + i + '-' + r">
+                                            <button type="button" @click="pickMatch(i, pi, r)" :disabled="matchRightTaken(i, r, pi)"
+                                                    class="tap-44 match-opt text-xs font-bold px-3 py-2 rounded-xl border-2 transition disabled:opacity-30"
+                                                    :class="matchAnswer(i)[left] === r ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-white border-stone-200 text-stone-600 hover:border-violet-300'">
+                                                <span x-text="r"></span>
+                                            </button>
+                                        </template>
+                                        <button type="button" @click="pickMatch(i, pi, null)" x-show="matchAnswer(i)[left]"
+                                                class="text-xs font-bold px-3 py-2 rounded-xl border-2 border-dashed border-stone-200 text-stone-400 hover:text-rose-500 hover:border-rose-200 transition">
+                                            <i class="fas fa-eraser mr-1"></i><span x-text="t('Hapus','Clear')"></span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Drag & drop: the bank is tappable *and* draggable. A phone gets
+                         taps, a mouse gets the drag it expects, and both write the same
+                         ordered answer. -->
+                    <template x-if="qKind(i) === 'dragdrop'">
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200" x-text="t('Susun Kata','Drag &amp; drop')"></span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <p class="text-[11px] font-semibold text-stone-400" x-text="t('Ketuk atau tarik kata ke kotak jawaban, dengan urutan yang benar.','Tap or drag words into the answer box, in the right order.')"></p>
+                            <div class="min-h-[56px] rounded-2xl border-2 border-dashed p-2 flex flex-wrap gap-1.5 items-start transition"
+                                 :class="dragOverChips[i] ? 'border-primary-400 bg-primary-50/40' : 'border-stone-300 bg-stone-50'"
+                                 @dragover.prevent="dragOverChips[i] = true"
+                                 @dragleave="dragOverChips[i] = false"
+                                 @drop.prevent="dropChip(i, $event)">
+                                <template x-for="(w, wi) in dragAnswer(i)" :key="'da-' + i + '-' + wi">
+                                    <span class="inline-flex items-center gap-1 bg-primary-50 border-2 border-primary-200 text-primary-700 rounded-xl pl-2.5 pr-1 py-1.5 text-xs font-bold">
+                                        <span x-text="w"></span>
+                                        <button type="button" @click="dragMove(i, wi, -1)" :disabled="wi === 0" class="tap-44 w-6 h-6 rounded-lg hover:bg-primary-100 disabled:opacity-30 text-[10px]"><i class="fas fa-chevron-left"></i></button>
+                                        <button type="button" @click="dragMove(i, wi, 1)" :disabled="wi === dragAnswer(i).length - 1" class="tap-44 w-6 h-6 rounded-lg hover:bg-primary-100 disabled:opacity-30 text-[10px]"><i class="fas fa-chevron-right"></i></button>
+                                        <button type="button" @click="dragRemove(i, wi)" class="tap-44 w-6 h-6 rounded-lg hover:bg-rose-100 hover:text-rose-600 text-[10px]"><i class="fas fa-times"></i></button>
+                                    </span>
+                                </template>
+                                <span x-show="!dragAnswer(i).length" class="text-xs font-semibold text-stone-400 px-2 py-2"
+                                      x-text="t('Kotak jawaban — tarik kata ke sini','Answer box — drop words here')"></span>
+                            </div>
+                            <div class="flex flex-wrap gap-1.5">
+                                <template x-for="(c, ci) in dragBank(i)" :key="'db-' + i + '-' + ci">
+                                    <button type="button" draggable="true"
+                                            @dragstart="chipStart($event, i, c)" @dragend="chipDrag = null; dragOverChips[i] = false"
+                                            @click="dragAdd(i, c)" :disabled="dragUsed(i, c)"
+                                            class="tap-44 chip-opt text-xs font-bold px-3 py-2 rounded-xl border-2 transition disabled:opacity-30 bg-white border-stone-200 text-stone-600 hover:border-rose-300 active:cursor-grabbing cursor-grab">
+                                        <span x-text="c"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <template x-if="qKind(i) === 'essay' && !isCanvasEssay(i)">
                         <div class="">
                             <div class="flex items-center gap-2 mb-2 flex-wrap">
                                 <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
@@ -847,7 +1142,7 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="(questions[i]||{}).type === 'essay_text' || (questions[i]||{}).type === 'essay'">
+                    <template x-if="qKind(i) === 'essay' && !isCanvasEssay(i)">
                         <div class="mt-2">
                             <!-- Tab: Teks / Canvas -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
@@ -902,7 +1197,7 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="(questions[i]||{}).type === 'essay_canvas'">
+                    <template x-if="qKind(i) === 'essay' && isCanvasEssay(i)">
                         <div class="mt-2">
                             <!-- Tab: Teks / Canvas (default Canvas untuk essay_canvas) -->
                             <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 mb-3 max-w-[200px]">
@@ -970,6 +1265,16 @@
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
 const QUESTION_CANVAS = {{ (exam.question_canvas or {}) | tojson | safe }};
 const QUESTION_PAGES = {{ (exam.question_pages or {}) | tojson | safe }};
+// The material for a matching or drag-and-drop question: the two columns, or the
+// chip bank. Never the pairing — the server builds this with
+// question_types.public_options(), and `answer_key` is stripped from `exam`
+// before this page is rendered at all.
+const QUESTION_OPTIONS = {{ (question_options or {}) | tojson | safe }};
+// The type vocabulary, from the server, so this page and the grader cannot
+// disagree about what a true/false question is. See app/services/question_types.py.
+const SG_QT = {{ q_vocabulary() | tojson | safe }};
+function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; }
+function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
 const EXAM_DURATION = {{ (exam.duration_minutes or 120) * 60 }};
 const EXAM_STARTED_AT = {{ (exam_started_at or '') | tojson }};
 
@@ -998,6 +1303,9 @@ function examApp(duration, totalQ) {
         answersText: {},
         paragraphs: {},       // { i: [{id, text, html, order}] } per question
         essayMode: {},        // { i: 'text' | 'canvas' }
+        matchOpen: null,      // which matching row's candidate list is open, 'i:pi'
+        chipDrag: null,       // { i, w } while a chip is being dragged
+        dragOverChips: {},    // { i: true } while a chip hovers the answer box
         _qOrder: null,
         _shuffledOpts: {},
         _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
@@ -1009,7 +1317,7 @@ function examApp(duration, totalQ) {
                 answer: null,
                 audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
                 youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
-                canvas: QUESTION_CANVAS[i] || ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] === 'essay' || false,
+                canvas: QUESTION_CANVAS[i] || sgKind(({{ exam.question_types|tojson if exam.question_types else '{}' }})[i]) === 'essay' || false,
             };
         }),
         // Access helpers via questions[i] directly to avoid Alpine x-for scope issues
@@ -1097,8 +1405,21 @@ function examApp(duration, totalQ) {
         // and the question list, so neither is ever out of reach.
         examLayout: (function () { try { return localStorage.getItem('sg_exam_layout') === 'rail' ? 'rail' : 'classic'; } catch (e) { return 'classic'; } })(),
         railMode: (function () { try { return localStorage.getItem('sg_exam_rail_mode') === 'questions' ? 'questions' : 'pages'; } catch (e) { return 'pages'; } })(),
-        railCollapsed: (function () { try { return localStorage.getItem('sg_exam_rail_hidden') === '1'; } catch (e) { return false; } })(),
-        navCollapsed: (function () { try { return localStorage.getItem('sg_exam_nav_hidden') === '1'; } catch (e) { return false; } })(),
+        // A stored choice always wins. Until there is one, a phone starts with the
+        // column put away: on a 320px screen it would otherwise leave about 155px
+        // of the paper, and the first thing a student does is collapse it by hand.
+        railCollapsed: (function () {
+            try {
+                const v = localStorage.getItem('sg_exam_rail_hidden');
+                return v !== null ? v === '1' : window.matchMedia('(max-width: 640px)').matches;
+            } catch (e) { return false; }
+        })(),
+        navCollapsed: (function () {
+            try {
+                const v = localStorage.getItem('sg_exam_nav_hidden');
+                return v !== null ? v === '1' : window.matchMedia('(max-width: 640px)').matches;
+            } catch (e) { return false; }
+        })(),
         syncStatus: navigator.onLine ? 'synced' : 'offline',
         // Every label below goes through window.sgT() rather than t(): these are
         // assembled inside component methods, where `this` is the component and the
@@ -1192,6 +1513,9 @@ function examApp(duration, totalQ) {
         showExamAgreement: (function() { try { return !localStorage.getItem('sg_agreed_' + '{{ exam.id }}'); } catch(e) { return true; } })(),
         agreed: false,
         examRules: {{ (exam.get('exam_rules') or '') | tojson | safe }},
+        // Drafting instruments folded behind one button on a phone (see the
+        // .math-tools rule in the head block); always out on a wide screen.
+        showMathTools: false,
         // Calculator — Scientific (standar matematika/fisika)
         showCalculator: false,
         calcInput: '0',
@@ -1248,6 +1572,18 @@ function examApp(duration, totalQ) {
             this.$watch('lang', () => this.relabelLocale());
             window.addEventListener('online', () => this.onGoOnline());
             window.addEventListener('offline', () => this.onGoOffline());
+            // Turning a phone, opening a keyboard, hiding the column: the paper is
+            // laid out again and the drawing layer has to follow it. Debounced,
+            // because a rotate fires a burst of these and re-measuring the DOM on
+            // each one is how a resize handler drops frames on a phone.
+            let _refitTimer = null;
+            const _refit = () => {
+                clearTimeout(_refitTimer);
+                _refitTimer = setTimeout(() => this.refitCanvasToPaper(), 150);
+            };
+            window.addEventListener('resize', _refit);
+            window.addEventListener('orientationchange', _refit);
+            this.$watch('chromeHidden', () => _refit());
             window.addEventListener('beforeunload', (e) => {
                 this.saveToLocal();
                 if (this.dirty) {
@@ -1283,7 +1619,7 @@ function examApp(duration, totalQ) {
             this._shuffledOpts = {};
             const baseOpts = ['A','B','C','D','E'];
             this.questions.forEach((q, i) => {
-                if (q.type === 'mcq' && this.antiCheat.randomize_options) {
+                if (sgKind(q.type) === 'choice' && this.antiCheat.randomize_options) {
                     const shuffled = [...baseOpts];
                     this._shuffle(shuffled);
                     this._shuffledOpts[i] = shuffled;
@@ -1803,6 +2139,41 @@ function examApp(duration, totalQ) {
             }
             this.$nextTick(() => this.updateScrollState());
         },
+        // On a phone the column is a drawer over the paper, so touching the paper
+        // puts it away — the paper is what the student came for. On a desktop it is
+        // a column, and a column stays where it was put. The choice is deliberate
+        // either way, so only the drawer closes by itself; the stored preference is
+        // left alone (`toggleChrome` would have written it).
+        closeColumnOnPhone() {
+            if (this.chromeHidden) return;
+            let phone = false;
+            try { phone = window.matchMedia('(max-width: 640px)').matches; } catch (e) { phone = false; }
+            if (!phone) return;
+            if (this.examLayout === 'rail') this.railCollapsed = true;
+            else this.navCollapsed = true;
+            this.$nextTick(() => this.updateScrollState());
+        },
+        // The drawing layer is a canvas sized from the page image at the moment the
+        // question opened, and the image is fluid (`w-full`). A phone gets turned, a
+        // keyboard opens, the column is hidden — and the paper is laid out again
+        // while the canvas keeps the old pixel width, so what is drawn no longer sits
+        // where it was put. Only the box changes here: the bitmap keeps its natural
+        // size, so the strokes themselves do not move on the page.
+        refitCanvasToPaper() {
+            document.querySelectorAll('.essay-canvas-area').forEach((area) => {
+                const img = area.querySelector('img');
+                const canvas = area.querySelector('canvas');
+                if (!img || !canvas) return;
+                const w = img.offsetWidth || area.offsetWidth;
+                const h = img.offsetHeight;
+                if (w > 0) canvas.style.width = w + 'px';
+                if (h > 0) canvas.style.height = h + 'px';
+            });
+            // A tool measured against the old width would now hang off the new one.
+            Object.keys(this.showRuler || {}).forEach((i) => {
+                if (this.showRuler[i]) this.fitRuler(i);
+            });
+        },
         // Which question a page belongs to, or -1 when the teacher set no range.
         pageOwner(p) {
             for (let i = 0; i < this.questions.length; i++) {
@@ -1856,16 +2227,37 @@ function examApp(duration, totalQ) {
                 }
             });
         },
+        // One question, asked three ways: is this a question a teacher marks by
+        // reading what the pupil wrote? A page that answers it with a list of type
+        // names answers it wrongly the moment a fourth name exists.
         isEssayWithBg(i) {
             const q = this.questions[i];
-            return q && (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas');
+            return !!q && sgKind(q.type) === 'essay';
         },
         isEssayBgCurrent() {
             return this.isEssayWithBg(this.currentQ);
         },
         isEssayTypeCurrent() {
             const q = this.questions[this.currentQ];
-            return q && (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas');
+            return !!q && sgKind(q.type) === 'essay';
+        },
+        // The essay family has two editors, and which one is the default is the only
+        // thing that separates them — `essay_canvas` opens on the drawing tab, the
+        // others open on the text one.
+        isCanvasEssay(i) {
+            return (this.questions[i] || {}).type === 'essay_canvas';
+        },
+        // The corner badge on the question rail: what kind of answer this question
+        // wants. Colour and icon, so the column reads at a glance.
+        qBadge(i) {
+            const kind = this.qKind(i);
+            const type = (this.questions[i] || {}).type;
+            if (kind === 'choice') return {cls: 'hidden', icon: 'fas fa-check-square'};
+            if (kind === 'truefalse') return {cls: 'text-primary-500', icon: 'fas fa-toggle-on'};
+            if (kind === 'match') return {cls: 'text-violet-500', icon: 'fas fa-arrows-left-right'};
+            if (kind === 'dragdrop') return {cls: 'text-rose-500', icon: 'fas fa-hand-pointer'};
+            if (type === 'essay_text') return {cls: 'text-amber-500', icon: 'fas fa-font'};
+            return {cls: 'text-orange-400', icon: 'fas fa-paint-brush'};
         },
         setEssayCanvasMode(i, mode) {
             this.essayCanvasMode[i] = mode;
@@ -2365,6 +2757,108 @@ function examApp(duration, totalQ) {
         },
         selectedAnswer(i) { return this.questions[i]?.answer; },
         get answeredCount() { return Object.keys(this.answered).length; },
+
+        // ── the three objective types that are not a row of letters ──────────
+        //
+        // A matching or drag-and-drop question is rendered from `QUESTION_OPTIONS`
+        // — the columns and the chip bank the server prepared — and answered into
+        // `questions[i].answer`, which is the same field a choice answer uses. So
+        // saving, syncing and submitting need no special case; only the control does.
+        qKind(i) { return sgKind((this.questions[i] || {}).type); },
+        _opts(i) { return QUESTION_OPTIONS[(this.questions[i] || {}).origIdx !== undefined ? this.questions[i].origIdx : i] || null; },
+        _setStructured(i, value, filled) {
+            this.questions[i].answer = value;
+            if (filled) { this.answered[i] = true; } else { delete this.answered[i]; }
+            if (!this._answerTimestamps) this._answerTimestamps = {};
+            const oi = this.questions[i].origIdx !== undefined ? this.questions[i].origIdx : i;
+            this._answerTimestamps[oi] = Date.now();
+            this.markDirty();
+        },
+        setBoolAnswer(i, word) {
+            // Tapping the same answer again is how a student clears it: a true/false
+            // question has no third state to offer, and silently keeping "true"
+            // after a second tap is a wrong answer the pupil cannot undo.
+            const current = (this.questions[i] || {}).answer;
+            if (current === word) { this._setStructured(i, null, false); return; }
+            this._setStructured(i, word, true);
+        },
+        matchLefts(i) { const o = this._opts(i); return (o && o.lefts) || []; },
+        matchRights(i) { const o = this._opts(i); return (o && o.rights) || []; },
+        matchAnswer(i) {
+            // { left: right } — the shape the grader reads, kept as a map while the
+            // student is answering so a change of mind replaces rather than appends.
+            const map = {};
+            const raw = (this.questions[i] || {}).answer;
+            if (Array.isArray(raw)) {
+                raw.forEach(p => { if (p && p.left != null) map[p.left] = p.right; });
+            } else if (raw && typeof raw === 'object') {
+                Object.keys(raw).forEach(k => { map[k] = raw[k]; });
+            }
+            return map;
+        },
+        matchRightTaken(i, right, exceptPi) {
+            const left = this.matchLefts(i)[exceptPi];
+            const map = this.matchAnswer(i);
+            return Object.keys(map).some(l => l !== left && map[l] === right);
+        },
+        toggleMatch(i, pi) {
+            const key = i + ':' + pi;
+            this.matchOpen = this.matchOpen === key ? null : key;
+        },
+        pickMatch(i, pi, right) {
+            const left = this.matchLefts(i)[pi];
+            const map = this.matchAnswer(i);
+            if (right == null) { delete map[left]; } else { map[left] = right; }
+            const pairs = Object.keys(map).filter(l => map[l] != null).map(l => ({left: l, right: map[l]}));
+            this._setStructured(i, pairs.length ? pairs : null, pairs.length > 0);
+            this.matchOpen = null;
+        },
+        dragBank(i) { const o = this._opts(i); return (o && o.chips) || []; },
+        dragAnswer(i) {
+            const raw = (this.questions[i] || {}).answer;
+            return Array.isArray(raw) ? raw.slice() : [];
+        },
+        dragUsed(i, chip) {
+            // How many of this chip the bank holds is how many the student may place;
+            // a word the answer uses twice is in the bank twice.
+            const want = this.dragBank(i).filter(c => c === chip).length;
+            const got = this.dragAnswer(i).filter(c => c === chip).length;
+            return got >= want;
+        },
+        dragAdd(i, chip) {
+            if (chip == null || this.dragUsed(i, chip)) return;
+            const arr = this.dragAnswer(i);
+            arr.push(chip);
+            this._setStructured(i, arr, true);
+        },
+        dragRemove(i, wi) {
+            const arr = this.dragAnswer(i);
+            arr.splice(wi, 1);
+            this._setStructured(i, arr.length ? arr : null, arr.length > 0);
+        },
+        dragMove(i, wi, delta) {
+            const arr = this.dragAnswer(i);
+            const to = wi + delta;
+            if (to < 0 || to >= arr.length) return;
+            const moved = arr.splice(wi, 1)[0];
+            arr.splice(to, 0, moved);
+            this._setStructured(i, arr, arr.length > 0);
+        },
+        chipStart(e, i, chip) {
+            this.chipDrag = { i: i, w: chip };
+            try {
+                e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('text/plain', String(chip));
+            } catch (err) { /* the tap path still works without a dataTransfer */ }
+        },
+        dropChip(i, e) {
+            this.dragOverChips[i] = false;
+            let chip = null;
+            try { chip = e.dataTransfer.getData('text/plain'); } catch (err) { chip = null; }
+            if (!chip && this.chipDrag && this.chipDrag.i === i) chip = this.chipDrag.w;
+            this.chipDrag = null;
+            if (chip) this.dragAdd(i, chip);
+        },
         _redrawBg(i) {
             const d = this.canvasDraw[i];
             if (!d) return;
@@ -2587,23 +3081,12 @@ function examApp(duration, totalQ) {
             const data = {};
             this.questions.forEach((q, i) => {
                 const oi = q.origIdx !== undefined ? q.origIdx : i;
-                if (q.type === 'essay_text') {
-                    const textAnswer = (this.answersText[i] || '').trim();
-                    const paras = this.paragraphs[i];
-                    const hasParas = paras && paras.length > 0 && paras.some(p => p.text.trim());
-                    const pagesData = {};
-                    const totalP = this.totalPages || 1;
-                    for (let p = 0; p < totalP; p++) {
-                        const boxes = (this.textBoxes[i]?.[p] || []).filter(b => b.text.trim());
-                        if (boxes.length > 0) pagesData[p] = { textBoxes: boxes };
-                    }
-                    data[oi] = { type: 'essay_text', text: textAnswer, pages: pagesData };
-                    if (hasParas) {
-                        data[oi].paragraphs = paras
-                            .filter(p => p.text.trim())
-                            .map(p => ({id: p.id, text: p.text, html: p.html, order: p.order}));
-                    }
-                } else if (q.type === 'essay' || q.type === 'essay_canvas') {
+                // One branch for the whole essay family: which of the three names it
+                // carries only changes the `type` that is written back, and asking
+                // "is it the essay name I know" is how a fourth name would end up
+                // with no serialiser at all.
+                const kind = sgKind(q.type);
+                if (kind === 'essay') {
                     const textAnswer = (this.answersText[i] || '').trim();
                     const paras = this.paragraphs[i];
                     const hasParas = paras && paras.length > 0 && paras.some(p => p.text.trim());
@@ -2619,7 +3102,7 @@ function examApp(duration, totalQ) {
                             .filter(p => p.text.trim())
                             .map(p => ({id: p.id, text: p.text, html: p.html, order: p.order}));
                     }
-                } else if (q.type === 'mcq') {
+                } else if (kind === 'choice') {
                     const pagesData = {};
                     const totalP = this.totalPages || 1;
                     let hasAny = false;
@@ -2652,7 +3135,8 @@ function examApp(duration, totalQ) {
             this.questions.forEach((q, i) => {
                 const oi = q.origIdx !== undefined ? q.origIdx : i;
                 const pagesObj = data[oi] && typeof data[oi] === 'object' ? data[oi].pages : null;
-                if (((q.type !== 'mcq') || (q.type === 'mcq' && pagesObj)) && data[oi] && (data[oi].pages || pagesObj)) {
+                const kind = sgKind(q.type);
+                if ((kind !== 'choice' || (kind === 'choice' && pagesObj)) && data[oi] && (data[oi].pages || pagesObj)) {
                     const target = data[oi].pages || pagesObj;
                     const totalP = this.totalPages || 1;
                     for (let p = 0; p < totalP; p++) {
@@ -2777,7 +3261,8 @@ function examApp(duration, totalQ) {
                         });
                         if (Object.keys(pages).length > 0) this.answered[i] = true;
                     };
-                    if (q.type === 'essay_text' || q.type === 'essay' || q.type === 'essay_canvas') {
+                    const kind = sgKind(q.type);
+                    if (kind === 'essay') {
                         if (qData && qData.pages) restorePages(qData.pages);
                         if (qData && qData.text) {
                             if (!this.answersText) this.answersText = {};
@@ -2794,14 +3279,22 @@ function examApp(duration, totalQ) {
                                 order: p.order !== undefined ? p.order : idx
                             }));
                         }
-                    } else if (q.type === 'mcq' && qData) {
-                        if (typeof qData === 'object' && qData.answer) {
+                    } else if (qData != null) {
+                        // Choice, true/false, matching and drag-and-drop all restore the
+                        // same way: the wrapped form when the pupil also drew on the
+                        // paper, the bare answer otherwise. A matching answer is a list
+                        // of pairs and a drag-and-drop answer a list of chips, and both
+                        // are written back exactly as they were saved.
+                        if (typeof qData === 'object' && !Array.isArray(qData) && qData.answer !== undefined) {
                             q.answer = qData.answer;
                             if (qData.pages) restorePages(qData.pages);
-                            this.answered[i] = true;
-                        } else if (typeof qData === 'string') {
+                        } else {
                             q.answer = qData;
-                            this.answered[i] = true;
+                        }
+                        if (!this.answered[i]) {
+                            const empty = q.answer == null || q.answer === '' ||
+                                (Array.isArray(q.answer) && q.answer.length === 0);
+                            if (!empty) this.answered[i] = true;
                         }
                     }
                 });
@@ -3142,6 +3635,25 @@ function examApp(duration, totalQ) {
             this.calcResult = 0;
             if (all) { this.calcOp = null; this.calcPrev = 0; this.calcExpression = ''; this.calcParenLevel = 0; }
         },
+        // The ruler is the one tool that was sized from a constant instead of from
+        // the paper: a fixed 800px, with its rotate handle at the right-hand end.
+        // On a phone the paper is ~300px wide, so that handle sat ~800px off the
+        // right edge and the ruler could not be turned at all. The protractor, the
+        // set square and the compass all measure the paper already; this is the
+        // same rule, applied to the one that was missed.
+        fitRuler(i) {
+            const area = document.getElementById('ec-area-' + i);
+            const rect = area ? area.getBoundingClientRect() : { width: 700 };
+            const fit = Math.max(120, Math.round(rect.width) - 16);
+            if (!this.rulerWidth[i] || this.rulerWidth[i] > fit) {
+                this.rulerWidth[i] = Math.min(fit, 800);
+            }
+            const w = this.rulerWidth[i];
+            const maxX = Math.max(0, Math.round(rect.width) - w - 4);
+            this.rulerX[i] = Math.min(Math.max(0, this.rulerX[i] || 40), maxX);
+            this.rulerY[i] = Math.max(0, this.rulerY[i] || 60);
+            return w;
+        },
         toggleRuler(i) {
             this.showRuler[i] = !this.showRuler[i];
             if (this.showRuler[i]) {
@@ -3151,6 +3663,7 @@ function examApp(duration, totalQ) {
                 this.rulerAngle[i] = this.rulerAngle[i] || 0;
                 this.rulerScale[i] = this.rulerScale[i] || 100;
                 this.snapRuler[i] = this.snapRuler[i] || false;
+                this.fitRuler(i);
                 setTimeout(() => this.initToolSvg(i, 'ruler'), 100);
             }
         },

@@ -10,6 +10,10 @@ from app.utils.exam_access import result_released, exam_sitting_allowed
 from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
 from app.services.pdf_service import ensure_page_thumbs
+from app.services.question_types import (
+    default_weights, earned_points, is_essay_marker, is_objective, public_options,
+)
+from app.services.submission_service import finish_sitting, open_sitting
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, school_features,
                                  school_subject_count)
@@ -277,6 +281,17 @@ def exam_list():
         now_iso = datetime.now(timezone.utc).isoformat()
         # Filter by class_id if student has one, AND check scheduling
         for e in all_exams:
+            # `question_types` is jsonb, and a jsonb value written with
+            # `json.dumps` arrives as a JSON *string*. The card asks it whether the
+            # exam has an essay question; on a string that question is a 500, and
+            # the student loses the whole exam list rather than one badge. The exam
+            # page already normalises its own copy of this column — the list was
+            # the one place that did not.
+            if isinstance(e.get("question_types"), str):
+                try:
+                    e["question_types"] = json.loads(e["question_types"])
+                except (json.JSONDecodeError, TypeError):
+                    e["question_types"] = {}
             # Skip exams with future start_at
             start_at = e.get("start_at")
             if start_at and str(start_at) > now_iso[:19]:
@@ -391,51 +406,40 @@ def take_exam(exam_id):
                 exam[_field] = {}
     # Strip answer_key from exam before passing to template (students must not see correct answers)
     safe_exam = {k: v for k, v in exam.items() if k != "answer_key"}
+    # What a matching or drag-and-drop question needs in order to be *answerable*:
+    # the two columns, or the chip bank. The pairing itself stays behind, and it is
+    # `public_options()` that decides what "the pairing itself" means — one place,
+    # so no route can send a key by accident. An MCQ and a true/false question
+    # need nothing extra, so they are absent from the map rather than empty in it.
+    _qt = exam.get("question_types") or {}
+    _ak = exam.get("answer_key") or {}
+    question_options = {}
+    for _i in range(exam.get("total_questions") or 0):
+        _public = public_options(_qt.get(str(_i)), _ak.get(str(_i)))
+        if _public:
+            question_options[str(_i)] = _public
     # The page rail renders every page at once, so it is given thumbnails rather
     # than the full pages. Idempotent and cheap when they already exist; it only
     # does work for an exam uploaded before thumbnails were generated.
     ensure_page_thumbs(exam_id, exam.get("pdf_page_urls"))
-    # Persist exam start time for accurate timer across refresh
-    started_at = None
-    try:
-        draft = supabase.table("submissions").select("id,started_at,status").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["draft"]).limit(1).execute().data
-        if draft:
-            started_at = draft[0].get("started_at")
-    except Exception:
-        pass
-    if not started_at:
-        import datetime as _dt
-        started_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
-        try:
-            # Check if any draft exists, if not update/create with started_at
-            draft = supabase.table("submissions").select("id,status").eq("exam_id", exam_id).eq("student_id", g.user_id).in_("status", ["draft"]).limit(1).execute().data
-            if draft:
-                supabase.table("submissions").update({"started_at": started_at}).eq("id", draft[0]["id"]).execute()
-            else:
-                supabase.table("submissions").insert({
-                    "exam_id": exam_id,
-                    "student_id": g.user_id,
-                    "answers": {},
-                    "score": 0,
-                    "max_score": 100,
-                    "status": "draft",
-                    "started_at": started_at,
-                }).execute()
-        except Exception:
-            pass
-    anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
-    # Cek existing draft submission untuk timer persist across devices
+    # Persist the exam start time so the timer survives a refresh. This is the
+    # row the sitting lives in — one per (student, exam) for *every* status, so a
+    # re-sit after an approved retraction is reopened here instead of colliding on
+    # the unique constraint. One call where there were three reads and a blind
+    # INSERT (see app/services/submission_service.py for what that cost a student).
     exam_started_at = None
     try:
-        draft = supabase.table("submissions").select("started_at").eq("exam_id", exam_id).eq("student_id", g.user_id).eq("status", "draft").limit(1).execute()
-        if draft.data and draft.data[0].get("started_at"):
-            exam_started_at = draft.data[0]["started_at"]
+        sitting, _opened = open_sitting(supabase, exam_id, g.user_id)
+        exam_started_at = sitting.get("started_at") or None
     except Exception:
-        pass
+        current_app.logger.exception(
+            "Could not open a sitting for exam %s user %s", exam_id, g.user_id
+        )
+    anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
     # The way back in when the phone dies or the WiFi does. Issued with the
     # session and shown in the exam topbar; never a precondition for opening.
     recovery_code = issue_code(supabase, g.user_id, exam_id)
-    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code))
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 
@@ -577,8 +581,7 @@ def submit_exam(exam_id):
             return jsonify({"success": True, "note": "already_submitted"})
         return redirect("/student/results")
 
-    # Find existing draft
-    draft_sub = next((s for s in all_subs if s.get("status") == "draft"), None)
+
 
     answers = {}
     if request.is_json:
@@ -607,42 +610,21 @@ def submit_exam(exam_id):
 
     question_types = exam.get("question_types") or {}
     total_q = exam["total_questions"]
-    mcq_count = sum(1 for v in (exam.get("answer_key") or {}).values() if v not in ("essay", "essay_text", "essay_canvas", None))
-    essay_count = total_q - mcq_count
+    # The auto-graded count. Note this site has always excluded a `None` key where
+    # the other count sites do not; `objective_key_count()` mirrors theirs, so the
+    # difference is kept here explicitly. It decides the 70/30 fallback below and
+    # therefore already-published marks.
+    mcq_count = sum(
+        1 for v in (exam.get("answer_key") or {}).values()
+        if v is not None and not is_essay_marker(v)
+    )
     question_weights = exam.get("question_weights") or {}
     if not question_weights and total_q > 0:
-        mcq_pct, essay_pct = 70, 30
-        if mcq_count == 0:
-            mcq_pct, essay_pct = 0, 100
-        elif essay_count == 0:
-            mcq_pct, essay_pct = 100, 0
-        if mcq_count > 0:
-            each = round(mcq_pct / mcq_count, 2)
-            for i in range(total_q):
-                if question_types.get(str(i), "mcq") == "mcq":
-                    question_weights[str(i)] = each
-        if essay_count > 0:
-            each = round(essay_pct / essay_count, 2)
-            for i in range(total_q):
-                if question_types.get(str(i), "mcq") != "mcq":
-                    question_weights[str(i)] = each
-    earned = 0.0
-    for i in range(exam["total_questions"]):
-        qtype = question_types.get(str(i), "mcq")
-        key = exam.get("answer_key", {}).get(str(i))
-        w = float(question_weights.get(str(i), 0))
-        if qtype == "mcq" and key and w > 0:
-            ans = answers.get(str(i))
-            if isinstance(ans, dict):
-                ans = ans.get('answer', '')
-            if key == "bonus":
-                if ans and str(ans).strip():
-                    earned += w
-            elif isinstance(key, list):
-                if ans in key:
-                    earned += w
-            elif ans == key:
-                earned += w
+        question_weights = default_weights(question_types, total_q)
+    # One rule for every objective type, so a true/false or a matching question is
+    # marked here exactly as it is marked by the sync route and the scan task.
+    earned, _graded = earned_points(
+        question_types, exam.get("answer_key"), answers, question_weights, total_q)
 
     score = round(min(earned, 100), 2)
 
@@ -673,7 +655,7 @@ def submit_exam(exam_id):
     if timestamps:
         mcq_times = []
         for i in range(exam["total_questions"]):
-            if question_types.get(str(i), "mcq") == "mcq" and str(i) in timestamps:
+            if is_objective(question_types.get(str(i))) and str(i) in timestamps:
                 mcq_times.append(timestamps[str(i)])
         if len(mcq_times) >= 5:
             mcq_times.sort()
@@ -716,16 +698,27 @@ def submit_exam(exam_id):
         "is_published": exam.get("publish_mode") == "auto",
     }
     try:
-        # ── Query 5: INSERT or UPDATE (draft found earlier) ──
-        if draft_sub:
-            supabase.table("submissions").update(submission).eq("id", draft_sub["id"]).execute()
-        else:
-            supabase.table("submissions").insert(submission).execute()
+        # ── Query 5: write into the row this (student, exam) already owns ──
+        # Not "update the draft, else INSERT": the unique constraint counts every
+        # status, so a row that is neither decides nothing and the INSERT collides.
+        # `all_subs` is the read from Query 3 — no extra round trip.
+        outcome = finish_sitting(supabase, exam_id, g.user_id, submission, all_subs)
+        if outcome == "already_submitted":
+            current_app.logger.info(
+                "Concurrent submit for exam %s user %s — one recorded", exam_id, g.user_id
+            )
+            if request.is_json:
+                return jsonify({"success": True, "note": "already_submitted"})
+            return redirect("/student/results")
         log_activity("submit", "submission", None, new_data={"exam_id": exam_id, "score": score}, user_id=g.user_id)
-    except Exception as e:
-        import traceback
-        current_app.logger.error("Submit error: %s\n%s", str(e), traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        # The student sees a sentence, not the database's own words: a raw
+        # constraint name in an alert is unreadable and tells them nothing they
+        # can act on. The detail goes to the log, where it can be acted on.
+        current_app.logger.exception(
+            "Submit failed for exam %s user %s", exam_id, g.user_id
+        )
+        return jsonify({"error": "Gagal menyimpan jawaban. Coba lagi."}), 500
     if request.is_json:
         return jsonify({"success": True})
     return redirect("/student/results")

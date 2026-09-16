@@ -12,6 +12,28 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.utils import ImageReader
 
+from app.services.question_types import (
+    KIND_DRAG, KIND_MATCH, describe_answer, grade_answer, has_answer, is_essay,
+    is_objective, question_kind,
+)
+
+
+def _display_answer(qtype, raw):
+    """What the student wrote, as a cell or a line of the report can show it.
+
+    A matching answer is a list of pairs and a drag-and-drop answer is a list of
+    chips; printed raw they read as Python. The same shape the teacher sees on the
+    grading page is used here, so a report and the screen agree.
+    """
+    if raw is None:
+        return ""
+    kind = question_kind(qtype)
+    if kind in (KIND_MATCH, KIND_DRAG):
+        return describe_answer(qtype, raw)
+    if isinstance(raw, (list, tuple)):
+        return " ".join(str(v) for v in raw)
+    return str(raw)
+
 
 DEFAULT_TZ_OFFSET = 7  # WIB
 
@@ -103,12 +125,14 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
     # Headers
     headers = ["No", "Nama Siswa", "NISN / ID", "Skor MCQ", "Penalti", "Nilai Final", "Status", "Waktu"]
     for qi in range(total_q):
-        qtype = q_types.get(str(qi), "mcq")
+        # "Not MCQ" is not "essay": the three new objective types are marked by
+        # the app, so their columns must not be labelled as written answers.
+        qtype = q_types.get(str(qi))
         label = f"Soal {qi+1}"
-        if qtype != "mcq":
+        if is_essay(qtype):
             label += " (Esai)"
         headers.append(label)
-        if qtype != "mcq":
+        if is_essay(qtype):
             headers.append(f"Soal {qi+1} Tulisan")
 
     for col, h in enumerate(headers, 1):
@@ -138,21 +162,18 @@ def export_to_xlsx(submissions: list, exam: dict = None) -> io.BytesIO:
         ]
 
         for qi in range(total_q):
-            qtype = q_types.get(str(qi), "mcq")
+            qtype = q_types.get(str(qi))
             ans_data = answers.get(str(qi))
             correct = _get_answer_key(exam, qi)
             ans, text_content = _parse_answer(ans_data, qi, qtype, exam.get("answer_key"))
 
-            if qtype == "mcq":
-                display = f"{ans}" if ans else "-"
-                if correct and ans:
-                    if correct == "bonus":
-                        display += " ✓"
-                    elif isinstance(correct, list):
-                        if ans in correct:
-                            display += " ✓"
-                    elif ans == correct:
-                        display += " ✓"
+            if is_objective(qtype):
+                # One grader decides the tick, so the spreadsheet and the app can
+                # never disagree about the same answer — this branch used to test
+                # letters only, which cannot express a matching answer at all.
+                display = _display_answer(qtype, ans)
+                if correct and has_answer(qtype, ans_data) and grade_answer(qtype, correct, ans_data):
+                    display += " ✓"
                 row_data.append(display)
             else:
                 row_data.append(ans if ans else "✓")
@@ -236,21 +257,17 @@ def export_to_pdf(submissions: list, exam_title: str = "Hasil Ujian", exam: dict
             correct = _get_answer_key(exam, qi)
             ans, text_content = _parse_answer(ans_data, qi, qtype, exam.get("answer_key"))
 
-            q_label = f"Soal {qi+1} ({qtype})"
+            q_label = f"Soal {qi+1} ({question_kind(qtype)})"
             c.setFont("Helvetica-Bold", 10)
             c.drawString(40, y, q_label)
             y -= 14
 
             c.setFont("Helvetica", 9)
-            if qtype == "mcq":
-                if correct == "bonus":
-                    is_correct = bool(ans and str(ans).strip())
-                elif isinstance(correct, list):
-                    is_correct = ans in correct if ans else False
-                else:
-                    is_correct = correct and ans == correct
-                status = "✓" if is_correct else "✗"
-                c.drawString(50, y, f"Jawaban: {ans if ans else '-'} | Kunci: {correct} {status}")
+            if is_objective(qtype):
+                is_correct = bool(correct) and grade_answer(qtype, correct, ans_data)
+                status = "\u2713" if is_correct else "\u2717"
+                c.drawString(50, y, f"Jawaban: {_display_answer(qtype, ans) or '-'} | "
+                                     f"Kunci: {describe_answer(qtype, correct) or '-'} {status}")
                 y -= 14
             else:
                 if ans:

@@ -1,3 +1,4 @@
+{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% set feedback = submission.teacher_feedback or {} %}
 {% set fb_scores = feedback.get('scores', {}) %}
@@ -26,6 +27,41 @@
 .text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .teacher-box textarea { border-color: #059669 !important; }
 .teacher-box .box-handle { background: #059669 !important; }
+/* ── The finger, not the width ───────────────────────────────────────────────
+   `.teacher-content .q-btn` is 2.5rem (40 px) and the header's icon buttons are
+   padding-sized, so on a touch screen the question picker and the toolbar were
+   under the 44 px floor. Asked as `pointer: coarse` rather than by width,
+   because a phone is not the only finger: measured at 768 px (a tablet, above
+   every width breakpoint) the same controls were still 40 px. Same reasoning as
+   the exam page's block — see tests/unit/test_mobile_layout.py. */
+@media (pointer: coarse) {
+    .teacher-content .q-btn { width: 44px !important; height: 44px !important; }
+    .q-btn { min-width: 44px; min-height: 44px; }
+    /* The header's five controls measured 30x32 (calculator), 28x40 (back) and
+       30 px tall (the MCQ/Essay tabs). Scoped to the two sticky cards, whose
+       rows now wrap — so a raised target costs a second line, never the page's
+       width. A blanket `header button` rule would instead have grown the global
+       topbar, where the breadcrumb has nowhere left to shrink. */
+    .sticky-topbar button, .sticky-topbar a,
+    .sticky-questions button { min-width: 44px; min-height: 44px; }
+    .draw-toolbar button { min-height: 44px; padding: 6px 14px; }
+    /* ── The correction tools are one swipeable row ────────────────────────
+       Measured at 375 px: `flex-wrap: wrap` turned this row into **8 rows,
+       209 px tall**, and the paper being marked began at y=652 of a 900 px
+       viewport — only **248 px** of it was visible without scrolling. The 44 px
+       floor is what makes the row too wide to fit, and raising a target is not
+       a reason to charge the paper the room: it scrolls sideways instead, the
+       same rule the exam page's tool row follows. */
+    .draw-toolbar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .draw-toolbar > * { flex: 0 0 auto; }
+    .draw-toolbar input[type=color] { width: 44px; height: 44px; }
+}
+/* At 320 px the tab buttons and the header's compact labels are the difference
+   between a readable control and a squashed one. */
+@media (max-width: 380px) {
+    .sticky-topbar .text-sm { font-size: 0.8rem; }
+    .sticky-topbar .px-3 { padding-left: 0.5rem; padding-right: 0.5rem; }
+}
 [x-cloak] { display: none !important; }
 .tool-controlbar { pointer-events: none !important; }
 .tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: 10; width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
@@ -33,15 +69,42 @@
 .tool-ctrl-btn.drag { cursor: grab; }
 .tool-ctrl-btn.close { background: rgba(220,38,38,0.85); }
 .sticky-topbar { position: sticky; top: 0; z-index: 20; }
+/* ── The question rail is a column only where there is room for one ─────────
+   Measured at 375 px before this: the rail was `shrink-0` at a fixed width and
+   the answer pane got **205 px** of the 343 available — a student's handwritten
+   canvas rendered 171 px wide, and the two answer cells 79 px each. The rail is
+   a horizontal swipeable strip on a phone now and the pane gets the full width.
+   `min-width: 1024px` is the same breakpoint the sidebar uses (`lg`), so the
+   rail turns back into a column exactly when the sidebar does.
+
+   The `max-height` moved out of the markup to here for two reasons: on a phone
+   a capped, vertically-clipped rail is the wrong shape, and as an inline style
+   it could not be answered per-width. `overflow-y: auto` is what makes the cap
+   mean "scroll" rather than "paint out of the box" — without it a 40-question
+   rail drew its buttons past the card's own background. */
 .sticky-questions { position: sticky; top: 60px; z-index: 10; }
+@media (min-width: 1024px) {
+    .sticky-questions { max-height: calc(100vh - 170px); overflow-y: auto; }
+}
+@media (max-width: 1023px) {
+    /* Above the answer, not beside it — and not sticky: the header card is
+       already `sticky` and wraps to ~174 px on a phone, so a second sticky bar
+       would leave ~490 px of a 900 px screen for the essay being marked. */
+    .sticky-questions { position: static; }
+}
 .student-overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.65; }
 .teacher-overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 </style>
 {% endblock %}
 {% block content %}
 <div x-data="gradeApp()" x-init="init()">
-    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky-topbar flex items-center justify-between border border-stone-100">
-        <div class="flex items-center gap-3">
+    {# `flex-wrap` is the whole point of this row on a phone. Five controls
+       (Auto-save, calculator, AI-essay, Print, Save) are ~309 px wide, and
+       beside a title block they made the card 465 px inside a 341 px box — so
+       `main` scrolled sideways by 107 px and the teacher had to drag the page
+       to reach Simpan. Measured at 375 px: wrap takes the overflow 107 → 0. #}
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky-topbar flex flex-wrap items-center gap-x-3 gap-y-2 justify-between border border-stone-100">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
             <a href="/teacher/results?exam_id={{ exam_id }}" class="text-stone-400 hover:text-orange-500 text-lg p-1.5 hover:bg-orange-50 rounded-xl transition no-print">
                 <i class="fas fa-arrow-left"></i>
             </a>
@@ -50,7 +113,7 @@
                 <span class="text-[10px] text-stone-400 font-semibold">{{ student.full_name or 'Siswa' }} &middot; MCQ: {{ submission.score if submission.score is not none else '-' }} &middot; Final: <span id="final-display" class="text-orange-600 font-extrabold">{{ submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else '-') }}</span></span>
             </div>
         </div>
-        <div class="flex items-center gap-2 no-print">
+        <div class="flex flex-wrap items-center justify-end gap-2 no-print ml-auto">
             <span id="auto-save-status" class="text-[10px] font-bold text-stone-400"><i class="fas fa-circle text-stone-300 mr-1 text-[8px]"></i>Auto-save</span>
             <button @click="showCalculator=!showCalculator" class="text-sm font-bold text-stone-500 hover:text-stone-700 px-3 py-1.5 hover:bg-stone-100 rounded-xl transition" title="Kalkulator Ilmiah"><i class="fas fa-calculator mr-1"></i></button>
             <button type="button" @click="gradeAllEssays()" class="text-sm font-bold text-emerald-600 hover:text-emerald-700 px-3 py-1.5 hover:bg-emerald-50 rounded-xl transition" title="Koreksi semua essay dengan AI">
@@ -69,35 +132,38 @@
         <input type="hidden" name="teacher_feedback" id="feedback-input" value="">
         <input type="hidden" name="final_score" id="final-score-hidden" value="{{ submission.final_score or submission.score or 0 }}">
 
-        <div class="flex gap-3">
-            <div class="shrink-0 flex flex-col items-center gap-1">
-                <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-2.5 sticky-questions border border-stone-100" style="max-height:calc(100vh - 170px)">
+        <div class="flex flex-col lg:flex-row gap-3">
+            <div class="shrink-0 flex flex-col items-center gap-1 w-full lg:w-auto">
+                <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-2.5 sticky-questions border border-stone-100 w-full lg:w-auto flex items-center gap-2 overflow-x-auto lg:block lg:overflow-visible">
                     <!-- Tab: MCQ / Essay -->
-                    <div class="flex gap-1 mb-2 px-0.5">
+                    <div class="flex gap-1 mb-0 lg:mb-2 px-0.5 shrink-0">
                         <button type="button" @click="tab='mcq'" class="flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg transition"
                                 :class="tab === 'mcq' ? 'bg-primary-600 text-white shadow-sm' : 'bg-surface-100 text-surface-500 hover:bg-surface-200'">MCQ</button>
                         <button type="button" @click="tab='essay'" class="flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg transition"
                                 :class="tab === 'essay' ? 'bg-amber-500 text-white shadow-sm' : 'bg-surface-100 text-surface-500 hover:bg-surface-200'">Essay</button>
                     </div>
-                    <div class="flex flex-col items-center gap-1.5 py-2">
+                    <div class="flex flex-row lg:flex-col items-center gap-1.5 py-0 lg:py-2 shrink-0">
                         {% for i in range(exam.total_questions) %}
                         {% set qtype = (exam.question_types or {}).get(i|string, 'mcq') %}
                         <button type="button" @click="currentQ = {{ i }}"
-                                x-show="tab === 'all' || (tab === 'mcq' && '{{ qtype }}' === 'mcq') || (tab === 'essay' && '{{ qtype }}' !== 'mcq')"
+                                x-show="tab === 'all' || (tab === 'mcq' && {{ 'true' if q_is_objective(qtype) else 'false' }}) || (tab === 'essay' && {{ 'false' if q_is_objective(qtype) else 'true' }})"
                                 class="q-btn w-8 h-8 text-xs rounded-xl font-bold border shrink-0 relative"
                                 :class="{
                                     'bg-white text-stone-500 border-stone-200 hover:border-orange-300': currentQ !== {{ i }},
                                     'ring-2 ring-orange-400 ring-offset-1 bg-orange-500 text-white border-orange-500': currentQ === {{ i }}
                                 }">
                             {{ i+1 }}
-                            {% if qtype != 'mcq' %}
-                            <span class="absolute -top-1.5 -right-1.5 text-[7px] {% if qtype == 'essay_text' %}text-amber-500{% else %}text-emerald-500{% endif %}">
-                                <i class="fas {% if qtype == 'essay_text' %}fa-font{% else %}fa-paint-brush{% endif %}"></i>
+                            {# The corner mark says what the question wants. It used to be an
+                               essay icon for everything that was not a choice question. #}
+                            {% set qkind = q_kind(qtype) %}
+                            {% if qkind != 'choice' %}
+                            <span class="absolute -top-1.5 -right-1.5 text-[7px] {% if qkind == 'truefalse' %}text-primary-500{% elif qkind == 'match' %}text-violet-500{% elif qkind == 'dragdrop' %}text-rose-500{% elif qtype == 'essay_text' %}text-amber-500{% else %}text-emerald-500{% endif %}">
+                                <i class="fas {% if qkind == 'truefalse' %}fa-toggle-on{% elif qkind == 'match' %}fa-arrows-left-right{% elif qkind == 'dragdrop' %}fa-hand-pointer{% elif qtype == 'essay_text' %}fa-font{% else %}fa-paint-brush{% endif %}"></i>
                             </span>
                             {% endif %}
                         </button>
                         {% endfor %}
-                        <div class="text-[9px] font-bold text-stone-400 mt-2 text-center bg-stone-100 rounded-full px-2 py-0.5">{{ exam.total_questions }} soal</div>
+                        <div class="text-[9px] font-bold text-stone-400 mt-0 lg:mt-2 text-center bg-stone-100 rounded-full px-2 py-0.5 shrink-0">{{ exam.total_questions }} soal</div>
                     </div>
                 </div>
             </div>
@@ -108,18 +174,24 @@
                 {% set correct = exam.answer_key.get(i|string, '') %}
                 {% set raw_val = submission.answers.get(i|string, '') %}
                 {% set student_ans = raw_val['answer'] if raw_val is mapping and 'answer' in raw_val else raw_val %}
-                {% set is_correct = (qtype == 'mcq' and correct and student_ans == correct) %}
+                {# The grader decides, not a letter comparison: a matching answer is a
+                   set of pairs and a drag-and-drop answer a sequence, and neither is
+                   equal to anything a "==" on strings can express. #}
+                {% set is_correct = correct is not none and correct != '' and q_correct(qtype, correct, student_ans) %}
                 {% set ans_obj = raw_val if raw_val is mapping else (raw_val|from_json or {}) %}
                 {% set pdf_pages = exam.pdf_page_urls or [] %}
 
-                {% if qtype == 'mcq' %}
+                {% if q_is_objective(qtype) %}
                 <div x-show="currentQ === {{ i }}" style="display:none" class="mb-3">
                     <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
                         <div class="pdf-container flex flex-col items-center justify-center p-4">
                             <div class="w-full max-w-md space-y-4">
                                 <div class="flex items-center gap-3">
                                     <span class="font-extrabold text-lg text-stone-700">Soal #{{ i+1 }}</span>
-                                    <span class="text-xs px-2 py-0.5 rounded-full font-extrabold bg-orange-100 text-orange-700">Pilihan Ganda</span>
+                                    <span class="text-xs px-2 py-0.5 rounded-full font-extrabold bg-orange-100 text-orange-700">
+                                        {% if q_kind(qtype) == 'choice' %}Pilihan Ganda{% elif q_kind(qtype) == 'truefalse' %}Benar / Salah{% elif q_kind(qtype) == 'match' %}Menjodohkan{% else %}Susun Kata{% endif %}
+                                    </span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-600 border border-emerald-200">Otomatis dinilai</span>
                                     {% if is_correct %}
                                     <i class="fas fa-check-circle text-emerald-500 ml-auto text-xl"></i>
                                     {% else %}
@@ -127,13 +199,13 @@
                                     {% endif %}
                                 </div>
                                 <div class="grid grid-cols-2 gap-3">
-                                    <div class="p-4 rounded-xl border-2 {% if is_correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %}">
+                                    <div class="p-4 rounded-xl border-2 {% if is_correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %} min-w-0">
                                         <p class="text-xs font-bold text-stone-500 mb-1">Jawaban Siswa</p>
-                                        <p class="text-2xl font-extrabold {% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}">{{ student_ans or '-' }}</p>
+                                        <p class="font-extrabold break-words {% if q_kind(qtype) == 'choice' %}text-2xl{% else %}text-sm leading-relaxed{% endif %} {% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}">{{ q_answer_text(qtype, student_ans) or '-' }}</p>
                                     </div>
-                                    <div class="p-4 rounded-xl border-2 bg-emerald-50 border-emerald-200">
+                                    <div class="p-4 rounded-xl border-2 bg-emerald-50 border-emerald-200 min-w-0">
                                         <p class="text-xs font-bold text-stone-500 mb-1">Kunci Jawaban</p>
-                                        <p class="text-2xl font-extrabold text-emerald-700">{{ correct }}</p>
+                                        <p class="font-extrabold break-words {% if q_kind(qtype) == 'choice' %}text-2xl{% else %}text-sm leading-relaxed{% endif %} text-emerald-700">{{ q_answer_text(qtype, correct) or '-' }}</p>
                                     </div>
                                 </div>
                                 {% set s = fb_scores.get(i|string, '') %}{% set c = fb_comments.get(i|string, '') %}
@@ -147,7 +219,7 @@
                     </div>
                 </div>
 
-                {% else %}
+                {% elif q_is_essay(qtype) %}
                 <div x-show="currentQ === {{ i }}" style="display:none" class="mb-3" id="grade-card-{{ i }}"
                      x-data="gradeQuestion({{ i }})" x-init="qInit()">
                     <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
