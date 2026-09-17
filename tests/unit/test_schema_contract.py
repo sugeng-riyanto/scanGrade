@@ -337,6 +337,36 @@ class TestStatementsThatCannotRun:
             "-- ALTER TABLE ghost_table ENABLE ROW LEVEL SECURITY;\n", encoding="utf-8")
         assert sc.unrunnable(tmp_path) == []
 
+    def test_a_guarded_table_is_optional_rather_than_pending(self, tmp_path):
+        """The guard is the evidence. `--live` reads names and cannot tell a table
+        waiting to be created from one a migration was written to tolerate, so it
+        would report `activation_codes` as pending for ever."""
+        (tmp_path / "b.sql").write_text(
+            "DO $$ BEGIN\n  ALTER TABLE ghost_table ENABLE ROW LEVEL SECURITY;\n"
+            "EXCEPTION WHEN undefined_table THEN NULL;\nEND $$;\n", encoding="utf-8")
+        assert sc.optional_tables(tmp_path) == {"ghost_table"}
+
+    def test_a_table_something_also_creates_is_not_optional(self, tmp_path):
+        (tmp_path / "a.sql").write_text(
+            "CREATE TABLE real_table (id UUID);\n"
+            "DO $$ BEGIN\n  ALTER TABLE real_table ENABLE ROW LEVEL SECURITY;\n"
+            "EXCEPTION WHEN undefined_table THEN NULL;\nEND $$;\n", encoding="utf-8")
+        assert sc.optional_tables(tmp_path) == set()
+
+    def test_this_repositorys_only_optional_table_is_the_legacy_one(self):
+        assert sc.optional_tables() == {"activation_codes"}
+
+    def test_live_reports_it_as_absent_by_design_not_as_pending(self, monkeypatch,
+                                                                capsys):
+        """The whole point: a `--live` run that is clean must say so."""
+        monkeypatch.setattr(sc, "live_schema",
+                            lambda: {t: set(c) for t, c in sc.schema_from_migrations().items()
+                                     if t not in sc.optional_tables()})
+        assert sc.main(["--live"]) == 0
+        out = capsys.readouterr().out
+        assert "pending migrations" not in out, out
+        assert "absent by design" in out and "activation_codes" in out, out
+
 
 class TestComparingWithTheApi:
     def test_declared_but_not_served_is_pending_not_a_failure(self):
@@ -379,6 +409,11 @@ class TestThisRepositoryPasses:
         sql = "\n".join(p.read_text(encoding="utf-8") for p in sc.sql_files())
         for view in ("active_school_years", "class_student_counts"):
             assert f"ALTER VIEW {view} SET (security_invoker = true);" in sql, view
+
+    def test_the_only_optional_table_is_named_as_such(self):
+        assert sc.optional_tables() == {"activation_codes"}, (
+            "a second guarded table has to be a deliberate edit here, or the `--live` "
+            "report stops distinguishing 'waiting' from 'optional'")
 
     def test_no_migration_stops_at_a_table_that_does_not_exist(self):
         found = sc.unrunnable()
