@@ -110,20 +110,30 @@ CREATE POLICY "subscriptions_select_super_admin" ON school_subscriptions
 
 -- 6. ACTIVATION_CODES — RLS
 -- ============================================================
-ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;
+-- `activation_codes` is a legacy name. Nothing in this repository creates it and
+-- production does not have it — `registration_codes` is what the app reads — and
+-- `001_enable_rls_and_policies.sql` already guarded its `ENABLE ROW LEVEL SECURITY`
+-- with `EXCEPTION WHEN undefined_table`, which is how the author knew the table is
+-- optional. This file did not, so the first statement aborted the whole migration
+-- and sections 1-5 and 7-9 could never be applied at all. The block is guarded in
+-- the same shape now, so the file runs whether or not the legacy table is there.
+DO $$ BEGIN
+  ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "codes_select_admin" ON activation_codes;
-CREATE POLICY "codes_select_admin" ON activation_codes
-  FOR SELECT
-  USING (
-    (public._is_role('admin_sekolah') AND school_id = public._user_school_id())
-    OR public._is_role('super_admin')
-  );
+  DROP POLICY IF EXISTS "codes_select_admin" ON activation_codes;
+  CREATE POLICY "codes_select_admin" ON activation_codes
+    FOR SELECT
+    USING (
+      (public._is_role('admin_sekolah') AND school_id = public._user_school_id())
+      OR public._is_role('super_admin')
+    );
 
-DROP POLICY IF EXISTS "codes_insert_super_admin" ON activation_codes;
-CREATE POLICY "codes_insert_super_admin" ON activation_codes
-  FOR INSERT
-  WITH CHECK (public._is_role('super_admin'));
+  DROP POLICY IF EXISTS "codes_insert_super_admin" ON activation_codes;
+  CREATE POLICY "codes_insert_super_admin" ON activation_codes
+    FOR INSERT
+    WITH CHECK (public._is_role('super_admin'));
+EXCEPTION WHEN undefined_table THEN NULL;
+END $$;
 
 -- 7. VIOLATION_LOGS — tambah RLS untuk super_admin + admin_sekolah
 -- ============================================================
