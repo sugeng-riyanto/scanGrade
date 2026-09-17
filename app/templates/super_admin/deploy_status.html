@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Deploy Runner - ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Kesiapan Runner','Runner Health')"></span>{% endblock %}
+{% block content %}
+{#
+    The colours are a Jinja *map of literal class names*, never an interpolated
+    one. `bg-{{ tone }}-50` appears in no template as text, so Tailwind generates
+    nothing for it and the element silently keeps whatever it inherited — see the
+    "Log in" buttons on /demo that shipped white-on-white.
+#}
+{% set LEVEL = {
+    'fresh':   {'box': 'bg-emerald-50 border-emerald-200', 'text': 'text-emerald-700', 'icon': 'fa-circle-check'},
+    'warn':    {'box': 'bg-amber-50 border-amber-200',     'text': 'text-amber-700',   'icon': 'fa-triangle-exclamation'},
+    'broken':  {'box': 'bg-rose-50 border-rose-200',       'text': 'text-rose-700',    'icon': 'fa-circle-xmark'},
+    'unknown': {'box': 'bg-surface-100 border-surface-200', 'text': 'text-surface-600', 'icon': 'fa-circle-question'},
+} %}
+{% set v = status.verdict %}
+{% set L = LEVEL.get(v.level, LEVEL['unknown']) %}
+<div class="max-w-4xl mx-auto space-y-6">
+
+    <!-- ── the verdict ──────────────────────────────────────────────────── -->
+    <div class="card p-5 border {{ L.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ L.icon }} {{ L.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ L.text }}" x-text="t('Status Runner Deploy','Deploy Runner Status')"></h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if v.key == 'fresh' %}
+                    <span x-text="t('Runner yang berjalan adalah launcher checkout ini, dan tidak ada commit yang tertinggal.','The running runner is this checkout’s own launcher, and no commit is behind.')"></span>
+                    {% elif v.key == 'copy_drifted' %}
+                    <span x-text="t('Runner yang terpasang adalah SALINAN yang sudah menyimpang dari checkout. Gate 0 menolaknya dengan exit 14, sehingga tidak ada rilis yang bisa deploy sampai installer dijalankan sekali lagi.','The installed runner is a COPY that has drifted from the checkout. Gate 0 refuses it with exit 14, so no release can deploy until the installer is run once.')"></span>
+                    {% elif v.key == 'copy_matches' %}
+                    <span x-text="t('Runner yang terpasang masih salinan, tetapi isinya sama dengan checkout sehingga hari ini tetap bisa deploy. Salinan berhenti menerima perbaikan sejak dipasang.','The installed runner is still a copy, but it matches the checkout, so it deploys today. A copy stops receiving fixes the moment it is installed.')"></span>
+                    {% elif v.key == 'launcher_stale' %}
+                    <span x-text="t('Launcher terpasang, tetapi bukan hasil render commit ini — deploy/entrypoint.sh sudah berubah sejak dipasang.','The launcher is installed, but it is not what this commit renders — deploy/entrypoint.sh has changed since it was installed.')"></span>
+                    {% elif v.key == 'behind' %}
+                    <span x-text="t('Runner sudah benar, tetapi checkout tertinggal dari origin/main.','The runner is right, but the checkout is behind origin/main.')"></span>
+                    {% elif v.key == 'dirty' %}
+                    <span x-text="t('Checkout ini punya perubahan yang belum di-commit, dan deploy menolak checkout yang kotor.','This checkout has uncommitted changes, and the deploy refuses a dirty checkout.')"></span>
+                    {% elif v.key == 'paused' %}
+                    <span x-text="t('Runner sudah benar, tetapi deploy sedang dibekukan oleh file pause.','The runner is right, but deploys are frozen by the pause file.')"></span>
+                    {% elif v.key == 'absent' %}
+                    <span x-text="t('Tidak ada runner yang terpasang di path itu, jadi update otomatis belum pernah dipasang di server ini.','No runner is installed at that path, so automatic deployment has never been installed on this server.')"></span>
+                    {% elif v.key == 'unrendered' %}
+                    <span x-text="t('File yang terpasang masih berisi placeholder @REPO@, jadi ia tidak bisa menemukan checkout sama sekali.','The installed file still contains the @REPO@ placeholder, so it cannot find the checkout at all.')"></span>
+                    {% elif v.key == 'other_path' %}
+                    <span x-text="t('Launcher ini dirender untuk path checkout yang lain, bukan checkout ini.','This launcher was rendered for a different checkout path, not this one.')"></span>
+                    {% elif v.key == 'no_repo_line' %}
+                    <span x-text="t('Launcher tidak punya baris REPO=, sehingga tidak tahu checkout mana yang harus dijalankan.','The launcher has no REPO= line, so it does not know which checkout to run.')"></span>
+                    {% elif v.key == 'entrypoint_unreadable' %}
+                    <span x-text="t('deploy/entrypoint.sh tidak bisa dibaca dari checkout ini, jadi hasil render yang seharusnya tidak bisa dibandingkan.','deploy/entrypoint.sh cannot be read from this checkout, so what should have been rendered cannot be compared.')"></span>
+                    {% elif v.key == 'checkout_file_unreadable' %}
+                    <span x-text="t('File pembanding di checkout tidak bisa dibaca, jadi kesegaran salinan ini tidak bisa dinilai.','The checkout file to compare against cannot be read, so this copy cannot be judged fresh or stale.')"></span>
+                    {% elif v.key == 'not_a_checkout' %}
+                    <span x-text="t('Path itu bukan checkout git, jadi jumlah commit yang tertinggal tidak bisa dihitung.','That path is not a git checkout, so the number of commits behind cannot be counted.')"></span>
+                    {% elif v.key == 'no_git' %}
+                    <span x-text="t('git tidak tersedia untuk proses aplikasi, jadi checkout tidak bisa dibaca.','git is not available to the app process, so the checkout cannot be read.')"></span>
+                    {% elif v.key == 'branch_unreadable' %}
+                    <span x-text="t('git tidak bisa membaca branch checkout ini.','git could not read this checkout’s branch.')"></span>
+                    {% else %}
+                    <span x-text="t('Status runner tidak bisa dipastikan dari halaman ini.','The runner’s state cannot be decided from this page.')"></span>
+                    {% endif %}
+                    {% if v.detail %}<code class="ml-1 px-1.5 py-0.5 rounded bg-surface-100 font-mono text-xs break-all">{{ v.detail }}</code>{% endif %}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the numbers ──────────────────────────────────────────────────── -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card p-4">
+            <p class="text-2xl font-extrabold text-surface-800">{{ status.checkout.behind if status.checkout.behind is not none else '—' }}</p>
+            <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('Commit Tertinggal','Commits Behind')"></p>
+        </div>
+        <div class="card p-4">
+            <p class="text-2xl font-extrabold text-surface-800">{{ status.checkout.ahead if status.checkout.ahead is not none else '—' }}</p>
+            <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('Commit di Depan','Commits Ahead')"></p>
+        </div>
+        <div class="card p-4">
+            <p class="text-2xl font-extrabold text-surface-800">{{ status.checkout.dirty if status.checkout.dirty is not none else '—' }}</p>
+            <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('File Belum Commit','Uncommitted Files')"></p>
+        </div>
+        <div class="card p-4">
+            <p class="text-2xl font-extrabold text-surface-800">
+                {% if status.paused %}<span x-text="t('Beku','Frozen')"></span>{% else %}<span x-text="t('Jalan','Running')"></span>{% endif %}
+            </p>
+            <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('Penjadwal Deploy','Deploy Schedule')"></p>
+        </div>
+    </div>
+
+    <!-- ── the installed runner ─────────────────────────────────────────── -->
+    <div class="card">
+        <div class="px-5 py-4 border-b border-surface-200 flex items-center gap-2">
+            <i class="fas fa-rocket text-primary-500"></i>
+            <h3 class="font-bold text-surface-800" x-text="t('Runner yang Terpasang','The Installed Runner')"></h3>
+        </div>
+        <div class="p-5 space-y-3 text-sm">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Path','Path')"></span>
+                <code class="font-mono text-xs text-surface-700 break-all">{{ status.runner.path }}</code>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Bentuknya','What it is')"></span>
+                <span class="font-bold text-surface-800">
+                    {% if status.runner.kind == 'launcher' %}<span x-text="t('Launcher (menjalankan file di checkout)','Launcher (runs the checkout’s file)')"></span>
+                    {% elif status.runner.kind == 'copy' %}<span x-text="t('Salinan (snapshot, bukan checkout)','Copy (a snapshot, not the checkout)')"></span>
+                    {% else %}<span x-text="t('Tidak ada','Nothing there')"></span>{% endif %}
+                </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Verdict Gate 0','Gate 0 verdict')"></span>
+                <span class="font-bold text-surface-800">
+                    {% if status.runner.gate0 == 'passes' %}<span x-text="t('Lolos','Passes')"></span>
+                    {% elif status.runner.gate0 == 'passes (the copy still matches)' %}<span x-text="t('Lolos (salinannya masih identik)','Passes (the copy still matches)')"></span>
+                    {% elif status.runner.gate0 == 'refuses (exit 14)' %}<span class="text-rose-700" x-text="t('Menolak (exit 14)','Refuses (exit 14)')"></span>
+                    {% else %}<span x-text="t('Tidak bisa dinilai','Cannot be judged')"></span>{% endif %}
+                </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Sidik Jari Berkas','File Fingerprint')"></span>
+                <code class="font-mono text-xs text-surface-700">{{ status.runner.sha256 or '—' }}</code>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Dipasang Pada','Installed At')"></span>
+                <code class="font-mono text-xs text-surface-700 break-all">{{ status.runner.installed_at or '—' }}</code>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Yg saat ini dirender commit ini','What this commit renders')"></span>
+                <code class="font-mono text-xs text-surface-700 break-all">{{ status.repo }}/deploy/entrypoint.sh</code>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Perintah snapshot','Snapshot command')"></span>
+                <span class="font-bold text-surface-800">
+                    {% if status.snapshot_runner.kind == 'launcher' %}<span x-text="t('Launcher','Launcher')"></span>
+                    {% elif status.snapshot_runner.kind == 'copy' %}<span x-text="t('Salinan','Copy')"></span>
+                    {% else %}<span x-text="t('Tidak ada','Nothing there')"></span>{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the checkout ─────────────────────────────────────────────────── -->
+    <div class="card">
+        <div class="px-5 py-4 border-b border-surface-200 flex items-center gap-2">
+            <i class="fas fa-code-branch text-primary-500"></i>
+            <h3 class="font-bold text-surface-800" x-text="t('Checkout di Server','The Checkout on the Server')"></h3>
+        </div>
+        <div class="p-5 space-y-3 text-sm">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Path','Path')"></span>
+                <code class="font-mono text-xs text-surface-700 break-all">{{ status.checkout.path }}</code>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Branch','Branch')"></span>
+                <code class="font-mono text-xs text-surface-700">{{ status.checkout.branch or ('HEAD terlepas' if status.checkout.detached else '—') }}</code>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <span class="text-surface-500 shrink-0" x-text="t('HEAD sekarang','Current HEAD')"></span>
+                <span class="text-right min-w-0">
+                    <code class="font-mono text-xs text-surface-700">{{ status.checkout.head or '—' }}</code>
+                    {% if status.checkout.head_subject %}<span class="block text-xs text-surface-500 break-words">{{ status.checkout.head_subject }}</span>{% endif %}
+                </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('origin/main yang terakhir dilihat','origin/main as last seen')"></span>
+                <code class="font-mono text-xs text-surface-700">{{ status.checkout.origin or '—' }}</code>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Pembacaan itu berumur','That reading is')"></span>
+                <span class="text-surface-700">
+                    {% if status.checkout.origin_age_seconds is not none %}<strong>{{ status.checkout.origin_age_seconds }}</strong> <span x-text="t('detik','seconds')"></span>
+                    {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── what this page cannot see ────────────────────────────────────── -->
+    <div class="card p-5 bg-surface-50">
+        <h3 class="font-bold text-surface-700 flex items-center gap-2 text-sm">
+            <i class="fas fa-circle-info text-surface-400"></i>
+            <span x-text="t('Yang tidak bisa dilihat halaman ini','What this page cannot see')"></span>
+        </h3>
+        <ul class="mt-3 space-y-2 text-xs text-surface-500 list-disc pl-5 leading-relaxed">
+            <li><span x-text="t('Halaman ini tidak fetch apa pun. Angka commit tertinggal adalah jarak ke origin/main yang terakhir dilihat checkout, dan umurnya tertulis di atas.','This page fetches nothing. The commits-behind figure is the distance to the origin/main the checkout last saw, and its age is written above.')"></span></li>
+            <li><span x-text="t('Setiap bagian yang tidak bisa diukur mengatakan alasannya, bukan menampilkan nol — nol di sini terbaca sebagai “sudah terbaru”.','Every part that cannot be measured says why instead of showing a zero — a zero here reads as “up to date”.')"></span></li>
+            <li><span x-text="t('Perubahan yang mengejutkan di halaman ini tidak akan muncul di sini; ini hanya membaca filesystem.','A surprise on this page is not written by it — it only reads the filesystem.')"></span></li>
+            <li><span class="font-mono">{{ status.measured_at }}</span></li>
+        </ul>
+    </div>
+
+</div>
+{% endblock %}

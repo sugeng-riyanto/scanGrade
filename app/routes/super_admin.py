@@ -7,6 +7,7 @@ from flask import Blueprint, render_template, g, request, jsonify, redirect, fla
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
+from app.services.deploy_status_service import report as deploy_status_report
 from app.services.question_types import grade_answer, key_has_answer
 from app.utils.req_cache import invalidate_school
 
@@ -269,6 +270,21 @@ def logs():
     # Filter out None items
     data = [d for d in data if d is not None]
     return render_template("super_admin/logs.html", logs=data, days=days)
+
+
+@super_bp.route("/deploy-status")
+@_sa_required
+def deploy_status():
+    """Whether the runner that will deploy the next release is the checkout's own.
+
+    Read-only, and reachable without a shell — which is the whole point: the one
+    state that matters here (an installed *copy* that has drifted from the
+    checkout) makes Gate 0 refuse every release with exit 14 while the site keeps
+    serving happily, so there is nothing to notice from the outside except a
+    version that stops changing.
+    """
+    return render_template("super_admin/deploy_status.html",
+                           status=deploy_status_report())
 
 
 @super_bp.route("/reset-demo-passwords", methods=["POST"])
