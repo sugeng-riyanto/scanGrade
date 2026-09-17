@@ -283,6 +283,61 @@ class TestTheRoleVocabulary:
 
 # ── the two directions of drift ─────────────────────────────────────────────
 
+class TestStatementsThatCannotRun:
+    """The one failure a name comparison is blind to: the file simply stops.
+
+    `20260608_fix_rls_policies.sql` opened section 6 with
+    `ALTER TABLE activation_codes …` and production has no such table — the app reads
+    `registration_codes`. So its **first** statement failed and everything after it was
+    never applied, including the `teacher_ai_keys.school_id` column and sixteen
+    policies, while the file looked applied to anyone reading names. `001` had already
+    met the same table and wrapped its own ALTER in `EXCEPTION WHEN undefined_table`:
+    that guard is the difference between a migration that runs and one that cannot.
+    """
+
+    def test_a_statement_on_a_table_nothing_creates_is_reported(self, tmp_path):
+        (tmp_path / "a.sql").write_text(
+            "CREATE TABLE real_table (id UUID);\n"
+            'CREATE POLICY "p" ON real_table FOR SELECT USING (true);\n', encoding="utf-8")
+        (tmp_path / "b.sql").write_text(
+            "ALTER TABLE ghost_table ENABLE ROW LEVEL SECURITY;\n", encoding="utf-8")
+        found = sc.unrunnable(tmp_path)
+        assert [f["name"] for f in found] == ["ghost_table"]
+        assert found[0]["where"].startswith("b.sql:"), found[0]["where"]
+        assert "ALTER TABLE ghost_table" in found[0]["statement"]
+
+    def test_a_policy_on_a_table_nothing_creates_is_reported(self, tmp_path):
+        (tmp_path / "a.sql").write_text(
+            'CREATE POLICY "p" ON ghost_table FOR SELECT USING (true);\n', encoding="utf-8")
+        assert [f["name"] for f in sc.unrunnable(tmp_path)] == ["ghost_table"]
+
+    def test_the_guard_001_already_uses_makes_it_optional(self, tmp_path):
+        (tmp_path / "a.sql").write_text(
+            "DO $$ BEGIN\n"
+            "  ALTER TABLE ghost_table ENABLE ROW LEVEL SECURITY;\n"
+            "EXCEPTION WHEN undefined_table THEN NULL;\n"
+            "END $$;\n", encoding="utf-8")
+        assert sc.unrunnable(tmp_path) == []
+
+    def test_a_table_another_file_creates_is_not_a_defect(self, tmp_path):
+        (tmp_path / "b.sql").write_text(
+            "ALTER TABLE late_table ADD COLUMN x INT;\n", encoding="utf-8")
+        (tmp_path / "c.sql").write_text(
+            "CREATE TABLE late_table (id UUID);\n", encoding="utf-8")
+        assert sc.unrunnable(tmp_path) == []
+
+    def test_a_table_in_someone_elses_schema_is_not_ours_to_create(self, tmp_path):
+        (tmp_path / "a.sql").write_text(
+            'CREATE POLICY "p" ON storage.objects FOR SELECT USING (true);\n',
+            encoding="utf-8")
+        assert sc.unrunnable(tmp_path) == []
+
+    def test_a_table_named_only_in_a_comment_is_not_a_statement(self, tmp_path):
+        (tmp_path / "a.sql").write_text(
+            "-- ALTER TABLE ghost_table ENABLE ROW LEVEL SECURITY;\n", encoding="utf-8")
+        assert sc.unrunnable(tmp_path) == []
+
+
 class TestComparingWithTheApi:
     def test_declared_but_not_served_is_pending_not_a_failure(self):
         pending, undeclared = sc.live_differences(
@@ -324,6 +379,12 @@ class TestThisRepositoryPasses:
         sql = "\n".join(p.read_text(encoding="utf-8") for p in sc.sql_files())
         for view in ("active_school_years", "class_student_counts"):
             assert f"ALTER VIEW {view} SET (security_invoker = true);" in sql, view
+
+    def test_no_migration_stops_at_a_table_that_does_not_exist(self):
+        found = sc.unrunnable()
+        assert found == [], (
+            "a statement that fails takes the rest of its file with it, so every "
+            f"migration after that line is silently unapplied: {found}")
 
     def test_a_profiles_email_select_cannot_come_back(self):
         """`profiles` has no `email`; addresses live in `auth.users`."""
@@ -367,6 +428,17 @@ class TestInjectedDefectsAreCaught:
             "ALTER VIEW active_school_years SET (security_invoker = true);\n", ""), encoding="utf-8")
         open_pols, _ = self._run(tree)
         assert "active_school_years" in {f["name"] for f in open_pols}
+
+    def test_unguarding_the_legacy_table_statement_brings_the_finding_back(self, tmp_path):
+        """Exactly the defect the file shipped with, put back verbatim."""
+        tree = self._tree(tmp_path)
+        m = tree / "migrations" / "20260608_fix_rls_policies.sql"
+        m.write_text(m.read_text(encoding="utf-8").replace(
+            "DO $$ BEGIN\n  ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;\n"
+            "DO $$ BEGIN\n  ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;"),
+            encoding="utf-8")
+        assert [f["name"] for f in sc.unrunnable(tree)] == ["activation_codes"]
 
     def test_removing_the_drift_migration_brings_the_columns_back(self, tmp_path):
         tree = self._tree(tmp_path)

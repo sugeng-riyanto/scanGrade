@@ -430,6 +430,81 @@ def open_policies(directory: pathlib.Path | None = None) -> list[dict]:
     return sorted(problems, key=lambda p: (p["kind"], p["name"]))
 
 
+# ── a statement that cannot run, which no name comparison can see ───────────
+
+#: A table this repository actually *brings into being*. `ALTER TABLE` alone does not
+#: count: that is how `activation_codes` looked like a table for as long as nothing
+#: asked whether anything created it.
+CREATES_TABLE = re.compile(r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?"
+                           r"(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+                           r"(?:public\.)?\"?([\w-]+)\"?", re.I)
+#: Statements that name a table and fail outright when it is not there. The schema
+#: prefix is captured because `storage.objects` lives in Supabase's own schema, which
+#: this repository does not create and must not be asked to.
+NEEDS_TABLE = re.compile(r"(?:ALTER|DROP)\s+TABLE\s+(?:IF\s+EXISTS\s+)?"
+                         r"(?:(?P<ts>[\w-]+)\.)?\"?(?P<t1>[\w-]+)\"?"
+                         r"|(?:CREATE|DROP)\s+POLICY\s+(?:IF\s+EXISTS\s+)?\"[^\"]+\"\s+ON\s+"
+                         r"(?:(?P<ps>[\w-]+)\.)?\"?(?P<t2>[\w-]+)\"?", re.I)
+#: ``001_enable_rls_and_policies.sql`` wrote exactly this around its own ALTER, which
+#: is how its author said out loud that the table may not exist. A statement inside
+#: such a block is optional by construction; one outside it is mandatory. (`\$\$` is
+#: followed by a space in every one of them, so a `\b` after it matches nothing — the
+#: first version of this read a guarded statement as unguarded.)
+GUARD = re.compile(r"DO\s+\$\$.*?EXCEPTION\s+WHEN\s+undefined_table.*?END\s*\$\$",
+                   re.I | re.S)
+
+
+def unrunnable(directory: pathlib.Path | None = None) -> list[dict]:
+    """Statements that name a table nothing in this repository creates, unguarded.
+
+    `20260608_fix_rls_policies.sql` began section 6 with
+    ``ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;`` and production does
+    not have that table — the app reads `registration_codes`, and no file here has
+    ever created the other one. So the **first** statement of the file failed and
+    everything after it never ran: sections 1-5 and 7-9, including the
+    `teacher_ai_keys.school_id` column and sixteen policies, were never applied, and
+    nothing anywhere said so. `001_enable_rls_and_policies.sql` had already met the
+    same table and wrapped its own ALTER in ``EXCEPTION WHEN undefined_table``, which
+    is the difference between a migration that runs and one that cannot.
+
+    This is the one failure mode a name comparison is blind to — every name resolves;
+    the file simply stops. A guard counts only when it *wraps* the statement, so the
+    exception handler has to be found in a ``DO $$`` block containing its offset.
+    """
+    created: set[str] = set()
+    problems: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for path in sql_files(directory):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        stripped = re.sub(r"--[^\n]*", " ", text)
+        created.update(m.group(1) for m in CREATES_TABLE.finditer(stripped))
+        guarded = [m.span() for m in GUARD.finditer(stripped)]
+        for m in NEEDS_TABLE.finditer(stripped):
+            # A statement in someone else's schema — `storage.objects` — is not this
+            # repository's table to create, so it is not this check's business.
+            if (m.group("ts") or m.group("ps")) not in (None, "public"):
+                continue
+            table = m.group("t1") or m.group("t2")
+            if any(a <= m.start() < b for a, b in guarded):
+                continue
+            if (path.name, table) in seen:
+                continue
+            seen.add((path.name, table))
+            problems.append({
+                "kind": "statement", "name": table, "owner": None,
+                "statement": " ".join(m.group(0).split())[:60],
+                "where": f"{path.name}:{stripped[:m.start()].count(chr(10)) + 1}",
+            })
+    for problem in problems:
+        if problem["name"] in created:
+            problem["late"] = True
+    # A table a *later* file creates is not a defect: migrations are applied in the
+    # order `sql_files()` returns, but `CREATE TABLE` in a numbered migration after a
+    # hand-written file is still a table this repository declares.
+    return sorted([p for p in problems if not p.get("late")],
+                  key=lambda p: (p["where"], p["name"]))
+
+
 # ── the role vocabulary, which is also a database fact ──────────────────────
 
 ROLE_CHECK = re.compile(r"CHECK\s*\(\s*role\s+IN\s*\(([^)]*)\)\s*\)", re.I)
@@ -629,9 +704,11 @@ def main(argv: list[str]) -> int:
     open_pols = open_policies()
     vocab = role_vocabulary()
     role_problems = role_mismatches(vocab)
+    unrunnable_stmts = unrunnable()
     print(f"schema contract: {len(schema)} table(s) in the migrations, "
           f"{len(refs)} reference(s) in the code, "
           f"{len(open_pols)} policy/view open to PUBLIC, "
+          f"{len(unrunnable_stmts)} statement(s) on a table nothing creates, "
           f"{len(vocab)} role(s) in the CHECK constraint")
 
     if "--json" in argv:
@@ -640,7 +717,7 @@ def main(argv: list[str]) -> int:
                                     "problems": problems}, indent=1), encoding="utf-8")
         print("wrote", path)
 
-    if problems or open_pols or role_problems:
+    if problems or open_pols or role_problems or unrunnable_stmts:
         for ref in problems[:60]:
             print(f"  {ref['kind']} `{ref['name']}`  -  {ref['where']}")
         if len(problems) > 60:
@@ -654,6 +731,9 @@ def main(argv: list[str]) -> int:
         for ref in role_problems:
             print(f"  {ref['kind']} '{ref['name']}' is not in ({', '.join(sorted(vocab))}) "
                   f"- {ref['where']}  [{ref['body']}]")
+        for ref in unrunnable_stmts:
+            print(f"  {ref['statement']}  -  {ref['where']}: nothing in this repository "
+                  f"creates `{ref['name']}`")
         if problems:
             print(f"\nschema contract: FAILED  -  {len(problems)} name(s) no SQL in this "
                   "repository creates. At runtime PostgREST refuses the request "
@@ -668,6 +748,14 @@ def main(argv: list[str]) -> int:
             print(f"schema contract: FAILED - {len(role_problems)} role(s) compared "
                   "against a name the database cannot hold. The branch never runs, so "
                   "the guard written around it is not there.")
+        if unrunnable_stmts:
+            print(f"schema contract: FAILED - {len(unrunnable_stmts)} statement(s) name "
+                  "a table no file here creates. This is the failure a name comparison "
+                  "cannot see: every name resolves and the migration still stops at "
+                  "that line, so nothing after it is ever applied. Write the migration "
+                  "that creates the table, or wrap the statement in "
+                  "`DO $$ … EXCEPTION WHEN undefined_table … END $$` the way "
+                  "001_enable_rls_and_policies.sql does.")
         return 1
 
     if "--anon" in argv:
