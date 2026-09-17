@@ -416,6 +416,10 @@ TRANSLATED = [
     "teacher/dashboard.html",
     "admin/dashboard.html",
     "super_admin/dashboard.html",
+    # The one page a super admin opens when a release has not arrived, and the
+    # one that says whether the installed runner is the checkout's launcher —
+    # read-only, no shell. Its copy is all pairs, so it belongs here.
+    "super_admin/deploy_status.html",
     "admin_sekolah/dashboard.html",
     "admin_sekolah/import.html",
     # The exam builder. It is where a teacher spends the most time in the app —
@@ -796,7 +800,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 30, (
+    assert len(TRANSLATED) == 31, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

@@ -236,7 +236,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 147,
+      "pairs": 148,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -377,6 +377,12 @@
       "pairs": 0,
       "leftovers": 12,
       "coverage": 0.0,
+      "frozen": false
+    },
+    "super_admin/deploy_status.html": {
+      "pairs": 55,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "super_admin/exams.html": {
