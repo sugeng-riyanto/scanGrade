@@ -505,6 +505,30 @@ def unrunnable(directory: pathlib.Path | None = None) -> list[dict]:
                   key=lambda p: (p["where"], p["name"]))
 
 
+def optional_tables(directory: pathlib.Path | None = None) -> set[str]:
+    """Tables a migration handles *conditionally* and no file creates.
+
+    `activation_codes` is only ever touched inside `EXCEPTION WHEN undefined_table` —
+    by `001` and by `20260608_fix_rls_policies.sql` — so its absence is the situation
+    both files were written for, not a migration waiting to be pasted. `--live` reads
+    names and cannot tell the two apart; it reports it as pending for ever, and a
+    finding that can never be acted on is how a gate stops being read. The guard is
+    the evidence, so the guard is what this reads.
+    """
+    created: set[str] = set()
+    guarded_names: set[str] = set()
+    for path in sql_files(directory):
+        stripped = re.sub(r"--[^\n]*", " ",
+                          path.read_text(encoding="utf-8", errors="replace"))
+        created.update(m.group(1) for m in CREATES_TABLE.finditer(stripped))
+        for span in (m.span() for m in GUARD.finditer(stripped)):
+            body = stripped[span[0]:span[1]]
+            for m in NEEDS_TABLE.finditer(body):
+                if (m.group("ts") or m.group("ps")) in (None, "public"):
+                    guarded_names.add(m.group("t1") or m.group("t2"))
+    return guarded_names - created
+
+
 # ── the role vocabulary, which is also a database fact ──────────────────────
 
 ROLE_CHECK = re.compile(r"CHECK\s*\(\s*role\s+IN\s*\(([^)]*)\)\s*\)", re.I)
@@ -791,6 +815,10 @@ def main(argv: list[str]) -> int:
                   "SUPABASE_SERVICE_KEY to also ask the database")
             return 0
         pending, undeclared = live_differences(schema, live)
+        optional = optional_tables()
+        optional_pending = [n for n in pending
+                            if n.startswith("table ") and n[6:] in optional]
+        pending = [n for n in pending if n not in optional_pending]
         print(f"the API serves {len(live)} object(s)")
         if pending:
             print(f"declared but not in the API yet (pending migrations): {len(pending)}")
@@ -798,6 +826,11 @@ def main(argv: list[str]) -> int:
                 print(f"  - {name}")
             if len(pending) > 40:
                 print(f"  ... and {len(pending) - 40} more")
+        if optional_pending:
+            print(f"absent by design (a guarded `ALTER TABLE` says it may not exist): "
+                  f"{len(optional_pending)}")
+            for name in optional_pending:
+                print(f"  ~ {name[6:]}")
         if undeclared:
             print(f"in the API but no SQL in this repository declares it: {len(undeclared)}")
             for name in undeclared[:40]:
