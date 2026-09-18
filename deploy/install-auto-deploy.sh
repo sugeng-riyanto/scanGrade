@@ -89,6 +89,15 @@ else
     echo "       $REPO/.venv/bin/pip install -r $REPO/requirements.txt"
     exit 7
   fi
+  # Exit 3: the gate is not there at all — a file it runs is missing from this
+  # commit, or the named tests collected nothing. Arming a box in that state
+  # arms one that refuses every release from now on, so it is an installation
+  # failure and not a warning.
+  if [ "$rc" -eq 3 ]; then
+    echo "!! the gate is DISARMED (exit 3) — a check it runs is missing from $AFTER:"
+    echo "       bash $REPO/deploy/theme_gate.sh"
+    exit 7
+  fi
   # Exit 1: the gate ran and found something. That is exactly what the deploy
   # would refuse to ship, so it has to be fixed before this installer is useful.
   echo "!! the gate found unreadable templates (exit $rc) — run it to see them:"

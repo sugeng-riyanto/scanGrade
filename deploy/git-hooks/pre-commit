@@ -46,7 +46,12 @@ fi
 echo "theme gate: template or stylesheet changes staged — checking readability, class names and the cached stylesheet…"
 if ! bash "$REPO/deploy/theme_gate.sh"; then
   echo
-  echo "Commit blocked. Fix the contrast, or re-run with: git commit --no-verify"
+  # Not "fix the contrast": the gate refuses more than one thing (an unreadable
+  # colour, a class name built at render time, a stale stylesheet, a language the
+  # page does not declare, and — exit 3 — a commit that removed a check itself).
+  # Naming one cause here sends the author to the wrong file.
+  echo "Commit blocked. Fix what the gate named above, or re-run with:"
+  echo "    git commit --no-verify"
   exit 1
 fi
 exit 0
