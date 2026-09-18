@@ -57,33 +57,29 @@
                 </a>
             </div>
             <div class="mt-6 flex items-center justify-center gap-3 flex-wrap">
+                {# Drawn from the stored order, so moving a row on
+                   /super-admin/demo-settings moves the button here. The row is a
+                   loop over visible items rather than one `{% if %}` per button:
+                   a button whose flag the template forgot to consult cannot be
+                   rendered at all, because the template does not name buttons. #}
                 {% set ds = get_demo_settings() %}
-                {% if ds is mapping %}
-                    {% set show_tutorial = ds.get('demo_tutorial', true) %}
-                    {% set show_tg = ds.get('demo_tutorial_guru', show_tutorial) %}
-                    {% set show_ts = ds.get('demo_tutorial_siswa', show_tutorial) %}
-                    {% set show_ta = ds.get('demo_tutorial_admin', show_tutorial) %}
-                {% else %}
-                    {% set show_tg = true %}
-                    {% set show_ts = true %}
-                    {% set show_ta = true %}
-                {% endif %}
-                {% if show_tg %}
+                {% for key in demo_items(ds, 'tutorials') %}
+                    {% if key == 'demo_tutorial_guru' %}
                 <a href="/tutorial/guru" class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition border border-emerald-200">
                     <i class="fas fa-chalkboard-teacher"></i><span x-text="t('Tutorial Guru','Teacher Tutorial')"></span>
                 </a>
-                {% endif %}
-                {% if show_ts %}
+                    {% elif key == 'demo_tutorial_siswa' %}
                 <a href="/tutorial/murid" class="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-50 text-amber-700 rounded-xl font-bold text-sm hover:bg-amber-100 transition border border-amber-200">
                     <i class="fas fa-user-graduate"></i><span x-text="t('Tutorial Siswa','Student Tutorial')"></span>
                 </a>
-                {% endif %}
-                {% if show_ta %}
+                    {% elif key == 'demo_tutorial_admin' %}
                 <a href="/tutorial/admin-sekolah" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition border border-blue-200">
                     <i class="fas fa-school"></i><span x-text="t('Tutorial Admin','Admin Tutorial')"></span>
                 </a>
-                {% endif %}
-                {% if not ds or ds.demo_enabled %}
+                    {% endif %}
+                {% endfor %}
+                {# Last, always: the demo is the door this row leads to. #}
+                {% if demo_link_on(ds) %}
                 <a href="/demo" class="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-50 text-purple-700 rounded-xl font-bold text-sm hover:bg-purple-100 transition border border-purple-200">
                     <i class="fas fa-flask"></i>Demo
                 </a>

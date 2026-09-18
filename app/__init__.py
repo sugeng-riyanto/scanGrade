@@ -213,6 +213,21 @@ def create_app(env=None):
         return result
     app.jinja_env.globals["get_demo_settings"] = get_demo_settings
 
+    # Which demo items a page renders, in the order the super admin arranged
+    # them. Exposed as one global so `/demo` and the landing page cannot read the
+    # blob differently — see `app/services/demo_settings.py` for why that matters.
+    from app.services.demo_settings import (
+        demo_items as _demo_items,
+        demo_link_on as _demo_link_on,
+        demo_order as _demo_order,
+    )
+    app.jinja_env.globals["demo_items"] = _demo_items
+    # The settings page needs the *unfiltered* order, because it is where a
+    # switched-off item is switched back on — `demo_items` would hide its own row.
+    app.jinja_env.globals["demo_order"] = _demo_order
+    # The `Demo` link has no row of its own; it follows the master toggle.
+    app.jinja_env.globals["demo_link_on"] = _demo_link_on
+
     def get_whatsapp_number():
         from flask import g as flask_g
         if hasattr(flask_g, '_whatsapp_number'):

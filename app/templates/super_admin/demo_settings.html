@@ -3,7 +3,44 @@
 {% block title %}Pengaturan Demo - Super Admin{% endblock %}
 {% block page_title %}Pengaturan Demo{% endblock %}
 {% block content %}
-<div class="max-w-2xl" x-data="demoForm()" x-init="init()">
+{% set ds = get_demo_settings() %}
+
+{# The rows are rendered from the stored order, not from the order they are
+   written in here: an operator who drags "Murid" to the top and saves must see
+   "Murid" at the top when the page reloads, and a page that drew them in source
+   order would silently put the old order back the next time they pressed save.
+   `demo_order()` reads the blob and completes it, so a hand-edited or missing
+   order still lists every item exactly once.
+
+   Colours are named one by one, never built as `bg-{{ tone }}-100`: Tailwind
+   reads this file as text, an interpolated name compiles to nothing, and the
+   element keeps its ancestor's background. See demo.html for the same note. #}
+{% set ROLE_ROWS = {
+    'demo_super_admin':    ('fas fa-crown',             'bg-purple-100',  'text-purple-600',  'text-purple-600 focus:ring-purple-500',    'Super Admin',    'superadmin@scan-grade.app'),
+    'demo_admin_sekolah':  ('fas fa-school',            'bg-blue-100',    'text-blue-600',    'text-blue-600 focus:ring-blue-500',         'Admin Sekolah',  'admin_smp@scan-grade.app, admin_sma@scan-grade.app'),
+    'demo_guru':           ('fas fa-chalkboard-teacher','bg-emerald-100', 'text-emerald-600', 'text-emerald-600 focus:ring-emerald-500',   'Guru',           'guru_mtk_smp@scan-grade.app, dll'),
+    'demo_murid':          ('fas fa-user-graduate',     'bg-amber-100',   'text-amber-600',   'text-amber-600 focus:ring-amber-500',       'Murid',          'siswa1_smp@scan-grade.app, dll'),
+} %}
+{% set TUTORIAL_ROWS = {
+    'demo_tutorial_guru':  ('fas fa-chalkboard-teacher', 'text-emerald-600', 'text-emerald-600 focus:ring-emerald-500', 'Tutorial Guru'),
+    'demo_tutorial_siswa': ('fas fa-user-graduate',      'text-amber-600',   'text-amber-600 focus:ring-amber-500',     'Tutorial Siswa'),
+    'demo_tutorial_admin': ('fas fa-school',             'text-blue-600',    'text-blue-600 focus:ring-blue-500',       'Tutorial Admin'),
+} %}
+
+{# A row's move controls. `type="button"` is not decoration: a bare <button>
+   inside a form submits it, so an arrow would save the settings as a side
+   effect of being clicked. The ends are disabled rather than hidden, because a
+   control that disappears is one the operator has to re-find. #}
+{% macro move_buttons() %}
+<button type="button" data-move="-1" @click="move($el, -1)"
+        class="w-10 h-10 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-purple-700 hover:bg-purple-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+        title="Naikkan" aria-label="Naikkan urutan"><i class="fas fa-arrow-up text-xs"></i></button>
+<button type="button" data-move="1" @click="move($el, 1)"
+        class="w-10 h-10 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-purple-700 hover:bg-purple-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+        title="Turunkan" aria-label="Turunkan urutan"><i class="fas fa-arrow-down text-xs"></i></button>
+{% endmacro %}
+
+<div class="max-w-2xl" x-data='demoForm({{ flags|default({}, true)|tojson }})' x-init="init()">
     <div class="card p-6">
         <p class="text-sm text-slate-500 mb-6">Atur visibilitas menu dan akun demo untuk setiap peran. Perubahan akan diterapkan di halaman landing, login, dan sidebar.</p>
 
@@ -20,36 +57,27 @@
                 </label>
             </div>
 
+            <p class="text-xs text-slate-400">Urutan baris di bawah menentukan urutan kartu di halaman <a href="/demo" target="_blank" class="text-purple-600 font-bold hover:underline">/demo</a> dan tombol tutorial di landing page. Pindahkan dengan tombol ▲ ▼.</p>
+
             <div class="divide-y divide-slate-100">
-                <!-- Per role toggles -->
-                <div class="flex items-center justify-between py-4">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center"><i class="fas fa-crown text-purple-600"></i></div>
-                        <div><p class="font-bold text-slate-800">Super Admin</p><p class="text-xs text-slate-400">superadmin@scan-grade.app</p></div>
+                <!-- Per role toggles: the card order on /demo -->
+                <div data-demo-group="roles">
+                    {% for key in demo_order(ds, 'roles') %}
+                    {% set row = ROLE_ROWS[key] %}
+                    <div data-demo-key="{{ key }}" class="flex items-center justify-between py-4 gap-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl {{ row[1] }} flex items-center justify-center"><i class="{{ row[0] }} {{ row[2] }}"></i></div>
+                            <div><p class="font-bold text-slate-800">{{ row[4] }}</p><p class="text-xs text-slate-400">{{ row[5] }}</p></div>
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <input type="checkbox" x-model="settings.{{ key }}" class="w-5 h-5 rounded {{ row[3] }}">
+                            {{ move_buttons() }}
+                        </div>
                     </div>
-                    <input type="checkbox" x-model="settings.demo_super_admin" class="w-5 h-5 rounded text-purple-600 focus:ring-purple-500">
+                    {% endfor %}
                 </div>
-                <div class="flex items-center justify-between py-4">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center"><i class="fas fa-school text-blue-600"></i></div>
-                        <div><p class="font-bold text-slate-800">Admin Sekolah</p><p class="text-xs text-slate-400">admin_smp@scan-grade.app, admin_sma@scan-grade.app</p></div>
-                    </div>
-                    <input type="checkbox" x-model="settings.demo_admin_sekolah" class="w-5 h-5 rounded text-blue-600 focus:ring-blue-500">
-                </div>
-                <div class="flex items-center justify-between py-4">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center"><i class="fas fa-chalkboard-teacher text-emerald-600"></i></div>
-                        <div><p class="font-bold text-slate-800">Guru</p><p class="text-xs text-slate-400">guru_mtk_smp@scan-grade.app, dll</p></div>
-                    </div>
-                    <input type="checkbox" x-model="settings.demo_guru" class="w-5 h-5 rounded text-emerald-600 focus:ring-emerald-500">
-                </div>
-                <div class="flex items-center justify-between py-4">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center"><i class="fas fa-user-graduate text-amber-600"></i></div>
-                        <div><p class="font-bold text-slate-800">Murid</p><p class="text-xs text-slate-400">siswa1_smp@scan-grade.app, dll</p></div>
-                    </div>
-                    <input type="checkbox" x-model="settings.demo_murid" class="w-5 h-5 rounded text-amber-600 focus:ring-amber-500">
-                </div>
+
+                <!-- Tutorial master, then the tutorial rows in their own order -->
                 <div class="flex items-center justify-between py-4">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"><i class="fas fa-book-open text-slate-600"></i></div>
@@ -57,19 +85,18 @@
                     </div>
                     <input type="checkbox" x-model="settings.demo_tutorial" class="w-5 h-5 rounded text-slate-600 focus:ring-slate-500" @change="if(!settings.demo_tutorial){settings.demo_tutorial_guru=false;settings.demo_tutorial_siswa=false;settings.demo_tutorial_admin=false}else{settings.demo_tutorial_guru=true;settings.demo_tutorial_siswa=true;settings.demo_tutorial_admin=true}">
                 </div>
-                <div x-show="settings.demo_tutorial" x-cloak class="ml-14 space-y-3 pb-2">
-                    <div class="flex items-center justify-between py-2">
-                        <div><p class="font-bold text-sm text-slate-700"><i class="fas fa-chalkboard-teacher text-emerald-600 mr-1"></i>Tutorial Guru</p></div>
-                        <input type="checkbox" x-model="settings.demo_tutorial_guru" class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500">
+                <div x-show="settings.demo_tutorial" x-cloak class="ml-14 pb-2" data-demo-group="tutorials">
+                    <p class="text-xs text-slate-400 py-2">Urutan tombol di landing page. Tombol <b>Demo</b> selalu paling akhir, dan tombol yang tidak dicentang tidak ditampilkan.</p>
+                    {% for key in demo_order(ds, 'tutorials') %}
+                    {% set row = TUTORIAL_ROWS[key] %}
+                    <div data-demo-key="{{ key }}" class="flex items-center justify-between gap-3 py-2">
+                        <div><p class="font-bold text-sm text-slate-700"><i class="{{ row[0] }} {{ row[1] }} mr-1"></i>{{ row[3] }}</p></div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <input type="checkbox" x-model="settings.{{ key }}" class="w-4 h-4 rounded {{ row[2] }}">
+                            {{ move_buttons() }}
+                        </div>
                     </div>
-                    <div class="flex items-center justify-between py-2">
-                        <div><p class="font-bold text-sm text-slate-700"><i class="fas fa-user-graduate text-amber-600 mr-1"></i>Tutorial Siswa</p></div>
-                        <input type="checkbox" x-model="settings.demo_tutorial_siswa" class="w-4 h-4 rounded text-amber-600 focus:ring-amber-500">
-                    </div>
-                    <div class="flex items-center justify-between py-2">
-                        <div><p class="font-bold text-sm text-slate-700"><i class="fas fa-school text-blue-600 mr-1"></i>Tutorial Admin</p></div>
-                        <input type="checkbox" x-model="settings.demo_tutorial_admin" class="w-4 h-4 rounded text-blue-600 focus:ring-blue-500">
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
 
@@ -86,22 +113,70 @@
 {% endblock %}
 {% block scripts %}
 <script>
-function demoForm() {
+function demoForm(initial) {
     return {
-        settings: {demo_enabled:false, demo_super_admin:false, demo_admin_sekolah:false, demo_guru:false, demo_murid:false, demo_tutorial:false, demo_tutorial_guru:true, demo_tutorial_siswa:true, demo_tutorial_admin:true},
+        settings: Object.assign({demo_enabled:true, demo_super_admin:true, demo_admin_sekolah:true, demo_guru:true, demo_murid:true, demo_tutorial:true, demo_tutorial_guru:true, demo_tutorial_siswa:true, demo_tutorial_admin:true}, initial || {}),
         allOn: false, saving: false, saved: false,
         init() {
-            fetch('/super-admin/demo-settings/data').then(r=>r.json()).then(d => { if(d) Object.assign(this.settings, d); this.allOn = this.settings.demo_enabled; }).catch(()=>{});
+            this.allOn = this.settings.demo_enabled;
+            fetch('/super-admin/demo-settings/data').then(r=>r.json()).then(d => {
+                // The blob is sparse: a key it does not carry is not "off", it is
+                // "unset" — and the checkbox is showing the page's answer for that.
+                // Overwriting blanks with `false` here is what made all three
+                // tutorial buttons reappear after a save that never touched them.
+                if (d) Object.entries(d).forEach(([k, v]) => { if (k in this.settings) this.settings[k] = !!v; });
+                this.refreshEdges();
+            }).catch(()=>{});
+            this.refreshEdges();
         },
         toggleAll() {
             const v = this.allOn;
             Object.keys(this.settings).forEach(k => this.settings[k] = v);
+        },
+        /* ── moving a row ────────────────────────────────────────────────
+           The order that gets saved is the order of the rows *in the document*
+           — read at submit time — so what the operator sees is what they get,
+           with no second copy of the order to keep in step. `:scope >` keeps a
+           group's own rows from picking up a nested group's. */
+        groupRows(el) {
+            const group = el.closest('[data-demo-group]');
+            return group ? Array.from(group.querySelectorAll(':scope > [data-demo-key]')) : [];
+        },
+        move(el, delta) {
+            const group = el.closest('[data-demo-group]');
+            const rows = this.groupRows(el);
+            const row = el.closest('[data-demo-key]');
+            const i = rows.indexOf(row);
+            const j = i + delta;
+            if (!group || !row || i < 0 || j < 0 || j >= rows.length) return;
+            // Down: insert after the row we swap with. Up: insert before it.
+            group.insertBefore(row, delta < 0 ? rows[j] : rows[j].nextSibling);
+            this.refreshEdges();
+        },
+        refreshEdges() {
+            document.querySelectorAll('[data-demo-group]').forEach(group => {
+                const rows = Array.from(group.querySelectorAll(':scope > [data-demo-key]'));
+                rows.forEach((row, i) => {
+                    const up = row.querySelector('[data-move="-1"]');
+                    const down = row.querySelector('[data-move="1"]');
+                    if (up) up.disabled = i === 0;
+                    if (down) down.disabled = i === rows.length - 1;
+                });
+            });
+        },
+        orderOf(group) {
+            const el = document.querySelector('[data-demo-group="' + group + '"]');
+            if (!el) return '';
+            return Array.from(el.querySelectorAll(':scope > [data-demo-key]'))
+                .map(row => row.dataset.demoKey).join(',');
         },
         save() {
             this.saving = true; this.saved = false;
             const fd = new FormData();
             this.settings.demo_enabled = this.allOn;
             Object.entries(this.settings).forEach(([k,v]) => fd.append(k, v ? 'true' : 'false'));
+            fd.set('role_order', this.orderOf('roles'));
+            fd.set('tutorial_order', this.orderOf('tutorials'));
             fetch('/super-admin/demo-settings', {method:'POST', body: fd})
                 .then(async r => {
                     const d = await r.json().catch(() => ({}));
