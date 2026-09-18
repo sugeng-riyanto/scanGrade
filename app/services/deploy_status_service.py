@@ -25,6 +25,25 @@ launcher or a copy, whether the checkout is behind `origin/main`, and how far. I
 reads the same two facts Gate 0 compares (`SELF` and `REPO_RUNNER`), so the page
 and the gate cannot disagree about the arrangement.
 
+A copy is *named*, not merely called stale
+------------------------------------------
+"A copy" is not yet an answer to "which fixes are missing", and the number that
+answers it is the one nobody could get without a shell: how far behind the
+*runner* is. Measured on production, the first version of this page said the box
+was five days stale — true — and then added the wrong reason:*"Gate 0 refuses it with exit 14"*. The installed copy was the revision from
+before Gate 0 existed, so there was no check in the running file to refuse
+anything, and releases had been going out all week with the deploy logic of 45
+commits ago — every gate built since simply absent, and the site perfectly
+healthy. The alarming sentence was wrong in the direction of being *reassuring*
+about the consequences.
+
+So the consequence is derived rather than assumed: a copy that carries no
+`runner-identity` block cannot refuse, whatever the checkout says (`copy_predates_gate`),
+and only a copy that does carry it is one Gate 0 turns away (`copy_drifted`).
+And the installed file's bytes are matched against every committed revision of
+the file it came from — exactly, by asking git for the commit whose blob has that
+hash, so the answer is a commit and a distance rather than an impression.
+
 No copy lives here
 ------------------
 Every reading is a stable **key** plus the **data** that goes with it — a path, a
@@ -93,6 +112,38 @@ _RENDERED_REPO = re.compile(r'^REPO="([^"]*)"', re.M)
 #: same answer as `fresh`.
 BROKEN, WARN, FRESH, UNKNOWN = "broken", "warn", "fresh", "unknown"
 
+#: Gate 0's own delimiter. A copy that does not carry it cannot refuse anything:
+#: the check it would need is not in the file that runs. Measured the hard way —
+#: production's runner was the revision from before Gate 0 existed, so a page that
+#: announced "Gate 0 refuses it, nothing can deploy" was describing a refusal that
+#: could not happen while releases went out all week.
+IDENTITY_MARKER = "runner-identity:start"
+
+#: The two arrangements, as `gate0` spells them. Strings rather than booleans
+#: because the template branches on them and the vocabulary test reads them.
+GATE0_PASSES = "passes"
+GATE0_COPY_MATCHES = "passes (the copy still matches)"
+GATE0_REFUSES = "refuses (exit 14)"
+GATE0_CANNOT = "cannot refuse (no Gate 0)"
+
+#: How far back the launcher search looks for the revision it was rendered from.
+#: Small on purpose: this runs inside a page request, and a launcher that matches
+#: nothing in the last 25 revisions of `deploy/entrypoint.sh` is stale by any
+#: measure a reader needs.
+LAUNCHER_SCAN_LIMIT = 25
+
+#: The directory whose movement is reported as "how much of the gate code is not
+#: in effect here": a commit count is honest but says nothing about *what*.
+DEPLOY_DIR = "deploy"
+
+#: How the installed file's provenance reads. `current` means it is what this
+#: commit renders; `named` means it is a real commit, just an older one;
+#: `unmatched` means no committed revision has those bytes; `unreadable` means git
+#: or the checkout could not be read, which is never the same answer as `named`.
+ORIGIN_CURRENT, ORIGIN_NAMED, ORIGIN_UNMATCHED, ORIGIN_UNREADABLE = (
+    "current", "named", "unmatched", "unreadable")
+ORIGIN_KEYS = frozenset({ORIGIN_CURRENT, ORIGIN_NAMED, ORIGIN_UNMATCHED, ORIGIN_UNREADABLE})
+
 
 # ── running a command, read-only ─────────────────────────────────────────────
 
@@ -125,6 +176,37 @@ def _git_out(git: str, repo: pathlib.Path, *args: str) -> tuple[int, str]:
     return _run([git, "--no-optional-locks", "-C", str(repo), *args])
 
 
+def _git_raw(git: str, repo: pathlib.Path, *args: str) -> tuple[int, str]:
+    """The same call, *without* the `.strip()`.
+
+    `_git_out` trims because every other caller wants a line. `cat-file` hands back
+    a whole file, and trimming it drops the trailing newline the installed file
+    has — so a launcher could never match the revision it was rendered from, and
+    every stale launcher would read as *unmatchable* rather than merely old. The
+    test that names a stale launcher found this.
+    """
+    try:
+        done = subprocess.run([git, "--no-optional-locks", "-C", str(repo), *args],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 255, f"{type(exc).__name__}: {exc}"
+    return done.returncode, (done.stdout or "")
+
+
+def _git_bytes(git: str, repo: pathlib.Path, *args: str) -> tuple[int, bytes]:
+    """Undecoded, so a blob can be compared with the bytes on disk.
+
+    Comparing a blob through `text=True` would normalise line endings, and the
+    question here is exactly which bytes the installed file has.
+    """
+    try:
+        done = subprocess.run([git, "--no-optional-locks", "-C", str(repo), *args],
+                              capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 255, b""
+    return done.returncode, (done.stdout or b"")
+
+
 def _read(path: pathlib.Path) -> tuple[str | None, str | None]:
     """(text, detail of why it could not be read)."""
     try:
@@ -143,6 +225,99 @@ def _read_bytes(path: pathlib.Path) -> tuple[bytes | None, str | None]:
         return None, "absent"
     except OSError as exc:
         return None, f"{type(exc).__name__}: {exc}"
+
+
+def _blob_sha(data: bytes) -> str:
+    """The sha1 git would give these bytes as a blob, so history can be searched.
+
+    `git log --find-object` takes that hash and returns the commits carrying it —
+    one command, exact, and it does not need the file to exist in the index.
+    """
+    return hashlib.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+
+
+def _head_sha(git: str, repo: pathlib.Path) -> str | None:
+    rc, sha = _git_out(git, repo, "rev-parse", "HEAD")
+    return sha if rc == 0 and sha else None
+
+
+def _origin_facts(git: str, repo: pathlib.Path, commit: str | None, *,
+                  head: str | None, key: str = ORIGIN_NAMED) -> dict:
+    """The commit the installed file came from, and what has moved since.
+
+    `origin_stale_files` is the count of files under `deploy/` that differ between
+    that commit and HEAD, which is the number behind "every gate added since is
+    not in effect" — a commit count is honest but says nothing about *what*.
+    """
+    facts = {
+        "origin_key": key, "origin_commit": None, "origin_short": None,
+        "origin_date": None, "origin_subject": None, "origin_behind": None,
+        "origin_stale_files": None,
+    }
+    if not commit:
+        return facts
+    facts["origin_commit"] = commit
+    rc, line = _git_out(git, repo, "log", "-1", "--format=%h|%cI|%s", commit)
+    if rc == 0 and "|" in line:
+        short, date, subject = line.split("|", 2)
+        facts["origin_short"], facts["origin_date"], facts["origin_subject"] = short, date, subject
+    if head:
+        rc, count = _git_out(git, repo, "rev-list", "--count", f"{commit}..{head}")
+        if rc == 0 and count.isdigit():
+            facts["origin_behind"] = int(count)
+    rc, names = _git_out(git, repo, "diff", "--name-only", commit,
+                         head or "HEAD", "--", DEPLOY_DIR)
+    if rc == 0:
+        facts["origin_stale_files"] = len([n for n in names.splitlines() if n.strip()])
+    return facts
+
+
+def _origin_of_copy(git: str, repo: pathlib.Path, data: bytes, copy_of: str, *,
+                    head: str | None) -> dict:
+    """Which commit an installed *copy* was taken from — by its bytes.
+
+    A copy is normally installed from a clean checkout, so its bytes are one of
+    the committed blobs; `--all` so a force-pushed or side-branch install is still
+    nameable. When nothing matches, the answer is `unmatched` rather than an
+    invented distance.
+    """
+    rc, out = _git_out(git, repo, "log", "--all", "--format=%H",
+                       f"--find-object={_blob_sha(data)}", "--",
+                       f"{DEPLOY_DIR}/{copy_of}")
+    if rc != 0:
+        return _origin_facts(git, repo, None, head=head, key=ORIGIN_UNREADABLE)
+    # `--find-object` reports every commit whose diff *changed the count* of that
+    # object — which includes the commit that **removed** it, i.e. the one where a
+    # later version replaced the file. Taking the first line therefore named the
+    # newest commit, and the distance came out as zero for a runner that was a
+    # commit behind. So each candidate is checked: which commit actually holds
+    # these bytes at this path.
+    for rev in out.splitlines():
+        rc, blob = _git_bytes(git, repo, "cat-file", "blob",
+                              f"{rev}:{DEPLOY_DIR}/{copy_of}")
+        if rc == 0 and blob == data:
+            return _origin_facts(git, repo, rev, head=head)
+    return _origin_facts(git, repo, None, head=head, key=ORIGIN_UNMATCHED)
+
+
+def _origin_of_launcher(git: str, repo: pathlib.Path, text: str, *,
+                       head: str | None) -> dict:
+    """Which committed `entrypoint.sh` renders to the installed launcher.
+
+    The rendered file is not a blob git ever stored (the placeholder is
+    substituted), so the search renders each recent revision and compares — which
+    is why it is bounded: the page must not walk all of history on a request.
+    """
+    rc, revs = _git_out(git, repo, "log", "-n", str(LAUNCHER_SCAN_LIMIT),
+                        "--format=%H", "--", f"{DEPLOY_DIR}/entrypoint.sh")
+    if rc != 0:
+        return _origin_facts(git, repo, None, head=head, key=ORIGIN_UNREADABLE)
+    for rev in revs.splitlines():
+        rc, blob = _git_raw(git, repo, "cat-file", "blob",
+                            f"{rev}:{DEPLOY_DIR}/entrypoint.sh")
+        if rc == 0 and blob.replace(PLACEHOLDER, str(repo)) == text:
+            return _origin_facts(git, repo, rev, head=head)
+    return _origin_facts(git, repo, None, head=head, key=ORIGIN_UNMATCHED)
 
 
 def _mtime(path: pathlib.Path) -> str | None:
@@ -192,6 +367,10 @@ def runner_state(path: pathlib.Path, repo: pathlib.Path, *,
         "sha256": None, "kind": UNKNOWN, "reason_key": None, "detail": None,
         "gate0": UNKNOWN, "differs_from_checkout": None, "rendered_repo": None,
         "matches_this_commit": None, "expected_paths": None,
+        "has_identity_check": None,
+        "origin_key": ORIGIN_UNREADABLE, "origin_commit": None, "origin_short": None,
+        "origin_date": None, "origin_subject": None, "origin_behind": None,
+        "origin_stale_files": None,
     }
 
     text, detail = _read(path)
@@ -225,14 +404,25 @@ def runner_state(path: pathlib.Path, repo: pathlib.Path, *,
             return state
         # Gate 0's second branch: SELF is not the checkout's file but the file it
         # execs is — which is the arrangement, and it passes.
-        state["gate0"] = "passes"
+        state["gate0"] = GATE0_PASSES
         if expect is None:
             state["reason_key"] = "entrypoint_unreadable"
             return state
         state["matches_this_commit"] = text == expect
         state["expected_paths"] = [
             target for target in re.findall(r'TARGET="\$REPO/([^"]+)"', text)]
-        if text != expect:
+        git = _git()
+        head = _head_sha(git, repo) if git else None
+        if git is None or head is None:
+            return state
+        if state["matches_this_commit"]:
+            state.update(_origin_facts(git, repo, head, head=head, key=ORIGIN_CURRENT))
+        else:
+            # A launcher that is not what this commit renders still runs the
+            # checkout — so the interesting number is which revision it was
+            # rendered from, not whether it matches. (An installed launcher never
+            # reaches Gate 0's byte comparison at all; see the test that pins it.)
+            state.update(_origin_of_launcher(git, repo, text, head=head))
             state["reason_key"] = "launcher_stale"
         return state
 
@@ -255,11 +445,30 @@ def runner_state(path: pathlib.Path, repo: pathlib.Path, *,
         return state
     state["differs_from_checkout"] = mine != theirs
     state["matches_this_commit"] = not state["differs_from_checkout"]
-    state["gate0"] = ("refuses (exit 14)" if state["differs_from_checkout"]
-                      else "passes (the copy still matches)")
+    # Whether anything *refuses* this copy is a property of the copy, not of the
+    # gate: Gate 0 lives in the file that runs, so an installed revision from
+    # before it existed compares itself with nothing and deploys regardless. The
+    # first version of this page assumed the gate was there and told a box that was
+    # deploying all week that nothing could deploy.
+    state["has_identity_check"] = IDENTITY_MARKER in text
+    if not state["differs_from_checkout"]:
+        state["gate0"] = GATE0_COPY_MATCHES
+    elif state["has_identity_check"]:
+        state["gate0"] = GATE0_REFUSES
+    else:
+        state["gate0"] = GATE0_CANNOT
     if state["differs_from_checkout"]:
         state["reason_key"] = "drifted"
         state["detail"] = f"deploy/{copy_of}"
+
+    git = _git()
+    head = _head_sha(git, repo) if git else None
+    if git is None or head is None:
+        return state
+    if state["matches_this_commit"]:
+        state.update(_origin_facts(git, repo, head, head=head, key=ORIGIN_CURRENT))
+    else:
+        state.update(_origin_of_copy(git, repo, mine, copy_of, head=head))
     return state
 
 
@@ -355,22 +564,33 @@ def verdict(runner: dict, checkout: dict, *, paused: bool) -> dict:
     waiting. `paused` is reported separately rather than folded in, because a
     frozen box is somebody's decision and a broken runner is not.
     """
-    out = {"level": UNKNOWN, "key": None, "detail": None, "behind": None}
+    out = {"level": UNKNOWN, "key": None, "detail": None, "behind": None,
+           "runner_behind": None, "runner_from": None}
 
     if runner["kind"] == UNKNOWN:
         return {**out, "key": runner["reason_key"] or "unreadable",
                 "detail": runner["detail"]}
 
     if runner["kind"] == "copy":
-        if runner["gate0"] == "refuses (exit 14)":
+        if runner["gate0"] == GATE0_REFUSES:
             return {**out, "level": BROKEN, "key": "copy_drifted",
                     "detail": runner["detail"], "behind": checkout.get("behind")}
+        if runner["gate0"] == GATE0_CANNOT:
+            # Worse than the refusal, and quieter: nothing stops this copy, so
+            # releases keep going out with the deploy logic of the commit it was
+            # taken from while the site looks healthy. It is a `broken` level
+            # because the gates this repository now relies on are simply not in
+            # the file that runs them.
+            return {**out, "level": BROKEN, "key": "copy_predates_gate",
+                    "detail": runner["detail"], "behind": checkout.get("behind"),
+                    "runner_behind": runner.get("origin_behind"),
+                    "runner_from": runner.get("origin_short")}
         if runner["reason_key"]:
             return {**out, "level": WARN, "key": runner["reason_key"],
                     "detail": runner["detail"]}
         return {**out, "level": WARN, "key": "copy_matches"}
 
-    if runner["gate0"] != "passes":
+    if runner["gate0"] != GATE0_PASSES:
         return {**out, "level": WARN,
                 "key": runner["reason_key"] or "launcher_unreadable",
                 "detail": runner["detail"]}
@@ -398,6 +618,7 @@ REASON_KEYS = frozenset({
     "absent", "unreadable", "unrendered", "no_repo_line", "other_path",
     "entrypoint_unreadable", "launcher_stale", "checkout_file_unreadable",
     "drifted", "copy_matches", "copy_drifted", "launcher_unreadable",
+    "copy_predates_gate",
     # the checkout
     "not_a_checkout", "no_git", "branch_unreadable", "checkout_unreadable",
     # the verdict

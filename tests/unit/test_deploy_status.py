@@ -100,6 +100,41 @@ def launcher_for(repo: Path) -> str:
     return _render(ENTRYPOINT.read_text(encoding="utf-8"), repo)
 
 
+def strip_gate0(text: str) -> str:
+    """The same script as it was *before* Gate 0 existed."""
+    return text.split(IDENTITY_START, 1)[0] + text.split(IDENTITY_END, 1)[1]
+
+
+def checkout_whose_runner_predates_gate_0(tmp_path: Path) -> tuple[Path, str]:
+    """A checkout one commit *after* an installed copy that predates Gate 0.
+
+    This is the shape production was in on 2026-09-17, and the reason this file
+    grew a second failure mode: the runner was the revision from before the
+    identity check existed, so it had no check in it to refuse anything while
+    releases went out all week with the deploy logic of 45 commits ago. The page
+    said "Gate 0 refuses it, so no release can deploy" — wrong, and wrong in the
+    direction that hides the problem.
+    """
+    repo = tmp_path / "checkout"
+    (repo / "deploy").mkdir(parents=True)
+    old_text = strip_gate0((ROOT / "deploy/scangrade-deploy.sh").read_text(encoding="utf-8"))
+    assert IDENTITY_START not in old_text
+    (repo / "deploy/scangrade-deploy.sh").write_bytes(old_text.encode("utf-8"))
+    for name in ("entrypoint.sh", "scangrade-db-snapshot.sh"):
+        shutil.copyfile(ROOT / "deploy" / name, repo / "deploy" / name)
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("-c", "user.email=t@t", "-c", "user.name=t", "add", "-A", cwd=repo)
+    _git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm",
+         "before gate 0", cwd=repo)
+    old_short = _git("rev-parse", "--short", "HEAD", cwd=repo).stdout.strip()
+    shutil.copyfile(ROOT / "deploy/scangrade-deploy.sh",
+                    repo / "deploy/scangrade-deploy.sh")
+    _git("-c", "user.email=t@t", "-c", "user.name=t", "add", "-A", cwd=repo)
+    _git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm",
+         "gate 0", cwd=repo)
+    return repo, old_short
+
+
 def ahead_of_head(repo: Path) -> str:
     """Put one commit on `origin/main` that HEAD does not have, and return its sha."""
     _git("checkout", "-q", "-b", "upstream", cwd=repo)
@@ -202,6 +237,75 @@ class TestWhatIsInstalled:
         assert state["kind"] == "copy"
         assert state["gate0"] == "passes (the copy still matches)"
 
+    def test_a_stale_copy_is_named_and_counted(self, tmp_path):
+        """"A copy" is not an answer to "which fixes are missing" — the commit and
+        the distance are, and they are what the box could not tell anyone before."""
+        repo, _ = checkout_whose_runner_predates_gate_0(tmp_path)
+        # The blob itself, not git's text-mode stdout: the point of this reading is
+        # the bytes, so the fixture has to hand the reader the same ones.
+        blob = subprocess.run(
+            ["git", "cat-file", "blob", "HEAD~1:deploy/scangrade-deploy.sh"],
+            cwd=repo, capture_output=True).stdout
+        assert blob
+        source = tmp_path / "installed-snapshot"
+        source.write_bytes(blob)
+        copy = install_from(tmp_path, "scangrade-deploy", source)
+
+        state = status.runner_state(copy, repo, expect=launcher_for(repo))
+
+        assert state["kind"] == "copy"
+        assert state["has_identity_check"] is False
+        assert state["gate0"] == status.GATE0_CANNOT, (
+            "this copy has no Gate 0 in it, so it cannot refuse anything")
+        assert state["origin_key"] == status.ORIGIN_NAMED
+        assert state["origin_short"] == _git("rev-parse", "--short", "HEAD~1",
+                                            cwd=repo).stdout.strip()
+        assert state["origin_subject"] == "before gate 0"
+        assert state["origin_behind"] == 1
+        assert state["origin_stale_files"] == 1, "one file under deploy/ moved on"
+
+    def test_a_copy_of_this_commit_says_so_rather_than_naming_history(self, tmp_path):
+        repo = checkout(tmp_path)
+        copy = install_from(tmp_path, "scangrade-deploy",
+                            repo / "deploy/scangrade-deploy.sh")
+        state = status.runner_state(copy, repo)
+        assert state["origin_key"] == status.ORIGIN_CURRENT
+        assert state["origin_behind"] == 0
+        assert state["origin_stale_files"] == 0
+
+    def test_bytes_no_commit_ever_held_are_reported_as_unmatched(self, tmp_path):
+        """A hand-edited install is not a commit, and the page must not invent one.
+        The distance stays unknown rather than becoming a zero."""
+        repo = checkout(tmp_path)
+        state = state_of(tmp_path, repo, "scangrade-deploy",
+                         (repo / "deploy/scangrade-deploy.sh").read_text(encoding="utf-8")
+                         + "\n# edited on the box by hand\n")
+        assert state["origin_key"] == status.ORIGIN_UNMATCHED
+        assert state["origin_commit"] is None
+        assert state["origin_behind"] is None, "unknown is not zero"
+
+    def test_a_stale_launcher_is_named_and_counted(self, tmp_path):
+        """The launcher half of the same question: which commit rendered it."""
+        repo = checkout(tmp_path)
+        (repo / "deploy/entrypoint.sh").write_text(
+            (ROOT / "deploy/entrypoint.sh").read_text(encoding="utf-8")
+            + "\n# a fix landed after the install\n", encoding="utf-8")
+        _git("-c", "user.email=t@t", "-c", "user.name=t", "add", "-A", cwd=repo)
+        _git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm",
+             "entrypoint grows", cwd=repo)
+        old_short = _git("rev-parse", "--short", "HEAD~1", cwd=repo).stdout.strip()
+        old_render = _render(
+            _git("show", "HEAD~1:deploy/entrypoint.sh", cwd=repo).stdout, repo)
+        launcher = install(tmp_path, "scangrade-deploy", old_render)
+
+        state = status.runner_state(launcher, repo, expect=launcher_for(repo))
+
+        assert state["kind"] == "launcher"
+        assert state["gate0"] == status.GATE0_PASSES, "Gate 0 never judges a launcher"
+        assert state["origin_key"] == status.ORIGIN_NAMED
+        assert state["origin_short"] == old_short
+        assert state["origin_behind"] == 1
+
     def test_nothing_installed_is_unknown_not_zero(self, tmp_path):
         repo = checkout(tmp_path)
         state = status.runner_state(tmp_path / "bin" / "nothing", repo)
@@ -298,10 +402,12 @@ class TestWhereTheCheckoutIs:
         # An allowlist rather than a blocklist, so a *new* call site has to be
         # argued for here instead of quietly joining the reader.
         source = Path(status.__file__).read_text(encoding="utf-8")
-        assert source.count("--no-optional-locks") >= 1
-        calls = set(re.findall(r'_git_out\(git, repo,\s*"([a-z-]+)"', source))
+        assert source.count("--no-optional-locks") >= 2, "every git call must carry it"
+        calls = set(re.findall(
+            r'_git_(?:out|raw)\(git, repo,\s*"([a-z-]+)"', source))
         assert calls, "no git call sites found — did the reader stop reading?"
-        assert calls <= {"rev-parse", "rev-list", "log", "status", "for-each-ref"}, (
+        assert calls <= {"rev-parse", "rev-list", "log", "status", "for-each-ref",
+                         "diff", "cat-file"}, (
             f"these read nothing: {sorted(calls)}")
 
     def test_a_path_that_is_not_a_checkout_says_so(self, tmp_path):
@@ -392,10 +498,52 @@ class TestWhatItAddsUpTo:
         assert report["runner"]["gate0"] == status.UNKNOWN, "unknown is not a pass"
 
     @needs_git
-    def test_an_empty_installed_file_is_a_drifted_copy_not_a_pass(self, tmp_path):
-        """Gate 0 would `cmp` it and refuse, so the page has to say the same."""
+    def test_an_empty_installed_file_is_broken_not_a_pass(self, tmp_path):
+        """It carries no Gate 0 either, so nothing refuses it — and it is still not
+        a pass. The important half is "not fresh": an unknown is never a pass."""
         report = self._report(tmp_path, installed="")
-        assert report["verdict"]["key"] == "copy_drifted"
+        verdict = report["verdict"]
+        assert verdict["level"] == status.BROKEN
+        assert verdict["key"] == "copy_predates_gate"
+
+    @needs_git
+    def test_a_copy_without_gate_0_is_broken_for_the_other_reason(self, tmp_path):
+        """Production's shape, and the defect this page shipped with: nothing
+        refuses an old copy, so releases keep going out with the deploy logic of
+        the commit it came from. The page said the opposite."""
+        repo, _ = checkout_whose_runner_predates_gate_0(tmp_path)
+        source = tmp_path / "installed-snapshot"
+        source.write_bytes(subprocess.run(
+            ["git", "cat-file", "blob", "HEAD~1:deploy/scangrade-deploy.sh"],
+            cwd=repo, capture_output=True).stdout)
+        report = status.report(
+            repo=repo, runner=install_from(tmp_path, "scangrade-deploy", source),
+            snapshot_runner=install(tmp_path, "snap", launcher_for(repo)),
+            pause_file=tmp_path / "no-pause-flag")
+        verdict = report["verdict"]
+        assert verdict["level"] == status.BROKEN
+        assert verdict["key"] == "copy_predates_gate"
+        assert verdict["runner_behind"] == 1, "the distance travels with the verdict"
+        assert report["runner"]["has_identity_check"] is False
+        assert report["runner"]["origin_short"]
+
+    @needs_git
+    def test_the_two_copy_failures_are_never_collapsed_into_one(self, tmp_path):
+        """One copy is refused; the other is not refused and cannot be. Reporting
+        the second as the first is how a box went a week with no gates and a page
+        that said nothing could deploy."""
+        plain = {"available": True, "reason_key": None, "detail": None,
+                 "behind": 0, "dirty": 0}
+        refused = status.verdict(
+            {"kind": "copy", "gate0": status.GATE0_REFUSES, "detail": "deploy/x",
+             "reason_key": "drifted", "origin_behind": 1}, plain, paused=False)
+        unnoticed = status.verdict(
+            {"kind": "copy", "gate0": status.GATE0_CANNOT, "detail": "deploy/x",
+             "reason_key": "drifted", "origin_behind": 45}, plain, paused=False)
+        assert refused["key"] == "copy_drifted"
+        assert unnoticed["key"] == "copy_predates_gate"
+        assert refused["level"] == unnoticed["level"] == status.BROKEN, (
+            "both are failures; they differ in what is stopping the releases")
 
 
 # ── the page and Gate 0 cannot disagree ──────────────────────────────────────
@@ -498,7 +646,32 @@ def template_keys() -> set[str]:
     return set(re.findall(r"v\.key == '([a-z_]+)'", text))
 
 
+def template_origin_keys() -> set[str]:
+    """The provenance keys the template has a sentence for."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    return set(re.findall(r"status\.runner\.origin_key == '([a-z_]+)'", text))
+
+
+def template_gate0_literals() -> set[str]:
+    text = TEMPLATE.read_text(encoding="utf-8")
+    return set(re.findall(r"status\.runner\.gate0 == '([^']+)'", text))
+
+
 class TestTheVocabularyIsWired:
+    def test_every_gate0_verdict_has_a_sentence_in_both_languages(self):
+        """The template branches on these strings, so a constant renamed in Python
+        has to fail here rather than render as an empty row on the box."""
+        service = {status.GATE0_PASSES, status.GATE0_COPY_MATCHES,
+                   status.GATE0_REFUSES, status.GATE0_CANNOT}
+        assert service == template_gate0_literals(), (
+            f"service-only: {sorted(service - template_gate0_literals())}; "
+            f"template-only: {sorted(template_gate0_literals() - service)}")
+
+    def test_every_provenance_key_has_a_sentence(self):
+        assert template_origin_keys() == status.ORIGIN_KEYS, (
+            f"missing from the page: {sorted(status.ORIGIN_KEYS - template_origin_keys())}; "
+            f"invented by the page: {sorted(template_origin_keys() - status.ORIGIN_KEYS)}")
+
     def test_the_template_only_names_keys_the_service_has(self):
         unknown = template_keys() - status.REASON_KEYS
         assert not unknown, f"the template invents keys: {sorted(unknown)}"
@@ -554,6 +727,24 @@ def app():
     return create_app("testing")
 
 
+def render_status(app, report) -> str:
+    """The template with a given report — for the tests that read its copy.
+
+    `g.user_id` is what base.html branches on to render the signed-in layout; with
+    only a role set, the *content* block is never invoked and a test that greps the
+    result is grepping the chrome. That is how the first version of these three
+    tests "passed" their assertions about the page's sentences.
+    """
+    from flask import g, render_template
+    with app.test_request_context("/super-admin/deploy-status"):
+        g.user_id = "a-super-admin"
+        g.user_role = "super_admin"
+        g.user_name = "Tester"
+        g.user_email = "t@t"
+        g.tz_offset = 7
+        return render_template("super_admin/deploy_status.html", status=report)
+
+
 class TestThePage:
     def test_it_is_super_admin_only(self, app):
         client = app.test_client()
@@ -576,18 +767,73 @@ class TestThePage:
                          source), "the decorator order put the guard first"
 
     def test_it_renders_both_languages(self, app):
-        from flask import g, render_template
         report = status.report(repo="/nonexistent", runner="/nonexistent",
                                snapshot_runner="/nonexistent",
                                pause_file="/nonexistent")
-        with app.test_request_context("/super-admin/deploy-status"):
-            g.user_role = "super_admin"
-            html = render_template("super_admin/deploy_status.html", status=report)
+        html = render_status(app, report)
         # The unknown state must still render sentences rather than an empty box.
         assert html.count("t('") >= 20, (
             "the copy is pairs, not one language; the unknown branch alone renders "
             f"this many: {html.count(chr(116) + chr(39))}")
         assert "@REPO@" not in html
+        assert "Deploy Runner Status" in html, (
+            "the content block did not render — base.html gates it on g.user_id, and "
+            "a test that misses that is testing the chrome")
+
+    @needs_git
+    def test_a_copy_that_predates_gate_0_does_not_claim_a_refusal(self, app, tmp_path):
+        """The regression this whole change exists for.
+
+        Production's runner was older than Gate 0: no check in it could refuse
+        anything, and releases were going out with 45 commits of gate work missing.
+        The page must not tell that box that nothing can deploy — that is the wrong
+        story about the wrong failure, and it points at the wrong fix.
+        """
+        repo, _ = checkout_whose_runner_predates_gate_0(tmp_path)
+        source = tmp_path / "installed-snapshot"
+        source.write_bytes(subprocess.run(
+            ["git", "cat-file", "blob", "HEAD~1:deploy/scangrade-deploy.sh"],
+            cwd=repo, capture_output=True).stdout)
+        report = status.report(
+            repo=repo, runner=install_from(tmp_path, "scangrade-deploy", source),
+            snapshot_runner=install(tmp_path, "snap", launcher_for(repo)),
+            pause_file=tmp_path / "no-pause-flag")
+        html = render_status(app, report)
+
+        assert "no release can deploy" not in html, (
+            "the page claimed a refusal that this copy cannot make")
+        assert "nothing refuses it" in html
+        assert "Every gate added since is not in effect" in html
+
+    @needs_git
+    def test_a_copy_that_carries_gate_0_still_claims_the_refusal(self, app, tmp_path):
+        """The other direction: the sentence is not deleted, it is earned."""
+        repo, _ = checkout_whose_runner_predates_gate_0(tmp_path)
+        report = status.report(
+            repo=repo,
+            runner=install(tmp_path, "scangrade-deploy",
+                           (repo / "deploy/scangrade-deploy.sh")
+                           .read_text(encoding="utf-8") + "\n# drift\n"),
+            snapshot_runner=install(tmp_path, "snap", launcher_for(repo)),
+            pause_file=tmp_path / "no-pause-flag")
+        assert report["verdict"]["key"] == "copy_drifted"
+        assert report["runner"]["has_identity_check"] is True
+        html = render_status(app, report)
+        assert "no release can deploy" in html
+        assert "nothing refuses it" not in html
+
+    def test_the_stale_runner_number_is_the_first_thing_on_the_page(self, app, tmp_path):
+        """The number that answers "which fixes are missing" is the runner's own
+        distance, not the checkout's — a box can be perfectly up to date and still
+        deploying with week-old logic."""
+        report = status.report(repo="/nonexistent", runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file="/nonexistent")
+        html = render_status(app, report)
+        behind = html.find("Behind (runner)")
+        checkout_behind = html.find("Commits Behind")
+        assert behind != -1 and checkout_behind != -1
+        assert behind < checkout_behind, "the runner's distance comes first"
 
     def test_the_template_writes_every_sentence_in_both_languages(self):
         """The reason a key is a key: the copy lives here, where the toggle and the

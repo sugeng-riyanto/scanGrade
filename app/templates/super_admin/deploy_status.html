@@ -28,7 +28,14 @@
                     {% if v.key == 'fresh' %}
                     <span x-text="t('Runner yang berjalan adalah launcher checkout ini, dan tidak ada commit yang tertinggal.','The running runner is this checkout’s own launcher, and no commit is behind.')"></span>
                     {% elif v.key == 'copy_drifted' %}
-                    <span x-text="t('Runner yang terpasang adalah SALINAN yang sudah menyimpang dari checkout. Gate 0 menolaknya dengan exit 14, sehingga tidak ada rilis yang bisa deploy sampai installer dijalankan sekali lagi.','The installed runner is a COPY that has drifted from the checkout. Gate 0 refuses it with exit 14, so no release can deploy until the installer is run once.')"></span>
+                    <span x-text="t('Runner yang terpasang adalah SALINAN yang sudah menyimpang dari checkout, dan salinan itu membawa pemeriksaan Gate 0 sendiri. Gate 0 menolaknya dengan exit 14, sehingga tidak ada rilis yang bisa deploy sampai installer dijalankan sekali lagi.','The installed runner is a COPY that has drifted from the checkout, and that copy carries Gate 0’s own check. Gate 0 refuses it with exit 14, so no release can deploy until the installer is run once.')"></span>
+                    {#
+                        The louder failure, and the one that was mis-reported before:
+                        a copy old enough to predate Gate 0 has no check to refuse it,
+                        so releases keep going out with that revision's deploy logic.
+                    #}
+                    {% elif v.key == 'copy_predates_gate' %}
+                    <span x-text="t('Runner yang terpasang adalah SALINAN dari commit lama, dan isinya belum mengenal Gate 0 sama sekali — jadi tidak ada yang menolaknya: rilis tetap jalan memakai logika deploy dari commit itu. Setiap gate yang ditambahkan setelahnya tidak berlaku di sini, dan situs tetap terlihat normal. Jalankan installer sekali.','The installed runner is a COPY from an older commit, and it does not know Gate 0 at all — so nothing refuses it: releases keep going out with that commit’s deploy logic. Every gate added since is not in effect here, and the site still looks healthy. Run the installer once.')"></span>
                     {% elif v.key == 'copy_matches' %}
                     <span x-text="t('Runner yang terpasang masih salinan, tetapi isinya sama dengan checkout sehingga hari ini tetap bisa deploy. Salinan berhenti menerima perbaikan sejak dipasang.','The installed runner is still a copy, but it matches the checkout, so it deploys today. A copy stops receiving fixes the moment it is installed.')"></span>
                     {% elif v.key == 'launcher_stale' %}
@@ -67,7 +74,20 @@
     </div>
 
     <!-- ── the numbers ──────────────────────────────────────────────────── -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {#
+            First, and deliberately so: "how far behind is the *runner*" is the
+            number that answers "which fixes are missing", and it is the one nobody
+            could get without a shell. The checkout's own figures follow.
+        #}
+        <div class="card p-4">
+            {% if status.runner.origin_behind is not none and status.runner.origin_behind > 0 %}
+            <p class="text-2xl font-extrabold text-rose-700">{{ status.runner.origin_behind }}</p>
+            {% else %}
+            <p class="text-2xl font-extrabold text-surface-800">{{ status.runner.origin_behind if status.runner.origin_behind is not none else '—' }}</p>
+            {% endif %}
+            <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('Tertinggal (runner)','Behind (runner)')"></p>
+        </div>
         <div class="card p-4">
             <p class="text-2xl font-extrabold text-surface-800">{{ status.checkout.behind if status.checkout.behind is not none else '—' }}</p>
             <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('Commit Tertinggal','Commits Behind')"></p>
@@ -113,8 +133,38 @@
                     {% if status.runner.gate0 == 'passes' %}<span x-text="t('Lolos','Passes')"></span>
                     {% elif status.runner.gate0 == 'passes (the copy still matches)' %}<span x-text="t('Lolos (salinannya masih identik)','Passes (the copy still matches)')"></span>
                     {% elif status.runner.gate0 == 'refuses (exit 14)' %}<span class="text-rose-700" x-text="t('Menolak (exit 14)','Refuses (exit 14)')"></span>
+                    {% elif status.runner.gate0 == 'cannot refuse (no Gate 0)' %}<span class="text-rose-700" x-text="t('Tidak menolak — salinan ini tidak punya Gate 0','Does not refuse — this copy has no Gate 0')"></span>
                     {% else %}<span x-text="t('Tidak bisa dinilai','Cannot be judged')"></span>{% endif %}
                 </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <span class="text-surface-500 shrink-0" x-text="t('Runner ini dari commit','Which commit this runner is')"></span>
+                <span class="text-right min-w-0">
+                    {% if status.runner.origin_key == 'current' %}
+                    <span class="text-xs font-bold text-emerald-700" x-text="t('Commit ini','This commit')"></span>
+                    {% elif status.runner.origin_key == 'named' %}
+                    <code class="font-mono text-xs text-surface-700">{{ status.runner.origin_short or '—' }}</code>
+                    {% if status.runner.origin_subject %}<span class="block text-xs text-surface-500 break-words">{{ status.runner.origin_subject }}</span>{% endif %}
+                    {% elif status.runner.origin_key == 'unmatched' %}
+                    <span class="text-xs text-amber-700" x-text="t('Tidak ada commit dengan isi seperti ini — mungkin pernah disunting langsung di server','No commit has these bytes — it may have been edited on the server by hand')"></span>
+                    {% elif status.runner.origin_key == 'unreadable' %}
+                    <span class="text-xs text-surface-500" x-text="t('Tidak bisa dibaca dari sini','Cannot be read from here')"></span>
+                    {% else %}
+                    <span class="text-surface-500">—</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Commit tertinggal (runner)','Commits behind (runner)')"></span>
+                {% if status.runner.origin_behind is not none and status.runner.origin_behind > 0 %}
+                <span class="font-bold text-rose-700">{{ status.runner.origin_behind }}</span>
+                {% else %}
+                <span class="font-bold text-surface-800">{{ status.runner.origin_behind if status.runner.origin_behind is not none else '—' }}</span>
+                {% endif %}
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Berkas deploy/ berubah sejak itu','Files under deploy/ changed since')"></span>
+                <code class="font-mono text-xs text-surface-700">{{ status.runner.origin_stale_files if status.runner.origin_stale_files is not none else '—' }}</code>
             </div>
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
                 <span class="text-surface-500" x-text="t('Sidik Jari Berkas','File Fingerprint')"></span>
@@ -184,6 +234,7 @@
         <ul class="mt-3 space-y-2 text-xs text-surface-500 list-disc pl-5 leading-relaxed">
             <li><span x-text="t('Halaman ini tidak fetch apa pun. Angka commit tertinggal adalah jarak ke origin/main yang terakhir dilihat checkout, dan umurnya tertulis di atas.','This page fetches nothing. The commits-behind figure is the distance to the origin/main the checkout last saw, and its age is written above.')"></span></li>
             <li><span x-text="t('Setiap bagian yang tidak bisa diukur mengatakan alasannya, bukan menampilkan nol — nol di sini terbaca sebagai “sudah terbaru”.','Every part that cannot be measured says why instead of showing a zero — a zero here reads as “up to date”.')"></span></li>
+            <li><span x-text="t('Isi runner dicocokkan dengan riwayat checkout ini, jadi commit yang disebutkannya adalah yang paling baru diketahui checkout ini, bukan apa yang ada di server GitHub.','The runner’s bytes are matched against this checkout’s history, so the commit it names is the newest one this checkout knows — not what GitHub holds.')"></span></li>
             <li><span x-text="t('Perubahan yang mengejutkan di halaman ini tidak akan muncul di sini; ini hanya membaca filesystem.','A surprise on this page is not written by it — it only reads the filesystem.')"></span></li>
             <li><span class="font-mono">{{ status.measured_at }}</span></li>
         </ul>
