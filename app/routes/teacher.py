@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
 from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
 from app.utils.cache import cache_get, cache_set, cache_delete
-from app.utils.helpers import row_or_none
+from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
 from app.decorators.subscription import require_subscription
-from app.utils.exam_access import can_manage_exam
+from app.utils.exam_access import can_manage_exam, exam_class_ids
 from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.question_types import (
@@ -324,6 +324,26 @@ def _needs_answer_key(exam: dict) -> bool:
     return True
 
 
+def _needs_class_assignment(exam: dict) -> bool:
+    """Is this exam invisible to every pupil because no class was picked?
+
+    An exam is offered to the classes the teacher assigned it to and to nobody
+    else (`exam_access.class_assignment_allows`), so an active, visible exam with
+    no classes reaches no one — the teacher sees it in their own list and the
+    pupils see nothing, with nothing anywhere saying why.
+
+    The test is deliberately narrow: only an exam the teacher has *published and
+    activated* is a surprise, because that is the state in which they expect a
+    class to be answering it. A draft nobody can reach is not news.
+
+    Same lesson as `_needs_answer_key` above: `class_ids` has to be in this
+    route's column list, or this card is permanent and nothing the teacher does
+    can clear it.
+    """
+    return bool(exam.get("is_published")) and exam.get("status") == "active" \
+        and not exam_class_ids(exam)
+
+
 def _invalidate_teacher_dashboard() -> None:
     """Drop this teacher's cached dashboard row.
 
@@ -350,7 +370,16 @@ def dashboard():
     # `answer_key` is here because the "no answer key" card below reads it:
     # leaving a column out of the list while the code below still reads it made
     # that warning permanent. See _needs_answer_key().
-    res = supabase.table("exams").select("id,title,subject,question_types,answer_key,total_questions,status,is_published,created_at,start_at,question_canvas,question_audio").eq("teacher_id", g.user_id).order("created_at", desc=True).execute()
+    # `class_ids` is here for the same reason `answer_key` is: the "no class"
+    # card below reads it, and a column missing from this list would make that
+    # warning permanent. See _needs_class_assignment().
+    # Retried, unlike the rest of this page: Supabase drops keep-alive
+    # connections and this read threw `RemoteProtocolError: Server disconnected`
+    # straight out of the view — measured on the running server, the dashboard
+    # answered its error page on 2 of 5 loads while nothing was wrong. A retry is
+    # what `read_with_retry` exists for, and this is the page a teacher opens
+    # first.
+    res = read_with_retry(lambda: supabase.table("exams").select("id,title,subject,question_types,answer_key,total_questions,status,is_published,created_at,start_at,question_canvas,question_audio,class_ids").eq("teacher_id", g.user_id).order("created_at", desc=True).execute())
     exams = res.data or []
 
     exam_ids = [e["id"] for e in exams]
@@ -360,12 +389,15 @@ def dashboard():
     upcoming_exams = []
     grading_progress = {}
     exams_no_key = []
+    # Both warnings are computed inside `if exam_ids`, so they need a default for
+    # the teacher who has no exams yet — the template reads them unconditionally.
+    exams_unassigned = []
     # Assigned inside `if exam_ids` below, but the class-analytics section always
     # reads it — a teacher with zero exams got UnboundLocalError (500) otherwise.
     subs = []
 
     if exam_ids:
-        subs = supabase.table("submissions").select("student_id,score,final_score,status,exam_id").in_("exam_id", exam_ids).execute().data or []
+        subs = read_with_retry(lambda: supabase.table("submissions").select("student_id,score,final_score,status,exam_id").in_("exam_id", exam_ids).execute()).data or []
         unique_students = set(s["student_id"] for s in subs)
         total_students = len(unique_students)
         all_scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs if s.get("final_score") or s.get("score")]
@@ -410,6 +442,8 @@ def dashboard():
         # Exams the warning on the card is true about: MCQ questions, no answer
         # set to score them with, so the students' MCQ score is 0.
         exams_no_key = [e for e in exams if _needs_answer_key(e)]
+        # Live exams that reach nobody: no class ticked, so no pupil can see them.
+        exams_unassigned = [e for e in exams if _needs_class_assignment(e)]
 
     # ── Class Analytics ──
     # Per-exam performance breakdown (sorted by avg — hardest first)
@@ -462,7 +496,7 @@ def dashboard():
         "exams": exams, "total_students": total_students,
         "avg_score": avg_score, "all_scores": all_scores, "user_name": user_name,
         "assignments": assignments, "classes": classes, "subjects": subjects,
-        "exams_no_key": exams_no_key,
+        "exams_no_key": exams_no_key, "exams_unassigned": exams_unassigned,
         "pending_grading": pending_grading, "upcoming_exams": upcoming_exams,
         "grading_progress": grading_progress,
         "exam_stats": exam_stats[:6],
@@ -1230,7 +1264,13 @@ def my_exams():
     if g.get("user_role") == "admin_sekolah" and g.get("user_school_id"):
         query = supabase.table("exams").select("*").eq("school_id", g.get("user_school_id"))
     res = query.order("created_at", desc=True).execute()
-    return render_template("teacher/exams.html", exams=res.data or [])
+    exams = res.data or []
+    # Which cards get the "no class" badge. Computed here rather than in the
+    # template because `class_ids` arrives as jsonb — a JSON *string* is truthy in
+    # Jinja, so `{% if not exam.class_ids %}` would miss exactly the empty case it
+    # is there to catch.
+    unassigned_ids = {e["id"] for e in exams if _needs_class_assignment(e)}
+    return render_template("teacher/exams.html", exams=exams, unassigned_ids=unassigned_ids)
 
 
 @teacher_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])

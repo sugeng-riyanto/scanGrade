@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 from flask import Blueprint, render_template, request, redirect, g, jsonify, current_app, make_response, flash
 from app.utils.auth import login_required, get_supabase
 from app.utils.cache import cache_get, cache_set
-from app.utils.helpers import row_or_none
-from app.utils.exam_access import result_released, exam_sitting_allowed
+from app.utils.helpers import read_with_retry, row_or_none
+from app.utils.exam_access import (
+    class_assignment_allows, exam_sitting_allowed, result_released,
+)
 from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
 from app.services.pdf_service import ensure_page_thumbs
@@ -78,27 +80,17 @@ def dashboard():
         query = supabase.table("exams").select("id,title,subject,start_at,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
-        all_exams = query.execute().data or []
+        # Same rule as the door the pupil walks through (`exam_sitting_allowed`),
+        # from the same function: an exam is offered to the classes the teacher
+        # assigned it to, and to nobody else.
+        all_exams = read_with_retry(query.execute).data or []
         now_iso = datetime.now(timezone.utc).isoformat()
-        # Filter by class_id if student has one, AND check scheduling
         for e in all_exams:
             start_at = e.get("start_at")
             if start_at and str(start_at) > now_iso[:19]:
                 continue
-            cids = e.get("class_ids") or []
-            if isinstance(cids, str):
-                try:
-                    cids = json.loads(cids)
-                except (json.JSONDecodeError, TypeError):
-                    cids = []
-            if isinstance(cids, list):
-                cids = [c for c in cids if c]
-            if student_class_id:
-                if not cids or student_class_id in cids:
-                    available_exams.append(e)
-            else:
-                if not cids:
-                    available_exams.append(e)
+            if class_assignment_allows(e, student_class_id):
+                available_exams.append(e)
     except Exception as e:
         current_app.logger.error(f"Dashboard query error: {e}")
     available_exams = [e for e in available_exams if e["id"] not in submitted_ids]
@@ -273,11 +265,14 @@ def exam_list():
         # Only the columns the card renders: `select("*")` shipped the whole exam
         # row — which carries question_canvas JSON — to every student's browser
         # context, and made the response bigger to parse for nothing.
-        query = supabase.table("exams").select("id,title,subject,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
+        # `class_ids` belongs in this column list: the filter below reads it, and
+        # leaving it out made every row look unassigned. `not cids` then matched
+        # every exam in the school, so a pupil in X-B was shown the papers for X-A
+        # and XI-A and had all three refused one click later.
+        query = supabase.table("exams").select("id,title,subject,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
-        res = query.order("created_at", desc=True).execute()
-        all_exams = res.data or []
+        all_exams = read_with_retry(lambda: query.order("created_at", desc=True).execute()).data or []
         now_iso = datetime.now(timezone.utc).isoformat()
         # Filter by class_id if student has one, AND check scheduling
         for e in all_exams:
@@ -296,20 +291,10 @@ def exam_list():
             start_at = e.get("start_at")
             if start_at and str(start_at) > now_iso[:19]:
                 continue
-            cids = e.get("class_ids") or []
-            if isinstance(cids, str):
-                try:
-                    cids = json.loads(cids)
-                except (json.JSONDecodeError, TypeError):
-                    cids = []
-            if isinstance(cids, list):
-                cids = [c for c in cids if c]
-            if student_class_id:
-                if not cids or student_class_id in cids:
-                    exams.append(e)
-            else:
-                if not cids:
-                    exams.append(e)
+            # The same predicate the access guard applies. `not cids` — an exam
+            # the teacher never assigned — is no longer a match for everyone.
+            if class_assignment_allows(e, student_class_id):
+                exams.append(e)
     except Exception as e:
         current_app.logger.error(f"Exam list query error: {e}")
 

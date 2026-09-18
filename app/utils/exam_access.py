@@ -61,6 +61,40 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
     return False
 
 
+def exam_class_ids(exam) -> list[str]:
+    """The classes an exam is assigned to, however Supabase handed them over.
+
+    `class_ids` is jsonb, and a value written with `json.dumps` arrives as a JSON
+    *string*, so every reader used to carry its own `json.loads` — and the readers
+    that forgot one silently saw "no classes" instead of the classes on file.
+    """
+    raw = (exam or {}).get("class_ids") if isinstance(exam, dict) else exam
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            raw = []
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    return [str(c) for c in raw if c]
+
+
+def class_assignment_allows(exam, student_class_id) -> bool:
+    """May a pupil whose class is `student_class_id` see this exam?
+
+    Assignment is a POSITIVE fact: an exam is visible to the classes the teacher
+    ticked in the builder, and to nobody else. It used to be read the other way
+    round — no classes ticked meant "the whole school" — so one unassigned exam
+    sat in the list of every class in the school while the access guard refused it
+    one click later, which is the dead end a pupil reported as "Ujian ini tidak
+    ditugaskan untuk kelas Anda".
+
+    A pupil with no class on file matches nothing (not a wildcard), which is the
+    same answer `exam_sitting_allowed` gives, so the list and the door agree.
+    """
+    return bool(student_class_id) and str(student_class_id) in exam_class_ids(exam)
+
+
 def exam_sitting_allowed(supabase, exam, exam_id, student_id):
     """Return ``(allowed, reason)`` — may this student open/sync this exam?
 
@@ -88,16 +122,12 @@ def exam_sitting_allowed(supabase, exam, exam_id, student_id):
     if exam_school_id and str(student_school_id or "") != str(exam_school_id):
         return False, "Ujian ini tidak tersedia untuk sekolah Anda."
 
-    exam_class_ids = exam.get("class_ids") or []
-    if isinstance(exam_class_ids, str):
-        try:
-            exam_class_ids = json.loads(exam_class_ids)
-        except (json.JSONDecodeError, TypeError):
-            exam_class_ids = []
-    exam_class_ids = [c for c in exam_class_ids if c]
-    # An exam assigned to classes must match the student's class. A student with
-    # no class on file is refused rather than treated as a wildcard.
-    if exam_class_ids and (not student_class_id or student_class_id not in exam_class_ids):
+    # One predicate, shared with the lists that offer the exam: an exam assigned
+    # to classes matches the pupil's class, an exam assigned to none matches
+    # nobody, and a pupil with no class on file is refused rather than treated as
+    # a wildcard. A list that computes this for itself can disagree with this
+    # door, and then the pupil is offered a page that refuses them.
+    if not class_assignment_allows(exam, student_class_id):
         return False, "Ujian ini tidak ditugaskan untuk kelas Anda."
 
     return True, ""

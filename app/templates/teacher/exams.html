@@ -52,6 +52,14 @@
                         {% if exam.is_template %}
                         <span class="badge bg-purple-50 text-purple-700"><i class="fas fa-copy mr-0.5"></i>Template</span>
                         {% endif %}
+                        {# A live exam with no class ticked reaches no pupil at all, and
+                           nothing about the card used to say so. The set is computed in
+                           the route, where `class_ids` is known to be readable. #}
+                        {% if exam.id in unassigned_ids %}
+                        {# `:lang="lang"` because this page pins its own copy to Indonesian while the
+                           badge follows the toggle — WCAG 3.1.2, same as the count in the header. #}
+                        <span class="badge bg-rose-50 text-rose-700" :lang="lang"><i class="fas fa-user-slash mr-0.5"></i><span x-text="t('Tanpa kelas','No class')"></span></span>
+                        {% endif %}
                     </div>
                 </div>
 

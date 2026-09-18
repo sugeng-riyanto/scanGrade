@@ -19,7 +19,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.utils.exam_access import result_released, exam_sitting_allowed
+from app.utils.exam_access import (
+    class_assignment_allows, exam_class_ids, exam_sitting_allowed, result_released,
+)
 
 
 # ── fakes ────────────────────────────────────────────────────────
@@ -142,10 +144,17 @@ class TestExamSittingAllowed:
         assert allowed is True
         assert reason == ""
 
-    def test_exam_open_to_the_whole_school_is_allowed(self):
-        allowed, _ = exam_sitting_allowed(
+    def test_an_exam_assigned_to_no_class_reaches_nobody(self):
+        """Assignment is a positive fact — an empty `class_ids` is not "everyone".
+
+        This used to be allowed, on the reading that unticked classes meant the
+        whole school. A pupil in X-B was therefore shown the papers written for
+        X-A and XI-A, and every one of them refused them on the next click.
+        """
+        allowed, reason = exam_sitting_allowed(
             FakeSupabase(STUDENT), exam(class_ids=[]), "exam-1", "stu-1")
-        assert allowed is True
+        assert allowed is False
+        assert "kelas" in reason.lower()
 
     def test_a_failed_lookup_denies_rather_than_allows(self):
         """Fail CLOSED. The old checks wrapped themselves in `except: pass`, so a
@@ -160,6 +169,61 @@ class TestExamSittingAllowed:
         allowed, _ = exam_sitting_allowed(
             FakeSupabase(None), exam(), "exam-1", "stu-1")
         assert allowed is False
+
+
+# ── the predicate the lists and the door share ────────────────────
+
+class TestClassAssignment:
+    """`class_assignment_allows` is the one answer both halves of the app use.
+
+    Two places decide whether a pupil is *shown* an exam — the exam list and the
+    dashboard, which filters the same rows — and one decides whether they may
+    *open* it. When each carried its own copy, the list offered what the door
+    refused, and the pupil met "Ujian ini tidak ditugaskan untuk kelas Anda."
+    after clicking a card the app had just handed them.
+    """
+
+    def test_a_ticked_class_matches(self):
+        assert class_assignment_allows(exam(class_ids=["class-7A"]), "class-7A") is True
+
+    def test_another_class_does_not_match(self):
+        assert class_assignment_allows(exam(class_ids=["class-7A"]), "class-8B") is False
+
+    def test_no_assignment_matches_nobody(self):
+        assert class_assignment_allows(exam(class_ids=[]), "class-7A") is False
+
+    def test_no_class_on_file_is_not_a_wildcard(self):
+        assert class_assignment_allows(exam(class_ids=["class-7A"]), None) is False
+        assert class_assignment_allows(exam(class_ids=[]), None) is False
+
+    def test_a_json_string_is_read_as_a_list(self):
+        assert exam_class_ids({"class_ids": json.dumps(["class-7A"])}) == ["class-7A"]
+
+    def test_a_broken_json_string_is_not_a_crash_and_not_a_match(self):
+        assert exam_class_ids({"class_ids": "{"}) == []
+        assert exam_class_ids({}) == []
+        assert exam_class_ids({"class_ids": None}) == []
+        # A bare string is not a list of classes, so it matches nothing.
+        assert exam_class_ids({"class_ids": "class-7A"}) == []
+        assert class_assignment_allows({"class_ids": "class-7A"}, "class-7A") is False
+
+    def test_ids_of_any_type_compare_as_strings(self):
+        assert exam_class_ids({"class_ids": [123]}) == ["123"]
+        assert class_assignment_allows({"class_ids": [123]}, "123") is True
+
+    def test_the_door_agrees_with_the_predicate_on_every_shape(self):
+        """Whatever the rule becomes, the list and the door must not disagree.
+
+        The route tests in `test_exam_assignment` assert this from the page's
+        side; this asserts it directly, over every shape `class_ids` arrives in.
+        """
+        for ids in ([], ["class-7A"], ["class-8B"], json.dumps(["class-7A"]), "{"):
+            for klass in ("class-7A", None):
+                want = class_assignment_allows(exam(class_ids=ids), klass)
+                got, reason = exam_sitting_allowed(
+                    FakeSupabase({"school_id": "school-A", "class_id": klass}),
+                    exam(class_ids=ids), "exam-1", "stu-1")
+                assert got is want, (ids, klass, got, want, reason)
 
 
 # ── the review template must not leak an unreleased key ──────────
