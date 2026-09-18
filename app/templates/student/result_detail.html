@@ -288,6 +288,15 @@
                        for itself cannot show a matching answer at all. #}
                     {% set is_correct = correct is not none and correct != '' and q_correct(qtype, correct, student_ans) %}
                     {% set qweight = question_weights.get(q_idx_str, '') %}
+                    {# The marks this question is worth, and what it earned. On an exam with
+                       a mark scheme a matching question answered 3 ways of 4 earns 3/4 of
+                       its marks, and `q_part_factor` is the very function the total was
+                       computed with — a report that worked this out for itself could show
+                       marks that do not add up to the score above them. #}
+                    {% set q_marks = (qweight|float) if qweight else 0 %}
+                    {% set q_partial = q_partial_credit(question_weights) %}
+                    {% set q_factor = q_part_factor(qtype, correct, student_ans) if q_partial else (1 if is_correct else 0) %}
+                    {% set q_earned = (q_marks * q_factor)|round(2) %}
                     {% set teacher_score = fb_scores.get(q_idx_str, '') %}
                     {% set teacher_comment = fb_comments.get(q_idx_str, '') %}
                     <tr>
@@ -295,13 +304,25 @@
                         {# Each label is a pair, so it flips with the toggle like the rest of
                            the page — and so a new question type cannot arrive as an
                            untranslated word. #}
-                        <td>{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}<span x-text="lang==='en'?'True / False':'Benar / Salah'"></span>{% elif q_kind(qtype) == 'match' %}<span x-text="lang==='en'?'Matching':'Menjodohkan'"></span>{% elif q_kind(qtype) == 'dragdrop' %}<span x-text="lang==='en'?'Drag &amp; drop':'Susun Kata'"></span>{% else %}<span x-text="lang==='en'?'Essay':'Esai'"></span>{% endif %}</td>
+                        <td>{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}<span x-text="lang==='en'?'True / False':'Benar / Salah'"></span>{% elif q_kind(qtype) == 'match' %}<span x-text="lang==='en'?'Matching':'Menjodohkan'"></span>{% elif q_kind(qtype) == 'dragdrop' %}<span x-text="lang==='en'?'Drag &amp; drop':'Tarik &amp; Letakkan'"></span>{% elif q_kind(qtype) == 'ordering' %}<span x-text="lang==='en'?'Ordering':'Mengurutkan'"></span>{% else %}<span x-text="lang==='en'?'Essay':'Esai'"></span>{% endif %}</td>
                         <td>{{ q_answer_text(qtype, student_ans) or '—' }}</td>
                         <td>{{ ('Bonus' if is_bonus else q_answer_text(qtype, correct)) or ('Esai' if q_is_essay(qtype) else '—') }}</td>
                         <td class="{% if is_bonus %}bonus{% elif is_correct %}correct{% elif q_is_essay(qtype) %}{% else %}wrong{% endif %}">
                             {% if is_bonus %}★{% elif is_correct %}✓{% elif q_is_essay(qtype) %}—{% else %}✗{% endif %}
                         </td>
-                        <td>{{ qweight if qweight else '—' }}</td>
+                        <td class="tabular-nums">
+                            {% if q_is_essay(qtype) %}
+                            {{ q_marks if q_marks else '—' }}
+                            {% elif not correct %}
+                            —
+                            {% elif q_earned == q_marks %}
+                            {{ q_marks }} / {{ q_marks }}
+                            {% else %}
+                            <span class="font-extrabold text-amber-700">{{ q_earned }}</span> / {{ q_marks }}
+                            <span class="block text-[10px] font-bold text-amber-600"
+                                  x-text="lang==='en'?'part marks':'nilai sebagian'"></span>
+                            {% endif %}
+                        </td>
                         {% if submission.status in ('graded', 'published') %}
                         <td>{{ teacher_score if teacher_score is defined and teacher_score != '' else '—' }}</td>
                         <td>{{ teacher_comment if teacher_comment else '—' }}</td>
@@ -346,7 +367,7 @@
                 <div class="print-only" style="display:none;">
                     <div class="print-q-header">
                         <span class="q-num">Soal #{{ i + 1 }}</span>
-                        <span class="q-type {{ 'mcq' if q_is_objective(qtype) else 'essay' }}">{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}<span x-text="lang==='en'?'TRUE / FALSE':'BENAR / SALAH'"></span>{% elif q_kind(qtype) == 'match' %}<span x-text="lang==='en'?'MATCHING':'MENJODOHKAN'"></span>{% elif q_kind(qtype) == 'dragdrop' %}<span x-text="lang==='en'?'DRAG &amp; DROP':'SUSUN KATA'"></span>{% else %}<span x-text="lang==='en'?'ESSAY':'ESAI'"></span>{% endif %}</span>
+                        <span class="q-type {{ 'mcq' if q_is_objective(qtype) else 'essay' }}">{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}<span x-text="lang==='en'?'TRUE / FALSE':'BENAR / SALAH'"></span>{% elif q_kind(qtype) == 'match' %}<span x-text="lang==='en'?'MATCHING':'MENJODOHKAN'"></span>{% elif q_kind(qtype) == 'dragdrop' %}<span x-text="lang==='en'?'DRAG &amp; DROP':'TARIK &amp; LETAKKAN'"></span>{% elif q_kind(qtype) == 'ordering' %}<span x-text="lang==='en'?'ORDERING':'MENGURUTKAN'"></span>{% else %}<span x-text="lang==='en'?'ESSAY':'ESAI'"></span>{% endif %}</span>
                     </div>
                 </div>
 
@@ -402,9 +423,24 @@
                             {% set s_pages = essay_ans.get('pages', {}) %}
                             {% set s_page_keys = s_pages.keys() | list %}
                             {% set ov_page_keys = teacher_overlay.keys() | list %}
-                            {% for p_key in s_page_keys + ov_page_keys %}
+                            {# One block per page, not per map.
+
+                               Concatenating the two key lists rendered a page
+                               twice whenever the student had drawn on it *and* the
+                               teacher had annotated it — the same paper page, its
+                               drawing and its annotation, printed twice in a row —
+                               which reads as "the annotation is on several pages".
+                               The block below draws both maps for one key, so the
+                               keys have to be merged first; `print/report_card.html`
+                               already did. #}
+                            {% set p_keys = namespace(all=[]) %}
+                            {% for k in s_page_keys %}{% if k not in p_keys.all %}{% set p_keys.all = p_keys.all + [k] %}{% endif %}{% endfor %}
+                            {% for k in ov_page_keys %}{% if k not in p_keys.all %}{% set p_keys.all = p_keys.all + [k] %}{% endif %}{% endfor %}
+                            {% for p_key in p_keys.all %}
                             {% set p_idx = p_key|int %}
-                            {% set pdf_idx = p_idx if (s_pages and '0' in s_pages) else (p_idx - 1) %}
+                            {# The key *is* the page index: both writers subtract one
+                               from the page they are on (`this.page - 1`). #}
+                            {% set pdf_idx = p_idx %}
                             {% set pdf_url = pdf_pages[pdf_idx] if (pdf_idx >= 0 and pdf_idx < (pdf_pages|length)) else '' %}
                             {% set p_data = s_pages.get(p_key, {}) %}
                             {% set ov_data = teacher_overlay.get(p_key, {}) %}

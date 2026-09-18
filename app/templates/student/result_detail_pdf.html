@@ -142,7 +142,7 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; font-size: 10p
         <span class="q-num">Soal #{{ i + 1 }}
             {% if qweight %} <span class="weight-badge">{{ qweight }} poin</span>{% endif %}
         </span>
-        <span class="q-type {{ 'mcq' if q_is_objective(qtype) else 'essay' }}">{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}BENAR/SALAH{% elif q_kind(qtype) == 'match' %}MENJODOHKAN{% elif q_kind(qtype) == 'dragdrop' %}SUSUN KATA{% else %}ESAI{% endif %}</span>
+        <span class="q-type {{ 'mcq' if q_is_objective(qtype) else 'essay' }}">{% if q_kind(qtype) == 'choice' %}MCQ{% elif q_kind(qtype) == 'truefalse' %}BENAR/SALAH{% elif q_kind(qtype) == 'match' %}MENJODOHKAN{% elif q_kind(qtype) == 'dragdrop' %}TARIK &amp; LETAKKAN{% elif q_kind(qtype) == 'ordering' %}MENGURUTKAN{% else %}ESAI{% endif %}</span>
     </div>
     <div class="q-body">
         {% if q_is_objective(qtype) %}

@@ -157,8 +157,8 @@
                                essay icon for everything that was not a choice question. #}
                             {% set qkind = q_kind(qtype) %}
                             {% if qkind != 'choice' %}
-                            <span class="absolute -top-1.5 -right-1.5 text-[7px] {% if qkind == 'truefalse' %}text-primary-500{% elif qkind == 'match' %}text-violet-500{% elif qkind == 'dragdrop' %}text-rose-500{% elif qtype == 'essay_text' %}text-amber-500{% else %}text-emerald-500{% endif %}">
-                                <i class="fas {% if qkind == 'truefalse' %}fa-toggle-on{% elif qkind == 'match' %}fa-arrows-left-right{% elif qkind == 'dragdrop' %}fa-hand-pointer{% elif qtype == 'essay_text' %}fa-font{% else %}fa-paint-brush{% endif %}"></i>
+                            <span class="absolute -top-1.5 -right-1.5 text-[7px] {% if qkind == 'truefalse' %}text-primary-500{% elif qkind == 'match' %}text-violet-500{% elif qkind == 'dragdrop' %}text-rose-500{% elif qkind == 'ordering' %}text-sky-500{% elif qtype == 'essay_text' %}text-amber-500{% else %}text-emerald-500{% endif %}">
+                                <i class="fas {% if qkind == 'truefalse' %}fa-toggle-on{% elif qkind == 'match' %}fa-arrows-left-right{% elif qkind == 'dragdrop' %}fa-hand-pointer{% elif qkind == 'ordering' %}fa-arrow-down-1-9{% elif qtype == 'essay_text' %}fa-font{% else %}fa-paint-brush{% endif %}"></i>
                             </span>
                             {% endif %}
                         </button>
@@ -178,6 +178,17 @@
                    set of pairs and a drag-and-drop answer a sequence, and neither is
                    equal to anything a "==" on strings can express. #}
                 {% set is_correct = correct is not none and correct != '' and q_correct(qtype, correct, student_ans) %}
+                {# What this question earned of what it is worth.
+
+                   "Partly right" did not exist before the mark scheme: a matching answer
+                   with three of four pairs right showed a red cross and, next to it, the
+                   question's full marks — the card disagreeing with the score it feeds.
+                   `q_part_factor` is the function the total is computed with. #}
+                {% set q_marks = (((exam.question_weights or {}).get(i|string, 0))|float) or 0 %}
+                {% set q_partial = q_partial_credit(exam.question_weights or {}) %}
+                {% set q_factor = q_part_factor(qtype, correct, student_ans) if q_partial else (1 if is_correct else 0) %}
+                {% set q_earned = (q_marks * q_factor)|round(2) %}
+                {% set q_partly = q_factor > 0 and q_factor < 1 %}
                 {% set ans_obj = raw_val if raw_val is mapping else (raw_val|from_json or {}) %}
                 {% set pdf_pages = exam.pdf_page_urls or [] %}
 
@@ -189,19 +200,26 @@
                                 <div class="flex items-center gap-3">
                                     <span class="font-extrabold text-lg text-stone-700">Soal #{{ i+1 }}</span>
                                     <span class="text-xs px-2 py-0.5 rounded-full font-extrabold bg-orange-100 text-orange-700">
-                                        {% if q_kind(qtype) == 'choice' %}Pilihan Ganda{% elif q_kind(qtype) == 'truefalse' %}Benar / Salah{% elif q_kind(qtype) == 'match' %}Menjodohkan{% else %}Susun Kata{% endif %}
+                                        {% if q_kind(qtype) == 'choice' %}Pilihan Ganda{% elif q_kind(qtype) == 'truefalse' %}Benar / Salah{% elif q_kind(qtype) == 'match' %}Menjodohkan{% elif q_kind(qtype) == 'dragdrop' %}Tarik &amp; Letakkan{% else %}Mengurutkan{% endif %}
                                     </span>
                                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-600 border border-emerald-200">Otomatis dinilai</span>
-                                    {% if is_correct %}
+                                    {# Plain text, not a `t()` pair: this page pins Indonesian
+                                       (`content_lang = 'id'`) and has no toggle, so a pair
+                                       here would be dead copy that can never switch — the
+                                       language gate refused exactly that. #}
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-extrabold {% if q_partly %}bg-amber-100 text-amber-700 border border-amber-200{% elif is_correct %}bg-emerald-100 text-emerald-700 border border-emerald-200{% else %}bg-red-100 text-red-700 border border-red-200{% endif %}">{{ q_earned }} / {{ q_marks }} poin{% if q_partly %} &middot; nilai sebagian{% endif %}</span>
+                                    {% if q_partly %}
+                                    <i class="fas fa-adjust text-amber-500 ml-auto text-xl"></i>
+                                    {% elif is_correct %}
                                     <i class="fas fa-check-circle text-emerald-500 ml-auto text-xl"></i>
                                     {% else %}
                                     <i class="fas fa-times-circle text-red-500 ml-auto text-xl"></i>
                                     {% endif %}
                                 </div>
                                 <div class="grid grid-cols-2 gap-3">
-                                    <div class="p-4 rounded-xl border-2 {% if is_correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %} min-w-0">
+                                    <div class="p-4 rounded-xl border-2 {% if q_partly %}bg-amber-50 border-amber-200{% elif is_correct %}bg-emerald-50 border-emerald-200{% else %}bg-red-50 border-red-200{% endif %} min-w-0">
                                         <p class="text-xs font-bold text-stone-500 mb-1">Jawaban Siswa</p>
-                                        <p class="font-extrabold break-words {% if q_kind(qtype) == 'choice' %}text-2xl{% else %}text-sm leading-relaxed{% endif %} {% if is_correct %}text-emerald-700{% else %}text-red-700{% endif %}">{{ q_answer_text(qtype, student_ans) or '-' }}</p>
+                                        <p class="font-extrabold break-words {% if q_kind(qtype) == 'choice' %}text-2xl{% else %}text-sm leading-relaxed{% endif %} {% if q_partly %}text-amber-700{% elif is_correct %}text-emerald-700{% else %}text-red-700{% endif %}">{{ q_answer_text(qtype, student_ans) or '-' }}</p>
                                     </div>
                                     <div class="p-4 rounded-xl border-2 bg-emerald-50 border-emerald-200 min-w-0">
                                         <p class="text-xs font-bold text-stone-500 mb-1">Kunci Jawaban</p>
@@ -402,8 +420,15 @@
                                 {% endif %}
                                 {% for pk, pv in s_pages.items() %}{% set pn = pk|int %}
                                 {% for box in pv.get('textBoxes', []) %}
+                                {#
+                                    One page, like the canvas: this used to also
+                                    match `page == pn`, the page *before* the one
+                                    the box was written on — so a note typed on
+                                    page 3 was drawn on page 2 as well, the same
+                                    "one answer on several pages" the drawing had.
+                                #}
                                 <div class="text-box" style="left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:none;"
-                                     :style="'left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:' + (page=={{ pn+1 }}||page=={{ pn }}?'block':'none')">
+                                     :style="'left:{{ box.x_pct * 100 }}%; top:{{ box.y_pct * 100 }}%; display:' + (page=={{ pn+1 }}?'block':'none')">
                                     <div class="box-handle"><i class="fas fa-grip-lines text-white text-[7px]"></i></div>
                                     <textarea readonly class="pointer-events-none">{{ box.text }}</textarea>
                                 </div>
@@ -603,6 +628,25 @@ function compressCanvas(canvas, maxW) {
     return c.toDataURL('image/png');
 }
 
+// Which of the student's canvases belongs to one paper page — or null.
+//
+// `pages` is keyed by the page *index* the student was drawing on: the exam page
+// writes `canvasData[i][p]` with `p = this.page - 1`, and the markup below already
+// assumes the same thing (`x-show="page === {{ pn }}+1"`). A survey of every
+// stored submission found no key that could only have been a page number, so there
+// is one convention here and it is not guessed per page.
+//
+// This exists because the reader used to accept the neighbouring key as well
+// (`pages[page-1] || pages[page]`): a drawing made on one page was painted onto
+// the next one too, so a teacher marking a paper saw a single annotation on
+// several pages and could not tell which page the student had actually answered
+// on. A page with no canvas for it must resolve to nothing.
+function sgCanvasForPage(pages, page) {
+    if (!pages) return null;
+    const pd = pages[String(page - 1)];
+    return (pd && pd.canvas) ? pd : null;
+}
+
 function gradeApp() {
     return {
         currentQ: 0, tab: 'mcq',
@@ -744,16 +788,22 @@ function gradeQuestion(qIdx) {
             }
         },
 
-        drawStudentCanvas() {
+        studentCanvasFor(page) {
             const ans = STUDENT_ANSWERS[this.qIdx];
-            if (!ans || !ans.pages) return;
-            const p0 = String(this.page - 1);
-            const p1 = String(this.page);
-            let pd = ans.pages[p0] || ans.pages[p1];
-            if (!pd || !pd.canvas) return;
+            return sgCanvasForPage(ans && ans.pages, page);
+        },
+
+        drawStudentCanvas() {
             const sc = document.getElementById('student-canvas-' + this.qIdx);
             if (!sc) return;
             const sCtx = sc.getContext('2d');
+            // Blank first, always. Returning early without this left the previous
+            // page's drawing on the overlay, so every page the teacher looked at
+            // afterwards still showed an annotation the student never put there —
+            // the other half of "the annotation is on several pages".
+            sCtx.clearRect(0, 0, sc.width, sc.height);
+            const pd = this.studentCanvasFor(this.page);
+            if (!pd) return;
             const img = new Image();
             img.onload = () => {
                 sc.width = img.naturalWidth;

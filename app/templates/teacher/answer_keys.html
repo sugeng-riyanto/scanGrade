@@ -76,8 +76,9 @@
                         {% if q.kind == 'truefalse' %}bg-primary-50 text-primary-700
                         {% elif q.kind == 'match' %}bg-violet-50 text-violet-700
                         {% elif q.kind == 'dragdrop' %}bg-rose-50 text-rose-700
+                        {% elif q.kind == 'ordering' %}bg-sky-50 text-sky-700
                         {% else %}bg-amber-50 text-amber-700{% endif %}">
-                        {% if q.kind == 'truefalse' %}Benar / Salah{% elif q.kind == 'match' %}Menjodohkan{% elif q.kind == 'dragdrop' %}Susun Kata{% else %}Esai{% endif %}
+                        {% if q.kind == 'truefalse' %}Benar / Salah{% elif q.kind == 'match' %}Menjodohkan{% elif q.kind == 'dragdrop' %}Tarik &amp; Letakkan{% elif q.kind == 'ordering' %}Mengurutkan{% else %}Esai{% endif %}
                     </span>
                     <span class="text-xs font-mono font-bold text-gray-700 flex-1 break-words">{{ q.answer_text or 'Belum diatur' }}</span>
                 </div>

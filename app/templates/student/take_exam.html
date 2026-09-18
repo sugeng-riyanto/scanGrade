@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block page_title %}{{ exam.title }}{% endblock %}
+{# An assessment is one room with one door. `base.html` hides the three chrome
+   regions it names `sg-app-*` for a page that asks for it, and this is the page
+   that asks. #}
+{% block body_class %}sg-exam{% endblock %}
 {% block head_extra %}
 <style>
 /* ── the paper gets the width on a phone ──────────────────────────────────
@@ -13,6 +17,111 @@
    putting it away is never a one-way door. */
 .exam-qcol { width: 150px; }
 .exam-qcol--rail { width: 132px; }
+
+/* ── where the controls that answer the paper are drawn ───────────────────
+   A paper answer sheet is read the other way round from this app's default:
+   the sheet on the right, the bubbles in a column beside it on the **left**,
+   both in view at once, so marking an answer does not mean scrolling away from
+   the question. That is what the "left" setting buys — and it is a setting, not
+   a replacement, because the two arrangements answer different needs.
+
+   The side layout is offered only from 641px, the width where a column beside
+   the paper can actually be paid for: on a 320px screen the column would leave
+   the A4 page under a third of itself, which is the same measurement that put
+   the question column behind a drawer at that width. A stored "left" choice is
+   kept on a phone and simply not honoured there — the preference belongs to the
+   student, whether it can be drawn belongs to the device.
+
+   `.exam-stage` is what makes this a layout rather than a second copy of every
+   control: all five kinds live inside one element, so it moves as a whole and no
+   kind can be left behind in the wrong place.
+
+   Every `--left` rule below sits **inside** the media query, and that is not
+   tidiness. The first version of this block scoped only the *button* to 641px
+   and left the layout rules outside it, so a phone with `left` stored obeyed it:
+   measured at 375px, the paper was **179px** wide with the answer strip holding
+   152 of the 375 — the identical defect this page already fixed once for the
+   question column. A preference a device cannot honour has to be refused by the
+   stylesheet, not only by the control that offers it. */
+.exam-stage { display: block; }
+.exam-side-ctl { display: none; }
+@media (min-width: 641px) {
+    .exam-stage--left { display: flex; align-items: flex-start; gap: 12px; }
+    .exam-stage--left .exam-paper { flex: 1 1 auto; min-width: 0; order: 2; margin-bottom: 0; }
+    /* The card follows the paper. A paper can be up to four times the height of
+       the controls beside it, and a column that scrolls out of sight is exactly
+       the scrolling this layout exists to remove — the reason an answer sheet
+       reads this way is that both halves stay in view at once. `top` is the exam
+       bar's own stuck height (measured 70px at 768, 74px from 1024 up, single
+       row, wrapped or not) plus its gap. */
+    /* The column scrolls *itself*, and that is what "beside the paper" is for.
+       A matching board with a dozen pairs, a chip bank, or an essay canvas is
+       taller than the window; with the column simply sticky, the only way to
+       reach the bottom of the options was to scroll the whole page away from the
+       question — the scrolling this layout exists to remove. It keeps its own
+       scrollbar instead: the paper stays where it is, the options move, and the
+       student alternates between the two without losing either.
+
+       `120px` is measured, not chosen, and the first version's `104px` was wrong
+       by a systematic 6px at every window size. The card's *stuck* offset is 84px
+       (the exam bar's 74px single row, its 12px gap, and the phone's 70px/16px
+       pair), but its natural top in the flow is **110px** at 1024 and up — the
+       page's own 24px of padding and the bar's 12px of gap sit above it again —
+       and 98px at 768. A ceiling of `100vh - 104px` therefore put the column's
+       bottom 6px under the fold on the page's opening position, at 1280, 1024 and
+       1920 alike, while 768 fitted. `calc(100vh - 120px)` clears the largest flow
+       offset with 10px to spare and still leaves 36px below the box once the card
+       is stuck. */
+    .exam-stage--left .exam-answers {
+        order: 1; flex: 0 0 auto; position: sticky; top: 84px;
+        max-height: calc(100vh - 120px); overflow-y: auto;
+    }
+    /* A choice reads down a column — A B C D E stacked is what the left edge of
+       an answer sheet looks like, and it keeps every option inside the column
+       instead of wrapping the fifth one onto a line of its own.
+
+       `width: 100%` is load-bearing and was measured missing: the row is a flex
+       item of a `flex items-center flex-wrap` line, so without it the row is only
+       as wide as its widest button (measured 54px inside a 152px column) and
+       `stretch` then has nothing to stretch to. The strip claims the column
+       first. */
+    .exam-stage--left .exam-answers .opt-row { flex-direction: column; align-items: stretch; width: 100%; }
+    .exam-stage--left .exam-answers .tf-grid { grid-template-columns: 1fr; }
+    /* A strip of bubbles needs a fraction of what a matching board or an essay
+       does, and each kind gets what it needs: too narrow and a matching row
+       truncates its own partner, too wide and the paper being answered loses the
+       room. */
+    .exam-stage--left .answer-bubbles { width: 9.5rem; }
+    .exam-stage--left .answer-medium { width: 20rem; max-width: 40%; }
+    .exam-stage--left .answer-wide { width: 34rem; max-width: 45%; }
+    /* The control is offered exactly where the layout exists, so it can never be
+       a switch that does nothing. */
+    .exam-side-ctl { display: flex; }
+}
+/* ── the sitting is one room, and the door is the Submit button ─────────────
+   The ScanGrade chrome is three ways off this page — the sidebar, the top bar,
+   and the phone's bottom nav — and on a 1366px laptop the sidebar alone was
+   **256px of the width the paper and the options needed**. All three go for the
+   sitting. That is also the honest reading of the anti-cheat this page already
+   enforces: leaving *is* a counted violation, so the app should not offer the
+   door it is counting, and a mis-tap on "My Exams" mid-question can no longer
+   cost a student a penalty.
+
+   What is kept is everything a sitting needs, and it is all in the exam's own
+   bar: title, code, sync state, timer, penalty, the column controls, Submit —
+   plus its own language control, which is the one chrome function a student may
+   genuinely need mid-exam (the app draws that three times for exactly this
+   reason). What goes with the chrome is the theme toggle and the account menu:
+   the stored theme still applies, and neither is a thing to reach for during a
+   timed paper.
+
+   The hooks are named in `base.html`, not matched by DOM shape. A rule written
+   as `body > div > aside` is turned off silently by one extra wrapper, and
+   "the sidebar is hidden during an exam" is not a thing a test can see. */
+body.sg-exam .sg-app-sidebar,
+body.sg-exam .sg-app-topbar,
+body.sg-exam .sg-app-bottomnav,
+body.sg-exam .sidebar-overlay { display: none !important; }
 @media (max-width: 640px) {
     .exam-qcol, .exam-qcol--rail {
         position: fixed; top: 0; bottom: 0; left: 0; z-index: 85;
@@ -27,11 +136,13 @@
 
 /* The scientific calculator is 288px of fixed chrome with 9px labels. On a
    phone that is the whole screen, and a 24px button cannot be hit by a thumb.
-   Full width above the bottom nav instead, with buttons a finger can find. */
+   Full width instead, with buttons a finger can find. `bottom` no longer clears
+   the app's bottom nav — an exam hides that nav (see body.sg-exam above) — so it
+   sits above the safe area rather than 56px of nothing. */
 @media (max-width: 640px) {
     .sg-calc {
         width: auto !important;
-        left: 8px; right: 8px; bottom: 72px;
+        left: 8px; right: 8px; bottom: calc(12px + env(safe-area-inset-bottom));
         max-height: 74vh; overflow-y: auto;
     }
     /* 40px was still under the floor, and the header's close "×" measured 9px
@@ -604,6 +715,24 @@
                     :title="t('Rel halaman di kolom kiri','Page rail on the left')"
                     x-text="t('Halaman','Pages')"></button>
         </div>
+        <!-- The same question the column control below answers, asked about the
+             answer controls: where do they sit? A stored choice is remembered
+             across devices that can honour it; the phone keeps the preference
+             and shows the column below the paper, because it has no width to
+             put it anywhere else. -->
+        <div class="exam-side-ctl items-center rounded-xl border border-surface-200 bg-white overflow-hidden shadow-sm">
+            <span class="text-[10px] font-bold text-surface-400 px-2" x-text="t('Jawaban','Answers')"></span>
+            <button type="button" @click="setAnswersSide('below')"
+                    class="px-2.5 py-1 text-[10px] font-extrabold border-l border-surface-200 transition"
+                    :class="answersSide === 'below' ? 'bg-primary-500 text-white' : 'text-surface-500 hover:bg-surface-100'"
+                    :title="t('Kontrol jawaban di bawah halaman PDF','Answer controls under the PDF page')"
+                    x-text="t('Bawah','Below')"></button>
+            <button type="button" @click="setAnswersSide('left')"
+                    class="px-2.5 py-1 text-[10px] font-extrabold border-l border-surface-200 transition"
+                    :class="answersSide === 'left' ? 'bg-primary-500 text-white' : 'text-surface-500 hover:bg-surface-100'"
+                    :title="t('Kontrol jawaban di sisi kiri halaman PDF, seperti lembar jawaban','Answer controls on the left of the PDF page, like an answer sheet')"
+                    x-text="t('Kiri','Left')"></button>
+        </div>
         <!-- The column can go away, and the count goes with it: on a small laptop
              the rail and the paper fight for the same width, and the student
              should decide who wins. -->
@@ -725,8 +854,14 @@
         <!-- Main Content Area -->
         <div class="flex-1 min-w-0">
     <form id="exam-form" method="POST" action="/student/exams/{{ exam.id }}/submit" @submit.prevent="null">
+            <!-- The stage: the paper, and the controls that answer it. Two
+                 arrangements of the same two elements — the controls below the
+                 paper (the default, and what a phone needs) or in a column on its
+                 left, the way an answer sheet is read. One wrapper, so all five
+                 kinds move together; see .exam-stage--left above. -->
+            <div class="exam-stage" :class="answersSide === 'left' ? 'exam-stage--left' : ''">
             <!-- MCQ: PDF + drawing canvas + tools — placed BEFORE soal -->
-            <div x-show="!submitted" style="display:none" class="mb-3">
+            <div x-show="!submitted" style="display:none" class="mb-3 exam-paper">
                 <template x-for="(q, i) in questions" :key="'mcq-area-'+i">
                     <div x-show="currentQ === i" class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 overflow-hidden border border-stone-100">
                         <div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold bg-gradient-to-r from-stone-50 to-orange-50/30 text-stone-700">
@@ -953,8 +1088,12 @@
                 </template>
             </div>
 
-            <!-- Current question answer options — placed SETELAH PDF -->
-            <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100">
+            <!-- Current question answer options — placed SETELAH PDF, or beside it
+                 in the left column (see .exam-stage--left). The width class is the
+                 kind's own: a strip of bubbles, a matching board, or a canvas an
+                 essay is typed and drawn on. -->
+            <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-4 border border-stone-100 exam-answers"
+                 :class="answerWidthClass">
             <template x-for="(q, i) in questions" :key="i">
                 <div x-show="currentQ === i" class="">
                     <!-- Media players -->
@@ -1026,7 +1165,7 @@
                                     <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
                                 </span>
                             </div>
-                            <div class="grid grid-cols-2 gap-2 sm:gap-3">
+                            <div class="grid grid-cols-2 gap-2 sm:gap-3 tf-grid w-full">
                                 <button type="button" @click="setBoolAnswer(i, 'true')"
                                         class="tf-btn flex items-center justify-center gap-2 py-3 sm:py-4 rounded-2xl border-2 font-extrabold text-sm transition"
                                         :class="(questions[i]||{}).answer === 'true' ? 'bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-white border-stone-200 text-stone-600 hover:border-emerald-300'">
@@ -1120,6 +1259,55 @@
                                             @dragstart="chipStart($event, i, c)" @dragend="chipDrag = null; dragOverChips[i] = false"
                                             @click="dragAdd(i, c)" :disabled="dragUsed(i, c)"
                                             class="tap-44 chip-opt text-xs font-bold px-3 py-2 rounded-xl border-2 transition disabled:opacity-30 bg-white border-stone-200 text-stone-600 hover:border-rose-300 active:cursor-grabbing cursor-grab">
+                                        <span x-text="c"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Ordering: the same sequence as a drag & drop question, asked as a
+                         ranking. A sentence is too wide to drag on a phone, so the item
+                         is tapped into place and the rank is the answer: the list reads
+                         1, 2, 3 down the page, and up/down move one item a rank. Both
+                         write the same `[item, …]` sequence, so saving, syncing and
+                         submitting need no case of their own. -->
+                    <template x-if="qKind(i) === 'ordering'">
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200" x-text="t('Mengurutkan','Ordering')"></span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <p class="text-[11px] font-semibold text-stone-400" x-text="t('Ketuk untuk menyusun sesuai urutan yang benar.','Tap to arrange them in the right order.')"></p>
+                            <div class="rounded-2xl border-2 border-dashed p-2 space-y-1.5 transition"
+                                 :class="dragOverChips[i] ? 'border-primary-400 bg-primary-50/40' : 'border-stone-300 bg-stone-50'"
+                                 @dragover.prevent="dragOverChips[i] = true"
+                                 @dragleave="dragOverChips[i] = false"
+                                 @drop.prevent="dropChip(i, $event)">
+                                <template x-for="(w, wi) in dragAnswer(i)" :key="'ord-' + i + '-' + wi">
+                                    <div class="flex items-center gap-1.5 rounded-xl border-2 border-primary-200 bg-primary-50/60 p-2">
+                                        <span class="w-7 h-7 shrink-0 rounded-full bg-primary-600 text-white text-xs font-extrabold flex items-center justify-center" x-text="wi + 1"></span>
+                                        <span class="flex-1 min-w-0 text-xs font-bold text-primary-800 break-words" x-text="w"></span>
+                                        <button type="button" @click="dragMove(i, wi, -1)" :disabled="wi === 0"
+                                                class="tap-44 ordering-move w-8 h-8 rounded-lg text-primary-500 hover:bg-primary-100 disabled:opacity-25 text-[11px]"><i class="fas fa-chevron-up"></i></button>
+                                        <button type="button" @click="dragMove(i, wi, 1)" :disabled="wi === dragAnswer(i).length - 1"
+                                                class="tap-44 ordering-move w-8 h-8 rounded-lg text-primary-500 hover:bg-primary-100 disabled:opacity-25 text-[11px]"><i class="fas fa-chevron-down"></i></button>
+                                        <button type="button" @click="dragRemove(i, wi)"
+                                                class="tap-44 ordering-move w-8 h-8 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-100 text-[11px]"><i class="fas fa-times"></i></button>
+                                    </div>
+                                </template>
+                                <span x-show="!dragAnswer(i).length" class="block text-xs font-semibold text-stone-400 px-2 py-2"
+                                      x-text="t('Belum disusun — pilih dari daftar di bawah','Nothing arranged yet — choose from the list below')"></span>
+                            </div>
+                            <div class="flex flex-wrap gap-1.5">
+                                <template x-for="(c, ci) in dragBank(i)" :key="'ob-' + i + '-' + ci">
+                                    <button type="button" draggable="true"
+                                            @dragstart="chipStart($event, i, c)" @dragend="chipDrag = null; dragOverChips[i] = false"
+                                            @click="dragAdd(i, c)" :disabled="dragUsed(i, c)"
+                                            class="tap-44 ordering-chip text-xs font-bold px-3 py-2 rounded-xl border-2 transition disabled:opacity-30 bg-white border-stone-200 text-stone-600 hover:border-sky-300 active:cursor-grabbing cursor-grab">
                                         <span x-text="c"></span>
                                     </button>
                                 </template>
@@ -1254,6 +1442,7 @@
                 </div>
             </template>
             </div>
+            </div><!-- /exam-stage -->
     </form>
         </div>
     </div>
@@ -1405,6 +1594,15 @@ function examApp(duration, totalQ) {
         // and the question list, so neither is ever out of reach.
         examLayout: (function () { try { return localStorage.getItem('sg_exam_layout') === 'rail' ? 'rail' : 'classic'; } catch (e) { return 'classic'; } })(),
         railMode: (function () { try { return localStorage.getItem('sg_exam_rail_mode') === 'questions' ? 'questions' : 'pages'; } catch (e) { return 'pages'; } })(),
+        // Where the controls that answer the paper are drawn. `left` is the
+        // default: it is how a paper answer sheet is read — the sheet on the
+        // right, the options in a column beside it, both in view — and the
+        // stylesheet refuses it below 641px, where the column would leave the A4
+        // page under a third of itself. A phone therefore still reads `below`
+        // without being asked, and a stored choice still beats the default on
+        // any device that can honour it. Remembered per device, like the layout
+        // above.
+        answersSide: (function () { try { return localStorage.getItem('sg_exam_answers_side') === 'below' ? 'below' : 'left'; } catch (e) { return 'left'; } })(),
         // A stored choice always wins. Until there is one, a phone starts with the
         // column put away: on a 320px screen it would otherwise leave about 155px
         // of the paper, and the first thing a student does is collapse it by hand.
@@ -2129,6 +2327,22 @@ function examApp(duration, totalQ) {
             this._remember('sg_exam_rail_mode', this.railMode);
             this.$nextTick(() => this.updateScrollState());
         },
+        setAnswersSide(v) {
+            this.answersSide = (v === 'left') ? 'left' : 'below';
+            this._remember('sg_exam_answers_side', this.answersSide);
+            this.$nextTick(() => this.updateScrollState());
+        },
+        // How much column the answer control earns, asked of the control that is
+        // on screen rather than of the exam: a paper can mix all six kinds, and
+        // a bubble strip that was sized for the matching question beside it would
+        // take room the paper is using. Whole class strings per branch, so the
+        // compiler and the CSS both see a name rather than a fragment.
+        get answerWidthClass() {
+            const kind = sgKind((this.questions[this.currentQ] || {}).type);
+            if (kind === 'essay') return 'answer-wide';
+            if (kind === 'match' || kind === 'dragdrop' || kind === 'ordering') return 'answer-medium';
+            return 'answer-bubbles';
+        },
         toggleChrome() {
             if (this.examLayout === 'rail') {
                 this.railCollapsed = !this.railCollapsed;
@@ -2256,6 +2470,7 @@ function examApp(duration, totalQ) {
             if (kind === 'truefalse') return {cls: 'text-primary-500', icon: 'fas fa-toggle-on'};
             if (kind === 'match') return {cls: 'text-violet-500', icon: 'fas fa-arrows-left-right'};
             if (kind === 'dragdrop') return {cls: 'text-rose-500', icon: 'fas fa-hand-pointer'};
+            if (kind === 'ordering') return {cls: 'text-sky-500', icon: 'fas fa-arrow-down-1-9'};
             if (type === 'essay_text') return {cls: 'text-amber-500', icon: 'fas fa-font'};
             return {cls: 'text-orange-400', icon: 'fas fa-paint-brush'};
         },

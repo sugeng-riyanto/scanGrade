@@ -204,6 +204,169 @@ class TestDragDrop:
         assert qt.grade_answer("drag_drop", ["a"], {"answer": ["a"], "pages": {}})
 
 
+class TestOrdering:
+    """Arranging sentences or words is its own question, beside every other type.
+
+    An ordering question and a drag & drop question answer the same kind of thing —
+    a sequence — so they share the key, the grader and the part-credit rule. What
+    they do **not** share is standing: ordering is a type of its own, priced in the
+    mark scheme on its own row, exactly as a matching question is. The model this
+    replaced had one "objective" budget that a fifty-question choice section and a
+    single ordering question split evenly.
+    """
+
+    KEY = {"order": ["Pertama", "Kedua", "Ketiga"], "extra": ["Penyeleweng"]}
+
+    def test_the_whole_sequence_right_is_right(self):
+        assert qt.grade_answer("order", self.KEY,
+                               ["Pertama", "Kedua", "Ketiga"]) is True
+
+    def test_the_same_items_in_the_wrong_order_are_wrong(self):
+        assert qt.grade_answer("order", self.KEY,
+                               ["Kedua", "Pertama", "Ketiga"]) is False
+
+    def test_a_short_sequence_is_wrong_even_when_it_is_a_prefix(self):
+        assert qt.grade_answer("order", self.KEY, ["Pertama", "Kedua"]) is False
+
+    def test_the_named_shape_is_read_as_the_answer_too(self):
+        """The offline queue replays what the key stores, so the key's own shape has
+        to be a right answer rather than a `("order", "[…]")` mapping."""
+        assert qt.grade_answer("order", self.KEY, self.KEY) is True
+
+    def test_the_student_is_offered_the_items_and_not_the_sequence(self):
+        public = qt.public_options("order", self.KEY)
+        assert public == {"chips": ["Kedua", "Ketiga", "Penyeleweng", "Pertama"]}
+        assert "order" not in public
+
+    def test_part_marks_are_the_positions_that_are_right(self):
+        assert qt.part_factor("order", self.KEY, ["Pertama", "Kedua", "salah"]) == 2 / 3
+
+    TYPE = {"0": "order"}
+    ASKED = {"0": ["Pertama", "Kedua", "salah"]}      # two of three positions right
+
+    def test_part_marks_only_exist_for_a_scheme(self):
+        """A paper that carries no scheme is worth exactly what it was worth
+        yesterday — the freeze that keeps published marks where they are."""
+        weights = {"0": 10.0}
+        assert qt.partial_credit(weights) is False
+        assert qt.earned_points(self.TYPE, {"0": self.KEY}, self.ASKED,
+                                weights, 1)[0] == 0.0
+
+    def test_a_scheme_turns_part_marks_on(self):
+        from app.services import mark_scheme as ms
+        weights = ms.weights_for(self.TYPE, 1, {qt.ORDER: 10}, partial=True)
+        assert qt.partial_credit(weights) is True
+        earned, graded = qt.earned_points(self.TYPE, {"0": self.KEY}, self.ASKED,
+                                          weights, 1)
+        assert graded == 1
+        assert earned == round(100.0 * 2 / 3, 2)
+
+    def test_an_ordering_question_has_a_readable_key_and_an_answer_dot(self):
+        assert qt.key_has_answer("order", self.KEY) is True
+        assert qt.key_has_answer("order", {"order": []}) is False
+        assert qt.key_has_answer("order", None) is False
+        assert qt.has_answer("order", ["Pertama"]) is True
+        assert qt.has_answer("order", []) is False
+        assert qt.describe_answer("order", self.KEY) == "Pertama \u2192 Kedua \u2192 Ketiga"
+
+    def test_the_key_is_stored_in_the_one_shape_the_reader_expects(self):
+        assert qt.normalise_key("order", self.KEY) == {
+            "order": ["Pertama", "Kedua", "Ketiga"], "extra": ["Penyeleweng"]}
+        # A *bare* list is the case that discriminates: handed the stored shape,
+        # every branch returns it unchanged, so a reader that no longer knows this
+        # type passes while a key posted in any other shape is stored unreadable.
+        assert qt.normalise_key("order", ["Pertama", "Kedua"]) == {
+            "order": ["Pertama", "Kedua"]}
+
+    def test_it_is_auto_marked_and_named(self):
+        assert qt.is_objective("order") is True
+        assert qt.question_kind("order") == qt.KIND_ORDER
+        assert qt.kind_label("order") == "Ordering"
+
+
+class TestEveryTypeStandsOnItsOwn:
+    """The standing rule, asserted rather than described.
+
+    Reported defect: the builder told a teacher that choice, true/false, matching
+    and drag & drop "all share this weight", and the mark scheme had one budget for
+    every auto-marked question. A true/false question beside fifty choice questions
+    was therefore worth a fiftieth of one choice question's marks, and there was no
+    way to say what a matching question was worth.
+    """
+
+    TEMPLATE = APP / "templates" / "teacher" / "exam_form.html"
+
+    def test_every_kind_has_its_own_scheme_row(self):
+        from app.services import mark_scheme as ms
+        kinds = {qt.question_kind(t) for t in ms.SCHEME_ORDER}
+        assert kinds == {qt.KIND_CHOICE, qt.KIND_TRUE_FALSE, qt.KIND_MATCH,
+                         qt.KIND_DRAG, qt.KIND_ORDER, qt.KIND_ESSAY}
+
+    def test_every_type_has_its_own_marks(self):
+        from app.services import mark_scheme as ms
+        marks = {t: ms.default_marks(t) for t in ms.SCHEME_ORDER}
+        assert len(set(marks.values())) > 1, (
+            "every type defaulting to the same marks is the pool model again"
+        )
+        assert marks[qt.MATCH] > marks[qt.MCQ], (
+            "a four-pair matching question must not be priced like one letter"
+        )
+
+    def test_the_scheme_prices_a_paper_per_type_not_per_pool(self):
+        """Five questions of five different kinds: five rows, and the paper is
+        still exactly 100."""
+        from app.services import mark_scheme as ms
+        types = {str(i): t for i, t in enumerate(
+            [qt.MCQ, qt.TRUE_FALSE, qt.MATCH, qt.DRAG_DROP, qt.ORDER])}
+        table = ms.describe(types, 5, None)
+        assert [r["type"] for r in table["rows"]] == [
+            qt.MCQ, qt.TRUE_FALSE, qt.MATCH, qt.DRAG_DROP, qt.ORDER]
+        assert table["total"] == 100.0
+
+    def test_the_builder_shows_a_row_per_type(self):
+        src = self.TEMPLATE.read_text(encoding="utf-8")
+        order = re.search(r"SG_SCHEME_ORDER = \[(.*?)\]", src, re.S)
+        assert order, "the builder no longer lists the scheme's rows"
+        rows = re.findall(r"'([a-z_]+)'", order.group(1))
+        from app.services import mark_scheme as ms
+        assert rows == list(ms.SCHEME_ORDER), (
+            "the page's rows and the server's rows are the same list, or the table "
+            "a teacher edits is not the table that scores the paper"
+        )
+
+    def test_no_page_calls_the_auto_marked_types_one_weight_any_more(self):
+        """The sentence that was reported: "…they all share this weight"."""
+        for path in (self.TEMPLATE,
+                     APP / "templates" / "student" / "take_exam.html"):
+            src = path.read_text(encoding="utf-8")
+            assert "they all share this weight" not in src, path
+            assert "semuanya berbagi bobot ini" not in src, path
+
+    def test_the_one_editor_for_a_sequence_serves_both_types_that_are_one(self):
+        """Ordering and drag & drop are written with the same editor.
+
+        They answer the same thing — a sequence — so there is one editor, and the
+        types it serves are named *there* rather than left to be re-derived. A
+        defent that narrows that `x-show` back to drag & drop leaves an ordering
+        question with an editor no teacher can fill in, and nothing on screen says
+        so.
+        """
+        src = self.TEMPLATE.read_text(encoding="utf-8")
+        # Located from the editor's own control and *backwards*, because the page
+        # has one editor per kind and the first `space-y-2` div on it belongs to
+        # matching — a forward search measures the neighbour, not the thing.
+        add = src.find("addChip(i)")
+        assert add > -1, "the builder has no chip editor any more"
+        opened = src.rfind('<div x-show="', 0, add)
+        assert opened > -1, "the sequence editor is no longer identifiable"
+        show = src[opened:src.index(">", opened)]
+        assert "kindOf(q) === 'dragdrop'" in show, show
+        assert "kindOf(q) === 'ordering'" in show, (
+            "an ordering question has no editor — the sequence editor is "
+            "drag & drop only again"
+        )
+
+
 # ── one answer, several shapes ──────────────────────────────────────────────
 
 class TestEveryShapeARightAnswerArrivesIn:
@@ -329,6 +492,74 @@ class TestTheNewControlsAreTappable:
         rule = re.search(r"\.tap-44\s*\{([^}]*)\}", block.group(1))
         assert rule, "`.tap-44` is not defined under `(pointer: coarse)`"
         assert "min-width: 44px" in rule.group(1) and "min-height: 44px" in rule.group(1), rule.group(1)
+
+
+class TestOrderingOnThePupilsPage:
+    """An ordering question needs a control of its own, and the *rank* is the answer.
+
+    Drag & drop already arranges items, so the failure mode here is not "nothing
+    renders" — it is rendering the drag box and calling it ordering, which shows a
+    pupil a control whose answer shape is a ranking while nothing on screen is
+    numbered. So these tests ask for the rank badge, and for the same answer route
+    (`dragAdd`/`dragMove`/`dragRemove` into `questions[i].answer`) that saving and
+    syncing already handle.
+    """
+
+    PAGE = (APP / "templates" / "student" / "take_exam.html").read_text(encoding="utf-8")
+
+    def _block(self):
+        """The whole ordering branch, to its own `</template>`.
+
+        Depth-counted rather than non-greedy: the block contains an `x-for`
+        template for the placed items, so the first `</template>` in it is that
+        one — and a guard that reads half a control passes while the half it did
+        not read is broken.
+        """
+        start = self.PAGE.find("<template x-if=\"qKind(i) === 'ordering'\">")
+        assert start > -1, "the ordering question has no control of its own"
+        depth = 0
+        for tag in re.finditer(r"</?template\b", self.PAGE[start:]):
+            depth += 1 if tag.group(0) == "<template" else -1
+            if depth == 0:
+                return self.PAGE[start:start + tag.end()]
+        raise AssertionError("unbalanced <template> tags in the ordering branch")
+
+    def test_the_branch_is_its_own_not_the_drag_and_drop_one(self):
+        assert "qKind(i) === 'ordering'" in self.PAGE
+        assert "qKind(i) === 'dragdrop'" in self.PAGE, (
+            "drag & drop is a type of its own too — reusing its branch is how one "
+            "of the two quietly stops existing"
+        )
+
+    def test_every_placed_item_shows_its_rank(self):
+        block = self._block()
+        assert "x-text=\"wi + 1\"" in block, (
+            "the position a pupil chose is the answer, so it has to be visible"
+        )
+
+    def test_the_items_are_tappable_and_draggable(self):
+        block = self._block()
+        assert "dragAdd(i, c)" in block, "a tap does not place the item"
+        assert "draggable=\"true\"" in block and "chipStart($event, i, c)" in block, (
+            "a mouse lost its drag"
+        )
+        assert "tap-44" in block, "the finger floor is missing from the control"
+
+    def test_the_sequence_is_moved_and_cleared_with_the_shared_answer_route(self):
+        block = self._block()
+        for call in ("dragMove(i, wi, -1)", "dragMove(i, wi, 1)", "dragRemove(i, wi)"):
+            assert call in block, call
+
+    def test_the_empty_state_says_what_to_do(self):
+        block = self._block()
+        assert "Belum disusun" in block and "Nothing arranged yet" in block, (
+            "an empty ordering answer needs a line telling a pupil what to tap"
+        )
+
+    def test_the_rail_badge_names_ordering(self):
+        m = re.search(r"if \(kind === 'ordering'\) return \{([^}]*)\}", self.PAGE)
+        assert m, "the question rail has no badge for an ordering question"
+        assert "fa-arrow-down-1-9" in m.group(1)
 
 
 class TestItNeverRaises:
@@ -500,7 +731,8 @@ class TestTheBuildersTypeList:
 
     def test_the_picker_is_the_types_a_teacher_can_create(self):
         picker = [c["v"] for c in qt.vocabulary()["picker"]]
-        assert picker == [qt.MCQ, qt.TRUE_FALSE, qt.MATCH, qt.DRAG_DROP, qt.ESSAY_CANVAS]
+        assert picker == [qt.MCQ, qt.TRUE_FALSE, qt.MATCH, qt.DRAG_DROP, qt.ORDER,
+                          qt.ESSAY_CANVAS]
 
     def test_every_pickable_type_is_one_the_grader_knows(self):
         for entry in qt.vocabulary()["picker"]:

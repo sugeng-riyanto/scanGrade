@@ -696,12 +696,85 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 p-3 sm:p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
+                    <!-- ── the mark scheme ────────────────────────────────────────
+                         What each *type* is worth, and the paper's 100. The marks are
+                         the teacher's; the scaling to exactly 100 is shown rather than
+                         hidden, because the score a student sees is out of 100 either
+                         way. Nothing here is written for a paper that has no scheme:
+                         the button below is what turns one on, which is what keeps an
+                         older exam's already-published marks where they are. -->
+                    <div x-show="_schemeOn" style="display:none" class="mb-4 p-3 sm:p-4 bg-white rounded-2xl border-2 border-primary-200">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <label class="text-xs font-extrabold text-primary-700 flex items-center gap-1.5">
+                                <i class="fas fa-scale-balanced"></i>
+                                <span x-text="t('Skema Nilai per Tipe Soal','Mark Scheme by Question Type')"></span>
+                            </label>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs font-bold text-slate-500"
+                                      x-text="t('Nilai mentah','Raw marks') + ' ' + schemeRawTotal()"></span>
+                                <i class="fas fa-arrow-right text-[10px] text-slate-400"></i>
+                                <span class="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200"
+                                      x-text="t('Total','Total') + ' ' + schemeTotal + ' / 100'"></span>
+                                <button type="button" @click="resetSchemeMarks()"
+                                        class="text-xs font-bold text-slate-500 hover:text-primary-700 underline"
+                                        x-text="t('Kembalikan default','Reset to defaults')"></button>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <template x-for="row in schemeRows()" :key="'ms-' + row.type">
+                                <div class="flex flex-wrap items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                                    <span class="text-xs font-extrabold text-slate-700 w-32" x-text="t(row.kind, row.kind)"></span>
+                                    <span class="text-xs font-bold text-slate-500"
+                                          x-text="row.count + ' ' + (row.count === 1 ? t('soal','question') : t('soal','questions'))"></span>
+                                    <span class="text-xs font-bold text-slate-400">×</span>
+                                    <input type="number" min="0" step="0.5"
+                                           x-model.number="_schemeByType[row.type]"
+                                           @input="_schemeOn = true"
+                                           class="w-16 px-2 py-1 border-2 border-primary-200 rounded-lg text-center font-extrabold text-primary-700 focus:border-primary-400">
+                                    <span class="text-xs font-bold text-slate-500" x-text="t('poin →','marks →')"></span>
+                                    <span class="text-xs font-extrabold text-slate-700 tabular-nums"
+                                          x-text="row.scaledEach + ' ' + t('poin/soal','marks each')"></span>
+                                    <span class="ml-auto text-xs font-extrabold text-primary-700 tabular-nums"
+                                          x-text="row.scaledSubtotal + ' / 100'"></span>
+                                </div>
+                            </template>
+                        </div>
+
+                        <p class="text-[10px] font-semibold text-slate-400 mt-2"
+                           x-text="t('Nilai mentah discaling agar total selalu tepat 100 — tiap soal dalam satu tipe bernilai sama.',
+                                     'Raw marks are scaled so the total is always exactly 100 — every question of a type is worth the same.')"></p>
+
+                        <label x-show="hasPartialTypes" class="flex items-start gap-2 mt-3 p-2.5 rounded-xl border-2 border-slate-200 cursor-pointer">
+                            <input type="checkbox" x-model="_partialOn" class="mt-0.5">
+                            <span class="text-xs font-bold text-slate-600"
+                                  x-text="t('Beri nilai sebagian untuk Menjodohkan, Tarik &amp; Letakkan dan Mengurutkan (mis. 3 dari 4 pasangan benar = 3/4 nilai soal).',
+                                            'Award part-marks for Matching, Drag &amp; drop and Ordering (e.g. 3 of 4 pairs right = 3/4 of the question).')"></span>
+                        </label>
+                    </div>
+
+                    <!-- A paper saved before schemes existed keeps the two pools it was
+                         marked with until someone presses this. -->
+                    <div x-show="!_schemeOn" class="mb-4 p-3 rounded-2xl border-2 border-dashed border-primary-200 bg-primary-50/40">
+                        <button type="button" @click="useMarkScheme()"
+                                class="flex items-center gap-2 px-3 py-2 rounded-xl font-bold text-sm bg-primary-600 hover:bg-primary-700 text-white">
+                            <i class="fas fa-scale-balanced"></i>
+                            <span x-text="t('Pakai skema nilai per tipe soal','Use a mark scheme per question type')"></span>
+                        </button>
+                        <p class="text-[10px] font-semibold text-slate-500 mt-2"
+                           x-text="t('Soal ini masih memakai bobot Objektif/Esai di bawah. Nilainya tidak diubah sampai skema dipakai, supaya nilai yang sudah dibagikan ke murid tidak berubah.',
+                                     'This exam still uses the Objective/Essay weights below. Its marks are not changed until a scheme is used, so marks already given to students stay as they are.')"></p>
+                    </div>
+
+                    <div x-show="!_schemeOn" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 p-3 sm:p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
                         <div>
-                            <!-- One budget for every auto-marked question, whatever its
-                                 kind. Labelling this "MCQ weight" is what made a
-                                 true/false question share the essay's 30% instead. -->
-                            <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i><span x-text="t('Bobot Objektif','Objective Weight')"></span></label>
+                            <!-- The *legacy* split, and it says so on the panel. It is
+                                 kept because a paper marked before schemes existed has
+                                 to be reproducible byte for byte — not because the five
+                                 auto-marked types are one kind of question. They are
+                                 not: choice, true/false, matching, drag & drop and
+                                 ordering each get their own row above. -->
+                            <label class="text-xs font-extrabold text-amber-700 mb-1 flex items-center gap-1"><i class="fas fa-list-ol"></i><span x-text="t('Bobot Objektif (model lama)','Objective Weight (legacy)')"></span></label>
                             <div class="flex items-center gap-2">
                                 <input type="number" x-model.number="_objectivePct" min="0" max="100" step="1"
                                        class="w-20 px-3 py-2 border-2 border-amber-200 rounded-xl text-center font-extrabold text-amber-700 focus:border-amber-400">
@@ -709,7 +782,8 @@
                                 <span class="text-xs font-bold text-slate-400"
                                       x-text="objectiveCount + ' ' + t('soal ×','questions ×') + ' ' + objectivePerQ.toFixed(1) + ' ' + t('poin','points')"></span>
                             </div>
-                            <p class="text-[10px] font-semibold text-slate-400 mt-1" x-text="t('PG, Benar/Salah, Menjodohkan dan Susun Kata otomatis dinilai — semuanya berbagi bobot ini','Choice, true/false, matching and drag &amp; drop are auto-marked — they all share this weight')"></p>
+                            <p class="text-[10px] font-semibold text-slate-400 mt-1" x-text="t('Model lama: PG, Benar/Salah, Menjodohkan, Tarik &amp; Letakkan dan Mengurutkan berbagi satu bobot ini. Pakai skema di atas agar tiap tipe punya nilainya sendiri.',
+                                     'Legacy: choice, true/false, matching, drag &amp; drop and ordering share this one weight. Use a mark scheme above so each type carries its own marks.')"></p>
                         </div>
                         <div>
                             <label class="text-xs font-extrabold text-emerald-700 mb-1 flex items-center gap-1"><i class="fas fa-pencil-alt"></i><span x-text="t('Bobot Esai','Essay Weight')"></span></label>
@@ -942,18 +1016,29 @@
                                     </div>
                                 </div>
 
-                                <!-- Drag and drop: the order of these chips IS the answer. -->
-                                <div x-show="kindOf(q) === 'dragdrop'" class="space-y-2">
+                                <!-- Drag & drop and ordering are the same question in
+                                     two presentations: a sequence. So they are written
+                                     with the same editor and stored in the same shape,
+                                     and only the words above the list change — what a
+                                     student *does* with it (drag it into a box, or rank
+                                     it) is the difference a teacher is choosing. -->
+                                <div x-show="kindOf(q) === 'dragdrop' || kindOf(q) === 'ordering'" class="space-y-2">
                                     <div class="flex items-center justify-between">
-                                        <label class="text-xs font-extrabold text-slate-500" x-text="t('Urutan yang benar (atas ke bawah):','Correct order (top to bottom):')"></label>
+                                        <label class="text-xs font-extrabold text-slate-500"
+                                               x-text="kindOf(q) === 'ordering'
+                                                       ? t('Urutan yang benar (1 = paling awal):','Correct order (1 = first):')
+                                                       : t('Urutan yang benar (atas ke bawah):','Correct order (top to bottom):')"></label>
                                         <button type="button" @click="addChip(i)" class="text-xs font-bold text-primary-600 hover:underline">
-                                            <i class="fas fa-plus mr-0.5"></i><span x-text="t('Tambah kata','Add word')"></span>
+                                            <i class="fas fa-plus mr-0.5"></i><span x-text="kindOf(q) === 'ordering'
+                                                ? t('Tambah kalimat atau kata','Add sentence or word')
+                                                : t('Tambah kata','Add word')"></span>
                                         </button>
                                     </div>
                                     <template x-for="(w, wi) in q.order" :key="'word-' + q._id + '-' + wi">
                                         <div class="flex items-center gap-2">
                                             <span class="w-6 text-[11px] font-extrabold text-slate-400 text-center shrink-0" x-text="wi + 1"></span>
-                                            <input type="text" x-model="q.order[wi]" :placeholder="t('kata atau frasa','word or phrase')"
+                                            <input type="text" x-model="q.order[wi]"
+                                                   :placeholder="kindOf(q) === 'ordering' ? t('kalimat atau kata','sentence or word') : t('kata atau frasa','word or phrase')"
                                                    class="flex-1 min-w-0 text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
                                             <button type="button" @click="moveChip(i, wi, -1)" :disabled="wi === 0"
                                                     class="tap-44 w-9 h-9 rounded-lg text-slate-400 hover:text-primary-600 disabled:opacity-25 transition shrink-0"><i class="fas fa-arrow-up text-xs"></i></button>
@@ -966,7 +1051,9 @@
                                     <div class="pt-1">
                                         <div class="flex items-center gap-2">
                                             <input type="text" x-model="q._extraInput" @keydown.enter.prevent="addExtra(i)"
-                                                   :placeholder="t('Pengecoh — kata yang tidak dipakai (opsional)','Distractor — a word that is not used (optional)')"
+                                                   :placeholder="kindOf(q) === 'ordering'
+                                                       ? t('Pengecoh — kalimat atau kata yang tidak dipakai (opsional)','Distractor — a sentence or word that is not used (optional)')
+                                                       : t('Pengecoh — kata yang tidak dipakai (opsional)','Distractor — a word that is not used (optional)')"
                                                    class="flex-1 min-w-0 text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
                                             <button type="button" @click="addExtra(i)" class="tap-44 w-9 h-9 rounded-lg bg-slate-100 text-slate-500 hover:bg-primary-50 hover:text-primary-600 transition shrink-0">
                                                 <i class="fas fa-plus text-xs"></i>
@@ -1142,6 +1229,66 @@ const SG_QT = {{ q_vocabulary() | tojson | safe }};
 function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
 function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; }
 
+// ── the mark scheme, as a preview ─────────────────────────────────────────────
+//
+// The authority is `app/services/mark_scheme.py`; this is the same arithmetic in the
+// page so the total moves while a teacher types, and it is deliberately only ever a
+// *preview*: the save route recomputes the marks from the scheme and ignores whatever
+// this form posted for them. So a bug here shows a wrong total — it cannot write one.
+// `tests/unit/test_mark_scheme.py` runs both implementations over the same inputs and
+// fails when they disagree.
+// One row per type, and that is the point: multiple choice, true/false, matching,
+// drag & drop, ordering and the essay each carry their own marks. The objective
+// pool this list replaced is what made a matching question share one weight with
+// the fifty choice questions beside it.
+const SG_SCHEME_ORDER = ['mcq', 'true_false', 'match', 'drag_drop', 'order', 'essay_canvas'];
+const SG_MARK_STEP = 0.1;
+const SG_MARK_DEFAULTS = {mcq: 1, true_false: 1, match: 3, drag_drop: 3, order: 3,
+                          essay_canvas: 10, essay_text: 10, essay: 10};
+function sgMarksDefault(type) {
+    var t = type || SG_QT.default;
+    return SG_MARK_DEFAULTS[t] != null ? SG_MARK_DEFAULTS[t] : SG_MARK_DEFAULTS[SG_QT.default];
+}
+// Largest-remainder, in whole steps of 0.1 — the same function as the Python one, so
+// that the parts add up to 100 exactly instead of to 99.9 or 100.1.
+function sgNorm100(points, step) {
+    step = step || SG_MARK_STEP;
+    if (!points || !points.length) return [];
+    var values = points.map(function(p) { return Math.max(0, +p || 0); });
+    var total = values.reduce(function(a, b) { return a + b; }, 0);
+    if (total <= 0) { values = values.map(function() { return 1; }); total = values.length; }
+    var target = Math.round(100 / step);
+    var exact = values.map(function(v) { return v * 100 / total; });
+    var units = exact.map(function(v) { return Math.floor(v / step + 1e-9); });
+    var spent = units.reduce(function(a, b) { return a + b; }, 0);
+    var remaining = target - spent;
+    var order = exact.map(function(_, i) { return i; }).sort(function(a, b) {
+        var ra = exact[a] / step - units[a], rb = exact[b] / step - units[b];
+        return (remaining >= 0 ? (rb - ra) : (ra - rb)) || (a - b);
+    });
+    for (var n = 0; n < Math.abs(remaining); n++) {
+        var pick = order[n % order.length];
+        if (remaining >= 0) units[pick] += 1;
+        else if (units[pick] > 0) units[pick] -= 1;
+    }
+    return units.map(function(u) { return Math.round(u * step * 10000) / 10000; });
+}
+function sgSchemeRawPoints(types, byType) {
+    return (types || []).map(function(t) {
+        var v = (byType || {})[t];
+        return v == null ? sgMarksDefault(t) : Math.max(0, +v || 0);
+    });
+}
+// Which scheme row a question belongs to. The legacy essay names are the essay
+// they are, and anything unrecognised falls to the type the server would read it
+// as — the same fold `mark_scheme.type_counts` makes, so the page's table and the
+// stored scheme group the paper the same way.
+function sgSchemeType(type) {
+    var t = type || SG_QT.default;
+    if (SG_SCHEME_ORDER.indexOf(t) > -1) return t;
+    return SG_QT.essay.indexOf(t) > -1 ? 'essay_canvas' : SG_QT.default;
+}
+
 function questionManager() {
     return {
         questions: (function() {
@@ -1173,7 +1320,10 @@ function questionManager() {
                         });
                         if (!q.pairs.length) q.pairs = [{l:'', r:''}];
                         q.extra = (k && k.extra) || [];
-                    } else if (kind === 'dragdrop') {
+                    } else if (kind === 'dragdrop' || kind === 'ordering') {
+                        // Both answer a sequence, and both store it the same way —
+                        // which is what lets an ordering question be re-typed as a
+                        // drag & drop one without losing the answer.
                         q.order = ((k && k.order) || []).slice();
                         if (!q.order.length) q.order = [''];
                         q.extra = (k && k.extra) || [];
@@ -1200,7 +1350,8 @@ function questionManager() {
                 choice:    {id:'Pilihan Ganda', en:'Multiple choice', icon:'fa-check-square',      btn:'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'},
                 truefalse: {id:'Benar / Salah', en:'True / False',    icon:'fa-toggle-on',         btn:'bg-primary-50 hover:bg-primary-100 text-primary-700 border-primary-200'},
                 match:     {id:'Menjodohkan',   en:'Matching',        icon:'fa-arrows-left-right', btn:'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'},
-                dragdrop:  {id:'Susun Kata',    en:'Drag & drop',     icon:'fa-hand-pointer',      btn:'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'},
+                dragdrop:  {id:'Tarik & Letakkan', en:'Drag & drop',   icon:'fa-hand-pointer',      btn:'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'},
+                ordering:  {id:'Mengurutkan',   en:'Ordering',        icon:'fa-arrow-down-1-9',    btn:'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'},
                 essay:     {id:'Esai',          en:'Essay',           icon:'fa-pencil-alt',        btn:'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'},
             };
             return (SG_QT.picker || []).map(function(c) {
@@ -1212,10 +1363,86 @@ function questionManager() {
         get essayCount() { return this.questions.filter(q => !this.isObjectiveType(q.type)).length; },
         get objectivePct() { return this._objectivePct != null ? +this._objectivePct : 50; },
         get essayPct() { return this._essayPct != null ? +this._essayPct : 50; },
-        get totalPct() { return +this.objectivePct + +this.essayPct; },
+        get totalPct() { return this._schemeOn ? this.schemeTotal : (+this.objectivePct + +this.essayPct); },
         get objectivePerQ() { return this.objectiveCount > 0 ? this.objectivePct / this.objectiveCount : 0; },
         get essayPerQ() { return this.essayCount > 0 ? this.essayPct / this.essayCount : 0; },
         get hasEssay() { return this.essayCount > 0; },
+
+        // ── the mark scheme, on screen ───────────────────────────────────────
+        // With a scheme the badge reports the scheme's own total, which is 100 by
+        // construction; without one it reports the two pools, the paper's marks as
+        // they stand.
+        get schemeTotal() {
+            return Math.round(this.schemePoints().reduce(function(a, b) { return a + b; }, 0) * 100) / 100;
+        },
+        get hasPartialTypes() {
+            var self = this;
+            return this.questions.some(function(q) {
+                var k = self.kindOf(q);
+                return k === 'match' || k === 'dragdrop' || k === 'ordering';
+            });
+        },
+        marksOf(type) {
+            var v = this._schemeByType[type];
+            return v == null ? sgMarksDefault(type) : Math.max(0, +v || 0);
+        },
+        // One point value per question, in question order — the same list the
+        // server scales, so the two cannot disagree about which question is worth what.
+        schemePoints() {
+            var self = this;
+            return sgNorm100(this.questions.map(function(q) { return self.marksOf(q.type); }));
+        },
+        schemeRows() {
+            var self = this, points = this.schemePoints(), buckets = {};
+            this.questions.forEach(function(q, i) {
+                var key = sgSchemeType(q.type);
+                (buckets[key] = buckets[key] || []).push(i);
+            });
+            var rows = [];
+            SG_SCHEME_ORDER.forEach(function(t) {
+                var idxs = buckets[t] || [];
+                if (!idxs.length) return;
+                var scaled = idxs.map(function(i) { return points[i] || 0; });
+                var sum = scaled.reduce(function(a, b) { return a + b; }, 0);
+                rows.push({
+                    type: t, kind: sgKind(t), count: idxs.length,
+                    marks: self.marksOf(t),
+                    rawSubtotal: Math.round(self.marksOf(t) * idxs.length * 100) / 100,
+                    scaledEach: Math.round((sum / idxs.length) * 100) / 100,
+                    scaledSubtotal: Math.round(sum * 100) / 100,
+                });
+            });
+            return rows;
+        },
+        schemeRawTotal() {
+            return Math.round(this.schemeRows().reduce(function(a, r) { return a + r.rawSubtotal; }, 0) * 100) / 100;
+        },
+        setTypeMarks(type, value) {
+            this._schemeByType[type] = value;
+            this._schemeOn = true;
+        },
+        // Every type this paper has gets a box, seeded with the marks it is already
+        // marked by — a stored scheme's own, or the paper's current weights read per
+        // type. A blank box would invite a teacher to type a number into a paper that
+        // is already marked at something else.
+        //
+        // Watched, not just run once at init: a draft restored from local storage — or
+        // a question the teacher adds — arrives *after* `init()`, and the first
+        // version left those types with empty boxes that read as "worth nothing".
+        seedScheme() {
+            var self = this;
+            SG_SCHEME_ORDER.forEach(function(t) {
+                if (self._schemeByType[t] != null) return;
+                if (!self.questions.some(function(q) { return sgSchemeType(q.type) === t; })) return;
+                self._schemeByType[t] = self.marksOf(t);
+            });
+        },
+        init() {
+            this.seedScheme();
+            this.$watch('questions.length', () => this.seedScheme());
+        },
+        useMarkScheme() { this._schemeOn = true; },
+        resetSchemeMarks() { this._schemeByType = {}; this._schemeOn = true; },
         // Every id is a string, so a question added after a restore can never
         // borrow a restored id — that collision is what made Alpine's x-for reuse
         // the wrong DOM node and draw one question's key inside another's card.
@@ -1243,6 +1470,50 @@ function questionManager() {
                 return Math.round(sum);
             } catch (e) { return 50; }
         })(),
+
+        // ── the mark scheme ───────────────────────────────────────────────────
+        //
+        // `_schemeOn` is what makes the freeze work. A paper saved before schemes
+        // existed has no `_scheme`, so this starts false and the form writes the
+        // paper's existing weights exactly as it always did — its marks are already
+        // on students' results. Using any control below turns it on, and from then
+        // on this paper has a scheme: per-type marks, and part-marks for matching
+        // and drag & drop.
+        _schemeOn: (function() {
+            try {
+                var w = {{ (exam.question_weights if exam else {}) | tojson | safe }} || {};
+                if (w['_scheme'] && w['_scheme'].by_type) return true;
+                // A brand-new paper starts on a scheme: it has no marks in anyone's
+                // hands yet, and per-type marks are the model. A paper that already
+                // has stored weights keeps them until someone presses the button —
+                // that is the freeze, and it is why this is not simply `true`.
+                return Object.keys(w).length === 0;
+            } catch (e) { return false; }
+        })(),
+        _partialOn: (function() {
+            try {
+                var w = {{ (exam.question_weights if exam else {}) | tojson | safe }} || {};
+                return w['_scheme'] ? !!w['_scheme'].partial : true;
+            } catch (e) { return true; }
+        })(),
+        // What a teacher sees in the boxes. A paper with a scheme shows its own
+        // marks; one without shows what it pays *now* per type, read off its stored
+        // weights, so the numbers on screen are the paper's rather than a default
+        // that is about to be written over them.
+        _schemeByType: (function() {
+            try {
+                var w = {{ (exam.question_weights if exam else {}) | tojson | safe }} || {};
+                var t = {{ (exam.question_types if exam else {}) | tojson | safe }} || {};
+                if (w['_scheme'] && w['_scheme'].by_type) return Object.assign({}, w['_scheme'].by_type);
+                var out = {};
+                Object.keys(w).forEach(function(i) {
+                    if (!/^\d+$/.test(String(i))) return;
+                    var type = t[i] || SG_QT.default;
+                    if (out[type] == null) out[type] = Math.round((+w[i] || 0) * 100) / 100;
+                });
+                return out;
+            } catch (e) { return {}; }
+        })(),
         dragFrom: null,
         dragOver: null,
         blankQuestion(type) {
@@ -1251,7 +1522,7 @@ function questionManager() {
             if (kind === 'choice') { q.answers = ['A']; q.bonus = false; }
             if (kind === 'truefalse') { q.tf = 'true'; }
             if (kind === 'match') { q.pairs = [{l:'', r:''}]; q.extra = []; q._extraInput = ''; }
-            if (kind === 'dragdrop') { q.order = ['']; q.extra = []; q._extraInput = ''; }
+            if (kind === 'dragdrop' || kind === 'ordering') { q.order = ['']; q.extra = []; q._extraInput = ''; }
             return q;
         },
         addQuestionOf(type) { this.questions.push(this.blankQuestion(type)); },
@@ -1320,9 +1591,9 @@ function questionManager() {
             if (kind === 'choice' && (!q.answers || !q.answers.length)) q.answers = ['A'];
             if (kind === 'truefalse' && !q.tf) q.tf = 'true';
             if (kind === 'match' && (!q.pairs || !q.pairs.length)) q.pairs = [{l:'', r:''}];
-            if (kind === 'dragdrop' && (!q.order || !q.order.length)) q.order = [''];
+            if ((kind === 'dragdrop' || kind === 'ordering') && (!q.order || !q.order.length)) q.order = [''];
             if (kind !== 'choice') q.answers = [];
-            if (kind !== 'match' && kind !== 'dragdrop') q.extra = [];
+            if (kind !== 'match' && kind !== 'dragdrop' && kind !== 'ordering') q.extra = [];
         },
         onBonusToggle(i) { if (this.questions[i].bonus) this.questions[i].answers = []; },
         normalizeTo100() {
@@ -1353,7 +1624,7 @@ function questionManager() {
                 if (extra.length) out.extra = extra;
                 return out;
             }
-            if (kind === 'dragdrop') {
+            if (kind === 'dragdrop' || kind === 'ordering') {
                 const out = {order: (q.order || []).map(w => String(w).trim()).filter(Boolean)};
                 const extra = (q.extra || []).map(x => String(x).trim()).filter(Boolean);
                 if (extra.length) out.extra = extra;
@@ -1365,7 +1636,24 @@ function questionManager() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, this.keyFor(q)])));
         },
         getWeightsJson() {
-            return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, this.isObjectiveType(q.type) ? this.objectivePerQ : this.essayPerQ])));
+            // A paper without a scheme posts exactly what it always posted: the two
+            // pools, split per question. That is what keeps opening and saving an
+            // older exam from re-scoring marks already in students' hands.
+            if (!this._schemeOn) {
+                return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, this.isObjectiveType(q.type) ? this.objectivePerQ : this.essayPerQ])));
+            }
+            // With a scheme, the marks are the scheme's own — and the save route
+            // recomputes them anyway, so this is the preview the teacher saw.
+            var self = this, points = this.schemePoints(), out = {};
+            this.questions.forEach(function(q, i) { out[i] = points[i] || 0; });
+            var byType = {};
+            SG_SCHEME_ORDER.forEach(function(t) {
+                if (self.questions.some(function(q) { return sgSchemeType(q.type) === t; })) {
+                    byType[t] = self.marksOf(t);
+                }
+            });
+            out['_scheme'] = {by_type: byType, partial: !!this._partialOn, version: 1};
+            return JSON.stringify(out);
         },
         getPagesJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.pages || ''])));
