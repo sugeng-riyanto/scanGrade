@@ -88,64 +88,82 @@
         </div>
 
         <!-- Features Grid -->
+        {# Every card names the artifact that proves it (`data-facility`), and
+           tests/unit/test_landing_facilities.py fails if a card has no artifact or
+           an artifact has no card — a facility claim cannot be advertised here
+           without the code behind it, the way a performance figure cannot be
+           advertised without a measurement.
+
+           The question types are counted, not asserted. This card used to read
+           "3 Tipe Soal" listing MCQ and two essays while the app had grown to
+           six: a marketing card that restates the app is a second copy of it, and
+           it drifted. The list below is `question_types.PICKER_TYPES`, the same
+           tuple the teacher's builder buttons come from. #}
+        {% set _qtypes = q_vocabulary()['picker'] %}
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 max-w-6xl mx-auto">
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="question-types" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 transform hover:scale-110 transition-transform duration-300">
                     <i class="fas fa-pen-fancy text-white text-xl"></i>
                 </div>
-                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('3 Tipe Soal','3 Question Types')"></h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('MCQ, Esai Teks (paragraph), dan Esai Canvas — lengkap dengan upload PDF soal.','MCQ, Text Essay (paragraph) and Canvas Essay — complete with PDF question upload.')"></p>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('{{ _qtypes|length }} Tipe Soal','{{ _qtypes|length }} Question Types')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('{{ _qtypes|map(attribute='id')|join(', ') }}, lengkap dengan upload PDF soal.','{{ _qtypes|map(attribute='en')|join(', ') }}, complete with PDF question upload.')"></p>
             </div>
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="ai-grading" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
                     <i class="fas fa-robot text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Koreksi AI','AI Grading')"></h3>
                 <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('AI grading untuk esai teks. Guru tinggal review. Support Gemini, OpenAI, DeepSeek, Groq.','AI grading for text essays. The teacher just reviews. Supports Gemini, OpenAI, DeepSeek, Groq.')"></p>
             </div>
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="anti-cheat" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
                     <i class="fas fa-shield-alt text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm">Anti-Cheat</h3>
                 <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Deteksi tab switch, watermark, blokir copy-paste, auto-submit saat maksimal pelanggaran.','Tab-switch detection, watermark, copy-paste blocked, auto-submit at the violation limit.')"></p>
             </div>
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="digital-tools" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
                     <i class="fas fa-ruler text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Alat Ukur Digital','Digital Tools')"></h3>
                 <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Ruler 30cm, busur 180°, segitiga siku 45°, jangka — transparan, bisa digeser & diputar.','30cm ruler, 180° protractor, 45° set square, compass — transparent, draggable and rotatable.')"></p>
             </div>
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="analytics-export" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-red-500 to-rose-500 flex items-center justify-center shadow-lg shadow-red-500/20">
                     <i class="fas fa-chart-bar text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Analitik & Export','Analytics & Export')"></h3>
                 <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Distribusi nilai, soal tersulit, export XLSX/PDF dengan canvas siswa.','Score distribution, hardest questions, XLSX/PDF export including student canvas work.')"></p>
             </div>
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="multi-school" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center shadow-lg shadow-teal-500/20">
                     <i class="fas fa-school text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Multi-Sekolah','Multi-School')"></h3>
                 <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Setiap sekolah punya NPSN sendiri. Data terpisah, aman, dan terisolasi.','Every school has its own NPSN. Data is separate, safe and isolated.')"></p>
             </div>
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="online-payment" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500 to-cyan-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
                     <i class="fas fa-credit-card text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Pembayaran Online','Online Payment')"></h3>
                 <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Midtrans terintegrasi. Billing otomatis, activation code, trial 14 hari.','Midtrans integrated. Automatic billing, activation codes, 14-day trial.')"></p>
             </div>
-            <div class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+            <div data-facility="scientific-calculator" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
                     <i class="fas fa-calculator text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Kalkulator Ilmiah','Scientific Calculator')"></h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Scientific calculator dengan trigonometri, logaritma, memory — bisa diaktifkan per ujian.','Scientific calculator with trigonometry, logarithms and memory — enabled per exam.')"></p>
-            </div>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Scientific calculator dengan trigonometri, logaritma, memory — bisa diaktifkan per ujian.','Scientific calculator with trigonometry, logarithms and memory — enabled per exam.')"></p>            </div>
         </div>
+
+        {# Facilities point at where a reader can check them, the way the
+           performance block points at its measurements. #}
+        <p class="mt-6 text-center text-[11px] text-surface-400 leading-relaxed max-w-3xl mx-auto">
+            <span x-text="t('Setiap fasilitas di atas ada di aplikasi, bukan di slide — Anda bisa mencobanya sendiri tanpa mendaftar di halaman','Every facility above is in the application, not in a slide deck — try each one yourself, without signing up, on the')"></span>
+            <a href="/demo" class="font-bold text-primary-600 dark:text-primary-400 hover:underline">Demo</a><span x-text="t('. Angka kinerja di bawah berasal dari uji beban yang skrip, konfigurasi, dan keluaran mentahnya ikut disimpan di repositori ini.','. The performance figures below come from load tests whose script, configuration and raw output are kept in this repository.')"></span>
+        </p>
 
         <!-- Evidence / Kinerja Terukur -->
         <div class="mt-16 bg-white rounded-3xl p-8 lg:p-12 shadow-lg shadow-surface-200/40 border border-surface-100">
