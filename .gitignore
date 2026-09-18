@@ -58,6 +58,10 @@ flask_*.log
 flask_*.txt
 improve/
 references/
+# Third-party product screenshots kept as a UX reference (ZipGrade). They are not
+# ours to publish, and a reference image in the tree is one `git add -A` away from
+# shipping inside the app's own repository.
+docs/ref/
 .opencode/
 .aider*
 

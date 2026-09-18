@@ -12,7 +12,15 @@
 .dark .chart-card { background: #1e2038 !important; border-color: #2d3050 !important; }
 .dark .chart-card h4 { color: #e2e8f0 !important; }
 .dark .chart-card p { color: #8892b0 !important; }
-@media (max-width:640px) { .chart-grid { grid-template-columns: 1fr !important; } }
+/* The floor for this page's own controls, asked as `pointer: coarse` for the
+   reason the app's chrome asks it: a 768px tablet is just as much a finger as a
+   375px phone, and a file input is 28px tall on both — a control a thumb misses.
+   The `@media (max-width:640px) .chart-grid` rule that used to sit here was for a
+   class this page does not have: the charts grid is `grid-cols-1 sm:grid-cols-2
+   xl:grid-cols-3` and already responsive, so that rule styled nothing. */
+@media (pointer: coarse) {
+    .sg-omr-file, .sg-omr-run, .sg-omr-select { min-height: 44px; }
+}
 </style>
 {% endblock %}
 {% block content %}
@@ -21,14 +29,22 @@
   <!-- Hero -->
   <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] p-6 text-white shadow-2xl">
     <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAyNHYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-40"></div>
-    <div class="relative flex items-center justify-between">
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-400 flex items-center justify-center shadow-lg shadow-emerald-500/30"><i class="fas fa-microscope text-slate-900 text-lg"></i></div>
-        <div><h2 class="text-xl font-extrabold tracking-tight">OMR Test Suite</h2><p class="text-sm text-slate-400 mt-0.5">Validasi akurasi & performa scanner LJK</p></div>
+    <!-- Stacked on a phone: a 12rem title block beside two buttons leaves the
+         heading wrapping into a column of single words. -->
+    <div class="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="flex items-center gap-4 min-w-0">
+        <div class="w-12 h-12 shrink-0 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-400 flex items-center justify-center shadow-lg shadow-emerald-500/30"><i class="fas fa-microscope text-slate-900 text-lg"></i></div>
+        <div class="min-w-0"><h2 class="text-xl font-extrabold tracking-tight">OMR Test Suite</h2><p class="text-sm text-slate-400 mt-0.5">Validasi akurasi & performa scanner LJK</p></div>
       </div>
-      <div class="flex gap-2">
-        <button onclick="exportChart('chart-pie')" class="bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-95"><i class="fas fa-download mr-1"></i>PNG</button>
-        <button onclick="copyTable()" class="bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-95"><i class="fas fa-copy mr-1"></i>Copy</button>
+      <div class="flex gap-2 shrink-0">
+        <!-- Disabled until there is something to export. Both were reachable
+             before a batch run and both failed silently: the canvas exists whether
+             or not a chart was drawn on it, so "PNG" downloaded a blank image — and
+             `copyTable` returned without a word. A control that cannot do its job
+             says so by being unavailable, which needs no copy at all. `renderCharts`
+             turns them on. -->
+        <button id="btn-export-png" onclick="exportChart('chart-pie')" disabled class="sg-omr-export tap-44 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-35 disabled:cursor-not-allowed" title="Jalankan Uji Batch dulu"><i class="fas fa-download mr-1"></i>PNG</button>
+        <button id="btn-export-csv" onclick="copyTable()" disabled class="sg-omr-export tap-44 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-35 disabled:cursor-not-allowed" title="Jalankan Uji Batch dulu"><i class="fas fa-copy mr-1"></i>Copy</button>
       </div>
     </div>
   </div>
@@ -63,26 +79,35 @@
   </div>
 
   <!-- Charts -->
-  <div id="charts-area" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  <div id="charts-area" class="hidden grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
     <div class="chart-card rounded-xl p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center"><i class="fas fa-chart-pie text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Success Rate</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Proporsi scan berhasil vs gagal. Idealnya &gt;95% success — jika rendah, periksa pencahayaan atau fokus kamera.</p>
-      <canvas id="chart-pie" height="140"></canvas>
+      <!-- Sized parent, and that is the whole fix: with `maintainAspectRatio:
+           false` Chart.js takes the canvas' height from its parent, and a parent
+           whose height *is* the canvas is a feedback loop — measured, the three
+           canvases grew to 5 400–8 300px tall at every window width, once per
+           resize. `relative` is what the library's own docs ask for. -->
+      <div class="relative h-40"><canvas id="chart-pie"></canvas></div>
     </div>
     <div class="chart-card rounded-xl p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-primary-400 to-blue-500 flex items-center justify-center"><i class="fas fa-chart-bar text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Distribusi Keyakinan</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Sebaran confidence 0-100%. <span class="text-emerald-600 font-bold">Hijau</span> = yakin, <span class="text-amber-600 font-bold">kuning</span> = ragu, <span class="text-red-500 font-bold">merah</span> = perlu review. Target: &gt;70% di &ge;80%.</p>
-      <canvas id="chart-histogram" height="140"></canvas>
+      <div class="relative h-40"><canvas id="chart-histogram"></canvas></div>
     </div>
     <div class="chart-card rounded-xl p-4 hover:shadow-md transition">
       <div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center"><i class="fas fa-layer-group text-white text-[10px]"></i></div><h4 class="text-xs font-bold text-surface-700">Tingkat Deteksi</h4></div>
       <p class="text-[9px] text-surface-400 mb-3 leading-relaxed">Jumlah bubble terdeteksi per file. Semua bar harus mencapai garis total soal — jika tidak, geometry mungkin meleset.</p>
-      <canvas id="chart-detection" height="140"></canvas>
+      <div class="relative h-40"><canvas id="chart-detection"></canvas></div>
     </div>
   </div>
 
-  <!-- 3 Cards: Single | Batch | Calibrate -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+  <!-- 3 Cards: Single | Batch | Calibrate.
+       Two up between 1024 and 1279 on purpose: at 1024 a three-up leaves each
+       card 227px, which is narrower than one file input plus the button under it,
+       and the metric pills inside fall to one per row. Measured at 1024 after the
+       change: cards 352px, pills back to three per row. -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
 
     <!-- Single Test -->
     <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-5 hover:shadow-md transition group">
@@ -90,12 +115,22 @@
         <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center shadow-lg shadow-sky-200/60 group-hover:scale-110 transition"><i class="fas fa-camera text-white text-sm"></i></div>
         <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Satu LJK</h3><p class="text-[10px] text-surface-400">Upload 1 gambar, lihat debug</p></div>
       </div>
-      <div class="flex items-center gap-2">
-        <input type="file" id="single-file" accept="image/*" class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 file:transition flex-1">
-        <button id="btn-test-single" class="shrink-0 bg-gradient-to-r from-sky-500 to-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-extrabold shadow-lg shadow-sky-200/60 transition active:scale-95"><i class="fas fa-play mr-1"></i>Test</button>
+      <!-- One row per control. The file input's own "Choose file / No file chosen"
+           text has a min-content width, so `flex-1` beside a button cannot shrink
+           it: measured, the button's right edge reached 374px on a 320px screen
+           and the row pushed the whole page 124px sideways. Stacked, and the
+           button gets the full width of the card a finger is aiming at. -->
+      <div class="space-y-2">
+        <input type="file" id="single-file" accept="image/*" class="sg-omr-file w-full text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 file:transition">
+        <button id="btn-test-single" class="sg-omr-run w-full bg-gradient-to-r from-sky-500 to-blue-600 text-white px-4 py-2.5 rounded-lg text-xs font-extrabold shadow-lg shadow-sky-200/60 transition active:scale-95"><i class="fas fa-play mr-1"></i>Test</button>
       </div>
       <div id="single-result" class="hidden mt-4 space-y-3">
-        <div class="grid grid-cols-2 gap-2 text-xs font-bold" id="single-metrics"></div>
+        <!-- Self-sizing, not a fixed grid. Each box has a floor wide enough for a
+             10-digit NISN in its own padding (`min-w-[6.5rem]`); the strip wraps
+             rather than overrunning when the card is narrower than three of them.
+             A `grid-cols-3` here measured a 79px number inside a 41px content box
+             at 1024 and 57px at 320 — the digits sat outside the coloured pill. -->
+        <div class="flex flex-wrap gap-2 text-xs font-bold" id="single-metrics"></div>
         <img id="single-debug" class="max-w-full h-auto rounded-xl border border-surface-200">
       </div>
     </div>
@@ -107,13 +142,27 @@
         <div><h3 class="font-extrabold text-surface-800 text-sm">Uji Batch</h3><p class="text-[10px] text-surface-400">Banyak file sekaligus + statistik</p></div>
       </div>
       <div class="space-y-2">
-        <input type="file" id="batch-files" accept="image/*" multiple class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 file:transition w-full">
+        <input type="file" id="batch-files" accept="image/*" multiple class="sg-omr-file w-full text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 file:transition">
         <div class="flex items-center gap-2">
-          <select id="batch-exam" class="flex-1 px-2 py-1.5 border border-surface-200 rounded-lg text-xs font-bold bg-surface-50">
+          <!-- Rendered by the route. This select used to be filled by a fetch to
+               `/api/exams/list`, which no blueprint defines: the 404 was swallowed
+               by a `.catch()` and the dropdown was empty for ever, so a batch run
+               could never be graded and "Rata-rata Skor" could never leave "-". -->
+          <select id="batch-exam" class="sg-omr-select flex-1 min-w-0 px-2 py-2 border border-surface-200 rounded-lg text-xs font-bold bg-surface-50">
             <option value="">— Tanpa grading —</option>
+            {% for e in exams or [] %}
+            <option value="{{ e.id }}">{{ e.title }} ({{ e.total_questions or '?' }} soal)</option>
+            {% endfor %}
           </select>
-          <button id="btn-test-batch" class="shrink-0 bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-1.5 rounded-lg text-xs font-extrabold shadow-lg shadow-violet-200/60 transition active:scale-95"><i class="fas fa-flask mr-1"></i>Run</button>
+          <button id="btn-test-batch" class="sg-omr-run shrink-0 bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2.5 rounded-lg text-xs font-extrabold shadow-lg shadow-violet-200/60 transition active:scale-95"><i class="fas fa-flask mr-1"></i>Run</button>
         </div>
+        <!-- `exams is None` is the *query*, `[]` is the *data* — a dropdown looks
+             identical either way and the two mean opposite things. The read
+             failed after retries here, so saying so is the difference between
+             "this bench has no exams" and "this bench could not ask". -->
+        {% if exams is none %}
+        <p class="text-[10px] font-bold text-red-600">Daftar ujian gagal dimuat — jalankan tanpa grading</p>
+        {% endif %}
       </div>
       <div id="batch-progress" class="hidden mt-3 text-xs font-bold text-surface-500"><span class="loading-spinner inline-block mr-1 align-middle"></span>Memproses...</div>
       <div id="batch-results" class="hidden mt-4">
@@ -132,13 +181,29 @@
         <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-200/60 group-hover:scale-110 transition"><i class="fas fa-crosshairs text-white text-sm"></i></div>
         <div><h3 class="font-extrabold text-surface-800 text-sm">Kalibrasi</h3><p class="text-[10px] text-surface-400">Ukur akurasi geometry terkini</p></div>
       </div>
-      <div class="flex items-center gap-2">
-        <input type="file" id="cal-file" accept="image/*" class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100 file:transition flex-1">
-        <input type="text" id="cal-total" value="50" class="w-14 px-2 py-1.5 border border-surface-200 rounded-lg text-xs font-bold text-center bg-surface-50">
-        <button id="btn-calibrate" class="shrink-0 bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-1.5 rounded-lg text-xs font-extrabold shadow-lg shadow-amber-200/60 transition active:scale-95"><i class="fas fa-crosshairs mr-1"></i>Ukur</button>
+      <!-- The same three controls, on two rows. All three on one row overflowed the
+           card at *every* width — measured on a 1280px window the "Ukur" button
+           ended at 1369px, and the whole page sat 89px wider than the viewport,
+           hidden behind `main`'s own horizontal scroll. It is the narrowest card
+           of the three, so it overflows first. -->
+      <div class="space-y-2">
+        <input type="file" id="cal-file" accept="image/*" class="sg-omr-file w-full text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100 file:transition">
+        <div class="flex items-center gap-2">
+          <!-- "50" beside a button that says "measure" is a number with no subject. -->
+          <!-- The label is an attribute, not a text node: this page declares
+               `content_lang = 'id'`, so its copy is Indonesian by design and a
+               `t(...)` pair here would render the *English* half into Indonesian
+               surroundings (the toggle reads `sg_lang`, which follows the document
+               only when the page does not pin it). `aria-label` names the field for
+               a screen reader and `title` for a mouse, without inventing copy. -->
+          <input type="text" id="cal-total" value="50" inputmode="numeric"
+                 aria-label="Jumlah soal pada LJK" title="Jumlah soal pada LJK"
+                 class="sg-omr-select w-16 px-2 py-2 border border-surface-200 rounded-lg text-xs font-bold text-center bg-surface-50">
+          <button id="btn-calibrate" class="sg-omr-run flex-1 bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-2.5 rounded-lg text-xs font-extrabold shadow-lg shadow-amber-200/60 transition active:scale-95"><i class="fas fa-crosshairs mr-1"></i>Ukur</button>
+        </div>
       </div>
       <div id="cal-result" class="hidden mt-4 space-y-2">
-        <div class="grid grid-cols-3 gap-2 text-xs font-bold" id="cal-metrics"></div>
+        <div class="flex flex-wrap gap-2 text-xs font-bold" id="cal-metrics"></div>
         <div id="cal-mismatches" class="text-[10px]"></div>
       </div>
     </div>
@@ -179,10 +244,18 @@ function renderCharts(data) {
     data: { labels: ok.map((_,i)=>'#'+(i+1)), datasets: [{ data: detected, backgroundColor: detected.map(v=>v>=total?'#10b981':v>=total*0.7?'#f59e0b':'#ef4444'), borderRadius: 2 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: total, ticks: { font: { size: 8 } } }, x: { ticks: { font: { size: 6 }, maxTicksLimit: 20 } } } }
   });
+  // There is something to export now, and that is what the two buttons wait for.
+  document.querySelectorAll('.sg-omr-export').forEach(b => { b.disabled = false; b.title = ''; });
   document.getElementById('charts-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function exportChart(id) { const c=document.getElementById(id),a=document.createElement('a'); a.download='omr_'+id+'_'+new Date().toISOString().slice(0,10)+'.png'; a.href=c.toDataURL('image/png'); a.click(); }
+function exportChart(id) {
+  const c=document.getElementById(id);
+  // The guard stays as well as the disabled state: the buttons are turned on by
+  // `renderCharts`, and a chart can still be destroyed and redrawn empty.
+  if(!c||!window.Chart||!Chart.getChart(c)) return;
+  const a=document.createElement('a'); a.download='omr_'+id+'_'+new Date().toISOString().slice(0,10)+'.png'; a.href=c.toDataURL('image/png'); a.click();
+}
 
 function copyTable() {
   const tbody=document.getElementById('batch-table-body'); if(!tbody?.children.length) return;
@@ -190,8 +263,6 @@ function copyTable() {
   tbody.querySelectorAll('tr').forEach(tr=>{const td=tr.querySelectorAll('td'); if(td.length>=7) csv+=Array.from(td).map(c=>c.textContent.trim()).join(',')+'\n';});
   navigator.clipboard.writeText(csv).then(()=>alert('CSV dicopy — paste di Excel/Sheets')).catch(()=>{const ta=document.createElement('textarea');ta.value=csv;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);alert('CSV dicopy.');});
 }
-
-fetch('/api/exams/list').then(r=>r.json()).then(d=>{const sel=document.getElementById('batch-exam');(d.exams||[]).forEach(e=>{const o=document.createElement('option');o.value=e.id;o.textContent=e.title+' ('+(e.total_questions||'?')+' soal)';sel.appendChild(o);});}).catch(()=>{});
 
 ['btn-test-single','btn-test-batch','btn-calibrate'].forEach(id=>{
   const btn=document.getElementById(id);
@@ -232,13 +303,13 @@ fetch('/api/exams/list').then(r=>r.json()).then(d=>{const sel=document.getElemen
         });
       } else if(isCal){
         document.getElementById('cal-result').classList.remove('hidden');
-        document.getElementById('cal-metrics').innerHTML='<div class="bg-amber-50/80 rounded-lg p-2 text-center">Cocok: <span class="text-amber-700 font-extrabold">'+data.matched+'/'+data.total+'</span></div><div class="bg-amber-50/80 rounded-lg p-2 text-center">Akurasi: <span class="text-amber-700 font-extrabold">'+data.accuracy+'%</span></div><div class="bg-amber-50/80 rounded-lg p-2 text-center">NISN: <span class="text-amber-700 font-extrabold">'+(data.nisn||'?')+'</span></div>';
+        document.getElementById('cal-metrics').innerHTML='<div class="sg-omr-metric flex-1 min-w-[6.5rem] bg-amber-50/80 rounded-lg p-2 text-center">Cocok: <span class="text-amber-700 font-extrabold">'+data.matched+'/'+data.total+'</span></div><div class="sg-omr-metric flex-1 min-w-[6.5rem] bg-amber-50/80 rounded-lg p-2 text-center">Akurasi: <span class="text-amber-700 font-extrabold">'+data.accuracy+'%</span></div><div class="sg-omr-metric flex-1 min-w-[6.5rem] bg-amber-50/80 rounded-lg p-2 text-center">NISN: <span class="text-amber-700 font-extrabold">'+(data.nisn||'?')+'</span></div>';
         const mm=document.getElementById('cal-mismatches');
         if(data.mismatches?.length) mm.innerHTML='<p class="text-xs font-bold text-red-600 mt-2">Mismatch ('+data.mismatches.length+'):</p><div class="text-[10px] text-red-500">'+data.mismatches.slice(0,20).map(m=>'Soal '+(parseInt(m.question)+1)+': seharusnya '+m.expected+' → terdeteksi '+(m.detected||'-')).join('<br>')+'</div>';
         else mm.innerHTML='<p class="text-xs font-bold text-emerald-600 mt-2">✅ Semua cocok!</p>';
       } else {
         document.getElementById('single-result').classList.remove('hidden');
-        document.getElementById('single-metrics').innerHTML='<div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">NISN</span><br><span class="text-sky-700">'+(data.nisn||'?')+'</span></div><div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Deteksi</span><br><span class="text-sky-700">'+(data.detected||0)+'/'+((data.total)||50)+'</span></div><div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Keyakinan</span><br><span class="text-sky-700">'+Math.round((data.avg_confidence||0)*100)+'%</span></div><div class="bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Status</span><br><span class="'+(data.error?'text-red-600':'text-emerald-600')+'">'+(data.error||'OK')+'</span></div>';
+        document.getElementById('single-metrics').innerHTML='<div class="sg-omr-metric flex-1 min-w-[6.5rem] bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">NISN</span><br><span class="text-sky-700">'+(data.nisn||'?')+'</span></div><div class="sg-omr-metric flex-1 min-w-[6.5rem] bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Deteksi</span><br><span class="text-sky-700">'+(data.detected||0)+'/'+((data.total)||50)+'</span></div><div class="sg-omr-metric flex-1 min-w-[6.5rem] bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Keyakinan</span><br><span class="text-sky-700">'+Math.round((data.avg_confidence||0)*100)+'%</span></div><div class="sg-omr-metric flex-1 min-w-[6.5rem] bg-sky-50 rounded-lg p-2 text-center"><span class="text-surface-400">Status</span><br><span class="'+(data.error?'text-red-600':'text-emerald-600')+'">'+(data.error||'OK')+'</span></div>';
         if(data.debug_image) document.getElementById('single-debug').src='data:image/jpeg;base64,'+data.debug_image;
       }
     } finally { this.disabled=false; this.innerHTML=isSingle?'<i class="fas fa-play mr-1"></i>Test':isBatch?'<i class="fas fa-flask mr-1"></i>Run':'<i class="fas fa-crosshairs mr-1"></i>Ukur'; }

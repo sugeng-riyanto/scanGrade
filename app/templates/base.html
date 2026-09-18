@@ -100,7 +100,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     {% block head_extra %}{% endblock %}
 </head>
-<body class="h-full antialiased"
+<body class="h-full antialiased {% block body_class %}{% endblock %}"
       x-data="{
         sidebarOpen: false,
         // The one place the UI language is held. Page templates used to declare
@@ -169,7 +169,13 @@
        "Nilai" with an English one. Region-level, not per label: every string in
        these regions is a pair, so the region *is* the smallest element that
        contains the change. #}
-    <aside :lang="lang" class="fixed inset-y-0 left-0 z-50 w-64 bg-gradient-to-b from-surface-900 via-surface-800 to-surface-900 transform transition-transform duration-250 ease-out lg:translate-x-0 lg:static lg:z-auto shadow-xl"
+    {# The three chrome regions carry `sg-app-*` hooks, and they are a contract,
+       not decoration: a page can ask to be left alone with a task (an exam
+       sitting does — see `body_class` on `student/take_exam.html`), and it can
+       only do that by naming the regions it is hiding. The first version matched
+       the DOM shape instead (`body > div > aside`), which one extra wrapper
+       would have turned off silently. #}
+    <aside :lang="lang" class="sg-app-sidebar fixed inset-y-0 left-0 z-50 w-64 bg-gradient-to-b from-surface-900 via-surface-800 to-surface-900 transform transition-transform duration-250 ease-out lg:translate-x-0 lg:static lg:z-auto shadow-xl"
            :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
            @keydown.escape.window="sidebarOpen=false">
 
@@ -326,7 +332,7 @@
     <div class="flex-1 flex flex-col min-w-0 max-w-full pb-safe lg:pb-0">
 
         <!-- Topbar -->
-        <header :lang="lang" class="h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-sm">
+        <header :lang="lang" class="sg-app-topbar h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-sm">
             <div class="flex items-center gap-3 min-w-0">
                 <button @click="sidebarOpen = !sidebarOpen" class="tap-44 text-surface-400 hover:text-surface-700 -ml-2 rounded-lg hover:bg-surface-100 transition">
                     <i class="fas fa-bars text-lg"></i>
@@ -563,7 +569,7 @@ function linkify(text) {
 {% block scripts %}{% endblock %}
 {% if g.user_role %}
 <!-- Mobile bottom nav -->
-<nav :lang="lang" class="fixed bottom-0 inset-x-0 z-50 bg-white border-t border-surface-200 pb-safe lg:hidden shadow-2xl flex">
+<nav :lang="lang" class="sg-app-bottomnav fixed bottom-0 inset-x-0 z-50 bg-white border-t border-surface-200 pb-safe lg:hidden shadow-2xl flex">
     {% set role = g.user_role %}
     {% if role == 'super_admin' %}
     <a href="/super-admin/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-crown text-lg mb-0.5"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
