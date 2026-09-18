@@ -269,9 +269,19 @@ class TestTheDeployUsesIt:
         )
 
     def test_it_runs_after_the_reload(self):
-        """Measuring before the reload would measure the release being replaced."""
+        """Measuring before the reload would measure the release being replaced.
+
+        The anchor is the reload *call* on its own line, not `reload_app` followed
+        by a particular next line: the forward path reloads gunicorn and then does
+        other things (restarting the Celery worker, sleeping), and pinning the
+        exact next line made this test fail on a change that left the ordering it
+        protects untouched. It also has to be the call and not the definition —
+        `reload_app() {` sits above the claims gate, so a bare `index()` would
+        pass even with the call deleted.
+        """
         body = DEPLOY.read_text(encoding="utf-8")
-        assert body.index("reload_app\nsleep 3") < body.index("deploy/claims_gate.py"), (
+        reload_call = body.index("\nreload_app\n")
+        assert reload_call < body.index("deploy/claims_gate.py"), (
             "the claims gate runs before the app is reloaded, so it would measure the "
             "previous release and pass a new one it never looked at."
         )
