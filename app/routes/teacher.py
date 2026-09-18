@@ -17,8 +17,9 @@ from app.services.question_types import (
     KIND_CHOICE, KIND_DRAG, KIND_ESSAY, KIND_MATCH, KIND_TRUE_FALSE, MCQ,
     canonical_type, default_weights, describe_answer, earned_points, essay_marker,
     grade_answer, has_answer, is_essay, is_objective, key_has_answer, normalise_key,
-    question_kind,
+    question_kind, scheme_in,
 )
+from app.services import mark_scheme
 from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
@@ -132,6 +133,33 @@ def _is_mcq_correct(student_ans, key_val):
     classified a true/false question as an essay.
     """
     return grade_answer(MCQ, key_val, student_ans)
+
+
+def _apply_mark_scheme(question_types, total_questions, question_weights):
+    """The scheme's own points, computed on the server.
+
+    The builder keeps a JavaScript copy of the mark-scheme arithmetic so the running
+    total moves while a teacher types. That copy is only a *preview*: if it could
+    write marks, a stale cached page — or a form edited in devtools — would decide
+    what a paper is worth, and the browser and the stored scores would drift apart
+    with nothing to show for it. The authority is `app/services/mark_scheme.py`, and
+    this is the one place the two exam-saving routes consult it.
+
+    A paper *without* a scheme is returned untouched. That is not politeness: a
+    result here is recomputed from the stored answers whenever marks are published
+    or recalculated, so applying a rule to an old exam would move marks already in
+    students' hands.
+    """
+    scheme = scheme_in(question_weights)
+    if not scheme:
+        return question_weights
+    return mark_scheme.weights_for(
+        question_types,
+        total_questions,
+        by_type=scheme.get("by_type"),
+        partial=bool(scheme.get("partial")),
+        existing=question_weights,
+    )
 
 
 def _recalculate_scores(exam_id):
@@ -791,6 +819,9 @@ def exam_form():
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
     question_weights = json.loads(request.form.get("question_weights", "{}"))
+    # The marks a paper is scored by are decided by _apply_mark_scheme, never by
+    # whatever the page posted (it posts a preview of the same numbers).
+    question_weights = _apply_mark_scheme(question_types, total_questions, question_weights)
     question_audio = {}
     question_canvas = {}
     anti_cheat_enabled = True
@@ -986,6 +1017,9 @@ def exam_detail(exam_id):
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
     question_weights = json.loads(request.form.get("question_weights", "{}"))
+    # The marks a paper is scored by are decided by _apply_mark_scheme, never by
+    # whatever the page posted (it posts a preview of the same numbers).
+    question_weights = _apply_mark_scheme(question_types, total_questions, question_weights)
     question_audio = {}
     question_canvas = {}
     anti_cheat_enabled = True
@@ -1327,9 +1361,9 @@ def answer_keys(exam_id):
                 stored = {}
         # This page edits choice keys. It used to write `essay` over every other
         # question it did not understand — which is now a matching question's pairs
-        # and a drag-and-drop question's word order — so saving a letter here
-        # destroyed a key the builder had set. Merge instead, and keep what the
-        # form did not have a control for.
+        # and the sequence a drag & drop or ordering question asks for — so saving a
+        # letter here destroyed a key the builder had set. Merge instead, and keep
+        # what the form did not have a control for.
         merged = dict(stored)
         for k, v in answer_key.items():
             qtype = qtypes.get(str(k))

@@ -326,9 +326,9 @@
       "frozen": false
     },
     "student/result_detail.html": {
-      "pairs": 24,
+      "pairs": 27,
       "leftovers": 28,
-      "coverage": 46.2,
+      "coverage": 49.1,
       "frozen": true
     },
     "student/results.html": {
@@ -344,7 +344,7 @@
       "frozen": false
     },
     "student/take_exam.html": {
-      "pairs": 232,
+      "pairs": 242,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -380,7 +380,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 55,
+      "pairs": 65,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -536,7 +536,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 147,
+      "pairs": 165,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -549,7 +549,7 @@
     },
     "teacher/grade_detail.html": {
       "pairs": 0,
-      "leftovers": 27,
+      "leftovers": 28,
       "coverage": 0.0,
       "frozen": false
     },

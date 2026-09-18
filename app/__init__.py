@@ -259,8 +259,8 @@ def create_app(env=None):
     # app/services/question_types.py; these are the four doors a page needs (see the
     # module docstring).
     from app.services.question_types import (
-        describe_answer, grade_answer, is_essay, is_objective, public_options,
-        question_kind, vocabulary,
+        describe_answer, grade_answer, is_essay, is_objective, part_factor,
+        partial_credit, public_options, question_kind, vocabulary,
     )
     # A report used to decide "is this answer right" with its own comparison of
     # letters, which cannot express a matching answer at all and marks every one
@@ -271,6 +271,12 @@ def create_app(env=None):
     app.jinja_env.globals["q_kind"] = question_kind
     app.jinja_env.globals["q_answer_text"] = describe_answer
     app.jinja_env.globals["q_public_options"] = public_options
+    # The mark scheme, for a page that shows what a question earned. These are the
+    # same functions the score is computed with, so a report cannot show a
+    # different number from the one it was added up from — which is exactly what a
+    # second implementation here would eventually do.
+    app.jinja_env.globals["q_part_factor"] = part_factor
+    app.jinja_env.globals["q_partial_credit"] = partial_credit
     # The pages that classify a question in JavaScript get the names from here
     # rather than writing their own list, which is how a Python change and a
     # JavaScript change stop meaning the same thing.

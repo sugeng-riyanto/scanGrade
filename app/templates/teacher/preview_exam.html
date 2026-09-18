@@ -52,6 +52,7 @@
                           {% if qkind == 'truefalse' %} bg-primary-50 border-primary-300 text-primary-700
                           {% elif qkind == 'match' %} bg-violet-50 border-violet-300 text-violet-700
                           {% elif qkind == 'dragdrop' %} bg-rose-50 border-rose-300 text-rose-700
+                          {% elif qkind == 'ordering' %} bg-sky-50 border-sky-300 text-sky-700
                           {% elif qtype == 'essay_text' %} bg-amber-50 border-amber-300 text-amber-700
                           {% elif qtype == 'essay_canvas' %} bg-emerald-50 border-emerald-300 text-emerald-700
                           {% else %}bg-white text-stone-600 border-stone-300{% endif %}">
@@ -82,7 +83,9 @@
                 {% elif qkind == 'match' %}
                 <span class="text-xs font-extrabold text-violet-600">(Menjodohkan · {{ q_answer_text(qtype, (exam.answer_key or {}).get(i|string)) or 'belum ada pasangan' }})</span>
                 {% elif qkind == 'dragdrop' %}
-                <span class="text-xs font-extrabold text-rose-600">(Susun Kata · {{ q_answer_text(qtype, (exam.answer_key or {}).get(i|string)) or 'belum ada kata' }})</span>
+                <span class="text-xs font-extrabold text-rose-600">(Tarik &amp; Letakkan · {{ q_answer_text(qtype, (exam.answer_key or {}).get(i|string)) or 'belum ada kata' }})</span>
+                {% elif qkind == 'ordering' %}
+                <span class="text-xs font-extrabold text-sky-600">(Mengurutkan · {{ q_answer_text(qtype, (exam.answer_key or {}).get(i|string)) or 'belum ada urutan' }})</span>
                 {% else %}
                 <span class="text-xs font-extrabold {% if qtype == 'essay_text' %}text-amber-600{% else %}text-emerald-600{% endif %}">
                     {% if qtype == 'essay_text' %}(Teks){% else %}(Canvas){% endif %}

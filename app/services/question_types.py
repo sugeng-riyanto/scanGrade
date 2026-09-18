@@ -37,16 +37,24 @@ from typing import Any, Iterable, Mapping
 
 # ── the vocabulary ───────────────────────────────────────────────────────────
 
+# A question type is a *kind of question*, not a flavour of multiple choice. Each
+# name below is priced on its own in the mark scheme, offered on its own in the
+# builder, and graded by its own rule. `OBJECTIVE_TYPES` is a statement about who
+# marks it — the app, not the teacher — and **not** a statement that these five are
+# one thing that shares a weight: the 70/30 pool model that read it that way is kept
+# only to reproduce papers marked before the scheme existed, and the scheme gives
+# every type its own row.
 MCQ = "mcq"
 TRUE_FALSE = "true_false"
 MATCH = "match"
 DRAG_DROP = "drag_drop"
+ORDER = "order"
 
 ESSAY = "essay"
 ESSAY_TEXT = "essay_text"
 ESSAY_CANVAS = "essay_canvas"
 
-OBJECTIVE_TYPES = (MCQ, TRUE_FALSE, MATCH, DRAG_DROP)
+OBJECTIVE_TYPES = (MCQ, TRUE_FALSE, MATCH, DRAG_DROP, ORDER)
 ESSAY_TYPES = (ESSAY, ESSAY_TEXT, ESSAY_CANVAS)
 
 #: The strings the answer key uses to mean "a teacher marks this one". The scanner
@@ -74,7 +82,12 @@ DEFAULT_TYPE = MCQ
 
 #: Matching: `{"pairs": [{"left": …, "right": …}, …], "extra": [right, …]}`
 MATCH_PAIRS = "pairs"
-#: Drag and drop: `{"order": [chip, …], "extra": [chip, …]}`
+#: Drag and drop *and* ordering: `{"order": [item, …], "extra": [item, …]}`. The
+#: two types answer the same kind of question — a sequence — so they share the
+#: field and the grader; what differs is the affordance a student is given, and
+#: that a drag & drop question is dragged into while an ordering question is
+#: ranked. Sharing the shape is also what keeps every drag & drop question already
+#: stored grading exactly as it did.
 DRAG_ORDER = "order"
 #: Both: right-hand or bank entries that belong to no correct answer.
 EXTRA = "extra"
@@ -267,7 +280,13 @@ def match_rights(key: Any) -> tuple[str, ...]:
 
 
 def drag_order(key: Any) -> tuple[str, ...]:
-    """The correct order of the chips. Accepts the stored shape or a bare list."""
+    """The correct order of the items — for drag & drop and for ordering alike.
+
+    Accepts the stored shape or a bare list. Named for the drag & drop type because
+    it was written for it first; an ordering question is the same sequence behind a
+    different control, so a second accessor would be a second answer to the same
+    question.
+    """
     raw = key.get(DRAG_ORDER) if isinstance(key, Mapping) else key
     sequence = _as_sequence(raw)
     return tuple(s for s in (sequence or ()) if s)
@@ -322,7 +341,7 @@ def public_options(qtype: Any, key: Any) -> dict[str, list[str]] | None:
         if not lefts or not rights:
             return None
         return {"lefts": lefts, "rights": rights}
-    if kind == KIND_DRAG:
+    if kind in (KIND_DRAG, KIND_ORDER):
         chips = list(drag_bank(key))
         return {"chips": chips} if chips else None
     return None
@@ -334,6 +353,7 @@ KIND_CHOICE = "choice"
 KIND_TRUE_FALSE = "truefalse"
 KIND_MATCH = "match"
 KIND_DRAG = "dragdrop"
+KIND_ORDER = "ordering"
 KIND_ESSAY = "essay"
 
 _KIND_BY_TYPE: dict[str, str] = {
@@ -341,6 +361,7 @@ _KIND_BY_TYPE: dict[str, str] = {
     TRUE_FALSE: KIND_TRUE_FALSE,
     MATCH: KIND_MATCH,
     DRAG_DROP: KIND_DRAG,
+    ORDER: KIND_ORDER,
     ESSAY: KIND_ESSAY,
     ESSAY_TEXT: KIND_ESSAY,
     ESSAY_CANVAS: KIND_ESSAY,
@@ -351,13 +372,14 @@ _KIND_BY_TYPE: dict[str, str] = {
 #: appear, each with its bilingual name. `essay_text` is deliberately absent: a
 #: typed essay is a legacy form the app still reads and grades, and offering it
 #: beside the canvas one invites a question the pupil cannot draw on.
-PICKER_TYPES: tuple[str, ...] = (MCQ, TRUE_FALSE, MATCH, DRAG_DROP, ESSAY_CANVAS)
+PICKER_TYPES: tuple[str, ...] = (MCQ, TRUE_FALSE, MATCH, DRAG_DROP, ORDER, ESSAY_CANVAS)
 
 _TYPE_LABELS: dict[str, tuple[str, str]] = {
     MCQ: ("Pilihan Ganda", "Multiple choice"),
     TRUE_FALSE: ("Benar / Salah", "True / False"),
     MATCH: ("Menjodohkan", "Matching"),
-    DRAG_DROP: ("Susun Kata", "Drag & drop"),
+    DRAG_DROP: ("Tarik & Letakkan", "Drag & drop"),
+    ORDER: ("Mengurutkan", "Ordering"),
     ESSAY_CANVAS: ("Esai", "Essay"),
     ESSAY_TEXT: ("Esai (ketik)", "Essay (typed)"),
     ESSAY: ("Esai", "Essay"),
@@ -386,7 +408,8 @@ def vocabulary() -> dict[str, Any]:
             KIND_CHOICE: ["Pilihan Ganda", "Multiple choice"],
             KIND_TRUE_FALSE: ["Benar / Salah", "True / False"],
             KIND_MATCH: ["Menjodohkan", "Matching"],
-            KIND_DRAG: ["Susun Kata", "Drag & drop"],
+            KIND_DRAG: ["Tarik & Letakkan", "Drag & drop"],
+            KIND_ORDER: ["Mengurutkan", "Ordering"],
             KIND_ESSAY: ["Esai", "Essay"],
         },
         "picker": [
@@ -394,6 +417,24 @@ def vocabulary() -> dict[str, Any]:
             for t in PICKER_TYPES
         ],
     }
+
+
+#: A kind's name in English. One map, because a scheme table, a spreadsheet export
+#: and a report all name the same kinds, and six hand-written lists is how one of
+#: them ends up calling a matching question "Essay".
+_KIND_LABELS: dict[str, str] = {
+    KIND_CHOICE: "Multiple choice",
+    KIND_TRUE_FALSE: "True / False",
+    KIND_MATCH: "Matching",
+    KIND_DRAG: "Drag & drop",
+    KIND_ORDER: "Ordering",
+    KIND_ESSAY: "Essay",
+}
+
+
+def kind_label(raw: Any) -> str:
+    """This question's kind, named for a reader."""
+    return _KIND_LABELS[question_kind(raw)]
 
 
 def question_kind(raw: Any) -> str:
@@ -418,7 +459,7 @@ def describe_answer(qtype: Any, key: Any) -> str:
         return word.capitalize() if word else ""
     if kind == KIND_MATCH:
         return "; ".join(f"{left} \u2192 {right}" for left, right in match_pairs(key))
-    if kind == KIND_DRAG:
+    if kind in (KIND_DRAG, KIND_ORDER):
         return " \u2192 ".join(drag_order(key))
     if kind == KIND_ESSAY:
         return ""
@@ -447,7 +488,7 @@ def normalise_key(qtype: Any, key: Any) -> Any:
         if extra:
             out[EXTRA] = extra
         return out
-    if kind == KIND_DRAG:
+    if kind in (KIND_DRAG, KIND_ORDER):
         out = {DRAG_ORDER: list(drag_order(key))}
         extra = _extra_chips(key)
         if extra:
@@ -474,7 +515,7 @@ def key_has_answer(qtype: Any, value: Any) -> bool:
         return _as_bool_word(value) is not None
     if kind == KIND_MATCH:
         return bool(match_pairs(value))
-    if kind == KIND_DRAG:
+    if kind in (KIND_DRAG, KIND_ORDER):
         return bool(drag_order(value))
     if kind == KIND_ESSAY:
         return False                     # a teacher marks it; there is no key
@@ -503,7 +544,7 @@ def has_answer(qtype: Any, answer: Any) -> bool:
         return _as_bool_word(value) is not None
     if kind == KIND_MATCH:
         return bool(_as_pairs(value))
-    if kind == KIND_DRAG:
+    if kind in (KIND_DRAG, KIND_ORDER):
         return bool([s for s in (_as_sequence(value) or ()) if s])
     if kind == KIND_ESSAY:
         if isinstance(answer, Mapping):
@@ -545,10 +586,11 @@ def grade_answer(qtype: Any, key: Any, answer: Any) -> bool:
         got = _as_pairs(value)
         return bool(want) and want == got
 
-    if kind == DRAG_DROP:
+    if kind in (DRAG_DROP, ORDER):
         want = drag_order(key)
         got = _as_sequence(value)
-        # Order-sensitive: a drag-and-drop question is about the sequence.
+        # Order-sensitive for both: a drag & drop question and an ordering question
+        # each ask for a sequence, and the sequence is the answer either way.
         return bool(want) and tuple(got or ()) == want
 
     # mcq, and anything that reaches here without a type of its own: the rule that
@@ -568,6 +610,84 @@ def is_correct(qtype: Any, key: Any, answer: Any) -> bool:
 
 # ── the marks ───────────────────────────────────────────────────────────────
 
+#: The reserved key inside `question_weights` that carries an exam's mark scheme.
+#:
+#: `question_weights` is `{"0": 1.4, "1": 3.2, …}` — points, looked up by question
+#: index — so a key called `_scheme` can never be mistaken for a question's marks:
+#: every reader asks for a numeric index. It rides *with* the weights on purpose,
+#: because the scheme decides how those weights are awarded, and the two travelling
+#: together is what makes every existing scoring site scheme-aware without a
+#: signature change. An exam whose weights carry no scheme scores exactly as it did
+#: before this key existed, which is what keeps already-published marks frozen.
+SCHEME_KEY = "_scheme"
+
+#: The types that can earn part of their marks. The other objective kinds have two
+#: or five possible answers, so a "part" of one is not a meaningful quantity.
+#: Ordering and drag & drop earn their share of the positions they got right; a
+#: matching question its share of the pairs. Ordering is in this tuple for the
+#: reason a teacher expects: arranging four items with three in the right place is
+#: three quarters of the question, and the old all-or-nothing rule called it zero.
+PARTIAL_TYPES = (MATCH, DRAG_DROP, ORDER)
+
+
+def scheme_in(weights: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """The mark scheme stored beside these weights, or `None`.
+
+    `None` is the important answer: it means "this exam was marked before schemes
+    existed", and every caller must then use the all-or-nothing rule rather than a
+    default scheme — otherwise saving an old exam in the builder would silently
+    re-score work already returned to students.
+    """
+    scheme = (weights or {}).get(SCHEME_KEY)
+    return scheme if isinstance(scheme, Mapping) else None
+
+
+def partial_credit(weights: Mapping[str, Any] | None) -> bool:
+    """Does this exam award part-marks for a partly-right matching or drag & drop
+    answer? Only an exam carrying a scheme can say yes."""
+    scheme = scheme_in(weights)
+    return bool(scheme and scheme.get("partial"))
+
+
+def part_factor(qtype: Any, key: Any, answer: Any) -> float:
+    """What share of a question's marks this answer earns, in `[0, 1]`.
+
+    All-or-nothing for the types where "partly right" is not a quantity — a wrong
+    letter is wrong, and so is a wrong true/false. For matching it is the share of
+    the key's pairs the student actually got: a four-pair question answered three
+    ways right earns three quarters of it, where the old rule gave it nothing. For
+    ordering and drag & drop it is the share of positions holding the right item —
+    four items in the right order with one out of place is three quarters.
+
+    The two shapes are compared against the *key's* own items, never against the
+    student's, so a student who pairs one left twice (once correctly, once with a
+    distractor) cannot earn the mark twice, and a distractor in the bank never
+    becomes a missing mark.
+    """
+    kind = canonical_type(qtype)
+    if kind not in PARTIAL_TYPES:
+        return 1.0 if grade_answer(kind, key, answer) else 0.0
+
+    value = unwrap(answer)
+    if kind == MATCH:
+        want = match_pairs(key)
+        if not want:
+            return 0.0
+        got = _as_pairs(value) or frozenset()
+        right = sum(1 for pair in want if pair in got)
+        return right / len(want)
+
+    want_sequence = drag_order(key)
+    if not want_sequence:
+        return 0.0
+    got_sequence = _as_sequence(value) or ()
+    right = sum(
+        1 for i, chip in enumerate(want_sequence)
+        if i < len(got_sequence) and got_sequence[i] == chip
+    )
+    return right / len(want_sequence)
+
+
 def earned_points(
     question_types: Mapping[str, Any] | None,
     answer_key: Mapping[str, Any] | None,
@@ -586,6 +706,7 @@ def earned_points(
     key = answer_key or {}
     given = answers or {}
     weight_of = weights or {}
+    part = partial_credit(weight_of)
 
     earned = 0.0
     graded = 0
@@ -597,7 +718,12 @@ def earned_points(
         if not is_objective(qtype) or not key_value or weight <= 0:
             continue
         graded += 1
-        if grade_answer(qtype, key_value, given.get(qi)):
+        # `part_factor` is only consulted for an exam that carries a scheme. The
+        # branch is not cosmetic: with no scheme, this is the expression that has
+        # marked every paper so far, so a wrong answer stays worth exactly zero.
+        if part:
+            earned += weight * part_factor(qtype, key_value, given.get(qi))
+        elif grade_answer(qtype, key_value, given.get(qi)):
             earned += weight
     return round(earned, 2), graded
 
@@ -613,6 +739,9 @@ def default_weights(
     Used when an exam carries no `question_weights` at all. The pools are decided
     by `pool()`, so a true/false question shares the objective budget with the
     MCQs rather than being counted as an essay.
+
+    Kept for the exams that have no stored weights at all; a scheme, when there is
+    one, decides the shares instead (see `app/services/mark_scheme.py`).
     """
     qtypes = question_types or {}
     objective = [i for i in range(total_questions or 0) if is_objective(qtypes.get(str(i), DEFAULT_TYPE))]
