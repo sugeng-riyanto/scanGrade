@@ -1,0 +1,93 @@
+SCANGRADE — where a request's CPU goes, attributed on the box itself
+====================================================================
+
+Production, https://scangrade.web.id, 1 vCPU, 3 gevent workers. Recorded
+2026-09-12. Supporting file, not a rung: it measures *attribution*, not latency.
+
+Why it exists
+-------------
+The capacity work established a ceiling in requests per second and a cost per
+request in CPU, without being able to say which process spends it. `vmstat` is
+box-wide, `/metrics` is the app's own view, and `rung-500-vps-samples.txt` records
+load and memory. The tool that normally answers this — `pidstat` over SSH — was
+refused for the machine doing the measuring, so the box reported about itself
+through `/metrics/processes` (cumulative CPU seconds per process, tagged by role,
+plus the kernel's own tally from `/proc/stat`), sampled by a client outside it.
+
+Every phase is bounded by two samples. The delta of a counter, divided by the
+requests that phase actually served, is that counter's CPU per request. Nothing
+here is a percentage: cumulative seconds are a fact, an interval is a choice, and
+the reader owns it.
+
+Milliseconds of CPU per request, instrument subtracted
+
+    phase                 reqs     rps     gunic  nginx  redis  other    proc     box   box%
+    -----------------------------------------------------------------------------------
+    static-keep 457B     20818   433.1      ~0    0.30   0.01   0.04    0.31    0.33    14%
+    static-fresh 457B      497    10.2    ~0     4.33   0.34   1.21    4.40    4.88     5%
+    static-keep 105K     13613   283.1      ~0    2.55   0.01   0.04    2.54    2.55    72%
+    static-fresh 105K      510    10.6    ~0     7.55   0.29   1.25    7.68    8.62     9%
+    load 50 students      1735    21.9    20.92   1.93   0.55   0.96   24.35   24.56    54%
+
+    gunic = the app rendering pages, nginx = the web server including TLS and
+    static files, redis = session and cache, other = Celery plus everything else.
+    proc and box are after subtracting the measuring instrument; box% is the share
+    of the single vCPU that the box was busy, from /proc/stat.
+
+Where the ~30 ms per request actually goes
+------------------------------------------
+At the rung the landing page publishes (50 sessions), a request costs about
+**25 ms of CPU, and roughly 85% of it is gunicorn rendering the page** —
+20.9 ms of app rendering, 1.9 ms of nginx, 0.55 ms of redis, 0.96 ms of
+everything else. The kernel share no process is charged for is small here
+(0.2 ms/request): under page-rendering load the work really is in the app.
+
+Two consequences worth stating:
+
+* **The ceiling is not what the box was doing.** 22 requests/s left the box 54%
+  busy, so the CPU cost extrapolates to roughly **41 requests/s on one vCPU** for
+  this page mix — while p50 was 273 ms and p99 7.0 s at that same load, with 0
+  errors and 0 x 429. CPU was not the binding constraint at 50 students; queueing
+  across three workers was. The ~20 req/s figure on the capacity page comes from a
+  different run (500 sessions under `vmstat`, user time 90-93%) and is not
+  contradicted here so much as measured under a heavier concurrency than this
+  harness reaches, since it paces each session with 1-3 second waits.
+* **Connection reuse is most of nginx's cost.** A cached 457-byte asset costs
+  0.30 ms of nginx CPU per request on a reused connection (433 req/s, 14% of the
+  box) but **4.33 ms when each request opens a new TCP+TLS connection** — with a
+  further ~5 ms of whole-box CPU that no process is charged for, because it is
+  kernel softirq and TCP work. A 105 KB cached asset is a different regime again:
+  2.55 ms per request at 283 req/s is 72% of the box, so large static files are
+  what nginx is spending its time on, not dynamic traffic.
+
+Three things the instrument forced
+----------------------------------
+1. **The measurement is not free.** Enumerating ~200 processes with `psutil` and
+   rendering four metrics for each costs **61.6 ms of the app's CPU per sample** —
+   at 1 Hz that was most of an idle box's busy time (7.9% busy, and the sampler
+   most of it). The load phase therefore samples every three seconds, and every
+   figure above has that cost subtracted. This is why the static phases show ~0
+   for gunicorn: their entire gunicorn reading was the instrument.
+2. **A fresh connection is forced with `Connection: close`, not a new client.**
+   Building a `requests.Session` per request rebuilds the SSL context every time;
+   the client became the bottleneck at 9 requests/s and the figure said nothing
+   about the server.
+3. **The payload has to be small to measure a handshake at all.** With the 105 KB
+   stylesheet a fresh connection spends its time in TCP slow-start (301 ms of wall
+   time per request from this client, against 22 ms on a reused connection), so
+   the static phases are run twice: over 457 bytes, where the difference between
+   the two is the handshake, and over the stylesheet, where the per-request cost
+   of a realistic cached asset is what is being read.
+
+What this does not say
+----------------------
+* **Read traffic only, and mostly this harness's mix.** The five student pages,
+  paced. A teacher grading or a student submitting canvas answers is heavier.
+* **One client, one network.** The fresh-connection phase is latency-bound from
+  this machine (~10 req/s over 6 threads, 301 ms wall per connection), so its
+  nginx cost per connection is measured under a light, sporadic load and is best
+  read as an upper bound.
+* **The instrument's cost under load is inferred, not measured.** The 61.6 ms per
+  sample was measured on an idle box; under load it reads 45-50 ms in the phases,
+  so the subtraction is close to right rather than exact. Every conclusion above
+  survives either figure.
