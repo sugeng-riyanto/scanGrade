@@ -7,7 +7,7 @@ import click
 from flask import Flask, g, request, jsonify, redirect, render_template, make_response
 from flask_cors import CORS
 from supabase import create_client, Client
-from app.utils.auth import login_required
+from app.utils.auth import login_required, super_admin_required
 
 from app.config import get_config
 
@@ -692,4 +692,16 @@ scangrade_memory_percent {mem.percent}
 scangrade_disk_free_bytes {disk.free}
 scangrade_disk_total_bytes {disk.total}
 """, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+    @app.route("/metrics/processes")
+    @super_admin_required
+    def metrics_processes():
+        """Cumulative per-process CPU, so a box with no shell can still be attributed.
+
+        `/metrics` answers the app's own questions; this answers the box's. It is a
+        super-admin read rather than one every signed-in user may make, because a
+        process inventory is not something a student needs.
+        """
+        from app.services.process_sampler import sample_text
+        return sample_text(), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
