@@ -406,11 +406,12 @@ def take_exam(exam_id):
                 exam[_field] = {}
     # Strip answer_key from exam before passing to template (students must not see correct answers)
     safe_exam = {k: v for k, v in exam.items() if k != "answer_key"}
-    # What a matching or drag-and-drop question needs in order to be *answerable*:
-    # the two columns, or the chip bank. The pairing itself stays behind, and it is
-    # `public_options()` that decides what "the pairing itself" means — one place,
-    # so no route can send a key by accident. An MCQ and a true/false question
-    # need nothing extra, so they are absent from the map rather than empty in it.
+    # What a matching, drag-and-drop or ordering question needs in order to be
+    # *answerable*: the two columns, or the items to arrange. The pairing itself
+    # stays behind, and it is `public_options()` that decides what "the pairing
+    # itself" means — one place, so no route can send a key by accident. An MCQ and
+    # a true/false question need nothing extra, so they are absent from the map
+    # rather than empty in it.
     _qt = exam.get("question_types") or {}
     _ak = exam.get("answer_key") or {}
     question_options = {}
@@ -1032,7 +1033,15 @@ def download_result_pdf(submission_id):
 
         for p_idx_str, p_data in s_pages.items():
             p_idx = int(p_idx_str)
-            pdf_idx = p_idx if ("0" in s_pages) else (p_idx - 1)
+            # The key *is* the page index: the exam page writes `canvasData[i][p]`
+            # with `p = this.page - 1`. This used to subtract one whenever the map
+            # happened to lack a '0' key, which moved any drawing whose first page
+            # was not page 1 onto the page before it — so a student who drew on
+            # page 3 got the overlay composed onto page 2 in their own report. The
+            # guess is gone because it was measurably wrong: across every stored
+            # submission no key was at or beyond the exam's page count, which a
+            # page number would have to reach for a drawing on the last page.
+            pdf_idx = p_idx
             pdf_url = pdf_page_urls[pdf_idx] if (0 <= pdf_idx < len(pdf_page_urls)) else ""
 
             bg = local_path_to_pil(pdf_url)
