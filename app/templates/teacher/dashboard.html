@@ -23,6 +23,24 @@
     </div>
     {% endif %}
 
+    {% if exams_unassigned %}
+    <div class="rounded-2xl bg-rose-50 border-2 border-rose-200 p-4 flex items-start gap-3">
+        <i class="fas fa-user-slash text-rose-600 mt-0.5"></i>
+        <div class="flex-1">
+            <p class="font-bold text-rose-800 text-sm"><span x-text="t('Ujian tanpa kelas','Exam with no class')"></span></p>
+            <p class="text-xs text-rose-700 mt-1" x-text="'{{ exams_unassigned|length }} ' + t('ujian sudah aktif tetapi belum ditugaskan ke kelas — tidak ada murid yang bisa melihatnya.','exam(s) are live but assigned to no class — no student can see them.')"></p>
+            <div class="flex flex-wrap gap-2 mt-2">
+                {% for e in exams_unassigned[:3] %}
+                <a href="/teacher/exams/{{ e.id }}" class="text-xs font-bold bg-white border border-rose-300 px-3 py-1.5 rounded-lg hover:bg-rose-100 transition">{{ e.title[:30] }}</a>
+                {% endfor %}
+                {% if exams_unassigned|length > 3 %}
+                <a href="/teacher/exams" class="text-xs font-bold bg-white border border-rose-300 px-3 py-1.5 rounded-lg hover:bg-rose-100 transition" x-text="'+' + '{{ exams_unassigned|length - 3 }} ' + t('lainnya','more')"></a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Welcome Banner -->
     <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-primary-700 p-6 lg:p-8">
         <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
