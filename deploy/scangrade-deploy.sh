@@ -233,6 +233,12 @@ fi
 # from the venv. That is a problem with the gate, not with the release, so it is
 # logged loudly and does not roll back good code: a broken checker must never be
 # able to take the site down. Exit 1 is a real finding and does.
+#
+# Exit 3 is the one the gate added for a release that *removes the check itself*
+# — a file it runs is gone, or the named tests collected nothing. That is a
+# property of the release rather than of the box, so it rolls back with exit 1;
+# the journal says which of the two it was, because "unreadable text" and "the
+# gate has been deleted" are fixed in different places.
 THEME_OUT=$(as_owner bash "$REPO/deploy/theme_gate.sh" 2>&1)
 THEME_RC=$?
 if [ "$THEME_RC" -eq 0 ]; then
@@ -241,7 +247,12 @@ elif [ "$THEME_RC" -eq 2 ]; then
   log "theme gate COULD NOT RUN (exit 2) — this release is NOT contrast-checked:"
   echo "$THEME_OUT" | sed 's/^/    /'
 else
-  log "theme gate FAILED (exit $THEME_RC) — rolling back to $BEFORE"
+  if [ "$THEME_RC" -eq 3 ]; then
+    log "theme gate DISARMED (exit 3) — this release removed the checks, so it is"
+    log "    refused rather than shipped unexamined — rolling back to $BEFORE"
+  else
+    log "theme gate FAILED (exit $THEME_RC) — rolling back to $BEFORE"
+  fi
   echo "$THEME_OUT" | sed 's/^/    /'
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 13

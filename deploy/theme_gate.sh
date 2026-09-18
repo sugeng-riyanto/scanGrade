@@ -95,6 +95,19 @@
 # one part of this gate that can report "could not measure" — a box without
 # node_modules must not be able to reject a release it cannot judge.)
 #
+# Exit codes, and the difference between them is the whole point:
+#
+#   0  the release is readable, compiled, translated and matches its own SQL.
+#   1  a real finding in the release. The deploy rolls back.
+#   2  **this box** cannot answer the question — no node, no node_modules, no
+#      SQL to read, a build that failed. Nothing is wrong with the release, and
+#      a checker that breaks must not be able to take the site down, so the
+#      deploy says so loudly and continues WITHOUT rolling back.
+#   3  the release **removed the check** — one of the files below is gone, or the
+#      named tests collected nothing. That is a property of the release, not of
+#      the box, and it is refused like any other finding: a gate someone can
+#      delete is a gate that stops running, silently, from that commit onwards.
+#
 # Usage:  bash deploy/theme_gate.sh
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
@@ -103,10 +116,23 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
 TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py"
 
-for check in $TESTS; do
-  if [ ! -f "$REPO/$check" ]; then
-    echo "theme gate: $check is missing — the check cannot run, which is not a pass" >&2
-    exit 2
+# ── Armament ─────────────────────────────────────────────────────────────────
+# Everything that makes this a gate: the checks themselves, and the three tools
+# they run through. A commit that deletes one of these is not a release with a
+# defect — it is the release that removes the check which would have found the
+# next defect, and every release after it ships unexamined. So the list is
+# checked up front, and a missing file is exit 3 (about the release), not exit 2
+# (about the box).
+ARMAMENT="$TESTS deploy/i18n_coverage.py deploy/css_freshness.py deploy/schema_contract.py"
+for check in $ARMAMENT; do
+  # `-s` and not `-f`: a file that exists and holds nothing is the same release
+  # as one where it was deleted, only quieter.
+  if [ ! -s "$REPO/$check" ]; then
+    echo "theme gate: DISARMED — $check is missing or empty in this release." >&2
+    echo "            It is part of the check itself, not of what the check judges," >&2
+    echo "            so deleting it does not make a release pass: it makes every" >&2
+    echo "            release after this one unchecked. Refusing (exit 3)." >&2
+    exit 3
   fi
 done
 
@@ -211,12 +237,16 @@ if [ "$RC" -eq 0 ]; then
   exit 2
 fi
 
-# pytest exit 5 is "no tests collected", which would silently disable the gate
-# while looking green to a `grep -q passed`.
+# pytest exit 5 is "no tests collected": the files are there and hold nothing,
+# so the gate would report green to a `grep -q passed` — or to anything reading
+# the exit code as "the check finished". Same class as a deleted file: the
+# release removed the check, not the defect. Exit 3, so it is refused.
 if [ "$RC" -eq 5 ]; then
-  echo "theme gate: no checks were collected — the gate is not running" >&2
+  echo "theme gate: DISARMED — the named checks collected no tests." >&2
+  echo "            The files exist and assert nothing, which reads as a pass to" >&2
+  echo "            everything except pytest itself. Refusing (exit 3)." >&2
   echo "$OUTPUT" >&2
-  exit 2
+  exit 3
 fi
 
 cat >&2 <<'EOF'
