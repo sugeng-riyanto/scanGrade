@@ -30,12 +30,13 @@ What this guard is protecting, and why each one is here:
   directly, but until this pin it arrived only as a `locust` dependency — so a
   venv built without locust would 500 both `/metrics` and `/metrics/processes`.
 
-Mutation-checked, **12/12 injected defects caught**: an unescaped quote in a
+Mutation-checked, **14/14 injected defects caught**: an unescaped quote in a
 label, a role total turned into a maximum, an unreadable process reported as a
 zero rather than skipped, the route losing its super-admin guard, a
 `cpu_percent(interval=…)` call, a `sleep`, the `psutil` pin deleted, the start
 time dropped, the ordering reversed, the counter renamed to a percentage, the
-role read from the name alone, and every role collapsed to `other`.
+role read from the name alone, every role collapsed to `other`, an unreadable
+`/proc/stat` reported as a zeroed box, and jiffies published as seconds.
 """
 
 from __future__ import annotations
@@ -347,3 +348,60 @@ class TestTheDependencyIsPinned:
         """If the imports go, this pin should go with them — and not silently first."""
         assert "import psutil" in INIT.read_text(encoding="utf-8")
         assert "import psutil" in SAMPLER.read_text(encoding="utf-8")
+
+
+# ── the share no process owns ────────────────────────────────────────────────
+
+class TestTheBoxTally:
+    """Process CPU is user time. TCP, softirq and the scheduler are charged to nobody."""
+
+    BOX = {"user": 50.0, "nice": 0.0, "system": 20.0, "idle": 1000.0,
+           "iowait": 30.0, "irq": 1.0, "softirq": 2.0, "steal": 0.0,
+           "total": 1103.0, "busy": 73.0}
+
+    def test_the_kernel_modes_are_reported(self):
+        out = sampler.render([], cpu_count=1, now=0.0, box=self.BOX)
+        assert 'scangrade_box_cpu_seconds{mode="softirq"} 2.00' in out
+        assert 'scangrade_box_cpu_seconds{mode="user"} 50.00' in out
+        assert "scangrade_box_cpu_seconds_busy 73.00" in out
+        assert "scangrade_box_cpu_seconds_total 1103.00" in out
+
+    def test_a_box_that_cannot_be_read_reports_nothing_rather_than_zero(self):
+        out = sampler.render([], cpu_count=1, now=0.0, box={})
+        assert "scangrade_box_cpu_seconds" not in out.replace("scangrade_box_cpu_count", ""), (
+            "a zero box tally reads as an idle box — the one answer that must not "
+            "be invented when /proc/stat cannot be read")
+
+    @staticmethod
+    def _proc_stat(monkeypatch, line: str | None):
+        import builtins
+        import io
+        real = builtins.open
+
+        def fake(path, *args, **kwargs):
+            if str(path) == "/proc/stat":
+                if line is None:
+                    raise FileNotFoundError(path)
+                return io.StringIO(line)
+            return real(path, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", fake)
+
+    def test_an_absent_proc_stat_yields_no_tally(self, monkeypatch):
+        self._proc_stat(monkeypatch, None)
+        assert sampler.box_cpu() == {}
+
+    def test_jiffies_are_converted_and_busy_excludes_idle_and_iowait(self, monkeypatch):
+        # user nice system idle iowait irq softirq steal (+ the guest fields that
+        # must NOT be added again, because the kernel already counts them in user).
+        line = ("cpu  100 0 50 8000 50 0 0 0 0 0\n"
+                "cpu0 100 0 50 8000 50 0 0 0 0 0\nintr 1\n")
+        self._proc_stat(monkeypatch, line)
+        got = sampler.box_cpu()
+        assert got["user"] == pytest.approx(1.0), "100 jiffies at USER_HZ=100 is 1 s"
+        assert got["system"] == pytest.approx(0.5)
+        assert got["idle"] == pytest.approx(80.0)
+        assert got["iowait"] == pytest.approx(0.5)
+        assert got["total"] == pytest.approx(82.0)
+        assert got["busy"] == pytest.approx(1.5), (
+            "busy is total minus idle and iowait; it is the share no process owns")
