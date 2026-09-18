@@ -36,11 +36,16 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = ROOT / "app" / "templates"
 DEMO = TEMPLATES / "demo.html"
+OMR_TEST = TEMPLATES / "super_admin" / "omr_test.html"
+SUPER_ADMIN_ROUTE = ROOT / "app" / "routes" / "super_admin.py"
 # The floor rules were a `<style>` block in base.html until they moved into the
 # stylesheet base.html links. Reading the file base.html points at, rather than
 # the template, is what keeps the check honest across that move: a re-inlined
 # block would leave floor_rules() reading an empty file and failing there.
 THEME_CSS = ROOT / "app" / "static" / "css" / "theme.css"
+# The chrome every page inherits — the bottom tab bar lives here, so a rule about
+# it has to be read against the markup that has to match the rule's selector.
+BASE = TEMPLATES / "base.html"
 
 
 def app_templates():
@@ -410,3 +415,245 @@ class TestTheDemoCredentialsAreUsable:
             "the copy buttons have no accessible name: the icon is decorative, so a "
             "screen reader announces nothing."
         )
+
+
+# ── 6. the OMR test bench ────────────────────────────────────────────────────
+#
+# Measured on the running page as a super admin, at 320/375/768/1024/1280. Three
+# defects, none visible on a wide screen while writing the template:
+#
+# 1. **The chart canvases ran away.** `maintainAspectRatio: false` makes Chart.js
+#    take the canvas' height from its *parent*, and the parent was the card,
+#    whose height was the canvas — a feedback loop. The three canvases measured
+#    **5 400–8 300px tall** at every width, once per resize, so the page was
+#    thousands of pixels long below the third chart.
+# 2. **The page was 89–174px wider than the window and nothing scrolled.** The
+#    three tool cards put a native file input beside a button; a file input's
+#    "Choose file / No file chosen" text has a min-content width, so `flex-1`
+#    cannot shrink it. `main` is `overflow-y: auto`, which computes its other
+#    axis to `auto` too, so the overflow hid behind an inner scrollbar instead of
+#    reaching `documentElement.scrollWidth` — a plain overflow check sees zero.
+# 3. **Every control was 28–31px tall**, the app's own floor being 44.
+#
+# A fourth was not a layout defect at all: the batch exam dropdown was filled by
+# a fetch to `/api/exams/list`, which no blueprint defines, and the 404 was
+# swallowed by a `.catch()` — so the select held nothing but "no grading" for
+# ever and a batch run could never be graded.
+
+CHART_PARENT = re.compile(r'<div class="([^"]*)\b(?:h-\d+|h-\[\d+px\])\b([^"]*)">\s*<canvas id="(chart-[\w-]+)"')
+
+
+class TestTheOmrBenchFitsEveryDevice:
+    def body(self):
+        assert OMR_TEST.is_file(), f"{OMR_TEST.name} is missing"
+        return rendered(OMR_TEST)
+
+    def test_every_chart_canvas_has_a_parent_that_sizes_it(self):
+        """A canvas in an unsized parent is the runaway: the parent's height *is*
+        the canvas, so each resize adds the canvas' own height again."""
+        body = self.body()
+        canvases = re.findall(r'<canvas id="(chart-[\w-]+)"', body)
+        assert len(canvases) == 3, f"expected three charts, found {canvases}"
+        for m in CHART_PARENT.finditer(body):
+            assert m, "a chart canvas is not inside a height-carrying div"
+        sized = {m.group(3) for m in CHART_PARENT.finditer(body)}
+        unsized = [c for c in canvases if c not in sized]
+        assert not unsized, (
+            f"{unsized} sits in a parent with no height: with `maintainAspectRatio: "
+            "false` Chart.js sizes the canvas from its parent, and a parent whose "
+            "height is the canvas grows without bound (measured 5 400–8 300px tall)."
+        )
+
+    def test_a_file_input_is_never_beside_the_button_that_submits_it(self):
+        """A native file input cannot shrink below its own text, so a row of
+        `file input + shrink-0 button` is wider than the card at every width —
+        measured, the button's right edge reached 374px on a 320px screen and
+        1369px on a 1280px one.
+
+        Asserted per input, not once for the page: a single `space-y-2` anywhere
+        satisfied the first version of this test while two of the three cards had
+        gone back to one packed line.
+        """
+        body = self.body()
+        for input_id in ("single-file", "batch-files", "cal-file"):
+            tag = re.search(r'<input type="file" id="' + re.escape(input_id) + r'"[^>]*>', body)
+            assert tag, f"{input_id} is gone"
+            assert "w-full" in tag.group(0), (
+                f"{input_id} is not `w-full`, so it shares a row with a button it "
+                "cannot shrink beside")
+            # The input's own parent is the control group, so that is where the
+            # stacked layout has to be.
+            start = body.rindex('<div class="', 0, body.index(f'id="{input_id}"'))
+            parent = re.match(r'<div class="([^"]*)"', body[start:]).group(1)
+            assert "space-y" in parent, (
+                f"{input_id}'s control group is `{parent}`, not a stack: the file input "
+                "and the run button are on one line again")
+            assert "items-center" not in parent and "flex" not in parent.split(), (
+                f"{input_id}'s control group is a flex row (`{parent}`)")
+
+    def test_the_page_declares_the_finger_floor_for_its_own_controls(self):
+        """Asked as `pointer: coarse` for the reason the chrome asks it: a 768px
+        tablet is just as much a finger as a 375px phone, and every control on
+        this page measured 28–31px.
+
+        The classes are checked on *every* control that needs them, because the
+        first version asked only whether each name appeared somewhere in the
+        markup — dropping it from one of the three run buttons passed.
+        """
+        body = self.body()
+        m = re.search(r"@media\s*\(\s*pointer:\s*coarse\s*\)\s*\{(.*?)\}", body, re.S)
+        assert m, "this page has no `pointer: coarse` block, so its 28px controls stay 28px"
+        block = m.group(1)
+        assert "min-height: 44px" in block, "the coarse block does not raise the height"
+
+        expected = {
+            "sg-omr-file": ("single-file", "batch-files", "cal-file"),
+            "sg-omr-run": ("btn-test-single", "btn-test-batch", "btn-calibrate"),
+            "sg-omr-select": ("batch-exam", "cal-total"),
+        }
+        for cls, controls in expected.items():
+            assert cls in block, f".{cls} is not lifted to the floor on a touch screen"
+            for control in controls:
+                tag = re.search(r"<[^>]*id=\"" + re.escape(control) + r"\"[^>]*>", body)
+                assert tag, f"#{control} is not in the markup"
+                assert cls in tag.group(0), (
+                    f"#{control} does not carry .{cls}, so the touch floor skips it and "
+                    "it stays 28px on a phone")
+
+    def test_no_rule_styles_a_class_this_page_does_not_have(self):
+        """`.chart-grid` was styled by a phone media query while the markup named
+        no such class — dead CSS that reads as a responsive rule."""
+        body = self.body()
+        style = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", body, re.S))
+        markup = re.sub(r"<style[^>]*>.*?</style>", " ", body, flags=re.S)
+        named = set(re.findall(r"\.([a-z][a-z0-9-]{2,})\s*[,{]", style))
+        used = set(re.findall(r"class=\"([^\"]*)\"", markup))
+        used = {token for group in used for token in group.split()}
+        dead = sorted(n for n in named if n.startswith("chart") and n not in used)
+        assert not dead, f"this page styles {dead} while its markup names no such class"
+
+    def test_the_metric_pills_cannot_spill_their_own_box(self):
+        """A 10-digit NISN is **79px** in this page's 12px/700, and the pill's own
+        padding is another 16.
+
+        Three of them in a `grid grid-cols-3` measured 57px per column at 1024 and
+        77px at 320, so the number sat outside its coloured box — and the box is
+        187px wide at 1024 only because the three tool cards are three-up there.
+        A floor plus wrapping is what makes the strip independent of the card
+        width; a fixed column count is what tied it to one.
+        """
+        body = self.body()
+        for container in ("single-metrics", "cal-metrics"):
+            tag = re.search(r'<div class="([^"]*)" id="' + container + r'">', body)
+            assert tag, f"#{container} is not in the markup"
+            cls = tag.group(1)
+            assert "flex-wrap" in cls and "grid-cols" not in cls, (
+                f"#{container} is `{cls}`: a fixed column count cannot shrink with "
+                "its card, so the numbers inside run past the pill")
+
+        # Every pill the page paints, counted where it is painted: the two
+        # `innerHTML` assignments are the only source of these boxes.
+        pills = re.findall(r'class="sg-omr-metric ([^"]*)"', body)
+        assert len(pills) == 7, (
+            f"expected 7 metric pills (4 single + 3 calibration), found {len(pills)}")
+        for cls in pills:
+            floor = re.search(r"min-w-\[(\d+(?:\.\d+)?)rem\]", cls)
+            assert floor, (
+                f"a metric pill carries no width floor (`{cls}`), so a long NISN "
+                "is centred over the box's edge")
+            # 79px of digits + 16px of padding = 95px = 5.94rem, so 6rem is the
+            # smallest floor that holds one; anything less is a floor in name.
+            assert float(floor.group(1)) >= 6.0, (
+                f"the pill's floor is {floor.group(1)}rem, below the 5.94rem a "
+                "10-digit NISN needs in this font")
+
+    def test_the_exam_list_is_rendered_rather_than_fetched(self):
+        """The dropdown's fetch pointed at `/api/exams/list`, which no blueprint
+        defines. The 404 was swallowed by a `.catch()`, so the empty select had no
+        symptom anywhere — and a batch run could not be graded."""
+        body = self.body()
+        assert "/api/exams/list" not in body, (
+            "the page fetches an endpoint that does not exist; the options are rendered "
+            "by the route now")
+        assert "{% for e in exams or [] %}" in body, (
+            "the select no longer renders the exams the route passes it")
+        route = SUPER_ADMIN_ROUTE.read_text(encoding="utf-8")
+        assert 'render_template("super_admin/omr_test.html", exams=exams)' in route, (
+            "the route does not pass an exam list, so the select renders empty")
+        assert 'supabase.table("exams")' in route.split("def omr_test_page", 1)[1].split("\n@super_bp.route", 1)[0], (
+            "the omr-test route does not query the exams it renders")
+
+
+# ── 6. the bottom tab bar on the smallest phones ─────────────────────────────
+
+
+def _css_rule(css, header):
+    """The whole rule that begins at `header`, with its braces balanced.
+
+    A media block contains nested rules, so a regex that stops at the first `}`
+    reads only the first selector inside it — which is how a rule looks present
+    while half of it is gone.
+    """
+    start = css.index(header)
+    depth = 0
+    for i, ch in enumerate(css[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return css[start:i + 1]
+    raise AssertionError(f"unclosed rule: {header}")
+
+
+class TestTheBottomTabBarOnTheSmallestPhones:
+    """Six labelled items do not fit 320px, and nothing anywhere said so.
+
+    Measured on the super-admin bar at 320px: 64 / 47 / 36 / 78 / 60 / 36. Every
+    item is `flex-1` with `min-width: auto`, so the two shortest labels were
+    crushed to 36px — under the 44px this suite holds every other control to,
+    and one thumb-width from the tab beside them, which is a navigation mistake
+    rather than a miss.
+
+    The stylesheet hides the labels *from the eye only* below 360px and floors
+    every item in both axes: measured again, 53x44 each (60x44 at 359), a 45px
+    bar, no overflow — and the labels are back at 360px, where all six fit.
+    """
+
+    def test_the_labels_are_hidden_below_360px_and_every_item_is_floored(self):
+        css = THEME_CSS.read_text(encoding="utf-8")
+        block = _css_rule(css, "@media (max-width: 359px)")
+        for selector in (".sg-app-bottomnav > a > span",
+                         ".sg-app-bottomnav > button > span"):
+            assert selector in block, (
+                f"`{selector}` is not in the sub-360px rule, so the labels stay in "
+                "the flow and the shortest tabs are crushed under the 44px floor")
+        assert re.search(r"min-width:\s*44px", block), (
+            "the items have no width floor, so the shortest tabs stay under 44px")
+        assert re.search(r"min-height:\s*44px", block), (
+            "the label was the item's height as much as its width: hiding it drops "
+            "the bar to 36px tall, which is under the floor in the other axis")
+        assert "clip-path" in block, (
+            "nothing clips the labels, so taking them out of the flow is not a "
+            "visual change the stylesheet owns")
+        assert "max-width: 359px" in block, (
+            "the boundary moved off 359px — at 360px the labelled bar already fits")
+
+    def test_the_selector_cannot_go_quietly_dead(self):
+        """A structural selector is a contract with the markup, and one wrapper
+        between them breaks it without an error: `> a > span` matches nothing the
+        day the icon and its label get a `<div>` around them, and the floor stops
+        applying with every test still green."""
+        nav = re.search(r"<nav\b[^>]*sg-app-bottomnav.*?</nav>",
+                        BASE.read_text(encoding="utf-8"), re.S)
+        assert nav, "base.html has no bottom tab bar for the rule to style"
+        nav = nav.group(0)
+        items = re.findall(r"<a\b[^>]*>.*?</a>|<button\b[^>]*>.*?</button>", nav, re.S)
+        assert len(items) >= 4, f"only {len(items)} tab-bar item(s) found"
+        for item in items:
+            inner = item[item.index(">") + 1:item.rindex("<")]
+            assert re.fullmatch(r"\s*<i\b.*?</i>\s*<span\b[^>]*>.*?</span>\s*",
+                                inner, re.S), (
+                "a tab-bar item no longer keeps its label in a <span> directly beside "
+                "the icon, so the stylesheet's `> a > span` never matches and the "
+                "44px floor goes dead silently: " + inner[:70])

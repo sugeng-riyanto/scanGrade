@@ -421,6 +421,9 @@ html { transition: background-color .3s, color .3s; }
            exist to prevent. */
         :where(.dark) :is(.hover\:border-emerald-100,.hover\:border-emerald-200,.hover\:border-emerald-300,.hover\:border-emerald-400):hover { border-color: #1f6b4a; }
         :where(.dark) :is(.hover\:border-rose-100,.hover\:border-rose-200,.hover\:border-rose-300):hover { border-color: #86203a; }
+        /* sky: the ordering question's chip bank hovers into it, the same way the
+           drag & drop bank hovers into rose. */
+        :where(.dark) :is(.hover\:border-sky-100,.hover\:border-sky-200,.hover\:border-sky-300):hover { border-color: #1c5a80; }
         :where(.dark) :is(.hover\:text-rose-200,.hover\:text-rose-300,.hover\:text-rose-400,.hover\:text-rose-500):hover { color: #fb7185; }
         :where(.dark) :is(.hover\:text-rose-600,.hover\:text-rose-700,.hover\:text-rose-800,.hover\:text-rose-900):hover { color: #fda4af; }
         :where(.dark) :is(.hover\:border-violet-100,.hover\:border-violet-200,.hover\:border-violet-300):hover { border-color: #45309f; }
@@ -459,6 +462,40 @@ html { transition: background-color .3s, color .3s; }
         .nav-section-title { color: #8892b0; }
         .dark ::-webkit-scrollbar-thumb { background: #3a4056; }
         .dark ::-webkit-scrollbar-thumb:hover { background: #4a5470; }
+        }
+
+        /* ── The bottom tab bar on a 320px phone ──────────────────────────────
+           Measured at 320px with the six items the super-admin bar carries:
+           64 / 47 / 36 / 78 / 60 / 36. Six labels do not fit there, and because
+           every item is `flex-1` with `min-width: auto`, the two shortest ones
+           ("Files", "Dark") were crushed to 36px — below the 44px the app holds
+           every other control to, and narrow enough that a thumb lands on the
+           neighbour and navigates somewhere else.
+
+           Under 360px the labels are hidden *visually* rather than removed: every
+           item measures 53×44 there (60×44 at 359), and each still carries its
+           name for a screen reader. The bar reads as an icon strip on the smallest
+           phones and is untouched from 360px up, where the labels fit — measured
+           at 375px, every item is already 58-78px wide. */
+        @media (max-width: 359px) {
+            .sg-app-bottomnav > a > span,
+            .sg-app-bottomnav > button > span {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip-path: inset(50%);
+                white-space: nowrap;
+            }
+            .sg-app-bottomnav > a,
+            .sg-app-bottomnav > button {
+                position: relative;
+                min-width: 44px;
+                /* The label was the item's height as much as its width: taking
+                   it out of the flow dropped the bar to 36px tall, which is
+                   under the floor in the other axis. */
+                min-height: 44px;
+            }
         }
 
         /* Print never carries a page wash. The token reset above already fixes the

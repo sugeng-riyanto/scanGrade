@@ -5,11 +5,11 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, current_app, send_file
 from app.utils.auth import login_required, get_supabase
-from app.utils.helpers import row_or_none
+from app.utils.helpers import read_with_retry, row_or_none
 from app.services.audit_service import log_activity
 from app.services.deploy_status_service import report as deploy_status_report
 from app.services.question_types import grade_answer, key_has_answer
-from app.utils.req_cache import invalidate_school
+from app.utils.req_cache import invalidate_school, ttl
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
 
@@ -278,13 +278,18 @@ def deploy_status():
     """Whether the runner that will deploy the next release is the checkout's own.
 
     Read-only, and reachable without a shell — which is the whole point: the one
-    state that matters here (an installed *copy* that has drifted from the
-    checkout) makes Gate 0 refuse every release with exit 14 while the site keeps
-    serving happily, so there is nothing to notice from the outside except a
-    version that stops changing.
+    state that matters here (an installed *copy*, or a *stale* one) leaves the site
+    serving happily while the deploy logic that runs is not the deploy logic in the
+    repository. There is nothing to notice from the outside except a version that
+    stops changing, which is not a symptom anyone reads.
+
+    The report is cached for half a minute because it is a dozen `git` calls on a
+    1 vCPU box that is also serving students, and nothing here changes faster than
+    the two-minute deploy timer. The measurement's own timestamp travels with it,
+    so a cached reading is never passed off as a live one.
     """
-    return render_template("super_admin/deploy_status.html",
-                           status=deploy_status_report())
+    status = ttl("deploy_status:report", 30, deploy_status_report)
+    return render_template("super_admin/deploy_status.html", status=status)
 
 
 @super_bp.route("/reset-demo-passwords", methods=["POST"])
@@ -1273,8 +1278,29 @@ def download_school_zip(school_id):
 @super_bp.route("/omr-test")
 @_sa_required
 def omr_test_page():
-    """Super Admin OMR test dashboard."""
-    return render_template("super_admin/omr_test.html")
+    """Super Admin OMR test dashboard.
+
+    The exam list is rendered here rather than fetched. The page used to fill its
+    batch dropdown from `/api/exams/list`, an endpoint no blueprint defines: the
+    404 was swallowed by a `.catch()`, so the select held nothing but "no grading"
+    for ever. A batch run then graded nothing and the "average score" card could
+    never leave "-", with no error anywhere to explain either.
+    """
+    supabase = get_supabase()
+    try:
+        # Retried, because this read fails transiently (`Server disconnected`,
+        # measured 4 of 10 identical calls) and the failure used to be invisible.
+        exams = read_with_retry(lambda: supabase.table("exams")
+                                .select("id,title,total_questions")
+                                .order("created_at", desc=True)
+                                .limit(200)
+                                .execute()).data or []
+    except Exception:
+        # A test bench that cannot list exams still tests scans; the scan paths
+        # below need no exam at all. `None` rather than `[]` so the page can say
+        # the list could not be read instead of implying there is nothing to list.
+        exams = None
+    return render_template("super_admin/omr_test.html", exams=exams)
 
 
 @super_bp.route("/api/omr-test/batch", methods=["POST"])
