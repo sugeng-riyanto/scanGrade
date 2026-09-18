@@ -7,6 +7,12 @@ from flask import Blueprint, render_template, g, request, jsonify, redirect, fla
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import read_with_retry, row_or_none
 from app.services.audit_service import log_activity
+from app.services.demo_settings import (
+    GROUPS as DEMO_GROUPS,
+    effective_flags as demo_effective_flags,
+    order_from_form,
+    order_key,
+)
 from app.services.deploy_status_service import report as deploy_status_report
 from app.services.question_types import grade_answer, key_has_answer
 from app.utils.req_cache import invalidate_school, ttl
@@ -402,6 +408,12 @@ def demo_settings():
             "demo_tutorial_siswa": request.form.get("demo_tutorial_siswa", "false") == "true",
             "demo_tutorial_admin": request.form.get("demo_tutorial_admin", "false") == "true",
         }
+        # The order the operator arranged the rows into. Stored beside the flags
+        # in the same blob, so the two cannot be saved separately and end up
+        # describing different lists; the field is sanitised on the way in
+        # because it is built from the DOM by the page.
+        for group in DEMO_GROUPS:
+            settings[order_key(group)] = order_from_form(request.form, group)
         try:
             existing = supabase.table("school_settings").select("id").eq("id", 1).execute()
             if existing.data:
@@ -415,7 +427,15 @@ def demo_settings():
         log_activity("update", "demo_settings", "1", new_data=settings, user_id=g.user_id)
         return jsonify({"success": True, "settings": settings})
 
-    return render_template("super_admin/demo_settings.html", settings=_demo_settings_row(supabase))
+    # `flags` is the blob *as the pages read it*: the settings page paints its
+    # checkboxes from this, so what is ticked is what a visitor actually sees,
+    # instead of blank boxes next to a landing page showing every button.
+    blob = _demo_settings_row(supabase)
+    return render_template(
+        "super_admin/demo_settings.html",
+        settings=blob,
+        flags=demo_effective_flags(blob),
+    )
 
 
 # ─── Midtrans Settings ────────────────────────────────────────────────

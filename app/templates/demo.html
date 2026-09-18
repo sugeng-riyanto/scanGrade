@@ -96,9 +96,14 @@
         </div>
 
         <div class="space-y-6 sm:space-y-8">
-            <!-- ===== SUPER ADMIN ===== -->
-            {% if not ds or ds.demo_super_admin %}
-            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-purple-500/5 border border-purple-100 demo-card-hover">
+            {# Order and visibility both come from the blob: the operator arranges
+               these cards on /super-admin/demo-settings, and a card that is not in
+               `demo_items(...)` has no branch to be drawn from. `elif`, not four
+               `if`s, because a card may only appear once however the blob is
+               hand-edited. #}
+            {% for key in demo_items(ds, 'roles') %}
+            {% if key == 'demo_super_admin' %}
+            <div data-demo-card="{{ key }}" class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-purple-500/5 border border-purple-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
                     <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-purple-500/20">
                         <i class="fas fa-crown text-white text-xl sm:text-2xl"></i>
@@ -117,11 +122,9 @@
                     {{ cred_row('superadmin@scan-grade.app', 'purple') }}
                 </div>
             </div>
-            {% endif %}
 
-            <!-- ===== ADMIN SEKOLAH ===== -->
-            {% if not ds or ds.demo_admin_sekolah %}
-            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-blue-500/5 border border-blue-100 demo-card-hover">
+            {% elif key == 'demo_admin_sekolah' %}
+            <div data-demo-card="{{ key }}" class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-blue-500/5 border border-blue-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
                     <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/20">
                         <i class="fas fa-school text-white text-xl sm:text-2xl"></i>
@@ -148,11 +151,9 @@
                     {% endfor %}
                 </div>
             </div>
-            {% endif %}
 
-            <!-- ===== GURU ===== -->
-            {% if not ds or ds.demo_guru %}
-            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-emerald-500/5 border border-emerald-100 demo-card-hover">
+            {% elif key == 'demo_guru' %}
+            <div data-demo-card="{{ key }}" class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-emerald-500/5 border border-emerald-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
                     <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
                         <i class="fas fa-chalkboard-teacher text-white text-xl sm:text-2xl"></i>
@@ -182,11 +183,9 @@
                     {% endfor %}
                 </div>
             </div>
-            {% endif %}
 
-            <!-- ===== MURID ===== -->
-            {% if not ds or ds.demo_murid %}
-            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-amber-500/5 border border-amber-100 demo-card-hover">
+            {% elif key == 'demo_murid' %}
+            <div data-demo-card="{{ key }}" class="bg-white rounded-3xl p-5 sm:p-8 shadow-xl shadow-amber-500/5 border border-amber-100 demo-card-hover">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-5">
                     <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">
                         <i class="fas fa-user-graduate text-white text-xl sm:text-2xl"></i>
@@ -218,6 +217,7 @@
                 </div>
             </div>
             {% endif %}
+            {% endfor %}
         </div>
 
         <!-- Footer -->
