@@ -28,6 +28,8 @@ pytest==8.3.5
 pytest-env==1.1.5
 black==25.1.0
 ruff==0.10.0
+# imported by app code directly, not only pulled in by locust
+psutil==7.2.2
 locust==2.32.0
 pandas==2.2.3
 midtransclient==1.4.2
