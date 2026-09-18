@@ -284,7 +284,7 @@
       "frozen": false
     },
     "landing.html": {
-      "pairs": 63,
+      "pairs": 64,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -375,7 +375,7 @@
     },
     "super_admin/demo_settings.html": {
       "pairs": 0,
-      "leftovers": 12,
+      "leftovers": 11,
       "coverage": 0.0,
       "frozen": false
     },
@@ -417,8 +417,8 @@
     },
     "super_admin/omr_test.html": {
       "pairs": 1,
-      "leftovers": 16,
-      "coverage": 5.9,
+      "leftovers": 17,
+      "coverage": 5.6,
       "frozen": true
     },
     "super_admin/payment_fee_settings.html": {
@@ -530,7 +530,7 @@
       "frozen": false
     },
     "teacher/dashboard.html": {
-      "pairs": 53,
+      "pairs": 56,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -542,9 +542,9 @@
       "frozen": false
     },
     "teacher/exams.html": {
-      "pairs": 18,
+      "pairs": 19,
       "leftovers": 5,
-      "coverage": 78.3,
+      "coverage": 79.2,
       "frozen": true
     },
     "teacher/grade_detail.html": {
