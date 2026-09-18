@@ -271,7 +271,44 @@ probe_app() {
   return 1
 }
 
+# ── The other process running this checkout ──────────────────────────────────
+# gunicorn is not the only thing holding this release's code. The Celery worker
+# imports its task modules at start-up and keeps them in memory for the life of
+# the process, so reloading the app leaves the worker answering with the previous
+# release. That is not theoretical: `page_index` was added to the OMR task's
+# signature and to its caller in one commit, the deploy reloaded gunicorn alone,
+# and every scan then failed with
+#
+#     process_omr_scan() got an unexpected keyword argument 'page_index'
+#
+# — the *caller* new, the *worker* old, and nothing on the box saying so.
+#
+# Celery has no SIGHUP reload, so this one is a restart. It holds no
+# student-facing request open the way gunicorn does, and the task config sets
+# `task_acks_late = True`, so a scan in flight when the restart lands is
+# redelivered and re-run rather than lost. The line is logged anyway: a worker
+# that goes down quietly is a thing an unattended deploy should say out loud.
+# A unit that is not installed is not a failure: async OMR simply queues.
+WORKER_UNIT="scangrade-celery"
+
+reload_worker() {
+  if ! systemctl cat "$WORKER_UNIT" >/dev/null 2>&1; then
+    log "$WORKER_UNIT is not installed — no worker to reload (async tasks will queue)"
+    return 0
+  fi
+  if ! systemctl restart "$WORKER_UNIT" 2>/dev/null; then
+    # Not a rollback: the app is healthy and rolling it back would turn a broken
+    # worker into an outage. But it is not a footnote either — this is the exact
+    # state that breaks scans — so it goes in the journal as a failure line.
+    log "could not restart $WORKER_UNIT — it may still be running '$BEFORE' code"
+    return 1
+  fi
+  log "restarted $WORKER_UNIT (it now holds the same revision as the app)"
+}
+
+WORKER_STALE=0
 reload_app
+reload_worker || WORKER_STALE=1
 sleep 3
 
 HEALTHY=0
@@ -465,6 +502,13 @@ if [ "$HEALTHY" = "1" ]; then
   if [ -n "$SNAPSHOT" ]; then
     log "recovery point kept: $SNAPSHOT"
   fi
+  if [ "$WORKER_STALE" = "1" ]; then
+    # The app is verified and the worker is not: a half-deployed release, and the
+    # half that is wrong is the one nothing probes. Say so where the deploy ends.
+    log "WARNING: $WORKER_UNIT was NOT restarted, so background work is still"
+    log "         running $BEFORE code. Fix it before trusting scans:"
+    log "             systemctl restart $WORKER_UNIT"
+  fi
   exit 0
 fi
 
@@ -482,6 +526,10 @@ fi
 journalctl -u "$SERVICE" -n 30 --no-pager 2>/dev/null | sed 's/^/    /'
 as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
 reload_app
+# The worker goes back with the app. Leaving it on the rejected revision is the
+# same mismatch in the other direction — and this is the direction a rollback
+# hides, because the site looks healthy while every background task fails.
+reload_worker || true
 sleep 3
 
 if systemctl is-active --quiet "$SERVICE" && probe_app; then

@@ -38,6 +38,9 @@ INSTALL_SH = DEPLOY / "install-auto-deploy.sh"
 ENTRYPOINT_SH = DEPLOY / "entrypoint.sh"
 SMOKE_PY = DEPLOY / "smoke_test.py"
 APP_SERVICE = DEPLOY / "scangrade.service"
+#: The background worker, which shares the checkout with the app but is a
+#: separate process with its own copy of every imported module.
+WORKER_UNIT = DEPLOY / "celery.service"
 DEPLOY_SERVICE = DEPLOY / "scangrade-deploy.service"
 DEPLOY_TIMER = DEPLOY / "scangrade-deploy.timer"
 
@@ -63,6 +66,174 @@ def test_deploy_prefers_reload_and_keeps_a_restart_fallback():
     )
     assert script.index("systemctl reload") < script.index("systemctl restart"), (
         "restart must be the fallback, not the default"
+    )
+
+
+# ── every process holding this checkout is put on the new code ───
+
+def _celery_tasks():
+    """Every task class the repository declares."""
+    found = []
+    for path in (ROOT / "app").rglob("*.py"):
+        if "@celery_app.task" in path.read_text(encoding="utf-8", errors="replace"):
+            found.append(path)
+    return found
+
+
+def _unit_the_installer_creates() -> str:
+    """The systemd unit name an installer actually puts on the box.
+
+    Read from the file that copies it, so the check is between two files rather
+    than against a name this test happens to remember.
+    """
+    manual = (DEPLOY / "deploy.sh").read_text(encoding="utf-8")
+    found = re.search(r"/etc/systemd/system/([\w.-]*celery[\w.-]*)", manual)
+    assert found, "no installer copies a celery unit into systemd"
+    return found.group(1)
+
+
+def test_the_deploy_restarts_the_worker_that_shares_the_checkout():
+    """Reloading gunicorn does not reload the worker, and the difference is fatal.
+
+    The worker imports its task modules once and keeps them for the life of the
+    process, so after a deploy it is running the *previous* release. `page_index`
+    was added to `process_omr_scan`'s signature and to its caller in one commit;
+    the deploy reloaded the app alone, and every scan then answered
+
+        process_omr_scan() got an unexpected keyword argument 'page_index'
+
+    with the caller new and the worker old. Nothing on the box said so, which is
+    why this is a test and not a comment.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    tasks = _celery_tasks()
+    assert tasks, (
+        "no Celery tasks in the repository — if the queue was removed, this check "
+        "and the worker unit should go with it"
+    )
+
+    declared = re.search(r'WORKER_UNIT="([^"]+)"', script)
+    assert declared, (
+        f"the deploy names no worker unit, but {tasks[0].relative_to(ROOT)} declares a "
+        "Celery task: the worker keeps last release's modules, so a changed task "
+        "signature fails in production while the site looks healthy"
+    )
+    # Restarting a name no installer creates is a no-op that reads as a fix.
+    assert f"{declared.group(1)}.service" == _unit_the_installer_creates(), (
+        f"the deploy restarts '{declared.group(1)}', but the installer creates "
+        f"'{_unit_the_installer_creates()}' — the restart would do nothing"
+    )
+    assert re.search(r"systemctl restart \"\$WORKER_UNIT\"", script), (
+        "the worker has to be restarted, not merely named: Celery has no SIGHUP "
+        "reload, so a signal would leave the old modules in memory"
+    )
+
+
+def test_the_worker_is_restarted_on_the_forward_path_not_only_on_rollback():
+    """The forward path is the one that fixes the reported bug.
+
+    Written after noticing the first three checks all pass with the forward-path
+    call deleted: the unit is still named, the definition still exists, and the
+    last `reload_worker` is still after the last `reload_app` (both now in the
+    rollback path only). This is the assertion that actually holds the fix.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert re.search(r"^reload_worker \|\| WORKER_STALE=1$", script, re.M), (
+        "the forward path no longer reloads the worker. Reloading gunicorn alone "
+        "leaves the worker on the previous release, which is the bug this guards."
+    )
+    # ...and the flag it sets has to be reported, or the half-deploy is silent.
+    assert re.search(r"^WORKER_STALE=0$", script, re.M), (
+        "WORKER_STALE is read before it is set; under `set -u` that aborts the "
+        "deploy, and without it the warning is unreliable"
+    )
+
+
+def test_the_deploy_reloads_the_worker_on_the_way_back_too():
+    """A rollback that leaves the worker ahead is the same mismatch, hidden.
+
+    After a rollback the site looks healthy — the app is serving the old revision
+    — while every background task calls into a newer module. That is the failure
+    mode nobody sees, because the symptom (scans erroring) reads as a scan bug.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    app_reload = script.rindex('reload_app')
+    worker_reload = script.rindex('reload_worker')
+    assert worker_reload > app_reload, (
+        "the last `reload_worker` call is not in the rollback path — the worker "
+        "would keep the rejected release's code"
+    )
+
+
+def test_an_unrestarted_worker_is_reported_at_the_end_of_the_deploy():
+    """The app is verified by a probe; the worker is verified by nothing."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert re.search(r'systemctl restart \"\$WORKER_UNIT\"', script)
+    # The warning belongs in the success path, after 'DEPLOY OK' — that is the
+    # line that could otherwise say everything is fine while scans fail.
+    ok = script.index("DEPLOY OK")
+    assert "WORKER_STALE" in script[ok:], (
+        "a worker that failed to restart is never reported, so a half-deployed "
+        "release reads as a clean one"
+    )
+
+
+def test_the_worker_unit_runs_this_app_from_the_checkout():
+    """A worker pointed at the wrong app or the wrong directory proves nothing.
+
+    It must import the same Celery app the tasks are registered on, and run from
+    the directory the deploy updates — otherwise restarting it is a gesture.
+    """
+    worker = WORKER_UNIT.read_text(encoding="utf-8")
+    assert "-A app.celery_app" in worker, (
+        "the worker does not load app.celery_app, so it is not the worker the "
+        "tasks are published to"
+    )
+    repo_dir = re.search(r'^REPO="([^"]+)"', DEPLOY_SH.read_text(encoding="utf-8"), re.M)
+    assert repo_dir, "the deploy script no longer pins the checkout it updates"
+    assert f"WorkingDirectory={repo_dir.group(1)}" in worker, (
+        f"the worker runs from somewhere other than {repo_dir.group(1)} — the "
+        "directory the deploy updates — so a restart would reload the wrong code"
+    )
+    assert re.search(r"^Restart=always", worker, re.M), (
+        "the worker must come back on its own: the deploy restarts it, and a unit "
+        "that stays down after a failed start takes async OMR with it"
+    )
+
+
+# ── the bytes Gate 0 compares ────────────────────────────────────
+
+#: The files that are read as *bytes* rather than as text. Gate 0 compares the
+#: runner with `cmp -s`, and `test_a_line_ending_difference_is_a_difference`
+#: exists precisely because `cmp` must not normalise what it compares.
+BYTE_COMPARED = (DEPLOY_SH, ENTRYPOINT_SH, DEPLOY / "scangrade-db-snapshot.sh")
+
+
+@pytest.mark.parametrize("path", BYTE_COMPARED, ids=lambda p: p.name)
+def test_the_scripts_compared_as_bytes_are_lf_on_disk(path):
+    """A CRLF copy of the runner makes Gate 0's byte comparison meaningless.
+
+    `.gitattributes` declares `eol=lf` for `*.sh`, `*.py` and `*.md`, so a fresh
+    checkout — and the Linux box — always gets LF. A Windows checkout does not,
+    and the failure is silent twice over: any tool that reads a file with
+    `read_text` and writes it back with `write_text` converts the whole file to
+    CRLF (`write_text` translates `\n` to the platform separator), and
+    `core.autocrlf=true` means those CRs never reach the index, so **`git status`
+    shows nothing at all**. What it breaks is byte-level work: Gate 0's `cmp -s`,
+    and the test that proves `cmp` does not normalise — a repo file that is
+    already CRLF makes its CRLF "drift" copy byte-identical, so the guard that
+    should catch drift reports a match. That is not hypothetical: a scratch
+    harness rewrote this file, and the only thing that noticed was a test that
+    happened to compare bytes.
+    """
+    if not path.exists():
+        pytest.skip(f"{path.name} is not installed in this checkout")
+    data = path.read_bytes()
+    assert b"\r\n" not in data, (
+        f"{path.name} has CRLF line endings on disk. Gate 0 compares this file "
+        f"with `cmp -s` and .gitattributes declares it eol=lf, so the working "
+        f"tree must be LF — and git will not tell you, because autocrlf "
+        f"normalises on the way into the index. Rewrite the file with LF."
     )
 
 
