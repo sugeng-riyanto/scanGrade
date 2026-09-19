@@ -85,6 +85,37 @@ EVIDENCE: dict[str, list[tuple[str, list[str]]]] = {
     "scientific-calculator": [
         ("app/templates/student/take_exam.html", [r"\bcalcSciFunc\b", r"\{l:'sin'"]),
     ],
+    # The answer sheet is both *made* and *read* by this app, so the card has to
+    # name both halves: a generator with no reader is a PDF, and a reader with no
+    # generator is a camera pointed at somebody else's form.
+    "omr-scan": [
+        ("app/routes/tools.py", [r"generate-answer-sheet"]),
+        ("app/services/answer_sheet_generator.py", [r"\bdef generate_answer_sheet\b"]),
+        ("app/services/omr_service.py", [r"\bdef process_scan\b"]),
+    ],
+    # "a document, not a screenshot" is the whole claim, and it is proved by the
+    # routes that render a sheet rather than by the results page that prints itself.
+    "print-reports": [
+        ("app/routes/teacher.py", [r'"/results/print"',
+                                   r'"/submissions/<submission_id>/print"']),
+        # The signature block is the half of "a document, not a screenshot" that
+        # makes it a document a school files, so it is the anchor rather than the
+        # template merely existing.
+        ("app/templates/print/report_card.html", [r'class="sign"', r"Kepala Sekolah",
+                                                 r"Guru Mata Pelajaran"]),
+    ],
+    "mark-scheme": [
+        ("app/services/mark_scheme.py", [r"\bdef build_weights\b",
+                                        r"\bdef normalise_to_100\b"]),
+        # Part-marks are the second half of the card, and they live in the grader.
+        ("app/services/question_types.py", [r"\bdef part_factor\b"]),
+    ],
+    "bilingual-dark": [
+        ("app/templates/base.html", [r"\bsetLang\b", r"\btoggleDark\b"]),
+        # "a release is refused if any text fails a contrast check" is a deploy
+        # behaviour, so the artifact is the gate that refuses it.
+        ("deploy/theme_gate.sh", [r"test_dark_theme_contrast"]),
+    ],
 }
 
 

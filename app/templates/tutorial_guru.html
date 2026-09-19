@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Tutorial Guru - ScanGrade{% endblock %}
+{% from "tutorial/_chrome.html" import header %}
+{% block title %}Teacher Tutorial - ScanGrade{% endblock %}
 {% block head_extra %}
 <style>
 .demo-step { animation: slideUp 0.4s ease-out; }
@@ -10,23 +11,15 @@
 </style>
 {% endblock %}
 {% block content_noauth %}
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50 relative overflow-hidden">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50 relative overflow-hidden"
+     x-effect="document.title = t('Tutorial Guru - ScanGrade', 'Teacher Tutorial - ScanGrade')">
     <div class="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-emerald-100/30 blur-3xl"></div>
     <div class="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-blue-100/30 blur-3xl"></div>
-    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto relative z-10">
-        <div class="flex items-center gap-2">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-                <i class="fas fa-chalkboard-teacher text-white text-sm"></i>
-            </div>
-            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-emerald-600" x-text="t('Guru','Teacher')"></span></span>
-        </div>
-        <div class="flex items-center gap-3">
-            <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i><span x-text="t('Beranda','Home')"></span></a>
-            <a href="/auth/login-user?role=guru" class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/25 hover:from-emerald-600 hover:to-emerald-700 transition"><i class="fas fa-sign-in-alt mr-1"></i><span x-text="t('Masuk sebagai Guru','Log in as Teacher')"></span></a>
-        </div>
-    </header>
+    {{ header('from-emerald-500 to-emerald-600', 'text-emerald-600', 'fa-chalkboard-teacher',
+              'Guru', 'Teacher', '/auth/login-user?role=guru',
+              'Masuk sebagai Guru', 'Log in as Teacher') }}
 
-    <main class="max-w-5xl mx-auto px-6 py-12">
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <div class="text-center mb-16">
             <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-100 rounded-full text-emerald-700 text-xs font-bold mb-4" x-text="t('🎓 Untuk Guru','🎓 For Teachers')"></div>
             <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900" x-text="t('Buat, Koreksi, dan Analisis Ujian','Create, Grade and Analyse Exams')"></h1>
@@ -38,15 +31,27 @@
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
                 <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>1</span></div>
                 <div class="flex-1">
-                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Buat Ujian — 3 Tipe Soal','Create an Exam — 3 Question Types')"></h3>
-                    <p class="mt-2 text-surface-500"><span x-text="t('Klik Buat Ujian dan isi detail. Tersedia 3 tipe soal:','Click Create Exam and fill in the details. Three question types are available:')"></span> <strong>MCQ</strong> <span x-text="t('(A-E), Esai Teks (siswa menulis paragraf), dan Esai Canvas (siswa menggambar di PDF). Atur durasi, kelas tujuan, jadwal mulai, dan bobot nilai per soal.','(A-E), Text Essay (the student writes a paragraph) and Canvas Essay (the student draws on the PDF). Set the duration, target classes, start schedule and the score weight per question.')"></span></p>
-                    <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-list-ol text-amber-600 text-xl"></i><p class="text-xs font-bold mt-1">MCQ</p></div>
-                        <div class="p-3 bg-blue-50 rounded-xl text-center"><i class="fas fa-align-left text-blue-600 text-xl"></i><p class="text-xs font-bold mt-1" x-text="t('Esai Teks','Text Essay')"></p></div>
-                        <div class="p-3 bg-emerald-50 rounded-xl text-center"><i class="fas fa-paint-brush text-emerald-600 text-xl"></i><p class="text-xs font-bold mt-1" x-text="t('Esai Canvas','Canvas Essay')"></p></div>
-                        <div class="p-3 bg-purple-50 rounded-xl text-center"><i class="fas fa-robot text-purple-600 text-xl"></i><p class="text-xs font-bold mt-1" x-text="t('Koreksi AI*','AI Grading*')"></p></div>
+                    {# Counted and listed from the registry, the way the landing page
+                       counts it: this card said "3 Tipe Soal" for as long as the
+                       builder has offered six, because a restatement of the app is
+                       a second copy of it and a second copy drifts. #}
+                    {% set _types = q_vocabulary()['picker'] %}
+                    {% set _type_icons = {'mcq':'fa-list-ol','true_false':'fa-check-double','match':'fa-arrows-left-right','drag_drop':'fa-hand-pointer','order':'fa-arrow-down-1-9','essay_canvas':'fa-paint-brush'} %}
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Buat Ujian — {{ _types|length }} Tipe Soal','Create an Exam — {{ _types|length }} Question Types')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Klik Buat Ujian dan isi detail. Tersedia {{ _types|length }} tipe soal, dan setiap tipe berdiri sendiri — soal menjodohkan tidak lagi dihargai sama dengan satu soal pilihan ganda. Atur durasi, kelas tujuan, jadwal mulai, dan bobot per tipe.','Click Create Exam and fill in the details. There are {{ _types|length }} question types, and each one stands on its own — a matching question is no longer worth the same as a single multiple-choice item. Set the duration, target classes, start schedule and the weight per type.')"></p>
+                    <div class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {% for qt in _types %}
+                        {% set _icon = _type_icons.get(qt.v, 'fa-circle-question') %}
+                        <div class="p-3 bg-emerald-50 rounded-xl text-center">
+                            <i class="fas {{ _icon }} text-emerald-600 text-xl"></i>
+                            <p class="text-xs font-bold mt-1 text-surface-700" x-text="t('{{ qt.id }}','{{ qt.en }}')"></p>
+                        </div>
+                        {% endfor %}
                     </div>
-                    <p class="mt-2 text-xs text-surface-400" x-text="t('*Koreksi AI untuk Esai Teks. Sediakan API key sendiri di Pengaturan AI.','*AI grading for text essays. Bring your own API key in AI Settings.')"></p>
+                    <div class="mt-4 p-4 bg-purple-50 rounded-xl flex items-start gap-3">
+                        <i class="fas fa-scale-balanced text-purple-500 mt-0.5"></i>
+                        <p class="text-sm text-purple-800 font-medium" x-text="t('Skema nilai ditentukan per tipe. Total soal selalu tepat 100 — bukan 99,99 — dan jawaban menjodohkan atau mengurutkan yang belum lengkap tetap mendapat nilai sebagian. Nilai yang sudah terbit tidak pernah dihitung ulang.','The mark scheme is set per type. The paper always totals exactly 100 — not 99.99 — and a matching or ordering answer that is not yet complete still earns part-marks. Marks already published are never recalculated.')"></p>
+                    </div>
                 </div>
             </div>
 
@@ -70,7 +75,7 @@
                 <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>3</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Koreksi dengan AI dan Tools Canvas','Grade with AI and Canvas Tools')"></h3>
-                    <p class="mt-2 text-surface-500"><span x-text="t('Untuk Esai Teks, klik Koreksi AI — AI membaca soal dan jawaban, lalu memberi saran skor beserta feedback. Guru tinggal review dan edit. Untuk Esai Canvas, gunakan','For Text Essays click AI Grading — the AI reads the question and the answer, then suggests a score with feedback. The teacher just reviews and edits. For Canvas Essays use the')"></span> <span class="font-semibold" x-text="t('pena digital, ruler 30cm, busur 180°, dan segitiga siku','digital pen, 30cm ruler, 180° protractor and 45° set square')"></span> <span x-text="t('untuk koreksi manual.','to grade by hand.')"></span></p>
+                    <p class="mt-2 text-surface-500"><span x-text="t('Untuk jawaban yang ditulis, klik Koreksi AI — AI membaca soal dan jawaban, lalu memberi saran skor beserta umpan balik. Guru tinggal meninjau dan mengubahnya.','For a written answer, click AI Grading — the AI reads the question and the answer, then suggests a score with feedback. The teacher just reviews and edits it.')"></span> <span x-text="t('Untuk jawaban yang digambar di halaman PDF, pakai','For an answer drawn on the PDF page, use the')"></span> <span class="font-semibold" x-text="t('pena digital, ruler 30cm, busur 180°, dan segitiga siku','digital pen, 30cm ruler, 180° protractor and 45° set square')"></span> <span x-text="t('untuk menilai secara manual.','to grade by hand.')"></span></p>
                     <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                         <div class="p-3 bg-purple-50 rounded-xl text-center"><i class="fas fa-robot text-purple-600"></i><p class="text-xs font-bold mt-1" x-text="t('Koreksi AI','AI Grading')"></p></div>
                         <div class="p-3 bg-green-50 rounded-xl text-center"><i class="fas fa-pencil-alt text-green-600"></i><p class="text-xs font-bold mt-1" x-text="t('Pena Digital','Digital Pen')"></p></div>
@@ -80,12 +85,27 @@
                 </div>
             </div>
 
-            <!-- Step 4 -->
+            <!-- Step 4 — the printed sheet, and the camera that reads it -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>4</span></div>
+                <div class="step-num bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/20 shrink-0"><span>4</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Cetak LJK, Lalu Pindai dengan Kamera HP','Print the Answer Sheet, Then Scan It with a Phone')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Lembar LJK dibuat dari aplikasi: pilih jumlah soal, jumlah opsi, dan versi A–E. Lembar yang tercetak membawa empat penanda sudut, pita NISN, dan kode QR yang menjelaskan susunannya sendiri. Setelah ujian kertas, buka halaman Scan dan foto lembarnya dengan kamera HP — foto yang tidak terbaca ditolak dengan alasan, bukan ditebak.','The answer sheet is generated by the application: choose the question count, the option count and version A–E. The printed sheet carries four corner markers, an NISN band and a QR code that describes its own layout. After a paper exam, open the Scan page and photograph the sheets with a phone camera — a photo that cannot be read is refused with a reason rather than guessed at.')"></p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-qrcode"></i> <span x-text="t('Kode QR per Lembar','QR Code per Sheet')"></span></span>
+                        <span class="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-camera"></i> <span x-text="t('Scan via Kamera','Camera Scan')"></span></span>
+                        <span class="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-layer-group"></i> <span x-text="t('Versi A–E','Versions A–E')"></span></span>
+                        <span class="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fas fa-shield-alt"></i> <span x-text="t('Foto Salah Ditolak','Wrong Photos Refused')"></span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 5 -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="step-num bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20 shrink-0"><span>5</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Lihat Hasil dan Export','See Results and Export')"></h3>
-                    <p class="mt-2 text-surface-500" x-text="t('Dashboard analitik: distribusi nilai, soal tersulit, statistik per-band. Export ke XLSX atau PDF — termasuk gambar canvas siswa dan jawaban teks.','Analytics dashboard: score distribution, hardest questions, per-band statistics. Export to XLSX or PDF — including the students canvas drawings and text answers.')"></p>
+                    <p class="mt-2 text-surface-500" x-text="t('Dashboard analitik: distribusi nilai, soal tersulit, statistik per-band. Export ke XLSX atau PDF — termasuk gambar canvas siswa dan jawaban teks. Untuk arsip sekolah, cetak rapor per murid dan lembar hasil per ujian: keduanya dokumen dengan kolom tanda tangan, bukan tangkapan layar.','Analytics dashboard: score distribution, hardest questions, per-band statistics. Export to XLSX or PDF — including the students canvas drawings and text answers. For the school file, print a report card per student and a results sheet per exam: both are documents with a signature block, not a screen capture.')"></p>
                     <div class="mt-4 flex flex-wrap gap-2">
                         <span class="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"><i class="fas fa-chart-bar mr-1"></i>Chart.js</span>
                         <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold"><i class="fas fa-file-excel mr-1"></i>XLSX</span>
@@ -94,9 +114,9 @@
                 </div>
             </div>
 
-            <!-- Step 5 — AI Settings -->
+            <!-- Step 6 — AI Settings -->
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
-                <div class="step-num bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-lg shadow-purple-500/20 shrink-0"><span>5</span></div>
+                <div class="step-num bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-lg shadow-purple-500/20 shrink-0"><span>6</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Pengaturan AI Grading','AI Grading Settings')"></h3>
                     <p class="mt-2 text-surface-500"><span x-text="t('Di menu Koreksi AI, kamu bisa menambahkan API Key dari Gemini, OpenAI, DeepSeek, Groq, atau custom provider. Pilih prompt grading yang sesuai mapel (IPA, Matematika, Bahasa, dll) atau buat prompt sendiri. Semua tersimpan per akun guru.','Under AI Grading you can add an API key from Gemini, OpenAI, DeepSeek, Groq or a custom provider. Pick a grading prompt that fits the subject (Science, Maths, Language, and so on) or write your own. Everything is stored per teacher account.')"></span></p>

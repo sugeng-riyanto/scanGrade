@@ -254,7 +254,7 @@
       "frozen": false
     },
     "demo.html": {
-      "pairs": 22,
+      "pairs": 23,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -284,7 +284,7 @@
       "frozen": false
     },
     "landing.html": {
-      "pairs": 64,
+      "pairs": 72,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -416,9 +416,9 @@
       "frozen": true
     },
     "super_admin/omr_test.html": {
-      "pairs": 1,
+      "pairs": 2,
       "leftovers": 17,
-      "coverage": 5.6,
+      "coverage": 10.5,
       "frozen": true
     },
     "super_admin/payment_fee_settings.html": {
@@ -530,7 +530,7 @@
       "frozen": false
     },
     "teacher/dashboard.html": {
-      "pairs": 56,
+      "pairs": 59,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -614,9 +614,9 @@
       "frozen": true
     },
     "teacher/scan.html": {
-      "pairs": 1,
+      "pairs": 3,
       "leftovers": 69,
-      "coverage": 1.4,
+      "coverage": 4.2,
       "frozen": true
     },
     "teacher/settings.html": {
@@ -679,20 +679,26 @@
       "coverage": 100.0,
       "frozen": false
     },
+    "tutorial/_chrome.html": {
+      "pairs": 6,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "tutorial_admin_sekolah.html": {
-      "pairs": 34,
+      "pairs": 38,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "tutorial_guru.html": {
-      "pairs": 36,
+      "pairs": 38,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "tutorial_murid.html": {
-      "pairs": 43,
+      "pairs": 42,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

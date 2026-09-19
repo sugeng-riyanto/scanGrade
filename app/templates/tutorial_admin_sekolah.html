@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Tutorial Admin Sekolah - ScanGrade{% endblock %}
+{% from "tutorial/_chrome.html" import header %}
+{% block title %}School Admin Tutorial - ScanGrade{% endblock %}
 {% block head_extra %}
 <style>
 .step-num { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; box-shadow: 0 8px 24px rgba(0,0,0,0.08); } .demo-step { animation: slideUp 0.4s ease-out; }
@@ -8,23 +9,15 @@
 </style>
 {% endblock %}
 {% block content_noauth %}
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 relative overflow-hidden">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 relative overflow-hidden"
+     x-effect="document.title = t('Tutorial Admin Sekolah - ScanGrade', 'School Admin Tutorial - ScanGrade')">
     <div class="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-blue-100/30 blur-3xl"></div>
     <div class="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-purple-100/30 blur-3xl"></div>
-    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto relative z-10">
-        <div class="flex items-center gap-2">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
-                <i class="fas fa-school text-white text-sm"></i>
-            </div>
-            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-blue-600" x-text="t('Admin Sekolah','School Admin')"></span></span>
-        </div>
-        <div class="flex items-center gap-3">
-            <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i><span x-text="t('Beranda','Home')"></span></a>
-            <a href="/auth/login" class="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-500/25 hover:from-blue-600 hover:to-blue-700 transition"><i class="fas fa-sign-in-alt mr-1"></i><span x-text="t('Masuk sebagai Admin','Log in as Admin')"></span></a>
-        </div>
-    </header>
+    {{ header('from-blue-500 to-blue-600', 'text-blue-600', 'fa-school',
+              'Admin Sekolah', 'School Admin', '/auth/login',
+              'Masuk sebagai Admin', 'Log in as Admin') }}
 
-    <main class="max-w-5xl mx-auto px-6 py-12">
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <div class="text-center mb-16">
             <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-100 rounded-full text-blue-700 text-xs font-bold mb-4" x-text="t('🏫 Untuk Admin Sekolah','🏫 For School Admins')"></div>
             <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900" x-text="t('Kelola Sekolah, Guru, dan Siswa','Manage the School, Teachers and Students')"></h1>
@@ -66,7 +59,7 @@
                 <div class="step-num bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/20 flex items-center justify-center shrink-0"><span>3</span></div>
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Import / CRUD Guru dan Siswa','Import / CRUD Teachers and Students')"></h3>
-                    <p class="mt-2 text-surface-500" x-text="t('Tambah guru dan siswa satu per satu atau import dari Excel. Setiap akun mendapat email dan password otomatis. Kamu juga bisa mereset password dan menghapus akun secara bulk.','Add teachers and students one by one, or import them from Excel. Every account gets an email and password automatically. You can also reset passwords and delete accounts in bulk.')"></p>
+                    <p class="mt-2 text-surface-500" x-text="t('Tambah guru dan siswa satu per satu, atau unduh template Excel-nya lebih dulu lalu import. Setiap akun mendapat email dan password otomatis. Meng-import ulang berkas yang sama akan memperbarui baris yang sudah ada — bukan menggandakannya — dan baris yang gagal tidak meninggalkan akun setengah jadi. Reset password dan hapus akun tersedia secara massal.','Add teachers and students one by one, or download the Excel template for the role and import it. Every account gets an email and password automatically. Importing the same file again updates the rows that already exist rather than duplicating them, and a row that fails leaves no half-created account behind. Password resets and deletions are available in bulk.')"></p>
                     <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                         <div class="p-3 bg-amber-50 rounded-xl text-center"><i class="fas fa-chalkboard-teacher text-amber-600"></i><p class="text-xs font-bold mt-1" x-text="t('Guru','Teachers')"></p></div>
                         <div class="p-3 bg-green-50 rounded-xl text-center"><i class="fas fa-user-graduate text-green-600"></i><p class="text-xs font-bold mt-1" x-text="t('Siswa','Students')"></p></div>
@@ -100,6 +93,21 @@
                     <div class="mt-4 p-4 bg-blue-50 rounded-xl flex items-start gap-3">
                         <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
                         <p class="text-sm text-blue-800 font-medium" x-text="t('Guru tidak bisa membuat kelas atau mapel — semua dikelola oleh Admin Sekolah.','Teachers cannot create classes or subjects — the School Admin manages all of them.')"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 6 — announcements, and the report a school hands upward -->
+            <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
+                <div class="step-num bg-gradient-to-br from-teal-500 to-teal-600 text-white shadow-lg shadow-teal-500/20 flex items-center justify-center shrink-0"><span>6</span></div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Pengumuman dan Rekap Sekolah','Announcements and School Reporting')"></h3>
+                    <p class="mt-2 text-surface-500" x-text="t('Kirim pengumuman ke guru dan murid dari satu halaman, dan lihat berapa yang belum membacanya. Unduh rekap data sekolah dalam XLSX kapan saja untuk laporan ke dinas.','Send an announcement to teachers and students from one page, and see how many have not read it yet. Download the school data as XLSX at any time for a district report.')"></p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="px-3 py-1.5 bg-teal-50 text-teal-700 rounded-lg text-xs font-bold"><i class="fas fa-bullhorn mr-1"></i><span x-text="t('Pengumuman','Announcements')"></span></span>
+                        <span class="px-3 py-1.5 bg-teal-50 text-teal-700 rounded-lg text-xs font-bold"><i class="fas fa-envelope-open-text mr-1"></i><span x-text="t('Belum Dibaca','Unread')"></span></span>
+                        <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold"><i class="fas fa-file-excel mr-1"></i><span x-text="t('Export XLSX','Export XLSX')"></span></span>
+                        <span class="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-bold"><i class="fas fa-file-invoice mr-1"></i><span x-text="t('Invoice PDF','PDF Invoice')"></span></span>
                     </div>
                 </div>
             </div>
