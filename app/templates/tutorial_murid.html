@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Tutorial Siswa - ScanGrade{% endblock %}
+{% from "tutorial/_chrome.html" import header %}
+{% block title %}Student Tutorial - ScanGrade{% endblock %}
 {% block head_extra %}
 <style>
 .step-num { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; box-shadow: 0 8px 24px rgba(0,0,0,0.08); } .demo-step { animation: slideUp 0.4s ease-out; }
@@ -9,23 +10,15 @@
 </style>
 {% endblock %}
 {% block content_noauth %}
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-amber-50 relative overflow-hidden">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-amber-50 relative overflow-hidden"
+     x-effect="document.title = t('Tutorial Siswa - ScanGrade', 'Student Tutorial - ScanGrade')">
     <div class="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-amber-100/30 blur-3xl"></div>
     <div class="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-orange-100/30 blur-3xl"></div>
-    <header class="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto relative z-10">
-        <div class="flex items-center gap-2">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
-                <i class="fas fa-user-graduate text-white text-sm"></i>
-            </div>
-            <span class="font-extrabold text-lg text-surface-800">ScanGrade <span class="text-amber-600" x-text="t('Siswa','Student')"></span></span>
-        </div>
-        <div class="flex items-center gap-3">
-            <a href="/" class="px-4 py-2 text-sm font-bold text-surface-500 hover:text-surface-700 transition"><i class="fas fa-arrow-left mr-1"></i><span x-text="t('Beranda','Home')"></span></a>
-            <a href="/auth/login-user?role=murid" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-amber-500/25 hover:from-amber-600 hover:to-orange-600 transition"><i class="fas fa-sign-in-alt mr-1"></i><span x-text="t('Masuk sebagai Siswa','Log in as Student')"></span></a>
-        </div>
-    </header>
+    {{ header('from-amber-500 to-orange-500', 'text-amber-600', 'fa-user-graduate',
+              'Siswa', 'Student', '/auth/login-user?role=murid',
+              'Masuk sebagai Siswa', 'Log in as Student') }}
 
-    <main class="max-w-5xl mx-auto px-6 py-12">
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <div class="text-center mb-16">
             <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-amber-100 rounded-full text-amber-700 text-xs font-bold mb-4" x-text="t('📝 Untuk Siswa','📝 For Students')"></div>
             <h1 class="text-3xl lg:text-4xl font-extrabold text-surface-900" x-text="t('Cara Mengerjakan Ujian','How to Take an Exam')"></h1>
@@ -50,21 +43,42 @@
             <div class="demo-card bg-white rounded-2xl p-6 lg:p-8 shadow-lg shadow-surface-200/40 border border-surface-100 flex flex-col lg:flex-row gap-6 items-start">
                 <div class="step-num bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/20 flex items-center justify-center shrink-0"><span>2</span></div>
                 <div class="flex-1">
+                    {# The count and the names come from the registry — `PICKER_TYPES`,
+                       the same tuple the teacher's builder buttons come from — so
+                       this card cannot go on advertising a type the builder has
+                       stopped offering, or too few of them. #}
+                    {% set _types = q_vocabulary()['picker'] %}
+                    {% set _type_icons = {'mcq':'fa-check-circle','true_false':'fa-check-double','match':'fa-arrows-left-right','drag_drop':'fa-hand-pointer','order':'fa-arrow-down-1-9','essay_canvas':'fa-paint-brush'} %}
+                    {% set _type_how = {
+                        'mcq': ('Klik A, B, C, D, atau E. Jawaban terpilih menyala oranye.', 'Click A, B, C, D or E. The chosen answer turns orange.'),
+                        'true_false': ('Pilih Benar atau Salah untuk setiap pernyataan.', 'Choose True or False for each statement.'),
+                        'match': ('Pasangkan tiap item di kiri dengan pasangannya di kanan.', 'Pair each item on the left with its match on the right.'),
+                        'drag_drop': ('Tarik kata atau frasa ke kotak kosong pada kalimat.', 'Drag the words or phrases into the empty boxes in the sentence.'),
+                        'order': ('Susun kalimat atau kata sampai urutannya benar, pakai tombol naik dan turun.', 'Arrange the sentence or the words until the order is right, using the up and down controls.'),
+                        'essay_canvas': ('Gambar dan tulis langsung di atas halaman PDF dengan berbagai alat.', 'Draw and write straight onto the PDF page with a range of tools.')
+                    } %}
                     <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Jenis Soal dan Cara Menjawab','Question Types and How to Answer')"></h3>
-                    <p class="mt-2 text-surface-500" x-text="t('Ada 3 tipe soal:','There are 3 question types:')"></p>
-                    <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <p class="mt-2 text-surface-500" x-text="t('Ada {{ _types|length }} tipe soal:','There are {{ _types|length }} question types:')"></p>
+                    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {% for qt in _types %}
+                        {# Chosen outside the attribute so the markup carries no nested
+                           quotes: a pair the i18n sweep cannot parse reads as an
+                           untranslated string, and the floor catches it. #}
+                        {% set _icon = _type_icons.get(qt.v, 'fa-circle-question') %}
+                        {% set _how = _type_how.get(qt.v) or ('', '') %}
                         <div class="p-4 bg-blue-50 rounded-xl">
-                            <p class="text-sm font-bold text-blue-800 flex items-center gap-2"><i class="fas fa-check-circle text-blue-600"></i>MCQ</p>
-                            <p class="text-xs text-blue-600 mt-1" x-text="t('Klik A, B, C, D, atau E. Jawaban terpilih menyala oranye.','Click A, B, C, D or E. The chosen answer turns orange.')"></p>
+                            <p class="text-sm font-bold text-blue-800 flex items-center gap-2"><i class="fas {{ _icon }} text-blue-600"></i><span x-text="t('{{ qt.id }}','{{ qt.en }}')"></span></p>
+                            <p class="text-xs text-blue-600 mt-1" x-text="t('{{ _how[0] }}','{{ _how[1] }}')"></p>
                         </div>
-                        <div class="p-4 bg-blue-50 rounded-xl">
-                            <p class="text-sm font-bold text-blue-800 flex items-center gap-2"><i class="fas fa-align-left text-blue-600"></i><span x-text="t('Esai Teks','Text Essay')"></span></p>
-                            <p class="text-xs text-blue-600 mt-1" x-text="t('Tulis jawaban paragraf di kotak teks yang tersedia. Panjang bebas.','Write a paragraph in the text box provided. Any length you like.')"></p>
-                        </div>
-                        <div class="p-4 bg-emerald-50 rounded-xl">
-                            <p class="text-sm font-bold text-emerald-800 flex items-center gap-2"><i class="fas fa-paint-brush text-emerald-600"></i><span x-text="t('Esai Canvas','Canvas Essay')"></span></p>
-                            <p class="text-xs text-emerald-600 mt-1" x-text="t('Gambar dan tulis langsung di atas halaman PDF dengan berbagai alat.','Draw and write straight onto the PDF page with a range of tools.')"></p>
-                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="mt-4 p-4 bg-amber-50 rounded-xl flex items-start gap-3">
+                        <i class="fas fa-lightbulb text-amber-500 mt-0.5"></i>
+                        <p class="text-sm text-amber-800 font-medium" x-text="t('Di HP atau tablet, semua kontrol jawaban bisa ditampilkan di sisi kiri canvas dan digulir naik-turun. Tata letaknya bisa kamu ganti kapan saja dari bilah di bagian atas saat ujian berlangsung.','On a phone or tablet every answer control can sit beside the canvas and scroll. You can change the layout at any time from the bar at the top while the paper is open.')"></p>
+                    </div>
+                    <div class="mt-3 p-4 bg-emerald-50 rounded-xl flex items-start gap-3">
+                        <i class="fas fa-scale-balanced text-emerald-500 mt-0.5"></i>
+                        <p class="text-sm text-emerald-800 font-medium" x-text="t('Soal menjodohkan dan mengurutkan dinilai sebagian: jawaban yang baru separuh benar tetap mendapat poin, bukan nol.','Matching and ordering questions are marked in part: an answer that is only half right still scores, rather than scoring nothing.')"></p>
                     </div>
                 </div>
             </div>
@@ -97,6 +111,10 @@
                 <div class="flex-1">
                     <h3 class="text-xl font-extrabold text-surface-800">Anti-Cheat</h3>
                     <p class="mt-2 text-surface-500" x-text="t('Jangan berpindah tab selama ujian. Sistem mendeteksi dan memberi sanksi bertahap:','Do not switch tabs during the exam. The system detects it and applies graduated penalties:')"></p>
+                    <div class="mt-3 p-3 bg-blue-50 rounded-xl flex items-start gap-2">
+                        <i class="fas fa-expand text-blue-500 mt-0.5"></i>
+                        <p class="text-sm text-blue-800 font-medium" x-text="t('Selama ujian layar harus tetap penuh. Keluar dari layar penuh atau mengecilkan jendela menutup soal dan dicatat sebagai pelanggaran.','The screen must stay in full screen for the whole exam. Leaving full screen or restoring the window covers the paper and is recorded as a violation.')"></p>
+                    </div>
                     {% set base = 5 %}
                     {% set maxv = 5 %}
                     <div class="mt-4 space-y-2">
@@ -122,6 +140,10 @@
                         <span class="px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-check"></i><span x-text="t('Kumpulkan','Submit')"></span></span>
                         <span class="px-4 py-2 bg-emerald-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-chart-bar"></i><span x-text="t('Lihat Nilai','See Score')"></span></span>
                         <span class="px-4 py-2 bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2"><i class="fas fa-download"></i><span x-text="t('Download PDF','Download PDF')"></span></span>
+                    </div>
+                    <div class="mt-3 p-3 bg-blue-50 rounded-xl flex items-start gap-2">
+                        <i class="fas fa-print text-blue-500 mt-0.5"></i>
+                        <p class="text-sm text-blue-800 font-medium" x-text="t('Halaman hasil juga bisa dicetak sebagai rapor resmi — ada kolom tanda tangan guru dan kepala sekolah, jadi orang tua menerima dokumen, bukan tangkapan layar.','The results page also prints as an official report card — with signature lines for the teacher and the principal, so parents receive a document rather than a screenshot.')"></p>
                     </div>
                 </div>
             </div>
