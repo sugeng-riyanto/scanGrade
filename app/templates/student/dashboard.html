@@ -180,7 +180,12 @@
                         <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-sm">
                             <i class="fas fa-file-alt text-white text-lg"></i>
                         </div>
+                        {% if e.sg_in_progress %}
+                        <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200"
+                              x-text="t('Sedang dikerjakan','In progress')"></span>
+                        {% else %}
                         <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Active</span>
+                        {% endif %}
                     </div>
                     <h3 class="font-bold text-surface-800 mb-1">{{ e.title }}</h3>
                     <p class="text-sm text-surface-500 font-medium">{{ e.subject or '-' }}</p>
@@ -188,6 +193,22 @@
                         <span><i class="fas fa-question-circle mr-1"></i><span x-text="t('{{ e.total_questions }} soal','{{ e.total_questions }} questions')"></span></span>
                         <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes }} min</span>
                     </div>
+                    {# The window, on the card: without it a student finds out the exam
+                       closed when the button refuses them. `end_at` is the last instant
+                       they may *begin*, and the second line is the teacher's
+                       "Auto-Submit on Assignment Window End" — the case where beginning
+                       late means a shorter paper rather than a longer deadline. #}
+                    {% if e.end_at %}
+                    <p class="text-xs text-amber-700 font-semibold mt-2">
+                        <i class="fas fa-hourglass-end mr-1"></i><span x-text="t('Mulai terakhir:','Last start:')"></span>
+                        {{ (e.end_at[:19] + '+00:00') | tz('%d %b %H:%M') }}
+                    </p>
+                    {% if e.auto_submit_on_window_end %}
+                    <p class="text-[11px] text-rose-600 font-semibold">
+                        <i class="fas fa-stopwatch mr-1"></i><span x-text="t('Otomatis dikumpulkan saat jendela berakhir','Auto-submitted when the window ends')"></span>
+                    </p>
+                    {% endif %}
+                    {% endif %}
                     <a href="/student/exams/{{ e.id }}"
                        class="mt-4 block text-center bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition">
                         <i class="fas fa-play mr-1"></i><span x-text="t('Mulai Ujian','Start Exam')"></span>

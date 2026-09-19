@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify, g, render_template, redirect, sen
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import row_or_none
 from app.utils.exam_access import exam_sitting_allowed
+from app.utils import exam_window
 from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
@@ -774,7 +775,8 @@ def _get_exam_cached(exam_id, supabase):
     if exam_id not in flask_g._exam_cache:
         flask_g._exam_cache[exam_id] = supabase.table("exams").select(
             "id,duration_minutes,total_questions,answer_key,question_types,"
-            "question_weights,max_attempts,publish_mode,is_published,status"
+            "question_weights,max_attempts,publish_mode,is_published,status,"
+            "start_at,end_at,auto_submit_on_window_end"
         ).eq("id", exam_id).single().execute().data
     return flask_g._exam_cache[exam_id]
 
@@ -877,16 +879,26 @@ def student_sync_draft():
                         return jsonify({"saved": True, "at": server_now, "error": "timer_mismatch", "server_time_left": max(0, duration - (server_now - existing_ts)) if duration else None}), 409
                 except Exception:
                     pass
-            # Hitung server_time_left
-            if duration and duration > 0 and existing_started:
+            # ── Where this sitting ends ──────────────────────────────────────
+            # Counted from the *stored* start and the exam's own window, never from
+            # what the client claims: `started_at` is the origin of the deadline, so
+            # a client that could move it could extend its own exam. Both clocks —
+            # the duration and the assignment window end — come from
+            # app/utils/exam_window.py, the same functions the exam page and the
+            # submit route use, so the countdown a student sees and the number
+            # enforced here are one number.
+            if existing_started:
                 try:
-                    if isinstance(existing_started, str):
-                        started_ts = int(datetime.fromisoformat(existing_started.replace("Z", "+00:00")).timestamp())
-                    else:
-                        started_ts = int(existing_started.timestamp())
-                    elapsed = server_now - started_ts
-                    if elapsed >= 30:
-                        server_time_left = max(0, duration - elapsed)
+                    started_dt = exam_window.parse_dt(existing_started)
+                    now_dt = datetime.fromtimestamp(server_now, tz=timezone.utc)
+                    left = exam_window.seconds_left(exam_data or {}, existing_started, now_dt)
+                    running_for = int((now_dt - started_dt).total_seconds()) if started_dt else 0
+                    # A sitting that began seconds ago is not "out of time": without
+                    # this guard a clock skew between the phone and the box would end
+                    # an exam at the door, which is what the old 30-second floor was
+                    # for.
+                    if left is not None and (left > 0 or running_for >= 30):
+                        server_time_left = left
                 except Exception:
                     pass
         else:
@@ -912,6 +924,14 @@ def student_sync_draft():
                 "status": "draft",
                 "started_at": started_at_dt,
             }).execute()
+            # A brand-new sitting gets the same answer as an existing one, so a
+            # device that opens the page late in the window is told the truth about
+            # the window rather than the full duration.
+            _left = exam_window.seconds_left(
+                exam_data or {}, started_at_dt,
+                datetime.fromtimestamp(server_now, tz=timezone.utc))
+            if _left is not None:
+                server_time_left = _left
     except Exception as e:
         current_app.logger.warning("sync-draft failed for exam %s user %s: %s", exam_id, g.user_id, str(e))
     finally:

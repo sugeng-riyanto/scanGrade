@@ -1466,14 +1466,26 @@ function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.defa
 function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
 const EXAM_DURATION = {{ (exam.duration_minutes or 120) * 60 }};
 const EXAM_STARTED_AT = {{ (exam_started_at or '') | tojson }};
+// The instant this sitting ends, computed by the server from *both* clocks:
+// `duration_minutes` counted from the student's own start, and — when the teacher
+// turned on "Auto-Submit on Assignment Window End" — the assignment window end,
+// whichever comes first. `app/utils/exam_window.py` decides it; this page only
+// counts toward it, and the sync API recomputes the same number from the same
+// stored `started_at`, so reloading cannot buy time.
+const EXAM_DEADLINE = {{ (deadline or '') | tojson }};
+const EXAM_DEADLINE_REASON = {{ (deadline_reason or '') | tojson }};
+const EXAM_SECONDS_LEFT = {{ seconds_left if seconds_left is not none else 'null' }};
 
 function examApp(duration, totalQ) {
-    // Timer recovery: server started_at > localStorage > duration
+    // Timer recovery: the server's own remaining time first, then started_at, then
+    // localStorage.
     var serverStart = EXAM_STARTED_AT ? new Date(EXAM_STARTED_AT).getTime() : null;
     var localStart = parseInt(localStorage.getItem('exam_started_' + '{{ exam.id }}'));
     var effectiveStart = serverStart || localStart || null;
     var elapsed = effectiveStart ? Math.floor((Date.now() - effectiveStart) / 1000) : 0;
-    var initialTime = Math.max(0, EXAM_DURATION - elapsed);
+    var initialTime = (EXAM_SECONDS_LEFT === null || EXAM_SECONDS_LEFT === undefined)
+        ? Math.max(0, EXAM_DURATION - elapsed)
+        : EXAM_SECONDS_LEFT;
     if (!localStart && serverStart) {
         localStorage.setItem('exam_started_' + '{{ exam.id }}', String(effectiveStart));
     } else if (!localStart && !serverStart) {
@@ -3408,9 +3420,13 @@ function examApp(duration, totalQ) {
                     // Guard: hanya auto-submit jika server confirmed time habis DAN
                     // durasi sudah >30 detik (cegah false positive dari kalkulasi awal)
                     if (data.server_time_left !== undefined && !this.submitted) {
-                        var totalDuration = {{ exam.duration_minutes * 60 }};
-                        var elapsed = totalDuration - data.server_time_left;
-                        if (data.server_time_left <= 0 && elapsed > 30) {
+                        // How long this sitting has actually been running. The old
+                        // guard derived it as `duration - time_left`, which stops
+                        // being the elapsed time the moment the window end — or a
+                        // start that predates the duration — is what ends the paper.
+                        var runningFor = EXAM_STARTED_AT
+                            ? (Date.now() - new Date(EXAM_STARTED_AT).getTime()) / 1000 : 0;
+                        if (data.server_time_left <= 0 && runningFor > 30) {
                             this.timeLeft = 0;
                             this.submitExam(true);
                         } else if (data.server_time_left < this.timeLeft - 5 || data.server_time_left > this.timeLeft + 5) {

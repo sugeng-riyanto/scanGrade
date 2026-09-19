@@ -9,6 +9,7 @@ from app.utils.helpers import read_with_retry, row_or_none
 from app.utils.exam_access import (
     class_assignment_allows, exam_sitting_allowed, result_released,
 )
+from app.utils import exam_window
 from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
 from app.services.pdf_service import ensure_page_thumbs
@@ -45,6 +46,28 @@ def _student_submissions(supabase, student_id):
         return []
 
 
+def _offerable(exam, student_class_id, draft_exam_ids, now=None):
+    """Should this exam appear on the student's list?
+
+    Three different questions, and collapsing them is how a paper either vanished
+    from the list or stayed on it for ever — the two answers are not the same:
+
+    * **before the window opens** — not offered; there is nothing to do with it yet.
+    * **after the window closes** — not offered, *unless* the student already began
+      (`draft_exam_ids`). The window governs *beginning*: whoever is already inside
+      keeps the sitting they hold, and its deadline, which is exactly what
+      `auto_submit_on_window_end` is about.
+    * **unassigned** — the class rule, from `class_assignment_allows`, so an exam
+      assigned to X-A is not offered to X-B.
+    """
+    state = exam_window.window_state(exam, now)
+    if state == exam_window.BEFORE:
+        return False
+    if state == exam_window.CLOSED and exam.get("id") not in draft_exam_ids:
+        return False
+    return class_assignment_allows(exam, student_class_id)
+
+
 def _rate_limit(n):
     return limiter.limit(n) if limiter else (lambda f: f)
 
@@ -75,21 +98,24 @@ def dashboard():
     submitted_ids = {s["exam_id"] for s in subs
                      if s.get("status") in ("submitted", "graded", "published")}
     submitted_ids -= {s["exam_id"] for s in subs if s.get("status") == "retracted"}
+    # A sitting that is still open. The window may close while a student is inside
+    # it, and the exam has to stay reachable so they can finish what they began.
+    draft_ids = {s["exam_id"] for s in subs if s.get("status") == "draft"}
 
     try:
-        query = supabase.table("exams").select("id,title,subject,start_at,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
+        query = supabase.table("exams").select("id,title,subject,start_at,end_at,auto_submit_on_window_end,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         # Same rule as the door the pupil walks through (`exam_sitting_allowed`),
         # from the same function: an exam is offered to the classes the teacher
         # assigned it to, and to nobody else.
         all_exams = read_with_retry(query.execute).data or []
-        now_iso = datetime.now(timezone.utc).isoformat()
         for e in all_exams:
-            start_at = e.get("start_at")
-            if start_at and str(start_at) > now_iso[:19]:
-                continue
-            if class_assignment_allows(e, student_class_id):
+            if _offerable(e, student_class_id, draft_ids):
+                # The card says which window state it is in and which clock ends it,
+                # from the same rules the door uses — never from its own reading.
+                e["sg_window_state"] = exam_window.window_state(e)
+                e["sg_in_progress"] = e["id"] in draft_ids
                 available_exams.append(e)
     except Exception as e:
         current_app.logger.error(f"Dashboard query error: {e}")
@@ -260,6 +286,22 @@ def exam_list():
     student_class_id = g.get("user_class_id")
     student_school_id = g.get("user_school_id")
 
+    # One read of the student's own submissions, before the exam list is filtered,
+    # because *both* answers come out of it and they pull in opposite directions:
+    # a finished exam is hidden, while a sitting still in progress has to stay on
+    # the list even after the window closes, so the student can finish what they
+    # began. Deriving them from one read is also what keeps this at one round-trip.
+    # (`status` is on the row, so there is nothing a second query would add.)
+    subs = []
+    try:
+        subs = supabase.table("submissions").select("exam_id, status").eq("student_id", g.user_id).in_("status", ["draft", "submitted", "graded", "published", "retracted"]).execute().data or []
+    except Exception as e:
+        current_app.logger.error(f"Submission query error: {e}")
+    submitted_ids = {s["exam_id"] for s in subs
+                     if s.get("status") in ("submitted", "graded", "published")}
+    submitted_ids -= {s["exam_id"] for s in subs if s.get("status") == "retracted"}
+    draft_ids = {s["exam_id"] for s in subs if s.get("status") == "draft"}
+
     exams = []
     try:
         # Only the columns the card renders: `select("*")` shipped the whole exam
@@ -269,12 +311,11 @@ def exam_list():
         # leaving it out made every row look unassigned. `not cids` then matched
         # every exam in the school, so a pupil in X-B was shown the papers for X-A
         # and XI-A and had all three refused one click later.
-        query = supabase.table("exams").select("id,title,subject,class_ids,question_types,total_questions,duration_minutes").eq("is_published", True).eq("status", "active")
+        query = supabase.table("exams").select("id,title,subject,class_ids,question_types,total_questions,duration_minutes,start_at,end_at,auto_submit_on_window_end").eq("is_published", True).eq("status", "active")
         if student_school_id:
             query = query.eq("school_id", student_school_id)
         all_exams = read_with_retry(lambda: query.order("created_at", desc=True).execute()).data or []
-        now_iso = datetime.now(timezone.utc).isoformat()
-        # Filter by class_id if student has one, AND check scheduling
+        # Filter by class_id if student has one, AND check the window
         for e in all_exams:
             # `question_types` is jsonb, and a jsonb value written with
             # `json.dumps` arrives as a JSON *string*. The card asks it whether the
@@ -287,29 +328,18 @@ def exam_list():
                     e["question_types"] = json.loads(e["question_types"])
                 except (json.JSONDecodeError, TypeError):
                     e["question_types"] = {}
-            # Skip exams with future start_at
-            start_at = e.get("start_at")
-            if start_at and str(start_at) > now_iso[:19]:
-                continue
-            # The same predicate the access guard applies. `not cids` — an exam
-            # the teacher never assigned — is no longer a match for everyone.
-            if class_assignment_allows(e, student_class_id):
+            # The window, and the same predicate the access guard applies. `not cids`
+            # — an exam the teacher never assigned — is no longer a match for anyone.
+            if _offerable(e, student_class_id, draft_ids):
+                e["sg_window_state"] = exam_window.window_state(e)
+                e["sg_in_progress"] = e["id"] in draft_ids
                 exams.append(e)
     except Exception as e:
         current_app.logger.error(f"Exam list query error: {e}")
 
-    submitted_ids = set()
-    try:
-        # One read where there were two: `status` is on the row, so the
-        # "answered" set and the retracted set come from the same query. Only
-        # submitted/graded/published hide an exam (a draft still shows), and a
-        # retracted one comes back into the list.
-        subs = supabase.table("submissions").select("exam_id, status").eq("student_id", g.user_id).in_("status", ["submitted", "graded", "published", "retracted"]).execute().data or []
-        submitted_ids = {s["exam_id"] for s in subs
-                         if s.get("status") in ("submitted", "graded", "published")}
-        submitted_ids -= {s["exam_id"] for s in subs if s.get("status") == "retracted"}
-    except Exception as e:
-        current_app.logger.error(f"Submission query error: {e}")
+    # `submitted_ids` and `draft_ids` were read above, with the window filter —
+    # only submitted/graded/published hide an exam (a draft still shows), and a
+    # retracted one comes back into the list.
     exams = [e for e in exams if e["id"] not in submitted_ids]
     resp = make_response(render_template("student/exam_list.html", exams=exams))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
@@ -333,19 +363,32 @@ def take_exam(exam_id):
 
     current_app.logger.info("Student exam %s: pdf_page_urls=%s, pdf_url=%s",
                             exam_id, exam.get("pdf_page_urls"), exam.get("pdf_url"))
-    # Check if exam is scheduled for the future
-    start_at = exam.get("start_at")
-    if start_at:
+    # ── The window ───────────────────────────────────────────────────────────
+    # The window governs *beginning*, and only that. So it refuses a student who has
+    # not begun — before it opens, and after it closes — and admits one who already
+    # has: the sitting they hold, and the deadline counted from its `started_at`, is
+    # what the second clock decides. This replaced a start-only check that read the
+    # two timestamps as strings and swallowed its own errors, so an exam whose end
+    # had passed was still open to anyone with the URL.
+    state = exam_window.window_state(exam)
+    if state != exam_window.OPEN:
+        sitting_row = None
         try:
-            if isinstance(start_at, str):
-                start_dt = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
-            else:
-                start_dt = start_at
-            if start_dt > datetime.now(timezone.utc):
-                flash("Ujian ini belum tersedia. Silakan cek kembali jadwal.", "error")
-                return redirect("/student/exams")
+            sitting_row = row_or_none(
+                supabase.table("submissions").select("id,status,started_at")
+                .eq("exam_id", exam_id).eq("student_id", g.user_id)
+                .maybe_single().execute()
+            )
         except Exception:
-            pass
+            sitting_row = None
+        began = exam_window.parse_dt((sitting_row or {}).get("started_at"))
+        end = exam_window.parse_dt(exam.get("end_at"))
+        if state == exam_window.BEFORE:
+            flash("Ujian ini belum tersedia. Silakan cek kembali jadwal.", "error")
+            return redirect("/student/exams")
+        if not (began and end and began <= end):
+            flash("Jendela ujian ini sudah berakhir, jadi ujian tidak bisa dimulai lagi.", "error")
+            return redirect("/student/exams")
 
     # Published + active + the student's own school and class. This used to
     # require only ``status == 'active'``, so an exam whose scores were not
@@ -421,11 +464,17 @@ def take_exam(exam_id):
         current_app.logger.exception(
             "Could not open a sitting for exam %s user %s", exam_id, g.user_id
         )
+    # One reading of the two clocks for this sitting: the instant it ends, which
+    # clock decided that, and how long is left as the server sees it. The page
+    # renders its countdown from this and the sync API recomputes it from the same
+    # functions, so the number on screen and the number the server enforces are the
+    # same number rather than two hopeful ones.
+    clocks = exam_window.page_facts(exam, exam_started_at)
     anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
     # The way back in when the phone dies or the WiFi does. Issued with the
     # session and shown in the exam topbar; never a precondition for opening.
     recovery_code = issue_code(supabase, g.user_id, exam_id)
-    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options))
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"]))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 
@@ -532,7 +581,8 @@ def submit_exam(exam_id):
     # ── Query 1: GET exam (only needed columns) ──
     exam = supabase.table("exams").select(
         "id,is_published,status,class_ids,max_attempts,publish_mode,"
-        "total_questions,answer_key,question_types,question_weights,question_pages"
+        "total_questions,answer_key,question_types,question_weights,question_pages,"
+        "start_at,end_at,auto_submit_on_window_end,duration_minutes"
     ).eq("id", exam_id).single().execute().data
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
@@ -550,7 +600,7 @@ def submit_exam(exam_id):
 
     # ── Query 3: GET existing submissions (single query for both checks) ──
     max_attempts = exam.get("max_attempts", 1)
-    all_subs = supabase.table("submissions").select("id,status").eq(
+    all_subs = supabase.table("submissions").select("id,status,started_at").eq(
         "exam_id", exam_id).eq("student_id", g.user_id).execute().data or []
 
     # Check attempts (exclude draft + retracted)
@@ -675,6 +725,15 @@ def submit_exam(exam_id):
             existing_answers = flags
         answers["_flags"] = existing_answers
 
+    # Did these answers beat the sitting's deadline? Recorded, not refused: a phone
+    # that loses its network in the last minute must not lose the answers. But "this
+    # paper was timed" and "this paper arrived twenty minutes after the deadline" are
+    # different facts about a result, and only one of them was observable before.
+    sitting_started = next((s.get("started_at") for s in all_subs
+                            if s.get("status") == "draft"), None)
+    submitted_late = exam_window.is_late(exam, sitting_started,
+                                         datetime.now(timezone.utc))
+
     submission = {
         "exam_id": exam_id,
         "student_id": g.user_id,
@@ -686,6 +745,7 @@ def submit_exam(exam_id):
         "final_score": final_score,
         "status": "submitted",
         "is_published": exam.get("publish_mode") == "auto",
+        "submitted_late": submitted_late,
     }
     try:
         # ── Query 5: write into the row this (student, exam) already owns ──
