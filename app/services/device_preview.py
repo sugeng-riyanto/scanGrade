@@ -15,6 +15,8 @@ is how a preview starts lying about what it covers.
 import re
 from itertools import chain
 
+from app.utils.legacy_urls import LEGACY_ADMIN_PAGES, LEGACY_PAGE_REASON
+
 # The widths a student's phone actually reports. 375 is the common Android/iPhone
 # CSS width, 320 is the narrowest phone still in a classroom, and 768 is exactly
 # Tailwind's `md` breakpoint — the one width where a layout is supposed to have
@@ -88,11 +90,23 @@ SECTION_RULES = (
     )),
     ("auth", ("Pintu masuk", "Entry"), (("/auth/", None),)),
     ("student", ("Murid", "Student"), (("/student/", None), ("/wb/student", None))),
-    ("teacher", ("Guru", "Teacher"), (("/teacher/", None), ("/wb/teacher", None))),
-    ("admin", ("Admin Sekolah", "School admin"), (
-        ("/admin-sekolah/", None), ("/admin/", None), ("/students/", None),
+    # `/students/` is here, not in `admin`: every route on that blueprint is
+    # `@guru_required` (it is the CSV importer's page), so filing it under the
+    # school admin put a second "Import" in a section that already has one —
+    # the same two-of-everything shape the legacy 308s removed, reached this
+    # time by putting a page in the wrong section.
+    ("teacher", ("Guru", "Teacher"), (
+        ("/teacher/", None), ("/wb/teacher", None), ("/students/", None),
     )),
-    ("super", ("Super Admin", "Super admin"), (("/super-admin/", None),)),
+    ("admin", ("Admin Sekolah", "School admin"), (("/admin-sekolah/", None),)),
+    # `/admin` is here, not in `admin`, and that is the fix for this section once
+    # listing two of everything: it is the panel from before the app served more
+    # than one school, so what survives under it is platform-wide (school
+    # registrations, the compliance/audit pages the super admin reads for every
+    # school). Its school-scoped pages are 308s now — see `legacy_urls`.
+    ("super", ("Super Admin", "Super admin"), (
+        ("/super-admin/", None), ("/admin/", None),
+    )),
     ("tools", ("Alat", "Tools"), (("/tools/", None),)),
 )
 
@@ -118,7 +132,7 @@ def page_label(url: str, depth: int = 1) -> str:
     Derived rather than typed, for the same reason the list is: a new page must
     arrive with a readable name and no edit here. *depth* says how many trailing
     segments make the name — two when the last one alone is ambiguous
-    (``/admin/dashboard`` is "Admin / Dashboard").
+    (``/super-admin/users/manage`` is "Users / Manage").
     """
     parts = [p for p in (url or "").split("/") if p]
     if not parts:
@@ -130,12 +144,18 @@ def page_label(url: str, depth: int = 1) -> str:
 def _unique_labels(pages: list) -> list:
     """Every page gets a name that is unique *inside its section*.
 
-    The last URL segment alone gave the school-admin section two buttons reading
-    "Dashboard" (`/admin/dashboard` and `/admin-sekolah/dashboard`) and two
-    reading "Import" — and the only thing telling them apart was a `title`
-    tooltip, which a phone cannot hover. So a name that collides is extended with
-    the segment before it: "Admin / Dashboard". Only the colliding pages pay the
-    length; a page whose name is already unique keeps its short one.
+    A name that collides is extended with the segment before it: "Users / Manage".
+    Only the colliding pages pay the length; a page whose name is already unique
+    keeps its short one.
+
+    This is the second line of defence, not the first. The school-admin section
+    used to hold two "Dashboard" buttons (`/admin/dashboard` and
+    `/admin-sekolah/dashboard`) and two "Import" — the only thing telling them
+    apart was a `title` tooltip, which a phone cannot hover — and the labels were
+    what made that survivable. The duplicates themselves are gone now (the `/admin`
+    ones are 308s to the page that owns the content; see `legacy_urls`), so a
+    collision here means a *new* pair was added and the longer name is what keeps
+    it readable until someone decides which of the two should not exist.
     """
     remaining = list(pages)
     depth = 1
@@ -155,6 +175,10 @@ def skip_reason(url: str):
     """Why this URL is not a page as an ``(id, en)`` pair, or ``None`` when it is one."""
     if url in SKIP_EXACT:
         return SKIP_EXACT[url]
+    # Read from the same table the router registers its 308s out of, so a moved
+    # page cannot be redirected *and* still advertised here as a page to look at.
+    if url in LEGACY_ADMIN_PAGES:
+        return LEGACY_PAGE_REASON
     for prefix, reason in SKIP_PREFIX.items():
         if url.startswith(prefix):
             return reason

@@ -414,12 +414,12 @@ def login():
             status = "active"
 
         redirect_map = {
-            "super_admin": "/admin/dashboard",
-            "admin_sekolah": "/admin/dashboard",
+            "super_admin": "/super-admin/dashboard",
+            "admin_sekolah": "/admin-sekolah/dashboard",
             "guru": "/teacher/dashboard",
             "murid": "/student/dashboard",
         }
-        redirect_url = redirect_map.get(role, "/admin/dashboard")
+        redirect_url = redirect_map.get(role, "/admin-sekolah/dashboard")
         resp = make_response(redirect(redirect_url))
         # A flash left over from a session that has just ended describes a state
         # the user is no longer in. The login page is where it belongs, and it is

@@ -76,15 +76,17 @@ Request → login_required decorator
 | `/super-admin/exams` | ✅ | ❌ | ❌ | ❌ |
 | `/super-admin/logs` | ✅ | ❌ | ❌ | ❌ |
 | **Admin (slug: `/admin/`)** |
-| `/admin/dashboard` | ❌ | ✅ | ❌ | ❌ |
-| `/admin/users` | ❌ | ❌ | ❌ | ❌ |
-| `/admin/teachers` | ❌ | ❌ | ❌ | ❌ |
-| `/admin/students` | ❌ | ❌ | ❌ | ❌ |
-| `/admin/classes` | ❌ | ❌ | ❌ | ❌ |
-| `/admin/exams` | ❌ | ❌ | ❌ | ❌ |
-| `/admin/school` | ❌ | ❌ | ❌ | ❌ |
 | `/admin/registration-requests` | ✅ | ❌ | ❌ | ❌ |
 | `/admin/compliance` | ✅ | ❌ | ❌ | ❌ |
+
+**URL lama di bawah `/admin/`** — `/admin/dashboard`, `/admin/users`, `/admin/exams`,
+`/admin/comms`, `/admin/compliance/logs`, `/admin/classes`, `/admin/students`,
+`/admin/teachers`, `/admin/school` — tidak lagi berupa halaman. Masing-masing menjawab
+**308 Permanent Redirect** ke halaman yang sekarang memilikinya (`/admin-sekolah/*`
+untuk yang berlingkup sekolah, `/super-admin/*` untuk yang membaca seluruh platform).
+Tabel pemetaannya satu dan hanya satu: `app/utils/legacy_urls.py`. Sebelum ini, satu
+halaman hidup di dua URL sekaligus sehingga `/tools/device-preview` menampilkan dua
+tombol bernama sama di seksi Admin Sekolah.
 | **Admin Sekolah (slug: `/admin-sekolah/`)** |
 | `/admin-sekolah/*` | ❌ | ✅ | ❌ | ❌ |
 | **Teacher (slug: `/teacher/`)** |
