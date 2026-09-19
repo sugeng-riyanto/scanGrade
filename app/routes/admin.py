@@ -19,132 +19,6 @@ def _gen_password(length=12) -> str:
 admin_bp = Blueprint("admin", __name__)
 
 
-@admin_bp.route("/dashboard")
-@admin_required
-def dashboard():
-    # Redirect admin_sekolah users to their own dashboard
-    if g.get("user_role") == "admin_sekolah":
-        return redirect("/admin-sekolah/dashboard")
-    supabase = get_supabase()
-    profiles = supabase.table("profiles").select("*").execute().data or []
-    exams = []
-    try:
-        exams = supabase.table("exams").select("id, title, subject, total_questions, question_types, question_audio, question_canvas, status, is_published, created_at").execute().data or []
-    except Exception:
-        pass
-    submissions = []
-    try:
-        submissions = supabase.table("submissions").select("id").execute().data or []
-    except Exception:
-        pass
-
-    total_users = len(profiles)
-    total_teachers = sum(1 for p in profiles if p.get("role") == "guru")
-    total_students = sum(1 for p in profiles if p.get("role") == "murid")
-    total_submissions = len(submissions)
-    active_exams = sum(1 for e in exams if e.get("status") == "active" and e.get("is_published"))
-    total_schools = 0
-    try:
-        sch = supabase.table("schools").select("id", count="exact").execute()
-        total_schools = sch.count or 0
-    except Exception:
-        pass
-
-    for e in exams:
-        teacher = next((p for p in profiles if p["id"] == e.get("teacher_id")), None)
-        e["teacher_name"] = (teacher or {}).get("full_name", "-")
-
-    pending_requests = 0
-    if g.get("user_role") == "super_admin":
-        try:
-            pr = supabase.table("school_registration_requests").select("id", count="exact").eq("status", "pending").execute()
-            pending_requests = pr.count or 0
-        except Exception:
-            pass
-
-    return render_template("admin/dashboard.html",
-        total_users=total_users,
-        total_teachers=total_teachers,
-        total_students=total_students,
-        total_exams=len(exams),
-        total_submissions=total_submissions,
-        active_exams=active_exams,
-        pending_requests=pending_requests,
-        total_schools=total_schools,
-        users=profiles,
-        exams=exams,
-    )
-
-
-@admin_bp.route("/users")
-@admin_required
-def users():
-    supabase = get_supabase()
-    profiles = supabase.table("profiles").select("*").execute().data or []
-    return render_template("admin/users.html", users=profiles)
-
-
-@admin_bp.route("/teachers")
-@admin_required
-def teachers():
-    supabase = get_supabase()
-    teachers = supabase.table("profiles").select("*").eq("role", "guru").execute().data or []
-    for t in teachers:
-        count = supabase.table("exams").select("id", count="exact").eq("teacher_id", t["id"]).execute().count or 0
-        t["exam_count"] = count
-    return render_template("admin/teachers.html", teachers=teachers)
-
-
-@admin_bp.route("/students")
-@admin_required
-def students():
-    supabase = get_supabase()
-    students = supabase.table("profiles").select("*").eq("role", "murid").execute().data or []
-    for s in students:
-        count = supabase.table("submissions").select("id", count="exact").eq("student_id", s["id"]).execute().count or 0
-        s["submission_count"] = count
-    return render_template("admin/students.html", students=students)
-
-
-@admin_bp.route("/classes")
-@admin_required
-def classes():
-    supabase = get_supabase()
-    try:
-        classes = supabase.table("classes").select("*").execute().data or []
-    except Exception:
-        classes = []
-    for c in classes:
-        if c.get("teacher_id"):
-            t = supabase.table("profiles").select("full_name").eq("id", c["teacher_id"]).execute().data
-            c["teacher_name"] = (t[0]["full_name"] if t else "-")
-        else:
-            c["teacher_name"] = "-"
-        try:
-            count = supabase.table("profiles").select("id", count="exact").eq("class_id", c["id"]).execute().count or 0
-        except Exception:
-            count = 0
-        c["student_count"] = count
-    return render_template("admin/classes.html", classes=classes)
-
-
-@admin_bp.route("/exams")
-@admin_required
-def exams():
-    supabase = get_supabase()
-    exams = supabase.table("exams").select("*").order("created_at", desc=True).execute().data or []
-    profiles = supabase.table("profiles").select("id,full_name").eq("role", "guru").execute().data or []
-    teacher_map = {p["id"]: p["full_name"] for p in profiles}
-    for e in exams:
-        e["teacher_name"] = teacher_map.get(e.get("teacher_id"), "-")
-        try:
-            count = supabase.table("submissions").select("id", count="exact").eq("exam_id", e["id"]).execute().count or 0
-        except Exception:
-            count = 0
-        e["submission_count"] = count
-    return render_template("admin/exams.html", exams=exams)
-
-
 @admin_bp.route("/exams/<exam_id>/toggle-status", methods=["POST"])
 @admin_required
 def toggle_exam_status(exam_id):
@@ -154,7 +28,7 @@ def toggle_exam_status(exam_id):
     supabase.table("exams").update({"status": new_status}).eq("id", exam_id).execute()
     if request.is_json:
         return jsonify({"success": True, "status": new_status})
-    return redirect(request.referrer or "/admin/exams")
+    return redirect(request.referrer or "/super-admin/exams")
 
 
 @admin_bp.route("/exams/<exam_id>/toggle-visibility", methods=["POST"])
@@ -166,7 +40,7 @@ def toggle_exam_visibility(exam_id):
     supabase.table("exams").update({"is_published": new_val}).eq("id", exam_id).execute()
     if request.is_json:
         return jsonify({"success": True, "is_published": new_val})
-    return redirect(request.referrer or "/admin/exams")
+    return redirect(request.referrer or "/super-admin/exams")
 
 
 @admin_bp.route("/exams/<exam_id>/delete", methods=["POST"])
@@ -180,7 +54,7 @@ def delete_exam(exam_id):
     supabase.table("exams").delete().eq("id", exam_id).execute()
     if request.is_json:
         return jsonify({"success": True})
-    return redirect("/admin/exams")
+    return redirect("/super-admin/exams")
 
 
 @admin_bp.route("/teachers/<teacher_id>/delete", methods=["POST"])
@@ -192,7 +66,7 @@ def delete_teacher(teacher_id):
     log_activity("delete", "teacher", teacher_id, user_id=g.user_id)
     if request.is_json:
         return jsonify({"success": True})
-    return redirect("/admin/teachers")
+    return redirect("/admin-sekolah/teachers")
 
 
 @admin_bp.route("/students/<student_id>/delete", methods=["POST"])
@@ -204,7 +78,7 @@ def delete_student(student_id):
     log_activity("delete", "student", student_id, user_id=g.user_id)
     if request.is_json:
         return jsonify({"success": True})
-    return redirect("/admin/students")
+    return redirect("/admin-sekolah/students")
 
 
 @admin_bp.route("/classes/create", methods=["POST"])
@@ -222,10 +96,10 @@ def create_class():
     except Exception as e:
         if request.is_json:
             return jsonify({"success": False, "error": str(e)}), 400
-        return redirect("/admin/classes")
+        return redirect("/admin-sekolah/classes")
     if request.is_json:
         return jsonify({"success": True})
-    return redirect("/admin/classes")
+    return redirect("/admin-sekolah/classes")
 
 
 @admin_bp.route("/classes/<class_id>/delete", methods=["POST"])
@@ -236,7 +110,7 @@ def delete_class(class_id):
     supabase.table("classes").delete().eq("id", class_id).execute()
     if request.is_json:
         return jsonify({"success": True})
-    return redirect("/admin/classes")
+    return redirect("/admin-sekolah/classes")
 
 
 @admin_bp.route("/school/data")
@@ -268,16 +142,13 @@ def school_data():
     return jsonify({"settings": settings, "stats": stats})
 
 
-@admin_bp.route("/school", methods=["GET", "POST"])
+@admin_bp.route("/school", methods=["POST"])
 @admin_required
 def school():
+    # The page moved to /admin-sekolah/profile and answers a 308 there; the write
+    # stayed, because the legacy form's field names are not the new form's and a
+    # 308 would re-post this body at a route that does not read it.
     supabase = get_supabase()
-    if request.method == "GET":
-        try:
-            settings = supabase.table("school_settings").select("*").eq("id", 1).single().execute().data
-        except Exception:
-            settings = {}
-        return render_template("admin/school.html", settings=settings)
     data = {
         "school_name": request.form.get("school_name", ""),
         "npsn": request.form.get("npsn", ""),
@@ -710,25 +581,3 @@ def pdp_reference():
     return render_template("admin/pdp_law.html")
 
 
-@admin_bp.route("/compliance/logs")
-@admin_required
-def audit_logs_view():
-    page = request.args.get("page", 1, type=int)
-    per_page = 50
-    offset = (page - 1) * per_page
-    action = request.args.get("action") or None
-    entity = request.args.get("entity") or None
-    days_raw = request.args.get("days", "7")
-    days = int(days_raw) if days_raw.isdigit() and int(days_raw) > 0 else None
-    logs = fetch_audit_logs(limit=per_page, offset=offset, action=action, entity_type=entity, days=days)
-    total = count_audit_logs(action=action, entity_type=entity, days=days)
-    return render_template("admin/audit_logs.html",
-        logs=logs, page=page, per_page=per_page, total=total,
-        action=action or "", entity=entity or "", days=days or 0,
-    )
-
-
-@admin_bp.route("/comms")
-@admin_required
-def admin_comms():
-    return render_template("shared/comms.html")

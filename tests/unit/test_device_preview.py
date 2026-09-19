@@ -119,10 +119,12 @@ class TestTheListComesFromTheApp:
     def test_two_pages_in_one_section_never_share_a_name(self, app):
         """A name that collides is a button nobody can tell from its neighbour.
 
-        The school-admin section really holds two dashboards (`/admin/dashboard`
-        and `/admin-sekolah/dashboard`) and two imports; the last segment alone
-        called all four by the same word, and the `title` tooltip that separated
-        them is not reachable on a phone at all.
+        The school-admin section used to be exactly this — two dashboards, two
+        imports — and the longer name is what made them distinguishable on a
+        phone. The duplicates are 308s now, so the real app has no collision left;
+        this stays as the net for the next pair someone adds, and
+        `test_the_school_admin_section_holds_each_page_once` is the test that the
+        *duplicates* stay gone.
         """
         seen = {}
         for page in preview.preview_pages(app):
@@ -132,13 +134,24 @@ class TestTheListComesFromTheApp:
                 f"section {page['section']!r}")
             seen[key] = page["url"]
 
-    def test_only_the_colliding_pages_get_a_longer_name(self, app):
+    def test_only_the_colliding_pages_get_a_longer_name(self):
+        """Synthetic, because the real collision this described is now a 308.
+
+        It used to assert on `/admin/dashboard` and `/admin-sekolah/dashboard`,
+        which is the duplicate the legacy redirects removed. Pointing a *naming*
+        test at pages that no longer both exist would leave it passing without
+        checking anything, so the pair is built here instead — same shape, no
+        dependency on the app staying broken.
+        """
+        app = create_app("testing")
+        app.add_url_rule("/teacher/brand-new-page", "collide_a", lambda: "ok")
+        app.add_url_rule("/teacher/classes/brand-new-page", "collide_b", lambda: "ok")
         labels = {p["url"]: p["label"] for p in preview.preview_pages(app)}
-        # Nobody else's name grew.
+        # Neither collided with anything else, so neither name grew.
         assert labels["/teacher/dashboard"] == "Dashboard"
         # And the two that collided now say which one they are.
-        assert labels["/admin/dashboard"] == "Admin / Dashboard"
-        assert labels["/admin-sekolah/dashboard"] == "Admin Sekolah / Dashboard"
+        assert labels["/teacher/brand-new-page"] == "Teacher / Brand New Page"
+        assert labels["/teacher/classes/brand-new-page"] == "Classes / Brand New Page"
 
     def test_a_deeper_name_reads_as_a_path(self):
         assert preview.page_label("/admin/dashboard", 2) == "Admin / Dashboard"
