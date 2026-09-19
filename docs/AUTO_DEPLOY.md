@@ -32,6 +32,35 @@ Safe to re-run afterwards, but you should not need to: the runner it installs is
 not a copy of anything, so a fix to the deploy logic reaches the box the same way
 the rest of the code does.
 
+### If that attempt does not take — the one-command way
+
+Run from a shell that is not root, `install-auto-deploy.sh` prints a banner and
+exits 2 **before touching anything**. In a screenful of output that reads as done,
+and the box then keeps serving a **copy** of the deploy script installed on an
+earlier day — it deploys every release while running no gate at all, and it has no
+`/etc/scangrade-claims.conf`, no `/etc/scangrade-perf.conf` and no load-test
+roster. Nothing on the box goes red: the timer keeps working, which is exactly why
+this state can survive a report that the installer ran.
+
+`deploy/arm-auto-deploy.sh` exists to make that impossible to mistake. Run it as
+yourself; it elevates once, keeps the installer's whole output in
+`/tmp/installer.log`, and states what the box is running *before* and *after*:
+
+```bash
+bash /opt/scangrade/deploy/arm-auto-deploy.sh --check   # what is armed; changes nothing
+bash /opt/scangrade/deploy/arm-auto-deploy.sh           # arm it — asks for your password once
+```
+
+`--check` exits 0 only when all four gates have what they need, and names every
+missing piece otherwise, so a missing launcher, conf or roster is never reported
+as armed. It reads the installed file the way `/super-admin/deploy-status` does:
+a launcher that execs the checkout is the arrangement, `@REPO@` still in the file
+means it was installed but never rendered, and anything else is a **copy** — whose
+missing gate blocks are printed by name, so "no theme gate, no claims gate, no
+performance gate, no quarantine" is a sentence an operator reads rather than a
+conclusion they have to reach. A password is never requested for a roster that
+cannot be parsed, and nothing is written at all in `--check`.
+
 ## The runner is never a copy
 
 The installed `/usr/local/bin/scangrade-deploy` is `deploy/entrypoint.sh`, rendered
