@@ -10,13 +10,35 @@
         <i class="fas fa-exclamation-triangle text-amber-600 mt-0.5"></i>
         <div class="flex-1">
             <p class="font-bold text-amber-800 text-sm"><span x-text="t('Kunci jawaban belum diatur','Answer key not set yet')"></span></p>
-            <p class="text-xs text-amber-700 mt-1" x-text="'{{ exams_no_key|length }} ' + t('ujian belum memiliki kunci jawaban — skor siswa akan 0.','exam(s) have no answer key — student scores will be 0.')"></p>
+            <p class="text-xs text-amber-700 mt-1" x-text="'{{ exams_no_key|length }} ' + t('ujian belum memiliki kunci jawaban — setiap soal objektif dinilai salah, jadi skor objektif murid 0.','exam(s) have no answer key — every objective question is marked wrong, so student scores are 0.')"></p>
             <div class="flex flex-wrap gap-2 mt-2">
                 {% for e in exams_no_key[:3] %}
                 <a href="/teacher/exams/{{ e.id }}/answer-keys" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition">{{ e.title[:30] }}</a>
                 {% endfor %}
                 {% if exams_no_key|length > 3 %}
                 <a href="/teacher/exams" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition" x-text="'+' + '{{ exams_no_key|length - 3 }} ' + t('lainnya','more')"></a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# A partly filled key is a different situation and gets its own sentence with its
+       own number: it does not score 0, it scores a *ceiling*. Saying "scores will be
+       0" here would be the same kind of untrue card this one replaced — and until the
+       scoring denominator was fixed, this situation was reported as nothing at all. #}
+    {% if exams_partial_key %}
+    <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4 flex items-start gap-3">
+        <i class="fas fa-key text-amber-600 mt-0.5"></i>
+        <div class="flex-1">
+            <p class="font-bold text-amber-800 text-sm"><span x-text="t('Kunci jawaban belum lengkap','Answer key is incomplete')"></span></p>
+            <p class="text-xs text-amber-700 mt-1" x-text="'{{ exams_partial_key|length }} ' + t('ujian baru sebagian kuncinya terisi — skor tertinggi yang bisa dicapai murid adalah ','exam(s) have a partly filled key — the highest score a student can reach is ') + '{{ partial_key_ceiling }}%' + '.'"></p>
+            <div class="flex flex-wrap gap-2 mt-2">
+                {% for e in exams_partial_key[:3] %}
+                <a href="/teacher/exams/{{ e.id }}/answer-keys" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition">{{ e.title[:30] }}</a>
+                {% endfor %}
+                {% if exams_partial_key|length > 3 %}
+                <a href="/teacher/exams" class="text-xs font-bold bg-white border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition" x-text="'+' + '{{ exams_partial_key|length - 3 }} ' + t('lainnya','more')"></a>
                 {% endif %}
             </div>
         </div>

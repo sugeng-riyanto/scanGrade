@@ -13,11 +13,11 @@ from app.services.demo_settings import (
     order_from_form,
     order_key,
 )
-from app.services.question_types import grade_answer, key_has_answer
 from app.services.deploy_status_service import (
     report as deploy_status_report,
     request_release as deploy_status_request_release,
 )
+from app.services.question_types import objective_result
 from app.utils.req_cache import invalidate, invalidate_school, ttl
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
@@ -1376,12 +1376,17 @@ def omr_test_batch():
             # Grade if exam_id
             score = None
             correct = None
+            unkeyed = None
             if exam_id and "error" not in result:
                 from app.utils.auth import get_supabase
                 # `question_types` rides along with the key, and the shared grader
                 # says what is right: comparing letters here is what made a
                 # true/false or matching question unscorable on a scanned sheet.
-                exam = get_supabase().table("exams").select("answer_key,question_types").eq("id", exam_id).single().execute().data
+                # `total_questions` rides along too, because it is the denominator:
+                # this bench divided by the number of answers the *key* had, so a
+                # half-keyed exam scored 100 while the pupil's own result page — and
+                # the scanner that feeds it — scored the same sheet out of the paper.
+                exam = get_supabase().table("exams").select("answer_key,question_types,total_questions").eq("id", exam_id).single().execute().data
                 if exam and exam.get("answer_key"):
                     key = exam["answer_key"]
                     if isinstance(key, str):
@@ -1390,10 +1395,11 @@ def omr_test_batch():
                     if isinstance(qtypes, str):
                         qtypes = json.loads(qtypes)
                     detected = result.get("answers", {})
-                    graded = [k for k, v in key.items() if key_has_answer(qtypes.get(str(k)), v)]
-                    c = sum(1 for k in graded if k in detected and grade_answer(qtypes.get(str(k)), key[k], detected[k]))
-                    correct = c
-                    score = round((c / max(len(graded), 1)) * 100, 2) if graded else 0
+                    paper = int(exam.get("total_questions") or 0) or total_questions
+                    objective = objective_result(qtypes, key, detected, paper)
+                    correct = objective.correct
+                    score = objective.score
+                    unkeyed = len(objective.unkeyed)
 
             results.append({
                 "filename": f.filename,
@@ -1404,6 +1410,10 @@ def omr_test_batch():
                 "avg_conf": result.get("avg_confidence", 0),
                 "needs_review": len(result.get("needs_review", [])),
                 "score": score,
+                # How many objective questions the key does not answer, so a sheet
+                # that looks perfect does not read as a scanner fault when the paper
+                # is only partly marked.
+                "unkeyed": unkeyed,
                 "correct": correct,
                 "error": result.get("error"),
             })
