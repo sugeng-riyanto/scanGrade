@@ -27,6 +27,13 @@ The roster file is written by ``provision_loadtest.py``.
 what ``deploy/claims_gate.py`` compares the landing page against. It is emitted
 from the same computation that prints the report below, so a reader and a gate
 can never disagree about what the run measured.
+
+Besides latency, each page records what it **cost**: the bytes it sent and the
+Supabase round-trips the render spent, read from the app's own
+``X-Supabase-Roundtrips`` header. Response time alone cannot see a release that
+adds three queries to the student dashboard while still answering inside the
+latency slack; these two can, and ``deploy/perf_gate.py`` compares both against
+the last release that passed.
 """
 import argparse
 import asyncio
@@ -50,6 +57,17 @@ TEACHER_READS = ["/teacher/dashboard", "/teacher/exams", "/teacher/results", "/t
 
 CSRF_RE = re.compile(r'name="csrf-token"\s+content="([^"]+)"')
 EXAM_RE = re.compile(r'/student/exams/([a-f0-9\-]{36})')
+
+#: The header the app puts on every response: how many Supabase round-trips the
+#: render spent. Declared here as the harness's own copy so this file can run
+#: against any base URL without importing the app (which would need its .env).
+#: `test_the_harness_reads_the_header_the_app_writes` asserts the two agree, so
+#: the copy cannot drift from `app/utils/query_meter.py`'s.
+ROUNDTRIP_HEADER = "X-Supabase-Roundtrips"
+
+#: The pages the published capacity claim is about, and therefore the ones whose
+#: payload the gate watches. Same shape as claims_gate.CLAIM_ENDPOINT.
+PAGE_ENDPOINT = re.compile(r"^GET /(student|teacher)/")
 
 # The mix locustfile.py uses, so a sustained run here can be compared with a
 # Locust run of the same shape: (weight, label, path). /student/exams/<id> needs
@@ -120,12 +138,25 @@ class Results:
         # Where a login ended up when it did not reach a dashboard. Kept
         # separate from transport errors so the two are never conflated.
         self.login_missed = Counter()
+        # What a page *costs*, not just how long it took. Bytes are the payload the
+        # student downloads; round-trips are the Supabase queries the render spent,
+        # read off the app's own header. Response time is the symptom of both.
+        self.nbytes = defaultdict(list)
+        self.trips = defaultdict(list)
 
     def rec(self, key, t0, resp):
         ms = (time.perf_counter() - t0) * 1000
         self.lat[key].append(ms)
         self.status[key][resp.status_code] += 1
         self.tl.append((time.perf_counter() - self.t0, key, ms, resp.status_code))
+        # Only a page that *answered*. A 302 or a 500 has a body of nothing, and
+        # averaging those in would let a page that broke look cheap — the exact
+        # shape of measurement that hides the defect it was taken to find.
+        if resp.status_code == 200:
+            self.nbytes[key].append(len(resp.content or b""))
+            value = resp.headers.get(ROUNDTRIP_HEADER)
+            if value is not None and value.strip().isdigit():
+                self.trips[key].append(int(value.strip()))
 
     def err(self, key, exc):
         self.lat[key].append(float("nan"))
@@ -264,6 +295,25 @@ async def sustain(r, client, base, role, exam_ids, duration):
         await asyncio.sleep(random.uniform(1.0, 3.0))
 
 
+def heaviest_page(s):
+    """The signed-in page that costs the most, as (endpoint, per_endpoint row).
+
+    "Costs the most" is the largest payload, which is the grading the perf gate
+    enforces — one rule, stated here so a human reading the report sees the same
+    page the gate will judge. A page with no 200 answer is skipped rather than
+    scored as zero bytes.
+
+    Returns None when nothing qualifies (an unsigned run, or every page failed),
+    which is a measurement gap and never a pass.
+    """
+    pages = {k: v for k, v in (s.get("per_endpoint") or {}).items()
+             if PAGE_ENDPOINT.match(k) and v.get("bytes_p50")}
+    if not pages:
+        return None
+    key = max(pages, key=lambda k: pages[k]["bytes_p50"])
+    return key, pages[key]
+
+
 def summary(r, wall, n_launched):
     """The whole run as one object — printed by report(), written by --json.
 
@@ -303,7 +353,15 @@ def summary(r, wall, n_launched):
         "identity_checked": r.identity_checked,
         "identity_wrong": dict(r.identity_wrong),
         "per_endpoint": {
-            k: {"n": len(v), "p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99)}
+            k: {
+                "n": len(v), "p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99),
+                # The median response size and the median round-trip count, so a
+                # single outlier page cannot decide the verdict and neither can a
+                # single cheap one. `None` when the endpoint answered nothing 200,
+                # which the gate reads as "not measured" rather than as zero.
+                "bytes_p50": pct(r.nbytes[k], 50) if r.nbytes[k] else None,
+                "roundtrips_p50": pct(r.trips[k], 50) if r.trips[k] else None,
+            }
             for k, v in r.lat.items()
         },
         "wall_s": round(wall, 2),
@@ -318,11 +376,14 @@ def report(r, accounts_used, roster_src, wall, n_launched):
     print("\n" + "=" * 82)
     print("PER-ENDPOINT RESULTS  (milliseconds)")
     print("=" * 82)
-    print(f"{'endpoint':<34}{'n':>5}{'p50':>8}{'p95':>8}{'p99':>8}   status")
+    print(f"{'endpoint':<34}{'n':>5}{'p50':>8}{'p95':>8}{'p99':>8}{'KB':>8}{'queries':>9}   status")
     for key in r.lat:
         st = dict(r.status[key])
+        kb = pct(r.nbytes[key], 50) / 1024.0 if r.nbytes[key] else 0.0
+        trips = pct(r.trips[key], 50) if r.trips[key] else 0.0
         print(f"{key:<34}{len(r.lat[key]):>5}{pct(r.lat[key], 50):>8.0f}"
-              f"{pct(r.lat[key], 95):>8.0f}{pct(r.lat[key], 99):>8.0f}   {st}")
+              f"{pct(r.lat[key], 95):>8.0f}{pct(r.lat[key], 99):>8.0f}"
+              f"{kb:>8.1f}{trips:>9.0f}   {st}")
 
     print("\n" + "=" * 82)
     print(f"sessions launched  : {s['sessions_launched']}")
@@ -341,6 +402,12 @@ def report(r, accounts_used, roster_src, wall, n_launched):
           f"/{total} = {s['error_rate_pct']:.2f}%  (429 + 5xx + transport)")
     print(f"overall latency    : p50={s['latency_ms']['p50']:.0f}ms "
           f"p95={s['latency_ms']['p95']:.0f}ms p99={s['latency_ms']['p99']:.0f}ms")
+    heaviest = heaviest_page(s)
+    if heaviest:
+        key, cost = heaviest
+        print(f"heaviest page      : {key} — {cost['bytes_p50'] / 1024.0:.1f} KB, "
+              f"{cost['roundtrips_p50']:.0f} Supabase queries per render "
+              f"(the two numbers the perf gate compares)")
     print(f"identity verified  : {s['identity_ok']}/{s['identity_checked']} via /auth/me user_id")
     if r.identity_wrong:
         print(f"  !! WRONG IDENTITY : {dict(r.identity_wrong)}")

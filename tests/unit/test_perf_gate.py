@@ -59,9 +59,19 @@ GATES = {
 
 def summary(p50: float, p95: float, sessions: int = 20, error_pct: float = 0.0,
             fivexx: int = 0, logins: int | None = None,
-            endpoint: str = "GET /student/dashboard") -> dict:
-    """A harness summary in the shape the real one writes."""
+            endpoint: str = "GET /student/dashboard",
+            payload: float | None = None, queries: float | None = None) -> dict:
+    """A harness summary in the shape the real one writes.
+
+    `payload` and `queries` are opt-in: left out, the summary is one an older harness
+    would have written, which is its own case to test.
+    """
     ok = sessions if logins is None else logins
+    row = {"n": 300, "p50": p50, "p95": p95}
+    if payload is not None:
+        row["bytes_p50"] = payload
+    if queries is not None:
+        row["roundtrips_p50"] = queries
     return {
         "sessions_launched": sessions,
         "logins_ok": ok,
@@ -74,11 +84,13 @@ def summary(p50: float, p95: float, sessions: int = 20, error_pct: float = 0.0,
         "server_errors_5xx": fivexx,
         "rate_limited_429": 0,
         "transport_errors": 0,
-        "per_endpoint": {endpoint: {"n": 300, "p50": p50, "p95": p95}},
+        "per_endpoint": {endpoint: row},
     }
 
 
-def baseline_from(p50: float, p95: float, commit: str = "abc1234", **extra) -> dict:
+def baseline_from(p50: float, p95: float, commit: str = "abc1234",
+                  payload: float | None = None, queries: float | None = None,
+                  **extra) -> dict:
     record = {
         "commit": commit,
         "shape": gate.shape_of(20, 2, 20.0, "https://example.test"),
@@ -87,6 +99,11 @@ def baseline_from(p50: float, p95: float, commit: str = "abc1234", **extra) -> d
         "error_pct": extra.pop("error_pct", 0.0),
         "server_errors_5xx": extra.pop("fivexx", 0),
     }
+    if payload is not None or queries is not None:
+        record["page_cost"] = {"bytes": float(payload or 0),
+                              "bytes_endpoint": "GET /student/dashboard",
+                              "roundtrips": float(queries or 0),
+                              "roundtrips_endpoint": "GET /student/dashboard"}
     record.update(extra)
     return record
 
@@ -131,6 +148,131 @@ class TestTheComparison:
         empty = summary(0, 0)
         empty["per_endpoint"] = {}
         assert gate.regression(baseline_from(200, 400), empty) == []
+
+
+# ── 1b. what a page costs, which latency cannot see ──────────────────────────
+
+class TestTheCostOfAPage:
+    """A page that stays just as fast while costing more is still a regression.
+
+    Response time is a symptom. A release can add three queries to the student
+    dashboard, or land a 200 KB script on it, and still answer inside the latency
+    slack on a box this quiet — and then be the page that falls over at 500
+    concurrent students. So each signed-in page also reports what it *cost*: the
+    bytes it sent, and the Supabase round-trips the render spent (the app's own
+    `X-Supabase-Roundtrips` header).
+
+    These hold the rule, the grace that keeps ordinary data growth from being
+    mistaken for a leak, and the self-arming that lets the rule arrive without
+    rejecting its first release.
+    """
+
+    def test_an_unchanged_page_is_not_a_regression(self):
+        reasons = gate.regression(baseline_from(200, 400, payload=100_000, queries=6),
+                                  summary(205, 420, payload=100_000, queries=6))
+        assert reasons == []
+
+    def test_a_heavier_page_is_a_regression_and_names_the_endpoint(self):
+        reasons = gate.regression(baseline_from(200, 400, payload=100_000, queries=6),
+                                  summary(200, 400, payload=300_000, queries=6))
+        assert len(reasons) == 1, reasons
+        assert "293.0 KB" in reasons[0] and "97.7 KB" in reasons[0], reasons[0]
+        assert "GET /student/dashboard" in reasons[0], "the page that grew must be named"
+        assert "abc1234" in reasons[0], "and the release it grew against"
+
+    def test_a_page_that_spends_more_queries_is_a_regression(self):
+        reasons = gate.regression(baseline_from(200, 400, payload=100_000, queries=6),
+                                  summary(200, 400, payload=100_000, queries=11))
+        assert len(reasons) == 1, reasons
+        assert "Supabase queries" in reasons[0]
+        assert "11" in reasons[0] and "6" in reasons[0], reasons[0]
+        assert "N+1" in reasons[0], (
+            "the message has to name the shape of the defect, or whoever reads the "
+            f"journal does not know what to grep for: {reasons[0]}")
+
+    def test_an_n_plus_one_is_caught_rather_than_waved_through(self):
+        """6 queries becoming 8 is the defect, not a rounding difference.
+
+        The count is structural: it does not grow because the data did, it grows
+        when somebody moves a query inside a loop. So the slack has to be tight
+        enough to see it, and this is the assertion that says so.
+        """
+        reasons = gate.regression(baseline_from(200, 400, payload=100_000, queries=6),
+                                  summary(200, 400, payload=100_000, queries=8))
+        assert reasons and "Supabase queries" in reasons[0], reasons
+
+    def test_growth_that_is_not_the_release_is_absorbed(self):
+        """A longer list is not a leak: 3 KiB and one more query both pass."""
+        reasons = gate.regression(baseline_from(200, 400, payload=100_000, queries=6),
+                                  summary(200, 400, payload=103_000, queries=7))
+        assert reasons == [], reasons
+
+    def test_the_grace_and_the_ratio_both_have_to_be_cleared(self):
+        """Two guards for two worries, and neither one alone is a refusal.
+
+        A tiny page can multiply many times over without being worth a rollback, and
+        a large one can grow well past its grace while staying a modest multiple.
+        """
+        tiny = gate.regression(baseline_from(200, 400, payload=1_000, queries=6),
+                               summary(200, 400, payload=9_000, queries=6))
+        assert tiny == [], f"9 KB against 1 KB is 9x, but inside the 8 KiB grace: {tiny}"
+        large = gate.regression(baseline_from(200, 400, payload=100_000, queries=6),
+                                summary(200, 400, payload=118_000, queries=6))
+        assert large == [], f"118 KB against 100 KB is inside the 1.25x ratio: {large}"
+
+    def test_a_baseline_written_before_the_rule_existed_is_not_a_regression(self):
+        """Self-arming: the rule arrived without a baseline that knows about it.
+
+        A baseline with no `page_cost` was written by the gate before this axis
+        existed. Reading its silence as zero bytes would refuse every release from
+        the moment the rule landed until somebody re-baselined by hand.
+        """
+        reasons = gate.regression(baseline_from(200, 400),
+                                  summary(200, 400, payload=900_000, queries=99))
+        assert reasons == [], reasons
+
+    def test_a_run_that_reports_no_cost_is_not_scored_against_one(self):
+        """The other direction: a harness too old to report costs.
+
+        `main()` refuses to *pass* this quietly — that is the end-to-end case below —
+        but the comparison itself has nothing to compare and must say so by silence,
+        not by inventing a number.
+        """
+        reasons = gate.regression(baseline_from(200, 400, payload=100_000, queries=6),
+                                  summary(200, 400))
+        assert reasons == [], reasons
+
+    def test_the_worst_page_on_each_axis_is_found_separately(self):
+        """The byte-heavy page and the query-heavy page are often different pages.
+
+        Judging both from whichever endpoint happens to be the biggest would let the
+        other one grow unseen.
+        """
+        measured = summary(200, 400, payload=10_000, queries=2)
+        measured["per_endpoint"] = {
+            "GET /student/dashboard": {"n": 10, "p50": 200, "p95": 400,
+                                      "bytes_p50": 500_000, "roundtrips_p50": 3},
+            "GET /teacher/exams": {"n": 10, "p50": 200, "p95": 400,
+                                   "bytes_p50": 20_000, "roundtrips_p50": 40},
+        }
+        cost = gate.page_cost(measured)
+        assert (cost.bytes, cost.by_bytes) == (500_000.0, "GET /student/dashboard")
+        assert (cost.roundtrips, cost.by_roundtrips) == (40.0, "GET /teacher/exams")
+
+    def test_a_page_the_run_never_loaded_costs_nothing_to_compare(self):
+        measured = summary(200, 400, payload=100_000, queries=6)
+        measured["per_endpoint"] = {"GET /health": {"n": 10, "p50": 5, "p95": 9,
+                                                   "bytes_p50": 2, "roundtrips_p50": 0}}
+        assert gate.page_cost(measured) is None, (
+            "the gate is about signed-in pages, not every endpoint the run touched")
+
+    def test_the_record_keeps_the_cost_and_which_page_it_came_from(self):
+        measured = summary(200, 400, payload=100_000, queries=6)
+        record = gate.baseline_record("deadbee", gate.shape_of(20, 2, 20.0, "https://x.test"),
+                                      measured, claims.claim_latency(measured))
+        assert record["page_cost"]["bytes"] == 100_000
+        assert record["page_cost"]["roundtrips"] == 6
+        assert record["page_cost"]["bytes_endpoint"] == "GET /student/dashboard"
 
 
 # ── 2. the baseline survives a bad release ───────────────────────────────────
@@ -376,6 +518,66 @@ class TestTheGateEndToEnd:
         assert [l["verdict"] for l in lines] == ["baseline", "regressed"]
         assert lines[1]["reasons"], "a refusal has to leave its reasons in the history"
 
+    def test_a_release_that_ships_a_heavier_page_is_refused(self, workbench, health_server,
+                                                           monkeypatch, capsys):
+        """The whole path: a page that got heavier, with latency unchanged.
+
+        This is the release the latency axis cannot see. Same response time, 300 KB
+        more down every student's phone.
+        """
+        bench, base = workbench, health_server()
+        bench["summary"].write_text(
+            json.dumps(summary(200, 400, payload=100_000, queries=6)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        before = bench["baseline"].read_bytes()
+        assert json.loads(before)["page_cost"]["bytes"] == 100_000, (
+            "the baseline has to record the cost, or there is nothing to compare next time")
+
+        bench["summary"].write_text(
+            json.dumps(summary(200, 400, payload=400_000, queries=6)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
+        out = capsys.readouterr().out
+        assert "heaviest page" in out and "GET /student/dashboard" in out, out
+        assert bench["baseline"].read_bytes() == before, (
+            "a refused release must not become the yardstick")
+
+    def test_a_release_that_adds_queries_is_refused(self, workbench, health_server,
+                                                    monkeypatch, capsys):
+        bench, base = workbench, health_server()
+        bench["summary"].write_text(
+            json.dumps(summary(200, 400, payload=100_000, queries=6)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+
+        bench["summary"].write_text(
+            json.dumps(summary(200, 400, payload=100_000, queries=12)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
+        out = capsys.readouterr().out
+        assert "Supabase queries per render" in out, out
+        assert "confirming with a second probe" in out, (
+            "a cost number is one measurement too: it gets the same second probe as "
+            "latency before a release is refused")
+
+    def test_a_run_that_stops_reporting_cost_cannot_measure(self, workbench, health_server,
+                                                           monkeypatch, capsys):
+        """A harness that stopped reporting must not quietly retire half the gate.
+
+        The baseline knows what a page costs; this run says nothing. Passing would
+        mean the payload and query axes stopped being checked without anyone being
+        told, which is the silent failure every gate here is built to avoid. Exit 2
+        is not a rollback, so the release is kept and the journal says why.
+        """
+        bench, base = workbench, health_server()
+        bench["summary"].write_text(
+            json.dumps(summary(200, 400, payload=100_000, queries=6)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        before = bench["baseline"].read_bytes()
+
+        bench["summary"].write_text(json.dumps(summary(200, 400)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_CANNOT_RUN
+        out = capsys.readouterr().out
+        assert "CANNOT MEASURE" in out and "round-trips" in out, out
+        assert bench["baseline"].read_bytes() == before
+
 
 # ── 5. the deploy script reads the exit codes the way the gate means them ────
 
@@ -423,6 +625,23 @@ class TestTheDeployWiring:
         assert "no $PERF_CONF" in block, (
             "a gate that is not installed must say so on every release, not disappear")
 
+    def test_the_payload_slacks_are_passed_through_to_the_gate(self):
+        """Reading a conf and then not passing it is how the claims gate shipped off.
+
+        `perf_gate.py` reads these from the environment; the deploy is the only thing
+        that puts them there. A setting the conf names but the deploy drops is a
+        setting an operator can change with no effect, which is worse than none.
+        """
+        loop = self.script[self.script.index("for v in PERF_BASE_URL"):]
+        loop = loop[:loop.index("do")]
+        for name in ("PERF_BYTES_SLACK", "PERF_ROUNDTRIPS_SLACK"):
+            assert name in loop, f"{name} is read from the conf but never passed"
+
+    def test_the_gate_reads_the_slacks_from_the_environment(self):
+        source = GATE_PATH.read_text(encoding="utf-8")
+        assert 'env_default("PERF_BYTES_SLACK"' in source
+        assert 'env_default("PERF_ROUNDTRIPS_SLACK"' in source
+
 
 class TestTheInstaller:
     installer = INSTALLER.read_text(encoding="utf-8")
@@ -445,6 +664,14 @@ class TestTheInstaller:
         assert 'PERF_ENFORCE="true"' in block, (
             "unlike the claims gate, arming this one cannot reject anything: with no "
             "baseline it writes one and passes")
+
+    def test_the_conf_names_the_payload_limits_it_will_be_read_against(self):
+        block = self.installer[self.installer.index("PERF_CONF=/etc"):]
+        block = block[:block.index("# ── 4.")]
+        assert "PERF_BYTES_SLACK=" in block
+        assert "PERF_ROUNDTRIPS_SLACK=" in block
+        assert "X-Supabase-Roundtrips" in block, (
+            "an operator reading the conf should be told where the query count comes from")
 
     def test_the_installer_proves_the_gate_can_run_with_the_conf_settings(self):
         block = self.installer[self.installer.index("Checking the performance gate"):]

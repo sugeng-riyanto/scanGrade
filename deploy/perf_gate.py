@@ -20,6 +20,16 @@ Every design choice below is a failure mode it avoids:
   instead of queueing, and the comparison keeps meaning something. The advertised
   rung is the claims gate's job, and it stays there.
 
+* **Cost, not just time.** Response time is a symptom: it says a page got slower,
+  not what made it slower, and a page can gain ten queries and still answer inside
+  the latency slack on a box this quiet. So each student/teacher page also reports
+  what it *cost* — the bytes it sent, and the Supabase round-trips the render spent
+  (the app puts the count on every response as `X-Supabase-Roundtrips`; see
+  `app/utils/query_meter.py`). Round-trips are an integer, they are deterministic
+  for the same data, and they are what an N+1 multiplies, so a release that adds
+  queries to the dashboard is refused by a number rather than inferred from a
+  stopwatch. Bytes are the bandwidth a phone on a school connection pays for.
+
 * **The baseline is written only when a release passes.** If a bad release became
   the baseline, the next release would be measured against it and the regression
   would become permanent and invisible. On a regression the baseline is left
@@ -52,6 +62,7 @@ import json
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,6 +94,29 @@ DEFAULT_ERROR_SLACK_PCT = 0.5   # percentage points above the baseline
 DEFAULT_SESSIONS = 20
 DEFAULT_DURATION = 20.0
 DEFAULT_TEACHERS = 2
+
+# Payload and query count get their own slacks, and they are *tighter* than the
+# latency ones on purpose. Latency on a shared box is noisy — around 1.3x between
+# two identical runs — so its slack has to be loose or the gate rejects healthy
+# releases. A byte count and a query count are not noisy at all: the same page with
+# the same data produces the same size and the same number every time.
+#
+# What they can still do is grow for an honest reason — the school added an exam, so
+# a list got longer — and that is what the *grace* is for. It is deliberately small
+# for queries and generous only in absolute terms for bytes, and the asymmetry is the
+# point: the number of *queries* a render makes is structural, not proportional to
+# rows, so it does not grow because the data did. It grows when somebody writes a
+# loop that queries per row, which is the defect. A tighter number therefore catches
+# the N+1 it is for — 6 queries becoming 8 is refused — while keeping pace with slow
+# decline as long as each release steps inside the grace.
+#
+# A jump larger than grace *and* ratio is what gets refused, which is the shape of
+# both defects: a script that lands on every student's page, and a query that moved
+# inside a loop.
+DEFAULT_BYTES_SLACK = 1.25      # a page may send up to 1.25x the baseline bytes
+DEFAULT_BYTES_GRACE = 8192.0    # ... plus 8 KiB, so ordinary list growth passes
+DEFAULT_ROUNDTRIPS_SLACK = 1.25  # a page may spend up to 1.25x the baseline queries
+DEFAULT_ROUNDTRIPS_GRACE = 1.0   # ... plus one query, so a new feature detail passes
 
 # The wording claims_gate.verdict() uses for *this* gate's question. Without it,
 # a refusal would read "both probes diverged from the published numbers" and send
@@ -142,7 +176,60 @@ def save_baseline(path: Path, record: dict) -> str:
         return f"could not write the baseline to {path} ({e}) — not fatal"
 
 
+# ── what a page costs ────────────────────────────────────────────────────────
+
+@dataclass
+class PageCost:
+    """The heaviest signed-in page: its payload, and its query count.
+
+    Two separate maxima, not one page's two numbers. The page that sends the most
+    bytes and the page that spends the most queries are often different, and a
+    release can make either one worse; judging both from whichever page happens to
+    be the biggest would let the other grow unnoticed.
+    """
+    bytes: float
+    by_bytes: str
+    roundtrips: float
+    by_roundtrips: str
+
+
+def page_cost(measured: dict) -> PageCost | None:
+    """What the heaviest student/teacher page cost, or None if none reported.
+
+    `None` is "not measured" and is never read as zero: a harness too old to write
+    these fields, or a run whose pages never answered 200, must not be able to
+    *pass* this comparison by having nothing to compare.
+    """
+    pages = {k: v for k, v in (measured.get("per_endpoint") or {}).items()
+             if cg.CLAIM_ENDPOINT.match(k)}
+    sized = {k: v for k, v in pages.items() if v.get("bytes_p50")}
+    counted = {k: v for k, v in pages.items() if v.get("roundtrips_p50") is not None}
+    if not sized and not counted:
+        return None
+    by_bytes = max(sized, key=lambda k: sized[k]["bytes_p50"]) if sized else ""
+    by_trips = (max(counted, key=lambda k: counted[k]["roundtrips_p50"])
+                if counted else "")
+    return PageCost(
+        bytes=float(sized[by_bytes]["bytes_p50"]) if sized else 0.0,
+        by_bytes=by_bytes,
+        roundtrips=float(counted[by_trips]["roundtrips_p50"]) if counted else 0.0,
+        by_roundtrips=by_trips,
+    )
+
+
+def over(value: float, base: float, slack: float, grace: float = 0.0) -> bool:
+    """Is `value` worse than `base` by more than slack *and* more than grace?
+
+    `and`, not `or`, because the two guards answer different worries: the ratio
+    catches a real multiple, and the grace forgives the honest growth that has
+    nothing to do with the release (a longer list, one more row). A release has to
+    clear both before it is called a regression.
+    """
+    return value > max(base * slack, base + grace)
+
+
 def baseline_record(commit: str, shape: dict, measured: dict, latency) -> dict:
+    cost = page_cost(measured)
     return {
         "commit": commit,
         "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -151,6 +238,14 @@ def baseline_record(commit: str, shape: dict, measured: dict, latency) -> dict:
                     "p95_ms": round(latency.p95_ms, 1),
                     "endpoints": latency.endpoints,
                     "samples": latency.samples},
+        # Always present, so a release measured after this field existed can be
+        # compared even when the one before it predates it. `null` here means the
+        # harness reported nothing, which `main` treats as a measurement gap when a
+        # baseline does carry it.
+        "page_cost": ({"bytes": round(cost.bytes, 1), "bytes_endpoint": cost.by_bytes,
+                       "roundtrips": round(cost.roundtrips, 2),
+                       "roundtrips_endpoint": cost.by_roundtrips}
+                      if cost else None),
         "error_pct": float(measured.get("error_rate_pct") or 0.0),
         "server_errors_5xx": int(measured.get("server_errors_5xx") or 0),
         "requests_total": int(measured.get("requests_total") or 0),
@@ -160,19 +255,69 @@ def baseline_record(commit: str, shape: dict, measured: dict, latency) -> dict:
 
 # ── the comparison ───────────────────────────────────────────────────────────
 
+def _cost_reasons(baseline: dict, measured: dict,
+                  bytes_slack: float, bytes_grace: float,
+                  trips_slack: float, trips_grace: float) -> list[str]:
+    """Why this release makes a page *cost* more than the baseline. [] means it does not.
+
+    A missing number on either side is skipped rather than scored, so this self-arms:
+    the first release after this rule exists writes a baseline with a cost and the
+    one after that is the first to be compared. (A baseline that *has* cost numbers
+    while the measurement does not is a different thing — a harness that stopped
+    reporting — and `main` calls that a measurement gap instead of letting it pass.)
+    """
+    old = baseline.get("page_cost") or {}
+    new = page_cost(measured)
+    if not old or new is None:
+        return []
+
+    reasons: list[str] = []
+    commit = baseline.get("commit") or "the previous release"
+
+    base_bytes = float(old.get("bytes") or 0.0)
+    if base_bytes > 0 and over(new.bytes, base_bytes, bytes_slack, bytes_grace):
+        reasons.append(
+            f"the heaviest page sends {new.bytes / 1024.0:.1f} KB against "
+            f"{base_bytes / 1024.0:.1f} KB on {commit} ({new.bytes / base_bytes:.2f}x, "
+            f"allowed {bytes_slack:.2f}x + {bytes_grace / 1024.0:.0f} KiB) — "
+            f"{new.by_bytes or 'unidentified endpoint'} is the page that grew")
+
+    base_trips = float(old.get("roundtrips") or 0.0)
+    if base_trips > 0 and over(new.roundtrips, base_trips, trips_slack, trips_grace):
+        reasons.append(
+            f"the busiest page spends {new.roundtrips:.0f} Supabase queries per render "
+            f"against {base_trips:.0f} on {commit} "
+            f"({new.roundtrips / base_trips:.2f}x, allowed {trips_slack:.2f}x + "
+            f"{trips_grace:.0f}) — {new.by_roundtrips or 'unidentified endpoint'} "
+            f"is the page that grew; a render that costs more queries is an N+1 or a "
+            f"round-trip that could have been one request")
+    return reasons
+
+
 def regression(baseline: dict, measured: dict,
                latency_slack: float = DEFAULT_LATENCY_SLACK,
                p95_slack: float = DEFAULT_P95_SLACK,
-               error_slack: float = DEFAULT_ERROR_SLACK_PCT) -> list[str]:
-    """Why this release is slower than the baseline. [] means it is not.
+               error_slack: float = DEFAULT_ERROR_SLACK_PCT,
+               bytes_slack: float = DEFAULT_BYTES_SLACK,
+               bytes_grace: float = DEFAULT_BYTES_GRACE,
+               trips_slack: float = DEFAULT_ROUNDTRIPS_SLACK,
+               trips_grace: float = DEFAULT_ROUNDTRIPS_GRACE) -> list[str]:
+    """Why this release is worse than the baseline. [] means it is not.
 
     A ratio, not an absolute: the baseline is this same box on this same load, so
-    the numbers cancel and what is left is what the release changed.
+    the numbers cancel and what is left is what the release changed. "Worse" covers
+    three axes — response time, payload, and Supabase round-trips — because they fail
+    independently: a release can be just as fast and send an extra 200 KB, or send
+    the same page and ask the database three more times.
     """
     reasons: list[str] = []
     old = baseline.get("latency") or {}
     new = cg.claim_latency(measured)
+    cost = _cost_reasons(baseline, measured, bytes_slack, bytes_grace, trips_slack, trips_grace)
     if new is None or not old:
+        # No latency to compare — a baseline predating that field, or a run whose
+        # pages never answered. The cost comparison does not depend on it.
+        reasons.extend(cost)
         return reasons
 
     base_p50, base_p95 = float(old.get("p50_ms") or 0.0), float(old.get("p95_ms") or 0.0)
@@ -206,6 +351,8 @@ def regression(baseline: dict, measured: dict,
             f"(allowed +{error_slack:.2f}pp); 429={measured.get('rate_limited_429')}, "
             f"5xx={measured.get('server_errors_5xx')}, "
             f"transport={measured.get('transport_errors')}")
+
+    reasons.extend(cost)
     return reasons
 
 
@@ -218,6 +365,10 @@ def describe(measured: dict, baseline: dict | None = None) -> str:
     line = (f"{measured.get('sessions_launched')} sessions, worst of {len(new.endpoints)} page "
             f"endpoints (n={new.samples}): p50 {new.p50_ms:.0f} ms, p95 {new.p95_ms:.0f} ms, "
             f"errors {err:.2f}%")
+    cost = page_cost(measured)
+    if cost is not None and (cost.bytes or cost.roundtrips):
+        line += (f"; heaviest page {cost.bytes / 1024.0:.1f} KB, "
+                 f"{cost.roundtrips:.0f} queries per render")
     old = (baseline or {}).get("latency") or {}
     if old.get("p50_ms"):
         p50 = float(old["p50_ms"])
@@ -266,6 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--latency-slack", type=float, default=DEFAULT_LATENCY_SLACK)
     ap.add_argument("--p95-slack", type=float, default=DEFAULT_P95_SLACK)
     ap.add_argument("--error-slack", type=float, default=DEFAULT_ERROR_SLACK_PCT)
+    ap.add_argument("--bytes-slack", type=float,
+                    default=env_default("PERF_BYTES_SLACK", DEFAULT_BYTES_SLACK),
+                    help="how much bigger the heaviest page may get (plus a 4 KiB grace)")
+    ap.add_argument("--roundtrips-slack", type=float,
+                    default=env_default("PERF_ROUNDTRIPS_SLACK", DEFAULT_ROUNDTRIPS_SLACK),
+                    help="how many more Supabase queries a render may spend (plus one)")
     ap.add_argument("--quiet-ms", type=float, default=cg.BOX_QUIET_MS)
     ap.add_argument("--commit", default="", help="the release being measured (for the record)")
     ap.add_argument("--rebaseline", action="store_true",
@@ -336,6 +493,17 @@ def main() -> int:
     if unusable:
         print(f"perf gate: CANNOT MEASURE — {unusable}")
         return EXIT_CANNOT_RUN
+    # A baseline that carries a cost while this run reports none is not "nothing to
+    # compare" — it is the harness that stopped measuring, and letting that pass
+    # would silently retire the payload half of this gate. (The opposite order is
+    # fine and expected: the first release after the rule was added has a baseline
+    # without a cost, and that is simply skipped.)
+    if (baseline or {}).get("page_cost") and page_cost(measured) is None:
+        print("perf gate: CANNOT MEASURE — the baseline records what a page costs "
+              "(bytes and Supabase round-trips) but this run reported neither, so the "
+              "comparison would quietly drop half the gate. Check that the harness is "
+              "the current one and that the app answers X-Supabase-Roundtrips.")
+        return EXIT_CANNOT_RUN
     if args.json_out:
         try:
             Path(args.json_out).write_text(json.dumps(measured, indent=2) + "\n",
@@ -354,10 +522,12 @@ def main() -> int:
                                                  dict(record, verdict="baseline")))
         return EXIT_OK
 
-    reasons = regression(baseline, measured, args.latency_slack, args.p95_slack, args.error_slack)
+    reasons = regression(baseline, measured, args.latency_slack, args.p95_slack,
+                         args.error_slack, args.bytes_slack, DEFAULT_BYTES_GRACE,
+                         args.roundtrips_slack, DEFAULT_ROUNDTRIPS_GRACE)
     confirmed = None
     if reasons:
-        print("perf gate: first probe is slower than the baseline —")
+        print("perf gate: first probe is worse than the baseline —")
         for r in reasons:
             print(f"    - {r}")
         print("perf gate: confirming with a second probe before refusing the release ...")
@@ -366,7 +536,8 @@ def main() -> int:
             print(f"perf gate: confirmation run did not complete (exit {rc2})")
         else:
             confirmed = regression(baseline, again, args.latency_slack, args.p95_slack,
-                                   args.error_slack)
+                                   args.error_slack, args.bytes_slack, DEFAULT_BYTES_GRACE,
+                                   args.roundtrips_slack, DEFAULT_ROUNDTRIPS_GRACE)
             print("perf gate: confirmation probe — " + describe(again, baseline))
 
     code, why_code = cg.verdict(reasons, confirmed, **VERDICT_WORDS)
@@ -387,9 +558,10 @@ def main() -> int:
 
     print(f"perf gate: REGRESSED — {why_code}")
     print("perf gate: the baseline is left as it was, so this does not become the new normal.")
-    print("perf gate: find what the release changed that costs response time. If the change was "
-          "deliberate (more work per page, a new feature worth its cost), re-baseline it on "
-          "purpose with --rebaseline and say so in the commit message.")
+    print("perf gate: find what the release changed that costs response time, bytes or "
+          "Supabase round-trips. If the change was deliberate (more work per page, a new "
+          "feature worth its cost), re-baseline it on purpose with --rebaseline and say so "
+          "in the commit message.")
     cg.append_evidence(Path(args.evidence_file), dict(record, verdict="regressed", reasons=reasons))
     return EXIT_REGRESSED
 
