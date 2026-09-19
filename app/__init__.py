@@ -7,7 +7,9 @@ import click
 from flask import Flask, g, request, jsonify, redirect, render_template, make_response
 from flask_cors import CORS
 from supabase import create_client, Client
+from app.utils import query_meter
 from app.utils.auth import login_required, super_admin_required
+from app.utils.supabase_retry import RetryingClient
 
 from app.config import get_config
 
@@ -134,10 +136,13 @@ def create_app(env=None):
     )
 
     supabase: Client = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_SERVICE_KEY)
-    app.extensions["supabase"] = supabase
+    # Wrapped, so a keep-alive connection the server has already closed is retried
+    # instead of reaching a view as `Server disconnected` — see app/utils/supabase_retry.py.
+    app.extensions["supabase"] = RetryingClient(supabase)
     app.extensions["supabase_auth"] = create_client(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY)
 
     _register_blueprints(app)
+    _register_legacy_admin_urls(app)
     _register_error_handlers(app)
     _register_request_logging(app)
     _register_performance_middleware(app)
@@ -361,7 +366,7 @@ def create_app(env=None):
                     role = profile.data.get("role", "murid")
                 except Exception:
                     role = user.user.user_metadata.get("role", "murid")
-                redirect_map = {"super_admin": "/super-admin/dashboard", "admin_sekolah": "/admin/dashboard", "guru": "/teacher/dashboard", "murid": "/student/dashboard"}
+                redirect_map = {"super_admin": "/super-admin/dashboard", "admin_sekolah": "/admin-sekolah/dashboard", "guru": "/teacher/dashboard", "murid": "/student/dashboard"}
                 return redirect(redirect_map.get(role, "/student/dashboard"))
             except Exception:
                 pass
@@ -488,6 +493,30 @@ def create_app(env=None):
     return app
 
 
+def _register_legacy_admin_urls(app):
+    """One rule per moved admin URL: a 308 to the page that owns it now.
+
+    Deliberately unguarded. Where a URL lives is not a permission, and the page
+    it lands on carries its own guard — which also makes the redirect correct for
+    whichever role follows it: a school admin sent to `/super-admin/dashboard` is
+    bounced on to `/admin-sekolah/dashboard` by `role_required`, the same place
+    their own bookmark would have taken them.
+
+    The query string is carried over. A permanent redirect that silently drops
+    `?page=3` lands the reader on a page that looks fine and is the wrong one.
+    """
+    from app.utils.legacy_urls import LEGACY_ADMIN_PAGES, legacy_endpoint
+
+    def _mover(target):
+        def move():
+            query = request.query_string.decode()
+            return redirect(target + ("?" + query if query else ""), code=308)
+        return move
+
+    for old, new in LEGACY_ADMIN_PAGES.items():
+        app.add_url_rule(old, legacy_endpoint(old), _mover(new), methods=["GET"])
+
+
 def _register_blueprints(app):
     from app.routes.auth import auth_bp
     from app.routes.exam import exam_bp
@@ -592,6 +621,14 @@ def _register_performance_middleware(app):
         if hasattr(g, "start"):
             duration_ms = int((time.time() - g.start) * 1000)
             response.headers["X-Response-Time-ms"] = str(duration_ms)
+        # How many Supabase round-trips this render spent. It rides beside the
+        # response time because the two answer the same question from opposite
+        # ends: response time is the symptom a student feels, round-trips are the
+        # cause a release changes. The load harness reads this header per page and
+        # deploy/perf_gate.py compares it with the last release that passed.
+        roundtrips = query_meter.header_value()
+        if roundtrips is not None:
+            response.headers[query_meter.HEADER] = roundtrips
         if request.path.startswith("/static/"):
             # 7 days for static assets (CSS/JS/images/fonts)
             response.cache_control.max_age = 604800
@@ -625,6 +662,9 @@ def _register_request_logging(app):
     def init_request():
         g.start = time.time()
         g.user_id = None
+        # Armed here, before every other hook, so the count a page reports covers
+        # the whole render. See app/utils/query_meter.py.
+        query_meter.begin()
         try:
             g.tz_offset = int(request.cookies.get("tz_offset", str(DEFAULT_TZ_OFFSET)))
         except (ValueError, TypeError):
