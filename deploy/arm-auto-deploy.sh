@@ -106,11 +106,13 @@ report_state() {
     echo "                $REPO/deploy/scangrade-deploy.sh, the commit in the repo"
   else
     for m in $GATE_BLOCKS; do
-      grep -q "$m" "$DEPLOY_BIN" 2>/dev/null || installed_blocks="$installed_blocks, no $m"
+      if ! grep -q "$m" "$DEPLOY_BIN" 2>/dev/null; then
+        installed_blocks="${installed_blocks:+$installed_blocks, }no $m"
+      fi
     done
     echo "   runner     : a COPY of the deploy script, $(stat -c '%y' "$DEPLOY_BIN" | cut -d. -f1)"
     if [ -n "$installed_blocks" ]; then
-      echo "                It deploys, but it contains$installed_blocks block — so"
+      echo "                It deploys, but it contains $installed_blocks block — so"
       echo "                every release it shipped went unchecked."
     else
       echo "                It carries the gate blocks; check whether it has drifted"
@@ -122,10 +124,10 @@ report_state() {
   for m in $GATE_BLOCKS; do
     if [ -f "$REPO/deploy/scangrade-deploy.sh" ] &&
        grep -q "$m" "$REPO/deploy/scangrade-deploy.sh" 2>/dev/null; then
-      blocks="$blocks $m"
+      blocks="${blocks:+$blocks, }$m"
     fi
   done
-  echo "   in the repo: the deploy script has${blocks:- no} gate block(s)"
+  echo "   in the repo: deploy/scangrade-deploy.sh has ${blocks:-no} gate block(s)"
 
   if [ -f "$SNAPSHOT_BIN" ]; then
     echo "   snapshot   : present ($SNAPSHOT_BIN)"
