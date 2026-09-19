@@ -12,7 +12,7 @@ from app.utils.exam_access import exam_sitting_allowed
 from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
-    earned_points, grade_answer, is_essay_marker, is_objective, objective_key_count,
+    earned_points, grade_answer, is_objective, objective_result,
 )
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
@@ -187,7 +187,13 @@ def force_submit():
             penalty = float(exam.get("penalty_per_violation", 5))
             # Calculate MCQ score
             earned, _graded = earned_points(qtypes, key, answers, weights, total_q)
-            score = round(min(earned, 100), 2)
+            # The stored objective score is the app's one rule
+            # (`question_types.objective_result`): a percentage of the paper's
+            # objective questions, so a partly keyed paper cannot pay this pupil
+            # 100. `earned` above still carries the weighted total that the final
+            # score is built from — they are two different numbers on purpose, and
+            # this route used to write the wrong one to this column.
+            score = objective_result(qtypes, key, answers, total_q).score
             # Get actual penalty from violation logs
             from app.services.anti_cheat_service import (
                 calculate_graduated_penalty, count_penalized_violations,
@@ -195,7 +201,7 @@ def force_submit():
             viol_count = count_penalized_violations(supabase, g.user_id, exam_id)
             pinfo = calculate_graduated_penalty(viol_count, exam)
             total_penalty = pinfo.get("penalty", 0)
-            final = max(0.0, round(score - total_penalty, 2))
+            final = max(0.0, round(earned - total_penalty, 2))
             supabase.table("submissions") \
                 .update({"status": "submitted", "answers": answers, "score": score, "final_score": final, "penalty": total_penalty}) \
                 .eq("id", sub.data[0]["id"]) \
@@ -618,22 +624,27 @@ def scan_bulk_save():
         # `question_types` rides along with the key: the grader needs to know which
         # kind of question each answer belongs to, and a column left out of a select
         # list reads as absent rather than as an error (see AGENTS.md).
-        exam = supabase.table("exams").select("answer_key,question_types").eq("id", exam_id).single().execute().data
+        # `total_questions` is here for the same reason `question_types` is: the
+        # grader's denominator is the paper's own count, and a column left out of
+        # this list would read as absent — which is how a missing column becomes a
+        # wrong score rather than an error.
+        exam = supabase.table("exams").select("answer_key,question_types,total_questions").eq("id", exam_id).single().execute().data
         key = exam.get("answer_key", {}) if exam else {}
         if isinstance(key, str):
             key = json.loads(key)
         qtypes = exam.get("question_types") or {} if exam else {}
         if isinstance(qtypes, str):
             qtypes = json.loads(qtypes)
-        correct = 0
-        graded = 0
-        for k, v in key.items():
-            if not key_has_answer(qtypes.get(str(k)), v):
-                continue
-            graded += 1
-            if k in answers and grade_answer(qtypes.get(str(k)), v, answers[k]):
-                correct += 1
-        score = round((correct / max(graded, 1)) * 100, 2) if graded > 0 else 0
+        total_q = int((exam or {}).get("total_questions") or 0)
+        # One rule for the whole app. This loop used to divide by the number of
+        # answers the *key* had, so a teacher who had keyed 2 of 10 questions got
+        # 100% for a pupil who answered those two — and `mcq_count` below was
+        # referenced without ever being assigned, so this route raised NameError on
+        # the first sheet it saved.
+        objective = objective_result(qtypes, key, answers, total_q)
+        score = objective.score
+        correct = objective.correct
+        mcq_count = objective.out_of
 
         enriched = {}
         for k, v in answers.items():
@@ -663,13 +674,19 @@ def scan_bulk_save():
 
         try:
             existing = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", student_id).execute().data
-            update_data = {"answers": enriched, "score": score, "max_score": mcq_count, "status": "graded"}
+            # `score` is a percentage (see `objective_result`), so its maximum is
+            # 100. This stored a question *count* here — a different unit in the same
+            # column as every other writer, which is how one reader ended up
+            # dividing by a paper and another by a key.
+            update_data = {"answers": enriched, "score": score, "max_score": 100.0, "status": "graded"}
             if existing:
                 supabase.table("submissions").update(update_data).eq("id", existing[0]["id"]).execute()
             else:
                 update_data.update({"exam_id": exam_id, "student_id": student_id})
                 supabase.table("submissions").insert(update_data).execute()
-            saved.append({"student_id": student_id, "score": score, "correct": correct, "nisn": nisn})
+            saved.append({"student_id": student_id, "score": score, "correct": correct,
+                          "total": mcq_count, "unkeyed": len(objective.unkeyed),
+                          "nisn": nisn})
         except Exception as e:
             failed.append({"student_id": student_id, "error": str(e)[:100]})
 
@@ -1002,17 +1019,12 @@ def grade_batch():
         final = round(min(earned, 100), 2)
         penalty = float(sub.get("penalty") or 0)
         final = max(0, round(final - penalty, 2))
-        # The denominator stays "every objective question", which is what this
-        # route has always reported; the numerator needs a key to be right against.
-        mcq_count_q = sum(1 for i in range(total_q)
-                          if is_objective(question_types.get(str(i))))
-        mcq_correct = sum(
-            1 for i in range(total_q)
-            if answer_key.get(str(i))
-            and grade_answer(question_types.get(str(i)), answer_key.get(str(i)),
-                             answers.get(str(i)))
-        )
-        mcq_score = round((mcq_correct / max(mcq_count_q, 1)) * 100, 2) if mcq_count_q > 0 else 0
+        # The same one rule as every other writer (this route's denominator was
+        # already the paper's objective count; it is now the shared function, so
+        # the numerator needs a key to be right against and an unkeyed question
+        # cannot be counted correct).
+        objective = objective_result(question_types, answer_key, answers, total_q)
+        mcq_score = objective.score
         supabase.table("submissions").update({
             "score": mcq_score,
             "final_score": final,
@@ -1197,14 +1209,17 @@ def scan_save():
             qtypes = json.loads(qtypes)
         except (json.JSONDecodeError, TypeError):
             qtypes = {}
-    correct = 0
-    for k, v in key.items():
-        if is_essay_marker(v) or k not in detected:
-            continue
-        if grade_answer(qtypes.get(str(k)), v, detected[k]):
-            correct += 1
-    mcq_count = objective_key_count(key)
-    score = round((correct / max(mcq_count, 1)) * 100, 2) if mcq_count > 0 else 0
+    # One rule for the whole app. This route divided by the number of answers the
+    # *key* had, so a teacher who had keyed 2 of 10 questions got a perfect 100 for a
+    # pupil who answered those two — a mark out of a paper that was two-tenths
+    # marked, and the one a teacher sees on this screen. `total_questions` is what
+    # the sheet was printed with, so `score` and `total` below now name the same
+    # denominator and cannot disagree with the pupil's own result page.
+    total_q = int(exam.get("total_questions") or 0)
+    objective = objective_result(qtypes, key, detected, total_q)
+    correct = objective.correct
+    score = objective.score
+    mcq_count = objective.out_of
 
     # Build enriched answers dict with confidence metadata
     enriched_answers = {}
@@ -1250,7 +1265,11 @@ def scan_save():
     update_data = {
         "answers": enriched_answers,
         "score": score,
-        "max_score": mcq_count,
+        # `score` is a percentage (see `objective_result`), so its maximum is 100.
+        # This used to store a question *count*, which is a different unit in the
+        # same column — the shape that let one reader divide by a paper and another
+        # by a key.
+        "max_score": 100.0,
         "status": "graded",
     }
 
@@ -1278,6 +1297,10 @@ def scan_save():
         "score": score,
         "correct": correct,
         "total": mcq_count,
+        # How many objective questions have no key yet, so the scan screen can say
+        # why a sheet that looks perfect did not score 100 instead of leaving the
+        # teacher to guess — the dashboard carries the same warning (teacher.py).
+        "unkeyed": len(objective.unkeyed),
         "needs_review": len(review),
         "submission": sub[0] if sub else None,
         # What this save covered, and how much of the sheet is answered now, so

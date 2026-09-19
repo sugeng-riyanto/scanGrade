@@ -13,7 +13,7 @@ from app.utils.exam_recovery import issue_code, redeem_code
 from app.services.audit_service import log_activity
 from app.services.pdf_service import ensure_page_thumbs
 from app.services.question_types import (
-    default_weights, earned_points, is_essay_marker, is_objective, public_options,
+    default_weights, earned_points, is_objective, objective_result, public_options,
 )
 from app.services.submission_service import finish_sitting, open_sitting
 from app.utils.rate_limiter import limiter
@@ -596,23 +596,23 @@ def submit_exam(exam_id):
 
     question_types = exam.get("question_types") or {}
     total_q = exam["total_questions"]
-    # The auto-graded count. Note this site has always excluded a `None` key where
-    # the other count sites do not; `objective_key_count()` mirrors theirs, so the
-    # difference is kept here explicitly. It decides the 70/30 fallback below and
-    # therefore already-published marks.
-    mcq_count = sum(
-        1 for v in (exam.get("answer_key") or {}).values()
-        if v is not None and not is_essay_marker(v)
-    )
     question_weights = exam.get("question_weights") or {}
     if not question_weights and total_q > 0:
         question_weights = default_weights(question_types, total_q)
-    # One rule for every objective type, so a true/false or a matching question is
-    # marked here exactly as it is marked by the sync route and the scan task.
+    # The weighted objective marks. The *final* score is built from these, and the
+    # essay marks a teacher enters are added on top of them. One rule for every
+    # objective type, so a true/false or a matching question is marked here exactly
+    # as it is marked by the sync route and the scan task.
     earned, _graded = earned_points(
         question_types, exam.get("answer_key"), answers, question_weights, total_q)
-
-    score = round(min(earned, 100), 2)
+    # The stored objective score is one rule for the whole app now
+    # (`question_types.objective_result`), and it is a percentage **of the paper's
+    # objective questions**. This route used to store the weighted marks here — a
+    # different number on a different scale from the one the teacher's "recalculate
+    # scores" wrote to the same column, so a pupil's own "MCQ:" figure moved the
+    # moment a teacher recalculated.
+    score = objective_result(
+        question_types, exam.get("answer_key"), answers, total_q).score
 
     # Device mismatch detection: bandingkan IP/UA dengan first sync
     flags = []
@@ -662,7 +662,11 @@ def submit_exam(exam_id):
     penalty_info = calculate_graduated_penalty(violation_count, exam)
     penalty = penalty_info["penalty"]
 
-    final_score = max(0.0, round(score - penalty, 2))
+    # `earned`, not `score`: the stored objective score is a percentage of the
+    # paper, while the final mark is the weighted total the essay marks are added
+    # to. Keeping the arithmetic here means this route's `final_score` is the value
+    # it has always written.
+    final_score = max(0.0, round(earned - penalty, 2))
     if flags:
         existing_answers = answers.get("_flags") or []
         if isinstance(existing_answers, list):

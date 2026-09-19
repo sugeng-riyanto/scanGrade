@@ -6,7 +6,7 @@ import zipfile
 import logging
 import uuid
 from app.celery_app import celery_app
-from app.services.question_types import grade_answer, key_has_answer
+from app.services.question_types import objective_result
 
 logger = logging.getLogger("app")
 
@@ -33,8 +33,10 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "",
             supabase = get_supabase()
             # `question_types` rides along with the key: the grader needs the kind
             # of each question, and a column missing from a select list reads as
-            # absent rather than as an error (see AGENTS.md).
-            exam = supabase.table("exams").select("answer_key,question_types").eq("id", exam_id).single().execute().data
+            # absent rather than as an error (see AGENTS.md). `total_questions` is
+            # here for the same reason — it is the grader's denominator, and a
+            # missing column would silently score against zero.
+            exam = supabase.table("exams").select("answer_key,question_types,total_questions").eq("id", exam_id).single().execute().data
             if exam and exam.get("answer_key"):
                 key = exam["answer_key"]
                 if isinstance(key, str):
@@ -43,17 +45,18 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "",
                 if isinstance(qtypes, str):
                     qtypes = json.loads(qtypes)
                 detected = result.get("answers", {})
-                correct = 0
-                graded = 0
-                for k, v in key.items():
-                    if not key_has_answer(qtypes.get(str(k)), v):
-                        continue
-                    graded += 1
-                    if k in detected and grade_answer(qtypes.get(str(k)), v, detected[k]):
-                        correct += 1
-                result["score"] = round((correct / max(graded, 1)) * 100, 2)
-                result["correct"] = correct
-                result["graded"] = graded
+                # One rule for the whole app. This loop divided by the number of
+                # answers the *key* had, so a teacher who had keyed 2 of 10
+                # questions got a perfect 100 — the same defect the scan routes had,
+                # reached by a different door (the Celery worker). The paper's own
+                # count is the denominator, falling back to the sheet's geometry if
+                # the exam row carries none.
+                paper = int((exam or {}).get("total_questions") or 0) or total_questions
+                objective = objective_result(qtypes, key, detected, paper)
+                result["score"] = objective.score
+                result["correct"] = objective.correct
+                result["graded"] = objective.keyed
+                result["unkeyed"] = len(objective.unkeyed)
         except Exception as e:
             logger.warning("OMR grading failed: %s", e)
 

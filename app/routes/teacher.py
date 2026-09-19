@@ -16,8 +16,8 @@ from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.question_types import (
     KIND_CHOICE, KIND_DRAG, KIND_ESSAY, KIND_MATCH, KIND_TRUE_FALSE, MCQ,
     canonical_type, default_weights, describe_answer, earned_points, essay_marker,
-    grade_answer, has_answer, is_essay, is_objective, key_has_answer, normalise_key,
-    question_kind, scheme_in,
+    grade_answer, has_answer, is_essay, is_objective, normalise_key,
+    objective_result, question_kind, scheme_in,
 )
 from app.services import mark_scheme
 from app.services.pdf_service import upload_pdf
@@ -189,7 +189,6 @@ def _recalculate_scores(exam_id):
     subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
     if not subs:
         return
-    objective_count = sum(1 for i in range(total_q) if is_objective(question_types.get(str(i))))
     # Build update list — all scoring in Python, then parallel DB writes
     updates = []
     for sub in subs:
@@ -211,14 +210,15 @@ def _recalculate_scores(exam_id):
         final = round(min(earned, 100), 2)
         penalty = float(sub.get("penalty") or 0)
         final = max(0, round(final - penalty, 2))
-        correct = 0
-        for i in range(total_q):
-            key_val = answer_key.get(str(i))
-            if key_has_answer(question_types.get(str(i)), key_val) and \
-                    grade_answer(question_types.get(str(i)), key_val, answers.get(str(i))):
-                correct += 1
-        objective_score = round((correct / max(objective_count, 1)) * 100, 2) if objective_count > 0 else 0
-        updates.append((sub["id"], objective_score, final))
+        # The stored objective score, by the same one rule every other writer uses
+        # (`question_types.objective_result`): a percentage of the paper's
+        # objective questions, with an unkeyed question scored wrong. The number
+        # here is the one this function has always written
+        # (`correct / objective questions`); what changed is that the routes which
+        # divided by the *keyed* count now agree with it instead of paying a pupil
+        # 100 for a two-tenths-marked paper.
+        objective = objective_result(question_types, answer_key, answers, total_q)
+        updates.append((sub["id"], objective.score, final))
     # Parallel DB updates — 300 subs / 20 threads ≈ 3s instead of 60s serial
     def _update_one(item):
         sub_id, sc, fs = item
@@ -288,14 +288,45 @@ def _normalise_exam_json(exam_data: dict) -> dict:
     return exam_data
 
 
-def _needs_answer_key(exam: dict) -> bool:
-    """Is the dashboard's warning actually true of this exam?
+def _answer_key_gap(exam: dict) -> dict | None:
+    """How short this exam's key falls, or None when there is nothing to say.
 
-    The card says the students' scores will be 0. That is what happens when an
-    exam has MCQ questions and no answer to score them with: `student.py` builds
-    `mcq_count` from the *key*, so with no key the whole MCQ half scores 0 however
-    well the student answered. So the test is the same one the scoring path makes
-    — for each question the exam calls MCQ, is there an answer in the key?
+    Returns the objective question count, how many of them the key answers, how
+    many it does not, and the highest score a student can still reach. The numbers
+    come from `question_types.objective_result` — the same function that marks the
+    paper — so a card built from this cannot disagree with the mark a pupil is
+    given, which is the whole point of measuring it here instead of re-deriving it.
+
+    Both the empty key and the *partly filled* one are reported, and they used to be
+    treated differently on purpose: the card's sentence was "scores will be 0", and a
+    partial key did not do that — it did something worse. It paid a student 100 out
+    of a paper that was two-tenths marked, because the scoring routes divided by the
+    number of answers the key happened to contain. That denominator is gone (see
+    `objective_result`), so the two situations are now the same defect with different
+    numbers, and both get a card that states its own number.
+    """
+    qtypes = _as_dict(exam.get("question_types"))
+    key = _as_dict(exam.get("answer_key"))
+    # Index the scorer over the questions this exam actually has: its own count, or
+    # one past the highest index its type map names — a type map longer than
+    # `total_questions` would otherwise be silently uncounted, and a key that covers
+    # those questions would look short.
+    named = [int(i) for i in qtypes if str(i).lstrip("-").isdigit() and int(i) >= 0]
+    span = max([int(exam.get("total_questions") or 0)] + [i + 1 for i in named])
+    result = objective_result(qtypes, key, {}, span)
+    if not result.out_of or not result.unkeyed:
+        return None
+    return {"objective": result.out_of, "keyed": result.keyed,
+            "unkeyed": len(result.unkeyed), "ceiling": result.ceiling}
+
+
+def _needs_answer_key(exam: dict) -> bool:
+    """Is the "scores will be 0" card actually true of this exam?
+
+    It is true when the exam has objective questions and the key answers **none**
+    of them: an unkeyed objective question is scored wrong by `objective_result`, so
+    every student scores 0 on that half however well they answered — which is
+    exactly what the card claims.
 
     It used to be `if not exam.get("answer_key")`, read off a row that never
     carried the column. Commit fb9aef2 trimmed this route's `select("*")` to an
@@ -303,25 +334,20 @@ def _needs_answer_key(exam: dict) -> bool:
     question was reported as missing its key — permanently, and nothing a teacher
     did could clear it.
 
-    A *partially* filled key is deliberately not flagged: it does not produce 0,
-    it produces an inflated score (the denominator is the number of answers the
-    key has), which is a different defect and not what this card claims.
+    A *partly* filled key is not this card's case: it does not produce 0, it
+    produces a lower ceiling, and it has its own card (`_partial_answer_key`) that
+    puts that ceiling in a number. Two situations, two sentences, neither of them a
+    lie — which is what the previous split got wrong when the partial case was
+    silently fine.
     """
-    qtypes = _as_dict(exam.get("question_types"))
-    objective = [index for index, kind in qtypes.items() if is_objective(kind)]
-    if not objective:
-        return False                     # nothing here is scored automatically
+    gap = _answer_key_gap(exam)
+    return bool(gap) and gap["keyed"] == 0
 
-    key = _as_dict(exam.get("answer_key"))
-    for index in objective:
-        value = key.get(str(index), key.get(index))
-        # `key_has_answer` knows the shape of every objective type. The inline
-        # version here only knew letters, so a matching question's object key read
-        # as "missing" and the card would have told the teacher to go and set a key
-        # they had already set.
-        if key_has_answer(qtypes.get(str(index)), value):
-            return False
-    return True
+
+def _partial_answer_key(exam: dict) -> bool:
+    """Does this exam have objective questions the key does not answer — but some it does?"""
+    gap = _answer_key_gap(exam)
+    return bool(gap) and gap["keyed"] > 0
 
 
 def _needs_class_assignment(exam: dict) -> bool:
@@ -389,6 +415,11 @@ def dashboard():
     upcoming_exams = []
     grading_progress = {}
     exams_no_key = []
+    exams_partial_key = []
+    #: The lowest ceiling among the partly keyed exams: the honest single number for
+    #: a card that has to fit in one sentence. Reporting the best of them would
+    #: understate what the situation costs the weakest paper.
+    partial_key_ceiling = 0
     # Both warnings are computed inside `if exam_ids`, so they need a default for
     # the teacher who has no exams yet — the template reads them unconditionally.
     exams_unassigned = []
@@ -442,6 +473,15 @@ def dashboard():
         # Exams the warning on the card is true about: MCQ questions, no answer
         # set to score them with, so the students' MCQ score is 0.
         exams_no_key = [e for e in exams if _needs_answer_key(e)]
+        # Exams whose key answers *some* objective questions but not all. They do not
+        # score 0, so they are not the card above; they score a ceiling, and the card
+        # for them says what it is.
+        exams_partial_key = [e for e in exams if _partial_answer_key(e)]
+        ceiling = min((_answer_key_gap(e)["ceiling"] for e in exams_partial_key),
+                      default=0)
+        # A whole number when it is one, so a full paper's 100 does not print as
+        # "100.0" beside a partial one's "42.5".
+        partial_key_ceiling = int(ceiling) if float(ceiling).is_integer() else ceiling
         # Live exams that reach nobody: no class ticked, so no pupil can see them.
         exams_unassigned = [e for e in exams if _needs_class_assignment(e)]
 
@@ -496,7 +536,9 @@ def dashboard():
         "exams": exams, "total_students": total_students,
         "avg_score": avg_score, "all_scores": all_scores, "user_name": user_name,
         "assignments": assignments, "classes": classes, "subjects": subjects,
-        "exams_no_key": exams_no_key, "exams_unassigned": exams_unassigned,
+        "exams_no_key": exams_no_key, "exams_partial_key": exams_partial_key,
+        "partial_key_ceiling": partial_key_ceiling,
+        "exams_unassigned": exams_unassigned,
         "pending_grading": pending_grading, "upcoming_exams": upcoming_exams,
         "grading_progress": grading_progress,
         "exam_stats": exam_stats[:6],

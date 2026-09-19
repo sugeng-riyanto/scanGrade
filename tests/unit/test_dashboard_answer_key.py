@@ -46,6 +46,8 @@ def _import_helpers():
 
 teacher = _import_helpers()
 needs_key = teacher._needs_answer_key
+partial_key = teacher._partial_answer_key
+gap_of = teacher._answer_key_gap
 
 
 # ── 1. the judgement matches what scoring actually does ──────────────────────
@@ -78,13 +80,97 @@ class TestWhenTheWarningIsTrue:
         exam = {"question_types": question_types, "answer_key": answer_key}
         assert needs_key(exam) is expected, label
 
-    def test_a_partially_filled_key_is_not_flagged(self):
-        """It does not produce 0 — the denominator is the number of answers the
-        key has, so it inflates the score instead. That is a different defect and
-        not what this card claims; flagging it here would make the card's own
-        sentence false."""
+    def test_a_partly_filled_key_is_not_this_card(self):
+        """It does not produce 0, so this card's sentence would be false of it.
+
+        It has its own card (`_partial_answer_key`) with its own number, because the
+        two situations are not the same thing: one zeroes the objective half, the
+        other lowers its ceiling. It used to be reported as *nothing at all* — and
+        the reason written here was that the score got inflated instead, which was
+        true and was the defect. The denominator is the paper now
+        (`question_types.objective_result`), so the two cases differ only in a
+        number, and both are said out loud.
+        """
         exam = {"question_types": {str(i): "mcq" for i in range(5)}, "answer_key": {"0": "A"}}
         assert needs_key(exam) is False
+        assert partial_key(exam) is True
+
+
+# ── 1b. the partly filled key, which used to have no card ───────────────────
+
+class TestThePartlyFilledKey:
+    """A key that answers some objective questions and not others.
+
+    What a teacher saw before this: they keyed 2 of 10 MCQ, scanned a sheet, and the
+    screen said 100% for a pupil who answered those two — because the scoring routes
+    divided by the number of answers the *key* had. Measured on the running app, the
+    same sitting scored 20% if the pupil submitted online and 100% if the teacher
+    scanned it. So the divisor is the paper now, and this card exists to say why a
+    perfect-looking sheet did not score 100.
+    """
+
+    def test_the_gap_names_the_numbers_a_warning_needs(self):
+        exam = {"question_types": {str(i): "mcq" for i in range(10)},
+                "total_questions": 10, "answer_key": {"0": "A", "1": "B"}}
+        gap = gap_of(exam)
+        assert gap == {"objective": 10, "keyed": 2, "unkeyed": 8, "ceiling": 20.0}, gap
+
+    def test_a_complete_key_has_nothing_to_report(self):
+        exam = {"question_types": {str(i): "mcq" for i in range(3)},
+                "total_questions": 3, "answer_key": {str(i): "A" for i in range(3)}}
+        assert gap_of(exam) is None
+
+    def test_an_exam_with_no_objective_questions_has_nothing_to_report(self):
+        exam = {"question_types": {"0": "essay"}, "total_questions": 1, "answer_key": {}}
+        assert gap_of(exam) is None
+
+    def test_the_ceiling_is_the_one_the_scorer_uses(self):
+        """One source of truth: the card's number and the pupil's mark come from the
+        same function, so they cannot drift apart as the rule changes again."""
+        from app.services.question_types import objective_result
+
+        qtypes = {str(i): "mcq" for i in range(10)}
+        key = {"0": "A", "1": "B", "2": "C", "3": "D"}
+        exam = {"question_types": qtypes, "total_questions": 10, "answer_key": key}
+        best = objective_result(qtypes, key, {str(i): key[str(i)] for i in range(4)}, 10)
+        assert gap_of(exam)["ceiling"] == best.score == best.ceiling == 40.0
+
+    def test_a_type_map_longer_than_the_paper_is_still_counted(self):
+        """`total_questions` is not the only source of the paper's length.
+
+        A type map naming question 11 on a 10-question row would otherwise be
+        dropped from the count, and a key that answered it would make the card claim
+        a ceiling lower than the scorer actually gives.
+        """
+        exam = {"question_types": {str(i): "mcq" for i in range(12)},
+                "total_questions": 10, "answer_key": {str(i): "A" for i in range(12)}}
+        assert gap_of(exam) is None, "a complete key over a longer map is still complete"
+
+    def test_the_dashboard_builds_the_card_from_the_shared_judgement(self):
+        block = _route_block("/dashboard")
+        assert re.search(
+            r'exams_partial_key\s*=\s*\[e for e in exams if _partial_answer_key\(e\)\]',
+            block), (
+            "the dashboard no longer builds the partly-filled list by calling the "
+            "shared judgement")
+        assert "exams_partial_key" in TEMPLATE, "the card and its value have to stay connected"
+
+    def test_the_card_states_its_own_number_and_not_the_other_card_s_sentence(self):
+        """The card has to be *true*, which is the whole history of this warning.
+
+        "Scores will be 0" belongs to the empty key. A partial key scores a ceiling,
+        and the sentence has to carry it — including the interpolation of the number
+        the route computed.
+        """
+        card = TEMPLATE[TEMPLATE.index("exams_partial_key"):]
+        card = card[:card.index("{% endif %}")]
+        assert "partial_key_ceiling" in card, (
+            "the partly-filled card has to print the ceiling, not just a count")
+        assert "skor akan 0" not in card and "scores will be 0" not in card, (
+            "that sentence is the other card's, and it is false here")
+        assert "belum lengkap" in card and "incomplete" in card
+        # The number comes from the route, so it is interpolated into the x-text.
+        assert "{{ partial_key_ceiling }}" in card
 
 
 # ── 2. the dashboard reads the column it judges ─────────────────────────────

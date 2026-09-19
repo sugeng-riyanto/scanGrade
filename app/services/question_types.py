@@ -33,6 +33,7 @@ scores.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
 # ── the vocabulary ───────────────────────────────────────────────────────────
@@ -726,6 +727,94 @@ def earned_points(
         elif grade_answer(qtype, key_value, given.get(qi)):
             earned += weight
     return round(earned, 2), graded
+
+
+# ── the one divisor for a partly keyed paper ────────────────────────────────
+
+@dataclass(frozen=True)
+class ObjectiveResult:
+    """The auto-graded half of one submission, and what it was measured against.
+
+    `score` is a percentage of the **paper's** objective questions, so it cannot
+    reach 100 while any of them has no key. `unkeyed` names the ones that do not,
+    which is what lets a caller say *why* the ceiling is where it is.
+    """
+    score: float
+    correct: int
+    out_of: int
+    keyed: int
+    unkeyed: list[int] = field(default_factory=list)
+
+    @property
+    def ceiling(self) -> float:
+        """The best this submission could have scored against this key."""
+        return round((self.keyed / self.out_of) * 100, 2) if self.out_of else 0.0
+
+
+def objective_result(
+    question_types: Mapping[str, Any] | None,
+    answer_key: Mapping[str, Any] | None,
+    answers: Mapping[str, Any] | None,
+    total_questions: int,
+) -> ObjectiveResult:
+    """The auto-graded score of one submission, by the one rule the app uses.
+
+    Why this function exists
+    ------------------------
+    Six places computed this score, in four different ways, and two of them
+    divided by the number of answers the **key** happens to contain. So a teacher
+    who had keyed 2 of 10 MCQ and saved one student's sheet got
+
+        correct 2 / keyed 2  =  100%
+
+    — a perfect mark out of a paper that was two-tenths marked — while the same
+    student's online submission was written as the *weighted* objective marks and
+    the teacher's own "recalculate scores" wrote `2 / 10 = 20%`. Three different
+    numbers for one sitting, chosen by which button was pressed.
+
+    The rule here is the paper's own count as the denominator and the key as the
+    only way to earn a mark:
+
+        score = correct / (objective questions on the paper) * 100
+
+    An objective question with no key is therefore scored wrong, which is the safe
+    direction and the honest one — it is what `_needs_answer_key` already told the
+    teacher happens when the whole key is missing. A partly filled key now
+    *depresses the ceiling* instead of inflating the score, and `ceiling` says by
+    how much so a page can put a number on the warning.
+
+    Only objective questions are counted; an essay is a teacher's mark and is
+    added to the final score by the caller, as it always was.
+    """
+    qtypes = question_types or {}
+    key = answer_key or {}
+    given = answers or {}
+
+    out_of = 0
+    keyed = 0
+    correct = 0
+    unkeyed: list[int] = []
+    for i in range(total_questions or 0):
+        qi = str(i)
+        qtype = qtypes.get(qi, DEFAULT_TYPE)
+        if not is_objective(qtype):
+            continue
+        out_of += 1
+        value = key.get(qi)
+        if not key_has_answer(qtype, value):
+            unkeyed.append(i)
+            continue
+        keyed += 1
+        if grade_answer(qtype, value, given.get(qi)):
+            correct += 1
+
+    return ObjectiveResult(
+        score=round((correct / out_of) * 100, 2) if out_of else 0.0,
+        correct=correct,
+        out_of=out_of,
+        keyed=keyed,
+        unkeyed=unkeyed,
+    )
 
 
 def default_weights(
