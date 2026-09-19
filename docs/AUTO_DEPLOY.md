@@ -78,6 +78,66 @@ installer is re-run. If your VPS was installed earlier, do that once:
 bash /opt/scangrade/deploy/install-auto-deploy.sh
 ```
 
+### A successful release re-renders the installed launcher
+
+`/usr/local/bin/scangrade-deploy` and `/usr/local/bin/scangrade-db-snapshot` are
+rendered from `deploy/entrypoint.sh`, and until now nothing re-rendered them: a
+launcher left behind by a fix to the template stayed behind until somebody ran the
+installer as root — the manual step this automation exists to remove. The last step
+of a release that passed every gate now rewrites both from the checkout it just
+verified, so an installed launcher cannot lag its template.
+
+What that heals, on the next successful release, with no root step:
+
+* a **launcher rendered from an older `deploy/entrypoint.sh`.** It still runs the
+  checkout, so nothing is broken — but whatever changed in the template is not in
+  effect, and the deploy-status page calls this `launcher_stale`;
+* a **missing** launcher or snapshot command;
+* a **copy that still matches the checkout byte-for-byte** — Gate 0 lets it through
+  precisely because it is the same code, and it becomes a launcher here.
+
+What it does **not** heal, and why: a **copy that has drifted** from the checkout —
+still the likeliest state of an old box, and the one `exit 14` names. That copy
+refuses before any gate can pass, and the refresh is the last step of a release that
+passes, so no release ever reaches it. Nothing inside a file that is not the
+checkout's can apply the checkout's logic; that is the one step a file cannot take
+for itself, and it is why the installer still exists. The same holds for a copy that
+predates Gate 0: it carries no check, so it keeps deploying with the logic of the
+day it was installed until the installer runs once.
+
+Three properties, because the installed path is the only thing the timer runs:
+
+* **it never installs a launcher it has not parsed.** The render is checked for the
+  `@REPO@` placeholder and with `bash -n` *before* the move, and every failure
+  leaves the installed file exactly as it was. A launcher that cannot run is worse
+  than a stale one: then nothing can deploy at all.
+* **the install is atomic.** The render is staged in the target's own directory, so
+  `mv` is a rename on one filesystem and no tick can observe a half-written file.
+* **it is skipped when the bytes already match.** Gate 0 compares *content*, so a
+  timestamp that moved while the content did not would be a signal that lies.
+
+Two properties of the unit are load-bearing here: it runs as root and is
+deliberately *not* hardened (`ProtectSystem`/`NoNewPrivileges` would break a script
+that has to write the checkout and restart another unit), which is the only reason
+a refresh can write `/usr/local/bin` at all; and `PrivateTmp=true` is a second
+reason the render is staged beside the target instead of in `/tmp`.
+
+It cannot take a release down with it: the app is verified and serving by the time
+it runs, so a failure is logged and nothing else happens — rolling a working site
+back to fix a bookkeeping step would trade the wrong thing. It also does not run on
+the rollback path, where the checkout is about to move back and the launcher would
+point at logic that no longer runs. The trace is one line per launcher it actually
+replaced — two on the first release after this lands, none on every release after
+that:
+
+```
+launcher refreshed: the deploy runner at /usr/local/bin/scangrade-deploy now renders from /opt/scangrade
+launcher refreshed: the snapshot command at /usr/local/bin/scangrade-db-snapshot now renders from /opt/scangrade
+```
+
+`git reset --hard` by hand is not a release and does not refresh anything, so after
+one of those the launcher is whatever the last *successful* release installed.
+
 ## Operating it
 
 | I want to… | Command |
@@ -88,11 +148,15 @@ bash /opt/scangrade/deploy/install-auto-deploy.sh
 | deploy right now, without waiting | `systemctl start scangrade-deploy.service` |
 | **freeze deploys** (e.g. exam week) | `touch /etc/scangrade-deploy.pause` |
 | resume | `rm /etc/scangrade-deploy.pause` |
+| see which commit a gate refused, and why | `cat /var/lib/scangrade-deploy/quarantined` |
+| retry a quarantined commit once | `touch /etc/scangrade-deploy.release` |
 | stop deploying automatically | `systemctl disable --now scangrade-deploy.timer` |
 | see the last release that stuck | `cat /var/lib/scangrade-deploy/last-deploy` |
 
 The freeze file is the one to reach for during exams: the timer keeps ticking,
 but the script exits immediately, so nothing restarts while students are working.
+It is a *human* decision about a window of time. The quarantine below is the
+automatic, per-commit sibling of it.
 
 ## The readability gate
 
@@ -249,13 +313,29 @@ is far from saturated, so latency tracks per-request cost rather than queueing,
 which is the thing a release can change. The advertised rung stays the claims
 gate's job.
 
+Three things are compared, because they fail independently: the response time of
+the slowest signed-in page (the symptom a student feels), the **bytes** the
+heaviest page sends (what a phone on a school connection pays for), and the
+**Supabase round-trips** the busiest render spends — read from the app's own
+`X-Supabase-Roundtrips` header, which is the *cause* the other two only reflect. A
+page can stay exactly as fast while gaining three queries or a 200 KB script, and
+that is the release this refuses. Each axis carries a ratio **and** an absolute
+grace (1.25x + 8 KiB of payload, 1.25x + 1 query), so a list that honestly got
+longer is not mistaken for a leak — a release has to clear both to be refused. The
+round-trip number is what the page costs *when it does its work*, not what a cache
+hit spent: a warm entry replays the cost it was built with, because otherwise the
+busiest student page reads as free on every request. For the same reason the
+program's bytecode is dropped before a mutation run — see
+`.freebuff/mutate_page_cost.py`.
+
 | Result | Outcome |
 |---|---|
 | no baseline yet | **deploy**, and this release becomes the baseline |
-| same or faster, within slack | deploy, and the baseline moves up to this release |
-| slower (confirmed twice) | roll back **if `PERF_ENFORCE=true`** |
+| no worse, on any of the three, within slack | deploy, and the baseline moves up to this release |
+| slower or more expensive (confirmed twice) | roll back **if `PERF_ENFORCE=true`** |
 | divergent once, clean on the confirmation run | deploy — contention, not a regression |
 | could not measure (exit 2) | **warn only**, and the baseline is left alone |
+| the baseline knows a page's cost but this run reports none | **warn only** — a harness that stopped reporting must not retire the payload and query axes in silence |
 
 The baseline is written **only when a release passes**. If a refused release
 became the yardstick, the next release would be measured against it and the
@@ -272,7 +352,8 @@ that is off.
 ### Arming it
 
 `/etc/scangrade-perf.conf` (root-only) holds the base URL, the roster path, the
-reference load, the baseline path and `PERF_ENFORCE`. Unlike the claims gate it
+reference load, the baseline path, the payload and query slacks
+(`PERF_BYTES_SLACK`, `PERF_ROUNDTRIPS_SLACK`) and `PERF_ENFORCE`. Unlike the claims gate it
 is armed from the first release, and that difference is deliberate: with no
 baseline the gate writes one and passes, so arming it cannot reject anything.
 From the second release on, a confirmed regression rolls the release back.
@@ -380,6 +461,66 @@ It also stops instead of guessing when:
 Each of those is a distinct non-zero exit, visible in the journal. On the last
 two it rolls the checkout back first, so the site keeps serving the release that
 was working.
+
+
+## A refused release is quarantined, not retried
+
+A rollback moves the **checkout**, not the branch. So without something else, the
+next tick fetches the same commit, sees it is not what is deployed, pulls it, and
+walks into the same gate — rejected, rolled back, re-pulled, every two minutes,
+for as long as the bad commit sits on `main`. The box reloads gunicorn and the
+Celery worker on every lap, the journal fills with one repeated failure, and the
+only exit is a human pushing a fix. Nothing about that loop is visible on any
+page: the previous release serves throughout.
+
+So a release that a **gate** rejects is quarantined by commit:
+
+```
+/var/lib/scangrade-deploy/quarantined
+```
+
+Three lines: the full sha of the refused commit, when it was refused, and which
+gate refused it (for example `perf gate (slower than the last release that
+passed)`).
+
+A quarantined commit is not retried. The next tick prints why and exits `0`
+without touching the checkout, so a refused release costs one rollback and then
+one journal line every two minutes — not a reload loop.
+
+**It comes back by itself.** The moment `origin/main` moves to another commit the
+quarantine is lifted, because a new commit is a new release and the refused one
+is no longer the question being asked. The normal fix path needs no command.
+
+**Or release it explicitly**, for the case where the gate was right about the box
+and wrong about the release — a busy VPS that made the performance gate diverge,
+a smoke password rotated without a commit:
+
+```bash
+touch /etc/scangrade-deploy.release     # one attempt, then consumed
+```
+
+It is deliberately one-shot: the file is deleted whether the retry passes or
+fails, so it cannot become a standing override that quietly pins a known-bad
+commit in place. If the release is refused again it is quarantined again.
+
+### What is *not* quarantined
+
+Two failures are properties of the **box**, not of the release, and retrying them
+is the correct behaviour, so they keep retrying every tick:
+
+* a failed `git fetch` (network or credentials);
+* a snapshot that could not be taken for a migration release — nothing has been
+  merged at that point, and the script says it will retry;
+* a `pip install` that failed, which is usually the network.
+
+Everything else that is a **gate** quarantines: `compileall`, app construction,
+the theme gate, and the post-reload verification (smoke test, claims gate,
+performance gate, and the app not answering `200`). The quarantine record names
+which one, so "why did nothing deploy" is answered by one `cat`.
+
+A **manual** rollback does not write a quarantine — `git reset --hard` by hand
+leaves no record — so after one, the next tick will indeed try the same release
+again. That is the paragraph at the end of this document.
 
 ## Why a reload and not a restart
 
@@ -557,5 +698,10 @@ systemctl reload scangrade
 scangrade-db-snapshot --restore /var/backups/scangrade/<archive>
 ```
 
-Then fix `origin/main` — otherwise the next tick will try the same bad release
-again. Freeze first if you need time: `touch /etc/scangrade-deploy.pause`.
+Then fix `origin/main` — a hand rollback writes no quarantine, so the next tick
+will try that same release again and refuse it the same way. Freeze first if you
+need time: `touch /etc/scangrade-deploy.pause`.
+
+If the refusal came from the deploy itself it is already quarantined, and the
+journal says so: `git reset` by hand is then only needed when you want the
+checkout somewhere other than the previous release.

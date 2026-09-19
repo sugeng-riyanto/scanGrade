@@ -775,3 +775,656 @@ def test_env_bool_reads_the_usual_spellings(name):
         assert env_bool("SG_TEST_BOOL", not expected) is expected, raw
     os.environ.pop("SG_TEST_BOOL", None)
     assert env_bool("SG_TEST_BOOL_UNSET", True) is True
+
+
+# ── a refused release is quarantined, not retried forever ────────
+#
+# Every gate rejects a release by resetting the *checkout*. `origin/main` does not
+# move, so without a record of which commit was refused the next tick fetches it
+# again, pulls it, and walks into the same gate — rejected, rolled back, re-pulled,
+# every two minutes, reloading gunicorn and the Celery worker on each lap, for as
+# long as the bad commit sits on the branch. The previous release serves the whole
+# time, so nothing about the loop is visible on a page.
+#
+# The quarantine is that record. These tests hold both halves: that it is written
+# where a gate refuses a release, and that the next tick honours it instead of
+# trying again.
+
+QUARANTINE_START = "# quarantine-logic:start"
+QUARANTINE_END = "# quarantine-logic:end"
+
+#: A *call* — `quarantine_write() {` is the definition and must not match, which
+#: is why the line has to end there: the call inside the shared failure block sits
+#: at column 0, and requiring an indent found three of the four call sites.
+QUARANTINE_CALL = re.compile(r"^[ \t]*quarantine_write$", re.M)
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+def _quarantine_block() -> str:
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return script.split(QUARANTINE_START, 1)[1].split(QUARANTINE_END, 1)[0]
+
+
+def test_the_quarantine_lives_between_its_delimiters():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert QUARANTINE_START in script and QUARANTINE_END in script, (
+        "the quarantine block's delimiters also let it be tested on its own, the "
+        "way Gate 0's do; keep them")
+    for fn in ("quarantine_write() {", "quarantine_gate() {",
+               "quarantine_honour_release() {"):
+        assert fn in _quarantine_block(), f"{fn} left the delimited block"
+
+
+def test_a_gate_that_refuses_a_release_records_it():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    calls = QUARANTINE_CALL.findall(script)
+    assert len(calls) == 4, (
+        f"{len(calls)} quarantine_write call(s). Every gate that rolls a release "
+        "back has to record it — compileall, app construction, the theme gate and "
+        "the shared post-reload verification — or that gate goes on re-pulling the "
+        "same commit every two minutes")
+
+
+def test_the_next_tick_consults_the_quarantine_and_can_be_released():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert re.search(r"^if ! quarantine_gate; then$", script, re.M), (
+        "the runner never consults the quarantine, so it would retry the refused "
+        "commit on the next tick — the loop this exists to stop")
+    assert re.search(r"^quarantine_honour_release$", script, re.M), (
+        "the one-shot release file is never read, so there is no way to retry a "
+        "release a gate refused for a box-side reason")
+    assert "QUARANTINED" in script, "nothing ever says out loud that it is skipping"
+
+
+def test_nothing_is_quarantined_before_the_release_has_been_merged():
+    """A transient failure must never freeze a good commit.
+
+    The fetch and a failed snapshot are properties of the box — nothing has been
+    merged when they happen — and the script already retries them next tick. So
+    no quarantine may be written anywhere before the merge, and the one failure
+    after it that is still the network's fault (`pip install`) must not quarantine
+    either.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    merge = script.index("merge --ff-only")
+    early = [m.start() for m in QUARANTINE_CALL.finditer(script) if m.start() < merge]
+    assert not early, (
+        "a quarantine_write call runs before the release is merged, so a failed "
+        "fetch or snapshot would freeze a commit no gate has judged")
+
+    pip = script.index("requirements.txt changed")
+    pip = script[pip:pip + script[pip:].index("exit 7")]
+    assert "quarantine" not in pip, (
+        "a failed pip install quarantines the release. That is usually the "
+        "network, and retrying it is the correct behaviour")
+
+
+def test_the_record_can_only_ever_name_the_candidate_release():
+    """The write reads `$AFTER_FULL` rather than taking an argument.
+
+    It is the script's only release under judgement, and reading it removes any
+    chance of quarantining a commit other than the one a gate actually refused —
+    as well as the positional parameters `test_deploy_script_takes_no_arguments`
+    forbids.
+    """
+    block = _quarantine_block()
+    assert re.search(r'printf .*"\$AFTER_FULL"', block), (
+        "the recorded sha is not the candidate release's — "
+        "the quarantine could name a commit no gate looked at")
+    for positional in ("$1", "${1"):
+        assert positional not in block, (
+            "the quarantine block takes a positional parameter; this script takes "
+            "none at all")
+
+
+# ── and it behaves ───────────────────────────────────────────────
+
+
+def _quarantine_harness(tmp_path: Path) -> str:
+    """The real block, lifted out and given the paths it reads.
+
+    `requests/` is created here because the block reads the request file's parent
+    as freely as the block itself does: a harness that left it out failed on
+    `set -u` rather than on anything the quarantine does.
+    """
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    requests = state / "requests"
+    requests.mkdir(exist_ok=True)
+    return (
+        "set -uo pipefail\n"
+        f'STATE_DIR="{state}"\n'
+        f'QUARANTINE_FILE="{state}/quarantined"\n'
+        f'RELEASE_FILE="{tmp_path}/scangrade-deploy.release"\n'
+        f'REQUEST_DIR="{requests}"\n'
+        f'RELEASE_REQUEST="{requests}/release"\n'
+        'BRANCH="main"\n'
+        'AFTER="abcdef1"\n'
+        'log() { echo "$*"; }\n'
+        + _quarantine_block()
+    )
+
+
+def _run_quarantine(tmp_path: Path, body: str, *, after_full: str = SHA_A):
+    program = (_quarantine_harness(tmp_path)
+               + f'\nAFTER_FULL="{after_full}"\nFAIL_REASON="theme gate (exit 13)"\n'
+               + body)
+    return subprocess.run([BASH, "-c", program], capture_output=True, text=True)
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_a_commit_nobody_refused_deploys(tmp_path):
+    run = _run_quarantine(tmp_path, 'quarantine_gate; echo "rc=$?"')
+    assert run.returncode == 0, run.stderr
+    assert "rc=0" in run.stdout, run.stdout
+    assert "QUARANTINED" not in run.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_a_refused_commit_is_skipped_and_the_reason_is_written_down(tmp_path):
+    run = _run_quarantine(tmp_path, 'quarantine_write\nquarantine_gate; echo "rc=$?"')
+    assert "QUARANTINED" in run.stdout, run.stdout
+    assert "rc=1" in run.stdout, (
+        "the tick after a refusal went ahead anyway — that is the re-pull loop")
+    assert "scangrade-deploy.release" in run.stdout, (
+        "the skip says nothing about how to retry, so the only escape reads as a "
+        "mystery")
+
+    record = (tmp_path / "state" / "quarantined").read_text(encoding="utf-8").splitlines()
+    assert record[0] == SHA_A, (
+        "the record must hold the full sha, not a 7-character prefix — a prefix is "
+        "a search key, not an identity")
+    assert record[1], "the record must say when it was refused"
+    assert "theme gate" in record[2], (
+        "the record must name the gate that refused it, so 'why did nothing "
+        "deploy' is answered by one cat")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_a_fix_lifts_the_quarantine_by_itself(tmp_path):
+    body = (
+        'quarantine_write\n'
+        f'AFTER_FULL="{SHA_B}"\n'
+        'quarantine_gate; echo "rc=$?"'
+    )
+    run = _run_quarantine(tmp_path, body)
+    assert "quarantine lifted" in run.stdout, run.stdout
+    assert "rc=0" in run.stdout, run.stdout
+    assert not (tmp_path / "state" / "quarantined").exists(), (
+        "a moved branch must clear the record, or a commit somebody has since "
+        "fixed stays frozen")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_release_file_buys_one_attempt_not_a_standing_override(tmp_path):
+    """The escape hatch has to be single-use.
+
+    A file that stayed put would quietly pin a known-bad commit in place: every
+    tick would try it, every tick would roll it back, and the quarantine would
+    have bought nothing.
+    """
+    release = tmp_path / "scangrade-deploy.release"
+    release.write_text("", encoding="utf-8")
+
+    # Tick 1 — a refusal was recorded, then somebody released it, so it is tried.
+    first = _run_quarantine(
+        tmp_path,
+        'quarantine_write\nquarantine_honour_release\nquarantine_gate; echo "rc=$?"')
+    assert "rc=0" in first.stdout, first.stdout
+    assert not release.exists(), "the release file was not consumed by the attempt"
+    assert "explicit release requested" in first.stdout, (
+        "clearing a quarantine silently loses the fact that somebody asked for it")
+
+    # Tick 2 — refused again, so it is quarantined again.
+    second = _run_quarantine(tmp_path, 'quarantine_write\nquarantine_gate; echo "rc=$?"')
+    assert "rc=1" in second.stdout, second.stdout
+
+    # Tick 3 — with the file gone, the next tick skips rather than retrying.
+    third = _run_quarantine(tmp_path, 'quarantine_gate; echo "rc=$?"')
+    assert "rc=1" in third.stdout, third.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_app_can_buy_the_same_single_attempt(tmp_path):
+    """The page's request and the operator's file mean exactly the same thing.
+
+    The app runs as the service user and cannot write /etc, so a request file in
+    the state directory is its only channel to a script that runs as root. It buys
+    one attempt and is consumed by it, the same as the root-owned file — otherwise
+    the button would be a standing override for a commit a gate keeps refusing.
+    """
+    request = tmp_path / "state" / "requests" / "release"
+    request.parent.mkdir(parents=True, exist_ok=True)
+    request.write_text("… anything at all …", encoding="utf-8")
+
+    first = _run_quarantine(
+        tmp_path,
+        'quarantine_write\nquarantine_honour_release\nquarantine_gate; echo "rc=$?"')
+    assert "rc=0" in first.stdout, first.stdout
+    assert not request.exists(), (
+        "the request survived the attempt, so the next tick would release another "
+        "commit nobody asked about")
+    assert "explicit release requested" in first.stdout, first.stdout
+
+    # Refused again: quarantined again, and the next tick skips. One click, one try.
+    second = _run_quarantine(tmp_path, 'quarantine_write\nquarantine_gate; echo "rc=$?"')
+    assert "rc=1" in second.stdout, second.stdout
+
+
+# ── a successful release reheals the installed launcher ───────────
+#
+# Gate 0 refuses an installed *copy* that has drifted, which is right — and it
+# also leaves the box unable to deploy until somebody runs the installer as root,
+# the manual step this automation exists to remove. So a release that gets all the
+# way to the end re-renders the launcher from the checkout it just deployed, and
+# from that release on what the timer runs *is* the checkout's launcher.
+#
+# Three properties make that safe rather than a new way to break a box, and each
+# is checked twice: as the shape of the code, and by running it.
+#
+#   * it never installs a launcher it has not parsed (a half-written launcher is a
+#     box that cannot deploy *at all*, which is strictly worse than a stale one);
+#   * the replacement is atomic (staged beside the target, so `mv` is a rename);
+#   * it is skipped when the bytes already match (Gate 0 compares *content*, so a
+#     timestamp that moved while the content did not would be a signal that lies).
+#
+# The last class is what the others exist for: a stale copy refuses to run, the
+# refresh replaces it, and the launcher that lands reaches the checkout's own
+# script and satisfies the real Gate 0.
+
+REFRESH_START = "# refresh-launcher-logic:start"
+REFRESH_END = "# refresh-launcher-logic:end"
+
+
+def _refresh_block() -> str:
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return script.split(REFRESH_START, 1)[1].split(REFRESH_END, 1)[0]
+
+
+def _refresh_code() -> str:
+    """The block with its comments removed, which is what the guards below read.
+
+    A guard that reads prose fires on a sentence: this block's own header explains
+    that a *drifted* copy still refuses with `exit 14`, and "exit 1" is a substring
+    of that — so the forbidden-words check lit up on a comment and invited a
+    relaxed guard instead of a correct one. Comments explain the code; the guards
+    judge the code.
+    """
+    return "\n".join(ln for ln in _refresh_block().splitlines()
+                     if ln.strip() and not ln.strip().startswith("#"))
+
+
+def _stale_installed_runner() -> bytes:
+    """The shape production was actually in: a *copy* of the runner taken at some
+    past commit, which stops matching the checkout the moment either one changes."""
+    return DEPLOY_SH.read_bytes() + b"\n# the logic of an older commit\n"
+
+
+def _posix(path: Path) -> str:
+    """A path for the shell.
+
+    Git Bash understands ``/c/...``, and handing it a Windows path would put
+    backslashes through sed's *replacement*, where GNU sed reads ``\\U`` as
+    "uppercase until \\E" — a rendered launcher that legal-looking would then not
+    match what the checkout says. The shell and the assertions compare the same
+    string by using this on both sides.
+    """
+    text = str(path)
+    if re.match(r"^[A-Za-z]:[\\/]", text):
+        return "/" + text[0].lower() + text[2:].replace("\\", "/")
+    return text.replace("\\", "/")
+
+
+def _refresh_harness(tmp_path: Path, repo: str) -> str:
+    """The real refresh block, with the globals it reads."""
+    bins = _posix(tmp_path / "installed")
+    (tmp_path / "installed").mkdir(exist_ok=True)
+    return (
+        "set -uo pipefail\n"
+        f'REPO="{repo}"\n'
+        f'INSTALLED_BIN_DIR="{bins}"\n'
+        f'INSTALLED_RUNNER="{bins}/scangrade-deploy"\n'
+        f'INSTALLED_SNAPSHOT="{bins}/scangrade-db-snapshot"\n'
+        'log() { echo "$*"; }\n'
+        + _refresh_block()
+    )
+
+
+def _run_refresh(tmp_path: Path, repo: str, body: str = "refresh_installed_launchers"):
+    program = _refresh_harness(tmp_path, repo) + "\n" + body + "\n"
+    return subprocess.run([BASH, "-c", program], capture_output=True, text=True)
+
+
+def _fake_checkout(tmp_path: Path, name: str = "repo") -> Path:
+    """A checkout holding the two files the refresh and Gate 0 read."""
+    repo = tmp_path / name
+    (repo / "deploy").mkdir(parents=True, exist_ok=True)
+    (repo / "deploy" / "entrypoint.sh").write_bytes(ENTRYPOINT_SH.read_bytes())
+    (repo / "deploy" / "scangrade-deploy.sh").write_bytes(DEPLOY_SH.read_bytes())
+    return repo
+
+
+def _rendered_launcher(repo: str, template: Path | None = None) -> bytes:
+    """What the refresh must produce: a template with the checkout rendered into it.
+
+    `template` defaults to the repository's `deploy/entrypoint.sh`; the stale-launcher
+    case renders the *checkout's* copy, which is what lets the two be told apart.
+    """
+    return (template or ENTRYPOINT_SH).read_bytes().replace(b"@REPO@", repo.encode())
+
+
+def _installed_runner(tmp_path: Path) -> Path:
+    return tmp_path / "installed" / "scangrade-deploy"
+
+
+def _install_stale_copy(tmp_path: Path) -> Path:
+    path = _installed_runner(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_stale_installed_runner())
+    return path
+
+
+def test_the_refresh_block_lives_between_its_delimiters():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert REFRESH_START in script and REFRESH_END in script, (
+        "the delimiters are what let this block be run on its own, the way the "
+        "quarantine and Gate 0 are; keep them"
+    )
+    block = _refresh_code()
+    assert "refresh_launcher() {" in block
+    assert "refresh_installed_launchers() {" in block
+    # The helper takes its target through a global, on purpose: `$1` anywhere in
+    # this script reads root's own argv, which `test_deploy_script_takes_no_
+    # arguments` forbids. Keep the two in step.
+    assert "LAUNCHER_TARGET" in block
+
+
+def test_the_refresh_parses_before_it_installs():
+    """Order, not presence: a `bash -n` after the move would check the new file on
+    a box the move had already broken."""
+    block = _refresh_code()
+    move = block.index('mv -f "$staged" "$target"')
+    assert block.index('bash -n "$staged"') < move, (
+        "the launcher is installed before it is parsed")
+    assert block.index("grep -q '@REPO@' \"$staged\"") < move, (
+        "an unrendered launcher could be installed, so it would exec "
+        "@REPO@/deploy/scangrade-deploy.sh forever")
+
+
+def test_the_refresh_stages_beside_the_target_so_the_install_is_atomic():
+    block = _refresh_code()
+    assert 'staged="$(dirname "$target")' in block, (
+        "staging anywhere but the target's own directory makes the install a copy "
+        "across filesystems, which a tick can observe half-done"
+    )
+
+
+def test_the_refresh_does_nothing_when_the_bytes_already_match():
+    block = _refresh_code()
+    assert block.index('cmp -s "$staged" "$target"') < \
+        block.index('mv -f "$staged" "$target"'), (
+        "an unconditional write moves the mtime on every release while the content "
+        "stays put — and Gate 0 compares content, so that signal would lie"
+    )
+
+
+def test_the_refresh_cannot_take_a_working_release_down_with_it():
+    """The app is verified and serving; a bookkeeping failure must not undo that,
+    nor look like a refused release — which would quarantine a good commit."""
+    block = _refresh_code()
+    for forbidden in ("HEALTHY=0", "FAIL_REASON=", "quarantine_write", "exit 1"):
+        assert forbidden not in block, (
+            f"the refresh block contains {forbidden!r}: a launcher refresh would "
+            "then roll back a release that is working"
+        )
+
+
+def test_the_refresh_rewrites_exactly_what_the_installer_installs():
+    """The relation that keeps the heal pointed at the right files.
+
+    The installer decides the two paths; the runner has to refresh exactly those,
+    or the box heals a path nothing runs.
+    """
+    installer = INSTALL_SH.read_text(encoding="utf-8")
+    installed = re.search(r'^DEPLOY_BIN="([^"]+)"', installer, re.M).group(1)
+    snapshot = re.search(r'^SNAPSHOT_BIN="([^"]+)"', installer, re.M).group(1)
+    runner = DEPLOY_SH.read_text(encoding="utf-8")
+    # Compared as POSIX strings: the paths describe a Linux box, and a test on
+    # Windows must not fail on the separator the local `pathlib` renders.
+    assert re.search(
+        rf'^INSTALLED_BIN_DIR="{re.escape(installed.rsplit("/", 1)[0])}"', runner, re.M), (
+        "the runner refreshes a different directory than the installer installs into")
+    assert re.search(
+        rf'^INSTALLED_RUNNER="\$INSTALLED_BIN_DIR/{re.escape(installed.rsplit("/", 1)[1])}"',
+        runner, re.M), "the runner refreshes a different deploy path than the installer installs"
+    assert re.search(
+        rf'^INSTALLED_SNAPSHOT="\$INSTALLED_BIN_DIR/{re.escape(snapshot.rsplit("/", 1)[1])}"',
+        runner, re.M), "the runner refreshes a different snapshot path than the installer installs"
+
+
+def test_the_refresh_runs_on_the_success_path_only():
+    """A refresh on the way *into* a release installs a launcher for a commit that
+    then gets rolled back."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    healthy = script.index('if [ "$HEALTHY" = "1" ]; then')
+    assert healthy < script.index("refresh_installed_launchers\n", healthy), (
+        "the refresh runs before the release is verified")
+    assert script.count("refresh_installed_launchers\n") == 1, (
+        "refresh_installed_launchers is called from somewhere other than the "
+        "success path")
+
+
+def test_the_rollback_path_does_not_refresh():
+    """A refused release must not install a launcher on its way out: the checkout
+    is about to move back, so the launcher would point at logic that no longer
+    runs."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    tail = script[script.index("did not pass verification — rolling back"):]
+    assert "refresh_installed_launchers" not in tail, "the rollback refreshes the launcher"
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the refresh block")
+def test_a_drifted_install_is_replaced_by_the_checkout_launcher(tmp_path):
+    repo = _fake_checkout(tmp_path)
+    installed = _install_stale_copy(tmp_path)
+
+    run = _run_refresh(tmp_path, _posix(repo))
+    assert run.returncode == 0, run.stderr
+    assert "launcher refreshed" in run.stdout, run.stdout
+    assert installed.read_bytes() == _rendered_launcher(_posix(repo)), (
+        "the installed file is not what the checkout renders")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the refresh block")
+def test_the_second_release_changes_nothing(tmp_path):
+    """Idempotence, measured: the mtime is the tell. Gate 0 compares content, so a
+    file rewritten on every release reports "the launcher moved" when it did not."""
+    repo = _fake_checkout(tmp_path)
+    installed = _install_stale_copy(tmp_path)
+
+    assert _run_refresh(tmp_path, _posix(repo)).returncode == 0
+    before = installed.stat().st_mtime_ns
+    again = _run_refresh(tmp_path, _posix(repo))
+    assert again.returncode == 0
+    assert "launcher refreshed" not in again.stdout, (
+        "an identical file was rewritten, so the mtime now moves on every release "
+        "while the content does not")
+    assert installed.stat().st_mtime_ns == before
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the refresh block")
+def test_a_missing_snapshot_launcher_is_created(tmp_path):
+    """The snapshot command is the one that was silently broken by being a copy —
+    it derived the checkout from its own location — so a box missing it heals here
+    too."""
+    repo = _fake_checkout(tmp_path)
+    run = _run_refresh(tmp_path, _posix(repo))
+    assert run.returncode == 0, run.stderr
+    snapshot = tmp_path / "installed" / "scangrade-db-snapshot"
+    assert snapshot.exists(), "a missing snapshot launcher was not restored"
+    assert snapshot.read_bytes() == _rendered_launcher(_posix(repo))
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the refresh block")
+def test_a_launcher_that_does_not_parse_never_replaces_a_working_one(tmp_path):
+    """The failure that would be worse than staleness: a launcher that cannot run
+    means nothing can deploy at all."""
+    repo = _fake_checkout(tmp_path)
+    (repo / "deploy" / "entrypoint.sh").write_text(
+        '#!/bin/sh\nif [ -z "$REPO" ]; then\n', encoding="utf-8")
+    installed = _install_stale_copy(tmp_path)
+    good = installed.read_bytes()
+
+    run = _run_refresh(tmp_path, _posix(repo))
+    assert run.returncode == 0, "a broken render must not fail the release"
+    assert "does not parse" in run.stdout, run.stdout
+    assert installed.read_bytes() == good, "a broken render was installed anyway"
+
+
+#: `|` is sed's delimiter in the render, so a checkout path holding one cannot be
+#: rendered — the branch that has to leave the installed file exactly as it found
+#: it. The trigger needs a `|` in a filename, which Windows does not allow, so this
+#: one runs where deploys actually happen.
+@pytest.mark.skipif(os.name == "nt", reason="a filename cannot hold `|` on Windows")
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the refresh block")
+def test_a_render_that_fails_outright_leaves_everything_alone(tmp_path):
+    repo = _fake_checkout(tmp_path, name="re|po")
+    installed = _install_stale_copy(tmp_path)
+    good = installed.read_bytes()
+
+    run = _run_refresh(tmp_path, _posix(repo))
+    assert run.returncode == 0, run.stderr
+    assert "could not render" in run.stdout, run.stdout
+    assert installed.read_bytes() == good, (
+        "a failed render left the installed launcher changed — that is the one "
+        "outcome worse than staleness")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the refresh block")
+def test_an_install_that_cannot_happen_is_reported_not_fatal(tmp_path):
+    """The `mv` is the step that actually replaces the file, so it is made to fail
+    here rather than relying on a filesystem's habits about overwriting."""
+    repo = _fake_checkout(tmp_path)
+    installed = _install_stale_copy(tmp_path)
+    good = installed.read_bytes()
+
+    run = _run_refresh(tmp_path, _posix(repo),
+                       body='mv() { return 1; }\nrefresh_installed_launchers')
+    assert run.returncode == 0, "a failed install must not fail the release"
+    assert "could not replace" in run.stdout, run.stdout
+    assert installed.read_bytes() == good, "the installed launcher changed anyway"
+    leftovers = [p.name for p in (tmp_path / "installed").iterdir()
+                 if p.name.startswith(".")]
+    assert not leftovers, f"the staged render was left behind: {leftovers}"
+
+
+def _identity_block() -> str:
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return script.split(IDENTITY_START, 1)[1].split(IDENTITY_END, 1)[0]
+
+
+def _stale_launcher(tmp_path: Path, repo: Path) -> Path:
+    """A launcher rendered from an `entrypoint.sh` that has since changed.
+
+    This is the state the deploy-status page calls `launcher_stale`, and the one this
+    step can genuinely heal: the launcher execs the checkout's script, so Gate 0
+    passes it and the release runs to the end, where the re-render happens.
+    """
+    path = tmp_path / "installed" / "scangrade-deploy"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_rendered_launcher(_posix(repo)))
+    # As bytes on purpose: `write_text` on Windows rewrites every line ending in the
+    # template, and the render is compared byte-for-byte, so a text-mode fixture would
+    # compare two different files and then call the refresh wrong (the line-ending
+    # lesson this repository keeps re-learning through a different door).
+    (repo / "deploy" / "entrypoint.sh").write_bytes(
+        ENTRYPOINT_SH.read_bytes() + b"\n# a fix landed after the install\n")
+    return path
+
+
+def _gate0_in_the_checkout(repo: Path) -> None:
+    """The checkout's runner, carrying Gate 0's real block.
+
+    Stubbing it with an echo would prove the launcher reaches *a* file; this proves
+    the arrangement gets *through* Gate 0 — which is the refusal a stale launcher
+    must not trip, because tripping it is what makes the refresh unreachable.
+    """
+    (repo / "deploy" / "scangrade-deploy.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -uo pipefail\n"
+        f'REPO="{_posix(repo)}"\n'
+        'log() { echo "$*"; }\n'
+        + _identity_block()
+        + 'echo "REACHED-END $0"\necho "ARGS $#"\n',
+        encoding="utf-8")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the refresh and Gate 0")
+def test_a_stale_launcher_is_re_rendered_by_the_next_release(tmp_path):
+    """The reachable half of the claim, end to end and on the real files.
+
+    Before: the installed launcher was rendered from an older `entrypoint.sh`, and
+    running it still reaches the checkout's script — which is why the staleness has
+    no symptom and no gate stops it. The release gets all the way to the end, the
+    launcher is re-rendered, and what is installed is now what this checkout renders:
+    no installer, no root, no shell edit.
+    """
+    repo = _fake_checkout(tmp_path)
+    installed = _stale_launcher(tmp_path, repo)
+    changed = repo / "deploy" / "entrypoint.sh"
+    stale = installed.read_bytes()
+    assert stale != _rendered_launcher(_posix(repo), changed), "the fixture is not stale"
+
+    _gate0_in_the_checkout(repo)
+    before = subprocess.run([BASH, str(installed)], capture_output=True, text=True)
+    assert before.returncode == 0, before.stderr
+    assert "REFUSING" not in before.stdout, (
+        "a stale launcher tripped the copy refusal, so the refresh would never be "
+        "reached:\n" + before.stdout)
+    assert f"REACHED-END {_posix(repo)}/deploy/scangrade-deploy.sh" in before.stdout, (
+        "the launcher did not reach the checkout's runner:\n" + before.stdout)
+    assert "ARGS 0" in before.stdout, (
+        "arguments got through the launcher, which is the one thing it must never "
+        "forward")
+
+    refreshed = _run_refresh(tmp_path, _posix(repo))
+    assert refreshed.returncode == 0, refreshed.stderr
+    assert "launcher refreshed" in refreshed.stdout, refreshed.stdout
+    assert installed.read_bytes() == _rendered_launcher(_posix(repo), changed), (
+        "the installed launcher is still the older rendering")
+    assert b"a fix landed after the install" in installed.read_bytes(), (
+        "the new template's content is not what got installed")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run Gate 0")
+def test_a_drifted_copy_is_refused_and_no_release_can_reach_the_refresh(tmp_path):
+    """The half this step cannot heal, measured rather than hoped.
+
+    A copy that has drifted refuses with exit 14 *before* any gate can pass, and the
+    refresh is the last step of a release that passed — so from that state the heal
+    is unreachable, and the one root command (`install-auto-deploy.sh`) is the only
+    way out. Nothing inside a file that is not the checkout's can apply the
+    checkout's logic; that is the step a file cannot take for itself, and it is why
+    `docs/AUTO_DEPLOY.md` names this case instead of claiming the arrangement always
+    heals itself.
+    """
+    repo = _fake_checkout(tmp_path)
+    installed = _install_stale_copy(tmp_path)
+
+    refused = subprocess.run([BASH, "-c", _identity_harness(repo), str(installed)],
+                             capture_output=True, text=True)
+    assert refused.returncode == 14, (
+        "a drifted copy did not refuse, so this proof is not measuring the state it "
+        f"claims to (rc={refused.returncode})\n{refused.stdout}")
+    assert "REFUSING" in refused.stdout
+
+    # The refusal is an `exit`, so the run stops there and the success path — with the
+    # refresh on it — is never reached. Pinned structurally below, because a
+    # behavioural test cannot show a call that never happens.
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    call = script.index("refresh_installed_launchers\n")
+    assert "exit 14" in script[:call], (
+        "the refusal no longer precedes the refresh, so the claim that it cannot be "
+        "reached needs re-deriving")

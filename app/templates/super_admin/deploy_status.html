@@ -18,6 +18,40 @@
 {% set L = LEVEL.get(v.level, LEVEL['unknown']) %}
 <div class="max-w-4xl mx-auto space-y-6">
 
+
+    {#
+        The result of a one-click release, as a key from the route rather than a
+        sentence: the copy belongs where the language toggle and the i18n sweep
+        can reach it (see the note in deploy_status_service.py).
+    #}
+    {% if released %}
+    {% if released == 'written' %}
+    <div class="card p-4 border bg-emerald-50 border-emerald-200 flex items-start gap-3">
+        <i class="fas fa-circle-check text-emerald-700 mt-0.5"></i>
+        <p class="text-sm text-emerald-700" x-text="t('Permintaan rilis dicatat — runner akan mencobanya sekali pada tick berikutnya. Kalau gate menolak lagi, commit itu dikarantina lagi.','Release requested — the runner will try it once on the next tick. If a gate refuses it again, the commit is quarantined again.')"></p>
+    </div>
+    {% elif released == 'nothing_held' %}
+    <div class="card p-4 border bg-surface-100 border-surface-200 flex items-start gap-3">
+        <i class="fas fa-circle-info text-surface-600 mt-0.5"></i>
+        <p class="text-sm text-surface-600" x-text="t('Tidak ada commit yang ditahan, jadi tidak ada yang perlu dirilis.','No commit is being held, so there is nothing to release.')"></p>
+    </div>
+    {% elif released == 'dir_missing' %}
+    <div class="card p-4 border bg-amber-50 border-amber-200 flex items-start gap-3">
+        <i class="fas fa-triangle-exclamation text-amber-700 mt-0.5"></i>
+        <p class="text-sm text-amber-700" x-text="t('Permintaan tidak bisa ditulis: direktori permintaannya belum ada. Jalankan installer sekali (install-auto-deploy.sh), atau rilis lewat shell dengan touch /etc/scangrade-deploy.release.','The request could not be written: the request directory does not exist yet. Run the installer once (install-auto-deploy.sh), or release from a shell with touch /etc/scangrade-deploy.release.')"></p>
+    </div>
+    {% elif released == 'not_writable' %}
+    <div class="card p-4 border bg-rose-50 border-rose-200 flex items-start gap-3">
+        <i class="fas fa-circle-xmark text-rose-700 mt-0.5"></i>
+        <p class="text-sm text-rose-700" x-text="t('Permintaan tidak bisa ditulis: direktori permintaan tidak boleh ditulis oleh proses aplikasi.','The request could not be written: the request directory is not writable by the app process.')"></p>
+    </div>
+    {% elif released == 'failed' %}
+    <div class="card p-4 border bg-rose-50 border-rose-200 flex items-start gap-3">
+        <i class="fas fa-circle-xmark text-rose-700 mt-0.5"></i>
+        <p class="text-sm text-rose-700" x-text="t('Permintaan rilis gagal ditulis.','The release request could not be written.')"></p>
+    </div>
+    {% endif %}
+    {% endif %}
     <!-- ── the verdict ──────────────────────────────────────────────────── -->
     <div class="card p-5 border {{ L.box }}">
         <div class="flex items-start gap-4">
@@ -69,6 +103,102 @@
                     {% endif %}
                     {% if v.detail %}<code class="ml-1 px-1.5 py-0.5 rounded bg-surface-100 font-mono text-xs break-all">{{ v.detail }}</code>{% endif %}
                 </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the release a gate is holding ───────────────────────────────── -->
+    {#
+        The one deploy failure that has no symptom on any other page: the previous
+        release serves, nothing changes, and the record is a file on the box. The
+        readings are the runner's own (`quarantine_state`), so this page cannot
+        disagree with the box about which commit is held or why.
+    #}
+    {% set q = status.quarantine %}
+    {% set QHELD = {'box': 'bg-rose-50 border-rose-200', 'text': 'text-rose-700', 'icon': 'fa-hand'} %}
+    {% set QCLEAR = {'box': 'bg-surface-50 border-surface-200', 'text': 'text-surface-700', 'icon': 'fa-circle-check'} %}
+    {% set QL = QHELD if q.held else QCLEAR %}
+    <div class="card p-5 border {{ QL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ QL.icon }} {{ QL.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ QL.text }}">
+                    {% if q.held %}
+                    <span x-text="t('Rilis yang Ditahan','Held Release')"></span>
+                    {% else %}
+                    <span x-text="t('Tidak Ada Rilis yang Ditahan','No Held Release')"></span>
+                    {% endif %}
+                </h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if q.held %}
+                    <span x-text="t('Runner tidak mencoba ulang commit ini, jadi rilis sebelumnya tetap melayani. Satu rilis hanya membeli satu percobaan: kalau gate menolak lagi, commit itu dikarantina lagi.','The runner is not retrying this commit, so the previous release keeps serving. A release buys exactly one attempt: if a gate refuses it again, the commit is quarantined again.')"></span>
+                    {% elif q.reason_key == 'unreadable' %}
+                    <span x-text="t('Catatan karantina tidak bisa dibaca, jadi halaman ini tidak bisa memastikan tidak ada yang ditahan.','The quarantine record could not be read, so this page cannot say that nothing is held.')"></span>
+                    {% elif q.reason_key == 'malformed' %}
+                    <span x-text="t('Catatan karantina ada, tetapi isinya tidak dikenali — baca berkasnya sebelum menganggap tidak ada yang ditahan.','The quarantine record exists but its contents are not recognised — read it before assuming nothing is held.')"></span>
+                    {% else %}
+                    <span x-text="t('Tidak ada commit yang ditahan, dan rilis terakhir yang lolos tetap berjalan.','No commit is held, and the last release that passed is still running.')"></span>
+                    {% endif %}
+                </p>
+
+                {% if q.held %}
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Commit yang ditahan','Held commit')"></span>
+                        <span class="text-right min-w-0">
+                            <code class="font-mono text-xs text-surface-700">{{ q.short }}</code>
+                            {% if q.subject %}<span class="block text-xs text-surface-500 break-words">{{ q.subject }}</span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Gate yang menolak','Refusing gate')"></span>
+                        <span class="text-right min-w-0">
+                            <span class="font-bold text-surface-800">
+                                {% if q.gate_key == 'python_compileall' %}<span x-text="t('kompilasi Python','the Python compile')"></span>
+                                {% elif q.gate_key == 'app_did_not_construct' %}<span x-text="t('aplikasi tidak bisa dibangun','the app did not construct')"></span>
+                                {% elif q.gate_key == 'app_did_not_come_up_after_the_reload' %}<span x-text="t('aplikasi tidak hidup setelah reload','the app did not come up after the reload')"></span>
+                                {% elif q.gate_key == 'theme_gate' %}<span x-text="t('gerbang tema','the theme gate')"></span>
+                                {% elif q.gate_key == 'smoke_test' %}<span x-text="t('uji asap setelah deploy','the post-deploy smoke test')"></span>
+                                {% elif q.gate_key == 'claims_gate' %}<span x-text="t('gerbang klaim','the claims gate')"></span>
+                                {% elif q.gate_key == 'perf_gate' %}<span x-text="t('gerbang kinerja','the performance gate')"></span>
+                                {% else %}<span x-text="t('tidak diketahui','unknown')"></span>
+                                {% endif %}
+                            </span>
+                            {% if q.gate %}<code class="block font-mono text-xs text-surface-500 break-words mt-0.5">{{ q.gate }}</code>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Ditahan sejak','Held since')"></span>
+                        <span class="text-surface-700">
+                            <code class="font-mono text-xs">{{ q.refused_at or '—' }}</code>
+                            {% if q.age_seconds is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ q.age_seconds }}</strong> <span x-text="t('detik','seconds')"></span></span>{% endif %}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-surface-200">
+                    {% if status.request_pending or status.release_file_present %}
+                    <p class="text-xs text-emerald-700" x-text="t('Permintaan rilis sudah menunggu — runner akan menghormatinya pada tick berikutnya (tiap dua menit).','A release request is already waiting — the runner honours it on the next tick (every two minutes).')"></p>
+                    {% elif status.request_dir_writable is none %}
+                    <p class="text-xs text-amber-700" x-text="t('Belum bisa dirilis dari sini: direktori permintaan belum ada, yang berarti installer belum pernah dijalankan di server ini. Jalankan install-auto-deploy.sh, atau dari shell: touch /etc/scangrade-deploy.release.','This cannot release from here yet: the request directory does not exist, which means the installer has never been run on this server. Run install-auto-deploy.sh, or from a shell: touch /etc/scangrade-deploy.release.')"></p>
+                    {% elif not status.request_dir_writable %}
+                    <p class="text-xs text-rose-700" x-text="t('Belum bisa dirilis dari sini: direktori permintaan tidak boleh ditulis oleh proses aplikasi.','This cannot release from here: the request directory is not writable by the app process.')"></p>
+                    {% else %}
+                    <form method="POST" action="/super-admin/deploy-status/release">
+                        <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-xl font-bold text-sm transition shadow-lg shadow-primary-600/20">
+                            <i class="fas fa-rotate-right mr-1"></i>
+                            <span x-text="t('Rilis sekali (satu percobaan)','Release once (one attempt)')"></span>
+                        </button>
+                        <span class="block text-xs text-surface-500 mt-2" x-text="t('Sama dengan touch /etc/scangrade-deploy.release dari shell — satu percobaan, lalu berkasnya dikonsumsi.','The same as touch /etc/scangrade-deploy.release from a shell — one attempt, then the file is consumed.')"></span>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                    <span class="text-surface-500" x-text="t('Catatan karantina','Quarantine record')"></span>
+                    <code class="font-mono text-surface-500 break-all">{{ status.quarantine_file }}</code>
+                </div>
             </div>
         </div>
     </div>
