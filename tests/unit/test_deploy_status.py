@@ -194,6 +194,26 @@ class TestWhatIsInstalled:
         assert state["kind"] == "copy"
         assert state["reason_key"] == "unrendered"
 
+    def test_a_copy_of_the_runner_that_mentions_the_placeholder_is_still_a_copy(self, tmp_path):
+        """The reader keys on the placeholder's *assignment*, not the bare token.
+
+        `deploy/scangrade-deploy.sh` names `@REPO@` itself while re-rendering the
+        launcher from the checkout, and a bare-token test read a copy of the runner as
+        an *unrendered launcher* — returning before the byte comparison this page
+        exists to give, so a drifted copy was reported as a different problem.
+        """
+        repo = checkout(tmp_path)
+        runner = (ROOT / "deploy/scangrade-deploy.sh").read_text(encoding="utf-8")
+        assert status.PLACEHOLDER in runner, (
+            "the runner no longer mentions the placeholder, so this fixture has stopped "
+            "reproducing the shape that caught the defect — look for the token's new "
+            "home before relaxing this test")
+        state = state_of(tmp_path, repo, "scangrade-deploy", runner)
+        assert state["kind"] == "copy", "a copy of the runner was read as a launcher"
+        assert state["reason_key"] == "drifted"
+        assert state["differs_from_checkout"] is True, (
+            "the reading returned before comparing bytes, which is the defect")
+
     def test_a_launcher_with_no_repo_line_is_reported(self, tmp_path):
         """A launcher-shaped file whose REPO= was stripped cannot find anything."""
         repo = checkout(tmp_path)
@@ -842,3 +862,427 @@ class TestThePage:
         assert text.count("x-text=\"t('") >= 20
         assert "{% set content_lang" not in text, (
             "a page that can switch must not pin its own document language")
+
+
+
+def template_gate_keys() -> set[str]:
+    """The gate names the quarantine card can say in either language."""
+    return set(re.findall(r"q\.gate_key == '([a-z_]+)'",
+                          TEMPLATE.read_text(encoding="utf-8")))
+
+
+def template_release_keys() -> set[str]:
+    """The outcomes a one-click release can report."""
+    return set(re.findall(r"released == '([a-z_]+)'",
+                          TEMPLATE.read_text(encoding="utf-8")))
+
+
+def template_quarantine_reason_keys() -> set[str]:
+    """Why the quarantine record itself could not be read."""
+    return set(re.findall(r"q\.reason_key == '([a-z_]+)'",
+                          TEMPLATE.read_text(encoding="utf-8")))
+
+# ── the release a gate is holding ────────────────────────────────────────────
+#
+# The quarantine is the deploy failure with no symptom on any other page: the
+# previous release serves, nothing changes on the site, and the record is three
+# lines in a file on the box. `/deploy-status` already answers "is the runner the
+# checkout's own"; these hold the second question an operator asks when nothing has
+# deployed for an hour — *which* commit is held, by *which* gate, since *when* —
+# and the one-click answer to it.
+#
+# Two of them are relations rather than facts about one side, because the defect
+# they exist for is drift *between* two sides: the page has to write where the
+# runner looks, and every gate the runner can record has to be a gate the page can
+# name in the reader's language. A test of either side alone would pass while the
+# feature did nothing.
+
+FAIL_REASON_LITERAL = re.compile(r'FAIL_REASON="([^"$]*)"')
+
+
+def runner_fail_reasons() -> set[str]:
+    """Every gate sentence `deploy/scangrade-deploy.sh` records.
+
+    Literals only: the `$THEME_RC` in `theme gate (exit $THEME_RC)` is the runner's
+    own variable, and `FAIL_REASON=""` is the reset before each gate rather than a
+    reason — a `$` or a blank is a template, not something a gate ever writes.
+    """
+    text = RUNNER.read_text(encoding="utf-8")
+    return {m.strip() for m in FAIL_REASON_LITERAL.findall(text) if m.strip()}
+
+
+def runner_constant(name: str) -> str | None:
+    """The value of a top-level assignment in the runner, e.g. `REQUEST_DIR`."""
+    match = re.search(rf'^{name}="([^"\n]*)"', RUNNER.read_text(encoding="utf-8"), re.M)
+    return match.group(1) if match else None
+
+
+def as_path(value: str) -> str:
+    """Compare paths by *path*, not by the separator this OS happens to use.
+
+    The strings describe a Linux box; a test running on Windows renders the same
+    `Path` with backslashes. Comparing the raw strings would fail on the shape of
+    the test machine rather than on the thing the assertion is about.
+    """
+    return value.replace("\\", "/")
+
+
+def resolved_runner_path(name: str) -> str | None:
+    """A runner path with its own `$STATE_DIR` substituted.
+
+    The runner spells its paths relative to that variable (`$STATE_DIR/requests`),
+    so comparing the strings as written would fail on the spelling rather than on
+    the path — and it is the *path* that has to agree with the page's default.
+    """
+    value = runner_constant(name)
+    if value is None:
+        return None
+    known = {n: runner_constant(n)
+             for n in ("STATE_DIR", "REQUEST_DIR", "RELEASE_REQUEST")}
+    # Substitute until nothing moves: the runner spells one path in terms of
+    # another (`RELEASE_REQUEST="$REQUEST_DIR/release"`, `REQUEST_DIR` in terms of
+    # `$STATE_DIR`), so a single pass leaves `$STATE_DIR` sitting in the answer.
+    for _ in range(len(known) + 1):
+        before = value
+        for var, raw in known.items():
+            if raw:
+                value = value.replace("${" + var + "}", raw).replace("$" + var, raw)
+        if value == before:
+            break
+    return value
+
+
+def runner_function(name: str) -> str:
+    text = RUNNER.read_text(encoding="utf-8")
+    start = text.index(f"{name}() {{")
+    return text[start:text.index("\n}", start) + 2]
+
+
+def held_report(tmp_path: Path, *, repo: Path | None = None, sha: str = "d" * 40,
+                since: str = "2026-09-19T04:44:23+07:00",
+                gate: str = "perf gate (slower than the last release that passed)"):
+    """A box holding one commit, and nothing else that needs explaining."""
+    record = tmp_path / "quarantined"
+    record.write_text(f"{sha}\n{since}\n{gate}\n", encoding="utf-8")
+    return status.report(repo=str(repo or tmp_path), runner="/nonexistent",
+                         snapshot_runner="/nonexistent",
+                         pause_file=str(tmp_path / "no-pause"),
+                         quarantine_file=str(record),
+                         request_dir=str(tmp_path / "requests"),
+                         release_request=str(tmp_path / "requests" / "release"))
+
+
+class TestTheHeldRelease:
+    def test_the_record_is_read_from_the_runner_s_own_file(self, tmp_path):
+        """Three lines, written by the runner: sha, time, gate.
+
+        Read rather than re-derived, so the page cannot disagree with the box about
+        which commit is held.
+        """
+        report = held_report(tmp_path)
+        held = report["quarantine"]
+        assert held["held"] is True
+        assert held["sha"] == "d" * 40
+        assert held["short"] == "d" * 7, "the page shows a prefix; the record holds the sha"
+        assert held["refused_at"] == "2026-09-19T04:44:23+07:00"
+        assert held["gate"] == "perf gate (slower than the last release that passed)"
+        assert held["gate_key"] == "perf_gate"
+        assert held["age_seconds"] is not None and held["age_seconds"] >= 0
+
+    def test_no_record_is_nothing_held_and_not_a_reason(self, tmp_path):
+        """\"Nothing is held\" has its own sentence, so it is not a reason key."""
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"),
+                               quarantine_file=str(tmp_path / "absent"),
+                               request_dir=str(tmp_path / "requests"))
+        held = report["quarantine"]
+        assert held["held"] is False and held["reason_key"] is None
+
+    def test_a_record_that_cannot_be_read_is_not_reported_as_nothing_held(self, tmp_path):
+        """A blank here reads as \"no release is stuck\", which is the one wrong
+        answer that looks exactly like the right one."""
+        unreadable = tmp_path / "a-directory"
+        unreadable.mkdir()
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"),
+                               quarantine_file=str(unreadable),
+                               request_dir=str(tmp_path / "requests"))
+        held = report["quarantine"]
+        assert held["held"] is False
+        assert held["reason_key"] == "unreadable"
+        assert held["detail"], "the reason it could not be read has to travel"
+
+    def test_a_malformed_record_is_reported_rather_than_ignored(self, tmp_path):
+        record = tmp_path / "quarantined"
+        record.write_text("nothing like a sha\n", encoding="utf-8")
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"),
+                               quarantine_file=str(record),
+                               request_dir=str(tmp_path / "requests"))
+        assert report["quarantine"]["reason_key"] == "malformed"
+        assert report["quarantine"]["held"] is False
+
+    @needs_git
+    def test_the_held_commit_s_subject_comes_from_the_checkout(self, tmp_path):
+        """So the operator recognises the release they are releasing."""
+        repo = checkout(tmp_path)
+        sha = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        report = held_report(tmp_path, repo=repo, sha=sha)
+        assert report["quarantine"]["subject"], (
+            "a sha with no subject makes the operator open a shell to know what "
+            "they are releasing")
+
+    def test_a_commit_the_checkout_does_not_know_is_still_reported(self, tmp_path):
+        """The rollback moves HEAD, so the commit is in the object database rather
+        than on a branch — and a subject that cannot be found is an absent field,
+        never an absent *record*."""
+        report = held_report(tmp_path, sha="9" * 40)
+        assert report["quarantine"]["held"] is True
+        assert report["quarantine"]["subject"] is None
+
+
+class TestTheGateIsNamed:
+    def test_every_gate_the_runner_records_is_one_the_page_can_name(self):
+        """The relation that makes the card trustworthy.
+
+        A gate added to the runner reads as \"unknown\" here — the runner's own
+        words still shown, but the one sentence an operator skims is missing. This
+        is what fails first.
+        """
+        reasons = runner_fail_reasons()
+        assert reasons, "no FAIL_REASON literals found — did the runner change shape?"
+        unknown = {r for r in reasons if status.gate_key(r) == status.GATE_UNKNOWN}
+        assert not unknown, (
+            "these gates have no name on the page, so the card would say \"unknown\": "
+            f"{sorted(unknown)}")
+
+    def test_the_runner_s_own_default_is_the_unknown_bucket(self):
+        """`${FAIL_REASON:-unknown gate}` is what a future gate gets if it forgets
+        to name itself; it must not read as a gate nobody has heard of."""
+        assert status.gate_key("unknown gate") == status.GATE_UNKNOWN
+        assert status.gate_key("") == status.GATE_UNKNOWN
+        assert status.gate_key(None) == status.GATE_UNKNOWN
+
+    def test_a_gate_the_page_does_not_know_still_shows_the_runner_s_words(self, tmp_path):
+        """Classifying is for the sentence, never for the evidence."""
+        report = held_report(tmp_path, gate="a gate from a newer runner (exit 3)")
+        held = report["quarantine"]
+        assert held["gate_key"] == status.GATE_UNKNOWN
+        assert held["gate"] == "a gate from a newer runner (exit 3)"
+
+
+class TestTheReleaseRequest:
+    def test_the_page_writes_where_the_runner_looks(self):
+        """The whole feature is one path agreeing with another.
+
+        The runner spells its paths relative to `$STATE_DIR` and the page has them
+        absolute, so the comparison substitutes rather than matching the text: the
+        *path* is what has to agree, and the state dir is checked first because a
+        substitution from the wrong base would agree by accident.
+        """
+        assert runner_constant("STATE_DIR") == status.DEFAULT_STATE_DIR, (
+            "the runner keeps its state somewhere else than the page looks")
+        assert as_path(resolved_runner_path("REQUEST_DIR") or "") == \
+            status.DEFAULT_REQUEST_DIR, (
+            "the runner's request directory and the page's have drifted apart, so "
+            "the button would write a file nothing reads")
+        assert as_path(resolved_runner_path("RELEASE_REQUEST") or "") == \
+            status.DEFAULT_REQUEST_DIR + "/release"
+
+    def test_the_page_s_defaults_land_on_the_runner_s_paths(self, tmp_path):
+        """The same relation from the page's side, through `report()`."""
+        # No path overrides here on purpose: the assertion *is* about the defaults.
+        # Reading an absent `/var/lib/...` is harmless wherever the suite runs.
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"))
+        assert as_path(report["request_path"]) == \
+            status.DEFAULT_REQUEST_DIR + "/release"
+        assert as_path(report["quarantine_file"]) == \
+            status.DEFAULT_STATE_DIR + "/quarantined"
+
+    def test_nothing_is_written_when_nothing_is_held(self, tmp_path):
+        """A request that outlived its quarantine would release the *next* refusal.
+
+        That is the standing override the runner's own design refuses to have, so
+        the answer is \"there is nothing to release\" — not a file waiting for
+        something to release.
+        """
+        requests = tmp_path / "requests"
+        requests.mkdir()
+        request = requests / "release"
+        result = status.request_release(
+            request_file=str(request),
+            quarantine_file=str(tmp_path / "no-record"))
+        assert result["key"] == status.RELEASE_NOTHING_HELD
+        assert result["written"] is False
+        assert not request.exists(), (
+            "a request was left behind with nothing held — it would release the "
+            "next commit a gate refuses, and nobody asked for that")
+
+    def test_a_missing_request_dir_is_its_own_answer(self, tmp_path):
+        """`dir_missing` is not `not_writable`: one needs the installer run once,
+        the other needs its permissions looked at."""
+        record = tmp_path / "quarantined"
+        record.write_text("e" * 40 + "\n2026-09-19T04:44:23+07:00\ntheme gate (exit 3)\n",
+                          encoding="utf-8")
+        result = status.request_release(
+            request_file=str(tmp_path / "not-there" / "release"),
+            quarantine_file=str(record))
+        assert result["key"] == status.RELEASE_DIR_MISSING
+        assert result["written"] is False
+        assert (tmp_path / "not-there").exists() is False, (
+            "the app must not create the runner's state directory itself")
+
+    def test_a_write_that_is_refused_is_its_own_answer(self, tmp_path, monkeypatch):
+        record = tmp_path / "quarantined"
+        record.write_text("f" * 40 + "\n2026-09-19T04:44:23+07:00\ntheme gate (exit 3)\n",
+                          encoding="utf-8")
+        requests = tmp_path / "requests"
+        requests.mkdir()
+
+        def refuse(self, *args, **kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(type(requests), "write_text", refuse)
+        result = status.request_release(request_file=str(requests / "release"),
+                                        quarantine_file=str(record))
+        assert result["key"] == status.RELEASE_NOT_WRITABLE
+        assert result["written"] is False
+        assert result["detail"], "why it was refused has to travel with the answer"
+
+    def test_a_written_request_names_the_held_commit(self, tmp_path):
+        record = tmp_path / "quarantined"
+        sha = "c" * 40
+        record.write_text(f"{sha}\n2026-09-19T04:44:23+07:00\nsmoke test (exit 1)\n",
+                          encoding="utf-8")
+        requests = tmp_path / "requests"
+        requests.mkdir()
+        result = status.request_release(request_file=str(requests / "release"),
+                                        quarantine_file=str(record))
+        assert result["key"] == status.RELEASE_WRITTEN
+        assert result["written"] is True and result["held"] == sha
+        body = (requests / "release").read_text(encoding="utf-8")
+        assert sha in body, "for a reader coming along later, the file names the commit"
+
+    def test_the_runner_reads_only_the_existence_of_the_request(self):
+        """One bit wide, on purpose.
+
+        This is the only channel a web request has to a script that runs as root;
+        if the runner read the file's contents it would be a way to put something
+        into root's hands from a page.
+        """
+        block = runner_function("quarantine_honour_release")
+        assert "RELEASE_REQUEST" in block, "the runner never looks at the request"
+        for reader in (r"\bcat\b", r"\bread\b", r"\$\(<", r"< *\""):
+            assert not re.search(reader, block), (
+                "the honour function reads the request's contents; only its "
+                f"existence may matter (matched {reader!r})")
+
+    def test_the_installer_creates_the_directory_the_app_writes_to(self):
+        """Ownership is the permission model here: the app runs as the service
+        user, so that user has to own the directory it writes into."""
+        installer = (ROOT / "deploy" / "install-auto-deploy.sh").read_text(encoding="utf-8")
+        assert "mkdir -p /var/lib/scangrade-deploy/requests" in installer
+        assert 'chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/requests' in installer
+        assert "chmod 0750 /var/lib/scangrade-deploy/requests" in installer, (
+            "a world-writable request directory would let any local user ask for a "
+            "release")
+
+
+class TestThePageNamesTheQuarantine:
+    def test_every_gate_name_has_a_sentence_in_both_languages(self):
+        assert template_gate_keys() == status.GATE_KEYS, (
+            f"missing from the page: {sorted(status.GATE_KEYS - template_gate_keys())}; "
+            f"invented by the page: {sorted(template_gate_keys() - status.GATE_KEYS)}")
+
+    def test_every_release_answer_has_a_sentence_in_both_languages(self):
+        assert template_release_keys() == status.RELEASE_KEYS, (
+            f"missing from the page: {sorted(status.RELEASE_KEYS - template_release_keys())}; "
+            f"invented by the page: {sorted(template_release_keys() - status.RELEASE_KEYS)}")
+
+    def test_every_quarantine_reading_has_a_sentence(self):
+        assert template_quarantine_reason_keys() == status.QUARANTINE_REASON_KEYS
+
+    def test_the_button_is_a_real_post_form_the_csrf_injection_will_find(self, app, tmp_path):
+        """`base.html` injects the token into `form[method="POST"]`, and the route
+        is POST-only, so the button has to be a form rather than a fetch."""
+        report = held_report(tmp_path)
+        report["request_dir_writable"] = True
+        html = render_status(app, report)
+        assert re.search(r'<form method="POST" action="/super-admin/deploy-status/release"',
+                         html), "no POST form for the release"
+        assert "Release once (one attempt)" in html
+
+    def test_the_button_is_withheld_when_the_request_cannot_be_written(self, app, tmp_path):
+        """The page knows the answer already, so it does not offer a control that
+        cannot work — it says what to do instead, and both remedies are named."""
+        for writable, expected in ((None, "install-auto-deploy.sh"),
+                                   (False, "not writable by the app process")):
+            report = held_report(tmp_path)
+            report["request_dir_writable"] = writable
+            html = render_status(app, report)
+            assert "deploy-status/release" not in html, (
+                f"the release button was offered with writable={writable!r}")
+            assert expected in html, expected
+
+    def test_a_pending_request_does_not_offer_a_second_one(self, app, tmp_path):
+        report = held_report(tmp_path)
+        report["request_dir_writable"] = True
+        report["request_pending"] = True
+        html = render_status(app, report)
+        assert "deploy-status/release" not in html
+        assert "already waiting" in html
+
+    def test_the_held_commit_gate_and_time_are_on_the_page(self, app, tmp_path):
+        report = held_report(tmp_path)
+        html = render_status(app, report)
+        assert report["quarantine"]["short"] in html
+        assert "perf gate (slower than the last release that passed)" in html, (
+            "the runner's own words are the evidence for the sentence beside them")
+        assert report["quarantine"]["refused_at"] in html
+        assert "the performance gate" in html, "the gate name is not in the reader's language"
+
+    def test_the_cold_state_says_so_rather_than_showing_a_blank(self, app, tmp_path):
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"),
+                               quarantine_file=str(tmp_path / "absent"),
+                               request_dir=str(tmp_path / "requests"))
+        html = render_status(app, report)
+        assert "No Held Release" in html
+        assert "No commit is held" in html
+        assert "deploy-status/release" not in html
+
+
+class TestTheReleaseRoute:
+    _SOURCE = (ROOT / "app" / "routes" / "super_admin.py").read_text(encoding="utf-8")
+
+    def test_it_is_a_post_and_super_admin_only(self):
+        assert re.search(
+            r'@super_bp\.route\("/deploy-status/release", methods=\["POST"\]\)\s*\n@_sa_required',
+            self._SOURCE), (
+            "the release route is not a guarded POST — a GET would let a link or a "
+            "prefetch release a quarantine")
+
+    def test_it_answers_with_a_key_rather_than_a_sentence(self):
+        assert re.search(r"\?released=\{result\['key'\]\}", self._SOURCE), (
+            "the outcome has to travel as a key; a sentence built here is copy the "
+            "language toggle and the i18n sweep cannot reach")
+
+    def test_it_drops_the_cached_report_before_redirecting(self):
+        """Otherwise the operator lands on a page showing the reading from *before*
+        the click, which reads as \"the button did nothing\"."""
+        block = self._SOURCE.split("def deploy_status_release", 1)[1].split("\n@", 1)[0]
+        invalidate_at = block.index('invalidate("deploy_status:report")')
+        redirect_at = block.index("return redirect(")
+        assert invalidate_at < redirect_at, "the stale report is still cached"
+
+    def test_it_is_audited(self):
+        block = self._SOURCE.split("def deploy_status_release", 1)[1].split("\n@", 1)[0]
+        assert "log_activity(" in block, (
+            "releasing a quarantined release is a consequential act on the box and "
+            "leaves no trace otherwise")

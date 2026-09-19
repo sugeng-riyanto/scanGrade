@@ -352,6 +352,13 @@ else
 # so latency tracks per-request cost, which is the thing a release can change.
 # The advertised rung stays the claims gate's job (Gate 5).
 #
+# It compares three things, because they fail independently: response time (the
+# symptom a student feels), the bytes the heaviest page sends (what a phone on a
+# school connection pays), and the Supabase round-trips a render spends -- the last
+# read from the app's own X-Supabase-Roundtrips header, which is the *cause* the
+# other two only reflect. A page can stay just as fast while gaining three queries
+# or 200 KB of script, and that is exactly the release this refuses.
+#
 # It must be HTTPS: production sets SESSION_COOKIE_SECURE, so over plain HTTP the
 # session cookie is dropped and every probe would look like a failed login.
 PERF_BASE_URL="$BASE_DEFAULT"
@@ -363,6 +370,15 @@ PERF_ROSTER="$REPO/.freebuff/lt_roster.json"
 PERF_SESSIONS="20"
 PERF_TEACHERS="2"
 PERF_DURATION="20"
+
+# How much bigger the heaviest page may get, and how many more Supabase queries a
+# render may spend, before the compared release is refused. Both also carry a small
+# absolute grace (8 KiB and one query) so a list that legitimately got longer is not
+# mistaken for a leak. Read from the environment by perf_gate.py, and passed through
+# by scangrade-deploy.sh -- which is the part that got missed once before, when the
+# claims gate shipped reading a conf nobody gave it.
+PERF_BYTES_SLACK="1.25"
+PERF_ROUNDTRIPS_SLACK="1.25"
 
 # The reference measurement. Written only when a release PASSES, so a slow
 # release cannot become the thing the next one is judged against. Delete it, or
@@ -386,6 +402,19 @@ fi
 mkdir -p /var/lib/scangrade-deploy/perf
 chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/perf
 chmod 0750 /var/lib/scangrade-deploy/perf
+# The state dir holds the last successful deploy and the quarantine record. The
+# deploy creates it when it needs it; creating it here too means the quarantine
+# file always has a home, even on a box whose first release is refused.
+mkdir -p /var/lib/scangrade-deploy
+chmod 0750 /var/lib/scangrade-deploy
+# The one directory in here the *app* may write. It is how /super-admin/deploy-status
+# asks for the one-shot release without a shell: the runner reads the existence of
+# `requests/release` exactly as it reads /etc/scangrade-deploy.release. Owned by
+# the service user because the app runs as that user, 0750 so no other local user
+# can ask for a release, and the runner removes the file when it honours it.
+mkdir -p /var/lib/scangrade-deploy/requests
+chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/requests
+chmod 0750 /var/lib/scangrade-deploy/requests
 
 say "Checking the performance gate"
 # The conf is read and passed the same way scangrade-deploy reads it, so "the gate
@@ -478,12 +507,27 @@ echo "   $SERVICE is $(systemctl is-active $SERVICE) on 127.0.0.1:8000"
 echo "   deployed commit: $(as_owner git -C "$REPO" rev-parse --short HEAD)"
 echo "   runner        : $DEPLOY_BIN execs this checkout, so a fix to the deploy"
 echo "                   script is live on the next tick — no install step needed"
+echo "                   Every successful release also re-renders both installed"
+echo "                   launchers from deploy/entrypoint.sh, so an installed launcher"
+echo "                   cannot lag a change to that template. This one root run is"
+echo "                   still what installs them in the first place (Gate 0 refuses a"
+echo "                   drifted COPY, and a file that is not the checkout's cannot"
+echo "                   apply the checkout's logic to itself)."
 echo
 echo "   watch deploys : journalctl -u scangrade-deploy.service -f"
 echo "   next tick     : systemctl list-timers scangrade-deploy.timer"
 echo "   test it live  : push a commit to main, then watch the journal above"
 echo "   deploy now    : systemctl start scangrade-deploy.service"
 echo "   freeze/resume : touch /etc/scangrade-deploy.pause   (rm to resume)"
+echo "   quarantine    : a commit a gate refuses is NOT retried on later ticks,"
+echo "                   so a bad release cannot be re-pulled every two minutes."
+echo "                   /var/lib/scangrade-deploy/quarantined = sha, time, gate."
+echo "                   A new commit on main lifts it by itself; to retry the"
+echo "                   exact commit (busy box, rotated password):"
+echo "                       touch /etc/scangrade-deploy.release   (one attempt)"
+echo "                   or, without a shell, /super-admin/deploy-status has the"
+echo "                   same button — it writes var-lib/scangrade-deploy/requests/"
+echo "                   release, which the runner consumes the same way."
 echo "   switch it off : systemctl disable --now scangrade-deploy.timer"
 echo
 echo "   Releases that change supabase/migrations get a data snapshot first, and"

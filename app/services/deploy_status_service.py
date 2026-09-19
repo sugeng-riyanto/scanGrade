@@ -94,6 +94,14 @@ DEFAULT_RUNNER = "/usr/local/bin/scangrade-deploy"
 DEFAULT_SNAPSHOT_RUNNER = "/usr/local/bin/scangrade-db-snapshot"
 DEFAULT_PAUSE_FILE = "/etc/scangrade-deploy.pause"
 
+#: The runner's own quarantine record and the two one-shot release files, as
+#: `deploy/scangrade-deploy.sh` names them. Overridable for the same reason the
+#: paths above are: the checks point them at a temporary tree.
+DEFAULT_STATE_DIR = "/var/lib/scangrade-deploy"
+DEFAULT_QUARANTINE_FILE = DEFAULT_STATE_DIR + "/quarantined"
+DEFAULT_RELEASE_FILE = "/etc/scangrade-deploy.release"
+DEFAULT_REQUEST_DIR = DEFAULT_STATE_DIR + "/requests"
+
 #: Where git lives when the service user's PATH does not carry it. The unit runs
 #: the app without a login shell, so `which` is the first guess and these are the
 #: fallbacks rather than the other way round.
@@ -102,6 +110,13 @@ GIT_FALLBACKS = ("/usr/bin/git", "/bin/git", "/usr/local/bin/git")
 #: `deploy/entrypoint.sh`'s signature — three parts, all of which must hold for
 #: the installed file to be the launcher rather than something that resembles one.
 PLACEHOLDER = "@REPO@"
+#: The unrendered launcher is recognised by its *assignment*, not by the bare token.
+#: `deploy/scangrade-deploy.sh` names `@REPO@` three times while re-rendering the
+#: launcher from the checkout, so a bare-token test read a **copy of the runner** as
+#: an unrendered launcher and returned before it ever compared the bytes — the one
+#: reading this page exists to give. A file that merely mentions the token is not an
+#: unrendered launcher; a file that assigns it is.
+UNRENDERED = f'REPO="{PLACEHOLDER}"'
 _DISPATCH = 'case "$(basename "$0")" in'
 _EXEC = re.compile(r'^\s*exec bash "\$TARGET"', re.M)
 _RENDERED_REPO = re.compile(r'^REPO="([^"]*)"', re.M)
@@ -143,6 +158,197 @@ DEPLOY_DIR = "deploy"
 ORIGIN_CURRENT, ORIGIN_NAMED, ORIGIN_UNMATCHED, ORIGIN_UNREADABLE = (
     "current", "named", "unmatched", "unreadable")
 ORIGIN_KEYS = frozenset({ORIGIN_CURRENT, ORIGIN_NAMED, ORIGIN_UNMATCHED, ORIGIN_UNREADABLE})
+
+
+# ── the commit a gate refused ────────────────────────────────────────────────
+#
+# The runner quarantines a refused commit so the next tick does not walk into the
+# same gate — see `deploy/scangrade-deploy.sh`. It is correct, and it is invisible:
+# the *previous* release serves throughout, no page changes, and the only record
+# is a three-line file on the box. So "why has nothing deployed for an hour" is a
+# question that could only be answered with a shell — the same gap this page
+# already closes for the runner itself, and the same answer: read it and say it.
+
+#: `deploy/scangrade-deploy.sh` sets `FAIL_REASON` to one of these before it
+#: quarantines a release. The sentence goes on the page as data — it is the
+#: runner's own words — but "which gate refused this" is something an operator
+#: reads, so it is *also* classified into a key the template can say in either
+#: language. `tests/unit/test_deploy_status.py` lifts every `FAIL_REASON=` out of
+#: the runner and fails if one of them lands on a key with no sentence, so the two
+#: cannot drift apart.
+GATE_UNKNOWN = "unknown"
+GATE_KEYS = frozenset({
+    "python_compileall",
+    "app_did_not_construct",
+    "app_did_not_come_up_after_the_reload",
+    "theme_gate",
+    "smoke_test",
+    "claims_gate",
+    "perf_gate",
+})
+
+#: Why the quarantine record itself could not be read. `held` carries no key of
+#: its own — "a commit is held" and "no commit is held" are the two ordinary
+#: answers, and the second one has a sentence the same way the first does.
+QUARANTINE_REASON_KEYS = frozenset({"unreadable", "malformed"})
+
+#: What a release request can answer.
+RELEASE_WRITTEN = "written"
+RELEASE_NOTHING_HELD = "nothing_held"
+RELEASE_DIR_MISSING = "dir_missing"
+RELEASE_NOT_WRITABLE = "not_writable"
+RELEASE_FAILED = "failed"
+RELEASE_KEYS = frozenset({RELEASE_WRITTEN, RELEASE_NOTHING_HELD,
+                          RELEASE_DIR_MISSING, RELEASE_NOT_WRITABLE, RELEASE_FAILED})
+
+
+def gate_key(reason: str | None) -> str:
+    """Which gate refused this, as a stable key rather than a sentence.
+
+    The runner writes `theme gate (exit 3)`, `perf gate (slower than the last
+    release that passed)`, and so on. Everything from the first `(` is its own
+    explanation and is shown as it stands; the name in front of it is the part
+    that has to be said in the reader's language.
+    """
+    if not reason:
+        return GATE_UNKNOWN
+    head = reason.split("(", 1)[0]
+    slug = re.sub(r"[^a-z0-9]+", "_", head.strip().lower()).strip("_")
+    return slug if slug in GATE_KEYS else GATE_UNKNOWN
+
+
+def _commit_subject(repo: pathlib.Path, sha: str) -> str | None:
+    """What the refused commit says it does, from this checkout's own history.
+
+    Read-only, and it may simply be absent: a rollback moves HEAD, so the refused
+    commit is in the object database rather than on a branch. Not being able to say
+    is one of the answers here, never a blank that reads as "nothing".
+    """
+    git = _git()
+    if git is None:
+        return None
+    rc, line = _git_out(git, repo, "log", "-1", "--format=%s", sha)
+    return line if rc == 0 and line else None
+
+
+def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
+                     now: _dt.datetime) -> dict:
+    """The commit the runner is holding, by which gate, since when.
+
+    The runner writes three lines — the full sha, the time it was refused, and the
+    gate's own sentence — so this reads the runner's record instead of keeping a
+    second copy of the same fact, and a page cannot disagree with the box.
+
+    Anything unreadable or malformed is *reported*, not treated as "nothing held":
+    a blank here would read as "no release is stuck", which is the one wrong answer
+    that looks exactly like the right one.
+    """
+    state: dict = {
+        "path": str(path), "held": False, "reason_key": None, "detail": None,
+        "sha": None, "short": None, "subject": None, "refused_at": None,
+        "age_seconds": None, "gate": None, "gate_key": None,
+    }
+    text, detail = _read(path)
+    if text is None:
+        if detail != "absent":
+            state["reason_key"] = "unreadable"
+            state["detail"] = detail
+        return state
+
+    lines = text.splitlines()
+    sha = lines[0].strip() if lines else ""
+    when = lines[1].strip() if len(lines) > 1 else ""
+    reason = lines[2].strip() if len(lines) > 2 else ""
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        state["reason_key"] = "malformed"
+        state["detail"] = sha or None
+        return state
+
+    state["held"] = True
+    state["sha"] = sha.lower()
+    state["short"] = sha[:7]
+    state["refused_at"] = when or None
+    state["age_seconds"] = _age_seconds(when or None, now)
+    state["gate"] = reason or None
+    state["gate_key"] = gate_key(reason)
+    state["subject"] = _commit_subject(repo, sha)
+    return state
+
+
+def request_release(*, request_file=None, quarantine_file=None, repo=None,
+                    now: _dt.datetime | None = None) -> dict:
+    """Ask the runner, from the page, to retry the refused commit exactly once.
+
+    Why a file: this is the only channel a web request has to a script that runs as
+    root, and it is deliberately one bit wide. The runner reads whether
+    `requests/release` **exists** and ignores what is in it, so nothing a page can
+    write ever becomes something root executes.
+
+    Why nothing is written when no commit is held: a request that outlived its
+    quarantine would sit in that directory and release the *next* refusal — the
+    standing override the runner's own design refuses to have. So the honest answer
+    is "there is nothing to release", never a file waiting for something to release.
+    """
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    repo = pathlib.Path(repo or os.environ.get("SCANGRADE_REPO") or DEFAULT_REPO)
+    quarantine_file = pathlib.Path(
+        quarantine_file or os.environ.get("SCANGRADE_QUARANTINE_FILE")
+        or DEFAULT_QUARANTINE_FILE)
+    request_file = pathlib.Path(
+        request_file or os.environ.get("SCANGRADE_RELEASE_REQUEST")
+        or (DEFAULT_REQUEST_DIR + "/release"))
+
+    held = quarantine_state(quarantine_file, repo, now=now)
+    result = {"key": None, "written": False, "path": str(request_file),
+              "detail": None, "held": held["sha"], "gate": held["gate"]}
+
+    if not held["held"]:
+        result["key"] = RELEASE_NOTHING_HELD
+        return result
+    if not request_file.parent.is_dir():
+        result["key"] = RELEASE_DIR_MISSING
+        result["detail"] = str(request_file.parent)
+        return result
+
+    try:
+        request_file.write_text(
+            f"{held['sha']}\n{now.isoformat(timespec='seconds')}\n"
+            f"requested from /super-admin/deploy-status\n",
+            encoding="utf-8")
+    except PermissionError as exc:
+        result["key"] = RELEASE_NOT_WRITABLE
+        result["detail"] = str(exc)
+        return result
+    except OSError as exc:
+        result["key"] = RELEASE_FAILED
+        result["detail"] = f"{type(exc).__name__}: {exc}"
+        return result
+
+    result["key"] = RELEASE_WRITTEN
+    result["written"] = True
+    return result
+
+
+def _dir_writable(path: pathlib.Path) -> bool | None:
+    """Whether this process could drop a request here.
+
+    `None` is not "no": there is no directory, which needs the installer run once,
+    while `False` is a directory whose permissions need looking at. Two different
+    remedies, so they are two different answers.
+    """
+    try:
+        if not path.is_dir():
+            return None
+    except OSError:
+        return None
+    return os.access(path, os.W_OK)
+
+
+def _exists(path: pathlib.Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
 
 
 # ── running a command, read-only ─────────────────────────────────────────────
@@ -387,7 +593,7 @@ def runner_state(path: pathlib.Path, repo: pathlib.Path, *,
     state["installed_at"] = _mtime(path)
     state["sha256"] = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12]
 
-    is_launcher = (PLACEHOLDER not in text
+    is_launcher = (UNRENDERED not in text
                    and _DISPATCH in text
                    and bool(_EXEC.search(text)))
     rendered = _RENDERED_REPO.search(text)
@@ -426,7 +632,7 @@ def runner_state(path: pathlib.Path, repo: pathlib.Path, *,
             state["reason_key"] = "launcher_stale"
         return state
 
-    if PLACEHOLDER in text:
+    if UNRENDERED in text:
         state["kind"] = "copy"
         state["reason_key"] = "unrendered"
         return state
@@ -627,6 +833,7 @@ REASON_KEYS = frozenset({
 
 
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
+           quarantine_file=None, request_dir=None, release_request=None,
            now: _dt.datetime | None = None) -> dict:
     """Everything the page shows. Any single part may be `unknown` with a reason."""
     now = now or _dt.datetime.now(_dt.timezone.utc)
@@ -637,6 +844,14 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         or DEFAULT_SNAPSHOT_RUNNER)
     pause_file = pathlib.Path(
         pause_file or os.environ.get("SCANGRADE_PAUSE_FILE") or DEFAULT_PAUSE_FILE)
+    quarantine_file = pathlib.Path(
+        quarantine_file or os.environ.get("SCANGRADE_QUARANTINE_FILE")
+        or DEFAULT_QUARANTINE_FILE)
+    request_dir = pathlib.Path(
+        request_dir or os.environ.get("SCANGRADE_REQUEST_DIR") or DEFAULT_REQUEST_DIR)
+    release_request = pathlib.Path(
+        release_request or os.environ.get("SCANGRADE_RELEASE_REQUEST")
+        or str(request_dir / "release"))
 
     expect, expect_reason = expected_launcher(repo)
     main = runner_state(runner, repo, expect=expect)
@@ -658,6 +873,14 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "pause_file": str(pause_file),
         "launcher": expect_reason,
         "verdict": verdict(main, checkout, paused=paused),
+        "quarantine": quarantine_state(quarantine_file, repo, now=now),
+        "quarantine_file": str(quarantine_file),
+        "release_file": DEFAULT_RELEASE_FILE,
+        "release_file_present": _exists(pathlib.Path(DEFAULT_RELEASE_FILE)),
+        "request_dir": str(request_dir),
+        "request_path": str(release_request),
+        "request_pending": _exists(release_request),
+        "request_dir_writable": _dir_writable(request_dir),
     }
 
 

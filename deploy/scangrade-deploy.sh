@@ -16,6 +16,12 @@
 # An unattended deploy that only knows how to move forward is worse than no
 # automation at all.
 #
+# And a refused commit is *quarantined*: rolling back moves the checkout, not the
+# branch, so without that the next tick would fetch the same commit and fail the
+# same way every two minutes until somebody pushed a fix. See quarantine-logic
+# below — the tick after a refusal says why and does nothing until the branch
+# moves (or an operator touches /etc/scangrade-deploy.release).
+#
 # Log: journalctl -u scangrade-deploy.service
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -28,12 +34,239 @@ APP_PORT=8000
 LOCK="/run/scangrade-deploy.lock"
 PAUSE_FILE="/etc/scangrade-deploy.pause"
 STATE_DIR="/var/lib/scangrade-deploy"
+#: A commit a gate refused, recorded so the next tick does not walk into the
+#: same gate again; and the two one-shot files that override it. See
+#: quarantine-logic.
+QUARANTINE_FILE="$STATE_DIR/quarantined"
+RELEASE_FILE="/etc/scangrade-deploy.release"
+#: The same one-shot release, asked for from the app instead of a shell. The app
+#: runs as the service user and cannot write /etc, so the installer creates this
+#: directory owned by that user (mode 0750, so only it and root can reach it).
+#: A file in it means exactly what RELEASE_FILE means, and only its *existence*
+#: is read — nothing a web request can write is ever executed, so the request
+#: cannot carry a command.
+REQUEST_DIR="$STATE_DIR/requests"
+RELEASE_REQUEST="$REQUEST_DIR/release"
+#: Where the installer puts the two launchers it renders from
+#: `deploy/entrypoint.sh`. A successful release re-renders them from the checkout
+#: it just deployed, so the installed file cannot fall behind the repo — see
+#: refresh-launcher-logic.
+INSTALLED_BIN_DIR="/usr/local/bin"
+INSTALLED_RUNNER="$INSTALLED_BIN_DIR/scangrade-deploy"
+INSTALLED_SNAPSHOT="$INSTALLED_BIN_DIR/scangrade-db-snapshot"
 BACKUP_DIR="/var/backups/scangrade"
 BACKUP_KEEP=5
 SNAPSHOT_CMD="$REPO/deploy/db_snapshot.py"
 LOG_TAG="scangrade-deploy"
 
 log() { echo "[$(date '+%F %T')] $*"; }
+
+# ── Quarantine: a refused release is not retried forever ─────────────────────
+# quarantine-logic:start
+# The gates below roll a rejected release back to the previous commit. That is
+# right, and it is incomplete: the rollback moves the *checkout*, not
+# `origin/main`. So the next tick fetches the same commit, sees it is not what is
+# deployed, pulls it, and walks into the same gate — rejected, rolled back,
+# re-pulled, every two minutes, for as long as the bad commit sits on the branch.
+# The symptom is a box that reloads itself (and its Celery worker) forever while
+# the journal fills with the same failure, and the only way out is a human pushing
+# a fix. None of it is visible from a page: the previous release is serving
+# throughout.
+#
+# So a release that a *gate* rejects is quarantined by commit. A quarantined
+# commit is not retried; the next tick says so and exits. It comes back on its
+# own: the moment `origin/main` moves to another commit the quarantine is lifted,
+# because a new commit is a new release and the refused one is no longer the
+# question being asked.
+#
+# Two things deliberately do *not* quarantine, because they are properties of the
+# box rather than of the release, and retrying them is the correct behaviour:
+#
+#   * a failed fetch, or a snapshot that could not be taken — nothing has been
+#     merged at that point, and the script already says it will retry next tick;
+#   * a pip install that failed, which is usually the network.
+#
+# And one escape hatch, for the case where a gate was right about the box and
+# wrong about the release — a busy VPS that made the performance gate diverge, a
+# smoke password rotated without a commit. Touching this file releases the
+# quarantine for exactly one attempt and is then consumed:
+#
+#     touch /etc/scangrade-deploy.release
+#
+# It is the per-commit sibling of the pause file, not a replacement for it: the
+# pause file freezes *every* deploy and stays until removed, while this one
+# unfreezes a single commit and disappears on use.
+#
+# The super-admin deploy-status page asks for the same thing, and it cannot touch
+# /etc either — which is the point, not an obstacle. So the state directory
+# carries a second, weaker one: a directory the *service user* owns, where the
+# app drops a file whose existence is the request. Both are read the same way and
+# both are consumed by the attempt, so neither can become a standing override.
+
+quarantine_sha() {
+  [ -f "$QUARANTINE_FILE" ] || return 1
+  sed -n '1p' "$QUARANTINE_FILE" 2>/dev/null || return 1
+}
+
+quarantine_reason() {
+  [ -f "$QUARANTINE_FILE" ] || return 1
+  sed -n '3p' "$QUARANTINE_FILE" 2>/dev/null || return 1
+}
+
+# These read two globals rather than taking arguments, because the script takes
+# none — `test_deploy_script_takes_no_arguments` forbids a positional parameter
+# anywhere in this file, and it is right to: this is the only thing root runs
+# unattended. The globals can only ever name the one release under judgement
+# (`AFTER_FULL`, set once from origin/$BRANCH), which also removes any chance of
+# quarantining a commit other than the one a gate actually refused.
+
+# Record a refusal. Called only after a gate has judged a *merged* release, so a
+# transient failure earlier in the run can never freeze a good commit.
+quarantine_write() {
+  local reason="${FAIL_REASON:-unknown gate}"
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  printf '%s\n%s\n%s\n' "$AFTER_FULL" "$(date -Is)" "$reason" \
+    > "$QUARANTINE_FILE" 2>/dev/null || true
+  log "QUARANTINED ${AFTER:-?} ($reason) — it will not be retried"
+  log "    a new commit on $BRANCH lifts this by itself; to retry it as-is:"
+  log "        touch $RELEASE_FILE"
+}
+
+# One-shot explicit release. Returns 0 either way; it only reports.
+#
+# Either file buys the same single attempt: the root-owned one an operator makes
+# over ssh, and the request the deploy-status page makes. Both are removed here,
+# so an attempt costs its file and a second refusal quarantines again — a release
+# is never a standing permission for a commit a gate keeps refusing.
+quarantine_honour_release() {
+  local asked="" held="" path=""
+  for path in "$RELEASE_FILE" "$RELEASE_REQUEST"; do
+    [ -e "$path" ] || continue
+    asked="${asked:+$asked, }$path"
+  done
+  [ -n "$asked" ] || return 0
+  held=$(quarantine_sha) || held=""
+  if [ -n "$held" ]; then
+    log "explicit release requested ($asked) — clearing the quarantine on ${held:0:7}"
+  fi
+  rm -f "$QUARANTINE_FILE" "$RELEASE_FILE" "$RELEASE_REQUEST" 2>/dev/null || true
+  return 0
+}
+
+# 0 = this release may proceed; 1 = it is the quarantined commit, skip the tick.
+# The log is the whole point: "nothing deployed" has to say why, here, because
+# the journal is the only place an unattended box can be asked.
+quarantine_gate() {
+  local candidate="$AFTER_FULL" held="" reason=""
+  [ -n "$candidate" ] || return 0
+  held=$(quarantine_sha) || held=""
+  [ -n "$held" ] || return 0
+  if [ "$held" = "$candidate" ]; then
+    reason=$(quarantine_reason) || reason="unknown"
+    # One line, because this prints every two minutes until the branch moves.
+    # The full instructions were printed once, when the refusal was recorded —
+    # `journalctl` still has them, and a gate that fills the journal is a gate
+    # somebody turns off.
+    log "QUARANTINED ${AFTER:-?} ($reason) — not retried, so the box stops"
+    log "    re-pulling it: push a fix to $BRANCH, or touch $RELEASE_FILE"
+    return 1
+  fi
+  log "quarantine lifted: $BRANCH now points at ${candidate:0:7}, not the refused ${held:0:7}"
+  rm -f "$QUARANTINE_FILE" 2>/dev/null || true
+  return 0
+}
+# quarantine-logic:end
+
+# ── The installed launcher refreshes itself from the checkout ─────────────
+# refresh-launcher-logic:start
+# The two installed names are rendered from `deploy/entrypoint.sh`, and nothing
+# used to re-render them: a fix to that template sat in the repo while root kept
+# running the launcher of the day it was installed, and the only way to deliver it
+# was `install-auto-deploy.sh` by hand — the manual step automatic deployment
+# exists to remove. So a release that gets all the way to the end re-renders both
+# from the checkout it just deployed.
+#
+# What that heals with no root step: a launcher rendered from an older
+# `entrypoint.sh` (it still runs the checkout, so nothing is broken, but the
+# template's fix is not in effect — the deploy-status page calls it
+# `launcher_stale`), a missing launcher or snapshot command, and a copy that still
+# matches the checkout byte-for-byte — Gate 0 lets that one through precisely
+# because it is the same code.
+#
+# What it cannot heal, and why the installer still exists: a copy that has
+# *drifted*. That copy refuses with exit 14 before any gate can pass, and this runs
+# at the end of a release that passed, so no release ever reaches it. Nothing
+# inside a file that is not the checkout's can apply the checkout's logic — that is
+# the one step a file cannot take for itself.
+#
+# Three properties, and each one is why the code looks the way it does:
+#
+#   * **It never installs what it has not parsed.** The installed path is the only
+#     thing the timer runs; a half-written launcher is a box that cannot deploy at
+#     all, which is strictly worse than a stale one. So the render goes to a file
+#     beside the target, the placeholder check and `bash -n` both have to pass,
+#     and every failure leaves the old file exactly where it was.
+#   * **It is atomic.** The staged file is written in the target's own directory,
+#     so `mv` is a rename on one filesystem and no tick can observe a partial
+#     file — a copy through /tmp would cross filesystems and lose that.
+#   * **It is skipped when the bytes already match.** An unconditional write would
+#     raise the mtime on every release, and the page that reports the arrangement
+#     compares *content* on purpose (Gate 0 uses `cmp`), so a timestamp that moved
+#     without the content moving would be a signal that lies.
+#
+# It does not fail the release. The app is up and the smoke test passed; rolling
+# that back because a *launcher refresh* failed would trade a working site for a
+# bookkeeping fix, and the deploy-status page reports the arrangement either way.
+#
+# The target and its label arrive through globals rather than arguments, which is
+# the same choice the quarantine block makes: this script is the one thing root
+# runs unattended, and it must never read its own argv — a helper that took
+# parameters would have to (`test_deploy_script_takes_no_arguments`).
+refresh_launcher() {
+  local target="$LAUNCHER_TARGET" label="$LAUNCHER_LABEL" staged=""
+  [ -f "$REPO/deploy/entrypoint.sh" ] || return 0
+
+  staged="$(dirname "$target")/.$(basename "$target").new.$$"
+  if ! sed "s|@REPO@|$REPO|" "$REPO/deploy/entrypoint.sh" > "$staged" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    log "launcher refresh: could not render deploy/entrypoint.sh — $label left as it is"
+    return 0
+  fi
+  if grep -q '@REPO@' "$staged" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    log "launcher refresh: the render still holds @REPO@ — not installing an unrendered $label"
+    return 0
+  fi
+  if ! bash -n "$staged" 2>/dev/null; then
+    rm -f "$staged" 2>/dev/null || true
+    log "launcher refresh: the rendered $label does not parse — leaving the installed one alone"
+    return 0
+  fi
+  # Same bytes: nothing to do, and nothing to say on every tick.
+  if [ -f "$target" ] && cmp -s "$staged" "$target"; then
+    rm -f "$staged" 2>/dev/null || true
+    return 0
+  fi
+
+  chmod 0755 "$staged" 2>/dev/null || true
+  chown root:root "$staged" 2>/dev/null || true
+  if mv -f "$staged" "$target" 2>/dev/null; then
+    log "launcher refreshed: $label at $target now renders from $REPO"
+  else
+    rm -f "$staged" 2>/dev/null || true
+    log "launcher refresh: could not replace $target — $label left as it is"
+  fi
+  return 0
+}
+
+# Both names the installer installs, because both are rendered from the same
+# template and the snapshot command is the one that was silently broken by being
+# a copy (it derived the checkout from its own location).
+refresh_installed_launchers() {
+  LAUNCHER_TARGET="$INSTALLED_RUNNER" LAUNCHER_LABEL="the deploy runner" refresh_launcher
+  LAUNCHER_TARGET="$INSTALLED_SNAPSHOT" LAUNCHER_LABEL="the snapshot command" refresh_launcher
+}
+# refresh-launcher-logic:end
 
 # ── Serialise runs ───────────────────────────────────────────────────────────
 # The timer already skips while the unit is active, but a manual run can overlap
@@ -130,9 +363,26 @@ if ! as_owner git -C "$REPO" fetch --quiet origin "$BRANCH"; then
 fi
 
 AFTER=$(as_owner git -C "$REPO" rev-parse --short "origin/$BRANCH")
+# The full sha, not the short one: the quarantine is a record of *which commit*
+# was refused, and a 7-character prefix is a search key, not an identity. It is
+# also what `git rev-parse` answers with, so a later comparison is exact.
+AFTER_FULL=$(as_owner git -C "$REPO" rev-parse "origin/$BRANCH")
+# Which gate refused this release, written into the quarantine record. Empty
+# until something refuses; every refusal path sets it before quarantining.
+FAIL_REASON=""
+
+# An operator's explicit release is consumed even when there is nothing to
+# deploy, so a pending request cannot sit on the box and surprise a later tick.
+quarantine_honour_release
 
 if [ "$BEFORE" = "$AFTER" ]; then
   exit 0                      # nothing new; stay silent so the journal stays quiet
+fi
+
+# A commit a gate already refused is not tried again. This is what stops the
+# reject-roll-back-re-pull loop: the rollback moved the checkout, not the branch.
+if ! quarantine_gate; then
+  exit 0
 fi
 
 log "new commit on origin/$BRANCH: $BEFORE -> $AFTER"
@@ -196,6 +446,8 @@ fi
 # ── Gate 1: does it compile? ─────────────────────────────────────────────────
 if ! as_owner "$REPO/.venv/bin/python" -m compileall -q "$REPO/app" >/dev/null 2>&1; then
   log "python compileall FAILED — rolling back to $BEFORE"
+  FAIL_REASON="python compileall (exit 8)"
+  quarantine_write
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 8
 fi
@@ -217,6 +469,8 @@ if missing:
 print("app constructs ok (%d routes)" % len(rules))
 '; then
   log "app failed to construct — rolling back to $BEFORE"
+  FAIL_REASON="app did not construct (exit 9)"
+  quarantine_write
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 9
 fi
@@ -254,6 +508,8 @@ else
     log "theme gate FAILED (exit $THEME_RC) — rolling back to $BEFORE"
   fi
   echo "$THEME_OUT" | sed 's/^/    /'
+  FAIL_REASON="theme gate (exit $THEME_RC)"
+  quarantine_write
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 13
 fi
@@ -322,9 +578,13 @@ reload_app
 reload_worker || WORKER_STALE=1
 sleep 3
 
+# Why a release is about to be rolled back — carried into the quarantine record
+# so the journal says which gate judged it, not merely that something did.
+FAIL_REASON="app did not come up after the reload"
 HEALTHY=0
 if systemctl is-active --quiet "$SERVICE" && probe_app; then
   HEALTHY=1
+  FAIL_REASON=""
 fi
 
 # ── Gate 4: sign in as each role and open the pages that matter ──────────────
@@ -366,6 +626,7 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
       if [ "${SMOKE_ENFORCE:-false}" = "true" ]; then
         log "smoke test FAILED (exit $SMOKE_RC) — rolling back"
         HEALTHY=0
+        FAIL_REASON="smoke test (exit $SMOKE_RC)"
       else
         log "smoke test FAILED (exit $SMOKE_RC) but SMOKE_ENFORCE is not 'true' — keeping the release"
       fi ;;
@@ -431,6 +692,7 @@ else
         echo "$CLAIMS_OUT" | sed 's/^/    /'
         log "rolling $AFTER back rather than publishing numbers we cannot deliver"
         HEALTHY=0
+        FAIL_REASON="claims gate (the page promises what this box no longer does)"
       else
         log "claims gate FAILED but CLAIMS_ENFORCE is not 'true' — keeping the release:"
         echo "$CLAIMS_OUT" | head -6 | sed 's/^/    /'
@@ -477,7 +739,7 @@ else
 
   PERF_ENV=()
   for v in PERF_BASE_URL PERF_ROSTER PERF_SESSIONS PERF_TEACHERS PERF_DURATION \
-           PERF_BASELINE PERF_EVIDENCE; do
+           PERF_BASELINE PERF_EVIDENCE PERF_BYTES_SLACK PERF_ROUNDTRIPS_SLACK; do
     [ -n "${!v:-}" ] && PERF_ENV+=("$v=${!v}")
   done
 
@@ -498,6 +760,7 @@ else
         echo "$PERF_OUT" | grep -E '^perf gate|^    -' | sed 's/^/    /'
         log "rolling $AFTER back rather than serving it"
         HEALTHY=0
+        FAIL_REASON="perf gate (slower than the last release that passed)"
       else
         log "perf gate FAILED but PERF_ENFORCE is not 'true' — keeping the release:"
         echo "$PERF_OUT" | grep -E '^perf gate|^    -' | head -8 | sed 's/^/    /'
@@ -510,6 +773,11 @@ if [ "$HEALTHY" = "1" ]; then
   mkdir -p "$STATE_DIR"
   printf '%s\n%s\n%s\n' "$AFTER" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"
   log "DEPLOY OK: $BEFORE -> $AFTER"
+  # The release is verified and serving, so this is the moment the arrangement can
+  # be brought back in step with the repo — a copy that has drifted, or a launcher
+  # rendered from an older entrypoint.sh, heals here instead of waiting for
+  # somebody to run the installer as root.
+  refresh_installed_launchers
   if [ -n "$SNAPSHOT" ]; then
     log "recovery point kept: $SNAPSHOT"
   fi
@@ -525,6 +793,9 @@ fi
 
 # ── Failure: put the previous release back ───────────────────────────────────
 log "$AFTER did not pass verification — rolling back to $BEFORE"
+# Record the refusal before rolling back. Without this the next tick finds the
+# same commit on the branch, merges it again, and fails the same way — forever.
+quarantine_write
 if [ -n "$SNAPSHOT" ]; then
   # Code goes back on its own; data does not. Name the recovery point here, where
   # someone is already looking, rather than leaving them to guess whether one
@@ -544,7 +815,10 @@ reload_worker || true
 sleep 3
 
 if systemctl is-active --quiet "$SERVICE" && probe_app; then
-  log "ROLLED BACK to $BEFORE — that release is serving. Fix origin/$BRANCH before the next tick."
+  log "ROLLED BACK to $BEFORE — that release is serving."
+  log "$AFTER is quarantined: the next tick skips it, so the box stops re-pulling it."
+  log "Push a fix to $BRANCH (lifts it automatically), or release this exact commit:"
+  log "    touch $RELEASE_FILE"
   mkdir -p "$STATE_DIR"
   printf '%s\n%s\n%s\n' "$BEFORE" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"
   exit 10

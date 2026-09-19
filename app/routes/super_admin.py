@@ -13,9 +13,12 @@ from app.services.demo_settings import (
     order_from_form,
     order_key,
 )
-from app.services.deploy_status_service import report as deploy_status_report
 from app.services.question_types import grade_answer, key_has_answer
-from app.utils.req_cache import invalidate_school, ttl
+from app.services.deploy_status_service import (
+    report as deploy_status_report,
+    request_release as deploy_status_request_release,
+)
+from app.utils.req_cache import invalidate, invalidate_school, ttl
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
 
@@ -295,7 +298,36 @@ def deploy_status():
     so a cached reading is never passed off as a live one.
     """
     status = ttl("deploy_status:report", 30, deploy_status_report)
-    return render_template("super_admin/deploy_status.html", status=status)
+    return render_template("super_admin/deploy_status.html", status=status,
+                           released=request.args.get("released"))
+
+
+@super_bp.route("/deploy-status/release", methods=["POST"])
+@_sa_required
+def deploy_status_release():
+    """Retry the commit a gate is holding, without opening a console.
+
+    The quarantine is the one deploy failure with no symptom — the previous release
+    serves, no page changes, and the record lives in a file on the box. Reading it
+    is half of being able to act on it; the other half is this button, which asks
+    the runner for the same one-shot release `touch /etc/scangrade-deploy.release`
+    buys. It is one attempt either way: a second refusal quarantines the commit
+    again, so this can never become a standing override for a commit that is
+    genuinely bad.
+
+    The answer travels back as a key rather than a sentence, because copy belongs
+    in the template where the language toggle and the i18n sweep can reach it. The
+    cached report is dropped first so the page the operator lands on shows the
+    request it just made instead of the reading from before it.
+    """
+    result = deploy_status_request_release()
+    invalidate("deploy_status:report")
+    if result.get("written"):
+        log_activity("update", "deploy_quarantine",
+                     result.get("held") or "unknown",
+                     new_data={"request": "release", "gate": result.get("gate")},
+                     user_id=g.user_id)
+    return redirect(f"/super-admin/deploy-status?released={result['key']}")
 
 
 @super_bp.route("/reset-demo-passwords", methods=["POST"])
