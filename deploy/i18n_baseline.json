@@ -308,14 +308,14 @@
       "frozen": true
     },
     "student/dashboard.html": {
-      "pairs": 26,
+      "pairs": 29,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "student/exam_list.html": {
       "pairs": 0,
-      "leftovers": 8,
+      "leftovers": 11,
       "coverage": 0.0,
       "frozen": false
     },
@@ -536,7 +536,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 165,
+      "pairs": 171,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

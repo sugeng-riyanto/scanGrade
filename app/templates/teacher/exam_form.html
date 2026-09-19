@@ -622,6 +622,7 @@
                                 {% endfor %}
                                  <option value="0" {% if exam and exam.duration_minutes == 0 %}selected{% endif %} x-text="t('Tak terbatas','Unlimited')">Unlimited</option>
                             </select>
+                            <p class="text-xs text-slate-400 mt-1" x-text="t('Dihitung dari saat murid mulai menegerjakan, dan boleh melewati Jendela Berakhir di atas.','Counted from the moment the student starts, and it may extend beyond the assignment window end above.')"></p>
                         </div>
                     </div>
 
@@ -649,7 +650,13 @@
                         <textarea name="description" rows="2" :placeholder="t('Petunjuk atau catatan untuk siswa','Instructions or notes for students')"
                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">{{ exam.description if exam else '' }}</textarea>
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
+                    <!-- Two ends of one window, and the clock that ends a sitting.
+                         `Mulai` was the only end that existed, so a paper could be
+                         scheduled to open and never to close: it stayed on every
+                         assigned student's list for ever. `end_at` is the last
+                         *instant a student may begin* — whoever already started keeps
+                         working, because a window governs beginning, not finishing. -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Mulai (jadwal)','Starts (scheduled)')"></label>
             <input type="datetime-local" name="start_at" id="start_at_input"
@@ -659,10 +666,28 @@
             <script>!function(){var e=document.getElementById('start_at_input');if(e&&!e.value){var t=new Date();t.setMinutes(t.getMinutes()-t.getTimezoneOffset());e.value=t.toISOString().slice(0,16)}}();</script>
                         </div>
                         <div>
+                            <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Jendela berakhir (batas mulai)','Assignment window end (last start)')"></label>
+                            <input type="datetime-local" name="end_at" id="end_at_input"
+                                   value="{% if exam and exam.end_at %}{{ (exam.end_at[:19] + '+00:00') | tz('%Y-%m-%dT%H:%M') }}{% endif %}"
+                                   class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
+                            <p class="text-xs text-slate-400 mt-1" x-text="t('Batas terakhir murid boleh MEMULAI. Kosongkan = tanpa batas.','The last date and time a student may BEGIN. Leave empty = no limit.')"></p>
+                        </div>
+                        <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Percobaan Maksimal','Max attempts')"></label>
                             <input type="number" name="max_attempts" value="{{ exam.max_attempts or 1 }}" min="1" max="10"
                                    class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
                         </div>
+                    </div>
+                    <div x-data="{ auto_submit_window_end: {{ 'true' if (exam.get('auto_submit_on_window_end') if exam else False) else 'false' }} }">
+                    <label class="flex items-start gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition"
+                           :class="auto_submit_window_end ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                        <input type="checkbox" x-model="auto_submit_window_end" name="auto_submit_on_window_end" value="true"
+                               class="mt-0.5 w-4 h-4 text-primary-600 rounded">
+                        <span class="text-xs sm:text-sm">
+                            <span class="font-bold text-slate-700 block" x-text="t('Auto-Submit saat Jendela Berakhir','Auto-Submit on Assignment Window End')"></span>
+                            <span class="text-slate-500" x-text="t('Murid hanya punya waktu sampai Jendela Berakhir di atas, kapan pun ia mulai — jadi yang berlaku adalah waktu yang lebih pendek antara Durasi dan Jendela Berakhir.','The student has until the Assignment Window End above regardless of when they start — so the shorter of the Duration and the window end applies.')"></span>
+                        </span>
+                    </label>
                     </div>
                 </div>
 
@@ -1098,8 +1123,7 @@
                     block_right_click: {{ 'true' if (exam.get('block_right_click') if exam else True) else 'false' }},
                     auto_submit_on_max: {{ 'true' if (exam.get('auto_submit_on_max') if exam else True) else 'false' }},
                     allow_calculator: {{ 'true' if (exam.get('allow_calculator') if exam else False) else 'false' }},
-                    randomize_questions: {{ 'true' if (exam.get('randomize_questions') if exam else False) else 'false' }},
-                    randomize_options: {{ 'true' if (exam.get('randomize_options') if exam else False) else 'false' }},
+                    block_screenshot: {{ 'true' if (exam.get('block_screenshot') if exam else False) else 'false' }},
                 })">
                     <div class="flex items-center justify-between">
                         <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
@@ -1148,12 +1172,21 @@
                             <input type="checkbox" x-model="allow_calculator" name="allow_calculator" value="true" class="w-4 h-4 text-primary-600 rounded">
                             <span class="font-bold text-slate-700" x-text="t('Kalkulator Ilmiah','Scientific calculator')"></span>
                         </label>
-                        <label 
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition"
+                               :class="block_screenshot ? 'border-primary-300 bg-primary-50' : 'border-slate-200'">
+                            <input type="checkbox" x-model="block_screenshot" name="block_screenshot" value="true" class="w-4 h-4 text-primary-600 rounded">
+                            <span class="font-bold text-slate-700" x-text="t('Cegah Screenshot','Block screenshot')"></span>
+                        </label>
                     </div>
                 </div>
 
-                <!-- Pengaturan Soal -->
-                <div class="card p-5" x-data="{ randomize_questions: true, randomize_options: true }">
+                <!-- Question settings.
+                     This card used to open its own Alpine scope with both shuffles
+                     hard-coded to `true`, which shadowed the exam's stored values:
+                     an exam saved with shuffling OFF still rendered ON, and the next
+                     save wrote `true` back. The seeds now come from the row, which is
+                     the whole of what "the teacher can turn it off" means. -->
+                <div class="card p-5" x-data="{ randomize_questions: {{ 'true' if (exam.get('randomize_questions') if exam else False) else 'false' }}, randomize_options: {{ 'true' if (exam.get('randomize_options') if exam else False) else 'false' }} }">
                     <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2 mb-4">
                         <i class="fas fa-random text-emerald-600"></i><span x-text="t('Pengaturan Soal','Question settings')"></span>
                     </h2>

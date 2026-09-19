@@ -681,6 +681,19 @@ COMMENT ON COLUMN exams.block_copy_paste IS 'Block copy/paste in essay textareas
 COMMENT ON COLUMN exams.block_right_click IS 'Block right-click context menu';
 COMMENT ON COLUMN exams.block_screenshot IS 'Attempt to block screenshots';
 
+-- ---- 030_exam_window.sql ----
+-- The assignment window end and the switch that decides which clock ends a sitting.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS auto_submit_on_window_end BOOLEAN DEFAULT FALSE;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submitted_late BOOLEAN DEFAULT FALSE;
+
+COMMENT ON COLUMN exams.end_at IS 'Assignment window end: the last instant a student may BEGIN this exam';
+COMMENT ON COLUMN exams.auto_submit_on_window_end IS 'True: the sitting ends at end_at regardless of when the student began, i.e. the earlier of end_at and started_at + duration_minutes';
+COMMENT ON COLUMN submissions.submitted_late IS 'The answers arrived after the sitting deadline plus the grace (app/utils/exam_window.py)';
+
+CREATE INDEX IF NOT EXISTS idx_submissions_late ON submissions(exam_id)
+  WHERE submitted_late = TRUE;
+
 -- ============================================
 -- SELESAI. Verifikasi:
 -- ============================================

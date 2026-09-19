@@ -24,6 +24,7 @@ from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
                                  school_subjects, teacher_assignments_for)
+from app.utils import exam_window
 
 logger = logging.getLogger(__name__)
 
@@ -879,18 +880,24 @@ def exam_form():
     passing_score = int(request.form.get("passing_score", 70))
     description = request.form.get("description", "")
     action = request.form.get("action", "save_draft")
-    start_at_str = request.form.get("start_at", "").strip()
+    # Both ends of the window go through one converter, so the start and the end
+    # cannot end up on different clocks — the one mistake here that would move a
+    # deadline by seven hours without anything looking wrong.
+    tz_off = g.get("tz_offset", 7)
     if action == "publish":
         start_at = None
-    elif start_at_str:
-        try:
-            tz_off = g.get("tz_offset", 7)
-            local_dt = datetime.fromisoformat(start_at_str)
-            start_at = (local_dt - timedelta(hours=tz_off)).isoformat()
-        except Exception:
-            start_at = start_at_str
     else:
-        start_at = None
+        start_at = exam_window.to_utc_iso(request.form.get("start_at", ""), tz_off)
+    # The assignment window end: the last instant a student may *begin*. The
+    # duration is counted from each student's own start and may run past it (the
+    # form says so on the field); `auto_submit_on_window_end` is the switch that
+    # makes the window end the deadline instead.
+    end_at = exam_window.to_utc_iso(request.form.get("end_at", ""), tz_off)
+    auto_submit_on_window_end = request.form.get("auto_submit_on_window_end") == "true"
+    _start_dt, _end_dt = exam_window.parse_dt(start_at), exam_window.parse_dt(end_at)
+    if _start_dt and _end_dt and _end_dt <= _start_dt:
+        flash("Batas akhir ujian harus setelah waktu mulai", "error")
+        return redirect(request.referrer or "/teacher/exams")
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
@@ -938,6 +945,8 @@ def exam_form():
         "subject_id": subject_id,
         "class_ids": class_ids,
         "start_at": start_at,
+        "end_at": end_at,
+        "auto_submit_on_window_end": auto_submit_on_window_end,
         "is_template": is_template,
         "source_exam_id": source_exam_id,
         "max_attempts": max_attempts,
@@ -971,7 +980,7 @@ def exam_form():
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -1077,18 +1086,24 @@ def exam_detail(exam_id):
     passing_score = int(request.form.get("passing_score", 70))
     description = request.form.get("description", "")
     action = request.form.get("action", "save_draft")
-    start_at_str = request.form.get("start_at", "").strip()
+    # Both ends of the window go through one converter, so the start and the end
+    # cannot end up on different clocks — the one mistake here that would move a
+    # deadline by seven hours without anything looking wrong.
+    tz_off = g.get("tz_offset", 7)
     if action == "publish":
         start_at = None
-    elif start_at_str:
-        try:
-            tz_off = g.get("tz_offset", 7)
-            local_dt = datetime.fromisoformat(start_at_str)
-            start_at = (local_dt - timedelta(hours=tz_off)).isoformat()
-        except Exception:
-            start_at = start_at_str
     else:
-        start_at = None
+        start_at = exam_window.to_utc_iso(request.form.get("start_at", ""), tz_off)
+    # The assignment window end: the last instant a student may *begin*. The
+    # duration is counted from each student's own start and may run past it (the
+    # form says so on the field); `auto_submit_on_window_end` is the switch that
+    # makes the window end the deadline instead.
+    end_at = exam_window.to_utc_iso(request.form.get("end_at", ""), tz_off)
+    auto_submit_on_window_end = request.form.get("auto_submit_on_window_end") == "true"
+    _start_dt, _end_dt = exam_window.parse_dt(start_at), exam_window.parse_dt(end_at)
+    if _start_dt and _end_dt and _end_dt <= _start_dt:
+        flash("Batas akhir ujian harus setelah waktu mulai", "error")
+        return redirect(request.referrer or "/teacher/exams")
 
     question_types = json.loads(request.form.get("question_types", "{}"))
     answer_key = json.loads(request.form.get("answer_key", "{}"))
@@ -1136,6 +1151,8 @@ def exam_detail(exam_id):
         "subject_id": subject_id,
         "class_ids": class_ids,
         "start_at": start_at,
+        "end_at": end_at,
+        "auto_submit_on_window_end": auto_submit_on_window_end,
         "is_template": is_template,
         "source_exam_id": source_exam_id,
         "max_attempts": max_attempts,
@@ -1169,7 +1186,7 @@ def exam_detail(exam_id):
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
