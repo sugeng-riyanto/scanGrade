@@ -47,10 +47,12 @@ Honest limits, and they are stated on the page rather than hidden here:
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
+from app.services import analysis_frameworks as af
 from app.services import question_types as qt
 
 #: The share of the class counted as the \"upper\" and \"lower\" group for the
@@ -258,17 +260,116 @@ def compare_measures(m1: float, se1: float, n1: int,
     return t, df, student_t_two_sided_p(t, df)
 
 
-def _zstd(mean_square: float, df: float) -> float:
-    """A mean square as a standardised t (Wilson–Hilferty cube-root approximation).
+def _zstd(mean_square: float, variance: float) -> float:
+    """A mean square as a unit-normal deviate (Wilson–Hilferty).
 
-    This is the number Winsteps prints as a fit ZSTD: how far a mean square sits
-    from 1.0 once its own spread is taken into account. Labeled as an approximation
-    on the page rather than sold as Winsteps' own formula.
+    This is Winsteps' ZSTD, and the argument that matters is the **variance of the
+    mean square**, not the count of observations behind it: Winsteps' own help says
+    "the degrees of freedom are 2/(qi*qi)", where `qi` is the model standard
+    deviation of the mean square, and Rating Scale Analysis estimates that d.f. from
+    the model distributions of the observations rather than from the sample size
+    (Wilson & Hilferty 1931; Schulz, RMT 16:2 p. 879; RSA pp. 100-101).
+
+    The distinction is not cosmetic. On data generated *from* the Rasch model — where
+    a fit statistic should be standard normal — dividing by the observation count
+    spreads ZSTD by a factor of 1.44 (measured, 60 replications: SD 1.44 against
+    0.95), so a misfit flag at 2.0 fires on data that fit. Floored at 1.0, as
+    Winsteps floors it, because the cube-root transform "goes crazy" below that.
     """
-    if df < 2 or mean_square <= 0:
+    if variance <= 0 or mean_square <= 0:
         return 0.0
+    df = max(2.0 / variance, 1.0)
     third = 1.0 - 2.0 / (9.0 * df)
     return (mean_square ** (1.0 / 3.0) - third) / math.sqrt(2.0 / (9.0 * df))
+
+
+def _observations(rows: list[list[float | None]], betas: Sequence[float],
+                  thetas: Sequence[float | None], item: int | None = None,
+                  person: int | None = None,
+                  ) -> list[tuple[float, float, float]]:
+    """`(standardized residual², model variance, model variance of that)`, per response.
+
+    One observation is `(x - E)² / W` — the squared Pearson residual — with its
+    information `W = P(1-P)`. The third number is what the fit *statistic's* own
+    sampling distribution needs: the variance of a squared standardized residual,
+    `Var(z²) = (1-2P)²/(P(1-P))`. It is zero at `P = .5` (where `z²` is 1 whatever
+    happens) and grows as the response becomes predictable, which is why a test of
+    middling questions has far more effective degrees of freedom than it has
+    responses.
+
+    `item` walks the rows; `person` walks the columns. The same arithmetic serves
+    both, and Winsteps reports both.
+    """
+    pairs = ([(j, item) for j in range(len(rows))] if item is not None
+             else [(person, i) for i in range(len(betas))])
+    out: list[tuple[float, float, float]] = []
+    for j, i in pairs:
+        value = rows[j][i]
+        theta = thetas[j]
+        if value is None or theta is None:
+            continue
+        expect = _logistic(theta - betas[i])
+        variance = expect * (1.0 - expect)
+        if variance <= 1e-12:
+            continue
+        out.append((((value - expect) ** 2) / variance, variance,
+                    ((1.0 - 2.0 * expect) ** 2) / variance))
+    return out
+
+
+@dataclass(frozen=True)
+class Fit:
+    """One item's or person's fit, in Winsteps' four numbers and their d.f."""
+
+    infit: float
+    infit_z: float
+    outfit: float
+    outfit_z: float
+    #: The effective degrees of freedom behind each ZSTD: `2 / Var(mean square)`.
+    infit_df: float
+    outfit_df: float
+
+
+def _fit_of(observations: Sequence[tuple[float, float, float]]) -> Fit | None:
+    """Mean squares and ZSTDs from the observations, as Winsteps computes them.
+
+        Outfit = sum(residual² / information) / count(residuals)
+        Infit  = sum(residual² / information * information) / sum(information)
+
+    — the first an ordinary mean of squared standardized residuals (outlier
+    sensitive), the second weighted by each observation's information (pattern
+    sensitive), exactly as Wright & Masters define them (RSA p. 100).
+    """
+    count = len(observations)
+    info = sum(weight for _z, weight, _v in observations)
+    if not count or info <= 0:
+        return None
+    outfit = sum(z2 for z2, _weight, _v in observations) / count
+    infit = sum(z2 * weight for z2, weight, _v in observations) / info
+    # Independent observations, so the variances add; the mean squares are sums
+    # over the same terms, which is what carries the 1/count² and 1/info² through.
+    var_outfit = sum(v for _z, _weight, v in observations) / (count * count)
+    var_infit = sum(weight * weight * v for _z, weight, v in observations) / (info * info)
+    return Fit(
+        infit=infit, infit_z=_zstd(infit, var_infit),
+        outfit=outfit, outfit_z=_zstd(outfit, var_outfit),
+        infit_df=(2.0 / var_infit if var_infit > 0 else 0.0),
+        outfit_df=(2.0 / var_outfit if var_outfit > 0 else 0.0),
+    )
+
+
+def _real_se(model_se: float, infit: float | None) -> float:
+    """Winsteps' misfit-inflated standard error.
+
+    "Real S.E. of an estimated measure = Model S.E. * Maximum [1.0, sqrt(INFIT
+    mean-square)]" (Winsteps, *Standard errors: model and real*). Model S.E. is what
+    the data say under the model; Real S.E. is the worst case, where the misfit is
+    a real departure from the model rather than noise. Both are reported, because a
+    reliability computed from the model errors flatters a misfitting paper.
+    """
+    if infit is None:
+        return model_se
+    return model_se * max(1.0, math.sqrt(max(infit, 0.0)))
 
 
 # ── what the exam and its submissions give us ────────────────────────────────
@@ -392,15 +493,28 @@ def _calibrate(rows: list[list[float | None]], item_count: int,
         b_i  solves  Σ_j P(x_ij = 1) = r_i     (the item's observed score)
         θ_j  solves  Σ_i P(x_ij = 1) = r_j
 
-    Both are anchored on 0 logits — the paper's average difficulty — which is what
-    makes each item's `t = b_i / SE_i` a test against "as hard as this paper's
-    average question". A student with a perfect or zero raw score has no finite
-    maximum-likelihood estimate, so gets the conventional third-of-a-case correction
-    and is flagged as extreme on the person table rather than quietly dropped.
+    Only the *differences* between a person's ability and an item's difficulty are
+    estimable, so the origin of the scale is chosen rather than found, and Winsteps
+    chooses the item mean (UCON). This does that explicitly: the shift is applied
+    after every round. It is what makes `t = b_i / SE_i` a test against "as hard as
+    this paper's average question" — without it the calibration stops wherever three
+    rounds happened to leave it, and the anchor sentence on the page is untrue.
+    Subtracting the same constant from both sides leaves every `theta - b` and
+    therefore every fit statistic untouched. A student with a perfect or zero raw
+    score has no finite maximum-likelihood estimate, so gets the conventional
+    third-of-a-case correction and is flagged as extreme on the person table rather
+    than quietly dropped.
     """
     people, items = len(rows), item_count
     if not people or not items:
-        return [], [], [], []
+        # Nothing to solve: nobody answered, or no question could be calibrated.
+        # The shape is still the caller's — one slot per question and per paper —
+        # with every slot saying "unknown". An empty list here indexed a question
+        # that did not exist, which is a 500 on the analysis page; a filled list of
+        # zeros would be worse, because `0.000 logits` is a measurement a reader
+        # would quote and this is the case where there is no measurement at all.
+        return ([None] * items, [None] * people,
+                [None] * items, [None] * people)
 
     betas = [0.0] * items
     thetas: list[float | None] = [None] * people
@@ -435,6 +549,12 @@ def _calibrate(rows: list[list[float | None]], item_count: int,
                 lambda b, pairs=pairs: sum(_logistic(t - b) for t in pairs),
                 increasing=False)
 
+        # The UCON constraint, after each round. `_logistic(theta - b)` is
+        # unchanged by shifting both, so this moves the origin and nothing else.
+        shift = _mean(betas)
+        betas = [value - shift for value in betas]
+        thetas = [value - shift if value is not None else None for value in thetas]
+
     # Standard errors are 1/sqrt(information). An item or a person whose information
     # is zero — every paper at an extreme, so the model has no curvature to measure
     # — gets None rather than a division by zero, and the page shows a dash.
@@ -461,27 +581,20 @@ def _calibrate(rows: list[list[float | None]], item_count: int,
 
 
 def _fit(rows: list[list[float | None]], betas: Sequence[float],
-         thetas: Sequence[float | None], index: int) -> tuple[float, float, float, float] | None:
-    """Infit and outfit mean squares for one item, and their standardised values."""
-    residuals: list[tuple[float, float]] = []     # (z², variance)
-    for j, row in enumerate(rows):
-        value = row[index]
-        theta = thetas[j]
-        if value is None or theta is None:
-            continue
-        expect = _logistic(theta - betas[index])
-        variance = expect * (1.0 - expect)
-        if variance <= 1e-12:
-            continue
-        residuals.append(((value - expect) ** 2, variance))
-    if not residuals:
-        return None
-    info = sum(v for _, v in residuals)
-    if info <= 0:
-        return None
-    outfit = sum(z2 / v for z2, v in residuals) / len(residuals)
-    infit = sum(z2 for z2, _ in residuals) / info
-    return infit, _zstd(infit, info), outfit, _zstd(outfit, len(residuals))
+         thetas: Sequence[float | None], index: int) -> Fit | None:
+    """One item's fit: infit and outfit mean squares and their ZSTDs."""
+    return _fit_of(_observations(rows, betas, thetas, item=index))
+
+
+def _person_fit(rows: list[list[float | None]], betas: Sequence[float],
+                thetas: Sequence[float | None], index: int) -> Fit | None:
+    """One person's fit — the same arithmetic with the axes exchanged.
+
+    Winsteps' person table carries infit and outfit for the same reason the item
+    table does: a paper whose answers do not go together is a paper the measures do
+    not describe, and its Real S.E. is inflated by exactly this number.
+    """
+    return _fit_of(_observations(rows, betas, thetas, person=index))
 
 
 def _option_labels(qtype: Any, key: Any) -> tuple[str, ...]:
@@ -586,8 +699,20 @@ class Item:
     outfit: float | None = None
     outfit_z: float | None = None
     pt_measure: float | None = None
+    #: The same standard error with its own misfit folded in (`_real_se`).
+    se_real: float | None = None
     flag: str = "ok"
     distractors: tuple[Distractor, ...] = ()
+    #: The cognitive level the teacher recorded in the kisi-kisi, as a key
+    #: ("c1".."c6") and its band ("lots"/"mots"/"hots"). Empty means *not
+    #: labelled* — never guessed from the question type, which would invent the
+    #: very thing this framework exists to measure.
+    level: str = ""
+    band: str = ""
+    #: Criterion-referenced verdict: has the class mastered this question, by the
+    #: KKM's own standard? ``None`` means there is nothing to judge (nobody
+    #: answered, or the exam carries no KKM).
+    mastered: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -599,6 +724,13 @@ class Person:
     se: float | None
     score: float
     extreme: bool
+    #: A paper's own fit, which is what makes its Real S.E. its own: the same
+    #: columns as the item table, with the persons as the rows.
+    infit: float | None = None
+    infit_z: float | None = None
+    outfit: float | None = None
+    outfit_z: float | None = None
+    se_real: float | None = None
 
 
 @dataclass(frozen=True)
@@ -622,6 +754,85 @@ class Split:
 
 
 @dataclass(frozen=True)
+class Separation:
+    """One side of Winsteps' Table 28.3: how far apart the measures really are.
+
+    Two rows, because they answer different questions and a school should quote the
+    worse of them:
+
+        REAL  RMSE 1.18  TRUE SD 1.58  SEPARATION 1.34  RELIABILITY .64  STRATA 2.12
+        MODEL RMSE 1.01  TRUE SD 1.69  SEPARATION 1.67  RELIABILITY .74  STRATA 2.56
+
+    MODEL takes the data at face value: the errors are the ones the model predicts.
+    REAL assumes misfit is a departure from the model rather than noise, and inflates
+    every standard error by its own infit (`_real_se`), so REAL is the conservative
+    row. A separation of 2 means two statistically distinct levels of ability in the
+    class; strata is how many the spread supports at a 95% cut.
+    """
+
+    rmse_model: float | None = None
+    rmse_real: float | None = None
+    true_sd_model: float | None = None
+    true_sd_real: float | None = None
+    separation_model: float | None = None
+    separation_real: float | None = None
+    reliability_model: float | None = None
+    reliability_real: float | None = None
+    strata_model: float | None = None
+    strata_real: float | None = None
+
+
+def _rounded(block: Separation) -> Separation:
+    """A separation block, rounded for a document. Money-like, not machine-like."""
+    return Separation(**{
+        name: (round(value, 3) if name.startswith("reliability") else round(value, 2))
+        for name, value in dataclasses.asdict(block).items()
+        if value is not None
+    })
+
+
+def separation(measures: Sequence[float | None], model_se: Sequence[float | None],
+               real_se: Sequence[float | None]) -> Separation:
+    """Winsteps' separation block, from the measures and both sets of errors.
+
+    `RMSE` is the root-mean-square of the standard errors — "the average conditional
+    standard error of measurement for this sample"; `TRUE SD` is the observed
+    *population* SD (Winsteps' P.SD, so ddof 0) with that error's variance taken out;
+    `SEPARATION` is TRUE SD / RMSE; `RELIABILITY` is its square over one plus its
+    square, which is the true variance over the observed variance; and `STRATA` is
+    `(4G + 1)/3` — the number of statistically distinct levels the spread supports.
+
+    Checked against the worked example in Winsteps' Table 28.3 (P.SD 1.97, RMSE 1.18
+    real and 1.01 model, separation 1.34 and 1.67, reliability .64 and .74): every
+    one of those comes back out of this function, which is why it takes plain
+    numbers rather than an `Analysis`. A separation with no error to divide by — a
+    class the model describes exactly — is unanswerable rather than infinite, and is
+    reported as nothing at all.
+    """
+    values = [value for value in measures if value is not None]
+    if len(values) < 2:
+        return Separation()
+    observed = _sd(values, ddof=0)
+    block: dict[str, float] = {}
+    for label, errors in (("model", [se for se in model_se if se]),
+                          ("real", [se for se in real_se if se])):
+        if not errors:
+            continue
+        rmse = math.sqrt(_mean([se * se for se in errors]))
+        variance = observed * observed - rmse * rmse
+        true_sd = math.sqrt(variance) if variance > 0 else 0.0
+        block[f"rmse_{label}"] = rmse
+        block[f"true_sd_{label}"] = true_sd
+        if rmse <= 1e-12:
+            continue
+        ratio = true_sd / rmse
+        block[f"separation_{label}"] = ratio
+        block[f"reliability_{label}"] = ratio * ratio / (1.0 + ratio * ratio)
+        block[f"strata_{label}"] = (4.0 * ratio + 1.0) / 3.0
+    return Separation(**block)
+
+
+@dataclass(frozen=True)
 class Summary:
     students: int
     items: int
@@ -640,6 +851,92 @@ class Summary:
     mean_measure: float | None
     sd_measure: float | None
     extremes: int
+    #: Winsteps' separation block, one per side. `person_reliability` and
+    #: `person_separation` above are this block's MODEL row, kept as flat fields
+    #: because the page and the documents read them by name.
+    person_stats: Separation = Separation()
+    item_stats: Separation = Separation()
+
+
+@dataclass(frozen=True)
+class CognitiveMix:
+    """How much of the paper asks for each level of thinking.
+
+    Two bases are reported because a kisi-kisi is written in *marks* and a
+    question list is read in *questions*: three HOTS questions worth one mark
+    each beside ten one-mark LOTS questions are 23% of the paper by question and
+    23% by mark, but a single five-mark HOTS question beside ten one-mark LOTS
+    questions is 9% by question and 33% by mark. Quoting one basis without
+    saying which is how the same paper "is" and "is not" HOTS-heavy depending on
+    who counted.
+
+    ``unset`` is the honest half and stays visible: a paper whose questions have
+    no level recorded is not 0% HOTS, it is *unlabelled*, and the panel says so
+    instead of drawing a bar at zero.
+    """
+
+    counts: Mapping[str, int] = field(default_factory=dict)      # band -> questions
+    marks: Mapping[str, float] = field(default_factory=dict)     # band -> marks
+    unset: int = 0
+    unset_marks: float = 0.0
+    total: int = 0
+    total_marks: float = 0.0
+    #: "marks" when the paper carries weights, "questions" when it does not.
+    basis: str = "questions"
+
+    @property
+    def labelled(self) -> int:
+        return self.total - self.unset
+
+    def share(self, band: str) -> float | None:
+        """The band's part of the paper as a percentage, on this mix's basis."""
+        if self.basis == "marks":
+            if not self.total_marks:
+                return None
+            return round(self.marks.get(band, 0.0) / self.total_marks * 100, 1)
+        if not self.total:
+            return None
+        return round(self.counts.get(band, 0) / self.total * 100, 1)
+
+
+@dataclass(frozen=True)
+class Mastery:
+    """Criterion-referenced mastery against the school's own KKM.
+
+    Two questions, both about the standard rather than about the spread: who is
+    tuntas, and which questions the class has mastered. A question is mastered
+    when the share of the papers that earned full credit on it reaches the KKM
+    — the school's own number, so changing the KKM moves the verdict and nothing
+    else has to be argued about.
+
+    ``configured`` is False when the exam carries no KKM (0 or absent): a report
+    that treats a missing standard as "everything passes" is worse than one that
+    says the standard is missing.
+    """
+
+    kkm: int = 0
+    configured: bool = False
+    passed: int = 0
+    failed: int = 0
+    mean: float | None = None
+    lowest: float | None = None
+    items_mastered: int = 0
+    items_measured: int = 0
+
+    @property
+    def threshold(self) -> float:
+        """The share of the class that must get a question fully right."""
+        return self.kkm / 100.0
+
+    @property
+    def gap(self) -> float | None:
+        """How far the class's mean sits from the standard, in marks."""
+        return None if self.mean is None else round(self.mean - self.kkm, 2)
+
+    @property
+    def pass_rate(self) -> float | None:
+        total = self.passed + self.failed
+        return round(self.passed / total * 100, 1) if total else None
 
 
 @dataclass(frozen=True)
@@ -653,6 +950,11 @@ class Analysis:
     notes: tuple[str, ...]
     #: ``(bin centre, count)`` of the ability distribution, for the chart.
     person_bins: tuple[tuple[float, int], ...] = ()
+    #: The two frameworks that need their own block. CTT and Rasch are already
+    #: the summary, the item table and the splits above; these two are the ones
+    #: this app never published, so they arrive as named blocks.
+    cognitive: CognitiveMix = field(default_factory=CognitiveMix)
+    mastery: Mastery = field(default_factory=Mastery)
 
 
 def _alpha(columns: list[list[float]]) -> float | None:
@@ -694,6 +996,12 @@ def analyse(exam: Mapping[str, Any],
     qtypes = exam.get("question_types") or {}
     weights = exam.get("question_weights") or {}
     key = exam.get("answer_key") or {}
+    # The kisi-kisi's own labels, and the school's own standard. Both are what
+    # the teacher recorded; neither is inferred from anything.
+    levels = exam.get("question_cognitive") or {}
+    if not isinstance(levels, Mapping):
+        levels = {}
+    kkm = _kkm(exam.get("passing_score"))
     responses = list(submissions)
     rows = _responses(exam, responses)
 
@@ -720,6 +1028,20 @@ def analyse(exam: Mapping[str, Any],
     }
     beta_by_item = {i: betas[position] for position, i in enumerate(item_index)}
     se_by_item = {i: item_se[position] for position, i in enumerate(item_index)}
+    real_se_by_item = {
+        i: (_real_se(item_se[position], fit_by_item[i].infit)
+            if item_se[position] and fit_by_item[i] else item_se[position])
+        for position, i in enumerate(item_index)
+    }
+    # Person fit, and the Real S.E. that follows from it. Winsteps' person table
+    # has the same four fit numbers as its item table, and the summary block needs
+    # them: a class whose answers already misfit cannot claim a clean reliability.
+    person_fit = {j: _person_fit(matrix, betas, thetas, j) for j in range(len(rows))}
+    person_real_se = [
+        _real_se(person_se[j], person_fit[j].infit if person_fit[j] else None)
+        if person_se[j] else None
+        for j in range(len(rows))
+    ]
 
     # Totals for the discrimination groups and the correlations.
     totals = [sum(s for s in row.shares.values() if s is not None) for row in rows]
@@ -797,32 +1119,42 @@ def analyse(exam: Mapping[str, Any],
         # never will be — its mark is the teacher's — so the two must not share a
         # word, or the page tells a teacher their essay question has no answer key.
         keyed = bool(objective and qt.key_has_answer(qtype, key.get(qi)))
+        # Papers awarded full credit on this question, out of the papers that
+        # answered it — the count a criterion-referenced verdict is made of.
+        full_credit = sum(1 for s in present if s >= 1.0)
+        level_key = af.level(levels.get(qi))
+        mastered = (None if not answered or not kkm
+                    else full_credit / answered >= kkm / 100.0)
 
         items.append(Item(
             index=i, qtype=qtype or "", kind=qt.question_kind(qtype), marks=marks,
             objective=objective, keyed=keyed,
             answered=answered, missing=len(rows) - answered,
             share=round(share, 4), pct=round(share * 100, 1),
-            full=sum(1 for s in present if s >= 1.0),
+            full=full_credit,
             discrimination=round(discrimination, 3),
             point_biserial=round(point_biserial, 3),
             measure=round(measure, 3) if measure is not None else None,
             se=round(se, 3) if se else None,
             t=round(t_value, 2) if t_value is not None else None,
             p_value=round(p_side, 4) if p_side is not None else None,
-            infit=round(fit[0], 3) if fit else None,
-            infit_z=round(fit[1], 2) if fit else None,
-            outfit=round(fit[2], 3) if fit else None,
-            outfit_z=round(fit[3], 2) if fit else None,
+            infit=round(fit.infit, 3) if fit else None,
+            infit_z=round(fit.infit_z, 2) if fit else None,
+            outfit=round(fit.outfit, 3) if fit else None,
+            outfit_z=round(fit.outfit_z, 2) if fit else None,
+            se_real=(round(real_se_by_item[i], 3) if real_se_by_item.get(i) else None),
             pt_measure=(round(_pearson(
                 [shares[j] if shares[j] is not None else 0.0 for j in range(len(rows))],
                 [(thetas[j] or 0.0) for j in range(len(rows))]), 3)
-                if i in beta_by_item else None),
+                if beta_by_item.get(i) is not None else None),
             # An essay is handed to `_flag` as if keyed: it cannot be *unkeyed*, so
             # its flag is its verdict on the classical columns instead.
             flag=_flag(share, answered, discrimination, point_biserial,
-                       fit[2] if fit else None, keyed=keyed or not objective),
+                       fit.outfit if fit else None, keyed=keyed or not objective),
             distractors=distractors,
+            level=level_key.key if level_key else "",
+            band=level_key.band if level_key else "",
+            mastered=mastered,
         ))
 
     # Reliability over every question that carries data. An essay's teacher marks
@@ -846,26 +1178,16 @@ def analyse(exam: Mapping[str, Any],
     finite_thetas = [th for th in thetas if th is not None]
     mean_theta = _mean(finite_thetas) if finite_thetas else None
     sd_theta = _sd(finite_thetas) if len(finite_thetas) > 1 else None
-    person_mse = _mean([se * se for se in person_se if se]) if any(person_se) else None
-    person_rel = person_sep = None
-    if sd_theta and person_mse is not None and sd_theta ** 2 > 0:
-        true_var = max(sd_theta ** 2 - person_mse, 0.0)
-        person_rel = true_var / (sd_theta ** 2)
-        # A separation needs an error to divide by. A set of papers that fit the
-        # model exactly has none, and the ratio is then not "infinite reliability"
-        # but unanswerable — reported as a dash rather than as 1.3e4.
-        if person_mse > 1e-12:
-            person_sep = math.sqrt(true_var / person_mse)
-
-    finite_betas = [b for b in betas]
-    item_mse = _mean([se * se for se in item_se if se]) if any(item_se) else None
-    sd_beta = _sd(finite_betas) if len(finite_betas) > 1 else None
-    item_rel = item_sep = None
-    if sd_beta and item_mse and sd_beta ** 2 > 0:
-        true_item_var = max(sd_beta ** 2 - item_mse, 0.0)
-        item_rel = true_item_var / (sd_beta ** 2)
-        if item_mse > 1e-12:
-            item_sep = math.sqrt(true_item_var / item_mse)
+    # Winsteps' separation block replaces the hand-rolled reliability that used to
+    # live here: same arithmetic, but with the REAL row as well as the MODEL one,
+    # and with `strata` — how many statistically distinct levels the spread
+    # supports, which is the number a school can actually act on.
+    person_stats = separation(thetas, person_se, person_real_se)
+    item_stats = separation(betas, item_se, [real_se_by_item[i] for i in item_index])
+    person_rel = person_stats.reliability_model
+    person_sep = person_stats.separation_model
+    item_rel = item_stats.reliability_model
+    item_sep = item_stats.separation_model
 
     total_values = [row.score for row in rows]
 
@@ -897,6 +1219,11 @@ def analyse(exam: Mapping[str, Any],
             possible=sum(1 for v in matrix[j] if v is not None),
             measure=round(thetas[j], 3) if thetas[j] is not None else None,
             se=round(person_se[j], 3) if person_se[j] else None,
+            se_real=(round(person_real_se[j], 3) if person_real_se[j] else None),
+            infit=round(person_fit[j].infit, 3) if person_fit[j] else None,
+            infit_z=round(person_fit[j].infit_z, 2) if person_fit[j] else None,
+            outfit=round(person_fit[j].outfit, 3) if person_fit[j] else None,
+            outfit_z=round(person_fit[j].outfit_z, 2) if person_fit[j] else None,
             score=row.score,
             extreme=(sum(1 for v in matrix[j] if v is not None) > 0
                      and (sum(1 for v in matrix[j] if v == 1.0) in (0, sum(1 for v in matrix[j] if v is not None)))),
@@ -922,6 +1249,8 @@ def analyse(exam: Mapping[str, Any],
         mean_measure=round(mean_theta, 3) if mean_theta is not None else None,
         sd_measure=round(sd_theta, 3) if sd_theta is not None else None,
         extremes=sum(1 for p in people if p.extreme),
+        person_stats=_rounded(person_stats),
+        item_stats=_rounded(item_stats),
     )
 
     notes = _notes(exam, items)
@@ -934,6 +1263,62 @@ def analyse(exam: Mapping[str, Any],
         splits=tuple(splits),
         notes=notes,
         person_bins=_bins([p.measure for p in people if p.measure is not None]),
+        cognitive=_mix(items),
+        mastery=_mastery(people, items, kkm),
+    )
+
+
+def _kkm(value: Any) -> int:
+    """The school's minimum standard as a whole number 0..100.
+
+    Anything unreadable reads as *not configured* (0) rather than as a default:
+    the mastery report is a statement about the school's own criterion, and
+    substituting 70 for a value nobody chose would put words in its mouth.
+    """
+    try:
+        kkm = int(float(value))
+    except (TypeError, ValueError):
+        return 0
+    return kkm if 0 < kkm <= 100 else 0
+
+
+def _mix(items: Sequence[Item]) -> CognitiveMix:
+    """The HOTS/MOTS/LOTS mix of a paper, by marks when it has them."""
+    counts = {band: 0 for band in af.BANDS}
+    marks = {band: 0.0 for band in af.BANDS}
+    unset = 0
+    unset_marks = 0.0
+    total_marks = 0.0
+    for item in items:
+        total_marks += item.marks
+        if not item.band:
+            unset += 1
+            unset_marks += item.marks
+            continue
+        counts[item.band] += 1
+        marks[item.band] += item.marks
+    # Marks are the basis only when the paper actually carries weights; an exam
+    # saved before weights existed would otherwise report every band as 0.0%.
+    basis = "marks" if total_marks > 0 else "questions"
+    return CognitiveMix(
+        counts=counts, marks={band: round(value, 2) for band, value in marks.items()},
+        unset=unset, unset_marks=round(unset_marks, 2), total=len(items),
+        total_marks=round(total_marks, 2), basis=basis)
+
+
+def _mastery(people: Sequence[Person], items: Sequence[Item], kkm: int) -> Mastery:
+    """Who is tuntas and which questions the class has mastered, by the KKM."""
+    scores = [person.score for person in people]
+    measured = [item for item in items if item.mastered is not None]
+    return Mastery(
+        kkm=kkm,
+        configured=kkm > 0,
+        passed=sum(1 for score in scores if score >= kkm) if kkm else 0,
+        failed=sum(1 for score in scores if score < kkm) if kkm else 0,
+        mean=round(_mean(scores), 2) if scores else None,
+        lowest=round(min(scores), 2) if scores else None,
+        items_mastered=sum(1 for item in measured if item.mastered),
+        items_measured=len(measured),
     )
 
 
@@ -959,4 +1344,19 @@ def _notes(exam: Mapping[str, Any], items: Sequence[Item]) -> tuple[str, ...]:
         notes.append("missing_not_wrong")
     if any(item.flag == "extreme_easy" or item.flag == "extreme_hard" for item in items):
         notes.append("extreme_items")
+    if not _kkm(exam.get("passing_score")) and any(item.answered for item in items):
+        # Mastery is reported against a standard the teacher chose; papers that
+        # came in beside no KKM cannot be read as "everything passed", and the
+        # panel says so instead of printing a verdict nobody set.
+        notes.append("kkm_missing")
+    if any(item.band for item in items) and any(not item.band for item in items):
+        notes.append("levels_partly_set")
+    if any(item.measure is not None for item in items):
+        # The measurement model, said where the numbers are. A school checking a
+        # logit or a fit t against Winsteps needs to know which block is which, what
+        # the fit t is standardised by, and what the scale is anchored on — none of
+        # which can be inferred from the columns.
+        notes.append("scale_anchor")
+        notes.append("fit_dof")
+        notes.append("model_real")
     return tuple(notes)

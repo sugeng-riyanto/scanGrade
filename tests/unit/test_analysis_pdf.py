@@ -128,6 +128,22 @@ def _margin(page):
     return 12 * 72 / 25.4
 
 
+def _charts_page(pdf: bytes, lang: str = "id"):
+    """The page the drawings are on, which is not always the first.
+
+    The summary grid and Winsteps' separation block sit above the drawings, and on
+    a forty-question paper those two tables fill page 1 — so a test pinned to
+    `_document(pdf)[0]` measures pagination instead of the charts, and fails on a
+    report whose drawings are perfectly drawn. The same mistake the note in
+    `test_the_paper_header_is_short_and_the_words_are_a_legend` describes.
+    """
+    t = analysis_report.labels(lang)
+    for page in _document(pdf):
+        if t["item_map"] in page.get_text():
+            return page
+    raise AssertionError(f"no page of the {lang} report holds the drawings")
+
+
 class RecordingCanvas:
     """A canvas that answers like reportlab's and remembers what it was asked.
 
@@ -222,7 +238,7 @@ class TestTheChartsAreDrawn:
         the ones it cannot place is how \"the graphs are missing\" starts."""
         exam, analysis = built
         pdf = analysis_report.analysis_pdf(analysis, exam, lang="id")
-        first = _document(pdf)[0]
+        first = _charts_page(pdf)
         # Any ink the drawings use, not one of them: the item map and the logit
         # bars are coloured by *finding* now (the palette the key explains), so a
         # count that only saw `_ACCENT` would report a chart that dropped its
@@ -242,7 +258,7 @@ class TestTheChartsAreDrawn:
         colour the chart says which options were chosen and not which was right."""
         exam, analysis = built
         pdf = analysis_report.analysis_pdf(analysis, exam, lang="id")
-        first = _document(pdf)[0]
+        first = _charts_page(pdf)
         assert any(shape[0] == KEY for shape in _shapes(first)), (
             "the distractor chart marks no key")
 
@@ -252,7 +268,7 @@ class TestTheChartsAreDrawn:
         because the ticks still drew."""
         exam, analysis = built
         pdf = analysis_report.analysis_pdf(analysis, exam, lang="en")
-        first = _document(pdf)[0]
+        first = _charts_page(pdf, "en")
         strokes = [drawing for drawing in first.get_drawings()
                    if drawing.get("fill") is None]
         assert any(tuple(round(c, 2) for c in (d.get("color") or ())) == MUTED
@@ -275,7 +291,7 @@ class TestTheChartsAreDrawn:
         shapes = {}
         for lang in ("id", "en"):
             pdf = analysis_report.analysis_pdf(analysis, exam, lang=lang)
-            first = _document(pdf)[0]
+            first = _charts_page(pdf, lang)
             shapes[lang] = len([s for s in _shapes(first) if s[0] == ACCENT])
             text = "".join(page.get_text() for page in _document(pdf))
             assert analysis_report.labels(lang)["item_map"] in text

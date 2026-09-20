@@ -300,3 +300,50 @@ class TestThePartsThatSwitchSaySo:
             "a fixed lang= on an element is right in one toggle position and "
             f"wrong in the other: {offenders}"
         )
+
+
+# ── the title is read out, not rendered ─────────────────────────────────────
+
+TITLE = re.compile(r"\{%\s*block\s+title\s*%\}(.*?)\{%\s*endblock\s*%\}",
+                   re.S)
+
+
+def title_blocks(src):
+    return [(src.count("\n", 0, m.start()) + 1, m.group(1).strip())
+            for m in TITLE.finditer(src)]
+
+
+class TestTheTitleIsText:
+    """`{% block title %}` lands inside `<title>`, which renders no HTML at all.
+
+    A `<span x-text=\"…\">` there is not translated, it is *spelled out*: the
+    browser tab showed the markup — `<span x-text="t('Analisis Butir Soal'…` —
+    to every reader, in both languages. Two pages had one. The visible heading
+    keeps its span; the tab gets text, and a page that wants its tab translated
+    sets `document.title` from an Alpine effect, after the toggle exists.
+    """
+
+    def test_no_title_block_carries_markup(self):
+        offenders = []
+        for path in templates():
+            src = path.read_text(encoding="utf-8", errors="ignore")
+            for line, body in title_blocks(src):
+                if "<" in body or "x-text" in body:
+                    offenders.append(
+                        f"{path.relative_to(TEMPLATES).as_posix()}:{line}"
+                    )
+        assert not offenders, (
+            "a <title> renders no HTML, so this markup is read out verbatim as "
+            "the tab's text:\n  " + "\n  ".join(offenders)
+        )
+
+    def test_a_page_that_wants_a_translated_tab_sets_it_from_the_toggle(self):
+        """The offline half, done the way that works: an Alpine effect that reads
+        `t(...)`. Both pages that used to spell their title out now do this, so the
+        pattern is recorded rather than re-invented."""
+        for name in ("teacher/analysis.html", "teacher/analytics.html"):
+            src = (TEMPLATES / name).read_text(encoding="utf-8", errors="ignore")
+            assert "document.title = t(" in src, (
+                f"{name} declares a fixed tab title and never follows the toggle")
+            assert not TITLE.search(src).group(1).strip().count("<"), (
+                f"{name} is back to putting markup in `<title>`")

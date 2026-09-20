@@ -131,6 +131,7 @@
                     {% for s in students %}
                     <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }" :class="selected.includes('{{ s.id }}') ? 'bg-amber-50/50' : ''">
                         <td class="px-2 py-3"><input type="checkbox" :checked="selected.includes('{{ s.id }}')" @click="selected.includes('{{ s.id }}') ? selected = selected.filter(x => x !== '{{ s.id }}') : selected.push('{{ s.id }}')" class="w-4 h-4"></td>
+                        <td class="px-4 py-3 font-mono text-xs text-stone-600">{{ s.nisn or '-' }}</td>
                         <td class="px-4 py-3 font-bold text-stone-700">{{ s.name }}</td>
                         <td class="px-4 py-3"><span class="badge bg-violet-50 text-violet-700 border border-violet-200">{{ s.class_name or '-' }}</span></td>
                         <td class="px-4 py-3 text-stone-500">{{ s.email or '-' }}</td>

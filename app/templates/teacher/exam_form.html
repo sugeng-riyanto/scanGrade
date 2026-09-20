@@ -875,6 +875,23 @@
                                                 <option :value="c.v" x-text="t(c.id, c.en)"></option>
                                             </template>
                                         </select>
+                                        <!-- The cognitive level, for the item analysis. Blank by
+                                             default and blank stays blank: the report says "not
+                                             labelled yet" rather than guessing from the type.
+                                             The six names and their band come from the server
+                                             (`SG_LEVELS`), and the colour is per band, so HOTS
+                                             questions stand out while a teacher scans the list. -->
+                                        <select x-model="q.level"
+                                                x-init="$nextTick(() => { $el.value = String(q.level || '') })"
+                                                :title="t('Tingkat kognitif (kisi-kisi)','Cognitive level (kisi-kisi)')"
+                                                :aria-label="t('Tingkat kognitif (kisi-kisi)','Cognitive level (kisi-kisi)')"
+                                                class="text-xs font-extrabold rounded-lg border-2 bg-white px-2 py-1 transition max-w-[11rem]"
+                                                :class="q.level ? (sgLevelBand(SG_LEVELS.filter(l => l.key === q.level)[0] || {band:''}) === 'hots' ? 'border-rose-300 text-rose-700' : sgLevelBand(SG_LEVELS.filter(l => l.key === q.level)[0] || {band:''}) === 'mots' ? 'border-amber-300 text-amber-700' : 'border-emerald-300 text-emerald-700') : 'border-slate-200 text-slate-400'">
+                                            <option value="" x-text="t('Tingkat kognitif…','Cognitive level…')"></option>
+                                            <template x-for="lv in SG_LEVELS" :key="lv.key">
+                                                <option :value="lv.key" x-text="sgLevelLabel(lv)"></option>
+                                            </template>
+                                        </select>
                                         <span x-show="q.bonus" class="text-xs px-2 py-1 rounded-full font-extrabold bg-purple-100 text-purple-700">Bonus</span>
                                         <span x-show="q.audio || q.youtube" class="text-xs px-2 py-1 rounded-full font-extrabold bg-rose-100 text-rose-700">
                                             <i class="fas fa-headphones mr-0.5"></i>Media
@@ -1109,6 +1126,7 @@
                     <input type="hidden" name="question_weights" id="question-weights-input" :value="getWeightsJson()">
                     <input type="hidden" name="question_pages" id="question-pages-input" :value="getPagesJson()">
                     <input type="hidden" name="question_audio" id="question-audio-input" :value="getAudioJson()">
+                    <input type="hidden" name="question_cognitive" id="question-cognitive-input" :value="getLevelsJson()">
                 </div>
 
                 <input type="hidden" name="anti_cheat_enabled" value="true">
@@ -1259,6 +1277,13 @@
 // again here is how a page and the grader stop agreeing about what a true/false
 // question is; see app/services/question_types.py.
 const SG_QT = {{ q_vocabulary() | tojson | safe }};
+// The cognitive levels, handed over by the server the same way. A teacher labelling
+// a question for the kisi-kisi and a report grouping by LOTS/MOTS/HOTS have to
+// agree on six names and three bands; writing them out here is how those two stop
+// agreeing. `app/services/analysis_frameworks.py` is the authority.
+const SG_LEVELS = {{ cognitive_levels() | tojson | safe }};
+function sgLevelLabel(lv) { return sgT(lv.name.id, lv.name.en); }
+function sgLevelBand(lv) { return lv.band; }
 function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
 function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; }
 
@@ -1330,6 +1355,7 @@ function questionManager() {
                 var akey = {{ (exam.answer_key if exam else {}) | tojson | safe }};
                 var ppages = {{ (exam.question_pages if exam else {}) | tojson | safe }};
                 var amedia = {{ (exam.question_audio if exam else {}) | tojson | safe }};
+                var plevel = {{ (exam.question_cognitive if exam else {}) | tojson | safe }};
                 if (Object.keys(qtypes).length === 0) return [];
                 return Object.keys(qtypes).map(function(i) {
                     var t = qtypes[i];
@@ -1338,7 +1364,12 @@ function questionManager() {
                     // Ids are strings so a restored question can never collide with a
                     // newly added one — the numbers used to restart at 1, which made
                     // Alpine's x-for keys duplicate as soon as a question was added.
+                    // `level` is the cognitive level from the kisi-kisi, and it is left
+                    // empty when the exam has none: a report that guessed a level from
+                    // the question *type* would fabricate the very thing the framework
+                    // is asked to measure.
                     var q = {_id: 'q' + i, type: t, pages: ppages[i] || '',
+                             level: plevel[i] || '',
                              audio: m.audio || '', youtube: m.youtube || '', _showMedia: false};
                     var kind = SG_QT.kinds[t] || SG_QT.kinds[SG_QT.default];
                     if (kind === 'choice') {
@@ -1550,7 +1581,7 @@ function questionManager() {
         dragFrom: null,
         dragOver: null,
         blankQuestion(type) {
-            const q = {_id: 'n' + (++this._cid), type: type, pages: '', audio: '', youtube: '', _showMedia: false};
+            const q = {_id: 'n' + (++this._cid), type: type, pages: '', level: '', audio: '', youtube: '', _showMedia: false};
             const kind = this.kindOf(q);
             if (kind === 'choice') { q.answers = ['A']; q.bonus = false; }
             if (kind === 'truefalse') { q.tf = 'true'; }
@@ -1690,6 +1721,14 @@ function questionManager() {
         },
         getPagesJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => [i, q.pages || ''])));
+        },
+        // Only the labelled questions are posted. An empty string would be a value
+        // the report has to interpret ("explicitly no level?"), where an absent key
+        // is unambiguous: nobody has said yet. The save route drops unknown keys on
+        // its own, so a hand-edited form cannot inject a level the vocabulary lacks.
+        getLevelsJson() {
+            return JSON.stringify(Object.fromEntries(
+                this.questions.map((q,i) => [i, q.level || '']).filter(([k,v]) => v)));
         },
         getAudioJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => {

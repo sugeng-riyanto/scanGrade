@@ -301,6 +301,17 @@ def create_app(env=None):
     # rather than writing their own list, which is how a Python change and a
     # JavaScript change stop meaning the same thing.
     app.jinja_env.globals["q_vocabulary"] = vocabulary
+    # The measurement vocabulary — the four education frameworks and the cognitive
+    # levels a kisi-kisi is written in. A page that offers "which analysis?" and a
+    # page that lets a teacher label a question must offer the same four and the
+    # same six, so both read them from app/services/analysis_frameworks.py rather
+    # than each writing a list that drifts from the other.
+    from app.services.analysis_frameworks import (
+        bands_payload, catalogue, levels_payload,
+    )
+    app.jinja_env.globals["frameworks_catalogue"] = catalogue
+    app.jinja_env.globals["cognitive_levels"] = levels_payload
+    app.jinja_env.globals["cognitive_bands"] = bands_payload
 
     def q_any_essay(types):
         """Does this exam contain a question a teacher has to mark by hand?

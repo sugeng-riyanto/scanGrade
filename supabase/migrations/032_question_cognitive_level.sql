@@ -1,0 +1,31 @@
+-- ──────────────────────────────────────────────
+-- Migration 032: the cognitive level of each question
+-- ──────────────────────────────────────────────
+-- Jalankan lewat deploy/apply_migration.py (uji rollback dulu), atau tempel di
+-- Supabase SQL Editor.
+--
+-- The HOTS/MOTS/LOTS framework asks one question: does the paper test what its
+-- kisi-kisi said it would? Answering it needs a fact this database never held —
+-- the level of each question — and that fact belongs to the *teacher*, not to a
+-- computation. Nothing here infers a level from a question's type: a
+-- multiple-choice question is not automatically lower order, and reporting it as
+-- such would answer a measurement framework with a guess.
+--
+-- Shape: `{"0": "c4", "3": "c5"}` — question *index* (as text, the same keying
+-- `question_types`, `question_weights` and `answer_key` already use) to a level
+-- (`c1`..`c6`). Absent means *unlabelled* rather than lower order, which the
+-- report states in words instead of drawing a bar at zero.
+--
+-- JSONB and not a table: a question's level is stored beside the question's type
+-- and marks, read in the same query as the exam, and never queried on its own.
+-- A sibling table would add a join to every analysis render to hold two columns
+-- of a document the teacher already edits on one page.
+--
+-- Idempotent: safe to run twice, and additive — an exam that never sets a level
+-- keeps an empty map and every existing report reads exactly as it did.
+--
+-- No backfill, deliberately. The levels of questions already written are not in
+-- this database anywhere, and inventing them would put a fabricated framework
+-- claim behind a school's assessment.
+
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS question_cognitive JSONB DEFAULT '{}';

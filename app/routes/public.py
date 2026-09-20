@@ -1,13 +1,22 @@
 """Public-facing routes — landing, pricing, demo request, capacity evidence."""
 
+import io
 from datetime import datetime, timezone
 from flask import (Blueprint, abort, jsonify, render_template, request,
                    send_file)
 from app.utils.auth import get_supabase
+from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
 
 public_bp = Blueprint("public", __name__)
 logger = get_logger("public")
+
+
+def _rate_limit(limit):
+    """The app's limiter when it has one — a public page that runs a full
+    calibration on every open should not be free to hammer."""
+    from app.utils.rate_limiter import limiter
+    return limiter.limit(limit) if limiter else (lambda f: f)
 
 
 @public_bp.route("/loaderio-51ecf273210e88abe9f24d4eb2dba2a8.html")
@@ -89,6 +98,135 @@ def capacity_evidence(name):
         abort(404)
     return send_file(path, mimetype="text/plain", as_attachment=False,
                      download_name=path.name)
+
+
+# ── a shared item analysis ───────────────────────────────────────────────────
+#
+# A teacher's report, reachable with a link and no account. Three rules decide
+# what a stranger gets, and they are the reason this lives in its own module
+# rather than behind the teacher's route with a flag:
+#
+#   1. **The token is the permission.** `analysis_share.resolve` answers the same
+#      404 for an unknown, expired and revoked token, because telling a stranger
+#      which one it was tells them a token existed.
+#   2. **The answer key and the student names never render.** The item statistics
+#      are the point of sharing; which bubble is correct and who sat the paper are
+#      not. That is enforced here — at the payload and at the document — not in
+#      the template, so a new panel added later cannot forget it.
+#   3. **The teacher's name is not published.** The school is named (a shared
+#      report about "SMA Negeri 1" is checkable) and the person is not.
+
+
+def _shared_report(supabase, exam_id):
+    """``(exam, analysis)`` for a visitor holding a link, with no permission check.
+
+    Deliberately not `_guard_exam`, which asks who is looking: nobody is. It reuses
+    the same loaders and the same analysis the teacher's page uses, so the shared
+    report and the teacher's report cannot disagree about a number.
+    """
+    from app.routes.teacher import _chart_payload, _exam_results, _json_fields
+    from app.services import item_analysis
+    from app.services.question_types import default_weights
+
+    exam = row_or_none(supabase.table("exams").select("*")
+                       .eq("id", exam_id).maybe_single().execute())
+    if not exam:
+        return None, None
+    exam = _json_fields(exam)
+    total = int(exam.get("total_questions") or 0)
+    if not (exam.get("question_weights") or {}) and total > 0:
+        exam["question_weights"] = default_weights(
+            exam.get("question_types") or {}, total)
+    submissions, _scan, _online, _stats = _exam_results(supabase, exam_id)
+    return exam, item_analysis.analyse(exam, submissions)
+
+
+def _link_or_404(supabase, token):
+    from app.services import analysis_share
+
+    link = analysis_share.resolve(supabase, token)
+    if not link:
+        abort(404)
+    return link
+
+
+@public_bp.route("/r/<token>")
+@_rate_limit("90 per minute")
+def shared_analysis(token):
+    """One exam's item analysis, shared by a teacher, redacted for a stranger."""
+    from app.routes.teacher import _chart_payload
+    from app.services import analysis_share
+
+    supabase = get_supabase()
+    link = _link_or_404(supabase, token)
+    exam, analysis = _shared_report(supabase, link["exam_id"])
+    if not exam:
+        abort(404)
+    # Counted after the report is known to exist, so a link to a deleted exam is
+    # not reported to its owner as a reader.
+    analysis_share.register_view(supabase, link)
+    # The framework travels in the link's own query string, so a shared report
+    # opens in the framework it was shared in: the reader chooses *what question
+    # they are being shown*, and two links to the same exam can mean different
+    # things without either of them being wrong.
+    from app.services import analysis_frameworks
+
+    framework = analysis_frameworks.resolve(request.args.get("framework"))
+    # `public_view` is what tells the template this is the redacted copy. The
+    # session cannot: a teacher who is signed in and opens somebody's share link
+    # used to render the *teacher's* copy of a shared report — key marker and
+    # all — because they had a cookie.
+    return render_template(
+        "teacher/analysis.html", exam=exam, analysis=analysis,
+        chart=_chart_payload(analysis, exam, public=True, framework=framework),
+        framework=framework, public_view=True,
+        download_base=f"/r/{token}")
+
+
+@public_bp.route("/r/<token>/download.<ext>")
+@_rate_limit("30 per minute")
+def shared_analysis_file(token, ext):
+    """The same three documents the teacher can download, redacted the same way.
+
+    The extension is a whitelist rather than a format string: a path built from
+    a caller's text is how a download route becomes a file-read route.
+    """
+    from app.routes.teacher import _exam_results, _json_fields  # noqa: F401
+    from app.services import analysis_report, analysis_share
+    from app.services.report_card_service import school_for
+
+    if ext not in ("csv", "xlsx", "pdf"):
+        abort(404)
+    supabase = get_supabase()
+    link = _link_or_404(supabase, token)
+    exam, analysis = _shared_report(supabase, link["exam_id"])
+    if not analysis:
+        abort(404)
+    from app.services import analysis_frameworks
+
+    lang = request.args.get("lang") or "id"
+    framework = analysis_frameworks.resolve(request.args.get("framework"))
+    name = analysis_report.filename(analysis, exam, ext)
+
+    if ext == "csv":
+        payload = analysis_report.analysis_csv(analysis, exam, lang, public=True,
+                                               framework=framework)
+        buf = io.BytesIO(payload.encode("utf-8-sig"))
+        return send_file(buf, mimetype="text/csv", as_attachment=True,
+                         download_name=name)
+    if ext == "xlsx":
+        book = analysis_report.analysis_xlsx(analysis, exam, lang=lang, public=True,
+                                             framework=framework)
+        return send_file(
+            io.BytesIO(book), as_attachment=True,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            download_name=name)
+    pdf = analysis_report.analysis_pdf(
+        analysis, exam,
+        school=(school_for(supabase, exam.get("school_id")) or {}).get("name", ""),
+        teacher="", lang=lang, public=True, framework=framework)
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
+                     download_name=name)
 
 
 @public_bp.route("/privacy")
