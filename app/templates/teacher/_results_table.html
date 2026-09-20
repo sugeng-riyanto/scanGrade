@@ -9,6 +9,21 @@
 }
 </style>
 
+{# The late mark, in both halves of this table.
+
+   `submissions.submitted_late` is the flag the submit route already records when
+   a paper arrives after its sitting's deadline, past the grace (see
+   `app/utils/exam_window.py`). Recording it and never showing it left a teacher
+   unable to tell a timed paper from one that came in twenty minutes late
+   without opening the database, which is the one place a marking screen exists
+   to save them from.
+
+   The mark reads the *stored* column rather than recomputing the deadline: the
+   teacher may have edited the exam's window since, and the record of when the
+   paper arrived must not follow that edit. It rides in the student's own cell
+   rather than a column of its own so the two halves stay the same width, and the
+   label is a `t()` pair because it renders inside a page that switches. #}
+
 <!-- Mobile cards -->
 <div class="mobile-only">
     <div class="space-y-3">
@@ -16,7 +31,15 @@
     {% set ans = s.get('answers', {}) if s.get('answers') is mapping else {} %}
     <div class="border border-stone-200 rounded-xl p-3 space-y-2">
         <div class="flex items-center justify-between gap-2">
-            <span class="font-extrabold text-stone-800 text-sm truncate">{{ s.student_name or s.student_id[:12] ~ '...' }}</span>
+            <span class="flex items-center gap-1.5 min-w-0">
+                <span class="font-extrabold text-stone-800 text-sm truncate">{{ s.student_name or s.student_id[:12] ~ '...' }}</span>
+                {% if s.submitted_late %}
+                <span class="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 text-amber-700 border border-amber-200"
+                      :title="t('Jawaban tiba setelah tenggat waktu ujian','The answers arrived after the sitting deadline')">
+                    <i class="fas fa-clock"></i><span x-text="t('Terlambat','Late')"></span>
+                </span>
+                {% endif %}
+            </span>
             <span class="px-2 py-0.5 text-[10px] font-bold rounded-full {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700{% elif s.status == 'published' %}bg-sky-100 text-sky-700{% else %}bg-amber-100 text-amber-700{% endif %}">{{ s.status }}</span>
         </div>
         {# This card only exists below 640px (`.mobile-only`), so four columns
@@ -66,7 +89,15 @@
             {% set ans = s.get('answers', {}) if s.get('answers') is mapping else {} %}
             <tr class="border-b border-stone-200 last:border-0 hover:bg-orange-50/30 transition">
                 <td class="py-3 font-bold text-stone-600">{{ loop.index }}</td>
-                <td class="py-3 font-extrabold text-stone-800">{{ s.student_name or s.student_id[:12] ~ '...' }}</td>
+                <td class="py-3 font-extrabold text-stone-800">
+                    {{ s.student_name or s.student_id[:12] ~ '...' }}
+                    {% if s.submitted_late %}
+                    <span class="ml-1.5 inline-flex items-center gap-1 align-middle px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 text-amber-700 border border-amber-200"
+                          :title="t('Jawaban tiba setelah tenggat waktu ujian','The answers arrived after the sitting deadline')">
+                        <i class="fas fa-clock"></i><span x-text="t('Terlambat','Late')"></span>
+                    </span>
+                    {% endif %}
+                </td>
                 <td class="py-3 font-bold text-stone-600 text-center">{{ s.score if s.score is not none else '-' }}</td>
                 <td class="py-3 font-bold text-red-600 text-center">{{ s.penalty if s.penalty is not none else 0 }}</td>
                 <td class="py-3 font-extrabold text-center {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</td>

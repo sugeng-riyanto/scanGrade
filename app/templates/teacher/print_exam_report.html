@@ -81,6 +81,10 @@
     .no { color: #dc2626; font-weight: bold; }
     .muted { color: #64748b; }
     .status { font-size: 7.5pt; font-weight: bold; }
+    /* A paper that arrived after its sitting's deadline. Amber rather than red:
+       the flag records *when the answers arrived*, which is a fact the school
+       needs, not a judgement about the student. */
+    .late { color: #b45309; font-weight: bold; font-size: 7pt; white-space: nowrap; }
     .empty { text-align: center; color: #94a3b8; padding: 20pt; }
 
     .sign { width: 100%; border-collapse: collapse; margin-top: 20pt; page-break-inside: avoid; }
@@ -191,7 +195,7 @@
             {% set final = s.get('final_score') if s.get('final_score') is not none else s.get('score') %}
             <tr>
                 <td class="center">{{ loop.index }}</td>
-                <td>{{ s.student_name or (s.student_id or '-')[:8] }}</td>
+                <td>{{ s.student_name or (s.student_id or '-')[:8] }}{% if s.get('submitted_late') %} <span class="late">terlambat</span>{% endif %}</td>
                 <td class="center">{{ ans.get('_nisn') or '&mdash;'|safe }}</td>
                 <td class="center">{{ s.get('score') if s.get('score') is not none else 0 }}</td>
                 <td class="center {{ 'no' if (s.get('penalty') or 0) else 'muted' }}">{{ s.get('penalty') or 0 }}</td>

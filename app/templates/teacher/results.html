@@ -7,7 +7,10 @@
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
             <h1 class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ exam.title if exam_id else 'Hasil Ujian' }}</h1>
-            {% if exam_id %}<p class="text-xs font-medium text-stone-500 mt-0.5">{{ exam.subject or '' }} &middot; {{ stats.count }} peserta</p>{% endif %}
+            {# The count belongs next to the participant count, not only on the
+               rows: a badge on row 180 of 500 is a badge nobody scrolls to, and
+               the whole point is that a late paper is noticed. #}
+            {% if exam_id %}<p class="text-xs font-medium text-stone-500 mt-0.5">{{ exam.subject or '' }} &middot; {{ stats.count }} peserta{% if stats.late %} <span :lang="lang" class="ml-1 inline-flex items-center gap-1 align-middle px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-700 border border-amber-200" :title="t('Kertas yang jawabannya tiba setelah tenggat waktu ujian','Papers whose answers arrived after the sitting deadline')"><i class="fas fa-clock"></i><span x-text="'{{ stats.late }} ' + t('terlambat','late')"></span></span>{% endif %}</p>{% endif %}
         </div>
         <div class="flex flex-wrap gap-1.5">
             {% if exams and not exam_id %}
