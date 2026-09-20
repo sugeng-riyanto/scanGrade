@@ -1,0 +1,481 @@
+{% extends "base.html" %}
+{% block title %}<span x-text="t('Analisis Butir Soal','Item Analysis')"></span> - {{ exam.title }}{% endblock %}
+{% block page_title %}<span x-text="t('Analisis Butir Soal','Item Analysis')"></span>{% endblock %}
+{% block content %}
+{# Every word on this page is a pair or a catalogue entry in the script below, so
+   the EN/ID button translates all of it — including the chart legends, which are
+   rebuilt on the toggle rather than baked in at load. Nothing here is written in
+   one language only. #}
+
+{# The tone per finding, as a Tailwind label pair. Kept beside the table rather
+   than in the script because it is presentation, not copy. #}
+{% set ITEM_FLAG_TONE = {
+    'ok':           'bg-emerald-100 text-emerald-700',
+    'weak':         'bg-amber-100 text-amber-700',
+    'negative':     'bg-red-100 text-red-700',
+    'misfit':       'bg-red-100 text-red-700',
+    'extreme_easy': 'bg-indigo-100 text-indigo-700',
+    'extreme_hard': 'bg-indigo-100 text-indigo-700',
+    'unscored':     'bg-surface-100 text-surface-600',
+    'unkeyed':      'bg-amber-100 text-amber-700'
+} %}
+
+<div class="space-y-4 sm:space-y-6" x-data="itemAnalysis({{ chart|tojson|forceescape }})" x-init="init()"
+     data-analysis-page>
+
+    <!-- ── header ─────────────────────────────────────────────────────────── -->
+    <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+        <div class="min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+                <a href="/teacher/results?exam_id={{ exam.id }}"
+                   class="text-surface-400 hover:text-primary-600 p-1.5 hover:bg-primary-50 rounded-lg transition shrink-0"
+                   :title="t('Kembali ke hasil ujian','Back to the results')"
+                   :aria-label="t('Kembali ke hasil ujian','Back to the results')">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <h1 class="text-lg sm:text-2xl font-extrabold text-surface-800 truncate"><span x-text="t('Analisis Butir Soal','Item Analysis')"></span></h1>
+            </div>
+            <p class="text-xs sm:text-sm text-surface-500 font-medium ml-9">
+                {{ exam.title }}{% if exam.subject %} &middot; {{ exam.subject }}{% endif %}
+                <span class="mx-1">&middot;</span>
+                <span x-text="t('apa yang dikatakan jawaban kelas tentang soalnya','what the class&#39;s answers say about the questions')"></span>
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-1.5 ml-9 lg:ml-0">
+{# The files are rendered on the server, so the toggle cannot reach inside
+               them — the link carries the language the reader has chosen, and a
+               teacher who switches to English files an English report. #}
+            <a :href="'/teacher/analysis/{{ exam.id }}/download.csv?lang=' + lang" data-download="csv"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-csv mr-1 text-emerald-600"></i>CSV
+            </a>
+            <a :href="'/teacher/analysis/{{ exam.id }}/download.pdf?lang=' + lang" data-download="pdf"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
+            </a>
+            <button type="button" @click="window.print()"
+                    class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>
+            </button>
+            <a href="/guide/skor"
+               class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
+                <i class="fas fa-book-open mr-1"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span>
+            </a>
+        </div>
+    </div>
+
+    {% if not analysis.items or analysis.summary.answered_papers == 0 %}
+    <!-- ── nothing to measure yet ─────────────────────────────────────────── -->
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-8 text-center">
+        <i class="fas fa-chart-bar text-3xl text-surface-300 mb-3"></i>
+        <p class="text-sm font-bold text-surface-700" x-text="t('Belum ada jawaban untuk dianalisis','No answers to analyse yet')"></p>
+        <p class="text-xs text-surface-500 mt-1 max-w-md mx-auto" x-text="t('Analisis muncul setelah ada kertas yang dikumpulkan. Angka yang dilaporkan selalu berasal dari jawaban yang sudah tersimpan, bukan dari perkiraan.','The analysis appears once papers have been submitted. Every number reported here comes from stored answers, never from an estimate.')"></p>
+    </div>
+    {% else %}
+
+    <!-- ── summary ────────────────────────────────────────────────────────── -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+        {% set s = analysis.summary %}
+        <template x-for="card in summaryCards()" :key="card.key">
+            <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
+                <p class="text-[10px] sm:text-[11px] font-bold text-surface-400 uppercase tracking-wide" x-text="card.label"></p>
+                <p class="text-lg sm:text-2xl font-extrabold text-surface-800 mt-0.5" x-text="card.value"></p>
+                <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="card.hint"></p>
+            </div>
+        </template>
+    </div>
+
+    <!-- ── charts ─────────────────────────────────────────────────────────── -->
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4 xl:col-span-2">
+            <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Peta butir soal','Item map')"></h2>
+                <p class="text-[10px] text-surface-400 font-medium" x-text="t('Tingkat kesulitan melawan daya beda. Kanan = dikerjakan hampir semua murid; atas = membedakan murid kuat dan lemah.','Difficulty against discrimination. Right = answered by nearly everyone; up = separates the strong from the weak.')"></p>
+            </div>
+            <div class="h-56 sm:h-72"><canvas x-ref="mapCanvas" aria-hidden="true"></canvas></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
+            <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Kesulitan soal (logit)','Question difficulty (logits)')"></h2>
+                <p class="text-[10px] text-surface-400 font-medium" x-text="t('Nol = soal pada rata-rata ujian ini.','Zero = a question of average difficulty for this paper.')"></p>
+            </div>
+            <div class="h-56 sm:h-72"><canvas x-ref="difficultyCanvas" aria-hidden="true"></canvas></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
+            <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Sebaran kemampuan murid','Spread of student ability')"></h2>
+                <p class="text-[10px] text-surface-400 font-medium" x-text="t('Setiap batang satu rentang logit. Murid dengan skor sempurna atau nol tidak punya taksiran hingga.','One bar per logit range. A paper scoring everything or nothing has no finite estimate.')"></p>
+            </div>
+            <div class="h-56 sm:h-72"><canvas x-ref="peopleCanvas" aria-hidden="true"></canvas></div>
+        </div>
+    </div>
+
+    <!-- ── item table ─────────────────────────────────────────────────────── -->
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 p-3 sm:p-4 border-b border-surface-100">
+            <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Statistik butir soal','Item statistics')"></h2>
+            <p class="text-[10px] text-surface-400 font-medium" x-text="t('P = persen nilai yang dibayarkan soal ini. D = selisih kelompok atas dan bawah. r = korelasi dengan sisa ujian. b = kesulitan dalam logit.','P = share of the marks this question actually paid. D = upper group minus lower group. r = correlation with the rest of the paper. b = difficulty in logits.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs min-w-[820px]">
+                <thead>
+                    <tr class="text-surface-500 border-b border-surface-100 bg-surface-50">
+                        <th class="text-left py-2 px-2 font-bold" x-text="t('Soal','No')"></th>
+                        <th class="text-left py-2 px-2 font-bold" x-text="t('Tipe','Type')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Bobot','Marks')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Dijawab','Answered')"></th>
+                        <th class="text-right py-2 px-2 font-bold">P</th>
+                        <th class="text-right py-2 px-2 font-bold">D</th>
+                        <th class="text-right py-2 px-2 font-bold">r</th>
+                        <th class="text-right py-2 px-2 font-bold">b</th>
+                        <th class="text-right py-2 px-2 font-bold">SE</th>
+                        <th class="text-right py-2 px-2 font-bold">t</th>
+                        <th class="text-right py-2 px-2 font-bold">p</th>
+                        <th class="text-right py-2 px-2 font-bold">Infit</th>
+                        <th class="text-right py-2 px-2 font-bold">Outfit</th>
+                        <th class="text-left py-2 px-2 font-bold" x-text="t('Catatan','Note')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in analysis.items %}
+                    <tr class="border-b border-surface-50 hover:bg-surface-50" data-item-row="{{ item.index + 1 }}">
+                        <td class="py-2 px-2 font-bold text-surface-700">{{ item.index + 1 }}</td>
+                        <td class="py-2 px-2 text-surface-500 whitespace-nowrap" x-text="window.SG_ITEM_WORDS.kind['{{ item.kind }}'][lang]"></td>
+                        <td class="py-2 px-2 text-right text-surface-500">{{ item.marks|round(1) }}</td>
+                        <td class="py-2 px-2 text-right text-surface-500">{{ item.answered }}<span class="text-surface-300">/{{ analysis.summary.students }}</span></td>
+                        <td class="py-2 px-2 text-right font-bold text-surface-700">{{ item.pct|round(1) }}</td>
+                        <td class="py-2 px-2 text-right font-bold {{ 'text-red-600' if item.discrimination < 0 else ('text-amber-600' if item.discrimination < 0.2 else 'text-emerald-600') }}">{{ item.discrimination|round(2) }}</td>
+                        <td class="py-2 px-2 text-right {{ 'text-red-600' if item.point_biserial < 0 else ('text-amber-600' if item.point_biserial < 0.2 else 'text-surface-600') }}">{{ item.point_biserial|round(2) }}</td>
+                        <td class="py-2 px-2 text-right text-surface-600">{{ item.measure|round(2) if item.measure is not none else '—' }}</td>
+                        <td class="py-2 px-2 text-right text-surface-400">{{ item.se|round(2) if item.se is not none else '—' }}</td>
+                        <td class="py-2 px-2 text-right text-surface-600">{{ item.t|round(2) if item.t is not none else '—' }}</td>
+                        <td class="py-2 px-2 text-right text-surface-500">{{ item.p_value|round(3) if item.p_value is not none else '—' }}</td>
+                        <td class="py-2 px-2 text-right text-surface-500">{{ item.infit|round(2) if item.infit is not none else '—' }}</td>
+                        <td class="py-2 px-2 text-right text-surface-500">{{ item.outfit|round(2) if item.outfit is not none else '—' }}</td>
+                        <td class="py-2 px-2">
+                            <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap {{ ITEM_FLAG_TONE.get(item.flag, 'bg-surface-100 text-surface-600') }}"
+                                  :lang="lang"
+                                  x-text="window.SG_ITEM_WORDS.flag['{{ item.flag }}'][lang]"></span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── distractors ────────────────────────────────────────────────────── -->
+    {% set with_options = analysis.items|selectattr('distractors')|list %}
+    {% if with_options %}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+        <div class="p-3 sm:p-4 border-b border-surface-100">
+            <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Sebaran pilihan jawaban','Where the options landed')"></h2>
+            <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="t('Pilihan yang tidak dipilih siapa pun belum pernah menjadi jawaban yang masuk akal — atau jawabannya belum sempat tersebar.','An option nobody chose was never a plausible answer — or the paper has not been answered widely yet.')"></p>
+        </div>
+        <div class="divide-y divide-surface-100">
+            {% for item in with_options %}
+            <div class="p-3 sm:p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-xs font-bold text-surface-700">
+                        <span x-text="t('Soal','No')"></span> {{ item.index + 1 }}
+                        <span class="text-surface-400 font-medium ml-1" x-text="window.SG_ITEM_WORDS.kind['{{ item.kind }}'][lang]"></span>
+                    </p>
+                    <p class="text-[10px] text-surface-400 font-medium">{{ item.answered }} <span x-text="t('kertas terjawab','papers answered')"></span></p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    {% set top = item.distractors|map(attribute='count')|max %}
+                    {% for option in item.distractors %}
+                    <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg border {{ 'border-emerald-200 bg-emerald-50' if option.key else 'border-surface-200 bg-surface-50' }}" data-option="{{ option.label }}">
+                        <span class="w-5 text-center text-xs font-extrabold {{ 'text-emerald-700' if option.key else 'text-surface-600' }}">{{ option.label }}</span>
+                        <span class="h-1.5 rounded-full {{ 'bg-emerald-400' if option.key else 'bg-surface-300' }}"
+                              style="width: {{ ((option.count / top * 48) if top else 0)|round(1) }}px; min-width: 3px"></span>
+                        <span class="text-[10px] font-bold {{ 'text-emerald-700' if option.key else 'text-surface-500' }}">{{ option.count }}</span>
+                        {% if option.key %}<i class="fas fa-key text-[9px] text-emerald-600"></i>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── upper vs lower group ───────────────────────────────────────────── -->
+    {% if analysis.splits %}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+        <div class="p-3 sm:p-4 border-b border-surface-100">
+            <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Kelompok atas dan bawah','Upper and lower groups')"></h2>
+            <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="t('Kesulitan soal yang sama diukur pada dua kelompok, lalu diuji dengan t dua ukuran seperti uji-t pada tabel referensi.','The same question measured for two groups, then tested with the reference table&#39;s two-measure t.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs min-w-[520px]">
+                <thead>
+                    <tr class="text-surface-500 border-b border-surface-100 bg-surface-50">
+                        <th class="text-left py-2 px-2 font-bold" x-text="t('Soal','No')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Atas (logit)','Upper (logits)')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Bawah (logit)','Lower (logits)')"></th>
+                        <th class="text-right py-2 px-2 font-bold">t</th>
+                        <th class="text-right py-2 px-2 font-bold">df</th>
+                        <th class="text-right py-2 px-2 font-bold">p</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for split in analysis.splits %}
+                    <tr class="border-b border-surface-50">
+                        <td class="py-2 px-2 font-bold text-surface-700">{{ split.index + 1 }}</td>
+                        <td class="py-2 px-2 text-right text-surface-600">{{ split.upper|round(2) }}</td>
+                        <td class="py-2 px-2 text-right text-surface-600">{{ split.lower|round(2) }}</td>
+                        <td class="py-2 px-2 text-right font-bold {{ 'text-red-600' if split.p < 0.05 else 'text-surface-500' }}">{{ split.t|round(2) }}</td>
+                        <td class="py-2 px-2 text-right text-surface-400">{{ split.df|round(1) }}</td>
+                        <td class="py-2 px-2 text-right {{ 'text-red-600 font-bold' if split.p < 0.05 else 'text-surface-500' }}">{{ split.p|round(3) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── honest limits ──────────────────────────────────────────────────── -->
+    {% if analysis.notes %}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
+        <h2 class="text-sm font-extrabold text-surface-800 mb-2" x-text="t('Cara angka ini dihitung, dan batasnya','How these numbers were computed, and their limits')"></h2>
+        <ul class="space-y-1.5">
+            {% for note in analysis.notes %}
+            <li class="flex gap-2 text-[11px] sm:text-xs text-surface-600">
+                <i class="fas fa-circle-info text-surface-300 mt-0.5"></i>
+                <span data-note="{{ note }}" x-text="window.SG_ITEM_WORDS.note['{{ note }}'][lang]"></span>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Every word this page renders, in both languages. The `{ id: '…', en: '…' }`
+// shape is the catalogue the EN/ID sweep recognises, so a missing translation is
+// a test failure rather than an Indonesian word on a document that declares
+// itself English to a screen reader.
+window.SG_ITEM_WORDS = {
+    kind: {
+        choice:    { id: 'Pilihan ganda', en: 'Multiple choice' },
+        truefalse: { id: 'Benar/Salah',   en: 'True / false' },
+        match:     { id: 'Menjodohkan',   en: 'Matching' },
+        dragdrop:  { id: 'Seret & lepas', en: 'Drag and drop' },
+        ordering:  { id: 'Mengurutkan',   en: 'Ordering' },
+        essay:     { id: 'Esai',          en: 'Essay' }
+    },
+    flag: {
+        ok:           { id: 'Baik',                 en: 'Sound' },
+        weak:         { id: 'Daya beda lemah',      en: 'Weak discrimination' },
+        negative:     { id: 'Daya beda negatif',    en: 'Negative discrimination' },
+        misfit:       { id: 'Menyimpang dari model', en: 'Misfits the model' },
+        extreme_easy: { id: 'Semua benar',          en: 'Everyone right' },
+        extreme_hard: { id: 'Semua salah',          en: 'Everyone wrong' },
+        unscored:     { id: 'Belum ada jawaban',    en: 'No answers yet' },
+        unkeyed:      { id: 'Kunci belum diisi',    en: 'No answer key' }
+    },
+    note: {
+        dichotomous:            { id: 'Kalibrasi memakai skor penuh atau nol, jadi soal menjodohkan yang mendapat nilai sebagian tetap dihitung sebagai satu butir dikotomi. Kolom P, D dan r tetap memakai nilai sebagiannya, seperti yang dibayarkan ke murid.',
+                                  en: 'The calibration is full credit or nothing, so a part-credited matching question is still one dichotomous item. The P, D and r columns do use the part credit the student was actually paid.' },
+        partial_credit:         { id: 'Ujian ini memberi nilai sebagian untuk jawaban yang sebagian benar.',
+                                  en: 'This exam awards part marks for partly correct answers.' },
+        essays_teacher_marked:  { id: 'Nilai esai berasal dari penilaian guru, bukan dari pengoreksi otomatis.',
+                                  en: 'An essay comes from the teacher\u2019s own marking, not the auto-grader.' },
+        unanswered_items:       { id: 'Ada soal yang belum dijawab satu murid pun.',
+                                  en: 'Some questions have not been answered by a single student.' },
+        unkeyed_items:          { id: 'Ada soal objektif yang kunci jawabannya belum diisi, sehingga belum bisa dinilai maupun dianalisis.',
+                                  en: 'Some objective questions have no answer key, so they can be neither marked nor analysed.' },
+        missing_not_wrong:      { id: 'Jawaban kosong dihitung hilang, bukan salah, dan tidak masuk perhitungan tingkat kesulitan soal itu.',
+                                  en: 'A blank answer counts as missing, not wrong, and stays out of that question\u2019s difficulty.' },
+        extreme_items:          { id: 'Ada soal yang dijawab benar atau salah oleh seluruh murid. Angkanya memakai koreksi skor ekstrem: skor mentah digeser 0,3 poin agar tetap terukur.',
+                                  en: 'Some questions were answered correctly or wrongly by every student. Their numbers use the extreme-score correction: the raw score is moved 0.3 points so it stays measurable.' }
+    },
+    metric: {
+        students:  { id: 'Murid',                 en: 'Students' },
+        questions: { id: 'Soal',                  en: 'Questions' },
+        objective: { id: 'objektif',              en: 'objective' },
+        papers:    { id: 'Kertas dengan data',    en: 'Papers with data' },
+        mean:      { id: 'Rata-rata nilai',       en: 'Mean mark' },
+        alpha:     { id: 'Alpha Cronbach',        en: 'Cronbach\u2019s alpha' },
+        sem:       { id: 'SEM',                   en: 'SEM' },
+        personRel: { id: 'Reliabilitas murid',    en: 'Student reliability' },
+        itemRel:   { id: 'Reliabilitas butir',    en: 'Item reliability' },
+        extremes:  { id: 'Skor ekstrem',          en: 'Extreme scores' },
+        sdHint:    { id: 'sebaran nilai akhir',   en: 'spread of the final marks' },
+        alphaHint: { id: 'keandalan satu kali ujian', en: 'how consistent one sitting is' },
+        semHint:   { id: 'kesalahan baku ukur',   en: 'standard error of measurement' },
+        relHint:   { id: 'seberapa stabil taksirannya', en: 'how stable the estimates are' }
+    }
+};
+
+function itemAnalysis(data) {
+    return {
+        items: data.items || [],
+        logits: data.logits || [],
+        bins: data.bins || [],
+        charts: {},
+
+        words(section, key) {
+            var entry = (window.SG_ITEM_WORDS[section] || {})[key] || {};
+            return entry[this.lang] || entry.id || key;
+        },
+
+        summaryCards() {
+            var s = data.summary || {};
+            return [
+                { key: 'students', label: this.words('metric', 'students'),
+                  value: s.students,
+                  hint: s.answered_papers + ' ' + this.words('metric', 'papers') },
+                { key: 'questions', label: this.words('metric', 'questions'),
+                  value: s.items,
+                  hint: this.words('metric', 'objective') + ' ' + s.objective
+                        + (s.essays ? ' \u00b7 ' + this.words('kind', 'essay') + ' ' + s.essays : '') },
+                { key: 'mean', label: this.words('metric', 'mean'),
+                  value: s.total_mean,
+                  hint: '\u00b1 ' + s.total_sd + ' ' + this.words('metric', 'sdHint') },
+                { key: 'alpha', label: this.words('metric', 'alpha'),
+                  value: s.alpha === null ? '\u2014' : s.alpha,
+                  hint: this.words('metric', 'alphaHint') },
+                { key: 'sem', label: this.words('metric', 'sem'),
+                  value: s.sem === null ? '\u2014' : s.sem,
+                  hint: this.words('metric', 'semHint') },
+                { key: 'personRel', label: this.words('metric', 'personRel'),
+                  value: s.person_reliability === null ? '\u2014' : s.person_reliability,
+                  hint: this.words('metric', 'relHint') },
+                { key: 'itemRel', label: this.words('metric', 'itemRel'),
+                  value: s.item_reliability === null ? '\u2014' : s.item_reliability,
+                  hint: this.words('metric', 'relHint') },
+                { key: 'extremes', label: this.words('metric', 'extremes'),
+                  value: s.extremes,
+                  hint: this.words('metric', 'questions') + ': ' + this.logits.length }
+            ];
+        },
+
+        // A question's colour on the item map, by what it did. Four buckets, because
+        // a teacher acts on four things: keep it, look at it, it is inverted, or it
+        // measured nothing at all.
+        tone(flag) {
+            if (flag === 'negative' || flag === 'misfit') return 'rgba(220,38,38,0.75)';
+            if (flag === 'weak') return 'rgba(217,119,6,0.75)';
+            if (flag === 'extreme_easy' || flag === 'extreme_hard') return 'rgba(99,102,241,0.75)';
+            if (flag === 'unkeyed' || flag === 'unscored') return 'rgba(120,113,108,0.6)';
+            return 'rgba(5,150,105,0.75)';
+        },
+
+        init() {
+            if (typeof Chart === 'undefined') return;
+            if (this.logits.length || this.items.length) this.drawMap();
+            if (this.logits.length) this.drawDifficulty();
+            if (this.bins.length) this.drawPeople();
+            // The charts are redrawn on a language change: their axis labels and
+            // legends are words, and Chart.js has already painted the old ones.
+            this.$watch('lang', () => this.redraw());
+        },
+
+        redraw() {
+            Object.keys(this.charts).forEach((key) => {
+                if (this.charts[key]) { this.charts[key].destroy(); this.charts[key] = null; }
+            });
+            if (this.logits.length || this.items.length) this.drawMap();
+            if (this.logits.length) this.drawDifficulty();
+            if (this.bins.length) this.drawPeople();
+        },
+
+        drawMap() {
+            var ctx = this.$refs.mapCanvas;
+            if (!ctx) return;
+            this.charts.map = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: this.words('metric', 'questions'),
+                        data: this.items.map((i) => ({ x: i.pct, y: i.disc, label: i.no, flag: i.flag })),
+                        pointRadius: 7,
+                        pointHoverRadius: 10,
+                        backgroundColor: this.items.map((i) => this.tone(i.flag))
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (c) => {
+                                    var d = c.raw;
+                                    return ['\u200b' + this.words('metric', 'questions') + ' ' + d.label,
+                                            'P = ' + d.x + '%',
+                                            'D = ' + d.y,
+                                            this.words('flag', d.flag) || d.flag];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { min: 0, max: 100, title: { display: true, text: 'P (%)' } },
+                        y: { suggestedMin: -0.4, suggestedMax: 1.0, title: { display: true, text: 'D' } }
+                    }
+                }
+            });
+        },
+
+        drawDifficulty() {
+            var ctx = this.$refs.difficultyCanvas;
+            if (!ctx) return;
+            var rows = this.logits.slice().sort((a, b) => a.b - b.b);
+            this.charts.difficulty = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: rows.map((r) => r.no),
+                    datasets: [{
+                        label: 'logit',
+                        data: rows.map((r) => r.b),
+                        backgroundColor: rows.map((r) => this.tone(r.flag))
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { title: { display: true, text: this.words('metric', 'questions') + ' \u2192 logit' } },
+                        y: { title: { display: true, text: this.words('metric', 'questions') } }
+                    }
+                }
+            });
+        },
+
+        drawPeople() {
+            var ctx = this.$refs.peopleCanvas;
+            if (!ctx) return;
+            this.charts.people = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: this.bins.map((b) => b.centre),
+                    datasets: [{
+                        label: this.words('metric', 'students'),
+                        data: this.bins.map((b) => b.count),
+                        backgroundColor: 'rgba(14,165,233,0.7)'
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { title: { display: true, text: 'logit' } },
+                        y: { beginAtZero: true, ticks: { precision: 0 } }
+                    }
+                }
+            });
+        }
+    };
+}
+</script>
+{% endblock %}

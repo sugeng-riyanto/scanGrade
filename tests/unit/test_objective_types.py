@@ -628,6 +628,27 @@ class TestDefaultWeights:
     def test_no_questions_is_no_weights(self):
         assert qt.default_weights({}, 0) == {}
 
+    def test_the_fallback_also_totals_exactly_100(self):
+        """The defect this model was built to replace, still alive on the legacy
+        path: 70% over three questions is 23.33 each, and a perfect paper scored
+        99.99 — a number `min(earned, 100)` cannot repair, because it is below the
+        cap. Every pool split has to land on 100 exactly."""
+        for n in range(1, 40):
+            types = {str(i): ("essay" if i % 3 == 0 else "mcq") for i in range(n)}
+            weights = qt.default_weights(types, n)
+            assert abs(sum(weights.values()) - 100.0) < 1e-9, (n, weights)
+
+    def test_nobody_scores_a_perfect_paper_at_99_99(self):
+        """The number a student sees, not the weight map: every answer right."""
+        types = {"0": "mcq", "1": "mcq", "2": "mcq", "3": "essay_canvas"}
+        key = {"0": "A", "1": "B", "2": "C"}
+        answers = {"0": "A", "1": "B", "2": "C", "3": {"text": "x"}}
+        weights = qt.default_weights(types, 4)
+        earned, _ = qt.earned_points(types, key, answers, weights, 4)
+        # The essay is the teacher's, and full marks there is what the 30 points
+        # are for: a paper that got everything right reaches the paper's total.
+        assert round(earned + weights["3"], 5) == 100.0
+
 
 # ── the one-place rule ───────────────────────────────────────────────────────
 
