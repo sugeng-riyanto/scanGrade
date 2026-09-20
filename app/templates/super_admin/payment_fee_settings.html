@@ -3,7 +3,9 @@
 {% block title %}Pengaturan Biaya Admin - ScanGrade{% endblock %}
 {% block page_title %}Pengaturan Biaya Admin{% endblock %}
 {% block content %}
-<div class="max-w-xl mx-auto" x-data="feeApp()" x-init="init({{ fee_config | tojson }})">
+{# Force-escaped: `fee_config` is a mapping, so `tojson`'s own double quotes would
+   end this attribute at the first key and hand `init()` a broken expression. #}
+<div class="max-w-xl mx-auto" x-data="feeApp()" x-init="init({{ fee_config | tojson | forceescape }})">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}

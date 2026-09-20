@@ -6,7 +6,11 @@
 {% set _scaled_active = scaled_active|default(false) %}
 {% set _scaled_tiers = scaled_tiers|default([]) %}
 {% block content %}
-<div x-data="subApp()" x-init="init({{ _student_count }}, {{ _scaled_active|lower }}, {{ _scaled_tiers | tojson }})">
+{# Force-escaped for the same reason as the login page: a scaled pricing model
+   makes `tiers` a list of dicts, and `tojson`'s own double quotes would end this
+   attribute inside the first key — leaving `subApp()`'s `init()` to be called
+   with a syntax error and the whole page without its Alpine scope. #}
+<div x-data="subApp()" x-init="init({{ _student_count }}, {{ _scaled_active|lower }}, {{ _scaled_tiers | tojson | forceescape }})">
     {% for msg in get_flashed_messages(with_categories=true) %}
     <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
         {{ msg[1] }}

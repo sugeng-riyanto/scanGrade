@@ -54,7 +54,15 @@ try {
             <p class="mt-1 text-surface-500 font-medium" x-text="t('Gunakan akun yang diberikan sekolah Anda','Use the account your school gave you')"></p>
         </div>
 
-        <div x-data="{ showPw: false, role: {{ (role_hint if role_hint in ('guru','murid') else '') | tojson }} }">
+        {# `| forceescape` is not decoration. `tojson` writes `"guru"` *with* its
+           quotes, and inside a double-quoted attribute the HTML parser ends the
+           attribute at the first of them — so Alpine was handed `{ showPw: false,
+           role: ` and raised `Unexpected token '}'`. The whole page scope died
+           with it: the Teacher/Student buttons did nothing, the password reveal
+           did nothing, and the password placeholder was empty. Force-escaping
+           turns the quotes into entities, which the parser decodes *after* it has
+           found the end of the attribute. #}
+        <div x-data="{ showPw: false, role: {{ (role_hint if role_hint in ('guru','murid') else '') | tojson | forceescape }} }">
             {# Same as /auth/login: this is where login_required sends an expired
                session, so the notice must be rendered here or it leaks onto the
                next page that renders flashes. #}
