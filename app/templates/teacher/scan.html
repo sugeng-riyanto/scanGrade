@@ -214,6 +214,18 @@
         </div>
 
         <div class="flex flex-wrap gap-3">
+            {# The teacher's own answer to a question no clock here can read: did the
+               sheet come in after time was called? Left unticked, the exam's own
+               clock decides (`exam_window.late_arrival`) — the student's sitting if
+               the app saw one, otherwise the exam's start. It sends a value only
+               when ticked, so an untouched box is never an assertion that the paper
+               was on time. Marking it also works on a sheet that is already graded:
+               the route writes the flag and leaves the answers alone. #}
+            <label id="late-wrap" class="hidden flex items-center gap-2 px-4 py-2.5 border-2 border-amber-200 bg-amber-50 rounded-xl cursor-pointer text-sm font-bold text-amber-700">
+                <input type="checkbox" id="late-check" class="w-4 h-4 accent-amber-600">
+                <span>Kertas masuk terlambat</span>
+                <span class="font-normal text-amber-600 text-xs">(dibiarkan = jam ujian yang menentukan)</span>
+            </label>
             <button id="btn-save" class="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-5 py-2.5 rounded-xl hover:from-primary-600 hover:to-primary-700 text-sm font-extrabold shadow-lg shadow-primary-500/25 transition hidden">
                 <i class="fas fa-save mr-1"></i>Simpan Hasil
             </button>
@@ -868,6 +880,10 @@ function renderScanResult(data) {
     if (data.debug_image) showDebug(data.debug_image);
     result.classList.remove('hidden');
     document.getElementById('btn-save').classList.remove('hidden');
+    // The late box belongs to the save, so it appears with the button that reads
+    // it and starts unticked for every new sheet.
+    document.getElementById('late-check').checked = false;
+    document.getElementById('late-wrap').classList.remove('hidden');
     // Save to sessionStorage for recovery after login redirect
     try {
         sessionStorage.setItem('sg_scan_result', JSON.stringify({
@@ -1038,6 +1054,8 @@ document.getElementById('btn-save').addEventListener('click', async function() {
                 confidence: confData,
                 needs_review: reviewList,
                 scan_file_id: window._lastScanData?.scan_file_id || '',
+                // Ticked only means "late"; absent lets the exam's clock decide.
+                late: document.getElementById('late-check')?.checked ? true : undefined,
             }),
         });
         // Check if redirected to login page (session expired)
@@ -1062,6 +1080,10 @@ document.getElementById('btn-save').addEventListener('click', async function() {
             successBar.className = 'bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between';
             successBar.innerHTML = '<div><span class="font-extrabold text-emerald-800 text-sm">✅ Tersimpan!</span><span class="text-xs text-emerald-600 ml-2">Skor: ' + data.score + '% (' + data.correct + '/' + data.total + ' benar)</span>' +
                 (data.unkeyed ? '<span class="text-xs text-amber-600 ml-2">' + (data.unkeyed + '/' + data.total) + sgT(' soal belum ada kunci', ' questions have no key') + '</span>' : '') +
+                // What the record now says about when this paper arrived, so the
+                // teacher is not left to open the results list to find out what the
+                // clock decided about their pupil.
+                (data.late ? '<span class="text-xs font-bold text-amber-700 ml-2">' + sgT('· ditandai terlambat', '· marked late') + '</span>' : '') +
                 '</div>' +
                 '<div class="flex gap-2">' +
                 (subId ? '<a href="/teacher/grade/' + subId + '" class="text-xs font-bold text-primary-600 hover:text-primary-700 px-3 py-1.5 bg-white rounded-lg border border-primary-200 hover:bg-primary-50 transition inline-flex items-center gap-1"><i class="fas fa-eye"></i>Detail</a>' : '') +
@@ -1087,6 +1109,8 @@ document.getElementById('btn-save').addEventListener('click', async function() {
 function resetScan() {
     document.getElementById('scan-result').classList.add('hidden');
     document.getElementById('btn-save').classList.add('hidden');
+    document.getElementById('late-wrap').classList.add('hidden');
+    document.getElementById('late-check').checked = false;
     document.getElementById('answers-tbody').innerHTML = '';
     document.getElementById('nisn-value').textContent = '';
     document.getElementById('avg-confidence').classList.add('hidden');
@@ -1212,6 +1236,7 @@ function renderBulkResults(data) {
         html += '<th class="p-2 text-center font-bold text-surface-600">Terdeteksi</th>';
         html += '<th class="p-2 text-center font-bold text-surface-600">Keyakinan</th>';
         html += '<th class="p-2 text-center font-bold text-surface-600">Skor</th>';
+        html += '<th class="p-2 text-center font-bold text-surface-600">Terlambat</th>';
         html += '<th class="p-2 text-center font-bold text-surface-600">Review</th>';
         html += '</tr>';
         for (const r of bulkResults) {
@@ -1227,6 +1252,10 @@ function renderBulkResults(data) {
             html += '<td class="p-2 text-center font-bold">' + r.detected + '</td>';
             html += '<td class="p-2 text-center font-bold ' + confColor + '">' + confPct + '%</td>';
             html += '<td class="p-2 text-center font-bold ' + (r.score !== undefined ? 'text-primary-600' : 'text-surface-300') + '">' + (r.score !== undefined ? r.score + '%' : '-') + '</td>';
+            // Per sheet, because a pile can hold both: the teacher ticks the papers
+            // that came in after time was called, and an unticked row stays the
+            // exam clock's decision. The results list is where either is corrected.
+            html += '<td class="p-2 text-center"><input type="checkbox" class="late-check w-4 h-4 accent-amber-600" title="Kertas ini diserahkan setelah waktu ujian habis"></td>';
             html += '<td class="p-2 text-center">' + (r.needs_review?.length > 0 ? '<span class="text-amber-600 font-bold">' + r.needs_review.length + '</span>' : '<span class="text-emerald-500">✓</span>') + '</td>';
             html += '</tr>';
         }
@@ -1276,6 +1305,8 @@ document.getElementById('btn-bulk-save').addEventListener('click', async functio
             confidence: result.confidence,
             needs_review: result.needs_review,
             scan_file_id: result.scan_file_id || '',
+            // Ticked only means "late"; absent lets the exam's clock decide.
+            late: sel.closest('tr')?.querySelector('.late-check')?.checked ? true : undefined,
         });
     });
 
