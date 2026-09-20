@@ -80,7 +80,12 @@ class TestTheWorkbookOpens:
         """In order, and only the sections that have something in them: an empty
         worksheet under a heading is a page a reader has to check before ignoring."""
         _exam, analysis, workbook = book
-        wanted = ["summary", "items", "options", "groups", "people", "key"]
+        # `framework` is written before anything else and unconditionally; only
+        # the two sheets that depend on the exam's own kisi-kisi are left out
+        # when there is nothing to say. The list went stale the moment the
+        # framework sheet was added, and the suite kept reporting a sheet as
+        # missing that the workbook had been writing all along.
+        wanted = ["summary", "framework", "items", "options", "groups", "people", "key"]
         expected = []
         for key in wanted:
             if key == "options" and not any(i.distractors for i in analysis.items):
