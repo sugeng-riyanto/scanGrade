@@ -609,6 +609,24 @@ def scan_bulk_save():
     saved = []
     failed = []
 
+    # Read once, outside the loop. It used to be inside it, so a class of thirty
+    # sheets paid thirty identical round-trips to Supabase for one exam row — and
+    # that row now also carries the two clocks a late mark is computed from:
+    # a window column left out of this select reads as *absent*, which is how a
+    # missing field becomes "never late" rather than an error (see AGENTS.md).
+    exam = supabase.table("exams").select(
+        "answer_key,question_types,total_questions,"
+        "start_at,end_at,duration_minutes,auto_submit_on_window_end"
+    ).eq("id", exam_id).single().execute().data
+    key = exam.get("answer_key", {}) if exam else {}
+    if isinstance(key, str):
+        key = json.loads(key)
+    qtypes = exam.get("question_types") or {} if exam else {}
+    if isinstance(qtypes, str):
+        qtypes = json.loads(qtypes)
+    total_q = int((exam or {}).get("total_questions") or 0)
+    arrived_at = datetime.now(timezone.utc)
+
     for sub in data["submissions"]:
         student_id = sub.get("student_id")
         answers = sub.get("answers", {})
@@ -622,21 +640,6 @@ def scan_bulk_save():
             continue
 
         # Grade
-        # `question_types` rides along with the key: the grader needs to know which
-        # kind of question each answer belongs to, and a column left out of a select
-        # list reads as absent rather than as an error (see AGENTS.md).
-        # `total_questions` is here for the same reason `question_types` is: the
-        # grader's denominator is the paper's own count, and a column left out of
-        # this list would read as absent — which is how a missing column becomes a
-        # wrong score rather than an error.
-        exam = supabase.table("exams").select("answer_key,question_types,total_questions").eq("id", exam_id).single().execute().data
-        key = exam.get("answer_key", {}) if exam else {}
-        if isinstance(key, str):
-            key = json.loads(key)
-        qtypes = exam.get("question_types") or {} if exam else {}
-        if isinstance(qtypes, str):
-            qtypes = json.loads(qtypes)
-        total_q = int((exam or {}).get("total_questions") or 0)
         # One rule for the whole app. This loop used to divide by the number of
         # answers the *key* had, so a teacher who had keyed 2 of 10 questions got
         # 100% for a pupil who answered those two — and `mcq_count` below was
@@ -674,12 +677,27 @@ def scan_bulk_save():
                     break
 
         try:
-            existing = supabase.table("submissions").select("id").eq("exam_id", exam_id).eq("student_id", student_id).execute().data
+            existing = supabase.table("submissions").select("id,started_at,submitted_late") \
+                .eq("exam_id", exam_id).eq("student_id", student_id).execute().data
+            # Was this paper late? The same rule the single-sheet save uses, from
+            # the same module: the student's own sitting if the app saw one, else
+            # the exam's start, else nothing — with the teacher's own answer winning
+            # when the bulk table sent one for this row. `stated` absent means "let
+            # the clock decide", and a stored True is never cleared by a later
+            # page's arrival time.
+            stated_late = sub.get("late")
+            stored_late = bool(existing[0].get("submitted_late")) if existing else False
+            late = exam_window.late_arrival(
+                exam, (existing[0].get("started_at") if existing else None),
+                arrived_at, stated_late)
+            if stated_late is None and stored_late:
+                late = True
             # `score` is a percentage (see `objective_result`), so its maximum is
             # 100. This stored a question *count* here — a different unit in the same
             # column as every other writer, which is how one reader ended up
             # dividing by a paper and another by a key.
-            update_data = {"answers": enriched, "score": score, "max_score": 100.0, "status": "graded"}
+            update_data = {"answers": enriched, "score": score, "max_score": 100.0,
+                           "status": "graded", "submitted_late": late}
             if existing:
                 supabase.table("submissions").update(update_data).eq("id", existing[0]["id"]).execute()
             else:
@@ -687,7 +705,7 @@ def scan_bulk_save():
                 supabase.table("submissions").insert(update_data).execute()
             saved.append({"student_id": student_id, "score": score, "correct": correct,
                           "total": mcq_count, "unkeyed": len(objective.unkeyed),
-                          "nisn": nisn})
+                          "nisn": nisn, "late": late})
         except Exception as e:
             failed.append({"student_id": student_id, "error": str(e)[:100]})
 
@@ -1172,6 +1190,8 @@ def scan_save():
         .execute().data
 
     stored = {}
+    stored_late = False
+    sitting_started = None
     if existing:
         stored = existing[0].get("answers") or {}
         if isinstance(stored, str):
@@ -1181,6 +1201,26 @@ def scan_save():
                 stored = {}
         if not isinstance(stored, dict):
             stored = {}
+        # The paper's own sitting and its existing late mark. Both come from the
+        # row this save is about to write, not from the client: a client that could
+        # name its own sitting start could move its own deadline.
+        sitting_started = existing[0].get("started_at")
+        stored_late = bool(existing[0].get("submitted_late"))
+
+    # ── Was this paper late? ─────────────────────────────────────────────────
+    # A scanned sheet has no session to measure, so `exam_window.late_arrival`
+    # answers it from the student's own sitting, or the exam's start, or not at
+    # all — and lets the teacher's own answer win when the request carries one.
+    # `late` absent from the payload means "let the clock decide" (see the
+    # checkbox on the scan screen: it sends a value only when a teacher ticks it).
+    stated_late = data.get("late")
+    arrived_at = datetime.now(timezone.utc)
+    late = exam_window.late_arrival(exam, sitting_started, arrived_at, stated_late)
+    if stated_late is None and stored_late:
+        # Page 2 of a sheet never un-lates page 1: the paper's answers arrived late
+        # once, whatever the next page's arrival time says. Only the teacher can
+        # clear it, which is what `stated_late` is for.
+        late = True
 
     def _qkey(k):
         """The question number of a stored key, or None for a metadata key."""
@@ -1291,6 +1331,7 @@ def scan_save():
         # by a key.
         "max_score": 100.0,
         "status": "graded",
+        "submitted_late": late,
     }
 
     if existing:
@@ -1300,7 +1341,19 @@ def scan_save():
         # the sheet, so it goes through and the union is re-graded. Re-scanning a
         # page already saved is still refused.
         if current_status in ("graded", "published") and not adds_new:
-            return jsonify({"warning": "Sudah dinilai/dipublikasi, tidak ditimpa", "score": score}), 200
+            # …except a late mark the teacher stated, which is a correction to the
+            # record rather than an overwrite of the paper. Without this the wrong
+            # automatic mark on an already-graded sheet could never be cleared from
+            # the scan screen, because the answers are refused as a rewrite.
+            if stated_late is not None and bool(stated_late) != stored_late:
+                supabase.table("submissions") \
+                    .update({"submitted_late": bool(stated_late)}) \
+                    .eq("id", existing[0]["id"]).execute()
+                return jsonify({"warning": "Sudah dinilai/dipublikasi, tidak ditimpa",
+                                "score": score, "late": bool(stated_late),
+                                "late_updated": True}), 200
+            return jsonify({"warning": "Sudah dinilai/dipublikasi, tidak ditimpa",
+                            "score": score, "late": stored_late}), 200
         new_status = "submitted" if (current_status == "submitted" and not adds_new) else "graded"
         sub = supabase.table("submissions") \
             .update(update_data) \
@@ -1322,6 +1375,10 @@ def scan_save():
         # teacher to guess — the dashboard carries the same warning (teacher.py).
         "unkeyed": len(objective.unkeyed),
         "needs_review": len(review),
+        # What the record now says about when this paper arrived, so the screen can
+        # show it instead of leaving the teacher to open the results list to find
+        # out what the clock just decided about their pupil.
+        "late": late,
         "submission": sub[0] if sub else None,
         # What this save covered, and how much of the sheet is answered now, so
         # a two-page sheet can be tracked page by page instead of hoping.

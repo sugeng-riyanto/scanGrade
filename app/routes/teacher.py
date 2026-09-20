@@ -1756,6 +1756,61 @@ def results_print():
     )
 
 
+@teacher_bp.route("/submission/<submission_id>/late", methods=["POST"])
+@teacher_or_admin_required
+def submission_late(submission_id):
+    """Record — or clear — that a paper's answers arrived after its deadline.
+
+    This is the correction the automatic mark needs, and it is why it is a
+    teacher's route rather than a computed one. A scanned sheet's arrival time is
+    the *scan*, not the hand-in: a pile scanned the next morning writes a late mark
+    on every paper in it, which is a true statement about the scan and a false one
+    about the students. No clock can tell those apart, so the person who watched
+    the papers come in can.
+
+    The control lives in the results list, beside the mark it changes, because that
+    is where the wrong marks are *seen* — thirty rows at once, not one paper at a
+    time through the marking screen. Writes one boolean and nothing else: the
+    answers, the marks and the status are untouched, so a graded or published
+    submission can be corrected without being re-graded.
+    """
+    supabase = get_supabase()
+    as_json = _wants_json()
+
+    try:
+        sub = row_or_none(
+            supabase.table("submissions").select("id,exam_id,submitted_late")
+            .eq("id", submission_id).maybe_single().execute()
+        )
+    except Exception:
+        logger.exception("Late-mark lookup failed for submission %s", submission_id)
+        return _deny("Tidak bisa memverifikasi kertas itu. Coba lagi.", as_json,
+                     "/teacher/results")
+    if not sub:
+        return _deny("Kertas itu tidak ditemukan.", as_json, "/teacher/results")
+
+    # The exam's owner, or the admin of its school — the same rule every other
+    # route that takes an id applies. A submission id says nothing about who may
+    # write to it.
+    exam, err = _guard_exam(supabase, sub.get("exam_id"), as_json=as_json,
+                            redirect_to="/teacher/results")
+    if err:
+        return err
+
+    payload = request.get_json(silent=True) or {}
+    raw = payload.get("late", request.form.get("late"))
+    late = str(raw).lower() in ("1", "true", "yes", "on")
+
+    supabase.table("submissions").update({"submitted_late": late}) \
+        .eq("id", sub["id"]).execute()
+
+    if as_json:
+        return jsonify({"success": True, "late": late})
+    flash("Kertas " + ("ditandai terlambat." if late
+                       else "tidak lagi ditandai terlambat."), "success")
+    return redirect(f"/teacher/results?exam_id={sub.get('exam_id')}")
+
+
 def _analysis_of(supabase, exam_id, as_json=True, redirect_to="/teacher/results"):
     """``(exam, analysis, error)`` — the paper, and what its questions actually did.
 

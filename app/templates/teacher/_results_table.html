@@ -22,7 +22,16 @@
    teacher may have edited the exam's window since, and the record of when the
    paper arrived must not follow that edit. It rides in the student's own cell
    rather than a column of its own so the two halves stay the same width, and the
-   label is a `t()` pair because it renders inside a page that switches. #}
+   label is a `t()` pair because it renders inside a page that switches.
+
+   **The mark can be corrected here, and that is the other half of it.** A scanned
+   paper's recorded arrival is the *scan*, so a pile scanned the next morning marks
+   every sheet in it late — true of the scan and false of the students. The control
+   sits beside the action it changes, in both halves, because this list is where a
+   wrong mark is seen: thirty rows on one screen rather than one paper at a time
+   through the marking page. It posts one boolean to a teacher route that writes
+   only that column, so a graded or published paper is corrected without being
+   re-graded. #}
 
 <!-- Mobile cards -->
 <div class="mobile-only">
@@ -60,6 +69,15 @@
                     <button type="submit" class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition"><i class="fas fa-share"></i></button>
                 </form>
                 {% endif %}
+                <form method="POST" action="/teacher/submission/{{ s.id }}/late" class="inline">
+                    {# The value posted is the *opposite* of what is stored: one button
+                       that marks and unmarks, so there is no state to remember. #}
+                    <input type="hidden" name="late" value="{{ 0 if s.submitted_late else 1 }}">
+                    <button type="submit" class="text-xs font-extrabold px-2.5 py-1.5 rounded-lg transition {% if s.submitted_late %}text-stone-500 bg-stone-50 hover:bg-stone-100{% else %}text-amber-700 bg-amber-50 hover:bg-amber-100{% endif %}"
+                            :title="{% if s.submitted_late %}t('Hapus tanda terlambat — kertas ini sebenarnya masuk tepat waktu','Clear the late mark — this paper actually arrived on time'){% else %}t('Tandai kertas ini masuk setelah tenggat waktu (untuk LJK, waktu yang tercatat adalah saat scan)','Mark this paper as arriving after the deadline (for a scanned sheet the recorded time is the scan)'){% endif %}">
+                        <i class="fas {% if s.submitted_late %}fa-rotate-left{% else %}fa-clock{% endif %}"></i>
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -106,13 +124,20 @@
                 <td class="py-3 text-center">
                     <span class="px-2.5 py-1 text-[10px] font-bold rounded-full {% if s.status == 'graded' %}bg-emerald-100 text-emerald-700{% elif s.status == 'published' %}bg-sky-100 text-sky-700{% else %}bg-amber-100 text-amber-700{% endif %}">{{ s.status }}</span>
                 </td>
-                <td class="py-3 text-center">
+                <td class="py-3 text-center whitespace-nowrap">
                     <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block"><i class="fas fa-eye mr-1"></i>Detail</a>
                     {% if s.status != 'published' %}
                     <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
                         <button type="submit" class="text-emerald-600 hover:text-emerald-700 font-extrabold text-xs p-2 hover:bg-emerald-50 rounded-xl transition" title="Publish"><i class="fas fa-share"></i></button>
                     </form>
                     {% endif %}
+                    <form method="POST" action="/teacher/submission/{{ s.id }}/late" class="inline">
+                        <input type="hidden" name="late" value="{{ 0 if s.submitted_late else 1 }}">
+                        <button type="submit" class="font-extrabold text-xs p-2 rounded-xl transition {% if s.submitted_late %}text-stone-500 hover:bg-stone-100{% else %}text-amber-600 hover:bg-amber-50{% endif %}"
+                                :title="{% if s.submitted_late %}t('Hapus tanda terlambat — kertas ini sebenarnya masuk tepat waktu','Clear the late mark — this paper actually arrived on time'){% else %}t('Tandai kertas ini masuk setelah tenggat waktu (untuk LJK, waktu yang tercatat adalah saat scan)','Mark this paper as arriving after the deadline (for a scanned sheet the recorded time is the scan)'){% endif %}">
+                            <i class="fas {% if s.submitted_late %}fa-rotate-left{% else %}fa-clock{% endif %}"></i>
+                        </button>
+                    </form>
                 </td>
             </tr>
             {% endfor %}

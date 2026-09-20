@@ -15,11 +15,15 @@ the whole duration. The deadline is then the **earlier** of the two, which is wh
 "the student has until the date and time defined in the Assignment Window End field
 regardless of when they start" means once a duration is also set.
 
-The four callers that need an answer — the exam list, the door into an exam, the
-sync API and the submit route — all ask here. Answering separately is how a page
-ends up telling a student "12 minutes left" while the server treats the paper as
-finished, and it is the same drift `exam_access.py` was written to stop for the
-RBAC questions.
+The callers that need an answer — the exam list, the door into an exam, the sync
+API, the submit route, and the two scan routes that save a paper sheet as a
+submission — all ask here. Answering separately is how a page ends up telling a
+student "12 minutes left" while the server treats the paper as finished, and it
+is the same drift `exam_access.py` was written to stop for the RBAC questions.
+
+The scan routes ask a different question through the same arithmetic, because a
+paper's arrival is not observable the way a session is: `late_arrival` below
+names the three ways this module answers it, and the teacher's own answer.
 """
 from __future__ import annotations
 
@@ -148,6 +152,38 @@ def is_late(exam, started_at, submitted_at, now=None) -> bool:
     if limit is None:
         return False
     return arrived > limit + timedelta(seconds=LATE_GRACE_SECONDS)
+
+
+def late_arrival(exam, sitting_started, arrived_at, stated=None) -> bool:
+    """**Scanned** answers: did they reach the system after the deadline?
+
+    An online submission needs no such function because both of its ends are
+    observable: the student's own ``started_at`` and the moment the answers
+    arrived are the same session. A scanned paper has only one of them — when the
+    teacher saved the scan — and the app cannot see when the sheet was handed in.
+    So this answers the question with whichever clock the paper actually ran on,
+    in this order:
+
+    * the student's own sitting, when the app saw one (they started online and the
+      paper was marked on paper);
+    * failing that, the exam's own ``start_at`` — for a paper exam that is when
+      the papers went out, and it is the class-level clock the school itself set;
+    * with neither, nothing enforces an end and a scan is never late by itself.
+
+    ``stated`` is the teacher's own answer, and **it wins outright** when given
+    (True or False, ``None`` for "not stated"). That is deliberate: the one fact
+    here that no clock can read is whether the sheet came in after time was
+    called, and a person who watched it happen outranks an arithmetic guess. It is
+    also the correction path — a pile scanned the next morning writes a late mark
+    on every paper in it, which is a true statement about the *scan* and not about
+    the students, and only the teacher can say which it was.
+    """
+    if stated is not None:
+        return bool(stated)
+    origin = parse_dt(sitting_started) or parse_dt(exam.get("start_at"))
+    if origin is None:
+        return False
+    return is_late(exam, origin, arrived_at)
 
 
 def page_facts(exam, started_at=None, now=None) -> dict:
