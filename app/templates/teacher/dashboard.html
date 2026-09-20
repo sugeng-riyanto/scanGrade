@@ -459,7 +459,10 @@
 document.addEventListener('DOMContentLoaded', function() {
     var ctx = document.getElementById('scoreChart');
     if (!ctx) return;
-    var scores = <span x-text="all_scores | tojson | safe"></span>;
+    {# `<script>` holds raw text: an `<span>` in here is not an element, it is a syntax
+       error, and the whole block — the score chart included — never runs. `tojson`
+       alone is already script-safe (it escapes `<`, `>`, `&`, `'`). #}
+    var scores = {{ all_scores | tojson }};
     var bins = [0,0,0,0,0];
     scores.forEach(function(s) { if(s<20)bins[0]++; else if(s<40)bins[1]++; else if(s<60)bins[2]++; else if(s<80)bins[3]++; else bins[4]++; });
     new Chart(ctx, {

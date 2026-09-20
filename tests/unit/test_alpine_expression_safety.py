@@ -118,6 +118,72 @@ def test_the_rule_would_catch_the_defect_it_describes():
                             + "' + n + ' students?')\"></span>")
 
 
+#: A `tojson` filter, with or without the force-escape that makes it legal in an
+#: attribute. Jinja's own documentation prescribes `|tojson|forceescape` for exactly
+#: this reason.
+TOJSON = re.compile(r"\|\s*tojson(\s*\|\s*forceescape)?")
+
+
+#: A double-quoted HTML attribute and its value.
+DOUBLE_QUOTED = re.compile(r'="([^"]*)"', re.S)
+
+
+def raw_tojson(text: str) -> list[str]:
+    """Every un-escaped `tojson` sitting inside a double-quoted attribute.
+
+    `tojson` writes `"guru"` **with its quotes**, and the HTML parser ends a
+    double-quoted attribute at the first of them. The attribute value stops there,
+    so Alpine is handed a truncated expression:
+
+        <div x-data="{ showPw: false, role: {{ … | tojson }} }">
+        →  x-data="{ showPw: false, role: "   and  role: " }" as junk attributes
+
+    `Unexpected token '}'`, the page's whole Alpine scope dies with it, and every
+    binding in that scope goes undefined — the login page's Teacher/Student buttons
+    and its password reveal did nothing, and the console was the only place that
+    said so. Force-escaping turns the quotes into entities, which the parser decodes
+    *after* it has found the end of the attribute.
+
+    A single-quoted attribute is safe (JSON's `"` does not end `'`), and a `tojson`
+    in element text (`<script type="application/json">{{ x|tojson }}</script>`) is
+    not in an attribute at all.
+    """
+    offenders = []
+    for attribute in DOUBLE_QUOTED.finditer(text):
+        for hit in TOJSON.finditer(attribute.group(1)):
+            if hit.group(1):
+                continue
+            line = text[:attribute.start()].count("\n") + 1
+            offenders.append(f"line {line}: {attribute.group(1).strip()[:120]}")
+    return offenders
+
+
+def test_a_json_value_in_an_attribute_is_force_escaped():
+    offenders = []
+    for page in pages():
+        text = page.read_text(encoding="utf-8")
+        if "tojson" not in text:
+            continue
+        for item in raw_tojson(text):
+            offenders.append(f"{page.relative_to(TEMPLATES)} {item}")
+    assert not offenders, (
+        "these `tojson` values sit raw inside a double-quoted attribute, so the HTML"
+        " parser ends the attribute at the JSON's own quote and Alpine gets a broken"
+        " expression — add `| forceescape`, or single-quote the attribute:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_tojson_rule_bites_on_the_defect_it_describes():
+    broken = ('<div x-data="{ showPw: false, role: {{ (role_hint if role_hint in '
+              "('guru','murid') else '') | tojson }} }\">")
+    assert raw_tojson(broken), "the tojson rule stopped biting on the real defect"
+    assert raw_tojson('<div x-data="subApp()" x-init="init({{ tiers | tojson }})">')
+    assert not raw_tojson('x-data="{ role: {{ hint | tojson | forceescape }} }"')
+    assert not raw_tojson("<input value='{{ ids | tojson }}'>")
+    assert not raw_tojson('<script id="d" type="application/json">{{ x | tojson }}</script>')
+
+
 def test_a_chart_component_is_not_initialized_twice():
     offenders = []
     for page in pages():

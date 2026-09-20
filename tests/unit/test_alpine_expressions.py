@@ -153,11 +153,18 @@ def test_the_quoted_phrases_survive_as_real_quotes():
 def test_the_analytics_visibility_checks_use_tojson():
     """`x-show="{{ n }} > 0"` is a numeric comparison, so quoting is wrong — but
     the value still has to be a JavaScript literal. tojson is what makes that a
-    guarantee instead of a coincidence that holds only while n is an int."""
+    guarantee instead of a coincidence that holds only while n is an int.
+
+    And it has to survive the *attribute*: `tojson` leaves double quotes alone,
+    so the moment the value is a string or a mapping the HTML parser ends the
+    attribute inside it. `forceescape` is what keeps it inside — and it costs
+    nothing while the value is an int.
+    """
     text = (ROOT / "app" / "templates" / "teacher" / "analytics.html") \
         .read_text(encoding="utf-8")
-    assert "{{ stats.total_submissions|tojson }}" in text
+    assert "{{ stats.total_submissions|tojson|forceescape }}" in text
     assert 'x-show="{{ stats.total_submissions }}' not in text
+
 
 
 def test_the_literal_interpolation_exemption_does_not_hide_data():
