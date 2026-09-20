@@ -140,9 +140,9 @@
       "frozen": false
     },
     "admin_sekolah/subjects.html": {
-      "pairs": 0,
-      "leftovers": 5,
-      "coverage": 0.0,
+      "pairs": 12,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "admin_sekolah/subscription.html": {
@@ -638,9 +638,9 @@
       "frozen": true
     },
     "teacher/subjects.html": {
-      "pairs": 0,
-      "leftovers": 6,
-      "coverage": 0.0,
+      "pairs": 8,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "teacher/templates.html": {

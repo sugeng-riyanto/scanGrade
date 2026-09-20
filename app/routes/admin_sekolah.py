@@ -731,6 +731,32 @@ def admin_subject_create():
     return redirect("/admin-sekolah/subjects")
 
 
+@admin_sekolah_bp.route("/subjects/<subject_id>/edit", methods=["POST"])
+@admin_sekolah_required
+@require_school_access("subjects", "subject_id")
+def admin_subject_edit(subject_id):
+    supabase = get_supabase()
+    name = request.form.get("name", "").strip()
+    code = request.form.get("code", "").strip() or None
+    if not name:
+        flash("Nama mapel wajib diisi", "error")
+        return redirect("/admin-sekolah/subjects")
+    sid = _school_id()
+    # Check duplicate name (excluding self)
+    dup = supabase.table("subjects").select("id").eq("school_id", sid).eq("name", name).neq("id", subject_id).limit(1).execute()
+    if dup.data:
+        flash(f"Mapel '{name}' sudah ada", "error")
+        return redirect("/admin-sekolah/subjects")
+    try:
+        supabase.table("subjects").update({"name": name, "code": code}).eq("id", subject_id).execute()
+        log_activity("update", "subject", subject_id, new_data={"name": name, "code": code}, user_id=g.user_id)
+        invalidate_school(sid)
+        flash("Mapel berhasil diperbarui", "success")
+    except Exception as e:
+        flash(f"Gagal: {e}", "error")
+    return redirect("/admin-sekolah/subjects")
+
+
 @admin_sekolah_bp.route("/subjects/<subject_id>/delete", methods=["POST"])
 @admin_sekolah_required
 @require_school_access("subjects", "subject_id")
