@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from app.services import analysis_frameworks as af
+
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = ROOT / "app" / "templates"
 PAGE = (TEMPLATES / "teacher" / "analysis.html").read_text(encoding="utf-8")
@@ -70,7 +72,7 @@ def rendered(app):
     chart = _chart_payload(analysis)
     with _signed_in(app, "/teacher/analysis/exam-1"):
         html = app.jinja_env.get_template("teacher/analysis.html").render(
-            exam=EXAM, analysis=analysis, chart=chart)
+            exam=EXAM, analysis=analysis, chart=chart, framework=af.resolve(None))
     return {"html": html, "analysis": analysis, "chart": chart}
 
 
@@ -118,8 +120,14 @@ class TestThePageRenders:
         data = json.loads(html_mod.unescape(m.group(1)))
         assert len(data["items"]) == len(rendered["analysis"].items)
         assert data["summary"]["students"] == 10
-        # The three canvases: an item map, a difficulty chart and a person spread.
-        assert html.count("<canvas") == 3
+        # Only the drawings this framework publishes are rendered at all. CTT asks
+        # how the questions behaved on this class, so it gets the item map and the
+        # ability spread; the logit-scale chart belongs to the Rasch view, and the
+        # framework tests pin which panels each one shows.
+        assert data["framework"] == "ctt"
+        assert html.count("<canvas") == 2
+        assert 'x-ref="mapCanvas"' in html and 'x-ref="peopleCanvas"' in html
+        assert 'x-ref="difficultyCanvas"' not in html
         # …and Alpine runs the component's own `init()`, so the element must not ask
         # for it again. It did, and the browser console said so: the second call
         # created a second Chart.js chart on a canvas the first one still owned.
@@ -173,6 +181,117 @@ class TestThePageRenders:
                 "cannot render")
         for note in rendered["analysis"].notes:
             assert note in analysis_report.NOTE_LABELS
+
+
+# ── Winsteps' block on the screen ───────────────────────────────────────────
+
+def _page_payload(html):
+    """The payload Alpine is given, parsed out of the attribute it reads."""
+    import html as html_mod
+    match = re.search(r'x-data="itemAnalysis\((.*?)\)"', html, re.S)
+    assert match, "the component is not initialised with its payload"
+    return json.loads(html_mod.unescape(match.group(1)))
+
+
+def _catalogue_entry(name):
+    """One `{ id: '…', en: '…' }` entry from the page's JS catalogue.
+
+    Matched on the key *and* the brace that opens its entry, so a longer name that
+    merely starts with this one ("se" against "separation:") cannot stand in for a
+    definition that is not there.
+    """
+    match = re.search(rf"(?<![\w]){re.escape(name)}\s*:\s*\{{", PAGE)
+    assert match, f"the page's catalogue has no entry for {name}"
+    return PAGE[match.end():match.end() + 600]
+
+
+class TestTheSeparationBlock:
+    """The four lines of the separation block, on the page that shows them.
+
+    The numbers are measured on the server — `analysis_report.separation_cells` is
+    the same function the PDF, the CSV and the workbook call — and the browser only
+    puts words on them, because the labels follow the language toggle and the
+    numbers do not. Both halves are asserted: the payload *is* that function's
+    output, and the table reads the payload rather than the summary it used to
+    re-derive the lines from.
+    """
+
+    def test_the_page_shows_what_the_documents_show(self, rendered):
+        from app.services import analysis_report
+        data = _page_payload(rendered["html"])
+        assert data["separation"] == analysis_report.separation_cells(
+            rendered["analysis"].summary)
+        assert len(data["separation"]) == 4, (
+            "both sides, both rows: ten marked papers can support all four lines")
+        assert 'data.separation' in PAGE, (
+            "the table no longer reads the server's cells")
+        assert "s.person_stats" not in PAGE and "s.item_stats" not in PAGE, (
+            "the page went back to deriving the block from the summary")
+
+    def test_each_label_is_the_readers_own(self):
+        """REAL and MODEL, students and items: four catalogue words, in pairs, so
+        the block is bilingual like the rest of the page."""
+        for key in ("peopleRow", "itemsRow", "realRow", "modelRow"):
+            assert re.search(rf"^\s*{key}:\s*\{{ id:", PAGE, re.M), \
+                f"the block has no label for {key}"
+
+    def test_a_block_with_nothing_in_it_says_so(self, app):
+        """        Papers came in, and nothing in them can be separated.
+
+        One question, one marked paper: neither side has two measures, so the block
+        has no lines at all. Four rows of dashes used to be printed in that state,
+        which reads as four measurements that all came out zero — the table is
+        hidden and the sentence that replaces it names what is missing.
+        """
+        from app.routes.teacher import _chart_payload
+        from app.services import item_analysis
+
+        exam, submissions = _class(items=1, students=1)
+        analysis = item_analysis.analyse(exam, submissions)
+        assert analysis.summary.answered_papers, "the empty state is a different page"
+        data = _chart_payload(analysis)
+        assert data["separation"] == [], "an unkeyed paper can separate nothing"
+        # Rendered as the Rasch view, because that is the framework whose promise
+        # the separation block is: a classical report does not show it at all.
+        with _signed_in(app, "/teacher/analysis/exam-1"):
+            html = app.jinja_env.get_template("teacher/analysis.html").render(
+                exam=exam, analysis=analysis, chart=data,
+                framework=af.resolve("rasch"))
+        assert "cannot be computed for this exam yet" in html
+        assert 'x-show="!separationRows().length"' in html
+        assert "{{" not in html and "{%" not in html
+
+    def test_an_exam_with_no_papers_is_not_a_crash(self, app):
+        """Nobody submitted anything. The page's own empty state covers it, and it
+        has to get that far: the calibration used to index a question that did not
+        exist and answer 500 instead."""
+        from app.routes.teacher import _chart_payload
+        from app.services import item_analysis
+
+        exam, submissions = _class(items=5, students=0)
+        analysis = item_analysis.analyse(exam, submissions)
+        assert [item.measure for item in analysis.items] == [None] * 5
+        assert [person.measure for person in analysis.people] == []
+        data = _chart_payload(analysis)
+        assert data["separation"] == []
+        with _signed_in(app, "/teacher/analysis/exam-1"):
+            html = app.jinja_env.get_template("teacher/analysis.html").render(
+                exam=exam, analysis=analysis, chart=data, framework=af.resolve(None))
+        assert "No answers to analyse yet" in html
+
+
+def _class(items=5, students=0, keyed=True):
+    """A small exam, so the empty states can be built without a database."""
+    exam = dict(EXAM, total_questions=items,
+                question_types={str(i): "mcq" for i in range(items)},
+                answer_key=({str(i): "A" for i in range(items)} if keyed else {}))
+    rows = []
+    for j in range(students):
+        rows.append({"student_name": f"Murid {j}",
+                     "answers": {str(i): ("A" if j % 2 else "B")
+                                 for i in range(items)},
+                     "final_score": 50.0})
+    return exam, rows
 
 
 # ── one door for the permission check ───────────────────────────────────────
@@ -260,10 +379,27 @@ class TestTheDocumentsAreOffered:
         link, or an English reader files an Indonesian report — the same defect as
         a hardcoded label, one layer further out."""
         for kind in ("csv", "xlsx", "pdf"):
-            assert re.search(
-                rf":href=\"'/teacher/analysis/\{{\{{ exam\.id \}}\}}/download\.{kind}"
-                r"\?lang=' \+ lang\"", PAGE), \
-                f"the {kind} link does not carry the chosen language"
+            link = ":href=\"'{{ base }}/download." + kind + "?lang=' + lang"
+            assert link in PAGE, f"the {kind} link does not carry the chosen language"
+        # And the framework travels with it, for the same reason the language does:
+        # the files are built on the server, so a document that did not carry the
+        # reader's choice would name one framework while the page showed another.
+        for kind in ("csv", "xlsx", "pdf"):
+            link = ":href=\"'{{ base }}/download." + kind + "?lang=' + lang + '&framework='"
+            assert link in PAGE, f"the {kind} link does not carry the chosen framework"
+        # And the base differs by reader, which is the point of putting it in the
+        # route: the teacher's copy links to the authenticated download, a shared
+        # copy to its own redacted one, so the file a stranger can fetch is the
+        # file with no names and no key in it.
+        #
+        # Which copy is rendered is the *route's* answer (`public_view`), not the
+        # session's: asking whether the reader is signed in meant a teacher who
+        # opened somebody's share link got the teacher's copy of a shared report,
+        # key marker and all. The fallback is still the teacher's copy, which is
+        # the only reader that reaches this block without the flag.
+        assert "body(public_view|default(false, true), "
+        assert "download_base|default('/teacher/analysis/'" in PAGE
+        assert "body(true, download_base|default('/r/'" in PAGE
         assert "lang=id\"" not in PAGE, "a download link is pinned to Indonesian"
 
     def test_the_csv_carries_every_item_the_page_shows(self, rendered):
@@ -474,15 +610,31 @@ class TestTheCopyBoard:
     CHART_REFS = ("map", "difficulty", "people")
 
     def test_the_page_draws_the_charts_the_copy_controls_address(self, rendered):
-        for ref in self.CHART_REFS:
-            assert f'x-ref="{ref}Canvas"' in rendered["html"], (
-                f"the page has no {ref} canvas, so copying it can only fail")
-
-    def test_every_chart_has_a_copy_control(self, rendered):
+        """The drawn canvases and the copy controls are the *same* set, whatever
+        framework the reader chose — which is why this is read off the render
+        rather than from a list in the test."""
         html = rendered["html"]
+        refs = set(re.findall(r'x-ref="(\w+)Canvas"', html))
+        controls = set(re.findall(r"copyChart\('(\w+)'\)", html))
+        assert refs, "the page draws no chart at all"
+        assert refs == controls, (refs, controls)
+
+    def test_every_chart_has_a_copy_control_under_the_framework_that_draws_it(
+            self, app):
+        """Rasch is the view that shows all three drawings, so it is the one that
+        can prove each of them is copyable."""
+        from app.routes.teacher import _chart_payload
+        from app.services import item_analysis
+
+        analysis = item_analysis.analyse(EXAM, _submissions())
+        chart = _chart_payload(analysis, framework=af.resolve("rasch"))
+        with _signed_in(app, "/teacher/analysis/exam-1"):
+            html = app.jinja_env.get_template("teacher/analysis.html").render(
+                exam=EXAM, analysis=analysis, chart=chart,
+                framework=af.resolve("rasch"))
         for ref in self.CHART_REFS:
-            assert f"copyChart('{ref}')" in html, (
-                f"the {ref} chart cannot be copied")
+            assert f'x-ref="{ref}Canvas"' in html, f"the page has no {ref} canvas"
+            assert f"copyChart('{ref}')" in html, f"the {ref} chart cannot be copied"
 
     def test_the_board_offers_the_table_and_the_whole_figure(self, rendered):
         html = rendered["html"]
@@ -503,6 +655,40 @@ class TestTheCopyBoard:
         assert on_the_table.search(rendered["html"]), (
             "the rendered item table has no hook for the copy control")
 
+    #: The legend keys each drawing names, both its shape lines and the statistics
+    #: that are in it. A drawing with no legend copies as a picture of a shape.
+    def test_every_column_the_table_shows_has_a_definition(self, rendered):
+        """The table's `data-col` names its definition, so a column whose key has
+        none cannot be copied: the paste would carry a bare letter and two teachers
+        would read it two ways. Both languages, because the legend follows the
+        toggle and the review of the page is not always in Indonesian."""
+        columns = re.findall(r'data-col="(\w+)"', rendered["html"])
+        assert len(columns) >= 10, "the item table lost its column keys"
+        for key in columns:
+            entry = _catalogue_entry(key)
+            assert "id:" in entry and "en:" in entry, (
+                f"the definition of {key!r} is not bilingual")
+            # And a short name for it: the label comes from the catalogue, not from
+            # the table's own headers, because those are filled by `x-text` and the
+            # legend can otherwise read them before they have landed.
+            label = re.search(rf"{key}:\s*\{{[^}}]*\}}", PAGE, re.S)
+            assert label, f"the legend has no short name for {key!r}"
+        assert "this.words('glossaryLabel'" in PAGE
+
+    def test_every_drawing_carries_its_own_legend(self):
+        """Each chart's own lines and its own statistics, not one caption for all
+        three: a reader pasting the item map needs to be told what a dot is."""
+        for key in self.CHART_REFS:
+            chunks = re.findall(rf"\b{key}:\s*\[([^\]]*)\]", PAGE)
+            names = [name for chunk in chunks
+                     for name in re.findall(r"'(\w+)'", chunk)]
+            assert len(names) >= 3, (
+                f"the {key} chart names {names}, which is not a legend")
+            for name in names:
+                entry = _catalogue_entry(name)
+                assert "id:" in entry and "en:" in entry, (
+                    f"the {key} chart's line {name!r} is not bilingual")
+
     def test_the_key_composed_into_a_copied_chart_is_the_server_palette(self):
         """One palette. The five `rgba(...)` literals that used to be here were the
         same information kept where the PDF and the workbook could not reach it."""
@@ -511,6 +697,66 @@ class TestTheCopyBoard:
                         "rgba(120,113,108", "rgba(5,150,105"):
             assert literal not in PAGE, (
                 f"the template keeps its own copy of the palette ({literal})")
+
+    def test_a_copied_table_carries_its_own_legend(self, rendered):
+        """The numbers first, then what each column is — one paste, both halves.
+        The legend is read from the table's own headings, so it is in the reader's
+        language along with them."""
+        assert "this.tableLegend()" in PAGE, "the item table travels with no legend"
+        assert "figureTitle()" in PAGE, "the paste does not say which exam it is"
+        assert 'data-copy="table"' in rendered["html"]
+        assert "'text/plain'" in PAGE and "'text/html'" in PAGE, (
+            "Excel takes tabs and Word takes a table, and both are needed")
+
+    def test_the_summary_can_be_copied_with_its_meaning(self, rendered):
+        """The cards and Winsteps' block, with the definition of each statistic:
+        these are the numbers a school quotes into a report."""
+        assert "copySummary()" in rendered["html"]
+        assert 'data-copy="summary"' in rendered["html"]
+        assert "this.summaryLegend()" in PAGE
+        for name in ("stat_rmse", "stat_tsd", "stat_sep", "stat_strata",
+                     "stat_rel"):
+            entry = _catalogue_entry(name)
+            assert "id:" in entry and "en:" in entry, (
+                f"{name} is not defined in both languages")
+
+    def test_the_legend_follows_the_language_toggle(self):
+        """Every line of every legend is a pair read through the catalogue — no
+        Indonesian sentence hard-coded into the canvas code, which is where the
+        page's copy would otherwise escape the sweep."""
+        for call in ("this.words('chartLine'", "this.words('glossary'",
+                     "this.words('figure'"):
+            assert call in PAGE, f"the copy board does not read {call}"
+        # The heading exists, in the catalogue, once — and the drawing code reads
+        # it rather than spelling it out.
+        assert PAGE.count("Keterangan warna:") == 1, (
+            "a legend heading is hard-coded outside the catalogue")
+        assert "this.words('figure', 'legend')" in PAGE
+
+    def test_the_page_prints_the_same_legends_the_paste_carries(self, rendered):
+        """One function, two destinations. A teacher reads the legend on the page
+        and pastes the same sentences into a report; two lists of sentences would
+        be two chances to disagree, and the page's copy is the one nobody notices
+        going stale."""
+        html = rendered["html"]
+        assert html.count("<details") >= 3, (
+            "a legend that is only in the paste is a legend nobody reads")
+        for call in ("chartLegend()", "tableLegend()", "summaryLegend()"):
+            assert f"in {call}" in html, f"the page does not list {call}"
+        for heading in ("What each column means",
+                        "What the summary and separation numbers mean",
+                        "How to read the charts above"):
+            assert heading in html, f"no on-page legend for {heading!r}"
+
+    def test_the_provenance_travels_with_the_figure(self, rendered):
+        """A pasted chart with no exam name is a chart nobody can check, and the
+        copy board cannot read the page's own header."""
+        data = _page_payload(rendered["html"])
+        assert data["meta"]["title"] == EXAM["title"]
+        assert data["meta"]["students"] == 10
+        assert data["meta"]["items"] == EXAM["total_questions"]
+        assert '"meta": {' in TEACHER
+        assert "meta.title" in PAGE and "meta.students" in PAGE
 
     def test_the_page_is_told_the_palette_the_documents_use(self, rendered):
         from app.services import analysis_report
@@ -560,3 +806,96 @@ class TestTheCopyBoard:
         # The chart controls are in the card header, which stacks on a phone; a
         # fixed-width toolbar here would push the chart off the screen.
         assert "flex items-center gap-2" in PAGE.split('copyChart(', 1)[0][-600:]
+
+
+# ── every table and drawing says what it means ──────────────────────────────
+
+class TestTheMeaningIsOnThePage:
+    """The meaning travels with the thing it explains, on the screen as well.
+
+    A legend that exists only inside a copy buffer is a legend the reader of the
+    page never sees; a table whose columns are defined only in the paste is a
+    table two teachers read two ways. So each block that publishes numbers — the
+    summary cards, the separation table, the item table, the upper-and-lower
+    table, the option spread — has to carry its own sentences *on the page*, and
+    those sentences have to be the pairs the language toggle switches.
+    """
+
+    #: The block -> the legend it must carry, and the binding that lets the
+    #: reader open it. The binding is asserted rather than the function's name,
+    #: because the name is also the word that *defines* it: a legend deleted from
+    #: the page would still be "there" as a method nobody calls.
+    LEGENDS = (
+        ("Arti angka pada ringkasan dan pemisahan",
+         'x-for="(line, index) in summaryLegend()"'),
+        ("Arti setiap kolom", 'x-for="line in tableLegend()"'),
+        ("Arti tabel kelompok atas dan bawah", 'x-for="line in splitLegend()"'),
+        ("Cara membaca grafik di atas",
+         'x-for="(line, index) in chartLegend()"'),
+    )
+
+    @staticmethod
+    def _section(name):
+        """One catalogue section of the page's own JS, as the page writes it."""
+        body = PAGE.split(f"    {name}: {{", 1)[1]
+        return body.split("\n    },", 1)[0]
+
+    def test_each_table_and_drawing_has_its_own_legend(self, rendered):
+        html = rendered["html"]
+        for heading, binding in self.LEGENDS:
+            assert heading in html, f"no on-page legend for {heading!r}"
+            assert html.count(binding) == 1, (
+                f"{heading!r} is not the one block bound to {binding}")
+
+    def test_each_legend_names_what_its_table_shows(self):
+        """The upper-and-lower table's columns and its legend are one list: a
+        column whose definition is missing renders as a bare letter beside a
+        number the reader has to interpret."""
+        block = PAGE.split("splitLegend() {", 1)[1].split("        },", 1)[0]
+        keys = re.findall(r"'([a-z]+)'", block)
+        assert keys[:5] == ["upper", "lower", "t", "df", "p"], keys
+        for key in keys[:5]:
+            for section in ("splitLabel", "split"):
+                # Scoped to the section's own body: a definition that moved to
+                # another section, or that lost its pair, is not a definition
+                # where this legend reads.
+                entry = re.search(
+                    rf"^\s*{key}:\s*\{{(.*?)\}}\s*,?$",
+                    self._section(section), re.M | re.S)
+                assert entry, f"{section} has no line for {key!r}"
+                assert "en:" in entry.group(1), (
+                    f"{section}.{key} is not bilingual")
+        # The headings the table prints and the labels the legend prints are the
+        # same words, so the reader can match a column to its sentence.
+        for label in ("Atas", "Bawah"):
+            assert label in PAGE, f"the split legend lost its label {label!r}"
+
+    def test_a_card_of_one_paper_says_one(self):
+        """The hint under a card is the meaning of the number above it, so it has
+        to agree with it: an exam with one paper answered printed "1 Papers with
+        data", and the copied summary — which reads the same `hint` — copied it."""
+        assert "s.answered_papers === 1" in PAGE, (
+            'the students card prints "1 Papers with data" again')
+        assert "'paperOne' : 'papers'" in PAGE.replace("\n", " ")
+        entry = _catalogue_entry("paperOne")
+        assert "id:" in entry and "en:" in entry, (
+            "the singular is not bilingual")
+
+    def test_the_option_spread_carries_its_colour_key(self, rendered):
+        """Two colours and one length, said in words: the bars encode a finding
+        and the finding is why the block is on the page at all."""
+        for call in (
+            "t('Hijau dan ikon kunci: pilihan yang menjadi kunci jawaban soal "
+            "ini.','Green with a key icon: the option this question is keyed to.')",
+            "t('Abu-abu: pengecoh, bukan kunci.','Grey: a distractor, not the key.')",
+            "t('Panjang batang: berapa kertas memilih pilihan itu.','Bar length: "
+            "how many papers chose that option.')",
+        ):
+            assert call in PAGE, f"the option key is missing {call}"
+        html = rendered["html"]
+        assert "Green with a key icon" in html and "Bar length" in html
+        # The swatches use the same utilities the bars do, so a legend cannot
+        # promise a colour the chart does not paint.
+        for utility in ("bg-emerald-400", "bg-surface-300"):
+            assert PAGE.count(utility) >= 2, (
+                f"{utility} is used once: the key and the bars drifted apart")

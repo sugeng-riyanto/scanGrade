@@ -21,6 +21,8 @@ import csv
 import io
 from typing import Any, Mapping
 
+from app.services import analysis_frameworks as af
+
 # Imported here rather than inside `analysis_pdf`, where the rest of reportlab is
 # loaded: a flowable has to exist as a *class* before the module finishes, and
 # `reportlab` is a hard requirement of this app either way.
@@ -56,6 +58,17 @@ _LABELS: dict[str, dict[str, str]] = {
         "measure_mean": "Rata-rata logit murid",
         "measure_sd": "Simpangan baku logit murid",
         "extremes": "Murid skor ekstrem",
+        "separation_block": "Pemisahan dan keandalan (Winsteps)",
+        "side_people": "Murid",
+        "side_items": "Butir",
+        "row_model": "MODEL",
+        "row_real": "REAL",
+        "rmse": "RMSE (galat baku rata-rata)",
+        "true_sd": "TRUE SD (SD tanpa galat)",
+        "separation": "SEPARASI (G)",
+        "strata": "STRATA",
+        "reliability": "RELIABILITAS",
+        "se_real": "SE real",
         "no": "No",
         "kind": "Tipe",
         "marks": "Bobot",
@@ -89,6 +102,10 @@ _LABELS: dict[str, dict[str, str]] = {
         "empty": "belum ada data untuk dianalisis",
         "before": "Turunkan versi bahasa di atas berkas, bukan di dalamnya: berkas ini dibuat ",
         "language": "Bahasa laporan",
+        # Printed only on a document generated from a public share link. A file
+        # whose columns are missing has to say why, or the reader assumes the
+        # data was not collected.
+        "shared": "Salinan berbagi: nama murid dan kunci jawaban tidak disertakan.",
         "generated": "Dibuat",
         "school": "Sekolah",
         "teacher": "Guru",
@@ -134,6 +151,32 @@ _LABELS: dict[str, dict[str, str]] = {
         "legend_key": "Kunci jawaban soal itu",
         "legend_distractor": "Pilihan pengecoh yang dipilih murid",
         "legend_students": "Jumlah murid",
+        # The four frameworks, and the two blocks the app never published before.
+        "framework": "Kerangka analisis",
+        "framework_question": "Pertanyaan yang dijawab laporan ini",
+        "framework_measures": "Yang dilaporkan",
+        "framework_when": "Kapan dipakai",
+        "framework_reference": "Rujukan",
+        "framework_not_for": "Yang tidak bisa dijawab",
+        "cognitive": "Porsi tingkat kognitif (kisi-kisi)",
+        "cognitive_basis_marks": "Dihitung dari bobot nilai tiap soal.",
+        "cognitive_basis_questions": "Dihitung dari banyak soal, karena ujian ini tidak memakai bobot nilai.",
+        "band": "Tingkat",
+        "share": "Porsi (%)",
+        "unlabelled": "Belum dilabeli",
+        "mastery": "Ketuntasan belajar (KKM)",
+        "kkm": "KKM",
+        "passed": "Tuntas",
+        "failed": "Belum tuntas",
+        "pass_rate": "Persentase tuntas (%)",
+        "class_mean": "Rata-rata kelas",
+        "lowest": "Nilai terendah",
+        "gap": "Rata-rata dikurangi KKM",
+        "mastered": "Soal sudah dikuasai",
+        "threshold": "Ambang penguasaan soal",
+        "mastery_unconfigured": "Ujian ini belum menetapkan KKM, jadi ketuntasan tidak dihitung: patokan yang tidak dipilih sekolah bukan patokan yang boleh dikarang.",
+        "level": "Tingkat kognitif",
+        "unchanged": "Soal yang tidak punya tingkat kognitif belum dilabeli, bukan otomatis tingkat rendah.",
     },
     "en": {
         "title": "Item Analysis",
@@ -160,6 +203,17 @@ _LABELS: dict[str, dict[str, str]] = {
         "measure_mean": "Mean student logit",
         "measure_sd": "SD of student logits",
         "extremes": "Extreme-score students",
+        "separation_block": "Separation and reliability (Winsteps)",
+        "side_people": "Students",
+        "side_items": "Items",
+        "row_model": "MODEL",
+        "row_real": "REAL",
+        "rmse": "RMSE (average measurement error)",
+        "true_sd": "TRUE SD (SD without measurement error)",
+        "separation": "SEPARATION (G)",
+        "strata": "STRATA",
+        "reliability": "RELIABILITY",
+        "se_real": "Real SE",
         "no": "No",
         "kind": "Type",
         "marks": "Marks",
@@ -193,6 +247,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "empty": "no data to analyse yet",
         "before": "Lower the language version, not the file: this report was produced ",
         "language": "Report language",
+        "shared": "Shared copy: student names and the answer key are not included.",
         "generated": "Generated",
         "school": "School",
         "teacher": "Teacher",
@@ -231,6 +286,32 @@ _LABELS: dict[str, dict[str, str]] = {
         "legend_key": "The option this question is keyed to",
         "legend_distractor": "A distractor the class actually chose",
         "legend_students": "Number of students",
+        # The four frameworks, and the two blocks the app never published before.
+        "framework": "Assessment framework",
+        "framework_question": "The question this report answers",
+        "framework_measures": "What it publishes",
+        "framework_when": "When it is used",
+        "framework_reference": "Reference",
+        "framework_not_for": "What it cannot answer",
+        "cognitive": "Cognitive level mix (kisi-kisi)",
+        "cognitive_basis_marks": "Counted from each question's marks.",
+        "cognitive_basis_questions": "Counted by question, because this exam carries no marks per question.",
+        "band": "Band",
+        "share": "Share (%)",
+        "unlabelled": "Not labelled yet",
+        "mastery": "Mastery against the KKM",
+        "kkm": "KKM",
+        "passed": "Met the standard",
+        "failed": "Below the standard",
+        "pass_rate": "Share meeting the standard (%)",
+        "class_mean": "Class mean",
+        "lowest": "Lowest mark",
+        "gap": "Mean minus the KKM",
+        "mastered": "Questions mastered",
+        "threshold": "Question mastery threshold",
+        "mastery_unconfigured": "This exam sets no KKM, so mastery is not computed: a standard the school never chose is not one a report may invent.",
+        "level": "Cognitive level",
+        "unchanged": "A question with no cognitive level is unlabelled, not lower order by default.",
     },
 }
 
@@ -290,11 +371,59 @@ NOTE_LABELS: dict[str, dict[str, str]] = {
         "en": "A blank answer counts as missing, not wrong, and stays out of that "
               "question's difficulty.",
     },
+    "kkm_missing": {
+        "id": "Ujian ini belum menetapkan KKM, jadi belum ada patokan untuk "
+              "menyatakan tuntas. Isi KKM pada pengaturan ujian.",
+        "en": "This exam has no KKM set, so there is no standard to declare "
+              "mastery against. Set the KKM on the exam.",
+    },
+    "levels_partly_set": {
+        "id": "Sebagian soal belum punya tingkat kognitif (C1–C6), jadi porsi "
+              "LOTS/MOTS/HOTS dihitung dari soal yang sudah dilabeli saja.",
+        "en": "Some questions have no cognitive level (C1–C6) yet, so the "
+              "LOTS/MOTS/HOTS shares count only the labelled questions.",
+    },
     "extreme_items": {
         "id": "Ada soal yang dijawab benar atau salah oleh seluruh murid; angkanya "
               "dihitung dengan koreksi skor ekstrem.",
         "en": "Some questions were answered by every student or by none; their "
               "numbers use the extreme-score correction.",
+    },
+    "model_real": {
+        "id": "Baris MODEL memakai galat seperti yang diprediksi model; baris REAL "
+              "menganggap ketidakcocokan itu nyata, sehingga galat baku tiap butir dan "
+              "murid digelembungkan oleh infit-nya sendiri. Angka REAL yang paling aman "
+              "dikutip, dan STRATA = (4G + 1)/3 adalah banyaknya tingkat yang benar-benar "
+              "terpisah.",
+        "en": "The MODEL row takes the errors the model predicts; the REAL row assumes "
+              "the misfit is real, inflating every item's and student's standard error "
+              "by its own infit. REAL is the conservative number to quote, and STRATA = "
+              "(4G + 1)/3 is how many statistically distinct levels the spread "
+              "supports.",
+    },
+    "fit_dof": {
+        "id": "Infit, outfit dan t-nya mengikuti Wright & Masters (Rating Scale "
+              "Analysis, 1982, hlm. 100): outfit = rata-rata kuadrat sisa terstandar, "
+              "infit = rata-rata berbobot informasi. Nilai ZSTD memakai transformasi "
+              "Wilson–Hilferty dengan derajat kebebasan 2/q² dari sebaran model "
+              "(Schulz, Rasch Measurement Transactions 16:2 hlm. 879), bukan jumlah "
+              "respons — jumlah respons membuat tanda ketidakcocokan menyala terlalu "
+              "sering.",
+        "en": "Infit, outfit and their t follow Wright & Masters (Rating Scale "
+              "Analysis, 1982, p. 100): outfit is the mean squared standardized "
+              "residual, infit the information-weighted one. ZSTD uses the "
+              "Wilson–Hilferty transform with degrees of freedom 2/q², estimated from "
+              "the model distribution (Schulz, Rasch Measurement Transactions 16:2 p. "
+              "879) rather than from the number of responses — the response count "
+              "fires the misfit flag far too often.",
+    },
+    "scale_anchor": {
+        "id": "Skala logit dipatok pada rata-rata kesulitan soal ujian ini (0 logit), "
+              "seperti konvensi UCON di Winsteps, sehingga t = b/SE menguji \"sesulit "
+              "rata-rata soal ujian ini\".",
+        "en": "The logit scale is anchored on the mean difficulty of this exam's "
+              "questions (0 logits), Winsteps' UCON convention, so that t = b/SE tests "
+              "\"as hard as this paper's average question\".",
     },
 }
 
@@ -325,6 +454,199 @@ def _num(value: Any, digits: int = 2) -> str:
     if isinstance(value, float):
         return f"{value:.{digits}f}"
     return str(value)
+
+
+#: The separation block's statistics, in the order Winsteps prints them, with the
+#: digits each one is worth. `text` renders them for a CSV or a page; the workbook
+#: takes the raw floats, because a spreadsheet that holds "1.18" as text cannot be
+#: averaged or charted — which is the defect this workbook exists to avoid.
+_SEPARATION_STATS = (("rmse", 2), ("true_sd", 2), ("separation", 2),
+                     ("strata", 2), ("reliability", 3))
+
+
+def separation_cells(summary, text: bool = True) -> list[list[Any]]:
+    """The block's lines that can be formed, keyed rather than labelled.
+
+    `(side, row, rmse, true_sd, separation, strata, reliability)` per line, with the
+    side and the row as the keys a reader who re-renders their own words needs
+    (`people`/`items`, `real`/`model`) and not as words. That is what lets the
+    *page* show Winsteps' block from this one function while the language toggle
+    rewrites its labels in the browser — the numbers and the choice of which lines
+    exist are decided here, once, so the screen cannot disagree with the filed PDF.
+
+    A line whose **separation is undefined** is left out rather than printed as
+    four dashes. Separation is the number the block exists for, and it is undefined
+    whenever there is nothing to divide: one marked paper, or no calibrated item.
+    TRUE SD of 0.00 with a separation of 0.00 *is* printed — that is a real finding
+    about a class whose spread is entirely measurement error.
+    """
+    out: list[list[Any]] = []
+    for side_key, block in (("people", summary.person_stats),
+                            ("items", summary.item_stats)):
+        for row_key, suffix in (("real", "real"), ("model", "model")):
+            values = [getattr(block, f"{name}_{suffix}")
+                      for name, _d in _SEPARATION_STATS]
+            separation = values[2]
+            if separation is None:
+                continue
+            out.append([side_key, row_key]
+                       + [(_num(value, digits) if text
+                           else (value if value is not None else ""))
+                          for value, (_n, digits) in zip(values, _SEPARATION_STATS)])
+    return out
+
+
+def separation_rows(summary, lang: str = "id", text: bool = True) -> list[list[Any]]:
+    """Winsteps' separation block as rows: a header, then REAL and MODEL per side.
+
+    One shape for the CSV, the workbook and the paper, because the number a school
+    quotes has to be the same number wherever it read it. REAL comes first: it is
+    the conservative row, the one that assumes the misfit is real.
+    """
+    lang = language(lang)
+    t = labels(lang)
+    rows: list[list[Any]] = [[t["separation_block"]] + [t[name]
+                                                       for name, _d in _SEPARATION_STATS]]
+    for cells in separation_cells(summary, text=text):
+        side, row = cells[0], cells[1]
+        side_key = "side_people" if side == "people" else "side_items"
+        row_key = "row_real" if row == "real" else "row_model"
+        rows.append([f"{t[side_key]} {t[row_key]}"] + list(cells[2:]))
+    return rows
+
+
+# ── the framework, and the two blocks only it publishes ──────────────────────
+#
+# One shape per block, read by the page, the CSV, the workbook and the paper, for
+# the same reason every other block here is built once: a report that says "23%
+# HOTS" on screen and "18%" in the PDF has stopped being a measurement. The page
+# re-writes only the *labels*; the numbers and the choice of which rows exist come
+# from here, so a change to what a framework reports lands in all four places or
+# in none of them.
+
+
+def framework_rows(framework, lang: str = "id") -> list[list[str]]:
+    """One framework's identity as rows: what it answers, and what it cannot.
+
+    The `not_for` line is part of the block rather than a footnote, because it is
+    the half that stops a reader quoting a logit as a mark or a HOTS share as a
+    verdict on question quality.
+    """
+    lang = language(lang)
+    t = labels(lang)
+    words = framework.words(lang)
+    return [
+        [t["framework"], words["name"]],
+        [t["framework_question"], words["question"]],
+        [t["framework_measures"], words["measures"]],
+        [t["framework_when"], words["when"]],
+        [t["framework_reference"], words["reference"]],
+        [t["framework_not_for"], words["not_for"]],
+    ]
+
+
+def cognitive_payload(analysis) -> dict[str, Any]:
+    """The HOTS/MOTS/LOTS mix: three bands, the unlabelled count, per question.
+
+    Deliberately not rounded into one number. `basis` says whether the shares are
+    counted in marks or in questions, because the same paper is HOTS-heavy or not
+    depending on which one a reader assumed — and `unset` travels with the bands
+    rather than being folded into LOTS, which is the difference between "this
+    paper asks for little higher-order thinking" and "nobody has written the
+    kisi-kisi yet".
+    """
+    mix = analysis.cognitive
+    return {
+        "basis": mix.basis,
+        "bands": [{"key": band, "count": mix.counts.get(band, 0),
+                   "marks": mix.marks.get(band, 0.0), "share": mix.share(band)}
+                  for band in af.BANDS],
+        "unset": mix.unset,
+        "unset_marks": mix.unset_marks,
+        "labelled": mix.labelled,
+        "total": mix.total,
+        "total_marks": mix.total_marks,
+        "questions": [{"no": item.index + 1, "level": item.level,
+                       "band": item.band, "marks": round(item.marks, 2)}
+                      for item in analysis.items],
+    }
+
+
+def cognitive_rows(analysis, lang: str = "id") -> list[list[Any]]:
+    """The cognitive mix as rows: the basis, the three bands, then the unlabelled."""
+    lang = language(lang)
+    t = labels(lang)
+    mix = cognitive_payload(analysis)
+    rows: list[list[Any]] = [[t["cognitive"]] + [t[v] for v in ("band", "item_count", "marks", "share")]]
+    for band in mix["bands"]:
+        rows.append([_pair(af.BAND_NAMES, band["key"], lang),
+                     _num(band["count"], 0), _num(band["marks"], 2),
+                     _num(band["share"], 1)])
+    rows.append([t["unlabelled"], _num(mix["unset"], 0),
+                 _num(mix["unset_marks"], 2), ""])
+    rows.append([t["cognitive_basis_marks"] if mix["basis"] == "marks"
+                 else t["cognitive_basis_questions"]])
+    if mix["unset"]:
+        rows.append([t["unchanged"]])
+    return rows
+
+
+def mastery_payload(analysis) -> dict[str, Any]:
+    """Criterion-referenced mastery: the standard, the verdicts, the questions.
+
+    `configured` is in the payload and not left to the reader: an exam with no KKM
+    has no verdict, and a payload that only carried the counts would let a page
+    draw "0 passed" as if a standard had been applied.
+    """
+    mastery = analysis.mastery
+    return {
+        "configured": mastery.configured,
+        "kkm": mastery.kkm,
+        "passed": mastery.passed,
+        "failed": mastery.failed,
+        "pass_rate": mastery.pass_rate,
+        "mean": mastery.mean,
+        "lowest": mastery.lowest,
+        "gap": mastery.gap,
+        "items_mastered": mastery.items_mastered,
+        "items_measured": mastery.items_measured,
+        "questions": [{"no": item.index + 1, "full": item.full,
+                       "answered": item.answered,
+                       "pct": item.pct, "mastered": item.mastered}
+                      for item in analysis.items if item.mastered is not None],
+    }
+
+
+def mastery_rows(analysis, lang: str = "id") -> list[list[Any]]:
+    """Mastery as rows: the standard and the counts, then the questions that lag."""
+    lang = language(lang)
+    t = labels(lang)
+    block = mastery_payload(analysis)
+    rows: list[list[Any]] = [[t["mastery"]]]
+    if not block["configured"]:
+        # One sentence instead of five empty rows: the reason there is no verdict
+        # is more useful than the absence of a number, and it is the reason a
+        # reader can act on.
+        rows.append([t["mastery_unconfigured"]])
+        return rows
+    rows += [
+        [t["kkm"], _num(block["kkm"], 0)],
+        [t["passed"], _num(block["passed"], 0)],
+        [t["failed"], _num(block["failed"], 0)],
+        [t["pass_rate"], _num(block["pass_rate"], 1)],
+        [t["class_mean"], _num(block["mean"], 2)],
+        [t["lowest"], _num(block["lowest"], 2)],
+        [t["gap"], _num(block["gap"], 2)],
+        [t["threshold"], _num(round(block["kkm"] / 100.0, 2), 2)],
+        [t["mastered"], f"{block['items_mastered']} / {block['items_measured']}"],
+    ]
+    if block["questions"]:
+        rows.append([t["no"], t["full"], t["answered"], t["pct"], t["mastered"]])
+        for question in block["questions"]:
+            rows.append([str(question["no"]), _num(question["full"], 0),
+                         _num(question["answered"], 0), _num(question["pct"], 1),
+                         t["yes"] if question["mastered"] else t["no"]])
+    return rows
 
 
 def analysis_rows(analysis, lang: str = "id", compact: bool = False) -> list[list[str]]:
@@ -383,14 +705,27 @@ def _person_rows(analysis, lang: str) -> list[list[str]]:
 
 
 def analysis_csv(analysis, exam: Mapping[str, Any] | None = None,
-                 lang: str = "id") -> str:
+                 lang: str = "id", public: bool = False,
+                 framework=None) -> str:
     """The whole analysis as one CSV: summary, then items, then students.
 
     One file rather than three because the three sections are read together — a
     teacher sorts the item table and wants the paper's reliability beside it.
+
+    `public=True` is the copy generated from a share link: the students section
+    is left out and the answer-key column is left blank, because a link a teacher
+    sent to a curriculum lead is not a reason to hand out either. The file says so
+    in its own header rather than quietly missing its last section.
+
+    `framework` is the report the reader chose, and the file carries the same one
+    the screen did: its identity goes in the header and its own blocks go in the
+    body. A CSV named "Item Analysis" that quietly contains a HOTS breakdown the
+    RASCH view never showed is a document nobody can date; naming the framework in
+    the file is what lets a school file it next to the right conversation.
     """
     lang = language(lang)
     t = labels(lang)
+    framework = framework or af.resolve(None)
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\r\n")
 
@@ -398,6 +733,9 @@ def analysis_csv(analysis, exam: Mapping[str, Any] | None = None,
     writer.writerow([t["title"], str(exam.get("title") or analysis.title or "")])
     writer.writerow([t["exam"], analysis.code or str(exam.get("id") or "")])
     writer.writerow([t["language"], "English" if lang == "en" else "Bahasa Indonesia"])
+    writer.writerow([t["framework"], framework.words(lang)["name"]])
+    if public:
+        writer.writerow([t["shared"]])
     writer.writerow([])
 
     summary = analysis.summary
@@ -424,6 +762,23 @@ def analysis_csv(analysis, exam: Mapping[str, Any] | None = None,
         writer.writerow([t[key], _num(value, digits)])
     writer.writerow([])
 
+    for row in separation_rows(summary, lang):
+        writer.writerow(row)
+    writer.writerow([])
+
+    # The two blocks only their own framework publishes. The reason they are
+    # conditional rather than always present: the framework *is* the promise about
+    # what this file is, and a CTT export that also carried the KKM verdict would
+    # be answering a question the reader did not ask it.
+    if framework.shows("cognitive"):
+        for row in cognitive_rows(analysis, lang):
+            writer.writerow(row)
+        writer.writerow([])
+    if framework.shows("mastery"):
+        for row in mastery_rows(analysis, lang):
+            writer.writerow(row)
+        writer.writerow([])
+
     writer.writerow([t["items"]])
     for row in analysis_rows(analysis, lang):
         writer.writerow(row)
@@ -438,7 +793,7 @@ def analysis_csv(analysis, exam: Mapping[str, Any] | None = None,
         for item in distractored:
             for option in item.distractors:
                 writer.writerow([str(item.index + 1), option.label, str(option.count),
-                                 t["yes"] if option.key else ""])
+                                 "" if public else (t["yes"] if option.key else "")])
         writer.writerow([])
 
     if analysis.splits:
@@ -450,14 +805,16 @@ def analysis_csv(analysis, exam: Mapping[str, Any] | None = None,
                              _num(split.df, 1), _num(split.p, 4)])
         writer.writerow([])
 
-    writer.writerow([t["people"]])
-    for row in _person_rows(analysis, lang):
-        writer.writerow(row)
-    writer.writerow([])
+    if not public:
+        writer.writerow([t["people"]])
+        for row in _person_rows(analysis, lang):
+            writer.writerow(row)
+        writer.writerow([])
 
-    if analysis.notes:
+    notes = af.notes_for(analysis.notes, framework)
+    if notes:
         writer.writerow([t["notes"]])
-        for note in analysis.notes:
+        for note in notes:
             writer.writerow([_pair(NOTE_LABELS, note, lang)])
     return out.getvalue()
 
@@ -497,7 +854,8 @@ _ITEM_COLUMN: dict[str, int] = {key: index + 1
 
 
 def analysis_xlsx(analysis, exam: Mapping[str, Any] | None = None,
-                  lang: str = "id") -> bytes:
+                  lang: str = "id", public: bool = False,
+                  framework=None) -> bytes:
     """The analysis as a workbook a school can *use*, charts included.
 
     The CSV is for reading and the PDF for filing; this is for working. Three
@@ -515,6 +873,10 @@ def analysis_xlsx(analysis, exam: Mapping[str, Any] | None = None,
       Excel has no chart legend that can say "red means the question penalises the
       strong students", and a workbook whose item column is coloured with nothing
       explaining the colours is a workbook that hides its own finding.
+
+    `public=True` is the workbook generated from a share link: the `people` sheet
+    is not created and the answer key is not painted on the `options` sheet — the
+    finding colours stay, because what a question *did* is the point of sharing.
     """
     from openpyxl import Workbook
     from openpyxl.chart import BarChart, Reference, ScatterChart, Series
@@ -524,6 +886,7 @@ def analysis_xlsx(analysis, exam: Mapping[str, Any] | None = None,
 
     lang = language(lang)
     t = labels(lang)
+    framework = framework or af.resolve(None)
     exam = exam or {}
     head = Font(bold=True)
     shade = PatternFill("solid", fgColor="eef2f7")
@@ -549,6 +912,9 @@ def analysis_xlsx(analysis, exam: Mapping[str, Any] | None = None,
     worksheet.append([t["exam"], analysis.code or str(exam.get("id") or "")])
     worksheet.append([t["language"],
                       "English" if lang == "en" else "Bahasa Indonesia"])
+    worksheet.append([t["framework"], framework.words(lang)["name"]])
+    if public:
+        worksheet.append([t["shared"]])
     worksheet.append([])
     label(t["summary"])
     sheet = worksheet
@@ -570,13 +936,106 @@ def analysis_xlsx(analysis, exam: Mapping[str, Any] | None = None,
         if value is not None and isinstance(value, (int, float)):
             sheet.cell(row=sheet.max_row, column=2).number_format = f"0.{'0' * digits}" \
                 if digits else "0"
-    if analysis.notes:
+
+    # Winsteps' separation block, as its own grid so the MODEL and REAL rows line
+    # up under their statistics the way they do in Winsteps' own Tables 3.1/28.3.
+    worksheet.append([])
+    for index, row in enumerate(separation_rows(summary, lang, text=False)):
+        worksheet.append(row)
+        for column, (name, digits) in enumerate(_SEPARATION_STATS, start=2):
+            cell = worksheet.cell(row=worksheet.max_row, column=column)
+            if index == 0:
+                cell.font = head
+                cell.fill = shade
+            elif isinstance(cell.value, (int, float)):
+                cell.number_format = f"0.{'0' * digits}"
+    notes = af.notes_for(analysis.notes, framework)
+    if notes:
         worksheet.append([])
         label(t["notes"])
-        for note in analysis.notes:
+        for note in notes:
             worksheet.append([_pair(NOTE_LABELS, note, lang)])
     worksheet.column_dimensions["A"].width = 34
     worksheet.column_dimensions["B"].width = 60
+
+    # ── the framework, and the two blocks only their own framework publishes ──
+    sheet = book.create_sheet(_sheet("framework", lang))
+    for row in framework_rows(framework, lang):
+        sheet.append(row)
+    sheet.column_dimensions["A"].width = 40
+    sheet.column_dimensions["B"].width = 90
+    for row in sheet.iter_rows(min_col=1, max_col=1):
+        row[0].font = head
+    for row in sheet.iter_rows(min_col=2, max_col=2):
+        row[0].alignment = Alignment(wrap_text=True, vertical="top")
+
+    if framework.shows("cognitive"):
+        mix = cognitive_payload(analysis)
+        sheet = book.create_sheet(_sheet("cognitive", lang))
+        sheet.append([t["cognitive"], t["band"], t["item_count"], t["marks"],
+                      t["share"]])
+        for cell in sheet[1]:
+            cell.font = head
+            cell.fill = shade
+        for band in mix["bands"]:
+            sheet.append(["", _pair(af.BAND_NAMES, band["key"], lang), band["count"],
+                          band["marks"], band["share"] if band["share"] is not None else ""])
+            for column, digits in ((3, 0), (4, 2), (5, 1)):
+                cell = sheet.cell(row=sheet.max_row, column=column)
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = "0" if digits == 0 else f"0.{'0' * digits}"
+        # The unlabelled row and the basis sentence go after the bands, not inside
+        # them: a paper whose kisi-kisi is unwritten is not a paper with 0% HOTS.
+        sheet.append(["", t["unlabelled"], mix["unset"], mix["unset_marks"], ""])
+        sheet.append([])
+        sheet.append([t["cognitive_basis_marks"] if mix["basis"] == "marks"
+                      else t["cognitive_basis_questions"]])
+        sheet.append([])
+        sheet.append([t["no"], t["level"], t["band"], t["marks"]])
+        for cell in sheet[sheet.max_row]:
+            cell.font = head
+        for question in mix["questions"]:
+            level = af.level(question["level"])
+            sheet.append([question["no"],
+                          level.name[lang] if level else t["unlabelled"],
+                          _pair(af.BAND_NAMES, question["band"], lang)
+                          if question["band"] else "",
+                          question["marks"]])
+        sheet.column_dimensions["B"].width = 34
+        sheet.column_dimensions["C"].width = 30
+
+    if framework.shows("mastery"):
+        block = mastery_payload(analysis)
+        sheet = book.create_sheet(_sheet("mastery", lang))
+        if not block["configured"]:
+            sheet.append([t["mastery_unconfigured"]])
+            sheet.column_dimensions["A"].width = 90
+        else:
+            sheet.append([t["mastery"]])
+            sheet.cell(row=1, column=1).font = head
+            for key, value, digits in (
+                ("kkm", block["kkm"], 0), ("passed", block["passed"], 0),
+                ("failed", block["failed"], 0), ("pass_rate", block["pass_rate"], 1),
+                ("class_mean", block["mean"], 2), ("lowest", block["lowest"], 2),
+                ("gap", block["gap"], 2),
+                ("threshold", round(block["kkm"] / 100.0, 2), 2),
+            ):
+                sheet.append([t[key], value if value is not None else ""])
+                cell = sheet.cell(row=sheet.max_row, column=2)
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = "0" if digits == 0 else f"0.{'0' * digits}"
+            sheet.append([t["mastered"], block["items_mastered"], block["items_measured"]])
+            sheet.append([])
+            sheet.append([t["no"], t["full"], t["answered"], t["pct"], t["mastered"]])
+            for cell in sheet[sheet.max_row]:
+                cell.font = head
+                cell.fill = shade
+            for question in block["questions"]:
+                sheet.append([question["no"], question["full"], question["answered"],
+                              question["pct"],
+                              t["yes"] if question["mastered"] else t["no"]])
+            sheet.column_dimensions["A"].width = 26
+            sheet.column_dimensions["E"].width = 16
 
     # ── items, with the two charts that belong to them ───────────────────────
     items = list(analysis.items)
@@ -665,12 +1124,12 @@ def analysis_xlsx(analysis, exam: Mapping[str, Any] | None = None,
                 option = counts.get(letter)
                 cell = sheet.cell(row=row_offset, column=first_matrix_col + offset,
                                   value=(option.count if option else None))
-                if option is not None and option.key:
+                if option is not None and option.key and not public:
                     cell.fill = PatternFill("solid", fgColor=_KEY.lstrip("#"))
         for item in chosen:
             for option in item.distractors:
                 sheet.append([item.index + 1, option.label, option.count,
-                              "✓" if option.key else ""])
+                              "" if public else ("✓" if option.key else "")])
         chart = BarChart()
         chart.type = "col"
         chart.grouping = "stacked"
@@ -707,41 +1166,47 @@ def analysis_xlsx(analysis, exam: Mapping[str, Any] | None = None,
             sheet.column_dimensions[get_column_letter(column)].width = 13
 
     # ── students, with the ability histogram ─────────────────────────────────
-    sheet = book.create_sheet(_sheet("people", lang))
-    sheet.append([t["name"], t["raw"], t["possible"], t["measure_p"], t["se"],
-                  t["score"], t["extreme"]])
-    for cell in sheet[1]:
-        cell.font = head
-        cell.fill = shade
-    people = list(analysis.people)
-    for person in people:
-        sheet.append([person.name, person.raw, person.possible, person.measure,
-                      person.se, person.score,
-                      t["yes"] if person.extreme else t["no_word"]])
-    bins = list(analysis.person_bins)
-    if bins:
-        first_bin_row = len(people) + 4
-        sheet.cell(row=first_bin_row - 1, column=1, value=t["people_chart"]).font = head
-        sheet.cell(row=first_bin_row, column=1, value=t["logit_axis"]).font = head
-        sheet.cell(row=first_bin_row, column=2, value=t["legend_students"]).font = head
-        for offset, (centre, count) in enumerate(bins, start=1):
-            sheet.cell(row=first_bin_row + offset, column=1, value=centre)
-            sheet.cell(row=first_bin_row + offset, column=2, value=count)
-        chart = BarChart()
-        chart.type = "col"
-        chart.title = t["people_chart"]
-        chart.x_axis.title = t["logit_axis"]
-        chart.y_axis.title = t["legend_students"]
-        chart.height, chart.width = 9.0, 16.0
-        data = Reference(sheet, min_col=2, min_row=first_bin_row,
-                         max_row=first_bin_row + len(bins))
-        cats = Reference(sheet, min_col=1, min_row=first_bin_row + 1,
-                         max_row=first_bin_row + len(bins))
-        chart.add_data(data, titles_from_data=True)
-        chart.set_categories(cats)
-        sheet.add_chart(chart, f"{get_column_letter(4)}{first_bin_row - 1}")
-    for column, width in enumerate((30, 9, 9, 9, 8, 9, 10), start=1):
-        sheet.column_dimensions[get_column_letter(column)].width = width
+    # A shared copy has no students sheet at all, rather than one with the name
+    # column blanked: an empty name column reads as data that was lost, and a
+    # workbook that quietly omitted its last sheet is worse than one that says so
+    # on the summary sheet. The histogram goes with the names — the bins are the
+    # class, and a class small enough to be one bar is a person.
+    if not public:
+        sheet = book.create_sheet(_sheet("people", lang))
+        sheet.append([t["name"], t["raw"], t["possible"], t["measure_p"], t["se"],
+                      t["score"], t["extreme"]])
+        for cell in sheet[1]:
+            cell.font = head
+            cell.fill = shade
+        people = list(analysis.people)
+        for person in people:
+            sheet.append([person.name, person.raw, person.possible, person.measure,
+                          person.se, person.score,
+                          t["yes"] if person.extreme else t["no_word"]])
+        bins = list(analysis.person_bins)
+        if bins:
+            first_bin_row = len(people) + 4
+            sheet.cell(row=first_bin_row - 1, column=1, value=t["people_chart"]).font = head
+            sheet.cell(row=first_bin_row, column=1, value=t["logit_axis"]).font = head
+            sheet.cell(row=first_bin_row, column=2, value=t["legend_students"]).font = head
+            for offset, (centre, count) in enumerate(bins, start=1):
+                sheet.cell(row=first_bin_row + offset, column=1, value=centre)
+                sheet.cell(row=first_bin_row + offset, column=2, value=count)
+            chart = BarChart()
+            chart.type = "col"
+            chart.title = t["people_chart"]
+            chart.x_axis.title = t["logit_axis"]
+            chart.y_axis.title = t["legend_students"]
+            chart.height, chart.width = 9.0, 16.0
+            data = Reference(sheet, min_col=2, min_row=first_bin_row,
+                             max_row=first_bin_row + len(bins))
+            cats = Reference(sheet, min_col=1, min_row=first_bin_row + 1,
+                             max_row=first_bin_row + len(bins))
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(cats)
+            sheet.add_chart(chart, f"{get_column_letter(4)}{first_bin_row - 1}")
+        for column, width in enumerate((30, 9, 9, 9, 8, 9, 10), start=1):
+            sheet.column_dimensions[get_column_letter(column)].width = width
 
     # ── how to read it ───────────────────────────────────────────────────────
     worksheet = book.create_sheet(_sheet("key", lang))
@@ -848,6 +1313,9 @@ FLAG_LEGEND: tuple[tuple[tuple[str, ...], str], ...] = (
 #: (skala logit)" cut in half. Each is checked against Excel's rules by a test.
 SHEET_NAMES: dict[str, dict[str, str]] = {
     "summary": {"id": "Ringkasan", "en": "Summary"},
+    "framework": {"id": "Kerangka analisis", "en": "Framework"},
+    "cognitive": {"id": "Tingkat kognitif", "en": "Cognitive mix"},
+    "mastery": {"id": "Ketuntasan", "en": "Mastery"},
     "items": {"id": "Butir soal", "en": "Items"},
     "options": {"id": "Pilihan jawaban", "en": "Options"},
     "groups": {"id": "Kelompok atas-bawah", "en": "Upper-lower"},
@@ -1438,11 +1906,16 @@ def chart_key(lang: str, charts: list[_Chart]) -> list[tuple[str, str]]:
 
 
 def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
-                 school: str = "", teacher: str = "", lang: str = "id") -> bytes:
+                 school: str = "", teacher: str = "", lang: str = "id",
+                 public: bool = False, framework=None) -> bytes:
     """The analysis as a filed report: identity, summary, charts, items, students.
 
     Landscape, because the item table is sixteen columns wide and a portrait A4
     would either shrink it past reading or split it across pages.
+
+    `public=True` is the report generated from a share link: no students table,
+    and a line saying so. The identity block keeps the exam, not the teacher — a
+    stranger reading a shared report needs to know which paper it is.
     """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
@@ -1454,6 +1927,7 @@ def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
 
     lang = language(lang)
     t = labels(lang)
+    framework = framework or af.resolve(None)
     exam = exam or {}
     styles = getSampleStyleSheet()
     body = ParagraphStyle("body", parent=styles["Normal"], fontSize=8, leading=10)
@@ -1477,7 +1951,35 @@ def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
     if analysis.code:
         identity.append(f"ID: {analysis.code}")
     identity.append(f"{t['language']}: {'English' if lang == 'en' else 'Bahasa Indonesia'}")
+    identity.append(f"{t['framework']}: <b>{framework.words(lang)['name']}</b>")
+    if public:
+        identity.append(f"<b>{t['shared']}</b>")
     flow.append(Paragraph(" &nbsp;|&nbsp; ".join(identity), body))
+
+    # ── the framework this report is ─────────────────────────────────────────
+    # Its own block on page one, before any number. A filed report is read months
+    # later by somebody who did not choose the framework, and "what question does
+    # this answer, and what can it not answer" is the sentence that decides whether
+    # the rest is quoted for the right thing. `framework_rows` is what the CSV and
+    # the workbook print, so the three documents make the same promise.
+    flow.append(Paragraph(str(t["framework"]), heading))
+    promise = [[Paragraph(str(label), ParagraphStyle(
+                    "fl", parent=body, fontSize=7, leading=9,
+                    textColor=colors.HexColor("#334155"))),
+                Paragraph(str(value), ParagraphStyle("fv", parent=body, fontSize=8,
+                                                     leading=10))]
+               for label, value in framework_rows(framework, lang)]
+    promise_table = Table(promise, colWidths=[52 * mm, 178 * mm])
+    promise_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    flow.append(promise_table)
 
     summary = analysis.summary
     flow.append(Paragraph(str(t["summary"]), heading))
@@ -1520,6 +2022,39 @@ def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     flow.append(summary_table)
+
+    # ── Winsteps' separation block ───────────────────────────────────────────
+    # Its own grid rather than more cells in the one above, because the shape is
+    # the message: two rows per side, REAL under MODEL, sharing the logit scale's
+    # errors. `separation_rows` is what the CSV and the workbook print too, so the
+    # number cannot differ between the three documents.
+    block = separation_rows(summary, lang, text=False)
+    # Only for the framework whose promise it is: a classical report prints no
+    # separation and no logit scale, because it publishes neither.
+    if framework.shows("separation") and any(value != "" for row in block[1:]
+                                             for value in row[1:]):
+        flow.append(Paragraph(str(t["separation_block"]), heading))
+        head_style = ParagraphStyle("sephead", parent=body, fontSize=7.5, leading=9,
+                                    textColor=colors.HexColor("#334155"))
+        number_style = ParagraphStyle("sepnum", parent=body, fontSize=7.5, leading=9,
+                                      alignment=2)
+        grid = [[Paragraph(str(cell), head_style) if isinstance(cell, str)
+                 else Paragraph(_num(cell, digits), number_style)
+                 for cell, digits in zip(row, [0, 2, 2, 2, 2, 3])]
+                for row in block]
+        separation_table = Table(grid, colWidths=[46 * mm, 32 * mm, 32 * mm,
+                                                  32 * mm, 26 * mm, 32 * mm])
+        separation_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ]))
+        flow.append(separation_table)
 
     # ── the drawings ─────────────────────────────────────────────────────────
     # Before the tables, and that order is the point: a teacher opens this file
@@ -1594,24 +2129,130 @@ def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
         ]))
         flow.append(split_table)
 
-    flow.append(CondPageBreak(90))
-    flow.append(Paragraph(str(t["people"]), heading))
-    people_rows = _person_rows(analysis, lang)
-    people_table = Table(people_rows, repeatRows=1,
-                         colWidths=["34%", "11%", "11%", "11%", "11%", "11%", "11%"])
-    people_table.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 6.5),
-        ("FONT", (0, 1), (-1, -1), "Helvetica", 7),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d8dee8")),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-    ]))
-    flow.append(people_table)
+    if not public:
+        flow.append(CondPageBreak(90))
+        flow.append(Paragraph(str(t["people"]), heading))
+        people_rows = _person_rows(analysis, lang)
+        people_table = Table(people_rows, repeatRows=1,
+                             colWidths=["34%", "11%", "11%", "11%", "11%", "11%", "11%"])
+        people_table.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 6.5),
+            ("FONT", (0, 1), (-1, -1), "Helvetica", 7),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d8dee8")),
+            ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ]))
+        flow.append(people_table)
 
-    if analysis.notes:
+    # ── the cognitive mix, and the mastery verdict ───────────────────────────
+    # Each only when the chosen framework publishes it. They are the two blocks
+    # this app never printed before, and both answer with the *school's* own
+    # documents: the kisi-kisi and the KKM.
+    if framework.shows("cognitive"):
+        mix = cognitive_payload(analysis)
+        flow.append(CondPageBreak(80))
+        flow.append(Paragraph(str(t["cognitive"]), heading))
+        flow.append(Paragraph(
+            str(t["cognitive_basis_marks"] if mix["basis"] == "marks"
+                else t["cognitive_basis_questions"]), body))
+        band_rows = [[t["band"], t["item_count"], t["marks"], t["share"]]]
+        for band in mix["bands"]:
+            band_rows.append([_pair(af.BAND_NAMES, band["key"], lang),
+                              _num(band["count"], 0), _num(band["marks"], 2),
+                              _num(band["share"], 1)])
+        # The unlabelled row is inside the grid, not a footnote: it is the row that
+        # says whether this table is a kisi-kisi check or a statement about an
+        # empty one.
+        band_rows.append([t["unlabelled"], _num(mix["unset"], 0),
+                          _num(mix["unset_marks"], 2), ""])
+        band_table = Table(band_rows, colWidths=[70 * mm, 30 * mm, 30 * mm, 30 * mm])
+        band_table.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 7),
+            ("FONT", (0, 1), (-1, -1), "Helvetica", 7.5),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d8dee8")),
+            ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ]))
+        flow.append(band_table)
+        levels = [[t["no"], t["level"], t["band"], t["marks"]]]
+        for question in mix["questions"]:
+            found = af.level(question["level"])
+            levels.append([str(question["no"]),
+                           found.name[lang] if found else t["unlabelled"],
+                           _pair(af.BAND_NAMES, question["band"], lang)
+                           if question["band"] else "",
+                           _num(question["marks"], 2)])
+        level_table = Table(levels, repeatRows=1,
+                            colWidths=[20 * mm, 55 * mm, 55 * mm, 25 * mm])
+        level_table.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 6.5),
+            ("FONT", (0, 1), (-1, -1), "Helvetica", 7),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d8dee8")),
+        ]))
+        flow.append(level_table)
+
+    if framework.shows("mastery"):
+        verdict = mastery_payload(analysis)
+        flow.append(CondPageBreak(80))
+        flow.append(Paragraph(str(t["mastery"]), heading))
+        if not verdict["configured"]:
+            # The absence of a verdict, said out loud. Five rows of zeros would
+            # read as a standard that nobody met, when the truth is that no
+            # standard was set.
+            flow.append(Paragraph(str(t["mastery_unconfigured"]), body))
+        else:
+            cells = [
+                (t["kkm"], verdict["kkm"], 0), (t["passed"], verdict["passed"], 0),
+                (t["failed"], verdict["failed"], 0),
+                (t["pass_rate"], verdict["pass_rate"], 1),
+                (t["class_mean"], verdict["mean"], 2),
+                (t["lowest"], verdict["lowest"], 2),
+                (t["gap"], verdict["gap"], 2),
+                (t["threshold"], round(verdict["kkm"] / 100.0, 2), 2),
+                (t["mastered"], f"{verdict['items_mastered']} / {verdict['items_measured']}", None),
+            ]
+            grid = [[Paragraph(f"<font size=7 color='#666666'>{name}</font><br/>"
+                               f"{_num(value, digits) if digits is not None else value or '-'}",
+                               ParagraphStyle("mv", parent=body, fontSize=8, leading=10))
+                     for name, value, digits in cells[i:i + 5]]
+                    for i in range(0, len(cells), 5)]
+            mastery_table = Table(grid, colWidths=[46 * mm] * 5)
+            mastery_table.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            flow.append(mastery_table)
+            if verdict["questions"]:
+                flow.append(Spacer(1, 3))
+                question_rows = [[t["no"], t["full"], t["answered"], t["pct"],
+                                  t["mastered"]]]
+                for question in verdict["questions"]:
+                    question_rows.append([str(question["no"]), _num(question["full"], 0),
+                                          _num(question["answered"], 0),
+                                          _num(question["pct"], 1),
+                                          t["yes"] if question["mastered"] else t["no"]])
+                question_table = Table(question_rows, repeatRows=1,
+                                       colWidths=[20 * mm, 25 * mm, 25 * mm, 25 * mm, 30 * mm])
+                question_table.setStyle(TableStyle([
+                    ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 6.5),
+                    ("FONT", (0, 1), (-1, -1), "Helvetica", 7),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
+                    ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d8dee8")),
+                    ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+                ]))
+                flow.append(question_table)
+
+    shown_notes = af.notes_for(analysis.notes, framework)
+    if shown_notes:
         flow.append(Spacer(1, 4))
         notes = [Paragraph(str(t["notes"]), heading)]
-        for note in analysis.notes:
+        for note in shown_notes:
             notes.append(Paragraph("&bull; " + _pair(NOTE_LABELS, note, lang), body))
         flow.append(KeepTogether(notes))
 

@@ -1,7 +1,20 @@
 {% extends "base.html" %}
-{% block title %}<span x-text="t('Analisis Butir Soal','Item Analysis')"></span> - {{ exam.title }}{% endblock %}
+{# Plain text for the tab, and the pair moved into the page's own `x-effect`: a
+   `<span x-text>` inside `<title>` is not rendered, it is *read out* — the browser
+   tab said `<span x-text="t('Analisis Butir Soal'…` — and the heading below keeps
+   its span, where markup is what is wanted. #}
+{% block title %}{{ exam.title }} - ScanGrade{% endblock %}
 {% block page_title %}<span x-text="t('Analisis Butir Soal','Item Analysis')"></span>{% endblock %}
-{% block content %}
+{# One body, rendered on both sides of base.html's split: the teacher's copy and
+   the redacted copy a share link hands a stranger. `public` is the parameter that
+   decides which, and it comes from the *route* rather than from `g.user_id` — a
+   logged-in teacher opening somebody's share link is still a reader of a shared
+   report, and asking who they are is how the answer key leaks to them.
+
+   A macro rather than two templates because the two copies must be identical
+   apart from what is withheld: two files would drift, and the half that drifts
+   is the one nobody is looking at. #}
+{% macro body(public, base, link) %}
 {# Every word on this page is a pair or a catalogue entry in the script below, so
    the EN/ID button translates all of it — including the chart legends, which are
    rebuilt on the toggle rather than baked in at load. Nothing here is written in
@@ -26,16 +39,57 @@
    owned (`Canvas is already in use. Chart with ID '0' ...`). Two watchers on the
    language followed, so the page redrew twice per toggle. #}
 <div class="space-y-4 sm:space-y-6" x-data="itemAnalysis({{ chart|tojson|forceescape }})"
+     x-effect="document.title = t('Analisis Butir Soal','Item Analysis') + ' - ' + {{ exam.title|tojson|forceescape }}"
      data-analysis-page>
+
+    {% if public %}
+    {# A stranger gets no navbar, so this copy carries its own brand row and its
+       own language button — the same convention as the public capacity page. A
+       linked report nobody can switch to English is a report for one reader. #}
+    {% if not g.user_id %}
+    <header class="flex items-center justify-between gap-3">
+        <a href="/" class="flex items-center gap-2">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-md">
+                <i class="fas fa-graduation-cap text-white text-xs"></i>
+            </div>
+            <span class="font-extrabold text-surface-800">ScanGrade</span>
+        </a>
+        <div class="flex items-center gap-2">
+            <button @click="setLang(lang === 'id' ? 'en' : 'id')" type="button"
+                    class="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-surface-500 hover:text-primary-600 border border-surface-200 rounded-lg transition"
+                    title="Bahasa / Language"
+                    :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'">
+                <i class="fas fa-globe"></i><span x-text="lang === 'id' ? 'EN' : 'ID'"></span>
+            </button>
+            <a href="/" class="px-3 py-2 text-xs font-bold text-surface-500 hover:text-primary-600 transition"
+               x-text="t('Beranda','Home')"></a>
+        </div>
+    </header>
+    {% endif %}
+    {# Said plainly, on the page: what this copy is, and what it is not. A reader
+       who cannot tell a shared report from a school's own file will quote it as
+       the file. #}
+    <div class="bg-primary-50 border border-primary-100 rounded-2xl px-3 sm:px-4 py-2.5">
+        <p class="text-[11px] sm:text-xs font-bold text-primary-800">
+            <i class="fas fa-share-nodes mr-1"></i>
+            <span x-text="t('Laporan yang dibagikan','A shared report')"></span>
+        </p>
+        <p class="text-[10px] sm:text-[11px] text-primary-700 mt-0.5"
+           x-text="t('Statistik di halaman ini boleh dibaca siapa pun yang memegang tautannya. Kunci jawaban dan nama murid tidak disertakan, dan tautannya bisa dihentikan oleh gurunya kapan saja.',
+                    'Anyone holding this link may read the statistics below. The answer key and student names are not included, and the teacher can stop the link at any time.')"></p>
+    </div>
+    {% endif %}
 
     <!-- ── header ─────────────────────────────────────────────────────────── -->
     <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
         <div class="min-w-0">
             <div class="flex items-center gap-2 mb-1">
-                <a href="/teacher/results?exam_id={{ exam.id }}"
+                {# A stranger has no results page to go back to, and a link to one
+                   would only bounce them through a login. #}
+                <a href="{{ '/teacher/results?exam_id=' ~ exam.id if not public else '/' }}"
                    class="text-surface-400 hover:text-primary-600 p-1.5 hover:bg-primary-50 rounded-lg transition shrink-0"
-                   :title="t('Kembali ke hasil ujian','Back to the results')"
-                   :aria-label="t('Kembali ke hasil ujian','Back to the results')">
+                   :title="t('Kembali','Back')"
+                   :aria-label="t('Kembali','Back')">
                     <i class="fas fa-arrow-left"></i>
                 </a>
                 <h1 class="text-lg sm:text-2xl font-extrabold text-surface-800 truncate"><span x-text="t('Analisis Butir Soal','Item Analysis')"></span></h1>
@@ -50,7 +104,7 @@
 {# The files are rendered on the server, so the toggle cannot reach inside
                them — the link carries the language the reader has chosen, and a
                teacher who switches to English files an English report. #}
-            <a :href="'/teacher/analysis/{{ exam.id }}/download.csv?lang=' + lang" data-download="csv"
+            <a :href="'{{ base }}/download.csv?lang=' + lang + '&framework=' + (chart.framework || '')" data-download="csv"
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-csv mr-1 text-emerald-600"></i>CSV
             </a>
@@ -58,11 +112,11 @@
                Excel charts on the sheets they plot, and the colour key filled in.
                It is a separate button rather than a format menu because a menu is a
                second click for the file most people want. #}
-            <a :href="'/teacher/analysis/{{ exam.id }}/download.xlsx?lang=' + lang" data-download="xlsx"
+            <a :href="'{{ base }}/download.xlsx?lang=' + lang + '&framework=' + (chart.framework || '')" data-download="xlsx"
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-excel mr-1 text-green-700"></i>Excel
             </a>
-            <a :href="'/teacher/analysis/{{ exam.id }}/download.pdf?lang=' + lang" data-download="pdf"
+            <a :href="'{{ base }}/download.pdf?lang=' + lang + '&framework=' + (chart.framework || '')" data-download="pdf"
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
             </a>
@@ -70,12 +124,130 @@
                     class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>
             </button>
+            {# The scoring guide is behind a login, so a shared copy does not
+               offer it: a button that lands on a login form is worse than none. #}
+            {% if not public %}
             <a href="/guide/skor"
                class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
                 <i class="fas fa-book-open mr-1"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span>
             </a>
+            {% endif %}
         </div>
     </div>
+
+    <!-- ── the framework this report is ───────────────────────────────────── -->
+    {# One exam's answers can be read four ways, and the four answer *different
+       questions* — so the reader chooses, and the choice lives in the URL
+       (`?framework=`) rather than in a hidden control: the address a teacher
+       copies is the report they are reading, and the download buttons below
+       carry the same key into the file so the page and the CSV agree.
+
+       The list, the four sentences and the "what it cannot answer" line all come
+       from the server payload (`chart.frameworks`), the same module that decides
+       which panels render — one vocabulary, in both languages, rather than a
+       second copy of the names in this template. #}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4"
+         data-framework-picker>
+        <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-[10px] font-extrabold uppercase tracking-wide text-surface-400 mr-1"
+                  x-text="t('Kerangka analisis','Assessment framework')"></span>
+            <template x-for="f in chart.frameworks" :key="f.key">
+                <a :href="'?framework=' + f.key"
+                   :data-framework="f.key"
+                   :data-active="f.key === chart.framework ? 'true' : 'false'"
+                   class="px-3 py-1.5 rounded-xl border-2 text-[11px] font-bold transition whitespace-nowrap"
+                   :class="f.key === chart.framework
+                       ? 'border-primary-400 bg-primary-50 text-primary-700'
+                       : 'border-surface-200 text-surface-500 hover:bg-surface-50'"
+                   x-text="t(f.name.id, f.name.en)" :title="t(f.question.id, f.question.en)"></a>
+            </template>
+        </div>
+        <template x-for="f in chart.frameworks" :key="'q-' + f.key">
+            <div x-show="f.key === chart.framework" x-cloak
+                 class="mt-2.5 grid grid-cols-1 lg:grid-cols-3 gap-2"
+                 :data-framework-panel="f.key">
+                <div class="lg:col-span-2 min-w-0">
+                    <p class="text-[11px] sm:text-xs font-bold text-surface-700"
+                       x-text="t(f.question.id, f.question.en)"></p>
+                    <p class="text-[10px] sm:text-[11px] text-surface-500 mt-1"
+                       x-text="t(f.when.id, f.when.en)"></p>
+                    <p class="text-[10px] text-surface-400 mt-1"
+                       x-text="t(f.reference.id, f.reference.en)"></p>
+                </div>
+                {# The honest half, in its own box and not a footnote: it is what
+                   stops a logit being quoted as a mark, or a HOTS share as a
+                   verdict on question quality. #}
+                <div class="rounded-xl bg-amber-50 border border-amber-200 px-2.5 py-2">
+                    <p class="text-[9px] font-extrabold uppercase tracking-wide text-amber-700"
+                       x-text="t('Yang tidak bisa dijawab','What it cannot answer')"></p>
+                    <p class="text-[10px] text-amber-800 mt-0.5"
+                       x-text="t(f.not_for.id, f.not_for.en)"></p>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    {% if not public %}
+    {# The share control. Two buttons and a URL, in the report's own header,
+       because the moment a teacher wants a link is the moment they are looking
+       at the numbers they want to show somebody. #}
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm px-3 sm:px-4 py-3"
+         data-share-card>
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+                <p class="text-xs font-extrabold text-surface-800">
+                    <i class="fas fa-share-nodes mr-1.5 text-primary-600"></i><span x-text="t('Bagikan laporan ini','Share this report')"></span>
+                </p>
+                <p class="text-[10px] text-surface-400 font-medium mt-0.5 max-w-2xl"
+                   x-text="t('Tautan ini menampilkan statistik saja — tanpa kunci jawaban dan tanpa nama murid — bisa dibuka siapa pun tanpa login, dan bisa dihentikan kapan saja.',
+                            'The link shows the statistics only — no answer key, no student names — opens for anyone without a login, and can be stopped at any time.')"></p>
+            </div>
+            <span class="text-[10px] font-bold shrink-0 {{ 'text-emerald-600' if link else 'text-surface-400' }}"
+                  x-show="!linkNote" x-cloak
+                  x-text="{{ "t('Aktif','Active')" if link else "t('Belum dibagikan','Not shared yet')" }}"></span>
+            <span class="text-[11px] font-bold text-emerald-600 shrink-0" x-show="linkNote" x-cloak
+                  x-text="linkNote"></span>
+        </div>
+
+        {% if link %}
+        <div class="flex flex-wrap items-center gap-2 mt-2.5">
+            {# Readonly and selected on click: the URL is the thing being copied,
+               and a field nobody can accidentally edit is a field nobody has to
+               be careful with. #}
+            <input type="text" readonly data-share-url value="{{ link.url }}"
+                   @focus="$el.select()" data-share-input
+                   class="flex-1 min-w-[16rem] text-[11px] font-mono text-surface-600 bg-surface-50 border border-surface-200 rounded-lg px-2.5 py-1.5">
+            <button type="button" @click="copyShareLink()" data-share-copy
+                    class="border-2 border-primary-200 text-primary-700 hover:bg-primary-50 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                <i class="fas fa-copy mr-1"></i><span x-text="t('Salin tautan','Copy link')"></span>
+            </button>
+            <span class="text-[10px] text-surface-400 font-medium">
+                {{ link.views }} <span x-text="t('dibuka','opens')"></span>
+                &middot;
+                {% if link.expires_at %}
+                <span x-text="t('kedaluwarsa','expires')"></span> {{ link.expires_at.strftime('%Y-%m-%d') }}
+                {% else %}
+                <span x-text="t('tanpa kedaluwarsa','no expiry')"></span>
+                {% endif %}
+            </span>
+            <form method="POST" action="/teacher/analysis/{{ exam.id }}/share/revoke"
+                  class="inline">
+                <button type="submit"
+                        class="border-2 border-red-100 text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                    <i class="fas fa-ban mr-1"></i><span x-text="t('Hentikan berbagi','Stop sharing')"></span>
+                </button>
+            </form>
+        </div>
+        {% else %}
+        <form method="POST" action="/teacher/analysis/{{ exam.id }}/share" class="mt-2.5">
+            <button type="submit"
+                    class="border-2 border-primary-200 text-primary-700 hover:bg-primary-50 px-3 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                <i class="fas fa-link mr-1"></i><span x-text="t('Buat tautan publik','Create a public link')"></span>
+            </button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
 
     {% if not analysis.items or analysis.summary.answered_papers == 0 %}
     <!-- ── nothing to measure yet ─────────────────────────────────────────── -->
@@ -87,7 +259,8 @@
     {% else %}
 
     <!-- ── summary ────────────────────────────────────────────────────────── -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+    {% if framework.shows('summary') %}
+    <div data-panel="summary" class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
         {% set s = analysis.summary %}
         <template x-for="card in summaryCards()" :key="card.key">
             <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
@@ -98,7 +271,100 @@
         </template>
     </div>
 
+    {# The figures a school quotes, copyable with the sentences that define them.
+       The copy controls sit under the cards rather than in the header because this
+       is the block they read: a metric card with no definition is a number a
+       reader has to guess at. #}
+    <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="text-[10px] font-medium text-surface-400"
+              x-text="t('salin ringkasan beserta arti setiap angkanya',
+                       'copy the summary with the meaning of every number')"></span>
+        <div class="flex items-center gap-1.5">
+            <button type="button" @click="copySummary()" data-copy="summary"
+                    class="border-2 border-surface-200 text-surface-600 hover:bg-surface-50 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                <i class="fas fa-clipboard-list mr-1"></i><span x-text="t('Salin ringkasan','Copy summary')"></span>
+            </button>
+        </div>
+    </div>
+
+    {# What the cards and Winsteps' block mean, in the words the copied summary
+       carries: same function, so the page and the file cannot drift apart. #}
+    <details class="bg-white rounded-2xl border border-surface-100 shadow-sm px-3 sm:px-4 py-2">
+        <summary class="text-[11px] sm:text-xs font-bold text-primary-700 cursor-pointer select-none"
+                 x-text="t('Arti angka pada ringkasan dan pemisahan','What the summary and separation numbers mean')"></summary>
+        <dl class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+            <template x-for="(line, index) in summaryLegend()" :key="index">
+                <div class="flex gap-2">
+                    <dt class="text-[10px] font-bold text-surface-600 shrink-0 min-w-[5rem]"
+                        x-text="line[0]"></dt>
+                    <dd class="text-[10px] text-surface-500" x-text="line[1]"></dd>
+                </div>
+            </template>
+        </dl>
+    </details>
+    {% endif %}
+
+    <!-- ── Winsteps' separation block ──────────────────────────────────────── -->
+    {% if framework.shows('separation') %}
+    {# Its own table rather than four more cards, because the shape is the message:
+       REAL under MODEL, per side, sharing the same errors. Every number here is
+       computed in `item_analysis.separation`, the same function the PDF, the CSV
+       and the workbook call, so the page cannot disagree with the file. #}
+    {# A block with nothing in it is worse than no block: four rows of dashes read as
+       four measurements that all came out zero. It is empty when the separation is
+       undefined — one marked paper, or nothing calibrated — so the page says which
+       rather than showing a table that looks like a result. #}
+    <div data-panel="separation"
+         class="bg-white rounded-2xl border border-surface-100 shadow-sm px-3 sm:px-4 py-2.5"
+         x-show="!separationRows().length">
+        <p class="text-[11px] sm:text-xs text-surface-500"
+           x-text="t('Pemisahan dan keandalan (Winsteps) belum bisa dihitung untuk ujian ini: butuh minimal dua kertas yang sudah dinilai dan satu soal yang bisa dikalibrasi.',
+                    'Separation and reliability (Winsteps) cannot be computed for this exam yet: it needs at least two marked papers and one question that can be calibrated.')"></p>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden"
+         x-show="separationRows().length">
+        <div class="px-3 sm:px-4 py-2.5 border-b border-surface-100 flex flex-wrap items-baseline gap-x-2">
+            <h2 class="text-sm font-extrabold text-surface-800"
+                x-text="words('metric', 'separation')"></h2>
+            <span class="text-[10px] font-medium text-surface-400"
+                  x-text="t('REAL = galat digelembungkan infit sendiri; MODEL = galat sesuai model','REAL = errors inflated by their own infit; MODEL = errors as the model predicts')"></span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-[11px] sm:text-xs min-w-[520px]">
+                <thead class="bg-surface-50 text-surface-500 uppercase text-[9px] sm:text-[10px] tracking-wide">
+                    <tr>
+                        <th class="py-2 px-3 font-bold" x-text="t('Sisi / baris','Side / row')"></th>
+                        <th class="py-2 px-2 font-bold text-right" x-text="words('metric', 'rmse')"></th>
+                        <th class="py-2 px-2 font-bold text-right" x-text="words('metric', 'trueSd')"></th>
+                        <th class="py-2 px-2 font-bold text-right" x-text="words('metric', 'sepG')"></th>
+                        <th class="py-2 px-2 font-bold text-right" x-text="words('metric', 'strata')"></th>
+                        <th class="py-2 px-2 font-bold text-right" x-text="words('metric', 'reliability')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="row in separationRows()" :key="row.side">
+                        <tr class="border-t border-surface-100">
+                            <td class="py-2 px-3 font-bold text-surface-700" x-text="row.side"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="row.rmse"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="row.true_sd"></td>
+                            <td class="py-2 px-2 text-right font-bold text-surface-700" x-text="row.separation"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="row.strata"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="row.reliability"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- ── charts ─────────────────────────────────────────────────────────── -->
+    {# The three drawings belong to three panels: the item map and the ability
+       spread are read by every framework, while the logit scale is a statement a
+       classical reader did not ask for. The block is hidden entirely when the
+       chosen framework shows none of them. #}
+    {% if framework.shows('map') or framework.shows('difficulty') or framework.shows('ability') %}
     {# The copy board. Charts on a screen are the one part of this page that cannot
        be downloaded as text, and a teacher writing a report pastes them into Word
        or Excel — so each drawing copies as an image *with its colour key*, and the
@@ -125,8 +391,21 @@
         </div>
     </div>
 
+    {# How to read a drawing, on the page and in the paste from one function: the
+       legend a copied chart carries is the legend a teacher reads here. #}
+    <details class="bg-white rounded-2xl border border-surface-100 shadow-sm px-3 sm:px-4 py-2">
+        <summary class="text-[11px] sm:text-xs font-bold text-primary-700 cursor-pointer select-none"
+                 x-text="t('Cara membaca grafik di atas','How to read the charts above')"></summary>
+        <div class="mt-2 space-y-1">
+            <template x-for="(line, index) in chartLegend()" :key="index">
+                <p class="text-[10px] sm:text-[11px] text-surface-500" x-text="line"></p>
+            </template>
+        </div>
+    </details>
+
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4 xl:col-span-2">
+        {% if framework.shows('map') %}
+        <div data-panel="map" class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4 xl:col-span-2">
             <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                 <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Peta butir soal','Item map')"></h2>
                 <div class="flex items-center gap-2">
@@ -141,8 +420,10 @@
             </div>
             <div class="h-56 sm:h-72"><canvas x-ref="mapCanvas" aria-hidden="true"></canvas></div>
         </div>
+        {% endif %}
 
-        <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
+        {% if framework.shows('difficulty') %}
+        <div data-panel="difficulty" class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
             <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                 <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Kesulitan soal (logit)','Question difficulty (logits)')"></h2>
                 <div class="flex items-center gap-2">
@@ -157,8 +438,10 @@
             </div>
             <div class="h-56 sm:h-72"><canvas x-ref="difficultyCanvas" aria-hidden="true"></canvas></div>
         </div>
+        {% endif %}
 
-        <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
+        {% if framework.shows('ability') %}
+        <div data-panel="ability" class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
             <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                 <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Sebaran kemampuan murid','Spread of student ability')"></h2>
                 <div class="flex items-center gap-2">
@@ -173,10 +456,13 @@
             </div>
             <div class="h-56 sm:h-72"><canvas x-ref="peopleCanvas" aria-hidden="true"></canvas></div>
         </div>
+        {% endif %}
     </div>
+    {% endif %}
 
     <!-- ── item table ─────────────────────────────────────────────────────── -->
-    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+    {% if framework.shows('items') %}
+    <div data-panel="items" class="bg-white rounded-2xl border border-surface-100 shadow-sm">
         <div class="flex flex-wrap items-baseline justify-between gap-2 p-3 sm:p-4 border-b border-surface-100">
             <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Statistik butir soal','Item statistics')"></h2>
             <div class="flex items-center gap-2">
@@ -189,24 +475,43 @@
                 </button>
             </div>
         </div>
+        {# The columns, defined on the page and not only in the paste: a teacher
+           reading P and b off the screen needs the same sentences as the ones the
+           copied table carries, from the same function. #}
+        <details class="border-b border-surface-100 px-3 sm:px-4 py-2">
+            <summary class="text-[11px] font-bold text-primary-700 cursor-pointer select-none"
+                     x-text="t('Arti setiap kolom','What each column means')"></summary>
+            <dl class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                <template x-for="line in tableLegend()" :key="line.key">
+                    <div class="flex gap-2">
+                        <dt class="text-[10px] font-bold text-surface-600 shrink-0 min-w-[3.5rem]"
+                            x-text="line.label"></dt>
+                        <dd class="text-[10px] text-surface-500" x-text="line.meaning"></dd>
+                    </div>
+                </template>
+            </dl>
+        </details>
         <div class="overflow-x-auto">
             <table class="w-full text-xs min-w-[820px]" data-item-table>
                 <thead>
                     <tr class="text-surface-500 border-b border-surface-100 bg-surface-50">
-                        <th class="text-left py-2 px-2 font-bold" x-text="t('Soal','No')"></th>
-                        <th class="text-left py-2 px-2 font-bold" x-text="t('Tipe','Type')"></th>
-                        <th class="text-right py-2 px-2 font-bold" x-text="t('Bobot','Marks')"></th>
-                        <th class="text-right py-2 px-2 font-bold" x-text="t('Dijawab','Answered')"></th>
-                        <th class="text-right py-2 px-2 font-bold">P</th>
-                        <th class="text-right py-2 px-2 font-bold">D</th>
-                        <th class="text-right py-2 px-2 font-bold">r</th>
-                        <th class="text-right py-2 px-2 font-bold">b</th>
-                        <th class="text-right py-2 px-2 font-bold">SE</th>
-                        <th class="text-right py-2 px-2 font-bold">t</th>
-                        <th class="text-right py-2 px-2 font-bold">p</th>
-                        <th class="text-right py-2 px-2 font-bold">Infit</th>
-                        <th class="text-right py-2 px-2 font-bold">Outfit</th>
-                        <th class="text-left py-2 px-2 font-bold" x-text="t('Catatan','Note')"></th>
+                        {# `data-col` is what the copied table's legend is built from:
+                           a column with no definition cannot travel into a report as
+                           a bare letter, because there would be nothing to look up. #}
+                        <th class="text-left py-2 px-2 font-bold" data-col="no" x-text="t('Soal','No')"></th>
+                        <th class="text-left py-2 px-2 font-bold" data-col="type" x-text="t('Tipe','Type')"></th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="marks" x-text="t('Bobot','Marks')"></th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="answered" x-text="t('Dijawab','Answered')"></th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="p">P</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="d">D</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="r">r</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="b">b</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="se">SE</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="t">t</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="pval">p</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="infit">Infit</th>
+                        <th class="text-right py-2 px-2 font-bold" data-col="outfit">Outfit</th>
+                        <th class="text-left py-2 px-2 font-bold" data-col="note" x-text="t('Catatan','Note')"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -236,14 +541,37 @@
             </table>
         </div>
     </div>
+    {% endif %}
 
     <!-- ── distractors ────────────────────────────────────────────────────── -->
     {% set with_options = analysis.items|selectattr('distractors')|list %}
-    {% if with_options %}
-    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+    {% if framework.shows('options') and with_options %}
+    <div data-panel="options" class="bg-white rounded-2xl border border-surface-100 shadow-sm">
         <div class="p-3 sm:p-4 border-b border-surface-100">
             <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Sebaran pilihan jawaban','Where the options landed')"></h2>
             <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="t('Pilihan yang tidak dipilih siapa pun belum pernah menjadi jawaban yang masuk akal — atau jawabannya belum sempat tersebar.','An option nobody chose was never a plausible answer — or the paper has not been answered widely yet.')"></p>
+            {# The key to the bars below. Two colours and one length, in the reader's
+               language: a row of coloured rectangles with no key is a picture, and
+               the finding — nobody chose this option, everybody chose that one — is
+               the reason the block is here. `option` is the same catalogue the rest
+               of the page's copy lives in, so the toggle reaches it too. #}
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+                {% if not public %}
+                <span class="inline-flex items-center gap-1.5 text-[10px] text-surface-500">
+                    <span class="w-2.5 h-2.5 rounded-sm bg-emerald-400"></span>
+                    <i class="fas fa-key text-[8px] text-emerald-600"></i>
+                    <span x-text="t('Hijau dan ikon kunci: pilihan yang menjadi kunci jawaban soal ini.','Green with a key icon: the option this question is keyed to.')"></span>
+                </span>
+                {% endif %}
+                <span class="inline-flex items-center gap-1.5 text-[10px] text-surface-500">
+                    <span class="w-2.5 h-2.5 rounded-sm bg-surface-300"></span>
+                    <span x-text="t('Abu-abu: pengecoh, bukan kunci.','Grey: a distractor, not the key.')"></span>
+                </span>
+                <span class="inline-flex items-center gap-1.5 text-[10px] text-surface-500">
+                    <span class="w-5 h-1.5 rounded-full bg-surface-300"></span>
+                    <span x-text="t('Panjang batang: berapa kertas memilih pilihan itu.','Bar length: how many papers chose that option.')"></span>
+                </span>
+            </div>
         </div>
         <div class="divide-y divide-surface-100">
             {% for item in with_options %}
@@ -258,12 +586,16 @@
                 <div class="flex flex-wrap gap-2">
                     {% set top = item.distractors|map(attribute='count')|max %}
                     {% for option in item.distractors %}
-                    <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg border {{ 'border-emerald-200 bg-emerald-50' if option.key else 'border-surface-200 bg-surface-50' }}" data-option="{{ option.label }}">
-                        <span class="w-5 text-center text-xs font-extrabold {{ 'text-emerald-700' if option.key else 'text-surface-600' }}">{{ option.label }}</span>
-                        <span class="h-1.5 rounded-full {{ 'bg-emerald-400' if option.key else 'bg-surface-300' }}"
+                    {# Which option is keyed is what a shared copy withholds, so it is
+                       decided once here rather than in four places inside the chip:
+                       the green, the tick and the key icon are one fact. #}
+                    {% set shows_key = option.key and not public %}
+                    <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg border {{ 'border-emerald-200 bg-emerald-50' if shows_key else 'border-surface-200 bg-surface-50' }}" data-option="{{ option.label }}">
+                        <span class="w-5 text-center text-xs font-extrabold {{ 'text-emerald-700' if shows_key else 'text-surface-600' }}">{{ option.label }}</span>
+                        <span class="h-1.5 rounded-full {{ 'bg-emerald-400' if shows_key else 'bg-surface-300' }}"
                               style="width: {{ ((option.count / top * 48) if top else 0)|round(1) }}px; min-width: 3px"></span>
-                        <span class="text-[10px] font-bold {{ 'text-emerald-700' if option.key else 'text-surface-500' }}">{{ option.count }}</span>
-                        {% if option.key %}<i class="fas fa-key text-[9px] text-emerald-600"></i>{% endif %}
+                        <span class="text-[10px] font-bold {{ 'text-emerald-700' if shows_key else 'text-surface-500' }}">{{ option.count }}</span>
+                        {% if shows_key %}<i class="fas fa-key text-[9px] text-emerald-600"></i>{% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -274,12 +606,29 @@
     {% endif %}
 
     <!-- ── upper vs lower group ───────────────────────────────────────────── -->
-    {% if analysis.splits %}
-    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+    {% if framework.shows('splits') and analysis.splits %}
+    <div data-panel="splits" class="bg-white rounded-2xl border border-surface-100 shadow-sm">
         <div class="p-3 sm:p-4 border-b border-surface-100">
             <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Kelompok atas dan bawah','Upper and lower groups')"></h2>
             <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="t('Kesulitan soal yang sama diukur pada dua kelompok, lalu diuji dengan t dua ukuran seperti uji-t pada tabel referensi.','The same question measured for two groups, then tested with the two-measure t of the reference table.')"></p>
         </div>
+        {# A column of t and p values is an argument about the item table, and an
+           argument needs its units named. Read from `splitLegend()`, the same
+           function the page's other legends come from, so a definition is written
+           once and follows the toggle wherever it is shown. #}
+        <details class="border-b border-surface-100 px-3 sm:px-4 py-2">
+            <summary class="text-[11px] font-bold text-primary-700 cursor-pointer select-none"
+                     x-text="t('Arti tabel kelompok atas dan bawah','What the upper and lower group table means')"></summary>
+            <dl class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                <template x-for="line in splitLegend()" :key="line.key">
+                    <div class="flex gap-2">
+                        <dt class="text-[10px] font-bold text-surface-600 shrink-0 min-w-[4.5rem]"
+                            x-text="line.label"></dt>
+                        <dd class="text-[10px] text-surface-500" x-text="line.meaning"></dd>
+                    </div>
+                </template>
+            </dl>
+        </details>
         <div class="overflow-x-auto">
             <table class="w-full text-xs min-w-[520px]">
                 <thead>
@@ -309,12 +658,168 @@
     </div>
     {% endif %}
 
+    <!-- ── the kisi-kisi check: how much of the paper is HOTS ─────────────── -->
+    {% if framework.shows('cognitive') %}
+    <div data-panel="cognitive" class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+        <div class="p-3 sm:p-4 border-b border-surface-100">
+            <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Porsi tingkat kognitif (kisi-kisi)','Cognitive level mix (kisi-kisi)')"></h2>
+            <p class="text-[10px] text-surface-400 font-medium mt-0.5 "
+               x-text="chart.cognitive.basis === 'marks'
+                   ? t('Dihitung dari bobot nilai tiap soal.','Counted from each question’s marks.')
+                   : t('Dihitung dari banyak soal, karena ujian ini tidak memakai bobot nilai.','Counted by question, because this exam carries no marks per question.')"></p>
+        </div>
+        {# The three bands as bars, and the unlabelled count beside them rather
+           than folded into the lowest band: "this paper asks for little
+           higher-order thinking" and "nobody has written the kisi-kisi yet" are
+           different findings, and only one of them is about the paper. #}
+        <div class="p-3 sm:p-4 space-y-2.5">
+            <template x-for="band in chart.cognitive.bands" :key="band.key">
+                <div :data-band="band.key">
+                    <div class="flex items-baseline justify-between gap-2">
+                        <span class="text-[11px] font-bold text-surface-700"
+                              x-text="bandName(band.key)"></span>
+                        <span class="text-[11px] text-surface-500">
+                            <b class="text-surface-700" x-text="band.count"></b>
+                            <span x-text="t('soal','questions')"></span>
+                            <span class="mx-1 text-surface-300">&middot;</span>
+                            <b class="text-surface-700" x-text="round1(band.marks)"></b>
+                            <span x-text="t('nilai','marks')"></span>
+                            <span class="mx-1 text-surface-300">&middot;</span>
+                            <b class="text-surface-800" x-text="band.share === null ? '—' : band.share + '%'"></b>
+                        </span>
+                    </div>
+                    <div class="h-2 mt-1 rounded-full bg-surface-100 overflow-hidden">
+                        <div class="h-full rounded-full" :class="bandTone(band.key)"
+                             :style="'width:' + Math.max(0, Math.min(100, band.share || 0)) + '%'"></div>
+                    </div>
+                </div>
+            </template>
+            <p class="text-[10px] text-surface-500" x-show="chart.cognitive.unset > 0" x-cloak>
+                <i class="fas fa-circle-info text-surface-300 mr-1"></i>
+                <b class="text-surface-700" x-text="chart.cognitive.unset"></b>
+                <span x-text="t('soal belum punya tingkat kognitif, jadi belum masuk salah satu tingkat di atas.','questions have no cognitive level yet, so they sit in none of the bands above.')"></span>
+            </p>
+        </div>
+        {# The legend the request asks for: what the three bands *mean*, and the
+           one sentence that keeps an unlabelled question from being read as an
+           easy one. #}
+        <details class="border-t border-surface-100 px-3 sm:px-4 py-2">
+            <summary class="text-[11px] font-bold text-primary-700 cursor-pointer select-none"
+                     x-text="t('Arti tabel tingkat kognitif','What the cognitive mix means')"></summary>
+            <dl class="mt-2 space-y-1.5">
+                <template x-for="(line, index) in cognitiveLegend()" :key="index">
+                    <div class="flex gap-2">
+                        <dt class="text-[10px] font-bold text-surface-600 shrink-0 min-w-[7rem]"
+                            x-text="line[0]"></dt>
+                        <dd class="text-[10px] text-surface-500" x-text="line[1]"></dd>
+                    </div>
+                </template>
+            </dl>
+        </details>
+        <div class="overflow-x-auto border-t border-surface-100" x-show="chart.cognitive.questions.length" x-cloak>
+            <table class="w-full text-xs min-w-[440px]" data-level-table>
+                <thead>
+                    <tr class="text-surface-500 border-b border-surface-100 bg-surface-50">
+                        <th class="text-left py-2 px-2 font-bold" x-text="t('Soal','No')"></th>
+                        <th class="text-left py-2 px-2 font-bold" x-text="t('Tingkat kognitif','Cognitive level')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Nilai','Marks')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="question in chart.cognitive.questions" :key="question.no">
+                        <tr class="border-b border-surface-50">
+                            <td class="py-2 px-2 font-bold text-surface-700" x-text="question.no"></td>
+                            <td class="py-2 px-2 text-surface-600" x-text="levelName(question.level)"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="round1(question.marks)"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── the KKM verdict, which is the school's own criterion ───────────── -->
+    {% if framework.shows('mastery') %}
+    <div data-panel="mastery" class="bg-white rounded-2xl border border-surface-100 shadow-sm">
+        <div class="p-3 sm:p-4 border-b border-surface-100">
+            <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Ketuntasan belajar (KKM)','Mastery against the KKM')"></h2>
+            <p class="text-[10px] text-surface-400 font-medium mt-0.5"
+               x-text="t('Dihitung terhadap KKM sekolah sendiri, bukan terhadap sebaran kelas.','Measured against the school’s own KKM, not against how the class spread out.')"></p>
+        </div>
+        {# A standard nobody set is said out loud. Four cards reading zero would
+           look like a standard everybody failed, which is a different and worse
+           claim than "no KKM has been chosen yet". #}
+        <div class="p-3 sm:p-4" x-show="!chart.mastery.configured" x-cloak>
+            <p class="text-[11px] sm:text-xs text-surface-500"
+               x-text="t('Ujian ini belum menetapkan KKM, jadi ketuntasan tidak dihitung: patokan yang tidak dipilih sekolah bukan patokan yang boleh dikarang. Isi KKM pada pengaturan ujian.',
+                        'This exam sets no KKM, so mastery is not computed: a standard the school never chose is not one a report may invent. Set the KKM on the exam.')"></p>
+        </div>
+        <div class="p-3 sm:p-4 grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3" x-show="chart.mastery.configured" x-cloak>
+            <template x-for="card in masteryCards()" :key="card.key">
+                <div class="rounded-xl border border-surface-100 bg-surface-50/60 p-2.5" :data-mastery="card.key">
+                    <p class="text-[10px] font-bold text-surface-400 uppercase tracking-wide" x-text="card.label"></p>
+                    <p class="text-lg font-extrabold text-surface-800 mt-0.5" x-text="card.value"></p>
+                    <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="card.hint"></p>
+                </div>
+            </template>
+        </div>
+        <details class="border-t border-surface-100 px-3 sm:px-4 py-2" x-show="chart.mastery.configured" x-cloak>
+            <summary class="text-[11px] font-bold text-primary-700 cursor-pointer select-none"
+                     x-text="t('Arti tabel ketuntasan','What the mastery numbers mean')"></summary>
+            <dl class="mt-2 space-y-1.5">
+                <template x-for="(line, index) in masteryLegend()" :key="index">
+                    <div class="flex gap-2">
+                        <dt class="text-[10px] font-bold text-surface-600 shrink-0 min-w-[7rem]"
+                            x-text="line[0]"></dt>
+                        <dd class="text-[10px] text-surface-500" x-text="line[1]"></dd>
+                    </div>
+                </template>
+            </dl>
+        </details>
+        {# The questions the class has not mastered are the reason a teacher opens
+           this framework: they are what a remedial lesson is built from. #}
+        <div class="overflow-x-auto border-t border-surface-100"
+             x-show="chart.mastery.configured && chart.mastery.questions.length" x-cloak>
+            <table class="w-full text-xs min-w-[520px]" data-mastery-table>
+                <thead>
+                    <tr class="text-surface-500 border-b border-surface-100 bg-surface-50">
+                        <th class="text-left py-2 px-2 font-bold" x-text="t('Soal','No')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Nilai penuh','Full credit')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Dijawab','Answered')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('P','P')"></th>
+                        <th class="text-right py-2 px-2 font-bold" x-text="t('Dikuasai kelas','Mastered')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="question in chart.mastery.questions" :key="question.no">
+                        <tr class="border-b border-surface-50">
+                            <td class="py-2 px-2 font-bold text-surface-700" x-text="question.no"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="question.full"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="question.answered"></td>
+                            <td class="py-2 px-2 text-right text-surface-600" x-text="round1(question.pct)"></td>
+                            <td class="py-2 px-2 text-right font-bold"
+                                :class="question.mastered ? 'text-emerald-600' : 'text-red-600'"
+                                x-text="question.mastered ? t('Ya','Yes') : t('Belum','No')"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- ── honest limits ──────────────────────────────────────────────────── -->
-    {% if analysis.notes %}
-    <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
+    {# Only the notes whose subject this framework shows. A limit of the HOTS
+       share on a report that draws no share tells a teacher to fix something
+       this page never measured, which is how a reader learns to skip the notes.
+       The list is filtered on the server (`analysis_frameworks.notes_for`), so
+       the page and the three documents show the same sentences. #}
+    {% if chart.notes %}
+    <div data-panel="notes" class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
         <h2 class="text-sm font-extrabold text-surface-800 mb-2" x-text="t('Cara angka ini dihitung, dan batasnya','How these numbers were computed, and their limits')"></h2>
         <ul class="space-y-1.5">
-            {% for note in analysis.notes %}
+            {% for note in chart.notes %}
             <li class="flex gap-2 text-[11px] sm:text-xs text-surface-600">
                 <i class="fas fa-circle-info text-surface-300 mt-0.5"></i>
                 <span data-note="{{ note }}" x-text="window.SG_ITEM_WORDS.note['{{ note }}'][lang]"></span>
@@ -325,7 +830,19 @@
     {% endif %}
     {% endif %}
 </div>
-{% endblock %}
+{% endmacro %}
+
+{# The teacher's copy, and the copy an anonymous visitor gets. `content_noauth`
+   is always public: base.html renders it only when nobody is signed in, and the
+   only route that reaches this template that way is a share link. #}
+{# Which *chrome* wraps the page is base.html's question, and it answers with the
+   session: a reader with an account keeps the sidebar. Which *copy* this is, is
+   the route's question — `public_view` — and it must not be the same answer.
+   Asking the session here is how the redaction depended on who was looking: a
+   signed-in teacher opening somebody's share link rendered the teacher's copy of
+   a shared report, key marker and all, because they had a cookie. #}
+{% block content %}{{ body(public_view|default(false, true), download_base|default('/teacher/analysis/' ~ exam.id, true), share|default(none, true)) }}{% endblock %}
+{% block content_noauth %}{{ body(true, download_base|default('/r/' ~ exam.id, true), none) }}{% endblock %}
 
 {% block scripts %}
 <script>
@@ -366,28 +883,185 @@ window.SG_ITEM_WORDS = {
         missing_not_wrong:      { id: 'Jawaban kosong dihitung hilang, bukan salah, dan tidak masuk perhitungan tingkat kesulitan soal itu.',
                                   en: 'A blank answer counts as missing, not wrong, and stays out of that question\u2019s difficulty.' },
         extreme_items:          { id: 'Ada soal yang dijawab benar atau salah oleh seluruh murid. Angkanya memakai koreksi skor ekstrem: skor mentah digeser 0,3 poin agar tetap terukur.',
-                                  en: 'Some questions were answered correctly or wrongly by every student. Their numbers use the extreme-score correction: the raw score is moved 0.3 points so it stays measurable.' }
+                                  en: 'Some questions were answered correctly or wrongly by every student. Their numbers use the extreme-score correction: the raw score is moved 0.3 points so it stays measurable.' },
+        scale_anchor:           { id: 'Skala logit dipatok pada rata-rata kesulitan soal ujian ini (0 logit), seperti konvensi UCON di Winsteps, sehingga t = b/SE menguji \u201csesulit rata-rata soal ujian ini\u201d.',
+                                  en: 'The logit scale is anchored on the mean difficulty of this exam\u2019s questions (0 logits), Winsteps\u2019 UCON convention, so t = b/SE tests \u201cas hard as this paper\u2019s average question\u201d.' },
+        fit_dof:                { id: 'Infit, outfit dan t-nya mengikuti Wright & Masters (Rating Scale Analysis, 1982, hlm. 100): outfit = rata-rata kuadrat sisa terstandar, infit = rata-rata berbobot informasi. ZSTD memakai transformasi Wilson\u2013Hilferty dengan derajat kebebasan 2/q\u00b2 dari sebaran model (Schulz, Rasch Measurement Transactions 16:2 hlm. 879), bukan jumlah respons \u2014 jumlah respons membuat tanda ketidakcocokan menyala terlalu sering.',
+                                  en: 'Infit, outfit and their t follow Wright & Masters (Rating Scale Analysis, 1982, p. 100): outfit is the mean squared standardized residual, infit the information-weighted one. ZSTD uses the Wilson\u2013Hilferty transform with degrees of freedom 2/q\u00b2 estimated from the model distribution (Schulz, Rasch Measurement Transactions 16:2 p. 879) rather than from the number of responses \u2014 the response count fires the misfit flag far too often.' },
+        model_real:             { id: 'Baris MODEL memakai galat seperti yang diprediksi model; baris REAL menganggap ketidakcocokan itu nyata, sehingga galat baku tiap butir dan murid digelembungkan oleh infit-nya sendiri. Angka REAL yang paling aman dikutip, dan STRATA = (4G + 1)/3 adalah banyaknya tingkat yang benar-benar terpisah.',
+                                  en: 'The MODEL row takes the errors the model predicts; the REAL row assumes the misfit is real, inflating every item\u2019s and student\u2019s standard error by its own infit. REAL is the conservative number to quote, and STRATA = (4G + 1)/3 is how many statistically distinct levels the spread supports.' },
+        kkm_missing:            { id: 'Ujian ini belum menetapkan KKM, jadi belum ada patokan untuk menyatakan tuntas. Isi KKM pada pengaturan ujian.',
+                                  en: 'This exam has no KKM set, so there is no standard to declare mastery against. Set the KKM on the exam.' },
+        levels_partly_set:      { id: 'Sebagian soal belum punya tingkat kognitif (C1\u2013C6), jadi porsi LOTS/MOTS/HOTS dihitung dari soal yang sudah dilabeli saja.',
+                                  en: 'Some questions have no cognitive level (C1\u2013C6) yet, so the LOTS/MOTS/HOTS shares count only the labelled questions.' }
     },
     metric: {
         students:  { id: 'Murid',                 en: 'Students' },
         questions: { id: 'Soal',                  en: 'Questions' },
         objective: { id: 'objektif',              en: 'objective' },
         papers:    { id: 'Kertas dengan data',    en: 'Papers with data' },
+        paperOne:  { id: 'Kertas dengan data',    en: 'Paper with data' },
         mean:      { id: 'Rata-rata nilai',       en: 'Mean mark' },
         alpha:     { id: 'Alpha Cronbach',        en: 'Cronbach\u2019s alpha' },
         sem:       { id: 'SEM',                   en: 'SEM' },
         personRel: { id: 'Reliabilitas murid',    en: 'Student reliability' },
         itemRel:   { id: 'Reliabilitas butir',    en: 'Item reliability' },
+        separation: { id: 'Pemisahan dan keandalan (Winsteps)', en: 'Separation and reliability (Winsteps)' },
+        peopleRow: { id: 'Murid',                 en: 'Students' },
+        itemsRow:  { id: 'Butir',                 en: 'Items' },
+        realRow:   { id: 'REAL',                  en: 'REAL' },
+        modelRow:  { id: 'MODEL',                 en: 'MODEL' },
+        rmse:      { id: 'RMSE',                  en: 'RMSE' },
+        trueSd:    { id: 'TRUE SD',               en: 'TRUE SD' },
+        sepG:      { id: 'SEPARASI (G)',          en: 'SEPARATION (G)' },
+        strata:    { id: 'STRATA',                en: 'STRATA' },
+        reliability: { id: 'RELIABILITAS',        en: 'RELIABILITY' },
         extremes:  { id: 'Skor ekstrem',          en: 'Extreme scores' },
         sdHint:    { id: 'sebaran nilai akhir',   en: 'spread of the final marks' },
         alphaHint: { id: 'keandalan satu kali ujian', en: 'how consistent one sitting is' },
         semHint:   { id: 'kesalahan baku ukur',   en: 'standard error of measurement' },
         relHint:   { id: 'seberapa stabil taksirannya', en: 'how stable the estimates are' }
+    },
+    // What a pasted figure or table says about itself. A chart in a report with no
+    // provenance is a chart nobody can check, and a number with no definition is a
+    // number the reader has to guess at — which is what this block exists to stop.
+    figure: {
+        howToRead: { id: 'Cara membaca:',   en: 'How to read this:' },
+        numbers:   { id: 'Arti angka:',     en: 'What the numbers mean:' },
+        legend:    { id: 'Keterangan warna:', en: 'Colour key:' },
+        copied:    { id: 'disalin dari ScanGrade', en: 'copied from ScanGrade' },
+        students:  { id: 'murid',           en: 'students' },
+        questions: { id: 'soal',            en: 'questions' },
+        studentOne: { id: 'murid',          en: 'student' },
+        questionOne: { id: 'soal',          en: 'question' },
+        column:    { id: 'Kolom',           en: 'Column' },
+        meaning:   { id: 'Arti',            en: 'Meaning' },
+        metric:    { id: 'Metrik',          en: 'Metric' },
+        value:     { id: 'Nilai',           en: 'Value' },
+        separationRow: { id: 'Pemisahan {side}', en: 'Separation {side}' },
+        limits:    { id: 'Batasan: kalibrasi memakai skor penuh atau nol, sehingga soal menjodohkan yang mendapat nilai sebagian tetap satu butir dikotomi; jawaban kosong dihitung hilang, bukan salah; kolom P, D dan r tetap memakai nilai sebagian yang benar-benar dibayarkan ke murid.',
+                     en: 'Limits: the calibration is full credit or nothing, so a part-credited matching question is still one dichotomous item; a blank answer counts as missing, not wrong; the P, D and r columns do use the part credit the student was actually paid.' }
+    },
+    // The legend each drawing carries into the report: what the shape says, in the
+    // reader's language. The statistics that appear in a drawing come from
+    // `glossary` below, so one definition serves the chart, the table and the
+    // separation block rather than three paraphrases of it.
+    chartLine: {
+        map1: { id: 'Setiap titik adalah satu soal, ditempatkan pada tingkat kesulitannya (b) dalam logit.',
+                en: 'Each dot is one question, placed at its difficulty (b) in logits.' },
+        map2: { id: 'Warna titik adalah temuan soal itu: baik, daya beda lemah, daya beda negatif, semua benar atau semua salah, atau kunci belum diisi.',
+                en: 'The dot\u2019s colour is the question\u2019s finding: sound, weak discrimination, negative discrimination, everyone right or wrong, or no answer key yet.' },
+        map3: { id: 'Titik di kanan dikerjakan hampir semua murid; titik di atas membedakan murid kuat dari yang lemah.',
+                en: 'A dot to the right was answered by nearly everyone; a dot high up separated the strong students from the weak.' },
+        difficulty1: { id: 'Tiap soal satu batang: tinggi batang adalah b dalam logit, dan garis rambut menunjukkan galat bakunya (\u00b11 SE).',
+                       en: 'One bar per question: its height is b in logits, and the whisker is its standard error (\u00b11 SE).' },
+        difficulty2: { id: 'Urutan batang adalah urutan kesulitan yang sebenarnya: dua soal bisa punya P berbeda karena bobotnya, tetapi b-nya sama.',
+                       en: 'The bars are in difficulty order: two questions can differ in P because of their marks and still share one b.' },
+        people1: { id: 'Ketinggian batang adalah jumlah murid pada rentang kemampuan itu; sumbu datar adalah kemampuan (\u03b8) dalam logit.',
+                   en: 'A bar\u2019s height is how many students are in that ability range; the horizontal axis is ability (\u03b8) in logits.' },
+        people2: { id: 'Sebaran yang menumpuk di ujung berarti ujiannya terlalu mudah atau terlalu sulit untuk kelas ini — bukan berarti muridnya seragam.',
+                   en: 'A pile at either end means the paper was too easy or too hard for this class \u2014 not that the students are all alike.' }
+    },
+    // The short name a column is labelled with in a legend. Read from here rather
+    // than from the table\u2019s own `<th>`: those are filled by `x-text`, and a
+    // legend that reads them can sample the DOM before the labels have landed and
+    // quietly publish a column with no name.
+    glossaryLabel: {
+        no:       { id: 'Soal',     en: 'No' },
+        type:     { id: 'Tipe',     en: 'Type' },
+        marks:    { id: 'Bobot',    en: 'Marks' },
+        answered: { id: 'Dijawab',  en: 'Answered' },
+        p:        { id: 'P',        en: 'P' },
+        d:        { id: 'D',        en: 'D' },
+        r:        { id: 'r',        en: 'r' },
+        b:        { id: 'b',        en: 'b' },
+        se:       { id: 'SE',       en: 'SE' },
+        t:        { id: 't',        en: 't' },
+        pval:     { id: 'p',        en: 'p' },
+        infit:    { id: 'Infit',    en: 'Infit' },
+        outfit:   { id: 'Outfit',   en: 'Outfit' },
+        note:     { id: 'Catatan',  en: 'Note' }
+    },
+    // The definition of every number this page publishes, keyed exactly as the
+    // table\u2019s own columns are (`data-col`), so a column cannot reach a report
+    // without the sentence that says what it is. The keys beginning `stat_` are
+    // the separation block\u2019s.
+    glossary: {
+        no:       { id: 'Nomor soal, urut seperti di ujian.',
+                    en: 'The question\u2019s number, in the exam\u2019s own order.' },
+        type:     { id: 'Tipe soal; tiap tipe diskor dengan cara yang sama seperti waktu dinilai.',
+                    en: 'The question type; each type is marked exactly as it was marked for the student.' },
+        marks:    { id: 'Bobot soal pada ujian ini.', en: 'What the question was worth on this exam.' },
+        answered: { id: 'Berapa kertas yang menjawab soal ini, dari seluruh kertas yang dikumpulkan. Jawaban kosong tidak dihitung salah.',
+                    en: 'How many papers answered this question, out of every paper collected. A blank is not counted wrong.' },
+        p:        { id: 'P = tingkat kesulitan klasik: persentase bobot yang benar-benar dibayarkan soal ini kepada murid. Makin tinggi, makin mudah.',
+                    en: 'P = classical difficulty: the share of the marks this question actually paid out. Higher means easier.' },
+        d:        { id: 'D = daya beda: P kelompok 27% atas dikurangi kelompok bawah. Sekitar 0,20 ke atas berarti soal ini memisahkan murid; negatif berarti murid yang kuat justru yang lebih sering salah.',
+                    en: 'D = discrimination: P of the upper 27% minus the lower 27%. About 0.20 and up separates students; a negative D means the stronger students were the ones who missed it.' },
+        r:        { id: 'r = korelasi butir-total: hubungan skor soal ini dengan sisa kertas. Positif berarti soalnya sejalan dengan seluruh ujian.',
+                    en: 'r = point-biserial: how this question goes with the rest of the paper. Positive means it points the same way the exam does.' },
+        b:        { id: 'b = tingkat kesulitan pada skala logit (kalibrasi Rasch), 0 = sesulit rata-rata soal ujian ini. Bisa dibandingkan antar ujian; P tidak bisa.',
+                    en: 'b = difficulty in logits (the Rasch calibration), 0 = as hard as this paper\u2019s average question. Unlike P, it can be compared across papers.' },
+        se:       { id: 'SE = galat baku b: makin kecil, makin pasti angka b ini.',
+                    en: 'SE = the standard error of b: the smaller it is, the surer this b.' },
+        t:        { id: 't = b/SE: seberapa jauh soal ini dari \u201csesulit rata-rata\u201d, diukur dalam galat bakunya sendiri. Lebih dari sekitar \u00b12 biasanya layak dilihat lagi.',
+                    en: 't = b/SE: how far this question sits from \u201cas hard as the average\u201d, measured in its own standard errors. Beyond about \u00b12 is usually worth a second look.' },
+        pval:     { id: 'p = peluang dua sisi untuk t: peluang melihat selisih sebesar ini seandainya soal ini memang sesulit rata-rata.',
+                    en: 'p = the two-sided probability of t: the chance of a difference this large if the question really were of average difficulty.' },
+        infit:    { id: 'INFIT = rata-rata kuadrat sisa terstandar yang berbobot informasi: peka pada pola jawaban, bukan pada pencilan. Acuan 0,5\u20131,5.',
+                    en: 'INFIT = the information-weighted mean square residual: sensitive to the pattern of answers rather than to outliers. The guide band is 0.5\u20131.5.' },
+        outfit:   { id: 'OUTFIT = rata-rata kuadrat sisa tanpa bobot: satu murid yang menjawab jauh dari kemampuannya sudah cukup menggesernya. Acuan 0,5\u20131,5.',
+                    en: 'OUTFIT = the unweighted mean square residual: one student answering far from their ability already moves it. The guide band is 0.5\u20131.5.' },
+        note:     { id: 'Catatan = temuan soal ini, dengan warna yang sama seperti di grafik.',
+                    en: 'Note = this question\u2019s finding, in the same colour as the charts.' },
+        theta:    { id: '\u03b8 = kemampuan murid dalam logit, ditaksir dari jawabannya sendiri. \u03b8 = 0 berarti tepat pada tingkat rata-rata soal ujian ini.',
+                    en: '\u03b8 = a student\u2019s ability in logits, estimated from their own answers. \u03b8 = 0 sits at the average difficulty of this paper.' },
+        stat_rmse: { id: 'RMSE = akar rata-rata kuadrat galat baku: besarnya ketidakpastian satu taksiran pada umumnya.',
+                    en: 'RMSE = the root-mean-square of the standard errors: the average uncertainty of one estimate.' },
+        stat_tsd: { id: 'TRUE SD = sebaran taksiran setelah galatnya dikeluarkan: seberapa nyata perbedaan antar murid atau antar soal.',
+                    en: 'TRUE SD = the spread of the measures with their error taken out: how real the differences between students, or between questions, are.' },
+        stat_sep: { id: 'SEPARASI (G) = TRUE SD / RMSE. G = 1 berarti sebarannya tidak lebih besar daripada galatnya sendiri.',
+                    en: 'SEPARATION (G) = TRUE SD / RMSE. A G of 1 means the spread is no bigger than the error itself.' },
+        stat_strata: { id: 'STRATA = (4G + 1)/3: banyaknya tingkat kemampuan (atau kesulitan) yang benar-benar terpisah. 3 strata berarti guru bisa membedakan tiga kelompok.',
+                    en: 'STRATA = (4G + 1)/3: how many statistically distinct levels of ability (or difficulty) the spread supports. 3 strata means a teacher can tell three groups apart.' },
+        stat_rel: { id: 'RELIABILITAS = G\u00b2/(1+G\u00b2): peluang dua murid dengan skor berbeda memang berbeda kemampuannya. Di atas 0,80 cukup untuk dipakai mengambil keputusan.',
+                    en: 'RELIABILITY = G\u00b2/(1+G\u00b2): the chance that two students with different scores really do differ in ability. Above 0.80 is a spread a teacher can act on.' }
+    },
+    // The short names the upper-and-lower legend labels its lines with, kept apart
+    // from `split` below for the same reason `glossaryLabel` is apart from
+    // `glossary`: the drawing code reads a label, the reader reads a definition.
+    splitLabel: {
+        upper: { id: 'Atas',  en: 'Upper' },
+        lower: { id: 'Bawah', en: 'Lower' },
+        t:     { id: 't',     en: 't' },
+        df:    { id: 'df',    en: 'df' },
+        p:     { id: 'p',     en: 'p' }
+    },
+    // The upper and lower group table, defined. One question measured on the top
+    // and the bottom quarter and the two measures tested against each other: a
+    // printed t with no bands beside it is a number the reader can only guess at.
+    split: {
+        upper: { id: 'Kesulitan soal (logit) yang diukur pada 27% murid dengan skor tertinggi. Angka yang lebih tinggi berarti kelompok ini merasa soalnya lebih sulit.',
+                  en: 'The question\u2019s difficulty (logits) measured on the top-scoring 27% of students. A higher number means this group found the question harder.' },
+        lower: { id: 'Kesulitan soal (logit) yang sama, diukur pada 27% murid dengan skor terendah.',
+                  en: 'The same difficulty (logits), measured on the lowest-scoring 27% of students.' },
+        t:     { id: 't = uji dua ukuran yang membandingkan kedua kelompok, seperti tabel referensi uji-t memakainya.',
+                  en: 't = the two-measure test comparing the two groups, used the way the reference t table uses it.' },
+        df:    { id: 'df = derajat kebebasan uji ini: dua kelompok dikurangi dua.',
+                  en: 'df = the degrees of freedom of this test: two groups minus two.' },
+        p:     { id: 'p = peluang melihat selisih sebesar ini seandainya kedua kelompok memang sama sulitnya. Di bawah 0,05 biasanya dianggap berbeda.',
+                  en: 'p = the chance of a difference this large if the two groups really were equally able. Below 0.05 is usually taken as different.' }
     }
 };
 
 function itemAnalysis(data) {
     return {
+        // The whole payload, under a name the *markup* can reach. A closure
+        // variable is visible to this object's methods and invisible to an Alpine
+        // expression in the page, so `x-for="f in chart.frameworks"` over a
+        // property-less payload renders an empty selector with no error at all.
+        // The methods below keep reading `data`; the bindings read `chart`.
+        chart: data,
         items: data.items || [],
         logits: data.logits || [],
         bins: data.bins || [],
@@ -396,6 +1070,7 @@ function itemAnalysis(data) {
         // payload, which falls back to the tones below rather than to nothing.
         tones: data.tones || {},
         copyNote: '',
+        linkNote: '',
         copyTimer: null,
 
         // The colour key, as the five acts a teacher takes rather than the eight
@@ -411,18 +1086,81 @@ function itemAnalysis(data) {
             }));
         },
 
-        flash(message) {
-            this.copyNote = message;
+        // Two slots, one timer: the copy board reports beside its own buttons and
+        // the share card reports beside the URL. Sharing one note put "Link
+        // copied" next to the chart toolbar, where nobody was looking.
+        flash(message, slot) {
+            if (slot === 'link') { this.linkNote = message; }
+            else { this.copyNote = message; }
             if (this.copyTimer) clearTimeout(this.copyTimer);
-            this.copyTimer = setTimeout(() => { this.copyNote = ''; }, 3200);
+            this.copyTimer = setTimeout(() => {
+                this.copyNote = '';
+                this.linkNote = '';
+            }, 3200);
         },
 
-        // A drawing and its key, as one PNG. `toBase64Image` is Chart.js's own
+        // The share URL is the server's — it is in the field the teacher can read
+        // — so the button copies that field rather than rebuilding the address in
+        // JavaScript, where a second version of it could drift from the first.
+        async copyShareLink() {
+            const field = document.querySelector('[data-share-url]');
+            if (!field) return;
+            field.select();
+            try {
+                await navigator.clipboard.writeText(field.value);
+                this.flash(this.t('Tautan tersalin', 'Link copied'), 'link');
+            } catch (error) {
+                // A refused clipboard (no secure context, no permission) leaves
+                // the text selected, which is the manual path it always had.
+                this.flash(this.t('Tekan Ctrl+C untuk menyalin',
+                                  'Press Ctrl+C to copy'), 'link');
+            }
+        },
+
+        // What a pasted drawing has to say about itself: which exam, how much data,
+        // and when it was copied. A chart in a report with no provenance is a chart
+        // nobody can check.
+        figureLine() {
+            const meta = data.meta || {};
+            const parts = [meta.title || '', meta.subject || ''];
+            // "1 students" is the kind of detail that makes a figure look
+            // machine-made, and a figure in a report is read by a person.
+            const count = (value, many, one) => value + ' '
+                + this.words('figure', value === 1 ? one : many);
+            if (meta.students) parts.push(count(meta.students, 'students', 'studentOne'));
+            if (meta.items) parts.push(count(meta.items, 'questions', 'questionOne'));
+            parts.push(this.words('figure', 'copied') + ' '
+                       + new Date().toISOString().slice(0, 10));
+            return parts.filter((part) => part !== '').join(' \u00b7 ');
+        },
+
+        // The lines that explain a drawing: what the shape says, and then the keys
+        // of the statistics that are in it — one definition each, from the glossary
+        // the item table's columns also use. Keys rather than sentences, so a chart
+        // and the table under it cannot end up with two paraphrases of one number.
+        chartNotes(key) {
+            const shapes = {
+                map: ['map1', 'map2', 'map3'],
+                difficulty: ['difficulty1', 'difficulty2'],
+                people: ['people1', 'people2']
+            }[key] || [];
+            const stats = {
+                map: ['p', 'd'],
+                difficulty: ['b', 'se', 't', 'pval'],
+                people: ['theta', 'stat_sep', 'stat_strata']
+            }[key] || [];
+            return {
+                shape: shapes.map((name) => this.words('chartLine', name)),
+                stats: stats
+            };
+        },
+
+        // A drawing and its legend, as one PNG. `toBase64Image` is Chart.js's own
         // export, so what is copied is exactly the chart on this screen — but it
-        // carries no key, because this page draws no Chart.js legend: the colour is
-        // the finding and the words are below. Composing them into the image is
-        // what makes the paste usable in Word, where the key was otherwise left
-        // behind on the website.
+        // carries no legend, because this page draws no Chart.js legend: the colour
+        // is the finding and the words are below. Composing them into the image is
+        // what makes the paste mean something in Word, where the explanation was
+        // otherwise left behind on the website.
         async compose(key) {
             const chart = this.charts[key];
             if (!chart) return null;
@@ -437,14 +1175,36 @@ function itemAnalysis(data) {
                 difficulty: this.t('Kesulitan soal (logit)', 'Question difficulty (logits)'),
                 people: this.t('Sebaran kemampuan murid', 'Spread of student ability')
             };
-            return this.paint(headings[key] || '', [image]);
+            return this.paint(headings[key] || '', [image], this.chartNotes(key));
         },
 
-        // One image of every drawing, under one key — the figure a report needs.
+        // Every drawing in one figure: its own shape lines under its own heading,
+        // and the union of the statistics the drawings show, defined once each.
+        allNotes(order, headings) {
+            const shape = [];
+            const stats = [];
+            order.forEach((key) => {
+                const note = this.chartNotes(key);
+                shape.push(headings[key] + ' \u2014 ' + note.shape.slice(0, 2).join(' '));
+                note.stats.forEach((name) => {
+                    if (stats.indexOf(name) === -1) stats.push(name);
+                });
+            });
+            return { shape: shape, stats: stats };
+        },
+
+        // One image of every drawing, under one key — the figure a report needs,
+        // with every drawing's own legend under it rather than one shared caption
+        // that cannot say what any single chart shows.
         async composeAll() {
             const order = ['map', 'difficulty', 'people'].filter((k) => this.charts[k]);
             if (!order.length) return null;
             const images = [];
+            const headings = {
+                map: this.t('Peta butir soal', 'Item map'),
+                difficulty: this.t('Kesulitan soal (logit)', 'Question difficulty (logits)'),
+                people: this.t('Sebaran kemampuan murid', 'Spread of student ability')
+            };
             for (const key of order) {
                 const chart = this.charts[key];
                 if (!chart) continue;
@@ -453,81 +1213,269 @@ function itemAnalysis(data) {
                 await new Promise((resolve) => { image.onload = resolve; });
                 images.push(image);
             }
-            return this.paint(this.t('Analisis butir soal', 'Item analysis'), images);
+            return this.paint(this.t('Analisis butir soal', 'Item analysis'), images,
+                              this.allNotes(order, headings));
         },
 
-        // Title, drawings, key. Canvas rather than SVG because the Clipboard API
-        // takes a PNG and Word and Excel both paste one without a second step.
-        paint(title, images) {
+        // A paragraph, wrapped to the canvas. Canvas has no word wrap, and a
+        // legend cut off at the edge is worse than no legend at all — which is
+        // what happened to every line in the other language.
+        wrap(ctx, text, maxWidth) {
+            const lines = [];
+            let line = '';
+            String(text || '').split(/\s+/).filter((w) => w).forEach((word) => {
+                const next = line ? line + ' ' + word : word;
+                if (line && ctx.measureText(next).width > maxWidth) {
+                    lines.push(line);
+                    line = word;
+                } else {
+                    line = next;
+                }
+            });
+            if (line) lines.push(line);
+            return lines;
+        },
+
+        // Title, provenance, drawings, then the legend that makes the paste mean
+        // something on its own: what the shape says, what each colour is, what the
+        // statistics are, and where the numbers stop being answerable. Laid out in
+        // two passes — measure, then draw — because a canvas has to know its height
+        // before anything is painted on it. Canvas rather than SVG because the
+        // Clipboard API takes a PNG and Word and Excel both paste one directly.
+        paint(title, images, notes) {
             const scale = 2;
-            const pad = 18;
-            const titleH = 30;
-            const lineH = 20;
+            const pad = 16 * scale;
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            const body = 12 * scale;
-            const font = '600 ' + body + 'px Inter, system-ui, sans-serif';
+            const fonts = {
+                title: '700 ' + 14 * scale + 'px Inter, system-ui, sans-serif',
+                heading: '700 ' + 11 * scale + 'px Inter, system-ui, sans-serif',
+                body: '400 ' + 11 * scale + 'px Inter, system-ui, sans-serif',
+                meta: '400 ' + 10 * scale + 'px Inter, system-ui, sans-serif'
+            };
+            const colours = { title: '#1e293b', heading: '#334155',
+                              body: '#475569', meta: '#64748b' };
+            const lineH = 15 * scale;
+            const width = Math.max.apply(null, images.map((i) => i.width)) + pad * 2;
+            canvas.width = width;
+            const inner = width - pad * 2;
 
-            const entries = this.legend();
-            const measure = document.createElement('canvas').getContext('2d');
-            measure.font = font;
-            const chipW = 11 * scale;
-            const gap = 8 * scale;
-            const between = 18 * scale;
-            const width = Math.max.apply(null, images.map((i) => i.width))
-                          + pad * 2 * scale;
-            // The key wraps, so the canvas is sized from the wrapped result rather
-            // than from a guess: a long label in either language must not be cut.
+            // The item list this method draws, in order. Text and swatches carry a
+            // `top` gap so a section can be separated from the one above it.
+            const items = [];
+            const text = (value, font, colour, top) => {
+                ctx.font = font;
+                this.wrap(ctx, value, inner).forEach((line, index) => {
+                    items.push({ kind: 'text', text: line, font: font, colour: colour,
+                                 top: index ? 0 : (top || 0) });
+                });
+            };
+            const heading = (value) => text(value, fonts.heading,
+                                             colours.heading, 9 * scale);
+
+            text(title, fonts.title, colours.title, 0);
+            text(this.figureLine(), fonts.meta, colours.meta, 2 * scale);
+            text(this.frameworkLine(), fonts.body, colours.body, 3 * scale);
+            images.forEach((image) => items.push({ kind: 'image', image: image }));
+            const shape = (notes || {}).shape || [];
+            if (shape.length) {
+                heading(this.words('figure', 'howToRead'));
+                shape.forEach((note) => text(note, fonts.body, colours.body, 1 * scale));
+            }
+            heading(this.words('figure', 'legend'));
+            items.push(this.swatchItem(inner));
+            const stats = ((notes || {}).stats || []).filter(
+                (key) => this.words('glossary', key));
+            if (stats.length) {
+                heading(this.words('figure', 'numbers'));
+                stats.forEach((key) => text(this.words('glossary', key), fonts.body,
+                                            colours.body, 1 * scale));
+            }
+            text(this.words('figure', 'limits'), fonts.meta, colours.meta, 6 * scale);
+
+            const rowHeight = (item) => {
+                if (item.kind === 'image') return item.image.height;
+                if (item.kind === 'swatches') return item.rows.length * lineH;
+                return lineH;
+            };
+            canvas.height = items.reduce(
+                (sum, item) => sum + (item.top || 0) + rowHeight(item), 0) + pad * 2;
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.textBaseline = 'top';
+            let y = pad;
+            items.forEach((item) => {
+                y += item.top || 0;
+                if (item.kind === 'image') {
+                    ctx.drawImage(item.image, pad, y);
+                } else if (item.kind === 'swatches') {
+                    // The row's own `y` is derived, not accumulated: the advance
+                    // below is the one the measuring pass counted, and advancing
+                    // twice here pushed the rest of the legend off the canvas.
+                    item.rows.forEach((row, index) => {
+                        let x = pad;
+                        row.forEach((cell) => {
+                            ctx.fillStyle = cell.entry.colour;
+                            ctx.fillRect(x, y + index * lineH + 2 * scale,
+                                         10 * scale, 10 * scale);
+                            ctx.font = fonts.body;
+                            ctx.fillStyle = colours.body;
+                            ctx.fillText(cell.entry.text, x + 14 * scale,
+                                         y + index * lineH);
+                            x += cell.width + 16 * scale;
+                        });
+                    });
+                } else {
+                    ctx.font = item.font;
+                    ctx.fillStyle = item.colour;
+                    ctx.fillText(item.text, pad, y);
+                }
+                y += rowHeight(item);
+            });
+            return canvas;
+        },
+
+        // The colour key as one item: the swatches wrap, and the canvas is sized
+        // from the wrapped result rather than from a guess about how long a label
+        // is in either language. `limit` is the canvas's own inner width — a fixed
+        // one cut the last swatch off the edge, because the widest drawing on this
+        // page is a landscape chart and the longest label is "No answer key yet".
+        swatchItem(limit) {
+            const scale = 2;
+            const ctx = document.createElement('canvas').getContext('2d');
+            ctx.font = '400 ' + 11 * scale + 'px Inter, system-ui, sans-serif';
             const rows = [];
             let row = [];
             let used = 0;
-            entries.forEach((entry) => {
-                const textW = measure.measureText(entry.text).width;
-                const need = chipW + gap + textW;
-                if (row.length && used + between + need > width - pad * 2 * scale) {
+            this.legend().forEach((entry) => {
+                const need = 14 * scale + ctx.measureText(entry.text).width;
+                if (row.length && used + 16 * scale + need > limit) {
                     rows.push(row);
                     row = [];
                     used = 0;
                 }
-                if (row.length) used += between;
+                if (row.length) used += 16 * scale;
                 row.push({ entry: entry, width: need });
                 used += need;
             });
             if (row.length) rows.push(row);
+            return { kind: 'swatches', rows: rows };
+        },
 
-            const imageH = images.reduce((sum, i) => sum + i.height, 0);
-            canvas.width = width;
-            canvas.height = titleH * scale + imageH + rows.length * lineH * scale
-                            + pad * 2 * scale;
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#1e293b';
-            ctx.font = '700 ' + 14 * scale + 'px Inter, system-ui, sans-serif';
-            ctx.fillText(title, pad * scale, 21 * scale);
-            let y = titleH * scale;
-            images.forEach((image) => {
-                ctx.drawImage(image, pad * scale, y);
-                y += image.height;
-            });
-            y += 4 * scale;
-            ctx.fillStyle = '#334155';
-            ctx.font = '700 ' + body + 'px Inter, system-ui, sans-serif';
-            ctx.fillText(this.t('Keterangan warna:', 'Colour key:'), pad * scale,
-                         y + body);
-            y += lineH * scale;
-            ctx.font = font;
-            rows.forEach((line) => {
-                let x = pad * scale;
-                line.forEach((item) => {
-                    ctx.fillStyle = item.entry.colour;
-                    ctx.fillRect(x, y - body + 3 * scale, chipW, chipW);
-                    ctx.fillStyle = '#475569';
-                    ctx.fillText(item.entry.text, x + chipW + gap, y);
-                    x += item.width + between;
+        // The legend a copied item table carries: its own headings, and what each
+        // one means. Read from the table\u2019s `data-col`, which is also what the
+        // test reads, so a column whose definition is missing cannot be copied as a
+        // bare letter.
+        tableLegend() {
+            const table = document.querySelector('[data-item-table]');
+            if (!table) return [];
+            return Array.prototype.slice.call(table.querySelectorAll('thead th'))
+                .filter((th) => th.dataset.col)
+                .map((th) => ({ key: th.dataset.col,
+                                label: this.words('glossaryLabel', th.dataset.col),
+                                meaning: this.words('glossary', th.dataset.col) }))
+                .filter((line) => line.label && line.meaning);
+        },
+
+        // Every drawing's own lines under its own heading, then the definitions of
+        // the statistics that appear in them. The page reads this, and so does a
+        // copied figure, so a teacher cannot read one thing here and paste another.
+        chartLegend() {
+            const headings = {
+                map: this.t('Peta butir soal', 'Item map'),
+                difficulty: this.t('Kesulitan soal (logit)', 'Question difficulty (logits)'),
+                people: this.t('Sebaran kemampuan murid', 'Spread of student ability')
+            };
+            const lines = [];
+            const stats = [];
+            ['map', 'difficulty', 'people'].forEach((key) => {
+                const note = this.chartNotes(key);
+                note.shape.forEach((line) => {
+                    lines.push(headings[key] + ' \u2014 ' + line);
                 });
-                y += lineH * scale;
+                note.stats.forEach((name) => {
+                    if (stats.indexOf(name) === -1) stats.push(name);
+                });
             });
-            return canvas;
+            return lines.concat(stats.map((name) => this.words('glossary', name)));
+        },
+
+        // The summary as rows a spreadsheet can take: the metric, its value, and
+        // then the meaning of the statistics that need one. The figures on these
+        // cards are the ones a report quotes, and a quoted number with no
+        // definition is a guess — so the definitions travel with them.
+        summaryRows() {
+            const rows = [];
+            // Which framework this is, first — the same rule the three documents
+            // follow. Two frameworks' numbers in one spreadsheet with nothing
+            // saying which read is which is how a report argues with itself.
+            const f = this.framework();
+            if (f) {
+                rows.push([this.t('Kerangka analisis', 'Assessment framework'),
+                           this.t(f.name.id, f.name.en)]);
+                rows.push([this.t('Pertanyaan yang dijawab laporan ini',
+                                  'The question this report answers'),
+                           this.t(f.question.id, f.question.en)]);
+                rows.push([this.t('Yang tidak bisa dijawab', 'What it cannot answer'),
+                           this.t(f.not_for.id, f.not_for.en)]);
+            }
+            this.summaryCards().forEach((card) => rows.push([card.label, card.value]));
+            // Then the two blocks that only their own framework publishes, so the
+            // copied summary carries them exactly when the page shows them.
+            if ((data.panels || []).indexOf('cognitive') > -1) {
+                (data.bands || []).forEach((band) => rows.push([
+                    this.bandName(band.key),
+                    band.count + ' ' + this.t('soal', 'questions') + ' \u00b7 '
+                    + this.round1(band.marks) + ' ' + this.t('nilai', 'marks') + ' \u00b7 '
+                    + (band.share === null ? '\u2014' : band.share + '%')]));
+                rows.push([this.t('Belum dilabeli', 'Not labelled yet'),
+                           data.cognitive.unset + ' ' + this.t('soal', 'questions')]);
+            }
+            const m = data.mastery || {};
+            if ((data.panels || []).indexOf('mastery') > -1 && m.configured) {
+                this.masteryCards().forEach((card) => rows.push([card.label, card.value]));
+            }
+            // A framework can be chosen without a KKM being set; the copy says so
+            // rather than omitting the block and looking complete.
+            if ((data.panels || []).indexOf('mastery') > -1 && !m.configured) {
+                rows.push([this.t('Ketuntasan belajar (KKM)', 'Mastery against the KKM'),
+                           this.t('KKM belum ditetapkan', 'no KKM set')]);
+            }
+            this.separationRows().forEach((line) => {
+                rows.push([this.words('figure', 'separationRow').replace('{side}', line.side),
+                           this.words('metric', 'rmse') + ' ' + line.rmse + ' '
+                           + this.words('metric', 'trueSd') + ' ' + line.true_sd + ' '
+                           + this.words('metric', 'sepG') + ' ' + line.separation + ' '
+                           + this.words('metric', 'strata') + ' ' + line.strata + ' '
+                           + this.words('metric', 'reliability') + ' '
+                           + line.reliability]);
+            });
+            return rows;
+        },
+
+        // What each of those rows means: the card's own hint, and then one line per
+        // statistic that a school has to be able to define before it quotes it.
+        summaryLegend() {
+            const rows = [];
+            this.summaryCards().forEach((card) => rows.push([card.label, card.hint]));
+            [['rmse', 'stat_rmse'], ['trueSd', 'stat_tsd'], ['sepG', 'stat_sep'],
+             ['strata', 'stat_strata'], ['reliability', 'stat_rel']]
+                .forEach((pair) => rows.push([this.words('metric', pair[0]),
+                                              this.words('glossary', pair[1])]));
+            return rows;
+        },
+
+        // The upper-and-lower table, named: which group is which, and what a t and
+        // a p on this page mean. Not a table the copy board takes — its numbers
+        // check the item table rather than report a result — but a reader who meets
+        // a t on the screen is owed the same sentences as the reader of the file.
+        splitLegend() {
+            return ['upper', 'lower', 't', 'df', 'p'].map((key) => ({
+                key: key,
+                label: this.words('splitLabel', key),
+                meaning: this.words('split', key)
+            }));
         },
 
         // `clipboard.write` needs a secure context and a user gesture, and a
@@ -564,32 +1512,72 @@ function itemAnalysis(data) {
             return this.put(await this.composeAll(), 'grafik-analisis');
         },
 
-        // The table, as *cells*: `text/plain` as tab-separated for Excel and
-        // `text/html` as a table for Word, from the same read of the DOM — the
-        // numbers a teacher sees, which is the only definition of "what is on the
-        // page" that survives somebody sorting the table. A plain-text paste into
-        // Word would arrive as one column of tabs.
+        // Rows as *cells*: `text/plain` as tab-separated for Excel and `text/html`
+        // as a table for Word, both from the same list, so the two pastes cannot
+        // disagree. A plain-text paste into Word would arrive as one column of tabs.
+        async copyRows(rows, done, refused) {
+            const tsv = rows.map((row) => row.map((cell) => cell === undefined
+                || cell === null ? '' : String(cell)).join('\t')).join('\n');
+            const html = '<table border="0" cellspacing="0" cellpadding="4">'
+                + rows.map((row) => '<tr>' + row.map((cell) => '<td>'
+                    + String(cell === undefined || cell === null ? '' : cell)
+                    + '</td>').join('') + '</tr>').join('') + '</table>';
+            try {
+                await navigator.clipboard.write([new ClipboardItem({
+                    'text/plain': new Blob([tsv], { type: 'text/plain' }),
+                    'text/html': new Blob([html], { type: 'text/html' })
+                })]);
+                this.flash(done);
+            } catch (error) {
+                this.flash(refused);
+            }
+        },
+
+        // The item table, as the numbers a teacher sees — the only definition of
+        // "what is on the page" that survives somebody sorting the table — followed
+        // by the legend that says what each column is. A pasted table of bare
+        // letters is a table the reader has to interpret, and two teachers will
+        // interpret P and b differently.
         async copyTable() {
             const table = document.querySelector('[data-item-table]');
             if (!table) return;
             const rows = Array.prototype.slice.call(table.querySelectorAll('tr'))
                 .map((tr) => Array.prototype.slice.call(tr.children)
                     .map((cell) => (cell.innerText || '').trim()));
-            const tsv = rows.map((row) => row.join('\t')).join('\n');
-            const html = '<table>' + rows.map((row) => '<tr>'
-                + row.map((cell) => '<td>' + cell + '</td>').join('') + '</tr>')
-                .join('') + '</table>';
-            const copied = this.t('Tabel tersalin', 'Table copied');
-            try {
-                await navigator.clipboard.write([new ClipboardItem({
-                    'text/plain': new Blob([tsv], { type: 'text/plain' }),
-                    'text/html': new Blob([html], { type: 'text/html' })
-                })]);
-                this.flash(copied);
-            } catch (error) {
-                this.flash(this.t('Tabel tersalin sebagai teks',
-                                  'Table copied as text'));
-            }
+            rows.splice(0, 0, [this.figureTitle()], [this.figureLine()]);
+            rows.push([]);
+            rows.push([this.words('figure', 'column'),
+                       this.words('figure', 'meaning')]);
+            this.tableLegend().forEach(
+                (line) => rows.push([line.label, line.meaning]));
+            return this.copyRows(rows, this.t('Tabel tersalin', 'Table copied'),
+                                 this.t('Tabel tersalin sebagai teks',
+                                        'Table copied as text'));
+        },
+
+        // The summary cards and Winsteps' block, with the meaning of every one of
+        // them: the numbers a school quotes into a report, and the sentences that
+        // define them, in one paste.
+        async copySummary() {
+            const rows = [[this.figureTitle()], [this.figureLine()], []];
+            rows.push([this.words('figure', 'metric'), this.words('figure', 'value')]);
+            this.summaryRows().forEach((row) => rows.push(row));
+            rows.push([]);
+            rows.push([this.words('figure', 'metric'),
+                       this.words('figure', 'meaning')]);
+            this.summaryLegend().forEach((row) => rows.push(row));
+            return this.copyRows(rows,
+                                 this.t('Ringkasan tersalin', 'Summary copied'),
+                                 this.t('Ringkasan tersalin sebagai teks',
+                                        'Summary copied as text'));
+        },
+
+        // What the artefact is: the exam's name and the report's, so a paste into a
+        // document says what it is even when the headline around it is gone.
+        figureTitle() {
+            const meta = data.meta || {};
+            const title = this.t('Analisis butir soal', 'Item analysis');
+            return meta.title ? title + ' \u2014 ' + meta.title : title;
         },
 
         words(section, key) {
@@ -602,7 +1590,11 @@ function itemAnalysis(data) {
             return [
                 { key: 'students', label: this.words('metric', 'students'),
                   value: s.students,
-                  hint: s.answered_papers + ' ' + this.words('metric', 'papers') },
+                  // "1 Papers with data" is the kind of detail that makes a page
+                  // look machine-made, and this card is the one a report quotes.
+                  hint: s.answered_papers + ' '
+                        + this.words('metric', s.answered_papers === 1
+                                               ? 'paperOne' : 'papers') },
                 { key: 'questions', label: this.words('metric', 'questions'),
                   value: s.items,
                   hint: this.words('metric', 'objective') + ' ' + s.objective
@@ -626,6 +1618,150 @@ function itemAnalysis(data) {
                   value: s.extremes,
                   hint: this.words('metric', 'questions') + ': ' + this.logits.length }
             ];
+        },
+
+        // ── the framework vocabulary, from the payload ───────────────────────
+        // The four frameworks, the three bands and the six levels all arrive from
+        // the server, in both languages, next to the numbers they label. A second
+        // list here is how the page offers a band the report cannot group — the
+        // same rule `SG_ITEM_WORDS` follows for the statistics.
+        framework() {
+            return (data.frameworks || []).filter((f) => f.key === data.framework)[0] || null;
+        },
+        frameworkByKey(key) {
+            return (data.frameworks || []).filter((f) => f.key === key)[0] || null;
+        },
+        // What a pasted figure says about which report it is. `meta.framework`
+        // travels in the payload because the copy board cannot reach the page's
+        // header, and two frameworks' numbers pasted into one document without
+        // their names look like a contradiction.
+        frameworkLine() {
+            var f = this.framework();
+            if (!f) return '';
+            return this.t('Kerangka analisis', 'Assessment framework') + ': '
+                + this.t(f.name.id, f.name.en) + ' \u2014 '
+                + this.t(f.question.id, f.question.en);
+        },
+        bandOf(key) {
+            return (data.bands || []).filter((b) => b.key === key)[0] || null;
+        },
+        bandName(key) {
+            var band = this.bandOf(key);
+            return band ? this.t(band.name.id, band.name.en) : key;
+        },
+        // Empty is a level too, and it is *not* the lowest one. "Belum dilabeli"
+        // is what an unlabelled question says, rather than being counted into LOTS.
+        levelName(key) {
+            var level = (data.levels || []).filter((l) => l.key === key)[0];
+            return level ? this.t(level.name.id, level.name.en)
+                         : this.t('Belum dilabeli', 'Not labelled yet');
+        },
+        // One colour per band, and the same three the legend names. A bar whose
+        // colour has to be guessed is a bar a reader stops reading.
+        bandTone(key) {
+            return ({ lots: 'bg-emerald-400', mots: 'bg-amber-400',
+                      hots: 'bg-rose-400' })[key] || 'bg-surface-300';
+        },
+        round1(value) {
+            return value === null || value === undefined
+                ? '\u2014' : Math.round(value * 10) / 10;
+        },
+        // The meaning of the three bands, from the payload's own levels: which
+        // C-levels each band covers and what they ask a student to do. The page
+        // and a copied paste read this one function, so the legend cannot name a
+        // level the vocabulary does not hold.
+        cognitiveLegend() {
+            var lines = (data.bands || []).map((band) => [
+                this.bandName(band.key),
+                band.levels.map((level) => this.t(level.name.id, level.name.en)
+                    + ' (' + this.t(level.verb.id, level.verb.en) + ')').join(' \u00b7 ')
+            ]);
+            lines.push([this.t('Porsi (%)', 'Share (%)'),
+                this.t('Bagian tiap tingkat dari seluruh ujian, pada dasar yang disebut di atas tabel.',
+                       'Each band\u2019s part of the whole paper, on the basis named above the table.')]);
+            lines.push([this.t('Belum dilabeli', 'Not labelled yet'),
+                this.t('Soal tanpa tingkat kognitif (C1\u2013C6) belum masuk tingkat mana pun \u2014 bukan berarti tingkat rendah.',
+                       'A question with no cognitive level (C1\u2013C6) sits in no band \u2014 which is not the same as being lower order.')]);
+            lines.push([this.t('Nilai', 'Marks'),
+                this.t('Bobot nilai tiap soal, dijumlahkan per tingkat. Ujian tanpa bobot dihitung per soal.',
+                       'Each question\u2019s marks, added up per band. A paper with no marks per question is counted by question.')]);
+            var f = this.frameworkByKey('cognitive');
+            if (f) lines.push([this.t('Rujukan', 'Reference'),
+                               this.t(f.reference.id, f.reference.en)]);
+            if (f) lines.push([this.t('Yang tidak bisa dijawab', 'What it cannot answer'),
+                               this.t(f.not_for.id, f.not_for.en)]);
+            return lines;
+        },
+        // The mastery cards. The standard first, because every number beside it is
+        // measured against it and a reader has to know which number that is.
+        masteryCards() {
+            var m = data.mastery || {};
+            return [
+                { key: 'kkm', label: this.t('KKM', 'KKM'), value: m.kkm,
+                  hint: this.t('patokan yang dipakai sekolah ini',
+                               'the standard this school uses') },
+                { key: 'passed', label: this.t('Tuntas', 'Met the standard'), value: m.passed,
+                  hint: m.failed + ' ' + this.t('belum tuntas', 'below the standard') },
+                { key: 'pass_rate', label: this.t('Persentase tuntas (%)', 'Share meeting the standard (%)'),
+                  value: m.pass_rate === null ? '\u2014' : m.pass_rate,
+                  hint: this.t('dari kertas yang ada nilainya', 'of the papers that have a mark') },
+                { key: 'mean', label: this.t('Rata-rata kelas', 'Class mean'), value: m.mean,
+                  hint: this.t('selisih dengan KKM', 'minus the KKM') + ' ' + m.gap },
+                { key: 'lowest', label: this.t('Nilai terendah', 'Lowest mark'), value: m.lowest,
+                  hint: this.t('satu kertas terendah', 'the lowest single paper') },
+                { key: 'mastered', label: this.t('Soal sudah dikuasai', 'Questions mastered'),
+                  value: m.items_mastered + ' / ' + m.items_measured,
+                  hint: this.t('soal yang dijawab penuh oleh cukup banyak murid',
+                               'questions enough papers earned full credit on') }
+            ];
+        },
+        // What the numbers mean, and the one sentence that keeps the framework
+        // honest: changing the KKM changes the verdict without changing an answer.
+        masteryLegend() {
+            var m = data.mastery || {};
+            var lines = [
+                [this.t('KKM', 'KKM'),
+                 this.t('Nilai minimum yang dipilih sekolah. Semua angka di tabel ini diukur terhadap angka ini, bukan terhadap rata-rata kelas.',
+                        'The minimum mark the school chose. Every number in this table is measured against it, not against how the class did.')],
+                [this.t('Tuntas / belum tuntas', 'Met / below the standard'),
+                 this.t('Dihitung dari nilai akhir tiap kertas, dibandingkan langsung dengan KKM.',
+                        'Counted from each paper\u2019s final mark, compared straight against the KKM.')],
+                [this.t('Ambang penguasaan soal', 'Question mastery threshold'),
+                 this.t('Bagian kelas yang harus menjawab penuh agar soalnya dianggap sudah dikuasai: {v}.',
+                        'The share of the class that must earn full credit for the question to count as mastered: {v}.')
+                     .replace('{v}', this.round1(m.kkm / 100))],
+                [this.t('Selisih', 'Gap'),
+                 this.t('Rata-rata kelas dikurangi KKM. Negatif berarti rata-rata belum mencapai patokan.',
+                        'The class mean minus the KKM. Negative means the average has not reached the standard.')],
+                [this.t('Soal sudah dikuasai', 'Questions mastered'),
+                 this.t('Soal yang bagian kelasnya menjawab penuh sudah mencapai ambang di atas.',
+                        'Questions where the share earning full credit has reached the threshold above.')]
+            ];
+            var f = this.frameworkByKey('mastery');
+            if (f) lines.push([this.t('Yang tidak bisa dijawab', 'What it cannot answer'),
+                               this.t(f.not_for.id, f.not_for.en)]);
+            return lines;
+        },
+
+        // Winsteps' separation block, as table rows: REAL and MODEL for the students
+        // and for the items. The lines and their numbers come from the server's
+        // `analysis_report.separation_cells` — the same function the PDF, the CSV
+        // and the workbook call — so this method only puts words on them, which is
+        // the one part that has to follow the language toggle. A line the server
+        // does not consider answerable is not in the payload at all, which is why
+        // there is nothing here to filter.
+        separationRows() {
+            var sides = { people: 'peopleRow', items: 'itemsRow' };
+            var which = { real: 'realRow', model: 'modelRow' };
+            return (data.separation || []).map((cells) => ({
+                side: this.words('metric', sides[cells[0]]) + ' \u00b7 '
+                    + this.words('metric', which[cells[1]]),
+                rmse: cells[2],
+                true_sd: cells[3],
+                separation: cells[4],
+                strata: cells[5],
+                reliability: cells[6]
+            }));
         },
 
         // A question's colour on the item map, by what it did. Four buckets, because
