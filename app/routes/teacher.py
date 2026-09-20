@@ -27,7 +27,7 @@ from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
                                  school_subjects, teacher_assignments_for)
 from app.utils import exam_window
-from app.services import analysis_report, analysis_scope, item_analysis
+from app.services import analysis_frameworks, analysis_report, analysis_scope, item_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,8 @@ def _apply_mark_scheme(question_types, total_questions, question_weights):
     )
 
 
-JSON_COLUMNS = ("answer_key", "question_types", "question_weights", "question_pages")
+JSON_COLUMNS = ("answer_key", "question_types", "question_weights", "question_pages",
+               "question_cognitive", "question_audio", "question_canvas")
 
 
 def _json_fields(row):
@@ -295,12 +296,43 @@ def _normalise_exam_json(exam_data: dict) -> dict:
     turning.
     """
     for field in ("question_types", "answer_key", "question_weights", "question_pages",
-                  "question_audio", "question_canvas", "question_texts"):
+                  "question_audio", "question_canvas", "question_texts",
+                  "question_cognitive"):
         if isinstance(exam_data.get(field), str):
             exam_data[field] = _as_dict(exam_data.get(field))
     if isinstance(exam_data.get("pdf_page_urls"), str):
         exam_data["pdf_page_urls"] = _as_list(exam_data.get("pdf_page_urls"))
     return exam_data
+
+
+def _cognitive_levels() -> dict:
+    """The cognitive labels the builder posted, kept to the vocabulary.
+
+    A key the vocabulary does not know is dropped rather than stored. The column
+    is read by a report that groups questions into LOTS/MOTS/HOTS bands, and an
+    unrecognised level would be counted in none of them while still looking
+    labelled — a silent hole in a measurement. A question nobody labelled is
+    simply absent from the mapping, which is the honest shape: "not labelled
+    yet" is a fact `item_analysis` states out loud, and the alternative (guessing
+    the level from the question's type) would invent the very thing the
+    framework is asked to measure.
+
+    Read from `request.form` rather than taken as an argument so the two routes
+    that save an exam cannot parse it two different ways.
+    """
+    raw = request.form.get("question_cognitive", "")
+    try:
+        posted = json.loads(raw) if raw else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(posted, dict):
+        return {}
+    out = {}
+    for key, value in posted.items():
+        found = analysis_frameworks.level(value if isinstance(value, str) else None)
+        if found is not None:
+            out[str(key)] = found.key
+    return out
 
 
 def _answer_key_gap(exam: dict) -> dict | None:
@@ -966,6 +998,7 @@ def exam_form():
         "max_attempts": max_attempts,
         "publish_mode": publish_mode,
         "question_pages": request.form.get("question_pages", "{}"),
+        "question_cognitive": _cognitive_levels(),
         "total_questions": total_questions,
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
@@ -994,7 +1027,7 @@ def exam_form():
     try:
         res = supabase.table("exams").insert(data).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         res = supabase.table("exams").insert(data).execute()
     exam_id = res.data[0]["id"]
@@ -1172,6 +1205,7 @@ def exam_detail(exam_id):
         "max_attempts": max_attempts,
         "publish_mode": publish_mode,
         "question_pages": request.form.get("question_pages", "{}"),
+        "question_cognitive": _cognitive_levels(),
         "total_questions": total_questions,
         "duration_minutes": duration_minutes,
         "passing_score": passing_score,
@@ -1200,7 +1234,7 @@ def exam_detail(exam_id):
     try:
         supabase.table("exams").update(data).eq("id", exam_id).execute()
     except Exception:
-        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages"]:
+        for key in ["question_weights", "question_texts", "anti_cheat_enabled", "penalty_per_violation", "max_violations", "auto_submit_on_max", "fullscreen_required", "randomize_questions", "randomize_options", "watermark_name", "block_copy_paste", "block_right_click", "block_screenshot", "allow_calculator", "subject_id", "class_ids", "start_at", "end_at", "auto_submit_on_window_end", "is_template", "source_exam_id", "max_attempts", "publish_mode", "question_pages", "question_cognitive"]:
             data.pop(key, None)
         supabase.table("exams").update(data).eq("id", exam_id).execute()
 
@@ -1833,8 +1867,13 @@ def _analysis_of(supabase, exam_id, as_json=True, redirect_to="/teacher/results"
     return exam, item_analysis.analyse(exam, submissions), None
 
 
-def _chart_payload(analysis):
+def _chart_payload(analysis, exam=None, public=False, framework=None):
     """What the three charts draw, as plain data.
+
+    `public=True` is the payload a share link renders. It drops the per-student
+    list — names and marks, the one part of this object that identifies somebody —
+    even though no chart draws it today: the payload is what reaches the browser,
+    and "nothing renders it" stops being true the moment somebody adds a table.
 
     Built here rather than in the template because the alternative — Jinja loops
     assembling arrays inside an `x-data` attribute — is untestable, and because a
@@ -1842,9 +1881,51 @@ def _chart_payload(analysis):
     decision with a name. A question with no calibration has no place on the logit
     chart and is left out of *that* chart only; it still appears in the item map,
     which is computed from the classical columns that never go missing.
+
+    `meta` travels with it because a chart copied into a report has to say which
+    exam it is and how much data is under it: a figure with no provenance is a
+    figure nobody can check, and the copy board cannot reach the page's own header.
     """
+    exam = exam or {}
+    framework = framework or analysis_frameworks.resolve(None)
     return {
+        "meta": {
+            "title": str(exam.get("title") or analysis.title or ""),
+            "subject": str(exam.get("subject") or ""),
+            "students": analysis.summary.students,
+            "items": analysis.summary.items,
+            # The framework travels in `meta` because the copy board cannot reach
+            # the page's own header: a figure pasted into a report has to say
+            # which report it came from, or two frameworks' numbers look like a
+            # contradiction in the same document.
+            "framework": framework.key,
+            "framework_name": dict(framework.name),
+        },
+        # Which framework this page is, and the four a reader may choose between.
+        # Both languages travel: the toggle rewrites the labels in the browser and
+        # the server has already rendered the numbers.
+        "framework": framework.key,
+        "frameworks": analysis_frameworks.frameworks_payload(),
+        # The panels this framework shows, as keys. The template uses them to hide
+        # a block, and the guard test checks every key is a marker on the page —
+        # a promise about a panel that does not render is a blank page with no
+        # error, which is the failure mode this list exists to prevent.
+        "panels": list(framework.panels),
+        "cognitive": analysis_report.cognitive_payload(analysis),
+        "mastery": analysis_report.mastery_payload(analysis),
+        # The band and level names, in both languages, so the page's toggle can
+        # rewrite them without a round trip. Handing the page a name already in
+        # one language is how an Indonesian label ends up under an English
+        # heading — the toggle is client-side and the payload is not.
+        "bands": analysis_frameworks.bands_payload(),
+        "levels": analysis_frameworks.levels_payload(),
+        "notes": list(analysis_frameworks.notes_for(analysis.notes, framework)),
         "summary": dataclasses.asdict(analysis.summary),
+        # Winsteps' separation block, as the block's own function builds it: which
+        # lines exist and what each one says is decided once, for the screen and for
+        # the three documents alike. The page re-writes only the *labels*, because
+        # they follow the language toggle and the numbers do not.
+        "separation": analysis_report.separation_cells(analysis.summary),
         # The finding colours, from the one palette the PDF and the workbook also
         # read. They used to be five `rgba(...)` literals inside the component, so
         # the page and the file a school filed could disagree about what red means.
@@ -1856,6 +1937,15 @@ def _chart_payload(analysis):
             "disc": item.discrimination,
             "flag": item.flag,
             "marks": item.marks,
+            # The kisi-kisi facts, per question: which level the teacher recorded
+            # (empty means unlabelled, never guessed) and whether the class has
+            # mastered it by the KKM. Both are `None`-able on purpose, and the
+            # page renders the empty state in words.
+            "level": item.level,
+            "band": item.band,
+            "mastered": item.mastered,
+            "full": item.full,
+            "answered": item.answered,
         } for item in analysis.items],
         "logits": [{
             "no": item.index + 1,
@@ -1866,10 +1956,12 @@ def _chart_payload(analysis):
         } for item in analysis.items if item.measure is not None],
         "bins": [{"centre": centre, "count": count}
                  for centre, count in analysis.person_bins],
-        "people": [{"name": person.name, "raw": person.raw,
-                    "possible": person.possible, "theta": person.measure,
-                    "extreme": person.extreme}
-                   for person in analysis.people if person.measure is not None],
+        "people": [] if public else [
+            {"name": person.name, "raw": person.raw,
+             "possible": person.possible, "theta": person.measure,
+             "extreme": person.extreme}
+            for person in analysis.people if person.measure is not None
+        ],
     }
 
 
@@ -1885,11 +1977,85 @@ def exam_analysis(exam_id):
     answer sheet collected.
     """
     supabase = get_supabase()
+    # Which framework this report *is*. It travels in the query string rather than
+    # in client state so the address a teacher copies is the report they are
+    # reading — and the download links carry it too, so the file matches the page.
+    framework = analysis_frameworks.resolve(request.args.get("framework"))
     exam, analysis, err = _analysis_of(supabase, exam_id, redirect_to="/teacher/results")
     if err:
         return err
-    return render_template("teacher/analysis.html", exam=exam, analysis=analysis,
-                           chart=_chart_payload(analysis))
+    return render_template(
+        "teacher/analysis.html", exam=exam, analysis=analysis,
+        chart=_chart_payload(analysis, exam, framework=framework),
+        framework=framework,
+        share=_share_card(supabase, exam_id),
+        download_base=f"/teacher/analysis/{exam_id}")
+
+
+def _share_card(supabase, exam_id):
+    """The exam's live public link, as the report's own header renders it.
+
+    The URL is built from the request's own root rather than from `APP_URL`, so
+    the address a teacher copies is the address they are reading the page on —
+    a config value that has drifted is a link that arrives broken. ProxyFix is
+    what makes `url_root` the public one behind nginx.
+    """
+    from app.services import analysis_share
+
+    return analysis_share.card(analysis_share.live(supabase, exam_id),
+                               base_url=request.url_root)
+
+
+@teacher_bp.route("/analysis/<exam_id>/share", methods=["POST"])
+@teacher_or_admin_required
+def share_exam_analysis(exam_id):
+    """Mint the public link for this exam's report, and show it.
+
+    The permission is the same one that opens the report: whoever may read the
+    analysis may share it. The link is redacted (no answer key, no student
+    names) and revocable, which is what makes that safe to hand out.
+    """
+    from app.services import analysis_share
+
+    supabase = get_supabase()
+    _exam, err = _guard_exam(supabase, exam_id, as_json=False,
+                             redirect_to="/teacher/results")
+    if err:
+        return err
+    link = analysis_share.create(supabase, exam_id, g.get("user_id"))
+    if not link:
+        flash("Tautan publik tidak bisa dibuat sekarang. Coba lagi.", "error")
+    else:
+        log_activity("share_analysis", "exam", exam_id)
+        flash("Tautan publik dibuat. Siapa pun yang memegangnya bisa membaca "
+              "statistiknya — tanpa kunci jawaban dan tanpa nama murid.", "success")
+    return redirect(f"/teacher/analysis/{exam_id}")
+
+
+@teacher_bp.route("/analysis/<exam_id>/share/revoke", methods=["POST"])
+@teacher_or_admin_required
+def revoke_exam_analysis(exam_id):
+    """Stop every live link for this exam. The next request with one is a 404."""
+    from app.services import analysis_share
+
+    supabase = get_supabase()
+    _exam, err = _guard_exam(supabase, exam_id, as_json=False,
+                             redirect_to="/teacher/results")
+    if err:
+        return err
+    stopped = analysis_share.revoke(supabase, exam_id)
+    if stopped:
+        log_activity("revoke_analysis_share", "exam", exam_id)
+        flash("Berbagi dihentikan. Tautan lama tidak bisa dibuka lagi.", "success")
+    elif analysis_share.live(supabase, exam_id):
+        # A live link that survived the click. Saying "tidak ada tautan aktif"
+        # here is the sentence that leaves a teacher believing sharing is off
+        # while the URL still opens — measured on the live connection, where a
+        # dropped answer made exactly that happen.
+        flash("Tautan masih aktif — penghentian gagal. Coba lagi.", "error")
+    else:
+        flash("Tidak ada tautan aktif untuk dihentikan.", "info")
+    return redirect(f"/teacher/analysis/{exam_id}")
 
 
 @teacher_bp.route("/analysis/<exam_id>/download.csv")
@@ -1899,11 +2065,12 @@ def exam_analysis_csv(exam_id):
     comparing questions with each other."""
     supabase = get_supabase()
     lang = request.args.get("lang") or "id"
+    framework = analysis_frameworks.resolve(request.args.get("framework"))
     exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
                                        redirect_to="/teacher/results")
     if err:
         return err
-    payload = analysis_report.analysis_csv(analysis, exam, lang)
+    payload = analysis_report.analysis_csv(analysis, exam, lang, framework=framework)
     # A BOM, so Excel opens the file as UTF-8 and a student's accented name is not
     # a row of mojibake on the teacher's machine.
     buf = io.BytesIO(payload.encode("utf-8-sig"))
@@ -1929,7 +2096,9 @@ def exam_analysis_xlsx(exam_id):
                                        redirect_to="/teacher/results")
     if err:
         return err
-    book = analysis_report.analysis_xlsx(analysis, exam, lang=lang)
+    book = analysis_report.analysis_xlsx(
+        analysis, exam, lang=lang,
+        framework=analysis_frameworks.resolve(request.args.get("framework")))
     return send_file(
         io.BytesIO(book), as_attachment=True,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1951,7 +2120,8 @@ def exam_analysis_pdf(exam_id):
     pdf = analysis_report.analysis_pdf(
         analysis, exam,
         school=(school_for(supabase, exam.get("school_id")) or {}).get("name", ""),
-        teacher=profile_name(supabase, exam.get("teacher_id")), lang=lang)
+        teacher=profile_name(supabase, exam.get("teacher_id")), lang=lang,
+        framework=analysis_frameworks.resolve(request.args.get("framework")))
     return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
                      download_name=analysis_report.filename(analysis, exam, "pdf"))
 
@@ -3569,6 +3739,65 @@ def accreditation_report(exam_id):
 @login_required
 def teacher_comms():
     return render_template("shared/comms.html")
+
+
+@teacher_bp.route("/subjects")
+@login_required
+def teacher_subjects():
+    """List subjects for the teacher's school."""
+    sid = g.get("user_school_id")
+    supabase = get_supabase()
+    sort = request.args.get("sort", "asc")
+    q = request.args.get("q", "")
+    data = []
+    if sid:
+        data = supabase.table("subjects").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
+        if q:
+            data = [s for s in data if q.lower() in s.get("name", "").lower()]
+    return render_template("teacher/subjects.html", subjects=data, sort=sort, q=q)
+
+
+@teacher_bp.route("/subjects/new", methods=["POST"])
+@login_required
+def teacher_subject_create():
+    """Create a new subject in the teacher's school."""
+    sid = g.get("user_school_id")
+    supabase = get_supabase()
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Nama mapel wajib diisi", "error")
+        return redirect("/teacher/subjects")
+    if not sid:
+        flash("Akses ditolak", "error")
+        return redirect("/teacher/subjects")
+    dup = supabase.table("subjects").select("id").eq("school_id", sid).eq("name", name).limit(1).execute()
+    if dup.data:
+        flash(f"Mapel '{name}' sudah ada", "error")
+        return redirect("/teacher/subjects")
+    try:
+        supabase.table("subjects").insert(
+            {"school_id": sid, "name": name, "is_active": True, "created_by": g.user_id}
+        ).execute()
+        log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
+        flash("Mapel berhasil ditambahkan", "success")
+    except Exception as e:
+        flash(f"Gagal: {e}", "error")
+    return redirect("/teacher/subjects")
+
+
+@teacher_bp.route("/subjects/<subject_id>/delete", methods=["POST"])
+@login_required
+def teacher_subject_delete(subject_id):
+    """Delete a subject."""
+    supabase = get_supabase()
+    try:
+        supabase.table("teacher_assignments").delete().eq("subject_id", subject_id).execute()
+        supabase.table("subjects").delete().eq("id", subject_id).execute()
+        log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
+        flash("Mapel berhasil dihapus", "success")
+    except Exception as e:
+        flash(f"Gagal menghapus: {e}", "error")
+    return redirect("/teacher/subjects")
 
 
 @teacher_bp.route("/settings")
