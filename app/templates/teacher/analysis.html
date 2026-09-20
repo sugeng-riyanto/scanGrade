@@ -20,7 +20,12 @@
     'unkeyed':      'bg-amber-100 text-amber-700'
 } %}
 
-<div class="space-y-4 sm:space-y-6" x-data="itemAnalysis({{ chart|tojson|forceescape }})" x-init="init()"
+{# No `x-init="init()"` here, and its absence is the fix for a real error: Alpine
+   calls a component's own `init()` method, so the attribute ran it twice — and the
+   second run created a second Chart.js chart on a canvas the first one already
+   owned (`Canvas is already in use. Chart with ID '0' ...`). Two watchers on the
+   language followed, so the page redrew twice per toggle. #}
+<div class="space-y-4 sm:space-y-6" x-data="itemAnalysis({{ chart|tojson|forceescape }})"
      data-analysis-page>
 
     <!-- ── header ─────────────────────────────────────────────────────────── -->
@@ -38,7 +43,7 @@
             <p class="text-xs sm:text-sm text-surface-500 font-medium ml-9">
                 {{ exam.title }}{% if exam.subject %} &middot; {{ exam.subject }}{% endif %}
                 <span class="mx-1">&middot;</span>
-                <span x-text="t('apa yang dikatakan jawaban kelas tentang soalnya','what the class&#39;s answers say about the questions')"></span>
+                <span x-text="t('apa yang dikatakan jawaban kelas tentang soalnya','what these answers say about the questions')"></span>
             </p>
         </div>
         <div class="flex flex-wrap gap-1.5 ml-9 lg:ml-0">
@@ -207,7 +212,7 @@
     <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
         <div class="p-3 sm:p-4 border-b border-surface-100">
             <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Kelompok atas dan bawah','Upper and lower groups')"></h2>
-            <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="t('Kesulitan soal yang sama diukur pada dua kelompok, lalu diuji dengan t dua ukuran seperti uji-t pada tabel referensi.','The same question measured for two groups, then tested with the reference table&#39;s two-measure t.')"></p>
+            <p class="text-[10px] text-surface-400 font-medium mt-0.5" x-text="t('Kesulitan soal yang sama diukur pada dua kelompok, lalu diuji dengan t dua ukuran seperti uji-t pada tabel referensi.','The same question measured for two groups, then tested with the two-measure t of the reference table.')"></p>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full text-xs min-w-[520px]">
