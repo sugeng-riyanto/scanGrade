@@ -54,6 +54,14 @@
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-csv mr-1 text-emerald-600"></i>CSV
             </a>
+            {# The workbook is the one a teacher *works* in: real numbers, editable
+               Excel charts on the sheets they plot, and the colour key filled in.
+               It is a separate button rather than a format menu because a menu is a
+               second click for the file most people want. #}
+            <a :href="'/teacher/analysis/{{ exam.id }}/download.xlsx?lang=' + lang" data-download="xlsx"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-excel mr-1 text-green-700"></i>Excel
+            </a>
             <a :href="'/teacher/analysis/{{ exam.id }}/download.pdf?lang=' + lang" data-download="pdf"
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
@@ -91,11 +99,45 @@
     </div>
 
     <!-- ── charts ─────────────────────────────────────────────────────────── -->
+    {# The copy board. Charts on a screen are the one part of this page that cannot
+       be downloaded as text, and a teacher writing a report pastes them into Word
+       or Excel — so each drawing copies as an image *with its colour key*, and the
+       numbers under it copy as cells. `@click` is the user gesture the clipboard
+       API requires; without one `clipboard.write` is refused by the browser and
+       the reader would see nothing happen at all. #}
+    <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+            <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Grafik','Charts')"></h2>
+            <span class="text-[10px] font-medium text-surface-400"
+                  x-text="t('salin grafiknya ke Word atau Excel, lengkap dengan keterangan warna','copy a chart into Word or Excel, colour key included')"></span>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" @click="copyAllCharts()" data-copy="all"
+                    class="border-2 border-primary-200 text-primary-700 hover:bg-primary-50 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                <i class="fas fa-images mr-1"></i><span x-text="t('Salin semua grafik','Copy all charts')"></span>
+            </button>
+            <button type="button" @click="copyTable()" data-copy="table"
+                    class="border-2 border-surface-200 text-surface-600 hover:bg-surface-50 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                <i class="fas fa-table-cells mr-1"></i><span x-text="t('Salin tabel','Copy table')"></span>
+            </button>
+            <span class="text-[11px] font-bold text-emerald-600" x-show="copyNote" x-cloak
+                  x-text="copyNote"></span>
+        </div>
+    </div>
+
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4 xl:col-span-2">
             <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                 <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Peta butir soal','Item map')"></h2>
-                <p class="text-[10px] text-surface-400 font-medium" x-text="t('Tingkat kesulitan melawan daya beda. Kanan = dikerjakan hampir semua murid; atas = membedakan murid kuat dan lemah.','Difficulty against discrimination. Right = answered by nearly everyone; up = separates the strong from the weak.')"></p>
+                <div class="flex items-center gap-2">
+                    <p class="text-[10px] text-surface-400 font-medium" x-text="t('Tingkat kesulitan melawan daya beda. Kanan = dikerjakan hampir semua murid; atas = membedakan murid kuat dan lemah.','Difficulty against discrimination. Right = answered by nearly everyone; up = separates the strong from the weak.')"></p>
+                    <button type="button" @click="copyChart('map')" data-copy="map"
+                            class="text-surface-400 hover:text-primary-600 p-1.5 hover:bg-primary-50 rounded-lg transition"
+                            :title="t('Salin grafik ini (dengan keterangan warna)','Copy this chart, colour key included')"
+                            :aria-label="t('Salin grafik ini (dengan keterangan warna)','Copy this chart, colour key included')">
+                        <i class="fas fa-copy text-xs"></i>
+                    </button>
+                </div>
             </div>
             <div class="h-56 sm:h-72"><canvas x-ref="mapCanvas" aria-hidden="true"></canvas></div>
         </div>
@@ -103,7 +145,15 @@
         <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
             <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                 <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Kesulitan soal (logit)','Question difficulty (logits)')"></h2>
-                <p class="text-[10px] text-surface-400 font-medium" x-text="t('Nol = soal pada rata-rata ujian ini.','Zero = a question of average difficulty for this paper.')"></p>
+                <div class="flex items-center gap-2">
+                    <p class="text-[10px] text-surface-400 font-medium" x-text="t('Nol = soal pada rata-rata ujian ini.','Zero = a question of average difficulty for this paper.')"></p>
+                    <button type="button" @click="copyChart('difficulty')" data-copy="difficulty"
+                            class="text-surface-400 hover:text-primary-600 p-1.5 hover:bg-primary-50 rounded-lg transition"
+                            :title="t('Salin grafik ini (dengan keterangan warna)','Copy this chart, colour key included')"
+                            :aria-label="t('Salin grafik ini (dengan keterangan warna)','Copy this chart, colour key included')">
+                        <i class="fas fa-copy text-xs"></i>
+                    </button>
+                </div>
             </div>
             <div class="h-56 sm:h-72"><canvas x-ref="difficultyCanvas" aria-hidden="true"></canvas></div>
         </div>
@@ -111,7 +161,15 @@
         <div class="bg-white rounded-2xl border border-surface-100 shadow-sm p-3 sm:p-4">
             <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                 <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Sebaran kemampuan murid','Spread of student ability')"></h2>
-                <p class="text-[10px] text-surface-400 font-medium" x-text="t('Setiap batang satu rentang logit. Murid dengan skor sempurna atau nol tidak punya taksiran hingga.','One bar per logit range. A paper scoring everything or nothing has no finite estimate.')"></p>
+                <div class="flex items-center gap-2">
+                    <p class="text-[10px] text-surface-400 font-medium" x-text="t('Setiap batang satu rentang logit. Murid dengan skor sempurna atau nol tidak punya taksiran hingga.','One bar per logit range. A paper scoring everything or nothing has no finite estimate.')"></p>
+                    <button type="button" @click="copyChart('people')" data-copy="people"
+                            class="text-surface-400 hover:text-primary-600 p-1.5 hover:bg-primary-50 rounded-lg transition"
+                            :title="t('Salin grafik ini','Copy this chart')"
+                            :aria-label="t('Salin grafik ini','Copy this chart')">
+                        <i class="fas fa-copy text-xs"></i>
+                    </button>
+                </div>
             </div>
             <div class="h-56 sm:h-72"><canvas x-ref="peopleCanvas" aria-hidden="true"></canvas></div>
         </div>
@@ -121,10 +179,18 @@
     <div class="bg-white rounded-2xl border border-surface-100 shadow-sm">
         <div class="flex flex-wrap items-baseline justify-between gap-2 p-3 sm:p-4 border-b border-surface-100">
             <h2 class="text-sm font-extrabold text-surface-800" x-text="t('Statistik butir soal','Item statistics')"></h2>
-            <p class="text-[10px] text-surface-400 font-medium" x-text="t('P = persen nilai yang dibayarkan soal ini. D = selisih kelompok atas dan bawah. r = korelasi dengan sisa ujian. b = kesulitan dalam logit.','P = share of the marks this question actually paid. D = upper group minus lower group. r = correlation with the rest of the paper. b = difficulty in logits.')"></p>
+            <div class="flex items-center gap-2">
+                <p class="text-[10px] text-surface-400 font-medium" x-text="t('P = persen nilai yang dibayarkan soal ini. D = selisih kelompok atas dan bawah. r = korelasi dengan sisa ujian. b = kesulitan dalam logit.','P = share of the marks this question actually paid. D = upper group minus lower group. r = correlation with the rest of the paper. b = difficulty in logits.')"></p>
+                <button type="button" @click="copyTable()"
+                        class="text-surface-400 hover:text-primary-600 p-1.5 hover:bg-primary-50 rounded-lg transition"
+                        :title="t('Salin tabel ini sebagai sel Excel','Copy this table as Excel cells')"
+                        :aria-label="t('Salin tabel ini sebagai sel Excel','Copy this table as Excel cells')">
+                    <i class="fas fa-copy text-xs"></i>
+                </button>
+            </div>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-xs min-w-[820px]">
+            <table class="w-full text-xs min-w-[820px]" data-item-table>
                 <thead>
                     <tr class="text-surface-500 border-b border-surface-100 bg-surface-50">
                         <th class="text-left py-2 px-2 font-bold" x-text="t('Soal','No')"></th>
@@ -326,6 +392,205 @@ function itemAnalysis(data) {
         logits: data.logits || [],
         bins: data.bins || [],
         charts: {},
+        // The palette, from the server: `flag -> #rrggbb`. Empty in an older
+        // payload, which falls back to the tones below rather than to nothing.
+        tones: data.tones || {},
+        copyNote: '',
+        copyTimer: null,
+
+        // The colour key, as the five acts a teacher takes rather than the eight
+        // internal names. Short labels, not the sentences the PDF prints: an image
+        // pasted into a report sits *beside* the explanation, while a filed PDF is
+        // read on its own and has to carry it.
+        legend() {
+            return [['ok'], ['weak'], ['negative', 'misfit'],
+                    ['extreme_easy', 'extreme_hard'],
+                    ['unkeyed', 'unscored']].map((group) => ({
+                colour: this.tone(group[0]),
+                text: this.words('flag', group[0])
+            }));
+        },
+
+        flash(message) {
+            this.copyNote = message;
+            if (this.copyTimer) clearTimeout(this.copyTimer);
+            this.copyTimer = setTimeout(() => { this.copyNote = ''; }, 3200);
+        },
+
+        // A drawing and its key, as one PNG. `toBase64Image` is Chart.js's own
+        // export, so what is copied is exactly the chart on this screen — but it
+        // carries no key, because this page draws no Chart.js legend: the colour is
+        // the finding and the words are below. Composing them into the image is
+        // what makes the paste usable in Word, where the key was otherwise left
+        // behind on the website.
+        async compose(key) {
+            const chart = this.charts[key];
+            if (!chart) return null;
+            const image = new Image();
+            image.src = chart.toBase64Image();
+            await new Promise((resolve, reject) => {
+                image.onload = resolve;
+                image.onerror = reject;
+            });
+            const headings = {
+                map: this.t('Peta butir soal', 'Item map'),
+                difficulty: this.t('Kesulitan soal (logit)', 'Question difficulty (logits)'),
+                people: this.t('Sebaran kemampuan murid', 'Spread of student ability')
+            };
+            return this.paint(headings[key] || '', [image]);
+        },
+
+        // One image of every drawing, under one key — the figure a report needs.
+        async composeAll() {
+            const order = ['map', 'difficulty', 'people'].filter((k) => this.charts[k]);
+            if (!order.length) return null;
+            const images = [];
+            for (const key of order) {
+                const chart = this.charts[key];
+                if (!chart) continue;
+                const image = new Image();
+                image.src = chart.toBase64Image();
+                await new Promise((resolve) => { image.onload = resolve; });
+                images.push(image);
+            }
+            return this.paint(this.t('Analisis butir soal', 'Item analysis'), images);
+        },
+
+        // Title, drawings, key. Canvas rather than SVG because the Clipboard API
+        // takes a PNG and Word and Excel both paste one without a second step.
+        paint(title, images) {
+            const scale = 2;
+            const pad = 18;
+            const titleH = 30;
+            const lineH = 20;
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const body = 12 * scale;
+            const font = '600 ' + body + 'px Inter, system-ui, sans-serif';
+
+            const entries = this.legend();
+            const measure = document.createElement('canvas').getContext('2d');
+            measure.font = font;
+            const chipW = 11 * scale;
+            const gap = 8 * scale;
+            const between = 18 * scale;
+            const width = Math.max.apply(null, images.map((i) => i.width))
+                          + pad * 2 * scale;
+            // The key wraps, so the canvas is sized from the wrapped result rather
+            // than from a guess: a long label in either language must not be cut.
+            const rows = [];
+            let row = [];
+            let used = 0;
+            entries.forEach((entry) => {
+                const textW = measure.measureText(entry.text).width;
+                const need = chipW + gap + textW;
+                if (row.length && used + between + need > width - pad * 2 * scale) {
+                    rows.push(row);
+                    row = [];
+                    used = 0;
+                }
+                if (row.length) used += between;
+                row.push({ entry: entry, width: need });
+                used += need;
+            });
+            if (row.length) rows.push(row);
+
+            const imageH = images.reduce((sum, i) => sum + i.height, 0);
+            canvas.width = width;
+            canvas.height = titleH * scale + imageH + rows.length * lineH * scale
+                            + pad * 2 * scale;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#1e293b';
+            ctx.font = '700 ' + 14 * scale + 'px Inter, system-ui, sans-serif';
+            ctx.fillText(title, pad * scale, 21 * scale);
+            let y = titleH * scale;
+            images.forEach((image) => {
+                ctx.drawImage(image, pad * scale, y);
+                y += image.height;
+            });
+            y += 4 * scale;
+            ctx.fillStyle = '#334155';
+            ctx.font = '700 ' + body + 'px Inter, system-ui, sans-serif';
+            ctx.fillText(this.t('Keterangan warna:', 'Colour key:'), pad * scale,
+                         y + body);
+            y += lineH * scale;
+            ctx.font = font;
+            rows.forEach((line) => {
+                let x = pad * scale;
+                line.forEach((item) => {
+                    ctx.fillStyle = item.entry.colour;
+                    ctx.fillRect(x, y - body + 3 * scale, chipW, chipW);
+                    ctx.fillStyle = '#475569';
+                    ctx.fillText(item.entry.text, x + chipW + gap, y);
+                    x += item.width + between;
+                });
+                y += lineH * scale;
+            });
+            return canvas;
+        },
+
+        // `clipboard.write` needs a secure context and a user gesture, and a
+        // browser that refuses it must not look like a button that does nothing: it
+        // saves the PNG instead and says so.
+        async put(canvas, name) {
+            if (!canvas) return;
+            const label = this.t('Tersalin', 'Copied');
+            const failed = this.t('Grafik diunduh sebagai PNG', 'Chart downloaded as a PNG');
+            try {
+                const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+                this.flash(label);
+            } catch (error) {
+                const url = canvas.toDataURL('image/png');
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = name + '.png';
+                link.click();
+                this.flash(failed);
+            }
+        },
+
+        // Returned, not fired and forgotten: `put` is what reports success, and a
+        // caller that cannot await it cannot tell a copied chart from a refused
+        // one — which is how a button that does nothing passes a test.
+        async copyChart(key) {
+            return this.put(await this.compose(key), 'grafik-' + key);
+        },
+
+        async copyAllCharts() {
+            return this.put(await this.composeAll(), 'grafik-analisis');
+        },
+
+        // The table, as *cells*: `text/plain` as tab-separated for Excel and
+        // `text/html` as a table for Word, from the same read of the DOM — the
+        // numbers a teacher sees, which is the only definition of "what is on the
+        // page" that survives somebody sorting the table. A plain-text paste into
+        // Word would arrive as one column of tabs.
+        async copyTable() {
+            const table = document.querySelector('[data-item-table]');
+            if (!table) return;
+            const rows = Array.prototype.slice.call(table.querySelectorAll('tr'))
+                .map((tr) => Array.prototype.slice.call(tr.children)
+                    .map((cell) => (cell.innerText || '').trim()));
+            const tsv = rows.map((row) => row.join('\t')).join('\n');
+            const html = '<table>' + rows.map((row) => '<tr>'
+                + row.map((cell) => '<td>' + cell + '</td>').join('') + '</tr>')
+                .join('') + '</table>';
+            const copied = this.t('Tabel tersalin', 'Table copied');
+            try {
+                await navigator.clipboard.write([new ClipboardItem({
+                    'text/plain': new Blob([tsv], { type: 'text/plain' }),
+                    'text/html': new Blob([html], { type: 'text/html' })
+                })]);
+                this.flash(copied);
+            } catch (error) {
+                this.flash(this.t('Tabel tersalin sebagai teks',
+                                  'Table copied as text'));
+            }
+        },
 
         words(section, key) {
             var entry = (window.SG_ITEM_WORDS[section] || {})[key] || {};
@@ -366,12 +631,12 @@ function itemAnalysis(data) {
         // A question's colour on the item map, by what it did. Four buckets, because
         // a teacher acts on four things: keep it, look at it, it is inverted, or it
         // measured nothing at all.
+        // The colour of a finding, from the server's palette: one table feeds the
+        // page, the PDF, the workbook and the key under a copied chart, so a flag
+        // cannot be red here and amber in the file the school keeps. The fallback
+        // is the same grey the server uses for a flag nobody has classified.
         tone(flag) {
-            if (flag === 'negative' || flag === 'misfit') return 'rgba(220,38,38,0.75)';
-            if (flag === 'weak') return 'rgba(217,119,6,0.75)';
-            if (flag === 'extreme_easy' || flag === 'extreme_hard') return 'rgba(99,102,241,0.75)';
-            if (flag === 'unkeyed' || flag === 'unscored') return 'rgba(120,113,108,0.6)';
-            return 'rgba(5,150,105,0.75)';
+            return this.tones[flag] || '#78716c';
         },
 
         init() {

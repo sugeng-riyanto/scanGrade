@@ -36,6 +36,18 @@ KEY = (0.06, 0.46, 0.43)      # #0f766e — a keyed option
 OPTIONS = "ABCDE"
 
 
+def _rgb(hex_colour: str) -> tuple[float, float, float]:
+    """`#059669` as the rounded triplet PyMuPDF reports for a fill.
+
+    The palette is written once, as hex, and a page reports components — so the
+    comparison has to be made in one of the two, and comparing a tuple to a string
+    is a test that fails for the right reason and says the wrong one.
+    """
+    raw = hex_colour.lstrip("#")
+    return tuple(round(int(raw[index:index + 2], 16) / 255, 2)
+                 for index in (0, 2, 4))
+
+
 def _class(items: int = 40, students: int = 200, seed: int = 20260920,
            mix: bool = True, unkeyed: int = 2):
     """An exam and a class, with a plausible spread and real distractors.
@@ -172,6 +184,12 @@ class RecordingCanvas:
     def circle(self, *_args, **_kwargs):
         pass
 
+    def translate(self, x, y):
+        # The legend is drawn by the grid through a `translate`, so a recorder
+        # without this cannot see the legend at all — which is how "the key is in
+        # the document" would pass while the key was drawn off the page.
+        self.texts.append(("translate", (x, y)))
+
     def stringWidth(self, text, _font, size):
         # Helvetica's average advance, near enough for a label-collision rule.
         return len(str(text)) * size * 0.5
@@ -205,12 +223,18 @@ class TestTheChartsAreDrawn:
         exam, analysis = built
         pdf = analysis_report.analysis_pdf(analysis, exam, lang="id")
         first = _document(pdf)[0]
-        accent = [shape for shape in _shapes(first) if shape[0] == ACCENT]
+        # Any ink the drawings use, not one of them: the item map and the logit
+        # bars are coloured by *finding* now (the palette the key explains), so a
+        # count that only saw `_ACCENT` would report a chart that dropped its
+        # questions when it had merely re-coloured them.
+        ink = {_rgb(colour) for colour in analysis_report.FLAG_TONES.values()}
+        ink |= {ACCENT, KEY}
+        filled = [shape for shape in _shapes(first) if shape[0] in ink]
         plotted = len([i for i in analysis.items if i.measure is not None])
-        assert len(accent) >= plotted + len(analysis.person_bins), (
-            f"{len(accent)} filled shapes for {plotted} calibrated questions and "
+        assert len(filled) >= plotted + len(analysis.person_bins), (
+            f"{len(filled)} filled shapes for {plotted} calibrated questions and "
             f"{len(analysis.person_bins)} bins")
-        assert any(shape[1] for shape in accent), (
+        assert any(shape[1] for shape in filled), (
             "nothing round was drawn, so the item map plotted no question")
 
     def test_the_keyed_option_is_flagged_in_its_own_colour(self, built):
@@ -324,13 +348,57 @@ class TestThePageIsReadable:
                             f"{lang} page {index + 1} line {y}: {text_a[-16:]!r} and "
                             f"{text_b[:16]!r} overlap by {a[2] - b[0]:.1f}pt")
 
+    def test_a_line_of_text_never_lands_on_the_line_below_it(self, built):
+        """The defect the same-line check above structurally cannot see.
+
+        Grouping spans by their rounded top edge compares a line with itself, so
+        two lines 3pt apart are never compared — and 3pt apart is exactly how the
+        colour key came to be printed over the x-axis captions of the drawings
+        above it. On the built file, `Logit` and `Baik — soal bekerja seperti
+        seharusnya.` shared 4.6pt of height and `No. soal` shared 20pt of width
+        with `Daya beda negatif atau menyimpang — soal ini merugikan murid kuat.`
+        The key is painted upward from its own origin, so a two-row key started
+        1pt *inside* the boxes; this is that, measured.
+
+        Per **word**, and that is the point rather than a detail: the span
+        extractor glues adjacent runs at one baseline into a single box — three
+        question numbers printed side by side come back as one span twenty points
+        wide — so a span-level rule reports collisions between numbers that never
+        touch and cannot see the ones that do. Words carry their own boxes.
+        """
+        exam, analysis = built
+        for lang in ("id", "en"):
+            pdf = analysis_report.analysis_pdf(analysis, exam, lang=lang)
+            for index, page in enumerate(_document(pdf)):
+                words = [(word[0], word[1], word[2], word[3], word[4])
+                         for word in page.get_text("words")]
+                for position, a in enumerate(words):
+                    for b in words[position + 1:]:
+                        tall = min(a[3], b[3]) - max(a[1], b[1])
+                        wide = min(a[2], b[2]) - max(a[0], b[0])
+                        # 1.5pt, not 0: consecutive lines of a paragraph report
+                        # bounding *boxes*, which overlap by about a point when the
+                        # leading is tight without any ink touching. Everything
+                        # measured above was 2.6pt or more.
+                        assert tall < 1.5 or wide < 1.5, (
+                            f"{lang} page {index + 1}: {a[4]!r} at "
+                            f"{a[0]:.0f},{a[1]:.0f} and {b[4]!r} at "
+                            f"{b[0]:.0f},{b[1]:.0f} share {tall:.1f}pt of height "
+                            f"and {wide:.1f}pt of width")
+
     def test_the_paper_header_is_short_and_the_words_are_a_legend(self, built):
         """Sixteen full names on a landscape A4 do not fit; the symbols do, and
         the words they stand for are one line above the table."""
         exam, analysis = built
         pdf = analysis_report.analysis_pdf(analysis, exam, lang="id")
-        text = _document(pdf)[0].get_text()
-        assert analysis_report.labels("id")["legend"] in text
+        # The page that holds the *table*: the drawings take the first page on a
+        # full report, so the legend is looked for where its columns are, not on
+        # page 1 — a test pinned to "page 1" measures pagination, not the legend.
+        legend = analysis_report.labels("id")["legend"]
+        holding = [page for page in _document(pdf) if legend in page.get_text()]
+        assert holding, "the symbols under the item table are never explained"
+        assert analysis_report.labels("id")["h_no"] in holding[0].get_text(), (
+            "the legend is not on the page with the table it explains")
         # The long names are the CSV's header, where a column can be as wide as
         # it likes — the paper uses the symbols.
         csv = analysis_report.analysis_csv(analysis, exam, "id")
@@ -549,9 +617,297 @@ class TestTheChartSpecs:
             "the histogram dropped a range nobody scored in")
         assert len(histogram.labels) == len(Stub.person_bins)
 
+    def test_the_ability_histogram_counts_people_not_choices(self, built):
+        """The same drawing was labelled two ways by two documents.
+
+        `chosen_count` ("Jumlah pemilih") is the *option* chart's axis — how many
+        students chose a distractor. On the ability histogram it labelled the
+        students themselves as voters, while the workbook written from the same
+        bins already said `legend_students`. A reader comparing the PDF with the
+        spreadsheet found two names for one chart; this is the one place either
+        can be checked without opening them.
+        """
+        exam, analysis = built
+        t = analysis_report.labels("id")
+        specs = {chart.title: chart
+                 for chart in analysis_report._chart_specs(analysis, "id")}
+        histogram = specs[t["people_chart"]]
+        assert histogram.y_label == t["legend_students"], (
+            f"the ability histogram's y axis says {histogram.y_label!r}")
+        assert histogram.y_label != t["chosen_count"], (
+            "the histogram is labelled with the option chart's counts")
+        # The two documents are read against each other in
+        # `test_analysis_workbook.py`, which is where the workbook is opened.
+
     def test_a_chart_with_nothing_to_draw_is_empty_not_zero(self):
         """`empty()` is what decides whether the grid is skipped: a chart whose
         values are all zero has data, one with no values does not."""
         assert analysis_report._Chart("bars", "t").empty()
         assert analysis_report._Chart("scatter", "t").empty()
         assert not analysis_report._Chart("bars", "t", values=[0.0]).empty()
+
+
+# ── the key under the drawings ──────────────────────────────────────────────
+
+class TestTheColourKey:
+    """The drawings have colours that mean something, and the file is read alone.
+
+    Everything here is about the reader who opens the PDF a term later: a red dot
+    with nothing saying what red is is a decoration, and a key that lost its last
+    entry to fit one line lies by omission.
+    """
+
+    def test_every_flag_the_analyser_can_raise_has_a_colour(self):
+        """One palette, and no flag outside it — a new finding must not ship grey
+        by accident and look like "not measurable"."""
+        assert set(analysis_report.FLAG_LABELS) == set(analysis_report.FLAG_TONES), (
+            "a finding flag has no colour in the palette, or a colour has no flag")
+        assert analysis_report.tone_for("something_new") == analysis_report.FLAG_FALLBACK
+
+    def test_the_palette_is_what_the_page_is_told(self):
+        """The page, the PDF, the workbook and a copied image all read this one
+        table; the literals that used to live in the Alpine component were the same
+        information in a place no document could reach."""
+        assert analysis_report.chart_palette() == analysis_report.FLAG_TONES
+        palette = analysis_report.chart_palette()
+        palette["ok"] = "#ffffff"
+        assert analysis_report.FLAG_TONES["ok"] != "#ffffff", (
+            "the palette handed to the page is an alias of the module's table, so "
+            "editing it once would change the PDF for every school")
+
+    def test_the_key_names_the_acts_not_the_statistics(self, built):
+        _exam, analysis = built
+        charts = [c for c in analysis_report._chart_specs(analysis, "id")
+                  if not c.empty()]
+        entries = analysis_report.chart_key("id", charts)
+        colours = [colour for colour, _text in entries]
+        assert analysis_report.tone_for("weak") in colours
+        assert analysis_report.tone_for("unkeyed") in colours
+        # A keyed option only appears when a chart actually stacks options.
+        assert analysis_report._KEY in colours
+        assert analysis_report._ACCENT in colours
+
+    def test_a_key_with_no_stacked_chart_does_not_list_the_options(self, built):
+        """The option swatches explain a drawing that is not there otherwise."""
+        _exam, analysis = built
+        charts = [c for c in analysis_report._chart_specs(analysis, "id")
+                  if not c.empty() and c.kind != "stacked"]
+        colours = [colour for colour, _text in analysis_report.chart_key("id", charts)]
+        assert analysis_report._KEY not in colours
+        assert analysis_report.tone_for("ok") in colours
+
+    def test_the_key_is_in_the_document_and_says_what_red_is(self, built):
+        exam, analysis = built
+        pdf = analysis_report.analysis_pdf(analysis, exam, lang="en")
+        text = " ".join(span for page in _document(pdf) for bbox, span in _spans(page))
+        t = analysis_report.labels("en")
+        for key in ("chart_legend", "legend_ok", "legend_weak", "legend_bad",
+                    "legend_extreme", "legend_unmeasured"):
+            assert t[key][:34] in text, f"the key is missing its {key} entry"
+
+    def test_the_key_cannot_be_separated_from_the_drawings(self):
+        """It rides inside the grid flowable.
+
+        As its own flowable it was the last item of an already-full page: the key
+        landed on page 2 under nothing while the drawings it explains stayed on
+        page 1, which is how this was found — by opening the PDF.
+        """
+        chart = analysis_report._Chart("bars", "t", values=[1.0, 2.0])
+        legend = analysis_report._ChartLegend([("#ff0000", "one")], heading="key")
+        plain = analysis_report._ChartGrid([chart], "none", columns=1)
+        with_key = analysis_report._ChartGrid([chart], "none", columns=1, legend=legend)
+        recorder = RecordingCanvas()
+        for grid in (plain, with_key):
+            grid.canv = recorder
+            grid.wrap(500, 500)
+        assert with_key.height > plain.height, "the key takes no room in the grid"
+        assert with_key.legend is legend
+
+    def test_the_document_hands_the_key_to_the_grid_rather_than_appending_it(
+            self, built, monkeypatch):
+        """The mechanism, because the outcome can still hold by luck.
+
+        A key appended as its own flowable lands on the drawings' page whenever
+        there is room for it — so a same-page assertion passes on a smaller report
+        and fails on a larger one, which is the worst kind of guard. Passing it
+        *into* the grid is what makes the pairing structural.
+        """
+        from reportlab.platypus import SimpleDocTemplate
+
+        exam, analysis = built
+        captured: dict[str, list] = {}
+        original = SimpleDocTemplate.build
+
+        def spy(self, flowables, *args, **kwargs):
+            captured["flow"] = list(flowables)
+            return original(self, flowables, *args, **kwargs)
+
+        monkeypatch.setattr(SimpleDocTemplate, "build", spy)
+        analysis_report.analysis_pdf(analysis, exam, lang="id")
+        flow = captured.get("flow") or []
+        grids = [item for item in flow
+                 if isinstance(item, analysis_report._ChartGrid)]
+        assert grids, "the document has no chart grid"
+        assert any(grid.legend is not None for grid in grids), (
+            "the colour key was not handed to the grid")
+        loose = [item for item in flow
+                 if isinstance(item, analysis_report._ChartLegend)]
+        assert not loose, (
+            "the colour key is a flowable of its own, so it can be pushed onto the"
+            " next page away from the drawings")
+
+    def test_the_document_puts_the_key_on_the_page_with_the_drawings(self, built):
+        """The property the flowable exists for, measured on the built file.
+
+        The test above is about the class; this one is about the document, and
+        without it `analysis_pdf` could append the key as its own flowable and
+        every assertion about `_ChartGrid` would still pass.
+        """
+        exam, analysis = built
+        pdf = analysis_report.analysis_pdf(analysis, exam, lang="id")
+        t = analysis_report.labels("id")
+        pages = _document(pdf)
+        with_key = [number for number, page in enumerate(pages)
+                    if t["chart_legend"] in page.get_text()]
+        with_drawings = [number for number, page in enumerate(pages)
+                         if t["item_map"] in page.get_text()]
+        assert with_key, "the colour key is not in the document at all"
+        assert with_drawings, "the charts are not in the document at all"
+        assert set(with_key) == set(with_drawings), (
+            f"the key is on page(s) {with_key} and the drawings on "
+            f"{with_drawings}")
+
+    def test_the_key_wraps_rather_than_losing_an_entry(self):
+        """A legend that hides its last entry to fit one line is a legend that
+        lies by omission, and the labels are sentences by design."""
+        long_entries = [(analysis_report.tone_for(flag), "x" * 60)
+                        for flag in ("ok", "weak", "negative", "extreme_easy",
+                                     "unkeyed")]
+        legend = analysis_report._ChartLegend(long_entries, heading="Keterangan")
+        recorder = RecordingCanvas()
+        legend.canv = recorder
+        width, height = legend.wrap(220, 500)
+        assert len(legend.rows) > 1, "the wide legend stayed on one line"
+        assert height >= len(legend.rows) * 11 - 1
+        legend.draw()
+        # `drawString(x, y, text)`, so the text is the third argument — reading the
+        # second compares labels against coordinates and passes whatever it finds.
+        drawn = [args[2] for kind, args in recorder.texts
+                 if kind in ("left", "centred", "right")]
+        for _colour, text in long_entries:
+            assert text in drawn, "an entry was dropped instead of wrapped"
+
+
+class TestTheDrawingKeepsItsFrame:
+    """The plot stays inside its box and out of the title band.
+
+    The bars used to grow into the title from underneath and the two printed over
+    each other, which is a defect a page image shows and a span list does not.
+    """
+
+    def test_a_bar_never_reaches_the_title(self):
+        chart = analysis_report._Chart("bars", "A title", values=[1.0, 5.0, 3.0],
+                                       labels=[1, 2, 3])
+        grid, recorder = _drawn(chart)
+        head = analysis_report._ChartGrid.HEAD
+        ceiling = analysis_report._ChartGrid([chart], "none").box_height - head
+        bars = [rect for rect in recorder.rects if rect[2] < 40 and rect[4]]
+        assert bars, "no bars were drawn at all"
+        for _x, y, _w, height, _colour in bars:
+            assert y + height <= ceiling + 0.01, (
+                f"a bar reaches {y + height:.1f} and the plot stops at {ceiling:.1f}")
+        titles = [args[2] for kind, args in recorder.texts if kind == "left"]
+        assert "A title" in titles
+        grid_title_y = [args[1] for kind, args in recorder.texts
+                        if kind == "left" and args[2] == "A title"][0]
+        assert grid_title_y > max(y + height for _x, y, _w, height, _c in bars), (
+            "the title is not above the tallest bar")
+
+    def test_the_axis_caption_is_under_the_plot_not_over_it(self):
+        """`Soal → logit` used to be drawn inside the plot area, across the bars."""
+        chart = analysis_report._Chart("bars", "Difficulty", values=[1.0, 2.0],
+                                       labels=[1, 2], x_label="Logit")
+        _grid, recorder = _drawn(chart)
+        captions = [args for kind, args in recorder.texts
+                    if kind == "centred" and args[2] == "Logit"]
+        assert captions, "the axis caption was not drawn"
+        caption_y = captions[0][1]
+        bars = [rect for rect in recorder.rects if rect[2] < 40 and rect[4]]
+        assert min(y for _x, y, _w, _h, _c in bars) > caption_y, (
+            "the axis caption sits inside the plot")
+
+    def test_the_title_band_holds_the_note_it_was_given(self):
+        """The four hints used to run together in one paragraph under the row of
+        charts, where a reader could not match a sentence to a picture."""
+        chart = analysis_report._Chart("bars", "Difficulty", values=[1.0], labels=[1],
+                                       note="Zero is an average question.")
+        _grid, recorder = _drawn(chart)
+        notes = [args[2] for kind, args in recorder.texts
+                 if kind == "right" and "average" in str(args[2])]
+        assert notes, "the chart's note was not drawn in its own box"
+
+    def test_the_item_table_opens_on_the_page_its_heading_is_on(self, built):
+        """A heading stranded at the foot of one page with its table overleaf."""
+        exam, analysis = built
+        pdf = analysis_report.analysis_pdf(analysis, exam, lang="id")
+        heading = analysis_report.labels("id")["items"]
+        pages = _document(pdf)
+        for number, page in enumerate(pages, start=1):
+            text = " ".join(span for _bbox, span in _spans(page))
+            if heading not in text:
+                continue
+            # The table's own header row has to be on that page too, and the
+            # heading is not the last thing on it.
+            assert analysis_report.labels("id")["h_no"] in text, (
+                f"page {number} has the item heading without the table")
+            return
+        raise AssertionError("the item section is not in the document at all")
+
+    def test_a_small_report_does_not_orphan_its_heading_either(self):
+        """The case that broke: five questions and one paper.
+
+        A full report fills the first page with drawings whatever the size of the
+        class, so the heading has nowhere to be stranded. A *small* one is where
+        there used to be room for the heading and none for the table.
+        """
+        exam, submissions = _class(items=3, students=6)
+        analysis = item_analysis.analyse(exam, submissions)
+        pdf = analysis_report.analysis_pdf(analysis, exam, lang="id")
+        t = analysis_report.labels("id")
+        pages = _document(pdf)
+        for number, page in enumerate(pages, start=1):
+            text = " ".join(span for _bbox, span in _spans(page))
+            if t["items"] in text:
+                assert t["h_no"] in text, (
+                    f"page {number} has the item heading and not the table")
+                return
+        raise AssertionError("the item section is not in the document at all")
+
+    def test_the_tables_begin_after_the_drawings_on_purpose(self, built, monkeypatch):
+        """The rule, at the level of the flow: a page break stands between them.
+
+        The two tests above check the *outcome*, and an outcome can hold by
+        accident — the drawings happen to fill the page. This one checks the
+        mechanism, so removing the break is a caught defect rather than a change
+        that no fixture notices.
+        """
+        from reportlab.platypus import PageBreak, SimpleDocTemplate
+
+        exam, analysis = built
+        captured: dict[str, list] = {}
+        original = SimpleDocTemplate.build
+
+        def spy(self, flowables, *args, **kwargs):
+            captured["flow"] = list(flowables)
+            return original(self, flowables, *args, **kwargs)
+
+        monkeypatch.setattr(SimpleDocTemplate, "build", spy)
+        analysis_report.analysis_pdf(analysis, exam, lang="id")
+        flow = captured.get("flow")
+        assert flow, "the document was built without a flowable list"
+        heading = analysis_report.labels("id")["items"]
+        at = [index for index, item in enumerate(flow)
+              if getattr(item, "text", None) == heading]
+        assert at, "the item heading is not in the flow at all"
+        assert any(isinstance(flow[index - 1], PageBreak) for index in at), (
+            "the item table can begin at the foot of the drawings' page")

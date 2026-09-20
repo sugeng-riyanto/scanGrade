@@ -248,17 +248,18 @@ def _view_body(name: str) -> str:
 # ── the documents ────────────────────────────────────────────────────────────
 
 class TestTheDocumentsAreOffered:
-    def test_both_links_carry_this_exam_and_the_current_language(self, rendered):
+    def test_every_document_carries_this_exam_and_the_current_language(self, rendered):
         html = rendered["html"]
         assert "/teacher/analysis/exam-1/download.csv" in html
+        assert "/teacher/analysis/exam-1/download.xlsx" in html
         assert "/teacher/analysis/exam-1/download.pdf" in html
 
     def test_the_language_parameter_follows_the_toggle(self):
-        """The CSV and the PDF are rendered on the server, so Alpine cannot
-        translate them. The page has to hand the reader's choice to the link, or
-        an English reader files an Indonesian report — the same defect as a
-        hardcoded label, one layer further out."""
-        for kind in ("csv", "pdf"):
+        """The CSV, the workbook and the PDF are rendered on the server, so Alpine
+        cannot translate them. The page has to hand the reader's choice to the
+        link, or an English reader files an Indonesian report — the same defect as
+        a hardcoded label, one layer further out."""
+        for kind in ("csv", "xlsx", "pdf"):
             assert re.search(
                 rf":href=\"'/teacher/analysis/\{{\{{ exam\.id \}}\}}/download\.{kind}"
                 r"\?lang=' \+ lang\"", PAGE), \
@@ -276,6 +277,21 @@ class TestTheDocumentsAreOffered:
         pdf = analysis_report.analysis_pdf(rendered["analysis"], EXAM, lang="en")
         assert pdf.startswith(b"%PDF-") and len(pdf) > 1500
 
+    def test_the_workbook_route_is_one_door_like_the_others(self):
+        """Guarded, and funnelled through `_analysis_of` — the one place that
+        decides whether this caller may open this exam. A new document route is
+        the easiest way to add a second door without noticing."""
+        block = TEACHER.split('@teacher_bp.route("/analysis/<exam_id>/download.xlsx")',
+                              1)
+        assert len(block) == 2, "the workbook route is gone"
+        body = block[1].split("@teacher_bp.route", 1)[0]
+        assert "@teacher_or_admin_required" in body
+        assert "_analysis_of(" in body, "the workbook route checks access by hand"
+        assert "redirect_to=\"/teacher/results\"" in body
+        assert ("application/vnd.openxmlformats-officedocument"
+                ".spreadsheetml.sheet") in body, (
+            "the workbook is not sent as a workbook, so a browser opens it as text")
+
 
 # ── responsiveness, asserted the way it fails ───────────────────────────────
 
@@ -285,7 +301,11 @@ class TestItFitsASmallScreen:
         scrolling is the layout that made the previous report unreadable, so the
         wrapper is asserted on the item table itself and not "somewhere on the
         page" — the banding and split tables have their own wrappers."""
-        assert '<div class="overflow-x-auto">\n            <table class="w-full text-xs min-w-[820px]">' in PAGE, (
+        # Matched by shape rather than by the whole tag: the table carries a
+        # `data-item-table` hook for the copy control now, and a test that pins the
+        # attribute list fails on the next attribute instead of on the layout.
+        assert re.search(r'<div class="overflow-x-auto">\s*<table[^>]*'
+                         r'min-w-\[820px\]', PAGE), (
             "the item table is not inside a horizontal scroller with a minimum "
             "width, so it will squash on a phone")
 
@@ -436,3 +456,107 @@ class TestTheScoringGuideIsTrue:
     def test_a_missing_key_is_described_as_unscored(self):
         assert "kunci" in GUIDE.lower()
         assert "Soal tanpa kunci tidak dinilai" in GUIDE
+
+
+# ── the copy board ──────────────────────────────────────────────────────────
+#
+# Charts are the one part of this page a teacher cannot type into a report. Each
+# one copies as an image *with its colour key*, and the item table copies as cells
+# — the two things Word and Excel respectively need. The failure that matters is
+# silent: a button that does nothing looks exactly like a button that worked, so
+# what is checked here is that the controls exist, that they address the drawings
+# that are on the page, and that the key they compose comes from the palette the
+# server sends rather than from a second copy kept in the template.
+
+class TestTheCopyBoard:
+    #: The canvases the page draws, and the key each copy control names. A control
+    #: for a chart that is not there composes nothing and reports success.
+    CHART_REFS = ("map", "difficulty", "people")
+
+    def test_the_page_draws_the_charts_the_copy_controls_address(self, rendered):
+        for ref in self.CHART_REFS:
+            assert f'x-ref="{ref}Canvas"' in rendered["html"], (
+                f"the page has no {ref} canvas, so copying it can only fail")
+
+    def test_every_chart_has_a_copy_control(self, rendered):
+        html = rendered["html"]
+        for ref in self.CHART_REFS:
+            assert f"copyChart('{ref}')" in html, (
+                f"the {ref} chart cannot be copied")
+
+    def test_the_board_offers_the_table_and_the_whole_figure(self, rendered):
+        html = rendered["html"]
+        assert "copyAllCharts()" in html, "there is no way to copy every chart at once"
+        assert "copyTable()" in html, "there is no way to copy the item table"
+
+    def test_the_table_the_copy_control_reads_is_marked(self, rendered):
+        """`copyTable` reads the DOM, so it needs a hook that is not a CSS class —
+        restyling the table must not silently unhook the button.
+
+        Matched on the *element*, not on the string: `[data-item-table]` appears in
+        the selector that reads the hook as well, so a plain substring check passes
+        with the attribute removed from the table and still present in the code
+        looking for it.
+        """
+        on_the_table = re.compile(r"<table[^>]*data-item-table")
+        assert on_the_table.search(PAGE), "the template's table has no copy hook"
+        assert on_the_table.search(rendered["html"]), (
+            "the rendered item table has no hook for the copy control")
+
+    def test_the_key_composed_into_a_copied_chart_is_the_server_palette(self):
+        """One palette. The five `rgba(...)` literals that used to be here were the
+        same information kept where the PDF and the workbook could not reach it."""
+        assert "this.tones[flag]" in PAGE
+        for literal in ("rgba(220,38,38", "rgba(217,119,6", "rgba(99,102,241",
+                        "rgba(120,113,108", "rgba(5,150,105"):
+            assert literal not in PAGE, (
+                f"the template keeps its own copy of the palette ({literal})")
+
+    def test_the_page_is_told_the_palette_the_documents_use(self, rendered):
+        from app.services import analysis_report
+        assert rendered["chart"]["tones"] == analysis_report.FLAG_TONES
+        # And it survives the trip through the attribute Alpine reads, which is
+        # where a payload silently becomes `{}`.
+        import html as html_mod
+        match = re.search(r'x-data="itemAnalysis\((.*?)\)"', rendered["html"], re.S)
+        data = json.loads(html_mod.unescape(match.group(1)))
+        assert data["tones"] == analysis_report.FLAG_TONES
+
+    def test_the_copied_legend_covers_the_acts_and_not_the_internals(self):
+        """Five swatches for the four acts a teacher takes plus \"not measurable\".
+
+        A swatch per internal flag would be eight, and two of them would be the
+        same colour — a key that lists the same red twice teaches a reader to skip
+        it.
+        """
+        legend = PAGE.split("legend() {", 1)[1].split("},\n", 1)[0]
+        for flag in ("'ok'", "'weak'", "'negative', 'misfit'",
+                     "'extreme_easy', 'extreme_hard'", "'unkeyed', 'unscored'"):
+            assert flag in legend, f"the copied key has no group for {flag}"
+        assert "this.tone(" in legend, "the swatches do not use the palette"
+
+    def test_a_refused_clipboard_is_not_a_button_that_does_nothing(self):
+        """`clipboard.write` needs a secure context and a browser may refuse it.
+        The fallback saves the PNG and the note says which happened."""
+        assert "navigator.clipboard.write" in PAGE
+        assert "canvas.toDataURL" in PAGE, (
+            "a refused clipboard leaves the reader with nothing")
+        for pair in ("'Tersalin', 'Copied'",
+                     "'Grafik diunduh sebagai PNG', 'Chart downloaded as a PNG'",
+                     "'Tabel tersalin', 'Table copied'"):
+            assert pair in PAGE, f"the copy feedback is not bilingual ({pair})"
+
+    def test_the_table_is_copied_as_cells_and_not_as_one_column(self):
+        """`text/plain` as tabs for Excel and `text/html` as a table for Word: a
+        plain-text paste into Word arrives as one column of tabs."""
+        assert "'text/plain': new Blob([tsv]" in PAGE
+        assert "'text/html': new Blob([html]" in PAGE
+        assert "cell.innerText" in PAGE, (
+            "the copy reads the template's markup instead of what is on the page")
+
+    def test_the_copy_control_is_offered_in_both_languages_and_on_a_phone(self):
+        assert "t('Salin semua grafik','Copy all charts')" in PAGE
+        assert "t('Salin tabel','Copy table')" in PAGE
+        # The chart controls are in the card header, which stacks on a phone; a
+        # fixed-width toolbar here would push the chart off the screen.
+        assert "flex items-center gap-2" in PAGE.split('copyChart(', 1)[0][-600:]

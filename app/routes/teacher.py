@@ -1845,6 +1845,10 @@ def _chart_payload(analysis):
     """
     return {
         "summary": dataclasses.asdict(analysis.summary),
+        # The finding colours, from the one palette the PDF and the workbook also
+        # read. They used to be five `rgba(...)` literals inside the component, so
+        # the page and the file a school filed could disagree about what red means.
+        "tones": analysis_report.chart_palette(),
         "items": [{
             "no": item.index + 1,
             "kind": item.kind,
@@ -1907,6 +1911,29 @@ def exam_analysis_csv(exam_id):
     # text mimetype itself, so writing it here as well sends the parameter twice.
     return send_file(buf, mimetype="text/csv", as_attachment=True,
                      download_name=analysis_report.filename(analysis, exam, "csv"))
+
+
+@teacher_bp.route("/analysis/<exam_id>/download.xlsx")
+@teacher_or_admin_required
+def exam_analysis_xlsx(exam_id):
+    """The analysis as a workbook — numbers as numbers, and the charts in it.
+
+    The CSV is for reading and the PDF for filing; this is the one a teacher
+    *works* in, which is why it is not a CSV with a different extension: the
+    figures are real numbers, the drawings are editable Excel charts sitting on
+    the sheets they plot, and the colour key is filled in.
+    """
+    supabase = get_supabase()
+    lang = request.args.get("lang") or "id"
+    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+                                       redirect_to="/teacher/results")
+    if err:
+        return err
+    book = analysis_report.analysis_xlsx(analysis, exam, lang=lang)
+    return send_file(
+        io.BytesIO(book), as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        download_name=analysis_report.filename(analysis, exam, "xlsx"))
 
 
 @teacher_bp.route("/analysis/<exam_id>/download.pdf")
