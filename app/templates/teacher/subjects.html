@@ -1,7 +1,7 @@
 {% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}Mata Pelajaran - ScanGrade{% endblock %}
-{% block page_title %}Mata Pelajaran{% endblock %}
+{% block title %}<span lang="id">Mata Pelajaran</span><span lang="en">Subjects</span> - ScanGrade{% endblock %}
+{% block page_title %}<span lang="id">Mata Pelajaran</span><span lang="en">Subjects</span>{% endblock %}
 {% block content %}
 {% set sort = sort|default('asc') %}
 {% set q = q|default('') %}
@@ -14,10 +14,14 @@
 
     <!-- Header + Search + Sort -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
-        <p class="text-sm text-slate-500 font-medium">Daftar mata pelajaran di sekolah Anda</p>
-        <div class="flex items-center gap-2">
+        <p class="text-sm text-slate-500 font-medium">
+            <span lang="id">Daftar mata pelajaran di sekolah Anda</span>
+            <span lang="en">Subjects in your school</span>
+        </p>
+        <div class="flex items-center gap-2 flex-wrap">
             <form method="GET" class="flex gap-1">
-                <input type="text" name="q" value="{{ q }}" class="input text-sm w-36" placeholder="Cari mapel...">
+                <input type="text" name="q" value="{{ q }}" class="input text-sm w-36"
+                       placeholder="Cari mapel... / Search...">
                 <button type="submit" class="btn btn-primary text-sm px-3"><i class="fas fa-search"></i></button>
             </form>
             <a href="?sort={% if sort == 'asc' %}desc{% else %}asc{% endif %}&q={{ q }}"
@@ -26,35 +30,56 @@
                 {% if sort == 'asc' %}A-Z{% else %}Z-A{% endif %}
             </a>
             <button @click="showForm = !showForm" class="text-xs font-bold px-3 py-2 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
-                <i class="fas fa-plus mr-1"></i>Tambah Mapel
+                <i class="fas fa-plus mr-1"></i><span lang="id">Tambah Mapel</span><span lang="en">Add Subject</span>
             </button>
         </div>
     </div>
 
     <!-- Add Form -->
     <form x-show="showForm" x-cloak method="POST" action="/teacher/subjects/new"
-          class="flex gap-2 mb-4 p-4 bg-primary-50 rounded-xl border border-primary-200">
-        <input type="text" name="name" x-model="name" required class="flex-1 px-4 py-2 border border-primary-200 rounded-xl text-sm font-bold" placeholder="Nama mata pelajaran...">
-        <button type="submit" class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">Simpan</button>
-        <button type="button" @click="showForm = false" class="px-4 py-2 border border-primary-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-white transition">Batal</button>
+          class="flex flex-col sm:flex-row gap-2 mb-4 p-4 bg-primary-50 rounded-xl border border-primary-200">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="name" x-model="name" required
+               class="flex-1 px-4 py-2 border border-primary-200 rounded-xl text-sm font-bold"
+               placeholder="Nama mata pelajaran... / Subject name...">
+        <div class="flex gap-2">
+            <button type="submit" class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">
+                <span lang="id">Simpan</span><span lang="en">Save</span>
+            </button>
+            <button type="button" @click="showForm = false"
+                    class="px-4 py-2 border border-primary-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-white transition">
+                <span lang="id">Batal</span><span lang="en">Cancel</span>
+            </button>
+        </div>
     </form>
 
     {% if subjects %}
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {% for s in subjects %}
         <div class="group relative p-4 bg-white rounded-xl border border-slate-200 text-center hover:shadow-md transition">
-            <form method="POST" action="/teacher/subjects/{{ s.id }}/delete" class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition"
-                  onsubmit="return confirm('Hapus {{ s.name }}?')">
+            <form method="POST" action="/teacher/subjects/{{ s.id }}/delete"
+                  class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition"
+                  onsubmit="return confirm('Hapus / Delete {{ s.name }}?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="text-red-300 hover:text-red-500 p-1"><i class="fas fa-times text-xs"></i></button>
             </form>
             <div class="w-10 h-10 mx-auto rounded-xl bg-primary-100 flex items-center justify-center text-primary-600 mb-2"><i class="fas fa-book"></i></div>
-            <p class="font-extrabold text-slate-700">{{ s.name }}</p>
+            <p class="font-extrabold text-slate-700 text-sm">{{ s.name }}</p>
+            {% if s.get('code') %}
+            <p class="text-xs text-slate-400 mt-1">{{ s.code }}</p>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
     {% else %}
     <div class="text-center py-12 text-slate-400 font-medium">
-        {% if q %}Tidak ada mapel dengan nama "{{ q }}"{% else %}Belum ada mata pelajaran. Klik "Tambah Mapel" untuk memulai.{% endif %}
+        {% if q %}
+            <span lang="id">Tidak ada mapel dengan nama "{{ q }}"</span>
+            <span lang="en">No subjects matching "{{ q }}"</span>
+        {% else %}
+            <span lang="id">Belum ada mata pelajaran. Klik "Tambah Mapel" untuk memulai.</span>
+            <span lang="en">No subjects yet. Click "Add Subject" to get started.</span>
+        {% endif %}
     </div>
     {% endif %}
 </div>
