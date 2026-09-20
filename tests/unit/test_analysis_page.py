@@ -112,7 +112,7 @@ class TestThePageRenders:
 
     def test_the_charts_get_data_through_the_attribute_alpine_reads(self, rendered):
         html = rendered["html"]
-        m = re.search(r'x-data="itemAnalysis\((.*?)\)"\s+x-init', html, re.S)
+        m = re.search(r'x-data="itemAnalysis\((.*?)\)"', html, re.S)
         assert m, "the component is not initialised with its payload"
         import html as html_mod
         data = json.loads(html_mod.unescape(m.group(1)))
@@ -120,6 +120,11 @@ class TestThePageRenders:
         assert data["summary"]["students"] == 10
         # The three canvases: an item map, a difficulty chart and a person spread.
         assert html.count("<canvas") == 3
+        # …and Alpine runs the component's own `init()`, so the element must not ask
+        # for it again. It did, and the browser console said so: the second call
+        # created a second Chart.js chart on a canvas the first one still owned.
+        assert 'x-init="init()"' not in html, (
+            "the charts component is initialized twice — Alpine already calls init()")
 
     def test_every_kind_a_question_can_be_gets_a_label(self, rendered):
         """`item.kind` is a `question_types.KIND_*` token; the catalogue is keyed
