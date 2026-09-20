@@ -4,7 +4,10 @@
 {% block content %}
 <div x-data="{ showForm: false, name: '' }">
     {% for msg in get_flashed_messages(with_categories=true) %}
-    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+    {% set tone = 'bg-emerald-50 text-emerald-700 border border-emerald-200' if msg[0] == 'success'
+                  else ('bg-amber-50 text-amber-700 border border-amber-200' if msg[0] == 'warning'
+                        else 'bg-red-50 text-red-600 border border-red-200') %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {{ tone }}">
         {{ msg[1] }}
     </div>
     {% endfor %}
@@ -39,10 +42,14 @@
         {% for s in subjects %}
         <div class="group relative p-4 bg-white rounded-xl border border-slate-200 hover:shadow-md transition"
              x-data="{ editing: false }">
-            <!-- Delete button -->
-            <form method="POST" action="/admin-sekolah/subjects/{{ s.id }}/delete" class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition"
-                  hx-confirm="{{ t('Hapus ' + s.name + '? Semua assignment guru ke mapel ini juga akan dihapus.','Delete ' + s.name + '? All teacher assignments to this subject will also be deleted.') }}"
-                  hx-post="/admin-sekolah/subjects/{{ s.id }}/delete" hx-target="body">
+            <!-- Delete button. The dialog names what breaks, and `confirm=1` is
+                 what lets the server act; a delete that would release a teacher
+                 assignment or strip an exam's subject is refused without it. -->
+            <form method="POST" action="/admin-sekolah/subjects/{{ s.id }}/delete"
+                  class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition"
+                  x-data
+                  @submit.prevent="if (confirm(t('Hapus {{ s.name }}? {{ s.assignment_count }} penugasan guru dan {{ s.exam_count }} ujian akan melepas mapel ini.','Delete {{ s.name }}? {{ s.assignment_count }} teacher assignments and {{ s.exam_count }} exams will lose it.'))) $el.submit()">
+                <input type="hidden" name="confirm" value="1">
                 <button type="submit" class="text-red-300 hover:text-red-500 p-1"><i class="fas fa-times text-xs"></i></button>
             </form>
             <!-- Edit button -->
@@ -53,6 +60,13 @@
             <p class="font-extrabold text-slate-700 text-center">{{ s.name }}</p>
             {% if s.code %}
             <p class="text-xs text-slate-400 text-center mt-1 font-mono">{{ s.code }}</p>
+            {% endif %}
+            {% if s.assignment_count or s.exam_count %}
+            <p class="text-[10px] text-slate-400 text-center mt-1">
+                {{ s.assignment_count }} <span x-text="t('penugasan','assignments')"></span>
+                &middot;
+                {{ s.exam_count }} <span x-text="t('ujian','exams')"></span>
+            </p>
             {% endif %}
             <!-- Inline edit form -->
             <div x-show="editing" x-collapse x-cloak class="mt-3 text-left">

@@ -24,10 +24,12 @@ from app.services.question_types import (
 from app.services import mark_scheme
 from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
-from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
-                                 school_subjects, teacher_assignments_for)
+from app.utils.req_cache import (invalidate_school, invalidate_teacher_assignments,
+                                 school_classes, school_subjects, teacher_assignments_for)
 from app.utils import exam_window
 from app.services import analysis_frameworks, analysis_report, analysis_scope, item_analysis
+from app.services.subject_service import (subject_usage, usage_confirmation_needed,
+                                          usage_message)
 
 logger = logging.getLogger(__name__)
 
@@ -3753,10 +3755,35 @@ def teacher_comms():
     return render_template("shared/comms.html")
 
 
+# ─── SUBJECTS ─────────────────────────────────────────
+#
+# A subject is a *school-wide* row, not a teacher's own. Writing one changes
+# what every teacher at the school can assign, and deleting one cascades into
+# `teacher_assignments` and strips the subject off every exam that used it.
+# That makes subject writes the admin's job — the same rule `assignments()`
+# already enforces for classes ("Hanya admin sekolah yang bisa menambah kelas").
+#
+# These three routes used to be guarded by `@login_required` alone, which asks
+# only "is somebody signed in?". Any member of the school — a murid included —
+# could list, create and delete subjects, and the delete filtered on nothing but
+# the id, so it reached across schools. They now carry a role guard; the writes
+# add the school check and the admin restriction, and a delete that would break
+# something has to be confirmed against the list of what breaks.
+
+
+def _subject_write_denied():
+    """Refuse a non-admin write, in the shape the caller can read."""
+    message = "Hanya admin sekolah yang bisa mengubah mata pelajaran"
+    if request.is_json or request.headers.get("HX-Request"):
+        return jsonify({"error": message}), 403
+    flash(message, "error")
+    return redirect("/teacher/subjects")
+
+
 @teacher_bp.route("/subjects")
-@login_required
+@teacher_or_admin_required
 def teacher_subjects():
-    """List subjects for the teacher's school."""
+    """List the school's subjects, with what each one is carrying."""
     sid = g.get("user_school_id")
     supabase = get_supabase()
     sort = request.args.get("sort", "asc")
@@ -3766,13 +3793,32 @@ def teacher_subjects():
         data = supabase.table("subjects").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
         if q:
             data = [s for s in data if q.lower() in s.get("name", "").lower()]
+        # What each subject is carrying, so the delete dialog can name it. Two
+        # batched reads rather than one per card.
+        subject_ids = [s["id"] for s in data]
+        assign_counts = {}
+        exam_counts = {}
+        if subject_ids:
+            for r in (supabase.table("teacher_assignments").select("subject_id")
+                      .in_("subject_id", subject_ids).execute().data or []):
+                assign_counts[r["subject_id"]] = assign_counts.get(r["subject_id"], 0) + 1
+            for r in (supabase.table("exams").select("subject_id")
+                      .in_("subject_id", subject_ids).execute().data or []):
+                key = r.get("subject_id")
+                if key:
+                    exam_counts[key] = exam_counts.get(key, 0) + 1
+        for s in data:
+            s["assignment_count"] = assign_counts.get(s["id"], 0)
+            s["exam_count"] = exam_counts.get(s["id"], 0)
     return render_template("teacher/subjects.html", subjects=data, sort=sort, q=q)
 
 
 @teacher_bp.route("/subjects/new", methods=["POST"])
-@login_required
+@teacher_or_admin_required
 def teacher_subject_create():
-    """Create a new subject in the teacher's school."""
+    """Create a new subject in the teacher's school. Admin only."""
+    if g.get("user_role") not in ("admin_sekolah", "super_admin"):
+        return _subject_write_denied()
     sid = g.get("user_school_id")
     supabase = get_supabase()
     name = request.form.get("name", "").strip()
@@ -3798,14 +3844,31 @@ def teacher_subject_create():
 
 
 @teacher_bp.route("/subjects/<subject_id>/delete", methods=["POST"])
-@login_required
+@teacher_or_admin_required
+@require_school_access("subjects", "subject_id")
 def teacher_subject_delete(subject_id):
-    """Delete a subject."""
+    """Delete a school subject. Admin only, and never blindly.
+
+    `require_school_access` proves the subject is this school's — without it the
+    id in the URL reached any school's row. The admin check is the same one
+    `assignments()` applies to classes. The confirmation is enforced *here*, not
+    only in the dialog: a subject another teacher or exam still references is not
+    deleted on a bare POST, whatever the client sent.
+    """
+    if g.get("user_role") not in ("admin_sekolah", "super_admin"):
+        return _subject_write_denied()
     supabase = get_supabase()
+    usage = subject_usage(supabase, subject_id)
+    if request.form.get("confirm") != "1" and usage_confirmation_needed(usage):
+        flash(usage_message(usage), "warning")
+        return redirect("/teacher/subjects")
     try:
         supabase.table("teacher_assignments").delete().eq("subject_id", subject_id).execute()
         supabase.table("subjects").delete().eq("id", subject_id).execute()
         log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
+        # The school's subject list and every teacher's assignment list are
+        # cached; a subject the admin just removed must stop appearing.
+        invalidate_school(g.get("user_school_id"))
         flash("Mapel berhasil dihapus", "success")
     except Exception as e:
         flash(f"Gagal menghapus: {e}", "error")

@@ -15,6 +15,8 @@ from app.services.audit_service import log_activity, log_create, log_update, log
 from app.services.student_import import create_student_account
 from app.utils.req_cache import invalidate_class, invalidate_school
 from app.services.teacher_import import create_teacher_account
+from app.services.subject_service import (subject_usage, usage_confirmation_needed,
+                                          usage_message)
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -705,6 +707,22 @@ def admin_subjects():
     data = supabase.table("subjects").select("*").eq("school_id", sid).order("name", desc=(sort == "desc")).execute().data or []
     if q:
         data = [s for s in data if q.lower() in s.get("name", "").lower()]
+    # What each subject is carrying, so the delete dialog can name it. Two
+    # batched reads rather than one count per card.
+    subject_ids = [s["id"] for s in data]
+    assign_counts, exam_counts = {}, {}
+    if subject_ids:
+        for r in (supabase.table("teacher_assignments").select("subject_id")
+                  .in_("subject_id", subject_ids).execute().data or []):
+            assign_counts[r["subject_id"]] = assign_counts.get(r["subject_id"], 0) + 1
+        for r in (supabase.table("exams").select("subject_id")
+                  .in_("subject_id", subject_ids).execute().data or []):
+            key = r.get("subject_id")
+            if key:
+                exam_counts[key] = exam_counts.get(key, 0) + 1
+    for s in data:
+        s["assignment_count"] = assign_counts.get(s["id"], 0)
+        s["exam_count"] = exam_counts.get(s["id"], 0)
     return render_template("admin_sekolah/subjects.html", subjects=data, sort=sort, q=q)
 
 
@@ -762,6 +780,20 @@ def admin_subject_edit(subject_id):
 @require_school_access("subjects", "subject_id")
 def admin_subject_delete(subject_id):
     supabase = get_supabase()
+    # A browser form post gets flash + redirect so the page comes back with the
+    # outcome; an API/HTMX caller gets the same answer as JSON.
+    wants_json = request.is_json or "application/json" in (request.headers.get("Accept") or "")
+
+    # A delete that breaks something has to be shown first. The dialog names the
+    # counts; this gate enforces it, because a bare POST carries no such promise
+    # — and `exams.subject_id` is ON DELETE SET NULL, so the exams that lose the
+    # subject do so without an error.
+    usage = subject_usage(supabase, subject_id)
+    if request.form.get("confirm") != "1" and usage_confirmation_needed(usage):
+        if wants_json:
+            return jsonify({"error": usage_message(usage), "needs_confirmation": True}), 409
+        flash(usage_message(usage), "warning")
+        return redirect("/admin-sekolah/subjects")
     try:
         supabase.table("teacher_assignments").delete().eq("subject_id", subject_id).execute()
         supabase.table("subjects").delete().eq("id", subject_id).execute()
@@ -770,9 +802,15 @@ def admin_subject_delete(subject_id):
         # 60 s TTL — their keys name a teacher this route never saw.
         invalidate_school(g.get("user_school_id"))
         log_activity("delete", "subject", str(subject_id), user_id=g.user_id)
-        return jsonify({"success": True})
+        if wants_json:
+            return jsonify({"success": True})
+        flash("Mapel berhasil dihapus", "success")
+        return redirect("/admin-sekolah/subjects")
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        if wants_json:
+            return jsonify({"error": str(e)}), 400
+        flash(f"Gagal: {e}", "error")
+        return redirect("/admin-sekolah/subjects")
 
 
 # ─── PROMOTE (Naik Kelas) ────────────────────────────

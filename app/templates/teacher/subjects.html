@@ -4,9 +4,17 @@
 {% block content %}
 {% set sort = sort|default('asc') %}
 {% set q = q|default('') %}
+{# A subject is a school-wide row, so writing one is the admin's job — the same
+   rule the classes list already follows. Teachers read the list; only
+   admin_sekolah (and super_admin) see the controls that change it. The route
+   enforces this too, so hiding the button is convenience, not the guard. #}
+{% set can_manage = g.user_role in ('admin_sekolah', 'super_admin') %}
 <div x-data="{ showForm: false, name: '' }">
     {% for msg in get_flashed_messages(with_categories=true) %}
-    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+    {% set tone = 'bg-emerald-50 text-emerald-700 border border-emerald-200' if msg[0] == 'success'
+                  else ('bg-amber-50 text-amber-700 border border-amber-200' if msg[0] == 'warning'
+                        else 'bg-red-50 text-red-600 border border-red-200') %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {{ tone }}">
         {{ msg[1] }}
     </div>
     {% endfor %}
@@ -24,12 +32,21 @@
                 <i class="fas fa-sort-alpha-{% if sort == 'asc' %}down{% else %}up{% endif %} mr-1"></i>
                 {% if sort == 'asc' %}A-Z{% else %}Z-A{% endif %}
             </a>
+            {% if can_manage %}
             <button @click="showForm = !showForm" class="text-xs font-bold px-3 py-2 rounded-lg bg-primary-50 text-primary-700 hover:bg-primary-100 transition border border-primary-200">
                 <i class="fas fa-plus mr-1"></i><span x-text="t('Tambah Mapel','Add Subject')"></span>
             </button>
+            {% endif %}
         </div>
     </div>
 
+    {% if not can_manage %}
+    <div class="mb-4 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-500">
+        <i class="fas fa-lock mr-1"></i><span x-text="t('Mata pelajaran dikelola oleh admin sekolah. Hubungi admin untuk menambah atau menghapus.','Subjects are managed by the school admin. Contact an admin to add or remove one.')"></span>
+    </div>
+    {% endif %}
+
+    {% if can_manage %}
     <form x-show="showForm" x-cloak method="POST" action="/teacher/subjects/new"
           class="flex flex-col sm:flex-row gap-2 mb-4 p-4 bg-primary-50 rounded-xl border border-primary-200">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -44,22 +61,33 @@
                     x-text="t('Batal','Cancel')"></button>
         </div>
     </form>
+    {% endif %}
 
     {% if subjects %}
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         {% for s in subjects %}
         <div class="group relative p-4 bg-white rounded-xl border border-slate-200 text-center hover:shadow-md transition">
+            {% if can_manage %}
             <form method="POST" action="/teacher/subjects/{{ s.id }}/delete"
                   class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition"
-                  hx-confirm="{{ t('Hapus ' + s.name + '? / Delete ' + s.name + '?', 'Delete ' + s.name + '?') }}"
-                  hx-post="/teacher/subjects/{{ s.id }}/delete" hx-target="body">
+                  x-data
+                  @submit.prevent="if (confirm(t('Hapus mapel ini? {{ s.assignment_count }} penugasan guru dan {{ s.exam_count }} ujian akan melepas mapel ini.','Delete this subject? {{ s.assignment_count }} teacher assignments and {{ s.exam_count }} exams will lose it.'))) $el.submit()">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="confirm" value="1">
                 <button type="submit" class="text-red-300 hover:text-red-500 p-1"><i class="fas fa-times text-xs"></i></button>
             </form>
+            {% endif %}
             <div class="w-10 h-10 mx-auto rounded-xl bg-primary-100 flex items-center justify-center text-primary-600 mb-2"><i class="fas fa-book"></i></div>
             <p class="font-extrabold text-slate-700 text-sm">{{ s.name }}</p>
             {% if s.get('code') %}
-            <p class="text-xs text-slate-400 mt-1">{{ s.code }}</p>
+            <p class="text-xs text-slate-400 mt-1 font-mono">{{ s.code }}</p>
+            {% endif %}
+            {% if s.assignment_count or s.exam_count %}
+            <p class="text-[10px] text-slate-400 mt-1">
+                {{ s.assignment_count }} <span x-text="t('penugasan','assignments')"></span>
+                &middot;
+                {{ s.exam_count }} <span x-text="t('ujian','exams')"></span>
+            </p>
             {% endif %}
         </div>
         {% endfor %}
@@ -68,8 +96,10 @@
     <div class="text-center py-12 text-slate-400 font-medium">
         {% if q %}
         <span>{{ t('Tidak ada mapel dengan nama', 'No subjects matching') }} "{{ q }}"</span>
-        {% else %}
+        {% elif can_manage %}
         <span x-text="t('Belum ada mata pelajaran. Klik Tambah Mapel untuk memulai.','No subjects yet. Click Add Subject to get started.')"></span>
+        {% else %}
+        <span x-text="t('Belum ada mata pelajaran di sekolah ini.','No subjects at this school yet.')"></span>
         {% endif %}
     </div>
     {% endif %}
