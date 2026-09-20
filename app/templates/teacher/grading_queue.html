@@ -3,16 +3,23 @@
 {% block title %}Koreksi {{ exam.title }} - ScanGrade{% endblock %}
 {% block page_title %}Koreksi: {{ exam.title }}{% endblock %}
 {% block content %}
-<div x-data="gradingApp()" x-init="init()" class="flex flex-col h-[calc(100vh-10rem)]" @keydown.window="handleKey($event)">
+{# Responsive contract: above `lg` this stays the split pane — the queue in a
+   18rem column, the marking panel beside it, both viewport-locked so the toolbar
+   and the save bar never scroll away. Below `lg` the two stack: the queue becomes
+   one horizontally scrolling row of students above the panel, and the panel takes
+   the full width. The old markup put a `w-72` column beside a `flex-1` panel at
+   every width, so on a 375 px phone the panel — the part a teacher is actually
+   reading — was about 100 px wide. #}
+<div x-data="gradingApp()" x-init="init()" class="flex flex-col min-h-0 lg:h-[calc(100vh-10rem)]" @keydown.window="handleKey($event)">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-3 shrink-0">
-        <div class="flex items-center gap-3">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
             <a href="/teacher/grading" class="text-surface-400 hover:text-primary-600 text-sm p-1.5 hover:bg-primary-50 rounded-lg transition">
                 <i class="fas fa-arrow-left"></i>
             </a>
-            <div>
-                <h1 class="text-base font-extrabold text-surface-800 flex items-center gap-2">
-                    <i class="fas fa-pen-alt text-primary-500"></i>{{ exam.title }}
+            <div class="min-w-0">
+                <h1 class="text-sm sm:text-base font-extrabold text-surface-800 flex items-center gap-2 truncate">
+                    <i class="fas fa-pen-alt text-primary-500 shrink-0"></i><span class="truncate">{{ exam.title }}</span>
                 </h1>
                 <p class="text-[11px] text-surface-500 font-medium">
                     <span x-text="graded + '/' + total"></span> dinilai
@@ -21,9 +28,9 @@
                 </p>
             </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center justify-end gap-2">
             <!-- Question tabs (essay only) -->
-            <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5" x-show="essayQuestions.length > 1">
+            <div class="flex gap-1 bg-surface-100 rounded-lg p-0.5 overflow-x-auto max-w-full" x-show="essayQuestions.length > 1">
                 <template x-for="(q, qi) in essayQuestions" :key="q.index">
                     <button @click="switchQuestion(q.index)"
                             class="px-2.5 py-1 text-[10px] font-bold rounded-md transition"
@@ -31,7 +38,7 @@
                             x-text="'Soal ' + (q.index + 1)"></button>
                 </template>
             </div>
-            <select x-model="filterMode" @change="fetchQueue()" class="text-[11px] border border-surface-200 rounded-lg px-2 py-1.5 bg-white text-surface-600 font-medium">
+            <select x-model="filterMode" @change="fetchQueue()" class="text-[11px] border border-surface-200 rounded-lg px-2 py-1.5 bg-white text-surface-600 font-medium shrink-0">
                 <option value="pending">Perlu Koreksi</option>
                 <option value="all">Semua</option>
                 <option value="graded">Sudah Dinilai</option>
@@ -39,8 +46,8 @@
             <!-- Batch AI button -->
             <button @click="bulkAiGrade()" :disabled="bulkAiLoading || pending === 0"
                     class="px-3 py-1.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white text-[11px] font-bold rounded-lg hover:from-violet-600 hover:to-purple-600 disabled:opacity-50 transition shadow-sm flex items-center gap-1.5">
-                <i class="fas" :class="bulkAiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-                <span x-text="bulkAiLoading ? 'AI memproses...' : 'AI Koreksi Semua'"></span>
+                <i class="fas shrink-0" :class="bulkAiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
+                <span class="hidden sm:inline" x-text="bulkAiLoading ? 'AI memproses...' : 'AI Koreksi Semua'"></span>
             </button>
         </div>
     </div>
@@ -52,11 +59,11 @@
              :style="'width:' + (total > 0 ? (graded/total*100) : 0) + '%'"></div>
     </div>
 
-    <!-- Main content: split pane -->
-    <div class="flex gap-4 flex-1 min-h-0">
+    <!-- Main content: split pane above lg, stacked below it -->
+    <div class="flex flex-col lg:flex-row gap-3 lg:gap-4 flex-1 min-h-0">
 
         <!-- LEFT: Student Queue -->
-        <div class="w-72 shrink-0 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden">
+        <div class="w-full lg:w-72 shrink-0 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden">
             <!-- Search -->
             <div class="p-2 border-b border-surface-100">
                 <div class="relative">
@@ -65,11 +72,14 @@
                            class="w-full pl-7 pr-3 py-2 bg-surface-50 border-0 rounded-lg text-xs text-surface-700 placeholder:text-surface-400 focus:ring-2 focus:ring-primary-200">
                 </div>
             </div>
-            <!-- Student list -->
-            <div class="flex-1 overflow-y-auto" x-ref="studentList">
+            <!-- Student list: a column above lg, one scrolling row of students below it -->
+            <div class="flex-1 flex lg:block overflow-x-auto lg:overflow-x-hidden lg:overflow-y-auto"
+                 x-ref="studentList" data-student-list>
                 <template x-for="(s, idx) in filteredList" :key="s.id">
                     <div @click="selectStudent(idx)"
-                         class="px-3 py-2.5 cursor-pointer transition border-b border-surface-50 group"
+                         class="px-3 py-2.5 cursor-pointer transition group shrink-0 lg:shrink
+                                min-w-[15rem] lg:min-w-0 border-r border-surface-100
+                                lg:border-r-0 lg:border-b lg:border-surface-50"
                          :class="currentIdx === idx ? 'bg-primary-50 border-l-[3px] border-l-primary-500' : 'border-l-[3px] border-l-transparent hover:bg-surface-50'"
                          :id="'student-' + idx">
                         <div class="flex items-center gap-2.5">
@@ -105,6 +115,7 @@
                         </div>
                         <!-- Preview text (collapsed) -->
                         <p x-show="s.preview && currentIdx !== idx" class="text-[10px] text-surface-400 truncate mt-1 ml-[46px]" x-text="s.preview"></p>
+                        <p x-show="s.preview && currentIdx === idx" class="text-[10px] text-surface-400 truncate mt-1 ml-[46px] lg:hidden" x-text="s.preview"></p>
                     </div>
                 </template>
                 <!-- Empty state -->
@@ -114,16 +125,16 @@
                 </div>
             </div>
             <!-- Queue stats footer -->
-            <div class="px-3 py-2 border-t border-surface-100 bg-surface-50 text-[10px] text-surface-400 font-medium flex items-center justify-between">
-                <span x-text="filteredList.length + ' siswa'"></span>
-                <span class="text-primary-500" x-show="pending > 0">
+            <div class="px-3 py-2 border-t border-surface-100 bg-surface-50 text-[10px] text-surface-400 font-medium flex items-center justify-between gap-2">
+                <span class="shrink-0" x-text="filteredList.length + ' siswa'"></span>
+                <span class="text-primary-500 hidden sm:inline" x-show="pending > 0">
                     <kbd class="px-1 bg-white rounded text-[9px] font-bold border border-surface-200">j</kbd>/<kbd class="px-1 bg-white rounded text-[9px] font-bold border border-surface-200">k</kbd> navigasi
                 </span>
             </div>
         </div>
 
         <!-- RIGHT: Grading Panel -->
-        <div class="flex-1 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden">
+        <div class="flex-1 min-w-0 flex flex-col bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden">
             <!-- Empty state -->
             <template x-if="!current">
                 <div class="flex-1 flex items-center justify-center text-surface-400">
@@ -146,14 +157,14 @@
             <template x-if="current">
                 <div class="flex-1 flex flex-col overflow-hidden">
                     <!-- Student header bar -->
-                    <div class="px-4 py-2.5 border-b border-surface-200 flex items-center justify-between bg-surface-50 shrink-0">
-                        <div class="flex items-center gap-3">
+                    <div class="px-3 sm:px-4 py-2.5 border-b border-surface-200 flex items-center justify-between gap-2 bg-surface-50 shrink-0">
+                        <div class="flex items-center gap-3 min-w-0">
                             <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-sm"
                                  :class="current.status === 'submitted' ? 'bg-amber-500' : 'bg-emerald-500'"
                                  x-text="(current.student_name || '?')[0].toUpperCase()"></div>
-                            <div>
-                                <span class="text-sm font-extrabold text-surface-800" x-text="current.student_name"></span>
-                                <div class="flex items-center gap-2 text-[10px] text-surface-400">
+                            <div class="min-w-0">
+                                <span class="text-sm font-extrabold text-surface-800 block truncate" x-text="current.student_name"></span>
+                                <div class="flex flex-wrap items-center gap-2 text-[10px] text-surface-400">
                                     <span x-text="'Esai ' + current.graded_essays + '/' + current.essay_count"></span>
                                     <span x-show="current.has_drawing"><i class="fas fa-paint-brush text-primary-400"></i> Gambar</span>
                                     <span class="text-surface-300">|</span>
@@ -163,7 +174,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 shrink-0">
                             <a :href="'/teacher/grade/' + current.id" class="text-[10px] text-primary-600 hover:text-primary-700 font-bold px-2 py-1 hover:bg-primary-50 rounded-lg transition" target="_blank">
                                 <i class="fas fa-external-link-alt mr-0.5"></i>Detail
                             </a>
@@ -173,7 +184,7 @@
                     </div>
 
                     <!-- Grading content area -->
-                    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                    <div class="flex-1 lg:overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
                         <!-- Per-question grading -->
                         <template x-for="(q, qIdx) in current.questions" :key="q.index">
                             <div class="border border-surface-200 rounded-xl overflow-hidden transition hover:border-surface-300">
@@ -192,18 +203,20 @@
                                     </div>
                                 </div>
 
-                                <div class="px-4 py-3 space-y-3">
+                                <div class="px-3 sm:px-4 py-3 space-y-3">
                                     <!-- Answer preview -->
                                     <div x-show="q.preview" class="text-xs text-surface-700 bg-blue-50/50 rounded-lg px-3 py-2.5 border border-blue-100 max-h-32 overflow-y-auto whitespace-pre-wrap leading-relaxed" x-text="q.preview"></div>
                                     <div x-show="!q.preview" class="text-xs text-surface-400 italic py-2">Tidak ada jawaban teks</div>
 
-                                    <!-- Quick score presets -->
-                                    <div class="flex items-center gap-2">
+                                    <!-- Quick score presets. They wrap instead of squeezing,
+                                         so a 320 px phone shows two rows of three rather than
+                                         six buttons under each other's elbows. -->
+                                    <div class="flex flex-wrap items-center gap-2">
                                         <label class="text-[11px] font-bold text-surface-600">Skor:</label>
-                                        <div class="flex gap-1">
+                                        <div class="flex flex-wrap gap-1">
                                             <template x-for="preset in [0, 20, 40, 60, 80, 100]" :key="preset">
                                                 <button @click="setQuickScore(q.index, preset)"
-                                                        class="w-9 h-8 rounded-lg text-[11px] font-bold border transition-all active:scale-95"
+                                                        class="w-8 sm:w-9 h-8 rounded-lg text-[11px] font-bold border transition-all active:scale-95"
                                                         :class="qscores[q.index] == preset
                                                             ? (preset >= 70 ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm' : preset > 0 ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-surface-500 text-white border-surface-500 shadow-sm')
                                                             : 'bg-white text-surface-500 border-surface-200 hover:border-primary-300 hover:text-primary-600'"
@@ -218,7 +231,7 @@
                                     </div>
 
                                     <!-- Comment (compact) -->
-                                    <div class="flex items-center gap-2">
+                                    <div class="flex flex-wrap items-center gap-2">
                                         <input type="text" x-model="qcomments[q.index]" @input="onScoreChange()"
                                                placeholder="Feedback untuk soal ini..."
                                                class="flex-1 px-3 py-1.5 border border-surface-200 rounded-lg text-xs text-surface-700 focus:border-primary-400 focus:ring-1 focus:ring-primary-200">
@@ -252,7 +265,7 @@
                     </div>
 
                     <!-- Bottom action bar -->
-                    <div class="px-4 py-3 border-t border-surface-200 bg-surface-50 flex items-center gap-3 shrink-0">
+                    <div class="px-3 sm:px-4 py-3 border-t border-surface-200 bg-surface-50 flex items-center gap-2 sm:gap-3 shrink-0">
                         <!-- Save button (primary) -->
                         <button @click="saveAndNext()" :disabled="saving"
                                 class="flex-1 px-4 py-2.5 bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 disabled:from-surface-300 disabled:to-surface-300 text-white rounded-xl text-sm font-bold transition shadow-lg shadow-primary-600/20 flex items-center justify-center gap-2">
@@ -262,11 +275,11 @@
                         </button>
                         <!-- Prev/Next -->
                         <button @click="prevStudent()" :disabled="currentIdx <= 0"
-                                class="w-10 h-10 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl font-bold transition flex items-center justify-center text-surface-600" title="Sebelumnya (K)">
+                                class="w-10 h-10 shrink-0 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl font-bold transition flex items-center justify-center text-surface-600" title="Sebelumnya (K)">
                             <i class="fas fa-chevron-left"></i>
                         </button>
                         <button @click="nextStudent()" :disabled="currentIdx >= filteredList.length - 1"
-                                class="w-10 h-10 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl font-bold transition flex items-center justify-center text-surface-600" title="Selanjutnya (J)">
+                                class="w-10 h-10 shrink-0 bg-surface-100 hover:bg-surface-200 disabled:text-surface-300 rounded-xl font-bold transition flex items-center justify-center text-surface-600" title="Selanjutnya (J)">
                             <i class="fas fa-chevron-right"></i>
                         </button>
                     </div>

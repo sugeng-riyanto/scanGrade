@@ -279,7 +279,7 @@
     },
     "guide/skor.html": {
       "pairs": 0,
-      "leftovers": 58,
+      "leftovers": 102,
       "coverage": 0.0,
       "frozen": false
     },
@@ -488,7 +488,7 @@
       "frozen": false
     },
     "teacher/_results_table.html": {
-      "pairs": 7,
+      "pairs": 11,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -503,6 +503,12 @@
       "pairs": 0,
       "leftovers": 3,
       "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/analysis.html": {
+      "pairs": 105,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "teacher/analytics.html": {
@@ -602,9 +608,9 @@
       "frozen": true
     },
     "teacher/results.html": {
-      "pairs": 3,
+      "pairs": 6,
       "leftovers": 9,
-      "coverage": 25.0,
+      "coverage": 40.0,
       "frozen": true
     },
     "teacher/retractions.html": {

@@ -2,6 +2,7 @@ import json
 import io
 import os
 import logging
+import dataclasses
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
@@ -25,6 +26,7 @@ from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
                                  school_subjects, teacher_assignments_for)
 from app.utils import exam_window
+from app.services import analysis_report, item_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -163,19 +165,30 @@ def _apply_mark_scheme(question_types, total_questions, question_weights):
     )
 
 
+JSON_COLUMNS = ("answer_key", "question_types", "question_weights", "question_pages")
+
+
+def _json_fields(row):
+    """A row's JSON columns as objects. PostgREST returns `jsonb` parsed and a
+    text column as a string, and which one arrives depends on the column's type in
+    a given project — so every reader of an exam row has to do this, and doing it
+    in four places is how one of them ends up with a `str` in its hands."""
+    for field in JSON_COLUMNS:
+        value = row.get(field)
+        if isinstance(value, str):
+            try:
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = {}
+    return row
+
+
 def _recalculate_scores(exam_id):
     supabase = get_supabase()
     exam = supabase.table("exams").select("*").eq("id", exam_id).single().execute().data
     if not exam:
         return
-    # Parse JSON fields that may be strings from Supabase
-    for _fld in ("answer_key", "question_types", "question_weights", "question_pages"):
-        _v = exam.get(_fld)
-        if isinstance(_v, str):
-            try:
-                exam[_fld] = json.loads(_v)
-            except (json.JSONDecodeError, TypeError):
-                exam[_fld] = {}
+    _json_fields(exam)
     answer_key = exam.get("answer_key") or {}
     question_types = exam.get("question_types") or {}
     question_weights = exam.get("question_weights") or {}
@@ -1741,6 +1754,121 @@ def results_print():
         printed_on=print_stamp(),
         pass_mark=PASS_MARK,
     )
+
+
+def _analysis_of(supabase, exam_id, as_json=True, redirect_to="/teacher/results"):
+    """``(exam, analysis, error)`` — the paper, and what its questions actually did.
+
+    The weights are resolved the way the *grader* resolves them: an exam saved
+    before schemes existed carries none, and is marked against the 70/30 default.
+    Analysing it with an empty weight map would report every question as worth
+    nothing and measure a paper nobody sat.
+    """
+    exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=as_json,
+                            redirect_to=redirect_to)
+    if err:
+        return None, None, err
+    exam = _json_fields(exam)
+    total = int(exam.get("total_questions") or 0)
+    if not (exam.get("question_weights") or {}) and total > 0:
+        exam["question_weights"] = default_weights(exam.get("question_types") or {},
+                                                   total)
+    submissions, _scan, _online, _stats = _exam_results(supabase, exam_id)
+    return exam, item_analysis.analyse(exam, submissions), None
+
+
+def _chart_payload(analysis):
+    """What the three charts draw, as plain data.
+
+    Built here rather than in the template because the alternative — Jinja loops
+    assembling arrays inside an `x-data` attribute — is untestable, and because a
+    chart that quietly drops a question (a `None` difficulty, say) should be a
+    decision with a name. A question with no calibration has no place on the logit
+    chart and is left out of *that* chart only; it still appears in the item map,
+    which is computed from the classical columns that never go missing.
+    """
+    return {
+        "summary": dataclasses.asdict(analysis.summary),
+        "items": [{
+            "no": item.index + 1,
+            "kind": item.kind,
+            "pct": item.pct,
+            "disc": item.discrimination,
+            "flag": item.flag,
+            "marks": item.marks,
+        } for item in analysis.items],
+        "logits": [{
+            "no": item.index + 1,
+            "kind": item.kind,
+            "b": item.measure,
+            "se": item.se,
+            "flag": item.flag,
+        } for item in analysis.items if item.measure is not None],
+        "bins": [{"centre": centre, "count": count}
+                 for centre, count in analysis.person_bins],
+        "people": [{"name": person.name, "raw": person.raw,
+                    "possible": person.possible, "theta": person.measure,
+                    "extreme": person.extreme}
+                   for person in analysis.people if person.measure is not None],
+    }
+
+
+@teacher_bp.route("/analysis/<exam_id>")
+@teacher_or_admin_required
+def exam_analysis(exam_id):
+    """What a class's answers say about the paper, not about the students.
+
+    The results page answers "who scored what". A question that everyone got
+    right measured nothing, a question the strong half did worse on is worth a
+    second look, and a distractor nobody chose was never an option — none of that
+    is visible in a roster, and all of it is already sitting in the answers the
+    answer sheet collected.
+    """
+    supabase = get_supabase()
+    exam, analysis, err = _analysis_of(supabase, exam_id, redirect_to="/teacher/results")
+    if err:
+        return err
+    return render_template("teacher/analysis.html", exam=exam, analysis=analysis,
+                           chart=_chart_payload(analysis))
+
+
+@teacher_bp.route("/analysis/<exam_id>/download.csv")
+@teacher_or_admin_required
+def exam_analysis_csv(exam_id):
+    """The analysis as a spreadsheet — sortable, because the numbers are read by
+    comparing questions with each other."""
+    supabase = get_supabase()
+    lang = request.args.get("lang") or "id"
+    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+                                       redirect_to="/teacher/results")
+    if err:
+        return err
+    payload = analysis_report.analysis_csv(analysis, exam, lang)
+    # A BOM, so Excel opens the file as UTF-8 and a student's accented name is not
+    # a row of mojibake on the teacher's machine.
+    buf = io.BytesIO(payload.encode("utf-8-sig"))
+    return send_file(buf, mimetype="text/csv; charset=utf-8", as_attachment=True,
+                     download_name=analysis_report.filename(analysis, exam, "csv"))
+
+
+@teacher_bp.route("/analysis/<exam_id>/download.pdf")
+@teacher_or_admin_required
+def exam_analysis_pdf(exam_id):
+    """The analysis as the document that goes in the exam file."""
+    from app.services.report_card_service import profile_name, school_for
+
+    supabase = get_supabase()
+    lang = request.args.get("lang") or "id"
+    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+                                       redirect_to="/teacher/results")
+    if err:
+        return err
+    pdf = analysis_report.analysis_pdf(
+        analysis, exam,
+        school=(school_for(supabase, exam.get("school_id")) or {}).get("name", ""),
+        teacher=profile_name(supabase, exam.get("teacher_id")), lang=lang)
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
+                     download_name=analysis_report.filename(analysis, exam, "pdf"))
 
 
 @teacher_bp.route("/submissions/<submission_id>/print")

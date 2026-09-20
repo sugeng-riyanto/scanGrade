@@ -823,7 +823,7 @@ def default_weights(
     objective_pct: float = 70.0,
     essay_pct: float = 30.0,
 ) -> dict[str, float]:
-    """The 70/30 split, distributed equally inside each pool.
+    """The 70/30 split, distributed equally inside each pool, totalling exactly 100.
 
     Used when an exam carries no `question_weights` at all. The pools are decided
     by `pool()`, so a true/false question shares the objective budget with the
@@ -831,23 +831,30 @@ def default_weights(
 
     Kept for the exams that have no stored weights at all; a scheme, when there is
     one, decides the shares instead (see `app/services/mark_scheme.py`).
+
+    **Exactly 100**, and that is a fix rather than a tidy-up. Dividing each pool
+    independently and rounding — the obvious version, and this function's first one
+    — gave three essays 23.33 points each and a paper that could never reach 100: a
+    perfect legacy paper scored 99.99, and `min(earned, 100)` does not repair a
+    number that is *below* the cap. `mark_scheme.normalise_to_100` re-bases the whole
+    paper in tenths, so the pools keep their 70/30 ratio and the parts add up to the
+    paper's own total. It is imported inside the function because `mark_scheme`
+    imports this module.
     """
+    from app.services import mark_scheme
+
     qtypes = question_types or {}
     objective = [i for i in range(total_questions or 0) if is_objective(qtypes.get(str(i), DEFAULT_TYPE))]
     essay = [i for i in range(total_questions or 0) if not is_objective(qtypes.get(str(i), DEFAULT_TYPE))]
 
+    if not objective and not essay:
+        return {}
     if not objective:
         objective_pct, essay_pct = 0.0, 100.0
     elif not essay:
         objective_pct, essay_pct = 100.0, 0.0
 
-    weights: dict[str, float] = {}
-    if objective:
-        each = round(objective_pct / len(objective), 2)
-        for i in objective:
-            weights[str(i)] = each
-    if essay:
-        each = round(essay_pct / len(essay), 2)
-        for i in essay:
-            weights[str(i)] = each
-    return weights
+    order = objective + essay
+    raw = [objective_pct / len(objective)] * len(objective) if objective else []
+    raw += [essay_pct / len(essay)] * len(essay) if essay else []
+    return {str(i): point for i, point in zip(order, mark_scheme.normalise_to_100(raw))}
