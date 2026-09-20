@@ -2772,7 +2772,9 @@ def analytics():
     """Performance over the caller's own scope: their exams, their school, or all."""
     supabase = get_supabase()
     lang = analysis_scope.language(request.args.get("lang"))
-    data = _scope_report(supabase, lang)
+    date_from = request.args.get("date_from") or None
+    date_to = request.args.get("date_to") or None
+    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to)
     return render_template("teacher/analytics.html", report=data, stats=_kpis(data),
                            dist_bins=data["bins"], exam_breakdown=data["rows"],
                            exam_labels=[row["title"][:20] for row in data["rows"]],
@@ -2786,7 +2788,9 @@ def analytics_csv():
     """The scope's report as a spreadsheet."""
     supabase = get_supabase()
     lang = analysis_scope.language(request.args.get("lang"))
-    data = _scope_report(supabase, lang)
+    date_from = request.args.get("date_from") or None
+    date_to = request.args.get("date_to") or None
+    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to)
     payload = analysis_scope.report_csv(data)
     buffer = io.BytesIO(payload.encode("utf-8-sig"))
     # Flask adds the charset to a text mimetype; naming it here as well duplicated
@@ -2802,7 +2806,9 @@ def analytics_pdf():
     """The scope's report as the document a school files."""
     supabase = get_supabase()
     lang = analysis_scope.language(request.args.get("lang"))
-    data = _scope_report(supabase, lang)
+    date_from = request.args.get("date_from") or None
+    date_to = request.args.get("date_to") or None
+    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to)
     pdf = analysis_scope.report_pdf(data)
     return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
                      download_name=analysis_scope.filename(data, "pdf"))
@@ -2821,7 +2827,9 @@ def analytics_print():
     """
     supabase = get_supabase()
     lang = analysis_scope.language(request.args.get("lang"))
-    data = _scope_report(supabase, lang)
+    date_from = request.args.get("date_from") or None
+    date_to = request.args.get("date_to") or None
+    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to)
     return render_template("teacher/analytics.html", report=data, stats=_kpis(data),
                            print_mode=True, dist_bins=data["bins"],
                            exam_breakdown=data["rows"],
@@ -2842,22 +2850,26 @@ def _kpis(data):
     }
 
 
-def _scope_report(supabase, lang):
-    """The caller's report, computed once per scope and language every five minutes.
+def _scope_report(supabase, lang, *, date_from=None, date_to=None):
+    """The caller's report, computed once per scope, language and range every five minutes.
 
     Built from a batch of queries over every exam in scope, which is the most
     expensive thing any teacher screen does; the cache key carries the role, the
     user *and* the school, because two admins of two schools must never share a
     row. The language is in the key as well, because the labels are rendered into
-    the report rather than looked up at print time.
+    the report rather than looked up at print time.  The date range is also in
+    the key so that switching from "this year" to "last semester" does not hand
+    back the cached totals of the other.
     """
     key = (f"analytics:{g.get('user_role')}:{g.user_id}:"
-           f"{g.get('user_school_id') or '-'}:{lang}")
+           f"{g.get('user_school_id') or '-'}:{lang}:"
+           f"{date_from or ''}:{date_to or ''}")
     cached = cache_get(key)
     if cached:
         return analysis_scope.from_payload(cached)
     data = analysis_scope.report(supabase, g.get("user_role") or "", g.user_id,
-                                 g.get("user_school_id"), lang=lang)
+                                 g.get("user_school_id"), lang=lang,
+                                 date_from=date_from, date_to=date_to)
     cache_set(key, analysis_scope.as_payload(data), ttl=ANALYTICS_TTL)
     return data
 

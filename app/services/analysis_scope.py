@@ -106,6 +106,7 @@ LABELS: dict[str, dict[str, str]] = {
         "items": "Butir soal",
         "flagged_short": "Bermasalah",
         "holes_short": "Belum terukur",
+        "range": "Rentang waktu",
         "legend": ("Lulus = persentase peserta yang mencapai KKM. Alpha = Cronbach "
                    "alpha; KR-20 sama nilainya untuk soal benar/salah. Soal "
                    "bermasalah = daya beda lemah/negatif, menyimpang dari model, "
@@ -152,6 +153,7 @@ LABELS: dict[str, dict[str, str]] = {
         "items": "Items",
         "flagged_short": "Flagged",
         "holes_short": "Unmeasurable",
+        "range": "Date range",
         "legend": ("Pass rate = the share of participants reaching the pass mark. "
                    "Alpha = Cronbach's alpha, the same number as KR-20 for "
                    "right/wrong questions. A flagged question has weak or negative "
@@ -200,7 +202,9 @@ def _may_scope(role: str) -> bool:
 
 
 def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
-                   limit: int = MAX_EXAMS) -> list[dict[str, Any]]:
+                   limit: int = MAX_EXAMS, *,
+                   date_from: str | None = None,
+                   date_to: str | None = None) -> list[dict[str, Any]]:
     """The exams this caller may analyse, newest first.
 
     The query narrows to what the role can reach — a teacher's own rows, a
@@ -209,6 +213,10 @@ def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
     the predicate is the permission. A role with no scope gets nothing, and an
     admin with no school on file gets nothing, because that is what
     `can_manage_exam` says about both.
+
+    *date_from* and *date_to* are ISO date strings (``YYYY-MM-DD``). When
+    provided the query adds ``created_at >= date_from`` and
+    ``created_at < date_to + 1 day`` so that a whole-day range is inclusive.
     """
     if not _may_scope(role) or not user_id:
         return []
@@ -219,6 +227,18 @@ def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
         if not school_id:
             return []
         query = query.eq("school_id", school_id)
+    # Date range: `created_at` is ISO-8601, so lexicographic comparison works.
+    if date_from:
+        query = query.gte("created_at", date_from)
+    if date_to:
+        # +1 day to make the end date inclusive: 2026-06-30 → >= 2026-07-01
+        from datetime import datetime, timedelta
+        try:
+            end = ((datetime.fromisoformat(date_to).date()
+                    + timedelta(days=1)).isoformat())
+            query = query.lt("created_at", end)
+        except (ValueError, TypeError):
+            pass
     rows = (query.order("created_at", desc=True).limit(int(limit)).execute().data
             or [])
     return [row for row in rows
@@ -326,15 +346,21 @@ def _bins(marks: Sequence[float]) -> list[int]:
 
 
 def report(supabase, role: str, user_id: str, school_id: str | None,
-           lang: str = "id", limit: int = MAX_EXAMS) -> dict[str, Any]:
+           lang: str = "id", limit: int = MAX_EXAMS, *,
+           date_from: str | None = None,
+           date_to: str | None = None) -> dict[str, Any]:
     """The whole report: one row per exam in scope, plus the totals and the bins.
 
     Nothing here is cached at this level — the caller decides that, because the
     cache key depends on the caller's scope and not on the report.
+
+    *date_from* and *date_to* are ISO date strings (``YYYY-MM-DD``) that filter
+    the exams by their ``created_at`` timestamp.
     """
     lang = language(lang)
     texts = labels(lang)
-    exams = exams_in_scope(supabase, role, user_id, school_id, limit)
+    exams = exams_in_scope(supabase, role, user_id, school_id, limit,
+                           date_from=date_from, date_to=date_to)
     answers = _submissions(supabase, [exam["id"] for exam in exams])
     teachers = _names(supabase, "profiles", [exam.get("teacher_id")
                                              for exam in exams])
@@ -359,12 +385,17 @@ def report(supabase, role: str, user_id: str, school_id: str | None,
             items = len(analysis.items)
             flagged = sum(1 for item in analysis.items if item.flag in FLAGGED)
             holes = sum(1 for item in analysis.items if item.flag in HOLES)
+            # `unkeyed` on its own, not `holes`: the totals line that counts an
+            # exam as "without a key" has to mean the key, and a paper nobody sat
+            # is unmeasurable for a different reason. Counting every hole here
+            # called an exam with no submissions an exam with no answer key.
+            unkeyed = sum(1 for item in analysis.items if item.flag == "unkeyed")
             alpha, kr20 = summary.alpha, summary.kr20
         except Exception:
             # A single unreadable paper must not take the school's report with it;
             # the row says what could not be measured instead of vanishing.
             items = _count(exam.get("total_questions"))
-            flagged = holes = 0
+            flagged = holes = unkeyed = 0
             alpha = kr20 = None
 
         rows.append({
@@ -377,6 +408,7 @@ def report(supabase, role: str, user_id: str, school_id: str | None,
             "items": items,
             "flagged": flagged,
             "holes": holes,
+            "unkeyed": unkeyed,
             "alpha": alpha,
             "kr20": kr20,
             **stats,
@@ -392,7 +424,7 @@ def report(supabase, role: str, user_id: str, school_id: str | None,
         "questions": sum(row["items"] for row in rows),
         "flagged": sum(row["flagged"] for row in rows),
         "holes": sum(row["holes"] for row in rows),
-        "without_key": sum(1 for row in rows if row["holes"]),
+        "without_key": sum(1 for row in rows if row["unkeyed"]),
     }
     return {
         "lang": lang,
@@ -409,6 +441,8 @@ def report(supabase, role: str, user_id: str, school_id: str | None,
         "bin_labels": list(SCORES),
         "truncated": len(exams) >= int(limit),
         "limit": int(limit),
+        "date_from": date_from or None,
+        "date_to": date_to or None,
     }
 
 
@@ -486,6 +520,19 @@ CSV_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _range_label(data: Mapping[str, Any]) -> str:
+    """A human-readable label for the date range, or ``""`` if unfiltered."""
+    d_from = data.get("date_from")
+    d_to = data.get("date_to")
+    if d_from and d_to:
+        return f"{d_from} – {d_to}"
+    if d_from:
+        return f">= {d_from}"
+    if d_to:
+        return f"<= {d_to}"
+    return ""
+
+
 def report_csv(data: Mapping[str, Any]) -> str:
     """The report as a spreadsheet, in the reader's language.
 
@@ -497,6 +544,12 @@ def report_csv(data: Mapping[str, Any]) -> str:
     texts = data["texts"]
     buffer = io.StringIO()
     writer = csv.writer(buffer)
+    # A header row so the reader knows which period the numbers cover.
+    rng = _range_label(data)
+    if rng:
+        writer.writerow([f"{texts['scope']}: {data['scope']}"])
+        writer.writerow([f"{texts.get('generated', 'Generated')}: {data['generated']:%Y-%m-%d} | {texts.get('range', 'Range')}: {rng}"])
+        writer.writerow([])
     writer.writerow([texts[key] for key, _field in CSV_COLUMNS])
     for row in data["rows"]:
         writer.writerow([_cell(row[field]) if isinstance(row[field], float)
@@ -511,8 +564,16 @@ def report_csv(data: Mapping[str, Any]) -> str:
 
 
 def filename(data: Mapping[str, Any], suffix: str) -> str:
-    """`analitik-super_admin-20260920.csv` — the scope is in the name."""
+    """`analitik-super_admin-20260920.csv` — the scope is in the name.
+
+    When a date range is active the period is appended so the reader can tell
+    two files of the same role apart: ``analitik-guru-20260920-20260601-20260630.csv``.
+    """
     stem = f"analitik-{data.get('role') or 'ujian'}-{data['generated']:%Y%m%d}"
+    d_from = data.get("date_from") or ""
+    d_to = data.get("date_to") or ""
+    if d_from or d_to:
+        stem += f"-{d_from or 'start'}-{d_to or 'end'}"
     return f"{stem}.{suffix}"
 
 
@@ -549,6 +610,9 @@ def report_pdf(data: Mapping[str, Any]) -> bytes:
                 f"{texts['generated']}: {data['generated']:%Y-%m-%d %H:%M}",
                 f"{texts['language']}: "
                 f"{'English' if data['lang'] == 'en' else 'Bahasa Indonesia'}"]
+    rng = _range_label(data)
+    if rng:
+        identity.append(f"{texts.get('range', 'Range')}: <b>{rng}</b>")
     flow.append(Paragraph(" &nbsp;|&nbsp; ".join(identity), body))
 
     totals = data["totals"]
