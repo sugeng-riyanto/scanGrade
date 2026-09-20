@@ -6,7 +6,8 @@ import dataclasses
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
-from app.utils.auth import teacher_or_admin_required, get_supabase, login_required, subscription_write_required
+from app.utils.auth import (teacher_or_admin_required, get_supabase, login_required,
+                            role_required, subscription_write_required)
 from app.utils.cache import cache_get, cache_set, cache_delete
 from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
@@ -26,7 +27,7 @@ from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_teacher_assignments, school_classes,
                                  school_subjects, teacher_assignments_for)
 from app.utils import exam_window
-from app.services import analysis_report, item_analysis
+from app.services import analysis_report, analysis_scope, item_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -2556,62 +2557,107 @@ def api_grading_queue(exam_id):
     })
 
 
+# ── The statistics page, for the three roles that may read one ──────────
+#
+# The page answers "how are these exams doing" for whoever opened it, and the
+# scope is decided by `analysis_scope`, which asks the same predicate the per-exam
+# routes ask. This route's job is the middle: stamp the answer, cache it for a
+# few minutes, and hand the documents the same report the page shows.
+
+ANALYTICS_TTL = 300
+
+
 @teacher_bp.route("/analytics")
-@teacher_or_admin_required
+@role_required("guru", "admin_sekolah", "super_admin")
 def analytics():
-    import statistics
+    """Performance over the caller's own scope: their exams, their school, or all."""
     supabase = get_supabase()
-    exams = supabase.table("exams").select("id,title,passing_score").eq("teacher_id", g.user_id).execute().data or []
-    exam_ids = [e["id"] for e in exams]
-    all_scores = []
-    exam_breakdown = []
-    dist_bins = [0, 0, 0, 0, 0]
-    exam_labels = []
-    exam_avgs = []
-    exam_medians = []
-    total_submissions = 0
-    pass_count = 0
-    for e in exams:
-        subs = supabase.table("submissions").select("score,final_score").eq("exam_id", e["id"]).execute().data or []
-        scores = [float(s.get("final_score") or s.get("score") or 0) for s in subs if s.get("final_score") or s.get("score")]
-        all_scores.extend(scores)
-        total_submissions += len(subs)
-        passing = e.get("passing_score") or 70
-        pc = sum(1 for sc in scores if sc >= passing)
-        pass_count += pc
-        if scores:
-            sorted_s = sorted(scores)
-            n = len(sorted_s)
-            median = sorted_s[n // 2] if n % 2 == 1 else (sorted_s[n // 2 - 1] + sorted_s[n // 2]) / 2
-            exam_breakdown.append({
-                "title": e["title"],
-                "count": len(scores),
-                "avg": round(sum(scores) / len(scores), 1),
-                "median": round(median, 1),
-                "max": round(max(scores), 1),
-                "min": round(min(scores), 1),
-                "pass_pct": round(pc / len(scores) * 100),
-            })
-            exam_labels.append(e["title"][:20])
-            exam_avgs.append(round(sum(scores) / len(scores), 1))
-            exam_medians.append(round(median, 1))
-    for sc in all_scores:
-        if sc < 20: dist_bins[0] += 1
-        elif sc < 40: dist_bins[1] += 1
-        elif sc < 60: dist_bins[2] += 1
-        elif sc < 80: dist_bins[3] += 1
-        else: dist_bins[4] += 1
-    avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else 0
-    pass_rate = round(pass_count / len(all_scores) * 100) if all_scores else 0
-    std_dev = round(statistics.stdev(all_scores), 1) if len(all_scores) > 1 else 0
-    stats = {
-        "total_exams": len(exams),
-        "total_submissions": total_submissions,
-        "avg_score": avg_score,
-        "pass_rate": pass_rate,
-        "std_dev": std_dev,
+    lang = analysis_scope.language(request.args.get("lang"))
+    data = _scope_report(supabase, lang)
+    return render_template("teacher/analytics.html", report=data, stats=_kpis(data),
+                           dist_bins=data["bins"], exam_breakdown=data["rows"],
+                           exam_labels=[row["title"][:20] for row in data["rows"]],
+                           exam_avgs=[row["mean"] or 0 for row in data["rows"]],
+                           exam_medians=[row["median"] or 0 for row in data["rows"]])
+
+
+@teacher_bp.route("/analytics/download.csv")
+@role_required("guru", "admin_sekolah", "super_admin")
+def analytics_csv():
+    """The scope's report as a spreadsheet."""
+    supabase = get_supabase()
+    lang = analysis_scope.language(request.args.get("lang"))
+    data = _scope_report(supabase, lang)
+    payload = analysis_scope.report_csv(data)
+    buffer = io.BytesIO(payload.encode("utf-8-sig"))
+    return send_file(buffer, mimetype="text/csv; charset=utf-8", as_attachment=True,
+                     download_name=analysis_scope.filename(data, "csv"))
+
+
+@teacher_bp.route("/analytics/download.pdf")
+@role_required("guru", "admin_sekolah", "super_admin")
+def analytics_pdf():
+    """The scope's report as the document a school files."""
+    supabase = get_supabase()
+    lang = analysis_scope.language(request.args.get("lang"))
+    data = _scope_report(supabase, lang)
+    pdf = analysis_scope.report_pdf(data)
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
+                     download_name=analysis_scope.filename(data, "pdf"))
+
+
+@teacher_bp.route("/analytics/print")
+@role_required("guru", "admin_sekolah", "super_admin")
+def analytics_print():
+    """The same report as paper.
+
+    The same template rather than a second one: a print view built beside the
+    screen view is a second copy of every number, and the two disagree the first
+    time one of them is edited. `print_mode` only turns the sheet on — the page
+    already hides its own chrome on paper (`@media print` in the template, which
+    is how the result and marking pages print).
+    """
+    supabase = get_supabase()
+    lang = analysis_scope.language(request.args.get("lang"))
+    data = _scope_report(supabase, lang)
+    return render_template("teacher/analytics.html", report=data, stats=_kpis(data),
+                           print_mode=True, dist_bins=data["bins"],
+                           exam_breakdown=data["rows"],
+                           exam_labels=[row["title"][:20] for row in data["rows"]],
+                           exam_avgs=[row["mean"] or 0 for row in data["rows"]],
+                           exam_medians=[row["median"] or 0 for row in data["rows"]])
+
+
+def _kpis(data):
+    """The four headline numbers the page has always shown."""
+    totals = data["totals"]
+    return {
+        "total_exams": totals["exams"],
+        "total_submissions": totals["participants"],
+        "avg_score": totals["mean"] or 0,
+        "pass_rate": totals["pass_rate"] or 0,
+        "std_dev": totals["sd"] or 0,
     }
-    return render_template("teacher/analytics.html", stats=stats, exam_breakdown=exam_breakdown, dist_bins=dist_bins, exam_labels=exam_labels, exam_avgs=exam_avgs, exam_medians=exam_medians)
+
+
+def _scope_report(supabase, lang):
+    """The caller's report, computed once per scope and language every five minutes.
+
+    Built from a batch of queries over every exam in scope, which is the most
+    expensive thing any teacher screen does; the cache key carries the role, the
+    user *and* the school, because two admins of two schools must never share a
+    row. The language is in the key as well, because the labels are rendered into
+    the report rather than looked up at print time.
+    """
+    key = (f"analytics:{g.get('user_role')}:{g.user_id}:"
+           f"{g.get('user_school_id') or '-'}:{lang}")
+    cached = cache_get(key)
+    if cached:
+        return analysis_scope.from_payload(cached)
+    data = analysis_scope.report(supabase, g.get("user_role") or "", g.user_id,
+                                 g.get("user_school_id"), lang=lang)
+    cache_set(key, analysis_scope.as_payload(data), ttl=ANALYTICS_TTL)
+    return data
 
 
 @teacher_bp.route("/reset-password", methods=["POST"])

@@ -348,6 +348,28 @@ class TestTheScoringGuideIsTrue:
         assert MATCH in PARTIAL_TYPES and ORDER in PARTIAL_TYPES
         assert "Nilai sebagian" in GUIDE
 
+    def test_the_guide_follows_the_language_toggle(self):
+        """It used to be pinned Indonesian. A school that runs the app in English
+        still marks papers, so the page has to switch — and a page that both
+        switches and declares its document language is a screen reader reading
+        English with an Indonesian voice, which the coverage gate refuses."""
+        # The *declaration*, not the word: the template's header comment explains
+        # why it no longer carries one, and a test that cannot tell a comment from
+        # a `{% set %}` is a test that deletes the explanation.
+        assert "{% set content_lang" not in GUIDE, (
+            "the guide declares a document language while its copy switches")
+        assert "t('Pilihan ganda','Multiple choice')" in GUIDE, (
+            "the scheme table's type names are not paired")
+        assert "'Final mark = max(0, min(points earned, 100)" in GUIDE, (
+            "the formula the page teaches has no English side")
+        # The tab state is internal, and an Indonesian identifier is still an
+        # Indonesian word to the sweep that reads Alpine expressions — it would
+        # have to be excused one at a time until the sweep stopped meaning
+        # anything. `teacher` says the same thing.
+        assert "tab: 'teacher'" in GUIDE and "tab='student'" in GUIDE
+        assert "'guru'" not in GUIDE and "'murid'" not in GUIDE, (
+            "an Indonesian identifier survived in the tab state")
+
     def test_the_penalty_table_is_computed_not_copied(self):
         """The page has no penalty numbers of its own. The table is built from
         `calculate_graduated_penalty`, so there is no second copy to drift."""
@@ -395,7 +417,7 @@ class TestTheScoringGuideIsTrue:
         saying it while the other says something else is the failure."""
         from app.services.anti_cheat_service import PENALIZED_VIOLATION_TYPES
         assert set(PENALIZED_VIOLATION_TYPES) == {"tab_switch", "fullscreen_exit"}
-        teacher_tab, student_tab = GUIDE.split("x-show=\"tab==='murid'\"", 1)
+        teacher_tab, student_tab = GUIDE.split("x-show=\"tab==='student'\"", 1)
         for name, tab in (("teacher", teacher_tab), ("student", student_tab)):
             assert "berpindah tab" in tab, \
                 f"the {name} tab stopped naming what is charged"

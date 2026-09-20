@@ -1,86 +1,95 @@
-{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Panduan Skor - ScanGrade{% endblock %}
 {% block page_title %}Panduan Sistem Penilaian{% endblock %}
 {% block content %}
-{# Indonesian only, and it says so — this page is reference material a teacher
-   reads while marking, so it is pinned with `content_lang = 'id'` rather than
-   carrying pairs that would switch on a reader who wants one page stable. The
-   numbers here are the code's: `mark_scheme.py` decides the points per question,
-   `question_types.part_factor` the part credit, and
+{# Bilingual, and it follows the toggle. This page used to be pinned Indonesian
+   with `content_lang = 'id'`, on the argument that reference material read while
+   marking should hold still. It is read in both languages — a school that runs
+   the app in English still marks papers — so every sentence is now a `t()` pair
+   and the page declares nothing. A page may not do both: pinning the document
+   language *while* the copy switches leaves an English reader's screen reader
+   speaking English text with an Indonesian voice, which is what
+   `deploy/i18n_coverage.py` refuses.
+
+   The numbers here are the code's: `mark_scheme.py` decides the points per
+   question, `question_types.part_factor` the part credit, and
    `anti_cheat_service.calculate_graduated_penalty` the penalty schedule. #}
-<div x-data="{ tab: 'guru' }" class="max-w-4xl mx-auto space-y-6">
+{# The tab state is `teacher`/`student`, not `guru`/`murid`: a state value is
+   not copy, but it is read by the same sweep that finds untranslated strings, and
+   an Indonesian *identifier* would have to be excused one by one until the sweep
+   stopped meaning anything. #}
+<div x-data="{ tab: 'teacher' }" class="max-w-4xl mx-auto space-y-6">
     <!-- Header -->
     <div class="flex items-center gap-3 mb-2">
         <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-teal-500/20">
             <i class="fas fa-book-open text-white text-lg"></i>
         </div>
         <div>
-            <h1 class="text-2xl font-extrabold text-surface-800">Panduan Sistem Penilaian</h1>
-            <p class="text-sm text-surface-500 font-medium">Cara menghitung nilai, penalti, dan pengajuan banding</p>
+            <h1 class="text-2xl font-extrabold text-surface-800" x-text="t('Panduan Sistem Penilaian','Marking System Guide')"></h1>
+            <p class="text-sm text-surface-500 font-medium" x-text="t('Cara menghitung nilai, penalti, dan pengajuan banding','How marks, penalties and appeals are worked out')"></p>
         </div>
     </div>
 
     <!-- Tab Switcher -->
     <div class="flex gap-1 bg-surface-100 rounded-xl p-1 max-w-xs">
-        <button @click="tab='guru'" :class="tab==='guru'?'bg-white shadow-sm text-primary-600':'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition">
-            <i class="fas fa-chalkboard-teacher mr-1.5"></i>Versi Guru
+        <button @click="tab='teacher'" :class="tab==='teacher'?'bg-white shadow-sm text-primary-600':'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition">
+            <i class="fas fa-chalkboard-teacher mr-1.5"></i><span x-text="t('Versi Guru','Teacher view')"></span>
         </button>
-        <button @click="tab='murid'" :class="tab==='murid'?'bg-white shadow-sm text-primary-600':'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition">
-            <i class="fas fa-user-graduate mr-1.5"></i>Versi Murid
+        <button @click="tab='student'" :class="tab==='student'?'bg-white shadow-sm text-primary-600':'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition">
+            <i class="fas fa-user-graduate mr-1.5"></i><span x-text="t('Versi Murid','Student view')"></span>
         </button>
     </div>
 
     <!-- ============================== -->
     <!-- TAB GURU -->
     <!-- ============================== -->
-    <div x-show="tab==='guru'" class="space-y-6">
+    <div x-show="tab==='teacher'" class="space-y-6">
 
         <!-- 1. Skema penilaian per tipe soal -->
         <div class="card p-6">
             <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
                 <span class="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-bold">1</span>
-                Menyusun Skema Penilaian
+                <span x-text="t('Menyusun Skema Penilaian','Setting Up a Mark Scheme')"></span>
             </h2>
-            <p class="text-sm text-surface-600 mb-3">Guru menentukan <strong>berapa nilai setiap tipe soal</strong>: pilihan ganda, benar/salah, menjodohkan, seret &amp; lepas, mengurutkan, dan esai. Setiap tipe berdiri sendiri — menjodohkan bukan bagian dari pilihan ganda — dan setiap tipe bisa diberi bobot yang berbeda.</p>
+            <p class="text-sm text-surface-600 mb-3"><span x-text="t('Guru menentukan','The teacher decides')"></span> <strong x-text="t('berapa nilai setiap tipe soal','how much each question type is worth')"></strong><span x-text="t(': pilihan ganda, benar/salah, menjodohkan, seret &amp; lepas, mengurutkan, dan esai. Setiap tipe berdiri sendiri &mdash; menjodohkan bukan bagian dari pilihan ganda &mdash; dan setiap tipe bisa diberi bobot yang berbeda.',': multiple choice, true/false, matching, drag and drop, ordering, and essay. Every type stands on its own — matching is not part of multiple choice — and each type can carry a different weight.')"></span></p>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                    <p class="text-xs font-bold text-amber-700 mb-1">Poin satu soal</p>
-                    <p class="text-sm font-bold text-surface-700">Poin soal = <span class="text-amber-600">bobot tipe</span> &times; jumlah soal tipe itu</p>
-                    <p class="text-xs text-surface-500 mt-1">Contoh: 4 soal menjodohkan dengan bobot 5 = <strong>20 poin</strong></p>
+                    <p class="text-xs font-bold text-amber-700 mb-1" x-text="t('Poin satu soal','Points for one question')"></p>
+                    <p class="text-sm font-bold text-surface-700"><span x-text="t('Poin soal =','Points =')"></span> <span class="text-amber-600" x-text="t('bobot tipe','the type weight')"></span> <span x-text="t('&times; jumlah soal tipe itu','&times; the number of questions of that type')"></span></p>
+                    <p class="text-xs text-surface-500 mt-1"><span x-text="t('Contoh: 4 soal menjodohkan dengan bobot 5 =','Example: 4 matching questions at a weight of 5 =')"></span> <strong x-text="t('20 poin','20 points')"></strong></p>
                 </div>
                 <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                    <p class="text-xs font-bold text-emerald-700 mb-1">Nilai sebagian</p>
-                    <p class="text-sm font-bold text-surface-700">Menjodohkan, seret &amp; lepas, dan mengurutkan dibayar <span class="text-emerald-600">sebagian</span></p>
-                    <p class="text-xs text-surface-500 mt-1">Contoh: 3 dari 4 pasangan benar = <strong>3/4 poin</strong>, bukan nol</p>
+                    <p class="text-xs font-bold text-emerald-700 mb-1" x-text="t('Nilai sebagian','Part credit')"></p>
+                    <p class="text-sm font-bold text-surface-700"><span x-text="t('Menjodohkan, seret &amp; lepas, dan mengurutkan dibayar','Matching, drag and drop, and ordering are paid')"></span> <span class="text-emerald-600" x-text="t('sebagian','in part')"></span></p>
+                    <p class="text-xs text-surface-500 mt-1"><span x-text="t('Contoh: 3 dari 4 pasangan benar =','Example: 3 of 4 pairs right =')"></span> <strong x-text="t('3/4 poin','3/4 of the points')"></strong><span x-text="t(', bukan nol',', not zero')"></span></p>
                 </div>
             </div>
             <div class="bg-surface-50 border border-surface-200 rounded-xl p-4">
-                <p class="text-xs font-bold text-surface-600 mb-2">Contoh skema lengkap: 6 tipe, total tepat 100 poin</p>
+                <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Contoh skema lengkap: 6 tipe, total tepat 100 poin','A full scheme: 6 types, exactly 100 points')"></p>
                 <div class="overflow-x-auto">
                     <table class="w-full text-xs min-w-[560px]">
                         <thead><tr class="text-surface-500 border-b border-surface-200">
-                            <th class="text-left py-1 pr-2">Tipe soal</th>
-                            <th class="text-right px-2">Bobot/Soal</th>
-                            <th class="text-right px-2">Jumlah</th>
-                            <th class="text-right px-2">Poin</th>
-                            <th class="text-right pl-2">Nilai Sebagian</th>
+                            <th class="text-left py-1 pr-2" x-text="t('Tipe soal','Question type')"></th>
+                            <th class="text-right px-2" x-text="t('Bobot/Soal','Weight each')"></th>
+                            <th class="text-right px-2" x-text="t('Jumlah','Count')"></th>
+                            <th class="text-right px-2" x-text="t('Poin','Points')"></th>
+                            <th class="text-right pl-2" x-text="t('Nilai Sebagian','Part credit')"></th>
                         </tr></thead>
                         <tbody>
-                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-amber-700">Pilihan ganda</td><td class="text-right px-2">1</td><td class="text-right px-2">20</td><td class="text-right px-2 font-bold">20</td><td class="text-right pl-2 text-surface-400">&mdash;</td></tr>
-                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-blue-700">Benar/Salah</td><td class="text-right px-2">1</td><td class="text-right px-2">10</td><td class="text-right px-2 font-bold">10</td><td class="text-right pl-2 text-surface-400">&mdash;</td></tr>
-                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-teal-700">Menjodohkan</td><td class="text-right px-2">5</td><td class="text-right px-2">4</td><td class="text-right px-2 font-bold">20</td><td class="text-right pl-2 text-emerald-700">per pasangan</td></tr>
-                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-violet-700">Seret &amp; lepas</td><td class="text-right px-2">5</td><td class="text-right px-2">2</td><td class="text-right px-2 font-bold">10</td><td class="text-right pl-2 text-emerald-700">per posisi</td></tr>
-                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-cyan-700">Mengurutkan</td><td class="text-right px-2">5</td><td class="text-right px-2">2</td><td class="text-right px-2 font-bold">10</td><td class="text-right pl-2 text-emerald-700">per posisi</td></tr>
-                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-emerald-700">Esai</td><td class="text-right px-2">10</td><td class="text-right px-2">3</td><td class="text-right px-2 font-bold">30</td><td class="text-right pl-2 text-surface-400">nilai guru</td></tr>
-                            <tr class="font-bold text-surface-800"><td class="py-1.5 pr-2">Total</td><td class="text-right px-2">&mdash;</td><td class="text-right px-2">41</td><td class="text-right px-2">100</td><td class="text-right pl-2">&mdash;</td></tr>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-amber-700" x-text="t('Pilihan ganda','Multiple choice')"></td><td class="text-right px-2">1</td><td class="text-right px-2">20</td><td class="text-right px-2 font-bold">20</td><td class="text-right pl-2 text-surface-400">&mdash;</td></tr>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-blue-700" x-text="t('Benar/Salah','True/false')"></td><td class="text-right px-2">1</td><td class="text-right px-2">10</td><td class="text-right px-2 font-bold">10</td><td class="text-right pl-2 text-surface-400">&mdash;</td></tr>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-teal-700" x-text="t('Menjodohkan','Matching')"></td><td class="text-right px-2">5</td><td class="text-right px-2">4</td><td class="text-right px-2 font-bold">20</td><td class="text-right pl-2 text-emerald-700" x-text="t('per pasangan','per pair')"></td></tr>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-violet-700" x-text="t('Seret &amp; lepas','Drag and drop')"></td><td class="text-right px-2">5</td><td class="text-right px-2">2</td><td class="text-right px-2 font-bold">10</td><td class="text-right pl-2 text-emerald-700" x-text="t('per posisi','per position')"></td></tr>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-cyan-700" x-text="t('Mengurutkan','Ordering')"></td><td class="text-right px-2">5</td><td class="text-right px-2">2</td><td class="text-right px-2 font-bold">10</td><td class="text-right pl-2 text-emerald-700" x-text="t('per posisi','per position')"></td></tr>
+                            <tr class="border-b border-surface-100"><td class="py-1.5 pr-2 font-bold text-emerald-700" x-text="t('Esai','Essay')"></td><td class="text-right px-2">10</td><td class="text-right px-2">3</td><td class="text-right px-2 font-bold">30</td><td class="text-right pl-2 text-surface-400" x-text="t('nilai guru','the teacher&rsquo;s mark')"></td></tr>
+                            <tr class="font-bold text-surface-800"><td class="py-1.5 pr-2" x-text="t('Total','Total')"></td><td class="text-right px-2">&mdash;</td><td class="text-right px-2">41</td><td class="text-right px-2">100</td><td class="text-right pl-2">&mdash;</td></tr>
                         </tbody>
                     </table>
                 </div>
                 <div class="mt-3 space-y-2 text-[11px] text-surface-500">
-                    <p><i class="fas fa-scale-balanced text-primary-500 mr-1"></i><strong>Selalu tepat 100.</strong> Kalau jumlah poin mentah bukan 100, setiap soal diskalakan sehingga pas 100 — skema bernilai 96 poin dibagi 100/96. Halaman pembuat soal menampilkan poin hasil skala per soal, jadi guru melihat angka yang benar sebelum menyimpan.</p>
-                    <p><i class="fas fa-clock-rotate-left text-primary-500 mr-1"></i><strong>Ujian lama tidak berubah.</strong> Ujian yang dibuat sebelum fitur skema tidak punya skema tersimpan, memakai aturan lamanya (70% objektif dan 30% esai dibagi rata, tanpa nilai sebagian), sehingga nilai yang sudah keluar tetap sama.</p>
-                    <p><i class="fas fa-key text-primary-500 mr-1"></i><strong>Soal tanpa kunci tidak dinilai.</strong> Selama kunci belum diisi, soal objektif itu bernilai nol untuk semua murid. Dasbor guru memperingatkan berapa ujian yang masih belum punya kunci.</p>
+                    <p><i class="fas fa-scale-balanced text-primary-500 mr-1"></i><strong x-text="t('Selalu tepat 100.','Always exactly 100.')"></strong> <span x-text="t('Kalau jumlah poin mentah bukan 100, setiap soal diskalakan sehingga pas 100 &mdash; skema bernilai 96 poin dibagi 100/96. Halaman pembuat soal menampilkan poin hasil skala per soal, jadi guru melihat angka yang benar sebelum menyimpan.','If the raw point total is not 100, every question is scaled so that it is — a scheme worth 96 points is divided by 100/96. The exam builder shows the scaled points for each question, so the teacher sees the real number before saving.')"></span></p>
+                    <p><i class="fas fa-clock-rotate-left text-primary-500 mr-1"></i><strong x-text="t('Ujian lama tidak berubah.','An older exam does not change.')"></strong> <span x-text="t('Ujian yang dibuat sebelum fitur skema tidak punya skema tersimpan, memakai aturan lamanya (70% objektif dan 30% esai dibagi rata, tanpa nilai sebagian), sehingga nilai yang sudah keluar tetap sama.','An exam created before the scheme feature has no stored scheme and keeps its old rule (70% objective and 30% essay spread evenly, with no part credit), so marks already released stay as they were.')"></span></p>
+                    <p><i class="fas fa-key text-primary-500 mr-1"></i><strong><span x-text="t('Soal tanpa kunci tidak dinilai.','A question with no key is not marked.')"></span></strong> <span x-text="t('Selama kunci belum diisi, soal objektif itu bernilai nol untuk semua murid. Dasbor guru memperingatkan berapa ujian yang masih belum punya kunci.','Until the key is filled in, that objective question is worth zero for every student. The teacher dashboard warns how many exams still have no key.')"></span></p>
                 </div>
             </div>
         </div>
@@ -89,49 +98,49 @@
         <div class="card p-6">
             <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
                 <span class="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-bold">2</span>
-                Cara Menghitung Nilai Akhir
+                <span x-text="t('Cara Menghitung Nilai Akhir','How the Final Mark Is Worked Out')"></span>
             </h2>
             <div class="bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200 rounded-xl p-4 mb-4">
-                <p class="text-xs font-bold text-primary-700 mb-1">Rumus:</p>
-                <p class="text-sm font-bold text-surface-700">Nilai Akhir = max(0, min(Poin Terkumpul, 100) &minus; Penalti)</p>
+                <p class="text-xs font-bold text-primary-700 mb-1" x-text="t('Rumus:','Formula:')"></p>
+                <p class="text-sm font-bold text-surface-700" x-text="t('Nilai Akhir = max(0, min(Poin Terkumpul, 100) &minus; Penalti)','Final mark = max(0, min(points earned, 100) &minus; penalty)')"></p>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="border border-surface-200 rounded-xl p-4">
-                    <p class="text-xs font-bold text-amber-700 mb-2"><i class="fas fa-robot mr-1"></i>Soal Objektif (Otomatis)</p>
+                    <p class="text-xs font-bold text-amber-700 mb-2"><i class="fas fa-robot mr-1"></i><span x-text="t('Soal Objektif (Otomatis)','Objective Questions (Automatic)')"></span></p>
                     <div class="overflow-x-auto -mx-1 px-1">
                     <table class="w-full text-xs min-w-[420px]">
-                        <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1">Soal</th><th class="text-center px-2">Benar</th><th class="text-right px-2">Poin/Soal</th><th class="text-right">Poin</th></tr></thead>
+                        <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1" x-text="t('Soal','Questions')"></th><th class="text-center px-2" x-text="t('Benar','Right')"></th><th class="text-right px-2" x-text="t('Poin/Soal','Points each')"></th><th class="text-right" x-text="t('Poin','Points')"></th></tr></thead>
                         <tbody>
-                            <tr class="border-b border-surface-50"><td class="py-1">Pilihan ganda</td><td class="text-center px-2">16 dari 20</td><td class="text-right px-2">1</td><td class="text-right font-bold">16</td></tr>
-                            <tr class="border-b border-surface-50"><td class="py-1">Benar/Salah</td><td class="text-center px-2">8 dari 10</td><td class="text-right px-2">1</td><td class="text-right font-bold">8</td></tr>
-                            <tr class="border-b border-surface-50"><td class="py-1">Menjodohkan</td><td class="text-center px-2">15 dari 16 pasangan</td><td class="text-right px-2">5</td><td class="text-right font-bold">18,75</td></tr>
-                            <tr class="border-b border-surface-50"><td class="py-1">Seret &amp; lepas</td><td class="text-center px-2">7 dari 10 posisi</td><td class="text-right px-2">5</td><td class="text-right font-bold">8</td></tr>
-                            <tr class="border-b border-surface-50"><td class="py-1">Mengurutkan</td><td class="text-center px-2">2 soal tepat</td><td class="text-right px-2">5</td><td class="text-right font-bold">10</td></tr>
-                            <tr><td class="py-1 font-bold text-surface-700">Jumlah objektif</td><td colspan="2"></td><td class="text-right font-bold text-amber-700">60,75</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Pilihan ganda','Multiple choice')"></td><td class="text-center px-2" x-text="t('16 dari 20','16 of 20')"></td><td class="text-right px-2">1</td><td class="text-right font-bold">16</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Benar/Salah','True/false')"></td><td class="text-center px-2" x-text="t('8 dari 10','8 of 10')"></td><td class="text-right px-2">1</td><td class="text-right font-bold">8</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Menjodohkan','Matching')"></td><td class="text-center px-2" x-text="t('15 dari 16 pasangan','15 of 16 pairs')"></td><td class="text-right px-2">5</td><td class="text-right font-bold">18,75</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Seret &amp; lepas','Drag and drop')"></td><td class="text-center px-2" x-text="t('7 dari 10 posisi','7 of 10 positions')"></td><td class="text-right px-2">5</td><td class="text-right font-bold">8</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Mengurutkan','Ordering')"></td><td class="text-center px-2" x-text="t('2 soal tepat','2 questions fully right')"></td><td class="text-right px-2">5</td><td class="text-right font-bold">10</td></tr>
+                            <tr><td class="py-1 font-bold text-surface-700" x-text="t('Jumlah objektif','Objective total')"></td><td colspan="2"></td><td class="text-right font-bold text-amber-700">60,75</td></tr>
                         </tbody>
                     </table>
                     </div>
-                    <p class="text-[10px] text-surface-500 mt-2">Menjodohkan yang benar 15 dari 16 pasangan dibayar 15/16 &times; 20 = 18,75 — bukan nol.</p>
+                    <p class="text-[10px] text-surface-500 mt-2" x-text="t('Menjodohkan yang benar 15 dari 16 pasangan dibayar 15/16 &times; 20 = 18,75 &mdash; bukan nol.','A matching question with 15 of 16 pairs right is paid 15/16 &times; 20 = 18.75 — not zero.')"></p>
                 </div>
                 <div class="border border-surface-200 rounded-xl p-4">
-                    <p class="text-xs font-bold text-emerald-700 mb-2"><i class="fas fa-pencil-alt mr-1"></i>Esai (Nilai Guru)</p>
+                    <p class="text-xs font-bold text-emerald-700 mb-2"><i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Esai (Nilai Guru)','Essays (Teacher&rsquo;s Mark)')"></span></p>
                     <div class="overflow-x-auto -mx-1 px-1">
                     <table class="w-full text-xs min-w-[380px]">
-                        <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1">Soal</th><th class="text-center px-2">Nilai</th><th class="text-center px-2">Poin/Soal</th><th class="text-right">Poin</th></tr></thead>
+                        <thead><tr class="text-surface-500 border-b border-surface-100"><th class="text-left py-1" x-text="t('Soal','Question')"></th><th class="text-center px-2" x-text="t('Nilai','Mark')"></th><th class="text-center px-2" x-text="t('Poin/Soal','Points each')"></th><th class="text-right" x-text="t('Poin','Points')"></th></tr></thead>
                         <tbody>
-                            <tr class="border-b border-surface-50"><td class="py-1">Esai 1</td><td class="text-center px-2">80</td><td class="text-center px-2">10</td><td class="text-right font-bold">8</td></tr>
-                            <tr class="border-b border-surface-50"><td class="py-1">Esai 2</td><td class="text-center px-2">70</td><td class="text-center px-2">10</td><td class="text-right font-bold">7</td></tr>
-                            <tr class="border-b border-surface-50"><td class="py-1">Esai 3</td><td class="text-center px-2">90</td><td class="text-center px-2">10</td><td class="text-right font-bold">9</td></tr>
-                            <tr><td class="py-1 font-bold text-surface-700">Jumlah esai</td><td colspan="2"></td><td class="text-right font-bold text-emerald-700">24</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Esai 1','Essay 1')"></td><td class="text-center px-2">80</td><td class="text-center px-2">10</td><td class="text-right font-bold">8</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Esai 2','Essay 2')"></td><td class="text-center px-2">70</td><td class="text-center px-2">10</td><td class="text-right font-bold">7</td></tr>
+                            <tr class="border-b border-surface-50"><td class="py-1" x-text="t('Esai 3','Essay 3')"></td><td class="text-center px-2">90</td><td class="text-center px-2">10</td><td class="text-right font-bold">9</td></tr>
+                            <tr><td class="py-1 font-bold text-surface-700" x-text="t('Jumlah esai','Essay total')"></td><td colspan="2"></td><td class="text-right font-bold text-emerald-700">24</td></tr>
                         </tbody>
                     </table>
                     </div>
-                    <p class="text-[10px] text-surface-500 mt-2">Nilai esai 0&ndash;100 dari guru, dikalikan poin soal: 80 &times; 10/100 = 8 poin. Soal esai yang belum dinilai belum masuk hitungan.</p>
+                    <p class="text-[10px] text-surface-500 mt-2" x-text="t('Nilai esai 0&ndash;100 dari guru, dikalikan poin soal: 80 &times; 10/100 = 8 poin. Soal esai yang belum dinilai belum masuk hitungan.','The teacher&rsquo;s mark on an essay is 0&ndash;100 and is multiplied by the question&rsquo;s points: 80 &times; 10/100 = 8 points. An essay nobody has marked yet is not counted at all.')"></p>
                 </div>
             </div>
             <div class="mt-3 bg-surface-50 border border-surface-200 rounded-xl p-4 text-xs">
-                <p><strong>Objektif:</strong> 60,75 + <strong>Esai:</strong> 24 = <strong>Poin Terkumpul:</strong> 84,75 &rarr; min(84,75, 100) = 84,75 &rarr; 84,75 &minus; 5 (penalti) = <strong class="text-primary-700 text-sm">79,75</strong></p>
-                <p class="text-surface-500 mt-1.5">Nilai akhir tidak pernah negatif: kalau penalti melebihi poin, hasilnya 0.</p>
+                <p><strong x-text="t('Objektif:','Objective:')"></strong> 60,75 + <strong x-text="t('Esai:','Essay:')"></strong> 24 = <strong x-text="t('Poin Terkumpul:','Points earned:')"></strong> 84,75 &rarr; <span x-text="t('min(84,75, 100) = 84,75','min(84.75, 100) = 84.75')"></span> &rarr; <span x-text="t('84,75 &minus; 5 (penalti) =','84.75 &minus; 5 (penalty) =')"></span> <strong class="text-primary-700 text-sm">79,75</strong></p>
+                <p class="text-surface-500 mt-1.5" x-text="t('Nilai akhir tidak pernah negatif: kalau penalti melebihi poin, hasilnya 0.','The final mark is never negative: if the penalty is larger than the points, the result is 0.')"></p>
             </div>
         </div>
 
@@ -139,9 +148,9 @@
         <div class="card p-6">
             <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
                 <span class="w-8 h-8 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-sm font-bold">3</span>
-                Sistem Penalti
+                <span x-text="t('Sistem Penalti','The Penalty System')"></span>
             </h2>
-            <p class="text-sm text-surface-600 mb-3">Yang <strong>dihitung</strong> sebagai pelanggaran hanya dua: <strong>berpindah tab</strong> dan <strong>keluar dari layar penuh</strong>. Kejadian lain yang tetap dicatat — jendela kehilangan fokus, klik kanan, salin &amp; tempel — tidak mengurangi nilai.</p>
+            <p class="text-sm text-surface-600 mb-3"><span x-text="t('Yang','What')"></span> <strong x-text="t('dihitung','counts')"></strong> <span x-text="t('sebagai pelanggaran hanya dua:','as a violation is only two things:')"></span> <strong x-text="t('berpindah tab','switching tabs')"></strong> <span x-text="t('dan','and')"></span> <strong x-text="t('keluar dari layar penuh','leaving fullscreen')"></strong><span x-text="t('. Kejadian lain yang tetap dicatat &mdash; jendela kehilangan fokus, klik kanan, salin &amp; tempel &mdash;','. Other events are still recorded — the window losing focus, right-click, copy and paste — but they')"></span> <span x-text="t('tidak mengurangi nilai','do not reduce the mark')"></span><span x-text="t('.','.')"></span></p>
             {# The schedule is computed by `calculate_graduated_penalty` in
                `app/routes/guide.py`, not typed here. This page described a
                schedule the app had already replaced for a whole release, and a
@@ -153,19 +162,19 @@
                is. #}
             <div class="overflow-x-auto mb-4">
                 <table class="w-full text-xs min-w-[520px]" data-penalty-table>
-                    <thead><tr class="bg-red-50 text-red-700"><th class="text-left px-4 py-2">Pelanggaran ke-</th><th class="text-right px-4 py-2">Potongan</th><th class="text-right px-4 py-2">Total penalti</th><th class="text-left px-4 py-2">Keterangan</th></tr></thead>
+                    <thead><tr class="bg-red-50 text-red-700"><th class="text-left px-4 py-2" x-text="t('Pelanggaran ke-','Violation number')"></th><th class="text-right px-4 py-2" x-text="t('Potongan','Deduction')"></th><th class="text-right px-4 py-2" x-text="t('Total penalti','Total penalty')"></th><th class="text-left px-4 py-2" x-text="t('Keterangan','Meaning')"></th></tr></thead>
                     <tbody>
                         {% for row in penalty_schedule|default([]) %}
                         <tr class="border-b border-surface-100" data-penalty-row="{{ row.n }}">
-                            <td class="px-4 py-2 font-bold">{{ row.n }}{% if loop.last %} ke atas{% endif %}</td>
+                            <td class="px-4 py-2 font-bold">{{ row.n }}{% if loop.last %} <span x-text="t('ke atas','and above')"></span>{% endif %}</td>
                             <td class="text-right px-4 py-2 font-bold {{ 'text-surface-400' if not row.cut else 'text-red-600' }}" data-penalty-cut="{{ row.cut }}">{% if row.cut %}&minus;{{ row.cut|int }}{% else %}0{% endif %}</td>
                             <td class="text-right px-4 py-2 font-bold {{ 'text-surface-400' if not row.total else 'text-red-600' }}" data-penalty-total="{{ row.total }}">{% if row.total %}&minus;{{ row.total|int }}{% else %}0{% endif %}{% if loop.last %} &hellip;{% endif %}</td>
                             <td class="px-4 py-2 text-surface-500">
-                                {% if row.n == 1 %}Peringatan saja, dengan pesan di layar murid
-                                {% elif row.n == 2 %}Dua kali lipat dari pelanggaran pertama
-                                {% elif row.n == 3 %}Dua kali lipat dari pelanggaran kedua
-                                {% elif loop.last %}Ujian otomatis dikumpulkan pada pelanggaran ke-{{ row.n }} (bisa diatur per ujian)
-                                {% else %}Tiga kali lipat, dan seterusnya{% endif %}
+                                {% if row.n == 1 %}<span x-text="t('Peringatan saja, dengan pesan di layar murid','A warning only, with a message on the student&rsquo;s screen')"></span>
+                                {% elif row.n == 2 %}<span x-text="t('Dua kali lipat dari pelanggaran pertama','Twice the first violation')"></span>
+                                {% elif row.n == 3 %}<span x-text="t('Dua kali lipat dari pelanggaran kedua','Twice the second violation')"></span>
+                                {% elif loop.last %}<span x-text="t('Ujian otomatis dikumpulkan pada pelanggaran ke-','The exam is submitted automatically on violation')"></span> {{ row.n }} <span x-text="t('(bisa diatur per ujian)','(settable per exam)')"></span>
+                                {% else %}<span x-text="t('Tiga kali lipat, dan seterusnya','Three times, and so on')"></span>{% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -173,40 +182,40 @@
                 </table>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-sliders mr-1"></i>Bisa diatur</p><p class="text-surface-600 mt-0.5">Besar potongan dan batas pengumpulan otomatis diatur per ujian di halaman Anti-Cheat.</p></div>
-                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-robot mr-1"></i>Bisa dinolkan</p><p class="text-surface-600 mt-0.5">Kalau Anti-Cheat dimatikan untuk satu ujian, tidak ada penalti yang dihitung sama sekali.</p></div>
-                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-hand mr-1"></i>Bisa dioverride</p><p class="text-surface-600 mt-0.5">Guru dapat mengubah penalti satu murid di halaman koreksi, dan perubahan itu tercatat.</p></div>
+                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-sliders mr-1"></i><span x-text="t('Bisa diatur','Configurable')"></span></p><p class="text-surface-600 mt-0.5" x-text="t('Besar potongan dan batas pengumpulan otomatis diatur per ujian di halaman Anti-Cheat.','The size of the deduction and the auto-submit limit are set per exam, on the Anti-Cheat page.')"></p></div>
+                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-robot mr-1"></i><span x-text="t('Bisa dinolkan','Can be switched off')"></span></p><p class="text-surface-600 mt-0.5" x-text="t('Kalau Anti-Cheat dimatikan untuk satu ujian, tidak ada penalti yang dihitung sama sekali.','If Anti-Cheat is switched off for one exam, no penalty is charged at all.')"></p></div>
+                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-hand mr-1"></i><span x-text="t('Bisa dioverride','Can be overridden')"></span></p><p class="text-surface-600 mt-0.5" x-text="t('Guru dapat mengubah penalti satu murid di halaman koreksi, dan perubahan itu tercatat.','A teacher can change one student&rsquo;s penalty on the marking page, and that change is recorded.')"></p></div>
             </div>
-            <p class="text-[11px] text-surface-500 mt-3">Penalti dibatasi maksimum 100 poin, dan nilai akhir tidak pernah di bawah 0.</p>
+            <p class="text-[11px] text-surface-500 mt-3" x-text="t('Penalti dibatasi maksimum 100 poin, dan nilai akhir tidak pernah di bawah 0.','The penalty is capped at 100 points, and the final mark never goes below 0.')"></p>
         </div>
 
         <!-- 4. Banding -->
         <div class="card p-6">
             <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
                 <span class="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">4</span>
-                Menangani Banding Penalti
+                <span x-text="t('Menangani Banding Penalti','Handling Penalty Appeals')"></span>
             </h2>
-            <p class="text-sm text-surface-600 mb-4">Siswa bisa mengajukan banding. Guru review dan putuskan di menu <strong>Banding Penalti</strong> (sidebar).</p>
+            <p class="text-sm text-surface-600 mb-4"><span x-text="t('Siswa bisa mengajukan banding. Guru review dan putuskan di menu','A student can appeal. The teacher reviews and decides in the')"></span> <strong x-text="t('Banding Penalti','Penalty Appeals')"></strong> <span x-text="t('(sidebar).','menu in the sidebar.')"></span></p>
             <div class="flex flex-col md:flex-row items-stretch gap-3 mb-4">
                 <div class="flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
                     <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-file-alt"></i></div>
-                    <p class="text-xs font-bold text-blue-700">Siswa Kirim</p>
-                    <p class="text-[10px] text-blue-500">Tulis alasan</p></div>
+                    <p class="text-xs font-bold text-blue-700" x-text="t('Siswa Kirim','Student sends')"></p>
+                    <p class="text-[10px] text-blue-500" x-text="t('Tulis alasan','Writes a reason')"></p></div>
                 <div class="flex items-center justify-center text-surface-300 text-lg"><i class="fas fa-arrow-right hidden md:block"></i><i class="fas fa-arrow-down md:hidden"></i></div>
                 <div class="flex-1 bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
                     <div class="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-gavel"></i></div>
-                    <p class="text-xs font-bold text-amber-700">Guru Review</p>
-                    <p class="text-[10px] text-amber-500">Setujui / Tolak</p></div>
+                    <p class="text-xs font-bold text-amber-700" x-text="t('Guru Review','Teacher reviews')"></p>
+                    <p class="text-[10px] text-amber-500" x-text="t('Setujui / Tolak','Approve or reject')"></p></div>
                 <div class="flex items-center justify-center text-surface-300 text-lg"><i class="fas fa-arrow-right hidden md:block"></i><i class="fas fa-arrow-down md:hidden"></i></div>
                 <div class="flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
                     <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-check-double"></i></div>
-                    <p class="text-xs font-bold text-emerald-700">Selesai</p>
-                    <p class="text-[10px] text-emerald-500">Skor diperbarui</p></div>
+                    <p class="text-xs font-bold text-emerald-700" x-text="t('Selesai','Done')"></p>
+                    <p class="text-[10px] text-emerald-500" x-text="t('Skor diperbarui','The mark is updated')"></p></div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3"><p class="font-bold text-emerald-700">&#10003; Setujui</p><p class="text-surface-600 mt-0.5">Pengurangan: nominal, persen, atau semua.</p></div>
-                <div class="bg-red-50 border border-red-200 rounded-xl p-3"><p class="font-bold text-red-700">&#10007; Tolak</p><p class="text-surface-600 mt-0.5">Penalti tetap. Bisa tambah catatan.</p></div>
-                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-history mr-1"></i>Tercatat</p><p class="text-surface-600 mt-0.5">Riwayat banding untuk guru &amp; murid.</p></div>
+                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3"><p class="font-bold text-emerald-700">&#10003; <span x-text="t('Setujui','Approve')"></span></p><p class="text-surface-600 mt-0.5" x-text="t('Pengurangan: nominal, persen, atau semua.','The reduction: a figure, a percentage, or everything.')"></p></div>
+                <div class="bg-red-50 border border-red-200 rounded-xl p-3"><p class="font-bold text-red-700">&#10007; <span x-text="t('Tolak','Reject')"></span></p><p class="text-surface-600 mt-0.5" x-text="t('Penalti tetap. Bisa tambah catatan.','The penalty stands. A note can be added.')"></p></div>
+                <div class="bg-surface-50 border border-surface-200 rounded-xl p-3"><p class="font-bold text-surface-700"><i class="fas fa-history mr-1"></i><span x-text="t('Tercatat','On the record')"></span></p><p class="text-surface-600 mt-0.5" x-text="t('Riwayat banding untuk guru &amp; murid.','The appeal history for teacher and student.')"></p></div>
             </div>
         </div>
     </div>
@@ -214,95 +223,95 @@
     <!-- ============================== -->
     <!-- TAB MURID -->
     <!-- ============================== -->
-    <div x-show="tab==='murid'" class="space-y-6">
+    <div x-show="tab==='student'" class="space-y-6">
 
         <!-- 1. -->
         <div class="card p-6">
             <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
                 <span class="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-bold">1</span>
-                Cara Nilai Anda Dihitung
+                <span x-text="t('Cara Nilai Anda Dihitung','How Your Mark Is Worked Out')"></span>
             </h2>
             <div class="bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-200 rounded-xl p-4 mb-4">
-                <p class="text-xs font-bold text-primary-700 mb-1">Rumus:</p>
-                <p class="text-sm font-bold text-surface-700">Nilai Akhir = max(0, min(Poin Terkumpul, 100) &minus; Penalti)</p>
+                <p class="text-xs font-bold text-primary-700 mb-1" x-text="t('Rumus:','Formula:')"></p>
+                <p class="text-sm font-bold text-surface-700" x-text="t('Nilai Akhir = max(0, min(Poin Terkumpul, 100) &minus; Penalti)','Final mark = max(0, min(points earned, 100) &minus; penalty)')"></p>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-center text-xs">
                 <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
                     <div class="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-list-ol"></i></div>
-                    <p class="font-bold text-amber-700">Soal Objektif</p>
-                    <p class="text-surface-500">Dinilai otomatis. Menjodohkan, seret &amp; lepas, dan mengurutkan dapat nilai sebagian kalau sebagian benar.</p></div>
+                    <p class="font-bold text-amber-700" x-text="t('Soal Objektif','Objective questions')"></p>
+                    <p class="text-surface-500" x-text="t('Dinilai otomatis. Menjodohkan, seret &amp; lepas, dan mengurutkan dapat nilai sebagian kalau sebagian benar.','Marked automatically. Matching, drag and drop, and ordering earn part credit when they are partly right.')"></p></div>
                 <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
                     <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-pencil-alt"></i></div>
-                    <p class="font-bold text-emerald-700">Esai</p>
-                    <p class="text-surface-500">Dikoreksi guru. Nilai 0&ndash;100, lalu dikalikan poin soal esai itu.</p></div>
+                    <p class="font-bold text-emerald-700" x-text="t('Esai','Essays')"></p>
+                    <p class="text-surface-500" x-text="t('Dikoreksi guru. Nilai 0&ndash;100, lalu dikalikan poin soal esai itu.','Marked by the teacher, 0&ndash;100, then multiplied by that essay question&rsquo;s points.')"></p></div>
                 <div class="bg-red-50 border border-red-200 rounded-xl p-4">
                     <div class="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-shield-alt"></i></div>
-                    <p class="font-bold text-red-700">Penalti</p>
-                    <p class="text-surface-500">Dari pelanggaran saat ujian. Dikurangi setelah poin terkumpul.</p></div>
+                    <p class="font-bold text-red-700" x-text="t('Penalti','Penalty')"></p>
+                    <p class="text-surface-500" x-text="t('Dari pelanggaran saat ujian. Dikurangi setelah poin terkumpul.','From violations during the exam. Deducted after the points are added up.')"></p></div>
             </div>
-            <p class="text-[11px] text-surface-500 mt-3">Jawaban yang dikosongkan tidak dihitung salah — soal itu hanya tidak menambah poin. Jawaban yang salah bernilai nol, kecuali soal menjodohkan, seret &amp; lepas, dan mengurutkan yang dibayar sebagian sesuai bagian yang benar.</p>
+            <p class="text-[11px] text-surface-500 mt-3" x-text="t('Jawaban yang dikosongkan tidak dihitung salah &mdash; soal itu hanya tidak menambah poin. Jawaban yang salah bernilai nol, kecuali soal menjodohkan, seret &amp; lepas, dan mengurutkan yang dibayar sebagian sesuai bagian yang benar.','A blank answer is not counted wrong — that question simply adds no points. A wrong answer is worth zero, except matching, drag and drop, and ordering, which are paid in part according to the part that is right.')"></p>
         </div>
 
         <!-- 2. -->
         <div class="card p-6">
             <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
                 <span class="w-8 h-8 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-sm font-bold">2</span>
-                Tabel Penalti
+                <span x-text="t('Tabel Penalti','Penalty Table')"></span>
             </h2>
-            <p class="text-sm text-surface-600 mb-3">Yang dihitung sebagai pelanggaran hanya <strong>berpindah tab</strong> dan <strong>keluar dari layar penuh</strong>. Pelanggaran pertama hanya peringatan; sesudahnya potongan bertambah besar:</p>
+            <p class="text-sm text-surface-600 mb-3"><span x-text="t('Yang dihitung sebagai pelanggaran hanya','Only')"></span> <strong x-text="t('berpindah tab','switching tabs')"></strong> <span x-text="t('dan','and')"></span> <strong x-text="t('keluar dari layar penuh','leaving fullscreen')"></strong><span x-text="t('. Pelanggaran pertama hanya peringatan; sesudahnya potongan bertambah besar:','. The first violation is a warning only; after that the deduction grows:')"></span></p>
             <div class="overflow-x-auto mb-4">
                 <table class="w-full text-xs min-w-[420px]" data-penalty-table-student>
-                    <thead><tr class="bg-red-50 text-red-700"><th class="text-left px-4 py-2">Pelanggaran ke-</th><th class="text-right px-4 py-2">Potongan</th><th class="text-right px-4 py-2">Total</th></tr></thead>
+                    <thead><tr class="bg-red-50 text-red-700"><th class="text-left px-4 py-2" x-text="t('Pelanggaran ke-','Violation number')"></th><th class="text-right px-4 py-2" x-text="t('Potongan','Deduction')"></th><th class="text-right px-4 py-2" x-text="t('Total','Total')"></th></tr></thead>
                     <tbody>
                         {% for row in penalty_schedule|default([]) %}
                         <tr class="border-b border-surface-100" data-penalty-row="{{ row.n }}">
                             <td class="px-4 py-2 font-bold">{{ row.n }}</td>
-                            <td class="text-right px-4 py-2 {{ 'text-surface-400' if not row.cut else 'text-red-600' }}">{% if row.cut %}&minus;{{ row.cut|int }}{% else %}0 (peringatan){% endif %}</td>
-                            <td class="text-right px-4 py-2 {{ 'text-surface-400' if not row.total else 'text-red-600' }}" data-penalty-total="{{ row.total }}">{% if row.total %}&minus;{{ row.total|int }}{% else %}0{% endif %}{% if row.submits %} &middot; ujian dikumpulkan otomatis{% endif %}</td>
+                            <td class="text-right px-4 py-2 {{ 'text-surface-400' if not row.cut else 'text-red-600' }}">{% if row.cut %}&minus;{{ row.cut|int }}{% else %}0 <span x-text="t('(peringatan)','(a warning)')"></span>{% endif %}</td>
+                            <td class="text-right px-4 py-2 {{ 'text-surface-400' if not row.total else 'text-red-600' }}" data-penalty-total="{{ row.total }}">{% if row.total %}&minus;{{ row.total|int }}{% else %}0{% endif %}{% if row.submits %} &middot; <span x-text="t('ujian dikumpulkan otomatis','the exam is submitted automatically')"></span>{% endif %}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            <p class="text-[11px] text-surface-500">Potongan maksimum 100 poin dan nilai akhir tidak pernah negatif. Pelanggaran yang tidak berlaku di ujian Anda tidak akan muncul di layar.</p>
-            <p class="text-[11px] text-surface-500 mt-1">Hanya {{ charged_violations|default(2) }} hal yang dihitung sebagai pelanggaran, yaitu berpindah tab dan keluar dari layar penuh. Kejadian lain yang tetap tercatat tidak mengurangi nilai.</p>
+            <p class="text-[11px] text-surface-500" x-text="t('Potongan maksimum 100 poin dan nilai akhir tidak pernah negatif. Pelanggaran yang tidak berlaku di ujian Anda tidak akan muncul di layar.','The deduction is capped at 100 points and the final mark is never negative. A violation that does not apply to your exam never appears on your screen.')"></p>
+            <p class="text-[11px] text-surface-500 mt-1"><span x-text="t('Hanya','Only')"></span> {{ charged_violations|default(2) }} <span x-text="t('hal yang dihitung sebagai pelanggaran, yaitu berpindah tab dan keluar dari layar penuh. Kejadian lain yang tetap tercatat','things count as a violation, namely switching tabs and leaving fullscreen. Other events are still recorded but they')"></span> <span x-text="t('tidak mengurangi nilai','do not reduce the mark')"></span><span x-text="t('.','.')"></span></p>
         </div>
 
         <!-- 3. -->
         <div class="card p-6">
             <h2 class="text-lg font-extrabold text-surface-800 flex items-center gap-2 mb-4">
                 <span class="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">3</span>
-                Cara Banding
+                <span x-text="t('Cara Banding','How to Appeal')"></span>
             </h2>
-            <p class="text-sm text-surface-600 mb-4">Jika penalti tidak wajar, ajukan banding ke guru.</p>
+            <p class="text-sm text-surface-600 mb-4" x-text="t('Jika penalti tidak wajar, ajukan banding ke guru.','If the penalty is unfair, appeal to the teacher.')"></p>
             <div class="flex flex-col md:flex-row items-stretch gap-3 mb-4">
                 <div class="flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
                     <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-file-alt"></i></div>
-                    <p class="text-xs font-bold text-blue-700">1. Tulis Alasan</p>
-                    <p class="text-[10px] text-blue-500">Min 10 karakter</p></div>
+                    <p class="text-xs font-bold text-blue-700" x-text="t('1. Tulis Alasan','1. Write the reason')"></p>
+                    <p class="text-[10px] text-blue-500" x-text="t('Min 10 karakter','At least 10 characters')"></p></div>
                 <div class="flex items-center justify-center text-surface-300"><i class="fas fa-arrow-right"></i></div>
                 <div class="flex-1 bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
                     <div class="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-paper-plane"></i></div>
-                    <p class="text-xs font-bold text-amber-700">2. Kirim</p>
-                    <p class="text-[10px] text-amber-500">Submit ke guru</p></div>
+                    <p class="text-xs font-bold text-amber-700" x-text="t('2. Kirim','2. Send')"></p>
+                    <p class="text-[10px] text-amber-500" x-text="t('Submit ke guru','Submit to the teacher')"></p></div>
                 <div class="flex items-center justify-center text-surface-300"><i class="fas fa-arrow-right"></i></div>
                 <div class="flex-1 bg-purple-50 border border-purple-200 rounded-xl p-4 text-center">
                     <div class="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-clock"></i></div>
-                    <p class="text-xs font-bold text-purple-700">3. Tunggu</p>
-                    <p class="text-[10px] text-purple-500">Review guru</p></div>
+                    <p class="text-xs font-bold text-purple-700" x-text="t('3. Tunggu','3. Wait')"></p>
+                    <p class="text-[10px] text-purple-500" x-text="t('Review guru','The teacher reviews it')"></p></div>
                 <div class="flex items-center justify-center text-surface-300"><i class="fas fa-arrow-right"></i></div>
                 <div class="flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
                     <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2"><i class="fas fa-check-double"></i></div>
-                    <p class="text-xs font-bold text-emerald-700">4. Selesai</p>
-                    <p class="text-[10px] text-emerald-500">Nilai diperbarui</p></div>
+                    <p class="text-xs font-bold text-emerald-700" x-text="t('4. Selesai','4. Done')"></p>
+                    <p class="text-[10px] text-emerald-500" x-text="t('Nilai diperbarui','The mark is updated')"></p></div>
             </div>
             <div class="flex flex-wrap gap-2 text-xs">
-                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200"><i class="fas fa-hourglass-half"></i>Pending</span>
-                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"><i class="fas fa-check-circle"></i>Disetujui</span>
-                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200"><i class="fas fa-times-circle"></i>Ditolak</span>
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200"><i class="fas fa-hourglass-half"></i><span x-text="t('Pending','Pending')"></span></span>
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"><i class="fas fa-check-circle"></i><span x-text="t('Disetujui','Approved')"></span></span>
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200"><i class="fas fa-times-circle"></i><span x-text="t('Ditolak','Rejected')"></span></span>
             </div>
             <div class="mt-3 bg-primary-50 border border-primary-200 rounded-xl p-3 text-xs">
-                <p><i class="fas fa-info-circle text-primary-600 mr-1"></i>Buka <strong>Detail Hasil</strong> ujian &rarr; klik <strong>"Ajukan Banding Penalti"</strong> &rarr; tulis alasan &rarr; kirim.</p>
+                <p><i class="fas fa-info-circle text-primary-600 mr-1"></i><span x-text="t('Buka','Open')"></span> <strong x-text="t('Detail Hasil','Result Details')"></strong> <span x-text="t('ujian','for the exam')"></span> &rarr; <span x-text="t('klik','click')"></span> <strong>&quot;<span x-text="t('Ajukan Banding Penalti','File a Penalty Appeal')"></span>&quot;</strong> &rarr; <span x-text="t('tulis alasan','write the reason')"></span> &rarr; <span x-text="t('kirim','send')"></span>.</p>
             </div>
         </div>
     </div>
