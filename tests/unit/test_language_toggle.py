@@ -451,6 +451,18 @@ TRANSLATED = [
     # landing page's capacity block, so it carries the same contract: the numbers
     # come from docs/measurements/ and the sentences come in both languages.
     "public/capacity.html",
+    # The scoring reference. It was pinned Indonesian on the argument that
+    # material read *while marking* should hold still; a school that runs the app
+    # in English still marks papers, so the page now follows the toggle like every
+    # other one. Its anchor copy — the formula, the six type names, the two acts
+    # that are charged — is in both languages and guarded by
+    # `tests/unit/test_analysis_page.py`.
+    "guide/skor.html",
+    # The statistics page, for the three roles that may read one. It used to be
+    # pinned Indonesian and written as inline ternaries, which the audit cannot
+    # count and the toggle cannot reach; every string on it — the KPI labels, the
+    # table headers, the legend under the table — is a pair now.
+    "teacher/analytics.html",
     # The entry door. Every auth page renders `content_noauth`, which carries no
     # navbar — so the toggle in the authenticated chrome is simply absent, and the
     # first page a stranger ever meets would have been copy for one reader. Each
@@ -805,7 +817,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 32, (
+    assert len(TRANSLATED) == 34, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

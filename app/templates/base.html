@@ -204,6 +204,8 @@
              <a href="/super-admin/logs" class="nav-item {% if request.path == '/super-admin/logs' %}active{% endif %}"><i class="fas fa-history"></i><span x-text="t('Audit Log','Audit Log')"></span></a>
              <a href="/super-admin/users/manage" class="nav-item {% if request.path == '/super-admin/users/manage' %}active{% endif %}"><i class="fas fa-user-cog"></i><span x-text="t('Manajemen User','User Management')"></span></a>
              <a href="/super-admin/feature-flags" class="nav-item {% if request.path == '/super-admin/feature-flags' %}active{% endif %}"><i class="fas fa-toggle-on"></i><span x-text="t('Feature Flags','Feature Flags')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
+            <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik Semua Sekolah','All-School Analytics')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Demo','Demo')"></span></div>
             <a href="/super-admin/demo-settings" class="nav-item {% if request.path == '/super-admin/demo-settings' %}active{% endif %}"><i class="fas fa-flask"></i><span x-text="t('Pengaturan Demo','Demo Settings')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Langganan','Subscription')"></span></div>
@@ -243,6 +245,8 @@
             <a href="/admin-sekolah/import" class="nav-item {% if request.path == '/admin-sekolah/import' %}active{% endif %}"><i class="fas fa-upload"></i><span x-text="t('Import Excel','Import Excel')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Akademik','Academic')"></span></div>
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
+            <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik Sekolah','School Analytics')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
@@ -275,8 +279,6 @@
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
             <a href="/teacher/comms" class="nav-item {% if request.path == '/teacher/comms' %}active{% endif %}"><i class="fas fa-comments"></i><span x-text="t('Pesan &amp; Pengumuman','Messages &amp; Announcements')"></span></a>
-            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
-            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Pengaturan','Settings')"></span></div>
             <a href="/teacher/settings" class="nav-item {% if request.path == '/teacher/settings' %}active{% endif %}"><i class="fas fa-cog"></i><span x-text="t('Pengaturan Akun','Account Settings')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>

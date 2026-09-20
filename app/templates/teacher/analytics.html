@@ -1,24 +1,84 @@
-{% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}Analitik - ScanGrade{% endblock %}
-{% block page_title %}Analitik{% endblock %}
-{# Chart.js is loaded once by base.html from the local vendored copy. A second
-   load here re-initialised window.Chart and wiped the theme defaults base.html
-   sets, so this page's charts rendered their labels at #666 on a dark card. #}
+{% block title %}<span x-text="t('Analitik','Analytics')"></span> - ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Analitik','Analytics')"></span>{% endblock %}
+{# Every word on this page is a pair, so the EN/ID button translates the whole
+   report — including the summary table, which is built from the numbers rather
+   than from sentences. The page used to pin `content_lang = 'id'` and write its
+   copy as inline ternaries, which is the same information in a shape the audit
+   cannot count and the toggle cannot reach. #}
 {% block content %}
 <div class="space-y-6">
-    <div>
-        <h2 class="text-2xl font-extrabold text-slate-800" x-text="lang==='en'?'Analytics':'Analitik'"></h2>
-        <p class="text-sm text-slate-500 font-medium mt-0.5" x-text="lang==='en'?'Performance insights across your exams':'Wawasan performa di seluruh ujian Anda'"></p>
+    <!-- Summary header -->
+    <div class="flex flex-wrap items-start justify-between gap-4 no-print">
+        <div>
+            <h2 class="text-2xl font-extrabold text-slate-800" x-text="t('Analitik','Analytics')"></h2>
+            <p class="text-sm text-slate-500 font-medium mt-0.5">
+                <span x-text="t('Analisis statistik untuk','Statistical analysis for')"></span>
+                <span class="font-bold text-slate-600"
+                      x-data="{scope: {{ report.scope_pair|tojson|forceescape }}}"
+                      x-text="t(scope.id, scope.en)"></span>
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+            {# Server-rendered files cannot follow the toggle, so each link carries
+               the language the reader has chosen. #}
+            <a :href="'/teacher/analytics/download.csv?lang=' + lang" data-download="csv"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-csv mr-1 text-emerald-600"></i>CSV
+            </a>
+            <a :href="'/teacher/analytics/download.pdf?lang=' + lang" data-download="pdf"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
+            </a>
+            <a :href="'/teacher/analytics/print?lang=' + lang" target="_blank" rel="noopener"
+               class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
+                <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>
+            </a>
+        </div>
     </div>
 
-    <!-- Stat Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+    <!-- Scope, and what is inside it -->
+    <div class="card p-4 sm:p-5 print-header">
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs sm:text-sm">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-layer-group text-primary-600"></i>
+                <span class="font-semibold text-slate-500" x-text="t('Cakupan','Scope')"></span>
+                <span class="font-bold text-slate-800"
+                      x-data="{scope: {{ report.scope_pair|tojson|forceescape }}}"
+                      x-text="t(scope.id, scope.en)"></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <i class="fas fa-file-alt text-slate-400"></i>
+                <span class="font-bold text-slate-800">{{ report.totals.exams }}</span>
+                <span class="font-semibold text-slate-500" x-text="t('ujian','exams')"></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <i class="fas fa-microscope text-violet-500"></i>
+                <span class="font-bold text-slate-800">{{ report.totals.questions }}</span>
+                <span class="font-semibold text-slate-500" x-text="t('butir soal','items')"></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <i class="fas fa-clock text-slate-400"></i>
+                <span class="font-semibold text-slate-500">{{ report.generated.strftime('%Y-%m-%d %H:%M') }}</span>
+            </div>
+        </div>
+        {% if report.truncated %}
+        <p class="mt-3 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <i class="fas fa-circle-info mr-1"></i>
+            <span x-text="t('Dibatasi {n} ujian terbaru di cakupan ini.', 'Limited to the newest {n} exams in this scope.').replace('{n}', '{{ report.limit }}')"></span>
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- Stat cards. Three across on a laptop rather than five: five columns in an
+         800px content area is 137px a card, and "TOTAL EXAMS" wraps onto two lines
+         above a number that then sits on the card's edge. -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
         <div class="card stat-card">
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-brand-50 text-brand-600"><i class="fas fa-file-alt"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Total Exams':'Total Ujian'"></p>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Total Ujian','Total Exams')"></p>
                     <p class="text-2xl font-extrabold text-slate-800">{{ stats.total_exams }}</p>
                 </div>
             </div>
@@ -27,7 +87,7 @@
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-user-check"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Submissions':'Pengumpulan'"></p>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Pengumpulan','Submissions')"></p>
                     <p class="text-2xl font-extrabold text-slate-800">{{ stats.total_submissions }}</p>
                 </div>
             </div>
@@ -36,7 +96,7 @@
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-chart-line"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Avg Score':'Rata-rata'"></p>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Rata-rata','Avg Score')"></p>
                     <p class="text-2xl font-extrabold text-slate-800">{{ stats.avg_score }}</p>
                 </div>
             </div>
@@ -45,7 +105,7 @@
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-amber-50 text-amber-600"><i class="fas fa-trophy"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="lang==='en'?'Pass Rate':'Kelulusan'"></p>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Kelulusan','Pass Rate')"></p>
                     <p class="text-2xl font-extrabold text-slate-800">{{ stats.pass_rate }}%</p>
                 </div>
             </div>
@@ -55,7 +115,7 @@
             <div class="flex items-center gap-3">
                 <div class="stat-icon bg-rose-50 text-rose-600"><i class="fas fa-chart-bar"></i></div>
                 <div>
-                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Std Dev</p>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Simpangan baku','Std Dev')"></p>
                     <p class="text-2xl font-extrabold text-slate-800">{{ stats.std_dev }}</p>
                 </div>
             </div>
@@ -63,22 +123,48 @@
         {% endif %}
     </div>
 
-    <!-- Empty state when no data -->
-    <div x-show="{{ stats.total_submissions|tojson }} === 0" class="card p-10 text-center">
-        <i class="fas fa-chart-pie text-5xl text-slate-300 mb-4"></i>
-        <h3 class="text-lg font-extrabold text-slate-700 mb-2" x-text="lang==='en'?'No Data Yet':'Belum Ada Data'"></h3>
-        <p class="text-sm font-medium text-slate-500 max-w-md mx-auto" x-text="lang==='en'?'Analytics will appear here after students take your exams. Create and publish an exam, then students can start working on it.':'Analitik akan muncul setelah siswa mengerjakan ujian Anda. Buat dan publikasikan ujian, lalu siswa dapat mulai mengerjakannya.'"></p>
-        <div class="flex justify-center gap-3 mt-6">
-            <a href="/teacher/exams" class="bg-brand-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-brand-600/20 hover:bg-brand-700 transition"><i class="fas fa-plus mr-1"></i> <span x-text="lang==='en'?'Create Exam':'Buat Ujian'"></span></a>
-            <a href="/teacher/results" class="border-2 border-slate-200 px-5 py-2.5 rounded-xl font-bold text-sm text-slate-600 hover:bg-slate-50 transition"><i class="fas fa-file-alt mr-1"></i> <span x-text="lang==='en'?'View Results':'Lihat Hasil'"></span></a>
+    <!-- Item analysis headline: the questions, not only the marks -->
+    <div class="card p-4 sm:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h3 class="font-bold text-slate-800" x-text="t('Analisis butir soal','Item analysis')"></h3>
+            <p class="text-xs font-medium text-slate-500" x-text="t('Angka ini berasal dari analisis yang sama dengan halaman tiap ujian.','These come from the same analysis the exam page shows.')"></p>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="rounded-xl border border-slate-200 p-3">
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Soal bermasalah','Flagged questions')"></p>
+                <p class="text-2xl font-extrabold {% if report.totals.flagged %}text-rose-600{% else %}text-emerald-600{% endif %}">{{ report.totals.flagged }}</p>
+                <p class="text-xs font-medium text-slate-400" x-text="t('daya beda lemah/negatif atau menyimpang','weak or negative discrimination, or a misfit')"></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 p-3">
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Belum terukur','Unmeasurable')"></p>
+                <p class="text-2xl font-extrabold {% if report.totals.holes %}text-amber-600{% else %}text-emerald-600{% endif %}">{{ report.totals.holes }}</p>
+                <p class="text-xs font-medium text-slate-400" x-text="t('belum ada kunci atau belum dijawab','no key yet, or nobody answered')"></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 p-3">
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Ujian tanpa kunci','Exams with no key')"></p>
+                <p class="text-2xl font-extrabold text-slate-800">{{ report.totals.without_key }}</p>
+                <p class="text-xs font-medium text-slate-400" x-text="t('soal objektifnya bernilai nol','their objective questions score zero')"></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 p-3">
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider" x-text="t('Soal dianalisis','Questions analysed')"></p>
+                <p class="text-2xl font-extrabold text-slate-800">{{ report.totals.questions }}</p>
+                <p class="text-xs font-medium text-slate-400" x-text="t('dari seluruh ujian di cakupan','across every exam in scope')"></p>
+            </div>
         </div>
     </div>
 
+    <!-- Empty state when no data -->
+    <div x-show="{{ stats.total_submissions|tojson|forceescape }} === 0" class="card p-10 text-center">
+        <i class="fas fa-chart-pie text-5xl text-slate-300 mb-4"></i>
+        <h3 class="text-lg font-extrabold text-slate-700 mb-2" x-text="t('Belum Ada Data','No Data Yet')"></h3>
+        <p class="text-sm font-medium text-slate-500 max-w-md mx-auto" x-text="t('Analitik akan muncul setelah murid mengerjakan ujian.','Analytics will appear here after students take an exam.')"></p>
+    </div>
+
     <!-- Charts (hidden when no data) -->
-    <div x-show="{{ stats.total_submissions|tojson }} > 0" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div x-show="{{ stats.total_submissions|tojson|forceescape }} > 0" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="card">
             <div class="px-5 py-4 border-b border-slate-100">
-                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Score Distribution':'Distribusi Nilai'"></h3>
+                <h3 class="font-bold text-slate-800" x-text="t('Distribusi Nilai','Score Distribution')"></h3>
             </div>
             <div class="p-5">
                 <canvas id="distChart" height="220"></canvas>
@@ -86,7 +172,7 @@
         </div>
         <div class="card">
             <div class="px-5 py-4 border-b border-slate-100">
-                <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Exam Performance':'Performa per Ujian'"></h3>
+                <h3 class="font-bold text-slate-800" x-text="t('Performa per Ujian','Exam Performance')"></h3>
             </div>
             <div class="p-5">
                 <canvas id="examChart" height="220"></canvas>
@@ -94,54 +180,109 @@
         </div>
     </div>
 
-    <!-- Per-Exam Breakdown -->
-    <div class="card" x-show="{{ stats.total_submissions|tojson }} > 0">
-        <div class="px-5 py-4 border-b border-slate-100">
-            <h3 class="font-bold text-slate-800" x-text="lang==='en'?'Per-Exam Breakdown':'Rincian per Ujian'"></h3>
+    <!-- Per-exam statistics, and each exam's own documents -->
+    <div class="card" x-show="{{ stats.total_submissions|tojson|forceescape }} > 0">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-bold text-slate-800" x-text="t('Rincian per Ujian','Per-Exam Breakdown')"></h3>
+            <p class="text-xs font-medium text-slate-500" x-text="t('Setiap baris punya PDF, CSV dan halaman analisisnya sendiri.','Every row has its own PDF, CSV and analysis page.')"></p>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm min-w-[760px]">
+            <table class="w-full text-sm min-w-[980px]">
                 <thead><tr class="text-left text-slate-500 bg-slate-50 border-b border-slate-100">
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Exam':'Ujian'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Submissions':'Pengumpulan'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Average':'Rata-rata'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Median':'Median'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Highest':'Tertinggi'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Lowest':'Terendah'"></th>
-                    <th class="px-5 py-3 font-semibold" x-text="lang==='en'?'Pass %':'Lulus %'"></th>
+                    <th class="px-5 py-3 font-semibold" x-text="t('Ujian','Exam')"></th>
+                    {% if report.role != 'guru' %}
+                    <th class="px-4 py-3 font-semibold" x-text="t('Guru','Teacher')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Sekolah','School')"></th>
+                    {% endif %}
+                    <th class="px-4 py-3 font-semibold" x-text="t('Pengumpulan','Submissions')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Rata-rata','Average')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Median','Median')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Simpangan baku','Std Dev')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Lulus %','Pass %')"></th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Soal','Questions')"></th>
+                    <th class="px-4 py-3 font-semibold">Alpha</th>
+                    <th class="px-4 py-3 font-semibold">KR-20</th>
+                    <th class="px-4 py-3 font-semibold" x-text="t('Bermasalah','Flagged')"></th>
+                    <th class="px-4 py-3 font-semibold no-print" x-text="t('Berkas','Files')"></th>
                 </tr></thead>
                 <tbody>
-                    {% for e in exam_breakdown %}
+                    {% for e in report.rows %}
                     <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
-                        <td class="px-5 py-3 font-semibold text-slate-700">{{ e.title }}</td>
-                        <td class="px-5 py-3 text-slate-600">{{ e.count }}</td>
-                        <td class="px-5 py-3 font-bold text-slate-800">{{ e.avg }}</td>
-                        <td class="px-5 py-3 font-semibold text-slate-700">{{ e.median }}</td>
-                        <td class="px-5 py-3 text-emerald-600 font-semibold">{{ e.max }}</td>
-                        <td class="px-5 py-3 text-red-500 font-semibold">{{ e.min }}</td>
                         <td class="px-5 py-3">
+                            <p class="font-semibold text-slate-700">{{ e.title }}</p>
+                            {% if e.subject %}<p class="text-xs font-medium text-slate-400">{{ e.subject }}</p>{% endif %}
+                        </td>
+                        {% if report.role != 'guru' %}
+                        <td class="px-4 py-3 text-slate-600">{{ e.teacher or '—' }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ e.school or '—' }}</td>
+                        {% endif %}
+                        <td class="px-4 py-3 text-slate-600">{{ e.count }}</td>
+                        <td class="px-4 py-3 font-bold text-slate-800">{{ e.mean if e.mean is not none else '—' }}</td>
+                        <td class="px-4 py-3 font-semibold text-slate-700">{{ e.median if e.median is not none else '—' }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ e.sd if e.sd is not none else '—' }}</td>
+                        <td class="px-4 py-3">
+                            {% if e.pass_pct is not none %}
                             <div class="flex items-center gap-2">
-                                <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500 rounded-full" style="width:{{ e.pass_pct }}%"></div></div>
+                                <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[48px]"><div class="h-full bg-brand-500 rounded-full" style="width:{{ e.pass_pct }}%"></div></div>
                                 <span class="text-xs font-semibold text-slate-600">{{ e.pass_pct }}%</span>
+                            </div>
+                            {% else %}<span class="text-slate-400">—</span>{% endif %}
+                        </td>
+                        {# Subscript, not `e.items`: Jinja resolves an attribute before a key,
+                           and for a dict `items` is the *method* — so `e.items` prints
+                           "<built-in method items of dict object at 0x...>" instead of the
+                           number. `tests/unit/test_analytics_scope.py` fails on any cell
+                           that prints a Python repr. #}
+                        <td class="px-4 py-3 text-slate-600">{{ e['items'] }}</td>
+                        <td class="px-4 py-3 font-semibold text-slate-700">{{ e.alpha|round(2) if e.alpha is not none else '—' }}</td>
+                        <td class="px-4 py-3 font-semibold text-slate-700">{{ e.kr20|round(2) if e.kr20 is not none else '—' }}</td>
+                        <td class="px-4 py-3">
+                            {% if e.flagged %}<span class="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">{{ e.flagged }}</span>
+                            {% else %}<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">0</span>{% endif %}
+                        </td>
+                        <td class="px-4 py-3 no-print">
+                            <div class="flex items-center gap-1">
+                                <a href="/teacher/analysis/{{ e.id }}" :title="t('Buka analisis butir soal ujian','Open the exam item analysis')"
+                                   class="w-8 h-8 rounded-lg bg-violet-50 text-violet-600 hover:bg-violet-100 flex items-center justify-center transition"><i class="fas fa-microscope text-xs"></i></a>
+                                <a :href="'/teacher/analysis/{{ e.id }}/download.pdf?lang=' + lang" data-download="pdf"
+                                   class="w-8 h-8 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center transition"><i class="fas fa-file-pdf text-xs"></i></a>
+                                <a :href="'/teacher/analysis/{{ e.id }}/download.csv?lang=' + lang" data-download="csv"
+                                   class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 flex items-center justify-center transition"><i class="fas fa-file-csv text-xs"></i></a>
                             </div>
                         </td>
                     </tr>
                     {% endfor %}
-                    {% if not exam_breakdown %}
-                    <tr><td colspan="7" class="px-5 py-8 text-center text-slate-400 font-medium" x-text="lang==='en'?'No data yet':'Belum ada data'"></td></tr>
+                    {% if not report.rows %}
+                    <tr><td colspan="13" class="px-5 py-8 text-center text-slate-400 font-medium" x-text="t('Belum ada ujian di cakupan ini','No exams in this scope yet')"></td></tr>
                     {% endif %}
                 </tbody>
             </table>
         </div>
+        <p class="px-5 py-4 text-xs font-medium text-slate-500 border-t border-slate-100" x-text="t('Lulus % = peserta yang mencapai KKM. Alpha = Cronbach alpha; KR-20 sama nilainya untuk soal benar/salah. Soal bermasalah = daya beda lemah atau negatif, menyimpang dari model, atau dijawab sama oleh semua murid.','Pass % = participants reaching the pass mark. Alpha = Cronbach alpha, the same number as KR-20 for right/wrong questions. Flagged = weak or negative discrimination, a misfit, or a question everybody answered the same way.')"></p>
     </div>
 </div>
 {% endblock %}
 {% block scripts %}
+<style>
+/* Paper does not carry the interface: the menu, the export buttons and the
+   per-row links are screen affordances, and the header becomes the document's
+   letterhead instead. */
+@media print {
+    @page { margin: 12mm; }
+    body { background: #fff !important; }
+    header, nav, .sg-app-sidebar, .sg-app-topbar, .sg-app-bottomnav, .no-print { display: none !important; }
+    main { padding: 0 !important; margin: 0 !important; }
+    .card { border: 1px solid #ddd !important; box-shadow: none !important; break-inside: avoid; }
+    .print-header { display: block !important; }
+    table { font-size: 9pt; }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+</style>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const distCtx = document.getElementById('distChart');
     if (distCtx) {
-        const bins = {{ dist_bins|tojson|safe if dist_bins else '[0,0,0,0,0]' }};
+        const bins = {{ dist_bins|tojson if dist_bins else '[0,0,0,0,0]' }};
         new Chart(distCtx, {
             type: 'bar',
             data: {
@@ -153,9 +294,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     const examCtx = document.getElementById('examChart');
     if (examCtx) {
-        const labels = {{ exam_labels|tojson|safe if exam_labels else '[]' }};
-        const avgs = {{ exam_avgs|tojson|safe if exam_avgs else '[]' }};
-        const medians = {{ exam_medians|tojson|safe if exam_medians else '[]' }};
+        const labels = {{ exam_labels|tojson if exam_labels else '[]' }};
+        const avgs = {{ exam_avgs|tojson if exam_avgs else '[]' }};
+        const medians = {{ exam_medians|tojson if exam_medians else '[]' }};
         new Chart(examCtx, {
             type: 'line',
             data: {
@@ -168,6 +309,10 @@ document.addEventListener('DOMContentLoaded', function() {
             options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { grid: { display: false } } } }
         });
     }
+    {% if print_mode %}
+    // Opened from the Print button: the sheet is what the reader asked for.
+    window.print();
+    {% endif %}
 });
 </script>
 {% endblock %}

@@ -236,7 +236,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 148,
+      "pairs": 150,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -278,9 +278,9 @@
       "frozen": false
     },
     "guide/skor.html": {
-      "pairs": 0,
-      "leftovers": 102,
-      "coverage": 0.0,
+      "pairs": 169,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "landing.html": {
@@ -488,7 +488,7 @@
       "frozen": false
     },
     "teacher/_results_table.html": {
-      "pairs": 11,
+      "pairs": 15,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -512,10 +512,10 @@
       "frozen": false
     },
     "teacher/analytics.html": {
-      "pairs": 21,
+      "pairs": 44,
       "leftovers": 0,
       "coverage": 100.0,
-      "frozen": true
+      "frozen": false
     },
     "teacher/answer_keys.html": {
       "pairs": 0,
@@ -620,9 +620,9 @@
       "frozen": true
     },
     "teacher/scan.html": {
-      "pairs": 3,
-      "leftovers": 69,
-      "coverage": 4.2,
+      "pairs": 4,
+      "leftovers": 72,
+      "coverage": 5.3,
       "frozen": true
     },
     "teacher/settings.html": {
