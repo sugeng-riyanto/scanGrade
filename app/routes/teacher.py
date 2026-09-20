@@ -1903,7 +1903,9 @@ def exam_analysis_csv(exam_id):
     # A BOM, so Excel opens the file as UTF-8 and a student's accented name is not
     # a row of mojibake on the teacher's machine.
     buf = io.BytesIO(payload.encode("utf-8-sig"))
-    return send_file(buf, mimetype="text/csv; charset=utf-8", as_attachment=True,
+    # `text/csv` and not `text/csv; charset=utf-8`: Flask appends the charset to a
+    # text mimetype itself, so writing it here as well sends the parameter twice.
+    return send_file(buf, mimetype="text/csv", as_attachment=True,
                      download_name=analysis_report.filename(analysis, exam, "csv"))
 
 
@@ -2590,7 +2592,10 @@ def analytics_csv():
     data = _scope_report(supabase, lang)
     payload = analysis_scope.report_csv(data)
     buffer = io.BytesIO(payload.encode("utf-8-sig"))
-    return send_file(buffer, mimetype="text/csv; charset=utf-8", as_attachment=True,
+    # Flask adds the charset to a text mimetype; naming it here as well duplicated
+    # it, which is how this was found — the live response read
+    # `text/csv; charset=utf-8; charset=utf-8`.
+    return send_file(buffer, mimetype="text/csv", as_attachment=True,
                      download_name=analysis_scope.filename(data, "csv"))
 
 
