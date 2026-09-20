@@ -108,9 +108,22 @@
             <a href="/teacher/results?exam_id={{ exam_id }}" class="text-stone-400 hover:text-orange-500 text-lg p-1.5 hover:bg-orange-50 rounded-xl transition no-print">
                 <i class="fas fa-arrow-left"></i>
             </a>
+            {# The same late mark the results list carries, for the one paper this
+               page is about. It reads the stored `submissions.submitted_late`
+               flag, so what the sheet says about when the answers arrived does
+               not change when the exam's window is edited later.
+
+               The label is plain copy rather than a `t()` pair, and that is this
+               page's own rule: it declares `content_lang = 'id'`, so its copy is
+               Indonesian whatever the reader chose, and a pair here would be the
+               one string that switched — leaving English words under an
+               Indonesian `lang`. `deploy/i18n_coverage.py` refuses a newly pinned
+               page that carries pairs, which is what stopped this being written
+               as a pair in the first place. Translating this page for real means
+               unpinning it, and that is a job for the page, not for one badge. #}
             <div>
                 <h1 class="font-extrabold text-sm lg:text-base truncate max-w-[150px] lg:max-w-none text-stone-800">{{ exam.title }}</h1>
-                <span class="text-[10px] text-stone-400 font-semibold">{{ student.full_name or 'Siswa' }} &middot; MCQ: {{ submission.score if submission.score is not none else '-' }} &middot; Final: <span id="final-display" class="text-orange-600 font-extrabold">{{ submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else '-') }}</span></span>
+                <span class="text-[10px] text-stone-400 font-semibold">{{ student.full_name or 'Siswa' }}{% if submission.submitted_late %} <span class="inline-flex items-center gap-1 align-middle px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 text-amber-700 border border-amber-200" title="Jawaban tiba setelah tenggat waktu ujian"><i class="fas fa-clock"></i> Terlambat</span>{% endif %} &middot; MCQ: {{ submission.score if submission.score is not none else '-' }} &middot; Final: <span id="final-display" class="text-orange-600 font-extrabold">{{ submission.final_score if submission.final_score is not none else (submission.score if submission.score is not none else '-') }}</span></span>
             </div>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2 no-print ml-auto">

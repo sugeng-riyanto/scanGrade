@@ -1610,6 +1610,12 @@ def _exam_results(supabase, exam_id):
     exam's results must not be able to disagree, so the deduplication, the
     source split and the statistics are computed here once instead of in each
     caller.
+
+    ``stats['late']`` counts the papers ``submitted_late`` flags. The rows are
+    selected with ``*``, so the flag arrives with them and the count is free —
+    and it is the *stored* flag the submit route wrote, not a recomputation, so
+    a teacher who edits the exam's window after the sitting cannot change what a
+    paper's result says about when it arrived.
     """
     subs = supabase.table("submissions").select("*, profiles(full_name)") \
         .eq("exam_id", exam_id).execute().data or []
@@ -1651,6 +1657,9 @@ def _exam_results(supabase, exam_id):
         "passed": len(passed),
         "pass_rate": round(100 * len(passed) / len(scores)) if scores else 0,
         "threshold": PASS_MARK,
+        # Counted here, in the same pass as the other statistics, so the header
+        # chip and the per-row badge cannot disagree about how many there were.
+        "late": sum(1 for row in subs if row.get("submitted_late")),
     }
     return subs, scan_subs, online_subs, stats
 
