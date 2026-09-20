@@ -260,6 +260,31 @@ def test_a_question_nobody_answered_is_a_hole_and_not_a_flag():
     assert data["totals"]["without_key"] == 1
 
 
+def test_a_paper_nobody_sat_is_not_a_paper_without_a_key():
+    """`without_key` counts exams whose *key* is missing, and an exam with no
+    submissions is missing answers, not a key.
+
+    It counted every hole once, and the two looked identical because
+    `analyse(exam, [])` raised on the empty matrix — the `except` branch zeroed
+    the count, so both of the fixture's uninhabited exams came out at zero for
+    the wrong reason. `/teacher/analytics` grew a crash test for that empty case,
+    the exception stopped happening, and the row started reporting four holes as
+    four missing keys: a school that had not yet run a paper was told its answer
+    key was missing.
+    """
+    tables = _tables()
+    keys = {exam["id"]: exam["answer_key"] for exam in tables["exams"]}
+    assert all(keys.values()), "every exam in the fixture carries a key"
+    assert not any(s["exam_id"] in ("exam-a2", "exam-c2")
+                   for s in tables["submissions"]), "and two have no papers"
+
+    data = analysis_scope.report(FakeSupabase(tables), "super_admin", "root", None)
+    rows = {row["id"]: row for row in data["rows"]}
+    assert rows["exam-a2"]["holes"] == 4, "a paper nobody sat cannot be measured"
+    assert rows["exam-a2"]["unkeyed"] == 0, "and that is not a missing key"
+    assert data["totals"]["without_key"] == 0
+
+
 def test_an_unreadable_paper_does_not_take_the_report_with_it():
     """One exam whose columns are malformed must cost its own row's statistics,
     not the school's whole page."""
@@ -395,13 +420,15 @@ def _page(app, role="admin_sekolah", user_id="user-admin", school=SCHOOL_A):
 
 def test_the_page_offers_each_role_its_own_three_documents(app):
     html = _page(app)
-    for suffix in ("download.csv?lang=", "download.pdf?lang=", "print?lang="):
-        assert f"/teacher/analytics/{suffix}" in html, (
-            f"the scope report offers no {suffix.split('?')[0]}")
+    # The export links now use exportUrl() which appends lang + date range via JS.
+    for path in ("/teacher/analytics/download.csv",
+                 "/teacher/analytics/download.pdf",
+                 "/teacher/analytics/print"):
+        assert path in html, f"the scope report offers no {path}"
     assert "data-download=\"csv\"" in html and "data-download=\"pdf\"" in html
-    # The files are rendered on the server, so the link has to carry the reader's
-    # language — which is what `+ lang` is for.
-    assert "'/teacher/analytics/download.pdf?lang=' + lang" in html
+    # The exportUrl helper builds the query string dynamically.
+    assert "exportUrl(" in html
+    assert "/teacher/analytics/download.pdf" in html
 
 
 def test_every_row_links_to_that_exam_s_own_analysis_and_files(app):

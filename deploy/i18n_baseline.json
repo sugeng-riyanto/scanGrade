@@ -278,7 +278,7 @@
       "frozen": false
     },
     "guide/skor.html": {
-      "pairs": 169,
+      "pairs": 185,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -506,13 +506,13 @@
       "frozen": false
     },
     "teacher/analysis.html": {
-      "pairs": 129,
+      "pairs": 399,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "teacher/analytics.html": {
-      "pairs": 44,
+      "pairs": 51,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -542,7 +542,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 171,
+      "pairs": 174,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -639,7 +639,7 @@
     },
     "teacher/subjects.html": {
       "pairs": 0,
-      "leftovers": 5,
+      "leftovers": 6,
       "coverage": 0.0,
       "frozen": false
     },
