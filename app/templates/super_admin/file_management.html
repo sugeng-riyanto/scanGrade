@@ -231,11 +231,17 @@
                             <div class="w-8 h-8 rounded-lg bg-red-100 text-red-700 flex items-center justify-center"><i class="fas fa-skull-crossbones text-sm"></i></div>
                             <span class="text-sm font-bold text-red-800">Reset Data Ujian</span>
                         </div>
-                        <p class="text-xs text-red-700">Hapus SEMUA <strong>submissions + exams + violation logs + audit logs</strong>. Data master (sekolah, guru, murid, kelas) <strong>AMAN</strong>.</p>
-                        <form method="POST" onsubmit="return confirm('⚠️⚠️⚠️ YAKIN?\n\nIni akan menghapus:\n- Semua submissions\n- Semua exams + soal\n- Semua violation logs\n- Semua audit logs\n\nData guru, murid, kelas, sekolah TETAP AMAN.\n\nLanjutkan?')">
+                        <p class="text-xs text-red-700">Pilih <strong>satu sekolah</strong> (NPSN). Data master dan audit log tetap aman.</p>
+                        <form method="POST" class="space-y-2" onsubmit="return confirm('⚠️ Hapus riwayat ujian sekolah yang dipilih?')">
                             <input type="hidden" name="action" value="reset_exam_data">
+                            <select name="npsn" required class="w-full px-3 py-2 rounded-xl border border-red-200 text-xs font-bold bg-white">
+                                <option value="" disabled selected></option>
+                                {% for s in schools %}
+                                <option value="{{ s.npsn }}">{{ s.name }}{% if s.npsn %} ({{ s.npsn }}){% endif %}</option>
+                                {% endfor %}
+                            </select>
                             <button type="submit" class="w-full px-4 py-2 bg-red-100 text-red-800 rounded-xl font-bold text-xs hover:bg-red-200 transition">
-                                <i class="fas fa-skull-crossbones mr-1"></i>Reset Semua
+                                <i class="fas fa-skull-crossbones mr-1"></i>Hapus Riwayat Ujian
                             </button>
                         </form>
                     </div>

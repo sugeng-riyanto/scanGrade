@@ -18,6 +18,12 @@ from app.services.deploy_status_service import (
     request_release as deploy_status_request_release,
 )
 from app.services.question_types import objective_result
+from app.services.demo_schools import demo_school_npsns
+from app.services.school_reset import (
+    EXAM_TABLES,
+    clear_schools,
+    school_ids_for_npsns,
+)
 from app.utils.req_cache import invalidate, invalidate_school, ttl
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
@@ -385,19 +391,43 @@ def reset_demo_passwords():
 @super_bp.route("/reset-demo-data", methods=["POST"])
 @_sa_required
 def reset_demo_data():
-    """Delete all demo data (submissions, exams, classes) but KEEP user accounts."""
+    """Clear the DEMO schools' data, leaving every other school untouched.
+
+    This used to run ``.delete().neq("id", <nil uuid>)`` over ten tables, which
+    is a tautology — no row carries the nil id, so it matched every row in every
+    school, and the server's service key bypasses RLS. A button named "reset demo
+    data" therefore emptied the real schools too, while its own dialog promised
+    "data demo" and that accounts would survive.
+
+    The scope now comes from the seed's NPSN list, the same source
+    ``reset_demo_passwords`` already trusts to find the demo accounts. If those
+    schools are not in this database, the answer is to clear NOTHING — never to
+    fall back to everything.
+    """
     supabase = get_supabase()
-    tables = ["submissions", "violation_logs", "exam_access_codes", "analytics_cache",
-              "teacher_assignments", "exams", "students", "teachers", "classes", "subjects"]
-    cleared = 0
-    errors = []
-    for table in tables:
-        try:
-            supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-            cleared += 1
-        except Exception as e:
-            errors.append(f"{table}: {str(e)[:40]}")
-    return jsonify({"success": True, "message": f"{cleared}/{len(tables)} tabel dibersihkan", "errors": errors[:3]})
+    npsns = demo_school_npsns()
+    school_ids = school_ids_for_npsns(supabase, npsns)
+    if not school_ids:
+        return jsonify({
+            "success": False,
+            "message": ("Sekolah demo (NPSN " + ", ".join(npsns) + ") tidak ditemukan "
+                        "di database ini, jadi tidak ada yang dihapus."),
+            "errors": [],
+        }), 404
+
+    report = clear_schools(supabase, school_ids)
+    for sid in school_ids:
+        invalidate_school(sid)
+    log_activity("reset_demo_data", "school", ",".join(school_ids),
+                 new_data={"npsns": npsns, "cleared": report["cleared"],
+                           "errors": report["errors"][:3]}, user_id=g.user_id)
+    return jsonify({
+        "success": True,
+        "message": (f"{report['cleared']} tabel dibersihkan untuk "
+                    f"{len(school_ids)} sekolah demo (NPSN {', '.join(npsns)}). "
+                    f"Sekolah lain tidak tersentuh."),
+        "errors": report["errors"][:3],
+    })
 
 
 def _demo_settings_row(supabase):
@@ -1169,18 +1199,31 @@ def file_management():
                 flash(f"Error: {e}", "error")
             return redirect("/super-admin/file-management")
 
-        # Reset all exam data from DB
+        # Reset one school's exam history — chosen by NPSN, like reset-school-data.
         elif action == "reset_exam_data":
-            failed = []
-            for tbl in ["submissions", "exams", "audit_logs", "violation_logs"]:
-                try:
-                    supabase.table(tbl).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-                except Exception as e:
-                    failed.append(f"{tbl}: {str(e)[:60]}")
-            if failed:
-                flash(f"⚠️ Sebagian berhasil. Gagal: {', '.join(failed)}", "warning")
+            npsn = request.form.get("npsn", "").strip()
+            if not npsn:
+                flash("Pilih sekolah (NPSN) yang riwayat ujiannya akan dihapus.", "error")
+                return redirect("/super-admin/file-management")
+            school_ids = school_ids_for_npsns(supabase, [npsn])
+            if not school_ids:
+                flash(f"Sekolah dengan NPSN {npsn} tidak ditemukan. Tidak ada yang dihapus.", "error")
+                return redirect("/super-admin/file-management")
+            # Assessment tables only, and never `audit_logs`: that is the
+            # platform's own record of who did what, it carries no school_id to
+            # scope it by, and the log entry for this very deletion belongs in it.
+            report = clear_schools(
+                supabase, school_ids,
+                school_tables=("exams",), exam_tables=EXAM_TABLES)
+            if report["errors"]:
+                flash(f"⚠️ Sebagian berhasil. Gagal: {', '.join(report['errors'][:3])}", "warning")
             else:
-                flash("✅ Semua data ujian, submission, dan log telah dihapus", "success")
+                flash(f"✅ Riwayat ujian NPSN {npsn} dihapus "
+                      f"({report['cleared']} tabel). Sekolah lain tidak tersentuh.", "success")
+            log_activity("reset_exam_data", "school", school_ids[0],
+                         new_data={"npsn": npsn, "cleared": report["cleared"]},
+                         user_id=g.user_id)
+            invalidate_school(school_ids[0])
             return redirect("/super-admin/file-management")
 
         # ── Per-School Actions ──
@@ -1203,15 +1246,18 @@ def file_management():
 
         elif action == "delete_school_exam_data":
             school_id = request.form.get("school_id", "")
-            try:
-                exam_ids = [e["id"] for e in supabase.table("exams").select("id").eq("school_id", school_id).execute().data or []]
-                for eid in exam_ids:
-                    supabase.table("submissions").delete().eq("exam_id", eid).execute()
-                    supabase.table("violation_logs").delete().eq("exam_id", eid).execute()
-                    supabase.table("exams").delete().eq("id", eid).execute()
-                flash(f"✅ {len(exam_ids)} exam + submission dihapus untuk sekolah ini", "success")
-            except Exception as e:
-                flash(f"Error: {e}", "error")
+            # Same scoped primitive as the NPSN form above: clear every table that
+            # hangs off the school's exams, not just two of them — a submission
+            # and a violation log were being removed while the access codes and
+            # analytics rows that named the same exam were left behind.
+            report = clear_schools(
+                supabase, [school_id],
+                school_tables=("exams",), exam_tables=EXAM_TABLES)
+            if report["errors"]:
+                flash(f"⚠️ Sebagian berhasil. Gagal: {', '.join(report['errors'][:3])}", "warning")
+            else:
+                flash("✅ Riwayat ujian sekolah ini dihapus (data master aman)", "success")
+            invalidate_school(school_id)
             return redirect("/super-admin/file-management")
 
     return render_template("super_admin/file_management.html",
