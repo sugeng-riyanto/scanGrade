@@ -509,3 +509,82 @@ def test_the_terms_say_fullscreen_is_required():
     assert "menghentikan ujian" in src
     assert "keluar dari layar penuh" in src, \
         "and the ladder must name the acts that are counted"
+
+
+# ── the paper is blurred, not merely dimmed ──────────────────────
+#
+# A window restored down and a new tab are the same act from the student's side:
+# something else on screen. The paper behind is still there to be read, which is
+# exactly why it stops being readable — so it is blurred behind the panel, both
+# for losing fullscreen and for leaving the exam.
+
+def test_a_restored_window_blurs_the_paper_rather_than_hiding_it():
+    """Leaving fullscreen already covered the paper; a 95% scrim *hides* it.
+
+    The ask was a blur: the exam is visibly still there and unreadable. A
+    `backdrop-*` utility is what does that, and it has to be on the fullscreen
+    panel — the one that answers a restore-down — not on some other element.
+    """
+    src = _src()
+
+    fullscreen_panel = src.split('x-show="fullscreenBlocked && !submitted"', 1)[1]
+    fullscreen_panel = fullscreen_panel.split('>', 1)[0]
+    assert "backdrop-blur" in fullscreen_panel, \
+        "the fullscreen panel has to blur the paper, not cover it"
+    assert "bg-surface-900/95 backdrop-blur-sm" not in src, \
+        "a 95% scrim is a hide, which is what a blur replaced"
+
+
+def test_leaving_the_exam_blurs_the_paper_too():
+    """Switching to another tab left the paper fully readable when the student
+    came back. It is now blurred behind its own panel, with one click back.
+    """
+    src = _src()
+
+    assert 'x-show="awayBlurred && !submitted"' in src, \
+        "the away panel must disappear with the exam, not outlive the submission"
+    panel = src.split('x-show="awayBlurred && !submitted"', 1)[1].split('>', 1)[0]
+    assert "backdrop-blur" in panel, "and it has to be the blur, not a plain scrim"
+    assert '@click="returnToExam()"' in src, "with one deliberate way back"
+
+
+def test_the_away_blur_cannot_fire_before_the_terms_are_accepted():
+    """Arming on page load watched a student who had not started, and a
+    middle-clicked link in a background tab was counted as leaving. The blur is
+    raised in exactly one place: the armed visibility handler.
+    """
+    src = _src()
+
+    assert "awayBlurred: false," in src, "it starts clear"
+    assert src.count("this.awayBlurred = true;") == 1, \
+        "one site, or it can be raised from somewhere that is not armed"
+    assert "this.setupAntiCheat()" in src.split("armAntiCheat() {", 1)[1], \
+        "and that site lives in the handler arming installs"
+
+
+def test_the_second_tab_of_the_same_exam_does_not_blur_the_tab_in_front():
+    """Two tabs of one exam each counting the other is the defect this ladder was
+    fixed for. The blur has to obey the same rule as the charge beside it: the
+    tab another tab has taken over from stays silent, so the paper a student is
+    actually working is never blurred by the tab they are not looking at.
+    """
+    src = _src()
+
+    hidden = src.split("if (document.hidden) {", 1)[1].split("} else {", 1)[0]
+    assert "if (!this._isFocusTab || this.submitted) return;" in hidden, \
+        "the blur and the charge must share one guard"
+    assert hidden.index("this.awayBlurred = true;") > hidden.index("return;"), \
+        "the blur is raised after the guard, never before it"
+
+
+def test_one_click_clears_the_blur_and_re_enters_fullscreen():
+    """Leaving the exam usually drops fullscreen as well, so clearing the blur on
+    its own would meet the fullscreen panel on the next click. One gesture has to
+    do both — and that gesture is the one the browser requires.
+    """
+    src = _src()
+
+    body = src.split("async returnToExam() {", 1)[1].split("\n        },", 1)[0]
+    assert "this.awayBlurred = false;" in body, "the panel has to come down"
+    assert "await this.resumeFullscreen();" in body, \
+        "and the same click re-enters fullscreen when that was lost too"
