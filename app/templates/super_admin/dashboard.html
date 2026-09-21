@@ -146,8 +146,8 @@ function resetDemoPasswords() {
     }).catch(() => { alert(sgT('Gagal', 'Failed')); btn.disabled = false; });
 }
 function resetDemoData() {
-    if (!confirm(sgT('⚠️ Reset SEMUA data demo?\n\nAkun pengguna TIDAK akan dihapus.\nData ujian, pengumpulan, kelas akan direset.\nJalankan seed setelahnya.',
-                       '⚠️ Reset ALL demo data?\n\nUser accounts will NOT be deleted.\nExams, submissions and classes will be reset.\nRun the seed afterwards.'))) return;
+    if (!confirm(sgT('⚠️ Reset data SEKOLAH DEMO saja?\n\nSekolah asli TIDAK tersentuh — hanya sekolah demo yang dihapus datanya.\nUjian, pengumpulan, kelas, murid, guru, dan mapel demo akan dihapus; akun login tetap ada, jadi jalankan seed lagi setelah ini.',
+                       '⚠️ Reset the DEMO schools only?\n\nReal schools are not touched — only the demo schools are cleared.\nDemo exams, submissions, classes, students, teachers and subjects are deleted; login accounts stay, so run the seed again afterwards.'))) return;
     const btn = event.target.closest('button');
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + sgT('Mereset...', 'Resetting...');
     fetch('/super-admin/reset-demo-data', {method:'POST', headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]')?.content||''}})
