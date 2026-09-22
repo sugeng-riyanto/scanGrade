@@ -1,0 +1,666 @@
+{# The filed report: one class, one paper, the way a school keeps it.
+
+   Two rules shape this template and both come from the same place — the page must
+   not claim more than the numbers support:
+
+   1. **Every figure is rendered from `report`, and the words come from pairs.**
+      The bands, their descriptors, the findings and the statements are built in
+      `app/services/exam_report.py` and arrive as `(id, en)` pairs, so the EN/ID
+      button rewrites them without a round trip. A label typed into this file would
+      be a second vocabulary that drifts from the one the maths used.
+   2. **The band vocabulary is this app's, and the page says so.** It is laid out
+      like the assessment report a school receives from an external examination
+      board, and it is not one: the bands are the app's own on its own 0–100 scale,
+      while the school's KKM decides the pass/fail line and is quoted as such. No
+      board is named anywhere on this page — the shape of such a report is a
+      convention, and naming one would claim a standard nobody measured against. #}
+{% extends "base.html" %}
+{% block title %}ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Laporan Hasil','Results Report')"></span>{% endblock %}
+
+{% macro pair(value) -%}
+    {# One `(id, en)` pair, rendered where it stands: the toggle rewrites it and the
+       payload never has to be re-sent. Same shape as `scope_pair` on the analytics
+       page, so a translator reads one pattern rather than two. #}
+    <span x-data="{ p: {{ value|tojson|forceescape }} }" x-text="t(p[0], p[1])"></span>
+{%- endmacro %}
+
+{% block content %}
+{# Tone → classes, written out rather than assembled from the tone key: Tailwind
+   reads this file as text, so `bg-{{ tone }}-50` compiles to nothing and the badge
+   quietly keeps its ancestor's styling. #}
+{% set TONE = {
+    'emerald': 'bg-emerald-50 text-emerald-700',
+    'teal':    'bg-teal-50 text-teal-700',
+    'sky':     'bg-sky-50 text-sky-700',
+    'amber':   'bg-amber-50 text-amber-700',
+    'orange':  'bg-orange-50 text-orange-700',
+    'rose':    'bg-rose-50 text-rose-700',
+} %}
+{# The item heatmap's four steps, likewise literal. The threshold picks a string,
+   it never builds one. #}
+{% set HEAT = ['bg-surface-100 text-surface-500',
+               'bg-rose-100 text-rose-700',
+               'bg-amber-100 text-amber-700',
+               'bg-emerald-100 text-emerald-700'] %}
+
+<div class="space-y-6" x-effect="document.title = t('Laporan Hasil','Results Report') + ' - ScanGrade'">
+
+    <!-- ── The toolbar: leave, download, print ─────────────────────────────── -->
+    <div class="flex flex-wrap items-start justify-between gap-4 no-print">
+        <div>
+            <a href="/teacher/analysis/{{ exam.id }}"
+               class="text-xs font-bold text-slate-500 hover:text-primary-700 transition">
+                <i class="fas fa-arrow-left mr-1"></i><span x-text="t('Kembali ke analisis butir','Back to item analysis')"></span>
+            </a>
+            <h2 class="mt-1 text-2xl font-extrabold text-slate-800" x-text="t('Laporan Hasil Ujian','Exam Results Report')"></h2>
+            <p class="text-sm text-slate-500 font-medium" x-text="t('Ringkasan hasil, distribusi, analisis butir dan pernyataan capaian per murid.','Results summary, distributions, item analysis and a statement of achievement per learner.')"></p>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+            <a :href="'/teacher/analysis/{{ exam.id }}/download.csv?lang=' + lang"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-csv mr-1 text-emerald-600"></i>CSV
+            </a>
+            <a :href="'/teacher/analysis/{{ exam.id }}/download.xlsx?lang=' + lang"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-excel mr-1 text-emerald-700"></i>XLSX
+            </a>
+            <a :href="'/teacher/analysis/{{ exam.id }}/download.pdf?lang=' + lang"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-pdf mr-1 text-rose-600"></i>PDF
+            </a>
+            <button type="button" @click="window.print()"
+                    class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
+                <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ── 1. Cover ────────────────────────────────────────────────────────── -->
+    <section class="card overflow-hidden">
+        <div class="bg-gradient-to-r from-primary-600 to-teal-600 px-5 py-6 sm:px-8 sm:py-8 text-white">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div class="min-w-0">
+                    <p class="text-[11px] font-extrabold uppercase tracking-widest text-primary-100"
+                       x-text="t('Laporan Hasil Asesmen','Assessment Results Report')"></p>
+                    <h1 class="mt-1 text-xl sm:text-3xl font-extrabold break-words">{{ report.cover.title or '—' }}</h1>
+                    <p class="mt-2 text-sm font-semibold text-primary-50">
+                        <span x-text="t('Mata pelajaran','Subject')"></span>: {{ report.cover.subject or '—' }}
+                        {% if report.cover.class_name %} · <span x-text="t('Kelas','Class')"></span>: {{ report.cover.class_name }}{% endif %}
+                    </p>
+                    {% if report.cover.school %}
+                    <p class="mt-1 text-sm font-bold text-white">{{ report.cover.school }}</p>
+                    {% endif %}
+                </div>
+                <div class="text-right shrink-0">
+                    <p class="text-[11px] font-bold uppercase tracking-wider text-primary-100"
+                       x-text="t('Sesi','Session')"></p>
+                    <p class="text-lg sm:text-2xl font-extrabold">{{ report.cover.session or '—' }}</p>
+                    {% if report.cover.exam_code %}
+                    <p class="mt-1 text-[11px] font-semibold text-primary-50">
+                        <span x-text="t('Kode ujian','Exam code')"></span>: {{ report.cover.exam_code }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 divide-x divide-surface-100 border-t border-surface-100">
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Murid','Learners')"></p>
+                <p class="text-xl font-extrabold text-slate-800">{{ report.cover.learners }}</p>
+            </div>
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Jumlah soal','Questions')"></p>
+                <p class="text-xl font-extrabold text-slate-800">{{ report.cover.questions }}</p>
+            </div>
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Guru','Teacher')"></p>
+                <p class="text-sm font-extrabold text-slate-800 break-words">{{ report.cover.teacher or '—' }}</p>
+            </div>
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Dibuat','Generated')"></p>
+                <p class="text-sm font-extrabold text-slate-800">{{ report.cover.generated.strftime('%d %b %Y %H:%M') }}</p>
+            </div>
+        </div>
+    </section>
+
+    {% if report.cover.learners == 0 %}
+    <!-- An empty paper is a state, not a reason to render eight empty charts. -->
+    <section class="card p-10 text-center">
+        <i class="fas fa-clipboard-check text-5xl text-slate-300"></i>
+        <p class="mt-4 text-sm font-bold text-slate-600" x-text="t('Belum ada jawaban yang bisa dianalisis untuk ujian ini.','No answers to analyse for this exam yet.')"></p>
+        <p class="mt-1 text-xs font-medium text-slate-500" x-text="t('Angka di halaman ini akan terisi begitu jawaban murid masuk.','These figures fill in as learners’ answers arrive.')"></p>
+    </section>
+    {% else %}
+
+    <!-- ── 2. Executive summary ────────────────────────────────────────────── -->
+    <section class="space-y-3">
+        <div class="flex items-baseline justify-between gap-3">
+            <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Ringkasan Eksekutif','Executive Summary')"></h3>
+            {% if report.mastery.configured %}
+            <span class="text-[11px] font-bold text-slate-500">
+                <span x-text="t('KKM sekolah','School standard')"></span>: {{ report.mastery.kkm }}</span>
+            {% else %}
+            <span class="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg"
+                  x-text="t('KKM belum diisi','No standard set')"></span>
+            {% endif %}
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {% set kpis = [
+                ('mean',   'Rata-rata',      'Mean',           'fa-chart-simple', 'bg-primary-50 text-primary-600', report.descriptives.mean, ''),
+                ('median', 'Median',         'Median',         'fa-scale-balanced','bg-teal-50 text-teal-700',   report.descriptives.median, ''),
+                ('sd',     'Simpangan baku', 'Standard dev.',  'fa-wave-square',  'bg-sky-50 text-sky-700',      report.descriptives.sd, ''),
+                ('max',    'Tertinggi',      'Highest',        'fa-arrow-trend-up','bg-emerald-50 text-emerald-700', report.descriptives.max, ''),
+                ('min',    'Terendah',       'Lowest',         'fa-arrow-trend-down','bg-rose-50 text-rose-700',  report.descriptives.min, ''),
+                ('mode',   'Modus',          'Mode',           'fa-divide',       'bg-violet-50 text-violet-600', report.descriptives.modes|join(', ') if report.descriptives.modes else none, ''),
+                ('iqr',    'Rentang antarkuartil', 'Interquartile range', 'fa-ruler-horizontal', 'bg-amber-50 text-amber-700', report.descriptives.iqr, ''),
+                (none,     'Kelulusan',      'Passing rate',   'fa-user-check',   'bg-emerald-50 text-emerald-700', report.descriptives.pass_pct, '%'),
+            ] %}
+            {% for _key, label_id, label_en, icon, icon_class, value, suffix in kpis %}
+            <div class="card p-4">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400"
+                           x-text="t('{{ label_id }}','{{ label_en }}')">{{ label_id }}</p>
+                        <p class="mt-1 text-2xl font-extrabold text-slate-800">
+                            {{ '—' if value is none else value }}{{ suffix if value is not none else '' }}
+                        </p>
+                    </div>
+                    <div class="stat-icon {{ icon_class }}"><i class="fas {{ icon }}"></i></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="card p-4 sm:p-5">
+            <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Modus','Mode')"></dt>
+                    <dd class="font-bold text-slate-700">
+                        {% if report.descriptives.modes %}{{ report.descriptives.modes|join(', ') }}
+                        {% else %}<span x-text="t('tidak ada nilai yang berulang','no mark repeats')"></span>{% endif %}
+                    </dd>
+                </div>
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Variansi','Variance')"></dt>
+                    <dd class="font-bold text-slate-700">{{ report.descriptives.variance if report.descriptives.variance is not none else '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Kuartil','Quartiles')"></dt>
+                    <dd class="font-bold text-slate-700">{{ report.descriptives.q1 }} · {{ report.descriptives.q2 }} · {{ report.descriptives.q3 }}</dd>
+                </div>
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Persentil','Percentiles')"></dt>
+                    <dd class="font-bold text-slate-700">
+                        p10 {{ report.descriptives.percentiles.p10 }} · p25 {{ report.descriptives.percentiles.p25 }} ·
+                        p75 {{ report.descriptives.percentiles.p75 }} · p90 {{ report.descriptives.percentiles.p90 }}
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    </section>
+
+    <!-- ── 9. Insight card (first, because it licenses the rest) ───────────── -->
+    {% if report.insights %}
+    <section class="card p-4 sm:p-6">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-lg font-extrabold text-slate-800">
+                <i class="fas fa-lightbulb text-amber-500 mr-1"></i><span x-text="t('Temuan Otomatis','Automatic Findings')"></span>
+            </h3>
+            <p class="text-[11px] font-semibold text-slate-400"
+               x-text="t('Dihitung dari statistik ujian ini sendiri — bukan teks dari model bahasa.','Computed from this exam’s own statistics — not text from a language model.')"></p>
+        </div>
+        <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {% for finding in report.insights %}
+            <article class="rounded-xl border border-surface-200 p-4">
+                <div class="flex items-start justify-between gap-3">
+                    <h4 class="text-sm font-extrabold text-slate-800">{{ pair(finding.title) }}</h4>
+                    <span class="shrink-0 text-[10px] font-extrabold px-2 py-0.5 rounded-lg {{ TONE[finding.tone] }}">{{ finding.evidence }}</span>
+                </div>
+                <p class="mt-1.5 text-xs font-medium text-slate-600 leading-relaxed">{{ pair(finding.body) }}</p>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- ── 3. Score distribution ───────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Distribusi Nilai','Score Distribution')"></h3>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Batang = jumlah murid per rentang 10 poin. Garis = kurva normal dengan rata-rata dan simpangan baku kelas ini, diskalakan ke tinggi batang tertinggi supaya keduanya bisa dibaca pada satu sumbu.','Bars = learners per ten-point bin. The line = a normal curve with this class’s mean and standard deviation, scaled to the tallest bar so both read on one axis.')"></p>
+        <div class="mt-4 h-64 sm:h-72"><canvas id="sgHistogram"></canvas></div>
+        <div class="mt-4 overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr class="text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th class="py-1.5 pr-3" x-text="t('Rentang','Range')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Jumlah','Count')"></th>
+                        <th class="py-1.5" x-text="t('Persen','Percent')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {% for row in report.histogram %}
+                    <tr>
+                        <td class="py-1.5 pr-3 font-bold text-slate-700">{{ row.label }}</td>
+                        <td class="py-1.5 pr-3 font-semibold text-slate-600">{{ row.count }}</td>
+                        <td class="py-1.5">
+                            <div class="flex items-center gap-2">
+                                <div class="h-1.5 w-24 bg-surface-100 rounded-full overflow-hidden">
+                                    <div class="h-full bg-primary-500" style="width: {{ row.pct }}%"></div>
+                                </div>
+                                <span class="font-semibold text-slate-500">{{ row.pct }}%</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ── 4. Grade distribution ───────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Distribusi Peringkat (Band)','Grade Distribution')"></h3>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Band di halaman ini adalah band aplikasi ini pada skala 0–100, bukan skala lembaga asesmen eksternal mana pun. Garis lulus/tidak lulus ditentukan KKM sekolah, bukan oleh band.','The bands on this page are this app’s own on the 0–100 scale, not any external board’s scale. The pass line is the school’s KKM, not a band floor.')"></p>
+        <div class="mt-4 grid grid-cols-1 lg:grid-cols-5 gap-5">
+            <div class="lg:col-span-2 h-56"><canvas id="sgGrades"></canvas></div>
+            <div class="lg:col-span-3 space-y-2">
+                {% for band in report.grades %}
+                <div class="rounded-xl border border-surface-200 p-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="shrink-0 text-[11px] font-extrabold px-2 py-0.5 rounded-lg {{ TONE[band.tone] }}">{{ band.letter }} · {{ band.range }}</span>
+                            <span class="text-xs font-bold text-slate-700 truncate">{{ pair(band.name) }}</span>
+                        </div>
+                        <span class="shrink-0 text-xs font-extrabold text-slate-700">{{ band.count }} <span class="text-slate-400">({{ band.pct }}%)</span></span>
+                    </div>
+                    <div class="mt-2 h-1.5 w-full bg-surface-100 rounded-full overflow-hidden">
+                        <div class="h-full {{ TONE[band.tone].split(' ')[0] }}" style="width: {{ band.pct }}%"></div>
+                    </div>
+                    <p class="mt-1.5 text-[11px] font-medium text-slate-500">{{ pair(band.note) }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <!-- ── 5. Topic / strand analysis ──────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Analisis Topik (Level Kognitif)','Topic Analysis (Cognitive Level)')"></h3>
+            {% if report.mastery.configured %}
+            <span class="text-[11px] font-bold text-slate-500">
+                <span x-text="t('Dikuasai = capaian ≥ KKM','Mastered = share ≥ KKM')"></span> {{ report.mastery.kkm }}%</span>
+            {% endif %}
+        </div>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Soal dikelompokkan menurut level pada kisi-kisi. Pertanyaan tanpa level tidak dianggap LOTS — ia dicatat sebagai belum berlabel.','Questions are grouped by the level recorded in the kisi-kisi. A question with no level is not treated as LOTS — it is reported as unlabelled.')"></p>
+        {% if report.topics %}
+        <div class="mt-4 grid grid-cols-1 lg:grid-cols-5 gap-5">
+            <div class="lg:col-span-2 h-60"><canvas id="sgTopics"></canvas></div>
+            <div class="lg:col-span-3 overflow-x-auto">
+                <table class="w-full min-w-[440px] text-xs">
+                    <thead>
+                        <tr class="text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                            <th class="py-1.5 pr-3" x-text="t('Level','Level')"></th>
+                            <th class="py-1.5 pr-3" x-text="t('Soal','Q')"></th>
+                            <th class="py-1.5 pr-3" x-text="t('Capaian','Share')"></th>
+                            <th class="py-1.5" x-text="t('Status','Status')"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-100">
+                        {% for topic in report.topics %}
+                        <tr>
+                            <td class="py-2 pr-3 font-bold text-slate-700">
+                                {{ pair(topic.name) }}
+                            </td>
+                            <td class="py-2 pr-3 font-semibold text-slate-600">{{ topic.questions }}</td>
+                            <td class="py-2 pr-3">
+                                {% if topic.share is not none %}
+                                <div class="flex items-center gap-2">
+                                    <div class="h-1.5 w-24 bg-surface-100 rounded-full overflow-hidden">
+                                        <div class="h-full bg-teal-500" style="width: {{ topic.share }}%"></div>
+                                    </div>
+                                    <span class="font-semibold text-slate-600">{{ topic.share }}%</span>
+                                </div>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td class="py-2">
+                                {% if topic.mastered is none %}
+                                <span class="text-[10px] font-bold text-slate-400" x-text="t('tidak dinilai','not judged')"></span>
+                                {% elif topic.mastered %}
+                                <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700" x-text="t('Dikuasai','Mastered')"></span>
+                                {% else %}
+                                <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700" x-text="t('Belum dikuasai','Not yet')"></span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <p class="mt-3 text-xs font-semibold text-slate-500" x-text="t('Tidak ada butir yang bisa dikelompokkan pada ujian ini.','No questions can be grouped for this exam.')"></p>
+        {% endif %}
+    </section>
+
+    <!-- ── 6. Question analysis ────────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Analisis Butir Soal','Question-by-Question Analysis')"></h3>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Warna sel = capaian kelas pada soal itu. P = tingkat kesulitan (persen benar), D = daya beda (27% atas dikurangi 27% bawah). D negatif berarti murid lemah menjawab lebih baik daripada murid kuat.','Cell colour = the class’s attainment on that question. P = facility (percent correct), D = discrimination (upper 27% minus lower 27%). A negative D means the weaker half answered better than the stronger half.')"></p>
+
+        <div class="mt-4 flex flex-wrap gap-1.5">
+            {% for item in report.item_rows %}
+            <span class="w-11 text-center text-[11px] font-extrabold rounded-lg py-1.5 {{ HEAT[3 if item.pct >= 80 else 2 if item.pct >= 60 else 1 if item.pct < 40 else 0] }}"
+                  title="Q{{ item.no }} · P={{ item.pct }}% · D={{ item.disc }}">{{ item.no }}</span>
+            {% endfor %}
+        </div>
+
+        <div class="mt-4 overflow-x-auto">
+            <table class="w-full min-w-[660px] text-xs">
+                <thead>
+                    <tr class="text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th class="py-1.5 pr-2" x-text="t('No','No')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('P (%)','P (%)')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('D','D')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('r-bis','r-pbis')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('Benar penuh','Full credit')"></th>
+                        <th class="py-1.5" x-text="t('Catatan','Note')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">                        {% for item in report.item_rows %}
+                        <tr>
+                        <td class="py-2 pr-2 font-extrabold text-slate-700">{{ item.no }}</td>
+                        <td class="py-2 pr-2 font-semibold text-slate-600">{{ item.pct }}</td>
+                        <td class="py-2 pr-2 font-semibold {{ 'text-rose-600' if item.disc < 0 else 'text-slate-600' }}">{{ item.disc }}</td>
+                        <td class="py-2 pr-2 font-semibold text-slate-600">{{ item.point_biserial }}</td>
+                        <td class="py-2 pr-2 font-semibold text-slate-600">{{ item.full }}/{{ item.answered }}</td>
+                        <td class="py-2">
+                            {% if item.flag == 'weak' %}
+                            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700" x-text="t('lemah','weak')"></span>
+                            {% elif item.flag == 'negative' %}
+                            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700" x-text="t('D negatif','negative D')"></span>
+                            {% elif item.flag in ('unkeyed', 'unscored') %}
+                            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700" x-text="t('belum ada kunci','no key yet')"></span>
+                            {% elif item.flag == 'misfit' %}
+                            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700" x-text="t('tidak cocok model','misfit')"></span>
+                            {% else %}
+                            <span class="text-[10px] font-bold text-slate-400" x-text="t('baik','ok')"></span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if item.options %}
+                    <tr>
+                        <td></td>
+                        <td colspan="5" class="pb-2">
+                            <div class="flex flex-wrap gap-1.5">
+                                {% for option in item.options %}
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-lg {{ 'bg-emerald-50 text-emerald-700' if option.key else ('bg-surface-100 text-slate-400' if option.count == 0 else 'bg-surface-100 text-slate-600') }}">
+                                    {{ option.label }} · {{ option.count }} ({{ option.pct }}%)
+                                    {% if option.key %}<i class="fas fa-check ml-1"></i>{% endif %}
+                                </span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ── 7. Student ranking ──────────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Peringkat Murid','Student Ranking')"></h3>
+            <p class="text-[11px] font-semibold text-slate-400"
+               x-text="t('Peringkat sama untuk nilai yang sama (1, 1, 3). Persentil = posisi terhadap kelas, bukan terhadap sekolah. Klik nama untuk laporan murid itu — tiap murid punya tautan sendiri yang bisa dibagikan tanpa login.','Equal marks share a rank (1, 1, 3). The percentile is within this class, not the school. Open a name for that learner’s own report — each learner has their own link that can be shared without a login.')"></p>
+        </div>
+        <div class="mt-3 overflow-x-auto">
+            <table class="w-full min-w-[660px] text-xs">
+                <thead>
+                    <tr class="text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th class="py-1.5 pr-3" x-text="t('#','#')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Nama','Name')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Nilai','Mark')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Band','Band')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Persentil','Percentile')"></th>
+                        <th class="py-1.5" x-text="t('Ukuran (logit)','Measure (logit)')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {% for row in report.ranking %}
+                    <tr>
+                        <td class="py-2 pr-3 font-extrabold text-slate-500">
+                            {{ row.rank }}{% if row.tied %}<span class="text-slate-400">=</span>{% endif %}
+                        </td>
+                        <td class="py-2 pr-3 font-bold text-slate-800">
+                            {# The name is the door to that learner's own page. Linked
+                               rather than made a button, because the thing a teacher
+                               wants next is the learner, and a row that is a table row
+                               everywhere else must not grow a control that looks like
+                               the row beside it. #}
+                            {% if row.id %}
+                            <a href="/teacher/analysis/{{ exam.id }}/report/student/{{ row.id }}"
+                               class="text-primary-700 hover:underline"
+                               :title="t('Laporan murid ini','This learner’s report')">{{ row.name }}</a>
+                            {% else %}{{ row.name }}{% endif %}
+                        </td>
+                        <td class="py-2 pr-3 font-extrabold text-slate-700">{{ row.pct }}</td>
+                        <td class="py-2 pr-3">
+                            {% if row.band %}
+                            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg {{ TONE[row.band.tone] }}">{{ row.band.letter }} · {{ row.band.range }}</span>
+                            {% else %}—{% endif %}
+                        </td>
+                        <td class="py-2 pr-3 font-semibold text-slate-600">{{ row.percentile_rank }}</td>
+                        <td class="py-2 font-semibold text-slate-500">{{ row.measure if row.measure is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="mt-5 rounded-xl border border-surface-200 p-3">
+            <h4 class="text-xs font-extrabold text-slate-700" x-text="t('Keandalan pengukuran','Measurement reliability')"></h4>
+            <dl class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">KR-20</dt>
+                    <dd class="font-bold text-slate-700">{{ report.reliability.kr20 if report.reliability.kr20 is not none else '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Cronbach α</dt>
+                    <dd class="font-bold text-slate-700">{{ report.reliability.alpha if report.reliability.alpha is not none else '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">SEM</dt>
+                    <dd class="font-bold text-slate-700">{{ report.reliability.sem if report.reliability.sem is not none else '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400"
+                        x-text="t('Murid terukur','Learners measured')"></dt>
+                    <dd class="font-bold text-slate-700">{{ report.reliability.people_measured }}</dd>
+                </div>
+            </dl>
+            <p class="mt-2 text-[11px] font-medium text-slate-500"
+               x-text="t('Di bawah 0,70 berarti urutan peringkat masih banyak dipengaruhi tebakan.','Below 0.70 means the ranking is still strongly influenced by guessing.')"></p>
+        </div>
+    </section>
+
+    <!-- ── 8. Progress trend ───────────────────────────────────────────────── -->
+    {% if report.progress.points|length > 1 %}
+    <section class="card p-4 sm:p-6">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Tren Antar Ujian','Progress Trend')"></h3>
+            {% if report.progress.change is not none %}
+            <span class="text-xs font-extrabold px-2 py-0.5 rounded-lg {{ 'bg-emerald-50 text-emerald-700' if report.progress.change >= 0 else 'bg-rose-50 text-rose-700' }}">
+                {{ '%+.1f'|format(report.progress.change) }} <span x-text="t('poin dibanding ujian sebelumnya','points vs the previous exam')"></span></span>
+            {% endif %}
+        </div>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Rata-rata nilai ujian mata pelajaran yang sama oleh guru yang sama; ujian terakhir adalah laporan ini.','Mean mark of the same subject by the same teacher; the last point is this report.')"></p>
+        <div class="mt-4 h-56">
+            {# The chart's own label for the final point: it is the sentence above,
+               so the canvas needs no copy of its own to translate. #}
+            <canvas id="sgProgress" data-last="{{ report.cover.session }}"></canvas>
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- ── Statements of achievement ───────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Pernyataan Capaian','Statements of Achievement')"></h3>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Satu paragraf per murid, disusun dari angka di halaman ini. Tidak ada pujian yang tidak didukung angka.','One paragraph per learner, built from the figures on this page. No praise beyond what the numbers support.')"></p>
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {% for row in report.statements %}
+            <article class="rounded-xl border border-surface-200 p-4 break-inside-avoid">
+                <div class="flex items-center justify-between gap-2">
+                    {# The second door to one learner's report. A school reads this
+                       section as a list of children, and "which one is this" is a
+                       question asked of a paragraph — so the paragraph is where the
+                       page answers it. Printed without a link when the paper could
+                       not name a profile, because a link to nowhere is worse than
+                       no link at all. #}
+                    <h4 class="text-sm font-extrabold text-slate-800">
+                        {% if row.id %}
+                        <a href="/teacher/analysis/{{ exam.id }}/report/student/{{ row.id }}"
+                           class="text-primary-700 hover:underline"
+                           :title="t('Laporan murid ini','This learner’s report')">{{ row.name }}</a>
+                        {% else %}{{ row.name }}{% endif %}
+                    </h4>
+                    <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-surface-100 text-slate-600">
+                        <span x-text="t('Peringkat','Rank')"></span> {{ row.rank }} · {{ row.pct }}</span>
+                </div>
+                <p class="mt-2 text-xs font-bold text-slate-700">{{ pair(row.head) }}</p>
+                <p class="mt-1 text-[11px] font-medium text-slate-600 leading-relaxed">{{ pair(row.body) }}</p>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- ── Method ──────────────────────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6 text-[11px] font-medium text-slate-500 leading-relaxed">
+        <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Metode dan batasan','Method and limits')"></h3>
+        <ul class="mt-2 list-disc pl-5 space-y-1">
+            <li x-text="t('Nilai diambil dari nilai akhir (final_score) setiap pengumpulan; nilai yang belum dikoreksi tidak dihitung.','The mark is each submission’s final score; papers not yet marked are not counted.')"></li>
+            <li x-text="t('Variansi dan simpangan baku memakai rumus sampel (n-1), sama seperti halaman analitik lain di aplikasi ini.','Variance and standard deviation use the sample formula (n−1), as every other analytics page in this app does.')"></li>
+            <li x-text="t('Kurva normal hanyalah pembanding bentuk: kelas ini tidak harus berdistribusi normal, dan penyimpangan dari kurva adalah informasi, bukan kesalahan.','The normal curve is only a shape to compare against: a class need not be normally distributed, and the deviation from the curve is information, not an error.')"></li>
+            <li x-text="t('Band capaian adalah milik aplikasi ini pada skala 0–100. Laporan asesmen dari lembaga eksternal memakai skala dan ambang batasnya sendiri; keduanya tidak dapat dipertukarkan.','The achievement bands belong to this app on a 0–100 scale. A report from an external board uses that board’s own scale and its own grade boundaries; the two are not interchangeable.')"></li>
+            <li x-text="t('Semua angka berasal dari analisis butir yang sama dengan halaman analisis; tidak ada yang dihitung dengan cara kedua.','Every figure comes from the same item analysis as the analysis page; nothing is computed a second way.')"></li>
+        </ul>
+    </section>
+    {% endif %}
+</div>
+
+<script>
+// Charts read their colours from the server payload, so a band and its bar can
+// never disagree, and no config here pins a light-only colour: base.html sets
+// `Chart.defaults.color` from the theme tokens and re-themes on a toggle.
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof Chart === 'undefined') return;
+    const palette = {{ report.palette|tojson }};
+    const bandRows = {{ report.grades|tojson }};
+    const bandColours = bandRows.map(row => palette[row.tone]);
+
+    const histogram = document.getElementById('sgHistogram');
+    if (histogram) {
+        const bins = {{ report.histogram|tojson }};
+        const curve = {{ report.curve|tojson }};
+        new Chart(histogram, {
+            data: {
+                labels: bins.map(row => row.label),
+                datasets: [
+                    {
+                        // No `label`: the legend is off and every label a reader
+                        // sees is a pair rendered in the markup above, so a
+                        // string here would be copy the toggle cannot reach.
+                        type: 'bar',
+                        data: bins.map(row => row.count),
+                        backgroundColor: '#3b82f6', borderRadius: 6, borderSkipped: false,
+                        order: 2,
+                    },
+                    {
+                        // The bell curve, indexed by its own x: a curve with a
+                        // different number of points than bins must not be read as
+                        // if the two arrays lined up.
+                        type: 'line',
+                        data: curve.map(point => point.y),
+                        borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.10)',
+                        fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2,
+                        order: 1,
+                    },
+                ],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { precision: 0 } },
+                          x: { grid: { display: false } } },
+            },
+        });
+    }
+
+    const grades = document.getElementById('sgGrades');
+    if (grades) {
+        new Chart(grades, {
+            type: 'doughnut',
+            data: {
+                labels: bandRows.map(row => row.letter + ' · ' + row.range),
+                datasets: [{ data: bandRows.map(row => row.count),
+                             backgroundColor: bandColours, borderWidth: 0 }],
+            },
+            options: { responsive: true, maintainAspectRatio: false, cutout: '58%',
+                       plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10 } } } },
+        });
+    }
+
+    const topics = document.getElementById('sgTopics');
+    if (topics) {
+        const rows = {{ report.topics|tojson }};
+        new Chart(topics, {
+            type: 'radar',
+            data: {
+                labels: rows.map(row => row.key === 'unlabelled' ? '—' : row.key.toUpperCase()),
+                datasets: [{
+                    data: rows.map(row => row.share || 0),
+                    borderColor: '#0d9488', backgroundColor: 'rgba(13,148,136,0.18)',
+                    pointBackgroundColor: '#0d9488', borderWidth: 2,
+                }],
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                       plugins: { legend: { display: false } },
+                       scales: { r: { beginAtZero: true, max: 100,
+                                     ticks: { backdropColor: 'transparent', stepSize: 25 } } } },
+        });
+    }
+
+    const progress = document.getElementById('sgProgress');
+    if (progress) {
+        const points = {{ report.progress.points|tojson }};
+        new Chart(progress, {
+            type: 'line',
+            data: {
+                // The last point is this report, and its label is the page's own
+                // heading, so the chart says "this one" without a second string
+                // for the toggle to miss.
+                labels: points.map((point, index) =>
+                    index === points.length - 1
+                        ? document.getElementById('sgProgress').dataset.last
+                        : (point.label || point.date)),
+                datasets: [{
+                    data: points.map(point => point.mean),
+                    borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
+                    fill: true, tension: 0.3, pointRadius: 4, spanGaps: true,
+                }],
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                       plugins: { legend: { display: false } },
+                       scales: { y: { beginAtZero: true, max: 100 },
+                                 x: { grid: { display: false } } } },
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -9,8 +9,9 @@ logger = logging.getLogger("app")
 _LANG_MAP = {
     "en": {
         "prompt": (
-            "You are an experienced IB/A-Level teacher creating an assessment rubric. "
-            "For the following essay question, create 4-5 evaluation criteria at IELTS 7.5+ standard.\n\n"
+            "You are an experienced senior-secondary examiner creating an assessment "
+            "rubric. For the following essay question, create 4-5 evaluation criteria "
+            "at advanced academic English level (CEFR C1 and above).\n\n"
             "Question: {question}\n\n"
             "Each criterion must:\n"
             "- Be precisely defined with measurable descriptors\n"
@@ -19,7 +20,7 @@ _LANG_MAP = {
             "- Include positive framing (what student demonstrates, not what's missing)\n\n"
             "Output ONLY valid JSON array:\n"
             '[{{"criterion": "Precise criterion name", "weight": percentage, "descriptor": "What meeting this looks like"}}]\n\n'
-            "Use English at IELTS 7.5+ vocabulary level."
+            "Use English at CEFR C1 vocabulary level or above."
         ),
         "default": [
             {"criterion": "Content Accuracy & Relevance", "weight": 30, "descriptor": "Demonstrates thorough understanding with precise, relevant information"},

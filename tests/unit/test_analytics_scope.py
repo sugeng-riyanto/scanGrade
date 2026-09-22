@@ -374,12 +374,6 @@ def test_a_report_survives_the_cache_round_trip():
 
 # ── the page ─────────────────────────────────────────────────────────────────
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def _signed_in(user_id, role, school_id=""):
     """The `g` values base.html reads: a name, an email, and the role."""
     from flask import g

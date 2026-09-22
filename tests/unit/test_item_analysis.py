@@ -18,6 +18,7 @@ import math
 
 import pytest
 
+from app.services import analysis_frameworks as af
 from app.services import analysis_report as report
 from app.services import item_analysis as ia
 
@@ -314,16 +315,33 @@ class TestTheSpreadsheet:
 
     def test_the_notes_travel_with_the_numbers(self):
         """The limits are half the value of the table: without them a teacher
-        averages a question nobody could be measured on."""
+        averages a question nobody could be measured on.
+
+        Asserted per framework, because that is the promise the file makes: the
+        export carries the notes its own reading shows and no others
+        (``analysis_frameworks.notes_for``). A note about a panel the framework does
+        not draw is the noise that teaches a reader to skip the notes — a CTT export
+        telling a teacher to set a KKM, for a verdict CTT never prints. So this
+        checks both directions: what the framework selects must survive into the
+        spreadsheet, and what it does not select must not appear.
+        """
         analysis, exam_row = _note_carrying()
-        parsed = list(csv.reader(io.StringIO(
-            report.analysis_csv(analysis, exam_row, "en"))))
-        assert any(r and r[0] == report.labels("en")["notes"] for r in parsed), \
-            "the CSV has no notes section"
-        text = " ".join(cell for row in parsed for cell in row)
-        for note in analysis.notes:
-            assert report.NOTE_LABELS[note]["en"] in text, \
-                f"the note {note} never reached the spreadsheet"
+        assert analysis.notes, "the fixture stopped raising any notes"
+        for key in ("ctt", "rasch", "cognitive", "mastery"):
+            framework = af.resolve(key)
+            parsed = list(csv.reader(io.StringIO(
+                report.analysis_csv(analysis, exam_row, "en", framework=framework))))
+            assert any(r and r[0] == report.labels("en")["notes"] for r in parsed), \
+                f"the {key} CSV has no notes section"
+            text = " ".join(cell for row in parsed for cell in row)
+            shown = af.notes_for(analysis.notes, framework)
+            assert shown, f"{key} shows no note, so this asserts nothing for it"
+            for note in shown:
+                assert report.NOTE_LABELS[note]["en"] in text, \
+                    f"{key}: the note {note} never reached the spreadsheet"
+            for note in set(analysis.notes) - set(shown):
+                assert report.NOTE_LABELS[note]["en"] not in text, \
+                    f"{key}: the note {note} is about a panel this report does not draw"
 
     def test_selected_options_are_counted_and_the_rest_still_listed(self):
         analysis, exam_row = _sample()

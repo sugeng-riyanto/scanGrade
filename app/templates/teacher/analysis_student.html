@@ -1,0 +1,414 @@
+{# One learner's own report.
+
+   Two rules shape it, the same two the filed report is built on, plus a third:
+
+   1. **Every credit is the learner's own share from `item_analysis`** — the same
+      numbers the item statistics were computed from — so this page can never
+      grade the sheet a second way. It adds the *reason* a question paid what it
+      paid, and the level breakdown beside the class's own.
+   2. **The words come from pairs**, so the EN/ID button rewrites the page without
+      a round trip.
+   3. **A shared copy carries no answer key.** `public_view` is what decides it,
+      and the key is not even in the payload then — the key is what one learner's
+      page teaches the next learner who opens it, and an exam can still be open for
+      the rest of the class. #}
+{% extends "base.html" %}
+{% block title %}{{ learner.who.name }} - ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Laporan Murid','Learner Report')"></span>{% endblock %}
+
+{% macro pair(value) -%}
+    {# One `(id, en)` pair, rendered where it stands. Same shape as the filed
+       report's macro, so a translator reads one pattern rather than two. #}
+    <span x-data="{ p: {{ value|tojson|forceescape }} }" x-text="t(p[0], p[1])"></span>
+{%- endmacro %}
+
+{# One body, two chromes. `base.html` answers "which chrome" with the *session* —
+   a reader with an account keeps the sidebar, a stranger gets the plain shell — and
+   this page answers "which copy" with `public_view`, which is the route's own
+   question. They are not the same question, and asking the session here is how a
+   redaction comes to depend on who is looking. The body is a macro for exactly that
+   reason: both blocks render the same markup, and the anonymous one is always the
+   redacted copy, because a share link is the only route that reaches it. #}
+{% macro body(public_view) %}
+{# Tone → classes, written out rather than assembled: Tailwind reads this file as
+   text, so `bg-{{ tone }}-50` compiles to nothing. #}
+{% set TONE = {
+    'emerald': 'bg-emerald-50 text-emerald-700',
+    'teal':    'bg-teal-50 text-teal-700',
+    'sky':     'bg-sky-50 text-sky-700',
+    'amber':   'bg-amber-50 text-amber-700',
+    'orange':  'bg-orange-50 text-orange-700',
+    'rose':    'bg-rose-50 text-rose-700',
+} %}
+{# How one question came out. Six states, because "wrong" is four different
+   problems to the person reading this page. #}
+{% set STATE = {
+    'full':     'bg-emerald-50 text-emerald-700',
+    'part':     'bg-amber-50 text-amber-700',
+    'none':     'bg-rose-50 text-rose-700',
+    'blank':    'bg-surface-100 text-surface-500',
+    'unmarked': 'bg-sky-50 text-sky-700',
+    'unkeyed':  'bg-violet-50 text-violet-600',
+} %}
+
+<div class="space-y-6"
+     x-effect="document.title = t('Laporan Murid','Learner Report') + ' - ScanGrade'">
+
+    <!-- ── The toolbar: leave, print ───────────────────────────────────────── -->
+    <div class="flex flex-wrap items-start justify-between gap-4 no-print">
+        <div>
+            {# No way back for a stranger: the only door they hold is the link they
+               arrived on, and a "back to the results report" that lands on the
+               public landing page is a label describing a page that is not there. #}
+            {% if not public_view %}
+            <a href="{{ back_url }}"
+               class="text-xs font-bold text-slate-500 hover:text-primary-700 transition">
+                <i class="fas fa-arrow-left mr-1"></i><span x-text="t('Kembali ke laporan hasil','Back to the results report')"></span>
+            </a>
+            {% endif %}
+            <h2 class="mt-1 text-2xl font-extrabold text-slate-800" x-text="t('Laporan Individu Murid','Individual Learner Report')"></h2>
+            <p class="text-sm text-slate-500 font-medium" x-text="t('Setiap soal dengan jawaban murid ini, alasan nilainya, dan langkah berikutnya.','Every question with this learner’s own answer, why it paid, and what to do next.')"></p>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+            <button type="button" @click="window.print()"
+                    class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
+                <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>
+            </button>
+        </div>
+    </div>
+
+    {% if not public_view %}
+    {# The share control, scoped to this learner. On this page rather than in the
+       ranking table because a link handed to a family should be made while
+       looking at the page that family will read. #}
+    <div class="card p-3 sm:p-4" data-share-card>
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+                <p class="text-xs font-extrabold text-slate-800">
+                    <i class="fas fa-share-nodes mr-1.5 text-primary-600"></i><span x-text="t('Bagikan laporan murid ini','Share this learner’s report')"></span>
+                </p>
+                <p class="text-[10px] text-slate-400 font-medium mt-0.5 max-w-2xl"
+                   x-text="t('Tautan ini menampilkan halaman murid ini saja — tanpa kunci jawaban dan tanpa nama murid lain — bisa dibuka tanpa login, dan bisa dihentikan kapan saja.','The link shows this learner’s page only — no answer key and no other learner’s name — opens without a login, and can be stopped at any time.')"></p>
+            </div>
+            <span class="text-[10px] font-bold shrink-0 {{ 'text-emerald-600' if share else 'text-slate-400' }}"
+                  x-show="!linkNote" x-cloak
+                  x-text="{{ "t('Aktif','Active')" if share else "t('Belum dibagikan','Not shared yet')" }}"></span>
+            <span class="text-[11px] font-bold text-emerald-600 shrink-0" x-show="linkNote" x-cloak
+                  x-text="linkNote"></span>
+        </div>
+        {% if share %}
+        <div class="flex flex-wrap items-center gap-2 mt-2.5">
+            <input type="text" readonly data-share-url value="{{ share.url }}"
+                   @focus="$el.select()" data-share-input
+                   class="flex-1 min-w-[16rem] text-[11px] font-mono text-slate-600 bg-surface-50 border border-surface-200 rounded-lg px-2.5 py-1.5">
+            <button type="button" @click="copyShareLink()" data-share-copy
+                    class="border-2 border-primary-200 text-primary-700 hover:bg-primary-50 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                <i class="fas fa-copy mr-1"></i><span x-text="t('Salin tautan','Copy link')"></span>
+            </button>
+            <span class="text-[10px] text-slate-400 font-medium">
+                {{ share.views }} <span x-text="t('dibuka','opens')"></span>
+                &middot;
+                {% if share.expires_at %}
+                <span x-text="t('kedaluwarsa','expires')"></span> {{ share.expires_at.strftime('%Y-%m-%d') }}
+                {% else %}
+                <span x-text="t('tanpa kedaluwarsa','no expiry')"></span>
+                {% endif %}
+            </span>
+            <form method="POST"
+                  action="/teacher/analysis/{{ exam.id }}/report/student/{{ learner.who.student_id }}/share/revoke"
+                  class="inline">
+                <button type="submit"
+                        class="border-2 border-red-100 text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                    <i class="fas fa-ban mr-1"></i><span x-text="t('Hentikan berbagi','Stop sharing')"></span>
+                </button>
+            </form>
+        </div>
+        {% else %}
+        <form method="POST"
+              action="/teacher/analysis/{{ exam.id }}/report/student/{{ learner.who.student_id }}/share"
+              class="mt-2.5">
+            <button type="submit"
+                    class="border-2 border-primary-200 text-primary-700 hover:bg-primary-50 px-3 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap">
+                <i class="fas fa-link mr-1"></i><span x-text="t('Buat tautan untuk murid ini','Create a link for this learner')"></span>
+            </button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- ── 1. Cover ────────────────────────────────────────────────────────── -->
+    <section class="card overflow-hidden">
+        <div class="bg-gradient-to-r from-primary-600 to-teal-600 px-5 py-6 sm:px-8 sm:py-7 text-white">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div class="min-w-0">
+                    <p class="text-[11px] font-extrabold uppercase tracking-widest text-primary-100"
+                       x-text="t('Laporan Hasil Individu','Individual Results Report')"></p>
+                    <h1 class="mt-1 text-xl sm:text-2xl font-extrabold break-words">{{ learner.who.name }}</h1>
+                    <p class="mt-2 text-sm font-semibold text-primary-50">
+                        {{ exam.title or '—' }}
+                        {% if exam.subject %} · {{ exam.subject }}{% endif %}
+                        {% if exam.class_name %} · <span x-text="t('Kelas','Class')"></span>: {{ exam.class_name }}{% endif %}
+                    </p>
+                    {% if exam.school_name %}
+                    <p class="mt-1 text-sm font-bold text-white">{{ exam.school_name }}</p>
+                    {% endif %}
+                </div>
+                <div class="text-right shrink-0">
+                    <p class="text-[11px] font-bold uppercase tracking-wider text-primary-100"
+                       x-text="t('Nilai akhir','Final mark')"></p>
+                    <p class="text-3xl sm:text-4xl font-extrabold">{{ learner.who.pct }}</p>
+                    <p class="mt-1 inline-flex items-center gap-1.5">
+                        <span class="text-[11px] font-extrabold px-2 py-0.5 rounded-lg bg-white/20">
+                            {{ learner.who.band.letter }} · {{ pair(learner.who.band.name) }}
+                        </span>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 divide-x divide-surface-100 border-t border-surface-100">
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Peringkat kelas','Rank in class')"></p>
+                <p class="text-xl font-extrabold text-slate-800">
+                    {{ learner.who.rank }}{% if learner.who.tied %}<span class="text-sm font-bold text-slate-400"
+                       x-text="t(' (nilai sama)',' (tied)')"></span>{% endif %}
+                </p>
+                <p class="text-[10px] font-semibold text-slate-400">
+                    <span x-text="t('dari','of')"></span> {{ learner.class.learners }}
+                </p>
+            </div>
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Persentil','Percentile')"></p>
+                <p class="text-xl font-extrabold text-slate-800">{{ learner.who.percentile_rank }}</p>
+            </div>
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Rata-rata kelas','Class average')"></p>
+                <p class="text-xl font-extrabold text-slate-800">
+                    {{ '—' if learner.class.mean is none else learner.class.mean }}
+                </p>
+            </div>
+            <div class="px-4 py-3">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('KKM sekolah','School standard')"></p>
+                {% if learner.class.configured %}
+                <p class="text-xl font-extrabold {{ 'text-emerald-600' if learner.who.pct >= learner.class.kkm else 'text-rose-600' }}">
+                    {{ learner.class.kkm|round(0)|int }}
+                </p>
+                {% else %}
+                <p class="text-[11px] font-bold text-amber-700" x-text="t('belum diisi','not set')"></p>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <!-- ── 2. Position and totals ──────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Posisi dan Total','Position and Totals')"></h3>
+        {% if learner.gap.text and learner.gap.points is not none %}
+        <p class="text-xs font-medium text-slate-500 mt-0.5">{{ pair(learner.gap.text) }}</p>
+        {% endif %}
+        <div class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="card p-4">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Markah terkumpul','Marks earned')"></p>
+                        <p class="mt-1 text-2xl font-extrabold text-slate-800">{{ learner.totals.credited }}</p>
+                    </div>
+                    <div class="stat-icon bg-primary-50 text-primary-600"><i class="fas fa-star-half-stroke"></i></div>
+                </div>
+            </div>
+            <div class="card p-4">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Markah dapat dinilai','Marks scoreable')"></p>
+                        <p class="mt-1 text-2xl font-extrabold text-slate-800">{{ learner.totals.possible }}</p>
+                    </div>
+                    <div class="stat-icon bg-teal-50 text-teal-700"><i class="fas fa-list-check"></i></div>
+                </div>
+            </div>
+            <div class="card p-4">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Ukuran (logit)','Measure (logit)')"></p>
+                        <p class="mt-1 text-2xl font-extrabold text-slate-800">
+                            {{ '—' if learner.who.measure is none else learner.who.measure }}
+                        </p>
+                    </div>
+                    <div class="stat-icon bg-violet-50 text-violet-600"><i class="fas fa-ruler-vertical"></i></div>
+                </div>
+            </div>
+            <div class="card p-4">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400" x-text="t('Soal benar penuh','Full credit')"></p>
+                        <p class="mt-1 text-2xl font-extrabold text-slate-800">{{ learner.counts.full }}</p>
+                    </div>
+                    <div class="stat-icon bg-emerald-50 text-emerald-700"><i class="fas fa-check"></i></div>
+                </div>
+            </div>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-1.5">
+            {# The labels come from the service, which is the same place the six
+               states themselves are defined — a second copy of these words in this
+               file is how a page ends up saying "Salah" while the service says
+               "Tidak dijawab". #}
+            {% for key in ['full', 'part', 'none', 'blank', 'unmarked', 'unkeyed'] %}
+            {% if learner.counts[key] %}
+            <span class="text-[10px] font-extrabold px-2 py-1 rounded-lg {{ STATE[key] }}">
+                {{ learner.counts[key] }}× {{ pair(learner.states[key]) }}
+            </span>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- ── 3. Levels, this learner beside the class ────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Capaian per Level Kisi-kisi','Achievement per Kisi-kisi Level')"></h3>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Level adalah level kognitif yang dicatat guru. Soal tanpa level dihitung pada barisnya sendiri, bukan dianggap LOTS.','A level is the cognitive level the teacher recorded. A question with no level is counted on its own row, never treated as LOTS.')"></p>
+        <div class="mt-3 overflow-x-auto">
+            <table class="w-full min-w-[560px] text-xs">
+                <thead>
+                    <tr class="text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th class="py-1.5 pr-3" x-text="t('Level','Level')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Soal','Q')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Capaian murid','Learner')"></th>
+                        <th class="py-1.5 pr-3" x-text="t('Capaian kelas','Class')"></th>
+                        <th class="py-1.5" x-text="t('Markah','Marks')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {% for level in learner.levels %}
+                    <tr>
+                        <td class="py-2 pr-3 font-bold text-slate-700">{{ pair(level.name) }}</td>
+                        <td class="py-2 pr-3 font-semibold text-slate-500">{{ level.questions }}</td>
+                        <td class="py-2 pr-3">
+                            <div class="flex items-center gap-2">
+                                <span class="font-extrabold text-slate-800">
+                                    {{ '—' if level.share is none else level.share ~ '%' }}
+                                </span>
+                                <span class="flex-1 h-1.5 rounded-full bg-surface-100 overflow-hidden min-w-[3rem]">
+                                    <span class="block h-full rounded-full bg-primary-500"
+                                          style="width: {{ (level.share or 0)|round(0)|int }}%"></span>
+                                </span>
+                            </div>
+                        </td>
+                        <td class="py-2 pr-3 font-semibold text-slate-500">
+                            {{ '—' if level.class_share is none else level.class_share ~ '%' }}
+                        </td>
+                        <td class="py-2 font-semibold text-slate-600">
+                            {{ level.marks }} / {{ level.possible }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ── 4. Question by question ─────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Analisis Tiap Soal','Question-by-Question Analysis')"></h3>
+        <p class="text-xs font-medium text-slate-500"
+           x-text="t('Kolom kelas menunjukkan berapa persen kelas memperoleh markah soal itu — pembanding yang menentukan apakah kelemahan ini milik murid atau milik kelas.','The class column is the share of the marks the class earned on that question — the comparison that decides whether a weakness belongs to this learner or to the class.')"></p>
+        <div class="mt-3 overflow-x-auto">
+            <table class="w-full min-w-[720px] text-xs">
+                <thead>
+                    <tr class="text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th class="py-1.5 pr-2" x-text="t('No','No')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('Jenis','Type')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('Level','Level')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('Markah','Marks')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('Status','Status')"></th>
+                        <th class="py-1.5 pr-2" x-text="t('Jawaban murid','Learner’s answer')"></th>
+                        {% if not public_view %}
+                        <th class="py-1.5 pr-2" x-text="t('Kunci','Key')"></th>
+                        {% endif %}
+                        <th class="py-1.5" x-text="t('Kelas','Class')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {% for q in learner.questions %}
+                    <tr>
+                        <td class="py-2 pr-2 font-extrabold text-slate-700">Q{{ q.no }}</td>
+                        <td class="py-2 pr-2 font-semibold text-slate-500">{{ q.kind }}</td>
+                        <td class="py-2 pr-2 font-semibold text-slate-500">{{ pair(q.level_name) }}</td>
+                        <td class="py-2 pr-2 font-semibold text-slate-600">
+                            {{ '—' if q.earned is none else q.earned }} / {{ q.marks }}
+                        </td>
+                        <td class="py-2 pr-2">
+                            <span class="text-[10px] font-extrabold px-2 py-1 rounded-lg {{ STATE[q.state] }}">
+                                {{ pair(q.state_name) }}
+                            </span>
+                        </td>
+                        <td class="py-2 pr-2 font-semibold text-slate-700 break-words max-w-[14rem]">
+                            {% if q.answered %}{{ q.answered }}{% else %}<span class="text-slate-400">—</span>{% endif %}
+                        </td>
+                        {% if not public_view %}
+                        <td class="py-2 pr-2 font-semibold text-slate-500 break-words max-w-[12rem]">
+                            {% if q.key %}{{ q.key }}{% else %}<span class="text-slate-400">—</span>{% endif %}
+                        </td>
+                        {% endif %}
+                        <td class="py-2 font-semibold text-slate-500">{{ q.class_pct }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ── 5. Strengths, weaknesses, what to do ────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <section class="card p-4 sm:p-5">
+            <h3 class="text-sm font-extrabold text-emerald-700">
+                <i class="fas fa-circle-check mr-1.5"></i><span x-text="t('Kekuatan','Strengths')"></span>
+            </h3>
+            <ul class="mt-2 space-y-1.5 list-disc pl-5 text-xs font-medium text-slate-600">
+                {% for line in learner.strengths %}<li>{{ pair(line) }}</li>{% endfor %}
+            </ul>
+        </section>
+        <section class="card p-4 sm:p-5">
+            <h3 class="text-sm font-extrabold text-rose-700">
+                <i class="fas fa-triangle-exclamation mr-1.5"></i><span x-text="t('Kelemahan','Weaknesses')"></span>
+            </h3>
+            <ul class="mt-2 space-y-1.5 list-disc pl-5 text-xs font-medium text-slate-600">
+                {% for line in learner.weaknesses %}<li>{{ pair(line) }}</li>{% endfor %}
+            </ul>
+        </section>
+        <section class="card p-4 sm:p-5">
+            <h3 class="text-sm font-extrabold text-primary-700">
+                <i class="fas fa-road mr-1.5"></i><span x-text="t('Langkah berikutnya','What to do next')"></span>
+            </h3>
+            <ul class="mt-2 space-y-1.5 list-disc pl-5 text-xs font-medium text-slate-600">
+                {% for line in learner.remediation %}<li>{{ pair(line) }}</li>{% endfor %}
+            </ul>
+        </section>
+    </div>
+
+    <!-- ── 6. The statement ────────────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6">
+        <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Pernyataan Capaian','Statement of Achievement')"></h3>
+        <p class="mt-2 text-sm font-bold text-slate-700">{{ pair(learner.statement.head) }}</p>
+        <p class="mt-1 text-sm text-slate-600 leading-relaxed">{{ pair(learner.statement.body) }}</p>
+        <p class="mt-3 text-[10px] font-medium text-slate-400"
+           x-text="t('Pernyataan ini mengikuti laporan kelas, dan dibaca bersama tabel di atas — bukan pengganti angka.','This statement follows the class report and is read beside the tables above — it does not replace the numbers.')"></p>
+    </section>
+
+    <!-- ── Method ──────────────────────────────────────────────────────────── -->
+    <section class="card p-4 sm:p-6 text-[11px] font-medium text-slate-500 leading-relaxed">
+        <h3 class="text-sm font-extrabold text-slate-700" x-text="t('Metode dan batasan','Method and limits')"></h3>
+        <ul class="mt-2 list-disc pl-5 space-y-1">
+            <li x-text="t('Setiap markah di halaman ini adalah markah yang sama dengan yang dihitung pada statistik butir — halaman ini tidak menilai ulang kertasnya.','Every mark on this page is the same mark the item statistics were computed from — this page does not grade the paper again.')"></li>
+            <li x-text="t('Soal yang tidak dijawab dihitung nol untuk murid ini, sementara capaian kelas dihitung dari kertas yang menjawab. Karena itu kedua kolom bisa berbeda penyebutnya.','A question left unanswered counts as zero for this learner, while the class column is computed over the papers that answered. The two columns can therefore have different denominators.')"></li>
+            <li x-text="t('Soal esai yang belum dikoreksi guru dan soal tanpa kunci dikeluarkan dari capaian per level, bukan dihitung nol.','An essay the teacher has not marked, and a question with no key, are excluded from the level shares rather than counted as zero.')"></li>
+            {% if public_view %}
+            <li x-text="t('Salinan yang dibagikan tidak memuat kunci jawaban dan tidak memuat nama murid lain.','A shared copy carries no answer key and no other learner’s name.')"></li>
+            {% else %}
+            <li x-text="t('Kolom kunci jawaban hanya tampil di halaman guru, dan tidak ikut terkirim pada tautan yang dibagikan.','The answer-key column shows only on the teacher’s page and is not sent with a shared link.')"></li>
+            {% endif %}
+        </ul>
+    </section>
+</div>
+{% endmacro %}
+
+{% block content %}{{ body(public_view|default(false, true)) }}{% endblock %}
+{% block content_noauth %}{{ body(true) }}{% endblock %}

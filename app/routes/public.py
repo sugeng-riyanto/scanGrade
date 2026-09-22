@@ -150,15 +150,62 @@ def _link_or_404(supabase, token):
     return link
 
 
+def _shared_learner(supabase, link):
+    """One learner's page from a token that names them, and nothing else.
+
+    Two differences from the teacher's copy, both decided here rather than in the
+    template:
+
+    * **the key never travels** — `with_key=False` keeps it out of the payload, so
+      no edit to the markup can start publishing it. A learner's page is the most
+      tempting place in the app to show the correct letter, and an exam can still
+      be open for the rest of the class;
+    * **only this learner is named.** The page is built from one person's row, so
+      there is no other name in the object at all — the ranking, the statements and
+      the per-student payload of the class report are all absent by construction.
+    """
+    from app.routes.teacher import _report_cover
+    from app.services import analysis_share, exam_report
+
+    from app.services import analysis_scope
+
+    exam, analysis = _shared_report(supabase, link["exam_id"])
+    if not exam:
+        abort(404)
+    cover = _report_cover(supabase, exam)
+    # Rule 3, kept where the redaction lives: the school is named and the person is
+    # not. The page does not print a teacher today, so this is the line that keeps
+    # that true if somebody adds one.
+    cover["teacher_name"] = ""
+    who = exam_report.learner(analysis, cover, link.get("student_id"), with_key=False)
+    if not who:
+        abort(404)
+    # Counted after the page is known to exist, so a link to a learner who has been
+    # removed is not reported to its owner as a reader.
+    analysis_share.register_view(supabase, link)
+    return render_template(
+        "teacher/analysis_student.html", exam=cover, analysis=analysis,
+        learner=who, public_view=True, share=None,
+        back_url="/", lang=analysis_scope.language(request.args.get("lang")))
+
+
 @public_bp.route("/r/<token>")
 @_rate_limit("90 per minute")
 def shared_analysis(token):
-    """One exam's item analysis, shared by a teacher, redacted for a stranger."""
+    """One exam's item analysis, shared by a teacher, redacted for a stranger.
+
+    The token's own row decides which of two documents this is: the exam's report,
+    or — when the link names a learner — that one learner's page. One route and one
+    token shape, because a teacher has one thing to hand out and one thing to
+    revoke, and a second URL prefix would be a second thing to remember.
+    """
     from app.routes.teacher import _chart_payload
     from app.services import analysis_share
 
     supabase = get_supabase()
     link = _link_or_404(supabase, token)
+    if link.get("student_id"):
+        return _shared_learner(supabase, link)
     exam, analysis = _shared_report(supabase, link["exam_id"])
     if not exam:
         abort(404)

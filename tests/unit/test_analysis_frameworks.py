@@ -464,11 +464,6 @@ class TestTheReportShowsTheChosenFramework:
                 [1, 1, 1, 1], [0, 0, 1, 0], [1, 0, 0, 1]]
         return ia.analyse(self.EXAM, papers(rows))
 
-    @pytest.fixture(scope="module")
-    def app(self):
-        from app import create_app
-        return create_app("app.config.TestingConfig")
-
     def render(self, app, analysis, key):
         import contextlib
 
@@ -772,14 +767,11 @@ class TestTheBuilderRenders:
     """
 
     @pytest.fixture(scope="module")
-    def rendered(self):
+    def rendered(self, app):
         import contextlib
 
         from flask import g
 
-        from app import create_app
-
-        app = create_app("app.config.TestingConfig")
         with app.test_request_context("/teacher/exams/new"):
             g.user_id = "tea-1"
             g.user_name = "Guru Uji"

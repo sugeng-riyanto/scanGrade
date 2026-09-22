@@ -31,7 +31,14 @@ import random
 import pytest
 from openpyxl import load_workbook
 
+from app.services import analysis_frameworks as af
 from app.services import analysis_report, item_analysis
+
+#: The reading the separation block belongs to. Every route passes a framework
+#: explicitly (`test_every_route_that_builds_a_document_hands_over_the_framework`),
+#: so a test that asks a document for its Rasch block has to name it too — the
+#: default is CTT, which publishes no separation and no logit scale.
+_RASCH = af.resolve("rasch")
 
 #: Winsteps Table 28.3's worked example (34 non-extreme kids, 18 items).
 WINSTEP_POP_SD = 1.97
@@ -499,10 +506,20 @@ class TestTheBlockIsReported:
 
     @pytest.mark.parametrize("lang", ["id", "en"])
     def test_the_pdf_prints_the_block(self, built, lang):
+        """The separation block belongs to the Rasch reading, and only to it.
+
+        It used to be asked for without naming a framework, so the builder answered
+        for the default one — CTT — which publishes no separation and no logit scale,
+        and the block was correctly absent. The document under test is the Rasch one
+        (`test_the_pdf_prints_only_the_blocks_the_framework_publishes` pins the other
+        half: a classical report must NOT carry it), so the caller names it, the way
+        every route does.
+        """
         import fitz
 
         exam, analysis = built
-        pdf = analysis_report.analysis_pdf(analysis, exam, lang=lang)
+        pdf = analysis_report.analysis_pdf(analysis, exam, lang=lang,
+                                           framework=_RASCH)
         text = "".join(page.get_text() for page in fitz.open(stream=pdf,
                                                              filetype="pdf"))
         t = analysis_report.labels(lang)

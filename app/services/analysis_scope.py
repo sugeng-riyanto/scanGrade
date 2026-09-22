@@ -277,6 +277,33 @@ def _names(supabase, table: str, ids: Sequence[str]) -> dict[str, str]:
     return {str(row.get("id")): (row.get(column) or "") for row in rows}
 
 
+# ── for a caller that compares sittings ─────────────────────────────────────
+
+
+def marks_by_exam(supabase, exam_ids: Sequence[str]) -> dict[str, list[float]]:
+    """`exam_id -> the marks of everyone who sat it`, for several exams at once.
+
+    Built for a trend line: a report that compares this sitting with the last four
+    needs those four sittings' marks, and the alternative — one `_submissions`
+    call per exam — is four round-trips where this is one.
+
+    Only exams with at least one mark appear, because the caller's next question is
+    always "can this be plotted" and an empty list answers it the same way a
+    missing key would, with more code.
+    """
+    found: dict[str, list[float]] = {}
+    for exam_id, rows in _submissions(supabase, list(exam_ids)).items():
+        marks = [mark for mark in (_mark(row) for row in rows) if mark is not None]
+        if marks:
+            found[str(exam_id)] = marks
+    return found
+
+
+def mean_of(marks: Sequence[float]) -> float | None:
+    """The mean of a mark list, rounded the way every other mean here is."""
+    return round(sum(marks) / len(marks), 1) if marks else None
+
+
 # ── the report ───────────────────────────────────────────────────────────────
 
 

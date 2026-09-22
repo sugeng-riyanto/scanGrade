@@ -116,6 +116,17 @@
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-excel mr-1 text-green-700"></i>Excel
             </a>
+            {# The filed report: the same analysis, arranged as the document a school
+               keeps. It is a link and not a mode of this page because a teacher
+               reading the item table is deciding what to do about a question, and a
+               teacher filing a result is answering a different one. A shared copy
+               does not offer it: that page needs the class roster by name. #}
+            {% if not public %}
+            <a href="/teacher/analysis/{{ exam.id }}/report" data-report="filed"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-lines mr-1 text-primary-600"></i><span x-text="t('Laporan Resmi','Filed Report')"></span>
+            </a>
+            {% endif %}
             <a :href="'{{ base }}/download.pdf?lang=' + lang + '&framework=' + (chart.framework || '')" data-download="pdf"
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
