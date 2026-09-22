@@ -75,12 +75,6 @@ SUBS = [
 ]
 
 
-@pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def _run(app, monkeypatch, route_func, tables, path):
     from flask import g
 
@@ -131,6 +125,27 @@ def test_results_subject_totals_ignore_unreleased(app, monkeypatch):
 
     assert totals["Matematika"]["avg"] == 0      # unreleased only
     assert totals["Fisika"]["avg"] == 88
+
+
+def test_results_survive_an_exam_with_no_subject(app, monkeypatch):
+    """A NULL subject is a row, not a missing key.
+
+    `.get("subject", "Lainnya")` does not catch it — the key is there and its
+    value is None — so the grouping key became None and the sort below compared it
+    with a real subject's name: `TypeError: '<' not supported between instances of
+    'NoneType' and 'str'`, and the student's whole results page was a 500. It
+    needs one paper with no subject *beside* one with a subject, which is exactly
+    what a school whose builder left the field empty has.
+    """
+    rows = [
+        _submission("sub-no-subject", "exam-3", "published", True, 60, subject=None),
+        _submission("sub-released", "exam-2", "published", True, 88, subject="Fisika"),
+    ]
+
+    ctx = _run(app, monkeypatch, studentmod.results,
+               {"submissions": rows}, "/student/results")
+
+    assert [t["name"] for t in ctx["subject_totals"]] == ["Fisika", "Lainnya"]
 
 
 # ── /student/dashboard ───────────────────────────────────────────

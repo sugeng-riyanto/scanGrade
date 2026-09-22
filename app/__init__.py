@@ -433,7 +433,13 @@ def create_app(env=None):
                 ac.update({k: v for k, v in exam_sample.data[0].items() if v is not None})
         except Exception:
             pass
-        return render_template("tutorial_murid.html", ac=ac)
+        # The countdown the exam screen gives before it records an absence, named
+        # here with the same two constants the screen counts with — a tutorial is
+        # where a student forms the expectation the exam then has to meet.
+        from app.services.anti_cheat_service import AWAY_GRACE_CHANCES, AWAY_GRACE_SECONDS
+        return render_template("tutorial_murid.html", ac=ac,
+                               away_grace_seconds=AWAY_GRACE_SECONDS,
+                               away_grace_chances=AWAY_GRACE_CHANCES)
 
     @app.route("/health")
     def health():

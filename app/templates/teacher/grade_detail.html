@@ -141,6 +141,51 @@
         </div>
     </div>
 
+    {# The paper's own record, one line per event. `violation_events` is the
+       anti-cheat log itself, read for this student, so the times are the server's
+       and the wording comes from the one label table the results list also uses.
+       The header already carries the penalty; what it cannot say is *when* the
+       paper left the screen, and that is the question this strip answers.
+
+       Plain Indonesian, like every other word on this page: it pins its language
+       (`content_lang = 'id'`), and a `t()` pair here would be the one string that
+       switched with the reader's choice — leaving English words under an
+       Indonesian `lang`. `deploy/i18n_coverage.py` refuses exactly that. #}
+    {# `default(..., true)` rather than a bare name: this template is also rendered
+       by suites that pass only the marking context, and an undefined count would
+       be a page that 500s on a paper whose log could not be read. #}
+    {% set events = violation_events|default([], true) %}
+    {% set charged = events|selectattr('charged')|list %}
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 border border-stone-100 no-print" data-leaving-log>
+        <p class="text-[10px] font-extrabold text-stone-500 tracking-wide">
+            <i class="fas fa-shield-alt mr-1"></i>Catatan meninggalkan ujian
+            {% if events %}
+            <span class="ml-1 font-bold text-stone-400" data-leaving-counts>({{ charged|length }} dihitung dari {{ events|length }} tercatat)</span>
+            {% endif %}
+        </p>
+        {% if events %}
+        <ul class="mt-2 space-y-1">
+            {% for ev in events %}
+            <li class="flex flex-wrap items-center gap-x-2 text-[11px] leading-relaxed">
+                {# The date is part of the moment, not decoration: a window can span
+                   two days, and production's own log holds events at 13:23 one day
+                   and 06:02 three days later — the clock alone reads as the same
+                   sitting. #}
+                <span class="font-mono font-bold text-stone-500">{{ ev.at|tz('%d %b %H:%M:%S') }}</span>
+                <span class="font-bold {% if ev.charged %}text-red-600{% else %}text-stone-400{% endif %}">{{ ev.label[0] }}</span>
+                <span class="text-stone-400">{% if ev.charged %}dihitung ke penalti{% else %}hanya dicatat, tidak mengurangi nilai{% endif %}</span>
+                {# How long the student was gone, when the page timed it. Shown only
+                   when the row carries it: an absence recorded on sight has no
+                   length, and "0 detik" would be a claim the log cannot make. #}
+                {% if ev.away_seconds %}<span class="text-stone-400">(meninggalkan {{ ev.away_seconds }} detik)</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="mt-1.5 text-[11px] font-bold text-stone-400">Tidak ada catatan meninggalkan ujian untuk kertas ini.</p>
+        {% endif %}
+    </div>
+
     <form method="POST" action="/teacher/grade/{{ submission.id }}/override" id="grade-form">
         <input type="hidden" name="teacher_feedback" id="feedback-input" value="">
         <input type="hidden" name="final_score" id="final-score-hidden" value="{{ submission.final_score or submission.score or 0 }}">

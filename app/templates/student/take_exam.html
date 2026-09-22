@@ -511,6 +511,27 @@ body.sg-exam .sidebar-overlay { display: none !important; }
             <h2 class="mt-4 text-lg font-extrabold text-surface-800" x-text="t('Anda Meninggalkan Ujian','You Left the Exam')"></h2>
             <p class="mt-1 text-sm text-surface-500 font-medium"
                x-text="t('Pindah tab atau membuka aplikasi lain selama ujian tidak diizinkan, jadi soal diburamkan sampai Anda kembali.','Switching tabs or opening another application during the exam is not allowed, so the questions are blurred until you come back.')"></p>
+            <!-- The countdown, and the reason this panel is not an instant fine.
+                 Shown only while a chance is actually being spent: when the
+                 chances are gone the absence is charged on sight, and a clock
+                 that could not save the student would be a lie with a number on
+                 it. -->
+            <div x-show="graceLeft > 0" class="mt-4">
+                <div class="flex items-baseline justify-center gap-1.5">
+                    <span class="text-4xl font-extrabold text-rose-600 font-mono" x-text="graceLeft"></span>
+                    <span class="text-xs font-bold text-surface-500" x-text="t('detik untuk kembali','seconds to return')"></span>
+                </div>
+                <div class="mt-2 h-1.5 w-full bg-surface-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-rose-500 transition-all duration-200"
+                         :style="'width:' + Math.max(0, Math.min(100, graceLeft / graceSeconds * 100)) + '%'"></div>
+                </div>
+                <p class="mt-2 text-[11px] font-bold text-surface-600"
+                   x-text="t('Kembali sebelum hitungan habis dan kejadian ini tidak dicatat — tanpa penalti, tanpa pelanggaran.','Come back before it runs out and this absence is not recorded — no penalty, no violation.')"></p>
+                <p class="mt-1 text-[11px] font-semibold text-surface-400"
+                   x-text="t('Sisa kesempatan tanpa penalti','Penalty-free returns left') + ': ' + _graceChancesLeft()"></p>
+            </div>
+            <p x-show="awayCharged" class="mt-4 text-xs font-bold text-rose-600"
+               x-text="t('Hitungan habis — kejadian ini dicatat sebagai pelanggaran.','Time is up — this absence is recorded as a violation.')"></p>
             <p x-show="violationCount > 0" class="mt-3 text-xs font-bold text-amber-700"
                x-text="t('Pelanggaran','Violations') + ': ' + violationCount + (totalPenalty > 0 ? ' · ' + t('total penalti','total penalty') + ': -' + totalPenalty + ' ' + t('poin','points') : '')"></p>
             <button type="button" @click="returnToExam()"
@@ -631,7 +652,12 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                     <div>
                         <p class="font-extrabold text-surface-800 mb-1"><i class="fas fa-exclamation-triangle text-amber-500 mr-1.5"></i><span x-text="t('Sistem Anti-Cheat','Anti-cheat system')"></span>:</p>
                         <ul class="space-y-0.5 ml-5 list-disc text-surface-500">
-                            <li><span x-text="t('Yang dihitung','Counted')"></span>: <strong x-text="t('berpindah tab/aplikasi','switching tab or app')"></strong> <span x-text="t('dan','and')"></span> <strong x-text="t('keluar dari layar penuh','leaving fullscreen')"></strong></li>
+                            <li><span x-text="t('Yang dihitung','Counted')"></span>: <strong x-text="t('berpindah tab/aplikasi','switching tab or app')"></strong> <span x-text="t('dan','and')"></span> <strong x-text="t('keluar dari layar penuh','leaving fullscreen')"></strong><span x-text="t(', termasuk meninggalkan jendela ujian untuk jendela lain &mdash; layar soal dikaburkan','; leaving the exam window for another window counts too — the paper is blurred')"></span></li>
+                            <!-- The second chance, on the screen the student agrees to,
+                                 with the numbers the countdown actually uses. A rule
+                                 discovered mid-exam is not a rule the student
+                                 accepted. -->
+                            <li><span x-text="t('Kesempatan kembali','A second chance')"></span>: <strong x-text="t('{{ away_grace_seconds }} detik untuk kembali tanpa dicatat','{{ away_grace_seconds }} seconds to come back without being recorded')"></strong><span x-text="t(', maksimal {{ away_grace_chances }} kali per ujian. Soal tetap dikaburkan selama Anda pergi.','; at most {{ away_grace_chances }} times per exam. The paper stays blurred while you are away.')"></span></li>
                             <li><span x-text="t('Pelanggaran ke-1','Violation 1')"></span>: <strong class="text-amber-600" x-text="t('Peringatan','Warning')"></strong> <span x-text="t('(0 poin)','(0 points)')"></span></li>
                             <li><span x-text="t('Pelanggaran ke-2','Violation 2')"></span>: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation"></span> <span x-text="t('poin','points')"></span></strong> <span x-text="t('per pelanggaran','per violation')"></span></li>
                             <li><span x-text="t('Pelanggaran ke-3','Violation 3')"></span>: <strong class="text-red-500">-<span x-text="antiCheat.penalty_per_violation*2"></span> <span x-text="t('poin','points')"></span></strong> <span x-text="t('per pelanggaran','per violation')"></span></li>
@@ -1726,6 +1752,24 @@ function examApp(duration, totalQ) {
         // the tab in front the only one that counts, and this flag follows the
         // same rule (see the visibility handler in setupAntiCheat).
         awayBlurred: false,
+        // ─── The second chance ────────────────────────────────────────────────
+        // An absence starts a countdown instead of costing a point — see
+        // startAwayGrace(). `graceUsed` counts the returns this sitting has
+        // already forgiven, because an unbounded grace would be a repeatable free
+        // window for looking something up: the panel says how many are left, so
+        // the number on the last one is never a surprise.
+        graceSeconds: {{ away_grace_seconds }},
+        graceChances: {{ away_grace_chances }},
+        graceUsed: 0,
+        graceLeft: 0,
+        graceKind: null,
+        graceTrigger: null,
+        _graceTimer: null,
+        _graceDeadline: 0,
+        // When this absence began and whether it has been charged, so one absence
+        // costs one violation however many of the three detectors saw it.
+        awaySince: 0,
+        awayCharged: false,
         lastSyncAt: Date.now(),
         pendingSync: false,
         dirty: false,
@@ -2098,13 +2142,114 @@ function examApp(duration, totalQ) {
         // while the student was away — otherwise they would clear one panel only
         // to meet the other, and the second click would be the one that grants it.
         async returnToExam() {
+            this.endAway();
             this.awayBlurred = false;
             if (this.antiCheat.fullscreen_required && this._fsSupported() && !this._fsElement()) {
                 await this.resumeFullscreen();
             }
         },
+        // ─── The second chance ─────────────────────────────────────────────────
+        //
+        // An absence is not charged when it is seen. It starts a countdown: the
+        // paper blurs at once — the protection never waits — and the student has
+        // `graceSeconds` to come back before the absence is recorded. A phone
+        // call or a notification used to walk a student down the ladder while
+        // they watched it happen, and the last rung of that ladder submits the
+        // paper for them; the countdown is the difference between an accident and
+        // a penalty.
+        //
+        // Three properties are load-bearing, and each is a guard rather than a
+        // hope:
+        //   * **the blur comes first, and always** — whatever happens to the
+        //     charge, the questions stop being readable the instant the absence is
+        //     seen, so the grace can only forgive a penalty and never expose a
+        //     question;
+        //   * **one absence, one charge** — a countdown already running *is* this
+        //     absence (the visibility path, the window-blur path and the fullscreen
+        //     sampler must not each open one for the same act), and an absence that
+        //     has already been charged cannot be charged again;
+        //   * **the chances are counted, not assumed** — `graceUsed` is spent on
+        //     each forgiven return, and once they are gone the absence is charged
+        //     the moment it is seen, exactly as before this feature existed.
+        _graceChancesLeft() {
+            return Math.max(0, this.graceChances - this.graceUsed);
+        },
+        // `kind` is what the server records and charges (`tab_switch`,
+        // `focus_lost`), `trigger` is what the page saw, and `since` is when the
+        // absence began — which is the moment the event fired, not the moment the
+        // 1.5 s debounce expired. The difference is the number a teacher reads on
+        // the recorded row, so it is measured rather than rounded away.
+        startAwayGrace(kind, trigger, since) {
+            if (this.submitted || !this.antiCheat.enabled) return;
+            if (!this._isFocusTab) return;   // the tab in front is the one that counts
+            this.awayBlurred = true;
+            if (this.graceLeft > 0) return;  // a countdown is already this absence
+            if (this.awayCharged) return;    // this absence has already cost a point
+            if (!this.awaySince) this.awaySince = since || Date.now();
+            if (this._graceChancesLeft() <= 0) {
+                // Out of chances. No countdown is shown, because nothing about one
+                // would be true: this absence is charged here and now.
+                this._chargeAway(kind, trigger);
+                return;
+            }
+            this.graceKind = kind;
+            this.graceTrigger = trigger;
+            this.graceLeft = this.graceSeconds;
+            this._graceDeadline = Date.now() + this.graceSeconds * 1000;
+            this._clearGraceTimer();
+            this._graceTimer = setInterval(() => this._graceTick(), 250);
+        },
+        _graceTick() {
+            if (this.submitted) { this._clearGraceTimer(); return; }
+            this.graceLeft = Math.max(0, Math.ceil((this._graceDeadline - Date.now()) / 1000));
+            if (this.graceLeft > 0) return;
+            this._clearGraceTimer();
+            // The return is what the chance is for, so it is re-read here rather
+            // than assumed from the timer: a browser that dropped the focus event
+            // must not cost a student the points the countdown promised they
+            // could keep. This is the fallback, not the path — endAway() cancels
+            // the countdown the moment they are actually back.
+            if (this._awayIsOver()) { this._spendGrace(); return; }
+            this._chargeAway(this.graceKind, this.graceTrigger);
+        },
+        // Back at the paper: the document is visible and its window is the one in
+        // front. Being on screen is not enough — a window nobody is attending to
+        // is exactly the absence this ladder exists for.
+        _awayIsOver() {
+            try { return !document.hidden && document.hasFocus(); } catch (e) { return false; }
+        },
+        // The absence is over — whether it was forgiven or charged. Resetting the
+        // pair here is what makes the *next* absence a new one instead of a
+        // continuation of this one.
+        endAway() {
+            if (this.graceLeft > 0 && !this.awayCharged) this._spendGrace();
+            this._clearGraceTimer();
+            this.graceLeft = 0;
+            this.awaySince = 0;
+            this.awayCharged = false;
+        },
+        _spendGrace() {
+            this.graceUsed++;
+            this.graceLeft = 0;
+            this.awaySince = 0;
+        },
+        _clearGraceTimer() {
+            if (this._graceTimer) { clearInterval(this._graceTimer); this._graceTimer = null; }
+        },
+        _chargeAway(kind, trigger) {
+            if (this.submitted || this.awayCharged) return;
+            this.awayCharged = true;
+            this.graceLeft = 0;
+            this._clearGraceTimer();
+            // The duration is the evidence the countdown existed: a row recorded
+            // without one was charged the moment it was seen, and a row recorded
+            // after forty seconds says the student was gone for forty seconds.
+            const away = this.awaySince ? Math.max(0, Math.round((Date.now() - this.awaySince) / 1000)) : null;
+            this.handleViolation(kind || 'tab_switch', trigger, away);
+        },
         setupAntiCheat() {
             this._blurTimer = null;
+            this._awayTimer = null;
             // ─── Show active indicator in top bar ───
             const acBadge = document.createElement('span');
             acBadge.id = 'anti-cheat-badge';
@@ -2120,20 +2265,28 @@ function examApp(duration, totalQ) {
             document.addEventListener('visibilitychange', () => {
                 if (this.submitted) return;
                 if (document.hidden) {
+                    // The instant the absence began. The debounce below is there so
+                    // a moment's inattention is not an event; it must not also be
+                    // subtracted from how long the student was actually gone.
+                    const gone = Date.now();
                     this._blurTimer = setTimeout(() => {
                         if (!this._isFocusTab || this.submitted) return;
-                        // A minimise is charged here, and only here: checkFullscreen()
+                        // A minimise is handled here, and only here: checkFullscreen()
                         // skips a hidden document so the same absence is not billed
                         // twice, and reads this flag when it raises the overlay.
                         this._hiddenAbsenceCharged = true;
-                        // Same fairness rule as the charge beside it: a second tab
-                        // of this exam claims the session before this fires, so
-                        // only a tab still enforcing blurs its own paper.
-                        this.awayBlurred = true;
-                        this.handleViolation();
+                        // The blur, then the countdown — not the charge. This is
+                        // the shape a phone call takes, and it is the absence the
+                        // second chance exists for. Same fairness rule as before:
+                        // a second tab of this exam claims the session before this
+                        // fires, so only a tab still enforcing blurs its own paper.
+                        this.startAwayGrace('tab_switch', 'visibilitychange', gone);
                     }, 1500);
                 } else {
                     if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
+                    // Back at the paper. A countdown still running is one the
+                    // student beat, so it is spent here rather than waited out.
+                    this.endAway();
                     this.claimExamFocus();
                     // Coming back to a window that is not fullscreen has to be
                     // caught here: the state changed while the page was hidden and
@@ -2141,16 +2294,41 @@ function examApp(duration, totalQ) {
                     this.checkFullscreen();
                 }
             });
-            // ─── Window blur (click outside browser) ───
+            // ─── The window is still on screen, and is no longer the one being
+            //     looked at ───
+            // This is the case the page could not see at all. A restored-down
+            // browser beside another window leaves `document.hidden` false, so
+            // neither the visibility path nor the fullscreen check fired when the
+            // student turned to something else — the paper sat legible next to it
+            // and nothing was recorded. The same panel the hidden path raises goes
+            // up here, charged on the same ladder, after the same debounce, so a
+            // moment's inattention is not an event.
             window.addEventListener('blur', () => {
                 if (this.submitted) return;
                 if (this.questions[this.currentQ]?.youtube) return;
-                if (!document.hidden) return; // still visible in another window? don't count
-                console.log('[AntiCheat] Window blurred');
+                // A hidden document belongs to the visibility handler above, which
+                // blurs the paper and charges for it. Two handlers billing one
+                // absence is the unfairness this ladder exists to avoid.
+                if (document.hidden) return;
+                const gone = Date.now();
+                clearTimeout(this._awayTimer);
+                this._awayTimer = setTimeout(() => {
+                    // The same guard the hidden path uses, and in the same order:
+                    // the blur is raised after it, never before, so the tab a
+                    // second exam tab has taken over from stays silent.
+                    if (!this._isFocusTab || this.submitted || document.hidden) return;
+                    // Not while the fullscreen panel is up: that absence is already
+                    // charged, and the paper behind it is already unreadable.
+                    if (this.fullscreenBlocked) return;
+                    this.startAwayGrace('focus_lost', 'window_blur', gone);
+                }, 1500);
             });
             window.addEventListener('focus', () => {
-                console.log('[AntiCheat] Window focused');
+                if (this._awayTimer) { clearTimeout(this._awayTimer); this._awayTimer = null; }
                 if (this._blurTimer) { clearTimeout(this._blurTimer); this._blurTimer = null; }
+                // The student is back in the exam window: the absence is over, so
+                // nothing is left to time out.
+                this.endAway();
             });
             // Fullscreen: mandatory and blocking. This used to be a banner that
             // promised no penalty, which is why a window restored or minimised
@@ -2179,10 +2357,16 @@ function examApp(duration, totalQ) {
                 }
             });
         },
-        // `vtype` is the kind the server will record and charge. Both kinds are
-        // charged (see PENALIZED_VIOLATION_TYPES), and the teacher's report can
-        // only tell them apart if the client names the right one.
-        handleViolation(vtype = 'tab_switch') {
+        // `vtype` is the kind the server records and charges; `trigger` is what
+        // the page actually saw (`visibilitychange`, `window_blur`);
+        // `awaySeconds` is how long the student was actually gone, and it is the
+        // only evidence of the countdown that exists on the server's side — null
+        // means this absence was charged the moment it was seen (the fullscreen
+        // panel, or a student out of second chances). Every charged kind climbs
+        // the one ladder (see PENALIZED_VIOLATION_TYPES), and the teacher's report
+        // can only tell them apart if the client names the right one — so the kind
+        // is what the report prints and the trigger is the detail behind it.
+        handleViolation(vtype = 'tab_switch', trigger = null, awaySeconds = null) {
             // Only the tab in front counts: a tab that another exam tab has taken
             // over from must not add a second charge for the same switch.
             if (!this._isFocusTab || this.submitted) return;
@@ -2204,7 +2388,7 @@ function examApp(duration, totalQ) {
                         exam_id: '{{ exam.id }}',
                         violation_type: vtype,
                         timestamp: Date.now() / 1000,
-                        metadata: {violation_count: this.violationCount},
+                        metadata: {violation_count: this.violationCount, trigger: trigger, away_seconds: awaySeconds},
                     }],
                 }),
             }).then(async (r) => {
@@ -2250,7 +2434,9 @@ function examApp(duration, totalQ) {
             }
             const n = this._bannerCount;
             const base = this.antiCheat.penalty_per_violation || 5;
-            const act = this._bannerKind === 'fullscreen_exit' ? sgT('keluar dari layar penuh','left fullscreen') : sgT('berpindah tab','switched tab');
+            const act = this._bannerKind === 'fullscreen_exit' ? sgT('keluar dari layar penuh','left fullscreen')
+                : this._bannerKind === 'focus_lost' ? sgT('meninggalkan jendela ujian','left the exam window')
+                : sgT('berpindah tab','switched tab');
             if (n === 1) {
                 this.violationMessage = sgT('PERINGATAN! Anda ','WARNING! You ') + act + sgT('. Pelanggaran berikutnya akan dikenakan penalti.','. The next violation carries a penalty.');
             } else if (n === 2) {
@@ -3608,6 +3794,11 @@ function examApp(duration, totalQ) {
             this.submitted = true;
             clearInterval(this.timer);
             clearInterval(this.autoSaveTimer);
+            // Nothing is left to time out: a countdown that kept running past the
+            // submission would record a violation for an absence during an exam
+            // that is already over.
+            this._clearGraceTimer();
+            this.graceLeft = 0;
             this.saveToLocal();
             if (window.markExamSubmitted) window.markExamSubmitted();
             const answers = this.getAnswers();
