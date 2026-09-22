@@ -278,7 +278,7 @@
       "frozen": false
     },
     "guide/skor.html": {
-      "pairs": 185,
+      "pairs": 195,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -296,7 +296,7 @@
       "frozen": false
     },
     "public/capacity.html": {
-      "pairs": 63,
+      "pairs": 64,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -344,7 +344,7 @@
       "frozen": false
     },
     "student/take_exam.html": {
-      "pairs": 249,
+      "pairs": 258,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -380,7 +380,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 94,
+      "pairs": 134,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -399,8 +399,8 @@
     },
     "super_admin/file_management.html": {
       "pairs": 4,
-      "leftovers": 29,
-      "coverage": 12.1,
+      "leftovers": 30,
+      "coverage": 11.8,
       "frozen": true
     },
     "super_admin/logs.html": {
@@ -488,7 +488,7 @@
       "frozen": false
     },
     "teacher/_results_table.html": {
-      "pairs": 15,
+      "pairs": 17,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -506,7 +506,19 @@
       "frozen": false
     },
     "teacher/analysis.html": {
-      "pairs": 399,
+      "pairs": 400,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/analysis_report.html": {
+      "pairs": 84,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "teacher/analysis_student.html": {
+      "pairs": 59,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -555,7 +567,7 @@
     },
     "teacher/grade_detail.html": {
       "pairs": 0,
-      "leftovers": 28,
+      "leftovers": 32,
       "coverage": 0.0,
       "frozen": false
     },
@@ -608,9 +620,9 @@
       "frozen": true
     },
     "teacher/results.html": {
-      "pairs": 6,
+      "pairs": 8,
       "leftovers": 9,
-      "coverage": 40.0,
+      "coverage": 47.1,
       "frozen": true
     },
     "teacher/retractions.html": {
@@ -704,7 +716,7 @@
       "frozen": false
     },
     "tutorial_murid.html": {
-      "pairs": 42,
+      "pairs": 43,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
