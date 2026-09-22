@@ -269,6 +269,65 @@
     </div>
     {% else %}
 
+    <!-- ── the index: every learner on this paper ─────────────────────────── -->
+    {# The page a teacher actually opens is this one, and until this block it had
+       no way into a learner: the individual report hung off the *filed* report,
+       one click and one roster further in. An index belongs here, at the top,
+       because the reason a teacher looks a child up is the numbers they just
+       read on this page.
+
+       Names, so it is never in the shared copy — `public` is the route's answer,
+       and a stranger's report carries no names by construction. The list is the
+       same `exam_report.ranking` the filed report prints, so the two cannot order
+       the class differently, and a paper whose submission could not name a profile
+       is listed without a link rather than dropped: a roster that quietly omits a
+       child is a roster that lies about the class.
+
+       `data-learner-index` and not `data-panel`: the panels are the framework's
+       promise (`af.PANELS`), and navigation is not one of the four questions. #}
+    {% if not public and learners %}
+    <div data-learner-index
+         class="bg-white rounded-2xl border border-surface-100 shadow-sm overflow-hidden">
+        <div class="px-3 sm:px-4 py-2.5 border-b border-surface-100 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+            <div class="min-w-0">
+                <h2 class="text-sm font-extrabold text-surface-800"
+                    x-text="t('Indeks murid kelas','Class learner index')"></h2>
+                <p class="text-[10px] text-surface-400 font-medium mt-0.5 max-w-2xl"
+                   x-text="t('Satu klik membuka laporan murid itu sendiri: soalnya, jawabannya, dan langkah berikutnya.',
+                            'One click opens the report for that learner: their questions, their answers, and what to work on next.')"></p>
+            </div>
+            <span class="text-[10px] font-bold text-surface-400 shrink-0">
+                {{ learners|length }}<span x-text="t(' murid di kertas ini',' learners on this paper')"></span>
+            </span>
+        </div>
+        <div class="p-2.5 sm:p-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5 max-h-72 overflow-y-auto">
+            {% for row in learners %}
+            {% if row.id %}
+            <a href="/teacher/analysis/{{ exam.id }}/report/student/{{ row.id }}"
+               data-learner="{{ row.id }}"
+               :title="t('Buka laporan murid ini','Open the report for this learner')"
+               class="flex items-center gap-2 rounded-xl border border-surface-100 hover:border-primary-200 hover:bg-primary-50/50 px-2.5 py-2 transition group">
+                <span class="w-6 h-6 rounded-lg bg-surface-100 group-hover:bg-primary-100 text-surface-500 group-hover:text-primary-700 text-[10px] font-extrabold flex items-center justify-center shrink-0">{{ row.rank }}</span>
+                <span class="text-[11px] sm:text-xs font-bold text-surface-700 truncate flex-1">{{ row.name }}</span>
+                <span class="text-[10px] font-extrabold text-surface-500 shrink-0">{{ row.pct }}</span>
+                <i class="fas fa-chevron-right text-[9px] text-surface-300 group-hover:text-primary-500 shrink-0"></i>
+            </a>
+            {% else %}
+            {# No profile on the submission, so no page exists to open. Named
+               anyway, with the reason: the class sat the paper either way. #}
+            <div data-learner-anonymous
+                 class="flex items-center gap-2 rounded-xl border border-dashed border-surface-200 px-2.5 py-2">
+                <span class="w-6 h-6 rounded-lg bg-surface-50 text-surface-400 text-[10px] font-extrabold flex items-center justify-center shrink-0">{{ row.rank }}</span>
+                <span class="text-[11px] sm:text-xs font-medium text-surface-500 truncate flex-1">{{ row.name }}</span>
+                <span class="text-[9px] font-bold text-surface-400 shrink-0"
+                      x-text="t('Tanpa laporan','No report')"></span>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- ── summary ────────────────────────────────────────────────────────── -->
     {% if framework.shows('summary') %}
     <div data-panel="summary" class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">

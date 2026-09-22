@@ -16,6 +16,7 @@ Two other contracts live here as well, both about *claims*:
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import re
 from pathlib import Path
@@ -42,17 +43,28 @@ EXAM = {
 }
 
 
-def _submissions():
+def _submissions(ids=True):
+    """Ten papers, half of them strong.
+
+    The learner's id travels with the submission because the page's learner index
+    links *by id*: two learners in one class can share a full name, and a page
+    that matched on the name would confidently describe the wrong child. `ids=False`
+    is the other end — a scan paper the app could not hang on a profile — which is
+    the paper that must be listed without a door.
+    """
     rows = []
     for j in range(10):
         strong = j < 5
-        rows.append({
+        row = {
             "student_name": f"Murid {j:02d}",
             "answers": {"0": "A" if strong else "B", "1": "C" if strong else "A",
                         "2": "true" if strong else "false", "3": {"text": "jawaban"}},
             "teacher_feedback": {"scores": {"3": 80 if strong else 40}},
             "final_score": 88 if strong else 42,
-        })
+        }
+        if ids:
+            row["student_id"] = f"stu-{j:02d}"
+        rows.append(row)
     return rows
 
 
@@ -60,14 +72,20 @@ def _submissions():
 def rendered(app):
     """The page, exactly as the route hands it to Jinja."""
     from app.routes.teacher import _chart_payload
-    from app.services import item_analysis
+    from app.services import exam_report, item_analysis
 
     analysis = item_analysis.analyse(EXAM, _submissions())
     chart = _chart_payload(analysis)
+    # The route's own list — `exam_report.ranking` — and not a re-sorted copy, so a
+    # test of the index cannot be passing on a second ordering that the page does
+    # not use.
+    learners = exam_report.ranking(analysis.people)
     with _signed_in(app, "/teacher/analysis/exam-1"):
         html = app.jinja_env.get_template("teacher/analysis.html").render(
-            exam=EXAM, analysis=analysis, chart=chart, framework=af.resolve(None))
-    return {"html": html, "analysis": analysis, "chart": chart}
+            exam=EXAM, analysis=analysis, chart=chart, framework=af.resolve(None),
+            learners=learners)
+    return {"html": html, "analysis": analysis, "chart": chart,
+            "learners": learners}
 
 
 @contextlib.contextmanager
@@ -463,6 +481,199 @@ class TestItFitsASmallScreen:
     def test_the_score_presets_wrap(self):
         body = re.search(r"Quick score presets.*?</div>", GRADING, re.S).group(0)
         assert "flex-wrap" in body, "six preset buttons squeeze on a small phone"
+
+
+# ── the index: every learner, one click from their own report ────────────────
+
+class TestTheLearnerIndex:
+    """The door the analysis page was missing.
+
+    The *class* report has opened a learner's own page from its ranking and from
+    the statement written about them since it was written; the page a teacher
+    actually opens is this one, and it had no way into a learner at all — reaching
+    a child meant knowing to look under "Laporan Resmi" and then finding them in a
+    roster. These hold the index to being an index: one link per learner who has a
+    page, in the order the filed report ranks the class, pointing at an address the
+    app serves, and no names at all in the copy a stranger reads.
+    """
+
+    def test_every_paper_with_a_profile_gets_exactly_one_link(self, rendered):
+        linked = re.findall(r'data-learner="([^"]+)"', rendered["html"])
+        expected = [row["id"] for row in rendered["learners"] if row["id"]]
+        assert linked == expected, (
+            "the index does not link each learner once, in the ranking's own order")
+        assert len(set(linked)) == len(linked), "a learner is linked twice"
+
+    def test_the_link_is_the_address_the_app_serves(self, app, rendered):
+        """A link is a promise the app answers. The address is built from the app's
+        own URL map — blueprint prefix and all — so renaming the route without the
+        template fails here rather than 404ing in a classroom."""
+        rule = next((r for r in app.url_map.iter_rules()
+                     if r.endpoint.endswith("exam_analysis_student")), None)
+        assert rule, "the learner's own report route is gone"
+        served = rule.build({"exam_id": EXAM["id"], "student_id": "stu-03"},
+                            append_unknown=False)[1]
+        assert f'href="{served}"' in rendered["html"]
+
+    def test_the_strongest_paper_is_listed_first(self, rendered):
+        """Mark order, because that is the order the filing report ranks the class
+        in and an index ordered some other way is a list a teacher re-sorts by eye."""
+        marks = [round(row["pct"], 1) for row in rendered["learners"]]
+        assert marks == sorted(marks, reverse=True)
+        expected = [row["id"] for row in rendered["learners"] if row["id"]][0]
+        index = rendered["html"].split("data-learner-index", 1)[1]
+        first = re.search(r'data-learner="([^"]+)"', index)
+        assert first and first.group(1) == expected, (
+            "the first learner the index offers is not the one ranked first")
+
+    def test_a_paper_with_no_profile_is_listed_without_a_door(self, app):
+        """A paper whose row names nobody has no page to open — and is still
+        listed, because the class sat it. A roster that silently drops the papers
+        it cannot link contradicts the total printed on the same page."""
+        from app.routes.teacher import _chart_payload
+        from app.services import exam_report, item_analysis
+
+        rows = _submissions()
+        rows[0]["student_id"] = None
+        analysis = item_analysis.analyse(EXAM, rows)
+        with _signed_in(app, "/teacher/analysis/exam-1"):
+            html = app.jinja_env.get_template("teacher/analysis.html").render(
+                exam=EXAM, analysis=analysis, chart=_chart_payload(analysis),
+                framework=af.resolve(None),
+                learners=exam_report.ranking(analysis.people))
+        assert "Murid 00" in html, "the paper with no profile left the roster"
+        assert "data-learner-anonymous" in html
+        assert 'data-learner="None"' not in html and 'data-learner=""' not in html
+        assert len(re.findall('data-learner="', html)) == 9
+
+    def test_the_route_hands_the_page_the_list_the_index_renders(self, app,
+                                                                monkeypatch):
+        """The index is only as real as the route that fills it.
+
+        Every other test here renders the template with `learners` handed in by
+        hand, so a route that stopped passing it would print no index and no error —
+        the door would be gone and the page would look finished. This drives the
+        view itself.
+        """
+        import app.routes.teacher as teacher
+        from app.services import item_analysis
+
+        analysis = item_analysis.analyse(EXAM, _submissions())
+        monkeypatch.setattr(teacher, "_analysis_of",
+                            lambda *a, **k: (dict(EXAM), analysis, None))
+        monkeypatch.setattr(teacher, "_share_card", lambda *a, **k: None)
+        monkeypatch.setattr(teacher, "_chart_payload", lambda *a, **k: {})
+        handed = {}
+        monkeypatch.setattr(teacher, "render_template",
+                            lambda name, **kw: handed.update(kw) or "")
+
+        # `inspect.unwrap` past the permission decorators, the way the rest of this
+        # file reaches a view: a test that rendered through `login_required` would
+        # be testing the session, not the route.
+        with _signed_in(app, "/teacher/analysis/exam-1"):
+            inspect.unwrap(teacher.exam_analysis)("exam-1")
+
+        rows = handed.get("learners")
+        assert rows, "the route handed the page no learners to index"
+        assert [row["id"] for row in rows if row["id"]] \
+            == [f"stu-{j:02d}" for j in range(10)], \
+            "the index is not the ranking the filed report prints"
+        assert rows[0]["pct"] == max(row["pct"] for row in rows)
+
+    def test_the_shared_copy_carries_no_names_and_no_index(self, app, rendered):
+        """The share link shows statistics, and a child's name is what it withholds.
+
+        The list is handed to the *shared* copy here on purpose. The route does not
+        pass it today, so passing it is the worst case — the one a future route that
+        renders "the same page" reaches. Without it this test passes on a template
+        whose only guard is the absent payload, which is a guard nobody wrote.
+        """
+        from app.routes.teacher import _chart_payload
+
+        with _signed_in(app, "/r/token"):
+            html = app.jinja_env.get_template("teacher/analysis.html").render(
+                exam=EXAM, analysis=rendered["analysis"],
+                chart=_chart_payload(rendered["analysis"], public=True),
+                framework=af.resolve(None), public_view=True,
+                learners=rendered["learners"])
+        assert "data-learner-index" not in html
+        assert "data-learner=" not in html, (
+            "a shared report offers a learner's own page by id")
+        for row in rendered["learners"]:
+            assert row["name"] not in html, "a shared report names a learner"
+
+    def test_the_route_that_serves_a_share_link_passes_no_names_at_all(self):
+        """The second layer: a stranger's report is built without the list in the
+        first place, so the template guard is not the only thing standing between a
+        learner's name and a public URL."""
+        public = (ROOT / "app" / "routes" / "public.py").read_text(encoding="utf-8")
+        shared = public.split("def shared_analysis(", 1)[1].split("\n@public_bp", 1)[0]
+        assert "learners" not in shared, (
+            "the shared analysis route hands the page the class list")
+
+
+# ── marking one paper is when "why did this child land here" is asked ────────
+
+class TestTheQueueOpensTheLearnerReport:
+    """The grading queue could not answer its own question.
+
+    The queue marks one paper at a time, and the page that says *why* that paper
+    scored what it scored is the learner's own report — which the queue had no door
+    to. Its only per-row door led to the submission. Two things make the one-click
+    link real, and both are asserted: the API hands the browser the learner's id,
+    and the markup writes an address the report's own route answers.
+    """
+
+    #: The queue column, from the list it renders to the footer under it.
+    LIST = GRADING.split("data-student-list", 1)[1].split("Queue stats footer", 1)[0]
+
+    def test_each_row_and_the_open_paper_link_to_that_report(self):
+        tags = re.findall(r"<a[^>]*data-learner-report[^>]*>", GRADING)
+        assert len(tags) == 2, (
+            "expected the queue row and the panel header to carry the door")
+        queue, panel = tags
+        assert ("'/teacher/analysis/{{ exam.id }}/report/student/' + s.student_id"
+                in queue)
+        assert ("'/teacher/analysis/{{ exam.id }}/report/student/' + current.student_id"
+                in panel)
+
+    def test_the_api_hands_the_queue_the_learners_id(self):
+        body = _view_body("api_grading_queue")
+        assert '"student_id":' in body, (
+            "the queue is never told which learner a paper belongs to, so its rows "
+            "have nothing to link with")
+        assert '"student_name":' in body, "the payload was replaced, not extended"
+
+    def test_the_row_only_reads_fields_the_payload_sends(self):
+        """The defect this door links with: a template reading a field the API never
+        sends renders `undefined` — a blank name, or a door whose id is the string
+        "undefined". The row's own reads are compared with the dict the API builds,
+        so the next field added to the markup has to be sent with it."""
+        payload = (_view_body("api_grading_queue")
+                   .split("result.append({", 1)[1].split("\n        })", 1)[0])
+        sent = set(re.findall(r'"(\w+)":', payload))
+        reads = set(re.findall(r"(?<![\w.])s\.(\w+)", self.LIST))
+        assert reads <= sent, (
+            f"the queue row reads {sorted(reads - sent)}, which the API never sends")
+
+    def test_opening_a_report_does_not_also_move_the_queue(self):
+        """The row's own click selects the student, and a link inside it inherits
+        that — so a teacher who opens a report comes back to a queue that moved
+        under them. The marker is on the anchor, not on its parent."""
+        queue = re.findall(r"<a[^>]*data-learner-report[^>]*>", GRADING)[0]
+        assert "@click.stop" in queue
+
+    def test_a_paper_with_no_profile_offers_no_door(self):
+        """The rule the index follows too: the learner route answers 404 for a paper
+        that names nobody, and a door that 404s is worse than no door."""
+        queue, panel = re.findall(r"<a[^>]*data-learner-report[^>]*>", GRADING)
+        assert 'x-show="s.student_id"' in queue
+        assert 'x-show="current.student_id"' in panel
+
+    def test_the_panel_still_offers_the_submission_its_own_page(self):
+        """Two different questions, so two doors rather than one button that
+        changes meaning: the submission's own detail page is still there."""
+        assert "'/teacher/grade/' + current.id" in GRADING
 
 
 # ── the link a teacher actually clicks ──────────────────────────────────────

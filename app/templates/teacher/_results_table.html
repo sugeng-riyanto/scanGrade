@@ -73,6 +73,20 @@
             <span class="text-[9px] text-stone-400">{{ s.submitted_at|tz if s.submitted_at else '-' }}</span>
             <div class="flex gap-1.5">
                 <a href="/teacher/grade/{{ s.id }}" class="text-xs font-extrabold text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg hover:bg-orange-100 transition inline-flex items-center gap-1"><i class="fas fa-eye"></i>Detail</a>
+                {# The learner's own report, one click from the roster. `Detail`
+                   beside it is the *submission* — one paper's marks — and this is
+                   the child's page: every question with the reason each paid what
+                   it paid. Guarded on `exam_id` **and** the row's own
+                   `student_id` (see the desktop half): no exam to address, or a
+                   row the app could not hang on a profile, means no door at all
+                   rather than one that leads nowhere. #}
+                {% if exam_id and s.student_id %}
+                <a href="/teacher/analysis/{{ exam_id }}/report/student/{{ s.student_id }}"
+                   target="_blank" rel="noopener" data-learner-report
+                   class="text-xs font-extrabold text-cyan-700 bg-cyan-50 px-3 py-1.5 rounded-lg hover:bg-cyan-100 transition inline-flex items-center gap-1">
+                    <i class="fas fa-file-lines"></i><span x-text="t('Laporan','Report')"></span>
+                </a>
+                {% endif %}
                 {% if s.status != 'published' %}
                 <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
                     <button type="submit" class="text-xs font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition"><i class="fas fa-share"></i></button>
@@ -146,6 +160,23 @@
                 </td>
                 <td class="py-3 text-center whitespace-nowrap">
                     <a href="/teacher/grade/{{ s.id }}" class="text-orange-600 hover:text-orange-700 font-extrabold text-xs p-2 hover:bg-orange-50 rounded-xl transition inline-block"><i class="fas fa-eye mr-1"></i>Detail</a>
+                    {# The learner's own report, one click from the roster a teacher
+                       scrolls. `Detail` beside it is the *submission* — one paper's
+                       marks — and this is the child's page: every question with the
+                       reason each paid what it paid. Two guards, both needed: no
+                       `exam_id` (the all-exams view) means there is no report to
+                       address, and a row whose submission named no profile has no
+                       page — the learner route answers 404 for it, so no door is
+                       written rather than one that leads nowhere. The label is a
+                       pair because this partial renders inside a page that
+                       switches, and its own coverage floor counts them. #}
+                    {% if exam_id and s.student_id %}
+                    <a href="/teacher/analysis/{{ exam_id }}/report/student/{{ s.student_id }}"
+                       target="_blank" rel="noopener" data-learner-report
+                       class="text-cyan-700 hover:bg-cyan-50 font-extrabold text-xs p-2 rounded-xl transition inline-block">
+                        <i class="fas fa-file-lines mr-1"></i><span x-text="t('Laporan','Report')"></span>
+                    </a>
+                    {% endif %}
                     {% if s.status != 'published' %}
                     <form method="POST" action="/teacher/publish/submission/{{ s.id }}" class="inline" onsubmit="return confirm('Publikasikan?')">
                         <button type="submit" class="text-emerald-600 hover:text-emerald-700 font-extrabold text-xs p-2 hover:bg-emerald-50 rounded-xl transition" title="Publish"><i class="fas fa-share"></i></button>
