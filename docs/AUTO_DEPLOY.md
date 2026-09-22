@@ -107,6 +107,27 @@ installer is re-run. If your VPS was installed earlier, do that once:
 bash /opt/scangrade/deploy/install-auto-deploy.sh
 ```
 
+### Gate 0 has three directions, and the quietest one is closed by the app
+
+* **A copy that has drifted** is refused by the running copy itself, exit 14.
+* **A checkout that no longer carries Gate 0** — rolled back past the commit that
+  added it, or edited out while debugging — is refused by the *launcher* before it
+  execs anything, exit 15, because a deploy script with no Gate 0 can never
+  refuse a copy of itself again.
+* **A release that removes the block** is refused and quarantined by the run that
+  reads it (exit 16), because that run is the last one that could have noticed.
+* **A copy so old it predates Gate 0 entirely** cannot refuse itself, and nothing
+  in it can judge it. The app refuses instead: the copy's own construct gate sets
+  `START_BACKGROUND_SCHEDULERS=false`, which marks the construction as the deploy's
+  probe, and the probe asks `deploy/arm-auto-deploy.sh --check` whether this box is
+  armed. If it is not, it prints `SCANGRADE-UNARMED` and exits non-zero, the
+  construct gate treats that as a failed release, and the previous commit keeps
+  serving. `gunicorn` builds the same app without the marker, so this can never
+  refuse the site — only a release.
+
+The marker is not new: it dates from the script's first commit, so every copy ever
+installed carries it. That is what makes the last case reachable at all.
+
 ### A successful release re-renders the installed launcher
 
 `/usr/local/bin/scangrade-deploy` and `/usr/local/bin/scangrade-db-snapshot` are
@@ -229,13 +250,15 @@ It runs only when a template or the stylesheet is staged, and
 |---|---|
 | every template and utility is readable | deploy |
 | a template, utility or tint pair is unreadable in either theme | roll back (exit 13) |
-| the gate could not run at all (exit 2) | **warn only**, and say so in the journal |
+| the gate could not run at all (exit 2) | roll back (exit 13) |
+| the release removes the check itself (exit 3) | roll back (exit 13) |
 
-The last row is deliberate: a missing interpreter or a `pytest` that never got
-installed is a fault in the gate, not in the release, and a broken checker must
-never be able to take the site down. It is logged loudly instead, and
-`install-auto-deploy.sh` proves the gate runs at install time so that warning has
-no reason to appear.
+The last two are not a fault in the release, and they still roll it back: the
+alternative is shipping a commit nobody read for contrast, which is the same as
+having no gate. The armament preflight below refuses the whole run, before anything
+is fetched, when the box cannot run this gate at all — so reaching here with exit 2
+means the box changed between the two checks, and the rollback is the safe half of
+that race.
 
 ## The gate on the published numbers
 
@@ -276,7 +299,14 @@ It says all three of those in its own output, so a passing run cannot be read as
 | measured, and the page still describes this box | deploy |
 | measured, and it does not (confirmed twice) | roll back **if armed** |
 | diverged once, clean on the confirmation run | deploy — contention, not a stale claim |
-| could not measure (exit 2) | **warn only**, and say so in the journal |
+| could not measure (exit 2) — the box was busy, or the probe did not complete | **warn only**, and say so in the journal |
+| not armed (exit 4) — no roster, no harness, no base URL, an unreadable claim | roll back: this release was never measured |
+
+The two rows above the last one are different answers, and they used to be one.
+An absent measurement on a busy box is not evidence against the release; a box that
+cannot check the claim at all means the release went out with the published table
+re-checked by nothing. The armament preflight normally refuses such a run before
+anything is fetched; the rollback is what happens if the box changes mid-release.
 
 The two-strike rule and the `2x` latency slack exist because a measurement on a
 shared box is not a fact about the code alone. They are also bounded: the slack
@@ -313,16 +343,17 @@ cat /var/lib/scangrade-deploy/claims/history.jsonl
 ```
 
 The roster is required and lives outside git (`.freebuff/lt_roster.json`), so a
-rollback cannot remove it. No roster means `cannot measure`: the gate says so on
-every release rather than passing silently.
+rollback cannot remove it. No roster means **not armed** (exit 4), and that release
+is refused rather than deployed unmeasured.
 
 **The conf file reaches the gate through the environment, and that is worth
 knowing.** The deploy sources `/etc/scangrade-claims.conf` and passes every
 `CLAIMS_*` setting as an environment variable; `claims_gate.py` reads them with
 `env_default()`. It did not always: the gate originally read only `argv`, so
 `CLAIMS_BASE_URL` arrived, was ignored, and every production run ended at
-`no --base URL` — exit 2, "could not measure", on a gate that looked installed
-and healthy. That is why `/var/lib/scangrade-deploy/claims` had never been created. `tests/unit/test_perf_gate.py` now fails if the installer writes a
+`no --base URL` — now exit 4, "not armed", on a gate that looked installed and
+healthy (it was exit 2 at the time, which is how a box kept deploying with the
+claim unchecked). That is why `/var/lib/scangrade-deploy/claims` had never been created. `tests/unit/test_perf_gate.py` now fails if the installer writes a
 setting its gate never reads.
 
 ## The gate on the release before this one
@@ -363,7 +394,8 @@ program's bytecode is dropped before a mutation run — see
 | no worse, on any of the three, within slack | deploy, and the baseline moves up to this release |
 | slower or more expensive (confirmed twice) | roll back **if `PERF_ENFORCE=true`** |
 | divergent once, clean on the confirmation run | deploy — contention, not a regression |
-| could not measure (exit 2) | **warn only**, and the baseline is left alone |
+| could not measure (exit 2) — a busy box, or a probe that did not complete | **warn only**, and the baseline is left alone |
+| not armed (exit 4) — no roster, no harness, no base URL, or a baseline from a different reference load | roll back: this release was never compared with the last one that passed |
 | the baseline knows a page's cost but this run reports none | **warn only** — a harness that stopped reporting must not retire the payload and query axes in silence |
 
 The baseline is written **only when a release passes**. If a refused release
@@ -372,11 +404,13 @@ regression would be permanent and invisible. A deliberate slowdown (more work pe
 page, a feature worth its cost) is recorded with `--rebaseline`, so the trade is
 stated rather than assumed.
 
-A changed reference load, a box that is already busy, or a divergence a second
-probe did not confirm are all `could not measure`. None of them is evidence
-against the release, none of them rolls anything back, and the gate says so out
-loud on every release — a gate that can only say "could not measure" is a gate
-that is off.
+A box that is already busy, or a divergence a second probe did not confirm, is
+`could not measure` (exit 2): not evidence against the release, and it rolls
+nothing back. A **changed reference load** is the other answer — exit 4, "not
+armed" — because the comparison this gate exists to make is not happening at all,
+and the message names the remedy (`--rebaseline`). Every one of them is said out
+loud on every release; a gate that can only say "could not measure" is a gate that
+is off.
 
 ### Arming it
 
@@ -417,13 +451,59 @@ page `500`s for one role, or whether an RBAC guard was loosened — and "deploye
 but teachers cannot open anything" is exactly what a reachability probe waves
 through.
 
-It checks three things:
+It checks four things:
 
 | | What it proves |
 |---|---|
 | four logins | session cookies, both login routes, both auth stores |
 | ~32 pages | every role's landing page, admin console and work queues render |
 | 6 refusals | admin/guru/murid cannot open another role's area |
+| one exam page | the student's exam screen still carries both anti-cheat panels, armed |
+
+The last one is the only check that asserts anything about what a page *says*, and
+the only one that opens a page needing a row to exist. Both are deliberate: the
+fullscreen blocker and the away blur live on that one page, a release that drops
+either leaves every other check green, and the page cannot be opened without an
+exam. So the murid check finds the demo exam on the student's own list, opens it,
+and reads out of the served document that
+
+* it is the sitting page for the exam it asked for;
+* the exam arms anti-cheat *and* requires fullscreen — with either off, neither
+  panel would ever be revealed however intact the markup is;
+* both panels are present, each with its own sentence;
+* the countdown carries the server's own `AWAY_GRACE_SECONDS`, not a hard-coded
+  number;
+* the page watches `fullscreenchange` and `visibilitychange`, which are what set
+  the two flags.
+
+A missing panel fails the release; a missing *fixture* only warns, with the command
+that puts it back — the demo schools are data, and a box whose demo data was cleared
+must not roll a healthy release back (see the section below). Opening an exam is the
+one place this smoke test changes state, because in this app opening an exam opens
+the sitting that belongs to it: one demo account, on the demo paper, reused by every
+later run.
+
+### The exam it opens
+
+`deploy/demo_exam_fixture.py` holds the paper, and the deploy runner refreshes it
+**before** the smoke test runs, on every release (`python manage.py demo-exam`, as
+the service user, with the schedulers switched off so constructing the app cannot
+start the retention purge). It is written to be sittable rather than merely to
+exist: assigned to every class in each demo school, no window at all (so it cannot
+close on a date), anti-cheat and fullscreen on, and every standing attempt on it
+voided — `retracted`, the app's own word for an attempt that does not stand — so a
+demo visitor who submitted it does not hide it from the check.
+
+If the smoke test reports *no sittable demo exam*, the fixture is gone or has been
+changed back. Put it back with:
+
+```bash
+cd /opt/scangrade && sudo -u scangrade .venv/bin/python manage.py demo-exam
+```
+
+It is idempotent: run it as often as you like. It touches the three seeded demo
+schools (NPSN `99887711`, `99887722`, `99887733`) and nothing else, and a box with
+no demo data is not an error — the check simply has nothing to open.
 
 ### Credentials
 
@@ -463,10 +543,174 @@ password must never be able to reject a good release. Once armed:
 | a role can open another role's area | roll back |
 | **no** role can sign in | roll back — one changed password cannot explain four |
 | one role cannot sign in | warn only; the others still gate the release |
-| `SMOKE_BASE_URL` unreachable | skip, exit 2 — a DNS or nginx problem is not fixed by rolling back code |
+| nothing was testable (exit 2) | roll back — no role could sign in against this release |
+| no `/etc/scangrade-smoke.conf`, or a conf that does not parse | roll back — the release was never signed in against |
 
-The line between the last three is the whole point: the dangerous case still
-rolls back, and a stale credential cannot.
+The line that matters is the one between a **failed** run and an **unarmed** one: a
+stale credential in the conf is evidence about the box, so with `SMOKE_ENFORCE` not
+`true` a failed run keeps the release, while a conf that is missing or unreadable is
+a gate that did not run — and that rolls back. The armament preflight refuses the run
+before it starts when the conf is absent, so the last row is the mid-release race.
+
+## An unarmed box deploys nothing
+
+Every gate below the preflight can be *skipped*, and each skip used to be a
+sentence in the journal and nothing else: the readability gate without `pytest`
+logged "this release is NOT contrast-checked", a missing smoke conf logged its skip,
+and the claims and performance gates said "could not measure" on a box with no
+roster. Each carried on and kept the release — so a box in that state deployed every
+commit while checking almost none of them, with the site green and "the gates ran"
+quietly false.
+
+So the armament is judged **once, before anything is fetched**, by the same checker
+a human runs:
+
+```bash
+bash /opt/scangrade/deploy/arm-auto-deploy.sh --check   # read-only; what the deploy asks
+```
+
+If it says the box is not armed, the run is refused with exit 15: nothing is pulled,
+nothing is reloaded, and no release is staged. It is a refusal to *deploy*, not a
+rollback — no release is under judgement, the box is — and it is **not** quarantined,
+because a quarantine is a record about a commit.
+
+That check now also counts the smoke test's conf, because `SMOKE_ENFORCE` and
+`/etc/scangrade-smoke.conf` are what make "every role still works" a gate rather than
+a log line. `arm-auto-deploy.sh` itself is the definition of "armed" for all four
+gates; the deploy prints its report verbatim rather than keeping a second copy of
+the judgement.
+
+### Seeing it without a shell
+
+The refusal writes the checker's report to
+`/var/lib/scangrade-deploy/unarmed` and deletes it the moment the box is armed again.
+`/super-admin/deploy-status` reads it, and that matters: a box that refuses every
+release has **no other symptom**. Nothing is fetched, no commit moves, nothing is
+quarantined, and the site keeps serving — from outside it is indistinguishable from
+"no new commits". The page says which of three states it is in: a refusal (with the
+checker's own report and how long ago), a record it cannot read, or nothing refused.
+
+The one directory both sides need is `/var/lib/scangrade-deploy`; the installer
+creates it `root:"$SERVICE_GROUP"` mode 0750 and the record itself `0644`, so the app
+can read a refusal and cannot write one away.
+
+## The alert when the runner goes stale
+
+`/super-admin/deploy-status` only answers when somebody opens it. That is the same
+failure one level up, and it is measured rather than imagined: production ran for a
+week with the runner **45 commits behind**, deploying every push with the deploy
+logic of the day it was installed, and the only trace was a page nobody had a reason
+to open.
+
+So the reading is made on a timer and emailed. **The app sends it, not the runner**
+— deliberately, because the runner is the thing being reported and an old copy would
+compose its own report with the gates of the day it was installed: the alert would be
+missing exactly when it matters. `gunicorn` is the process guaranteed to be the new
+commit, since the release that pulled it is also the one that reloaded it.
+
+### What is worth an email
+
+Four readings, in the order they bite:
+
+| reading | what it means |
+|---|---|
+| **the copy predates Gate 0** | nothing can refuse it — every release ships with the gates of the day it was installed, silently |
+| **the copy has drifted** | Gate 0 refuses it with exit 14, so *nothing* deploys while the site looks healthy |
+| **the runner is N commits behind** | a launcher rendered from an older `entrypoint.sh`, or a copy from an older commit |
+| **the checkout is N commits behind `origin/main`** | the pipeline has stopped: a failed fetch, a quarantine nobody released, or `PAUSE` |
+
+"More than a few commits" is **5** (`DEPLOY_ALERT_MIN_COMMITS`). Small on purpose:
+the timer runs every six hours and a healthy box is never more than a commit or two
+behind for more than a moment, so a threshold high enough to be quiet is high enough
+to miss the thing the alert exists for.
+
+It **never mails a reading it could not make**. An absent launcher, an unreadable
+file, a directory that is not a git tree: the page says "cannot measure" and nobody
+is woken, because an alert that cannot be acted on is how a channel gets muted.
+
+### One mail per problem, not one per tick
+
+The record (`deploy_alerts.json`, in whichever directory `state_dir()` chose — see
+below) keeps the identity of what was sent:
+**the kind, the count, and the revision**. So 5 commits behind that becomes 40 sends
+again, a runner that is fixed and drifts again sends again, and the same reading
+stays quiet for a week (`RENOTIFY_AFTER_SECONDS`) before one reminder. A record that
+cannot be parsed counts as *nothing sent*, because the wrong answer there is "never
+again".
+
+Three `gunicorn` workers start together and tick together, so the tick is claimed
+with an `O_EXCL` file (`deploy_alerts.lock`, beside the record) — one winner computes
+and sends, the others return. The claim is released even when sending raises, and one
+abandoned by a killed worker is stolen after 15 minutes rather than blocking alerts
+forever. A **failed send is not recorded**, so the next tick tries again instead of
+one SMTP wobble silencing the problem for a week.
+
+### Who gets it
+
+`system_settings` key **`deploy_alert_recipients`** (comma, semicolon or newline
+separated) if it is set; otherwise every active `super_admin`'s email; otherwise the
+SMTP account itself, which still reaches a person and is flagged on the page as the
+fallback it is. The card on
+[`/super-admin/deploy-status`](https://scangrade.web.id/super-admin/deploy-status)
+shows the addresses, which rule chose them, the cadence, the threshold, and the last
+alert with its date — so "alerts are armed" is something an operator can check
+instead of assume.
+
+There is a **Send a test email** button (guarded POST, audited). It records nothing,
+which is the point: it cannot silence or delay a real alert for the same staleness.
+The failure it prevents is a mail path that has never once been exercised being
+needed at the moment the box is broken.
+
+### The timer
+
+Started from `create_app` beside the cleanup and retention loops, behind the same
+
+```ini
+START_BACKGROUND_SCHEDULERS
+```
+
+switch, so a deploy probe constructs the app without starting a third thread. The
+first pass waits a full `DEPLOY_ALERT_INTERVAL_SECONDS` (default **6 h**): a deploy
+restarts the app, and an alert about a runner that was already stale belongs on the
+page, not in an inbox the moment the service comes back up.
+
+No gate needs arming for this — the recipients come from the database or the SMTP
+settings the app already has.
+
+### Where the record lives, and why that had to be arranged
+
+The record is the *only* thing that stops a stale runner being mailed every tick, so
+where it can be written is a correctness question. It cannot live in the checkout:
+the deploy pulls into `/opt/scangrade` **as root**, so the service user cannot write a
+byte inside it — and the service reads a *missing* record as "nothing was sent", so
+production as first written would have mailed every six hours, forever, about the same
+runner. The installer therefore creates one more directory the app owns:
+
+```
+/var/lib/scangrade-deploy/alerts     $SERVICE_USER:$SERVICE_GROUP 0750
+```
+
+The service picks its directory in this order — `SCANGRADE_ALERT_STATE_DIR` (used
+alone: falling through would silently ignore what an operator asked for), then that
+directory when the installer has created it, then Flask's instance folder, which is
+what a dev checkout gets. It **creates only the last one**: anything under
+`/var/lib/scangrade-deploy` is root's and the installer's, and that is what keeps the
+quarantine record unwritable by the process it constrains. The directory that
+answered is printed on the card, and a box where none of the three works says so on
+both the card and in the journal rather than looking armed.
+
+Guard: the same suite, plus `tests/unit/test_auto_deploy.py` comparing the installer's
+path with `DEPLOY_STATE_DIR` in the service, because two copies of one path that move
+separately leave an alert that stops recording on a box that looks installed —
+mutation-checked, **9/9 injected defects caught**
+(`.freebuff/mutate_alert_state_dir.py`).
+
+Guard: `tests/unit/test_deploy_alerts.py` (70 tests) — the policy against the real
+report shape, the four kinds, the identity and the reminder, the claim across
+processes, the fallbacks, the state-directory choice, the card and both routes —
+mutation-checked, **23/23 injected defects caught**
+(`.freebuff/mutate_deploy_alerts.py`), plus the state-directory harness above.
+
 
 ## What it refuses to do
 
@@ -478,6 +722,12 @@ It also stops instead of guessing when:
 
 - it is running from an installed copy that differs from the checkout (exit 14)
   — see [The runner is never a copy](#the-runner-is-never-a-copy);
+- the checkout has lost Gate 0, so it could never refuse a copy again (exit 15) —
+  the launcher refuses to exec it at all;
+- this box is not armed to check a release (exit 15, and the report is kept in
+  `/var/lib/scangrade-deploy/unarmed`) — see
+  [An unarmed box deploys nothing](#an-unarmed-box-deploys-nothing);
+- the release itself removes Gate 0 (exit 16, and it is quarantined);
 - the checkout has local changes (it will not clobber hand edits);
 - the update is not a fast-forward (history was rewritten);
 - the release ships a migration and no snapshot of the data can be taken;
@@ -542,10 +792,17 @@ is the correct behaviour, so they keep retrying every tick:
   merged at that point, and the script says it will retry;
 * a `pip install` that failed, which is usually the network.
 
-Everything else that is a **gate** quarantines: `compileall`, app construction,
-the theme gate, and the post-reload verification (smoke test, claims gate,
-performance gate, and the app not answering `200`). The quarantine record names
-which one, so "why did nothing deploy" is answered by one `cat`.
+Everything else that is a **gate** quarantines: the check that Gate 0 survives the
+release, `compileall`, app construction (including the app refusing to be deployed
+by an unarmed runner), the theme gate, and the post-reload verification (smoke test,
+claims gate, performance gate, and the app not answering `200`). The quarantine
+record names which one, so "why did nothing deploy" is answered by one `cat`.
+
+One refusal deliberately writes **no** quarantine: the armament preflight, which
+refuses the *run* rather than a commit. Its record is
+`/var/lib/scangrade-deploy/unarmed`, which the status page reads, and it is deleted
+as soon as the box is armed again — a quarantine is a fact about a commit, and there
+is no commit here.
 
 A **manual** rollback does not write a quarantine — `git reset --hard` by hand
 leaves no record — so after one, the next tick will indeed try the same release

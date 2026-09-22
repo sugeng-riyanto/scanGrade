@@ -17,6 +17,10 @@ from app.services.deploy_status_service import (
     report as deploy_status_report,
     request_release as deploy_status_request_release,
 )
+from app.services.deploy_alert_service import (
+    send_test as deploy_alert_send_test,
+    summary as deploy_alert_summary,
+)
 from app.services.question_types import objective_result
 from app.services.demo_schools import demo_school_npsns
 from app.services.school_reset import (
@@ -304,7 +308,13 @@ def deploy_status():
     so a cached reading is never passed off as a live one.
     """
     status = ttl("deploy_status:report", 30, deploy_status_report)
+    # Where the staleness alert goes, when the last one left, and why not more.
+    # Deliberately *not* cached behind the report's TTL: this is the answer an
+    # operator checks after arming the channel, and it does not measure the box —
+    # it reads one small file and a setting.
+    alerts = deploy_alert_summary()
     return render_template("super_admin/deploy_status.html", status=status,
+                           alerts=alerts, testalert=request.args.get("testalert"),
                            released=request.args.get("released"))
 
 
@@ -334,6 +344,27 @@ def deploy_status_release():
                      new_data={"request": "release", "gate": result.get("gate")},
                      user_id=g.user_id)
     return redirect(f"/super-admin/deploy-status?released={result['key']}")
+
+
+@super_bp.route("/deploy-status/test-alert", methods=["POST"])
+@_sa_required
+def deploy_status_test_alert():
+    """Send one test message, so "the alert is armed" is proven rather than assumed.
+
+    A mail path that has never once been exercised is a mail path discovered at the
+    moment the box is broken, and this is exactly the channel that is supposed to
+    speak then. It is safe to press: nothing is recorded against the alert state, so
+    a test cannot silence or delay a real alert for the same staleness.
+
+    The answer travels back as an outcome key rather than a sentence, because copy
+    belongs in the template where the language toggle and the i18n sweep reach it.
+    """
+    result = deploy_alert_send_test()
+    if result.get("sent"):
+        log_activity("create", "deploy_alert", "test",
+                     new_data={"to": (result.get("recipients") or {}).get("emails")},
+                     user_id=g.user_id)
+    return redirect(f"/super-admin/deploy-status?testalert={result['outcome']}")
 
 
 @super_bp.route("/reset-demo-passwords", methods=["POST"])

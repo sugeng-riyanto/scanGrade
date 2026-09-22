@@ -74,6 +74,8 @@
                     <span x-text="t('Runner yang terpasang masih salinan, tetapi isinya sama dengan checkout sehingga hari ini tetap bisa deploy. Salinan berhenti menerima perbaikan sejak dipasang.','The installed runner is still a copy, but it matches the checkout, so it deploys today. A copy stops receiving fixes the moment it is installed.')"></span>
                     {% elif v.key == 'launcher_stale' %}
                     <span x-text="t('Launcher terpasang, tetapi bukan hasil render commit ini — deploy/entrypoint.sh sudah berubah sejak dipasang.','The launcher is installed, but it is not what this commit renders — deploy/entrypoint.sh has changed since it was installed.')"></span>
+                    {% elif v.key == 'unarmed' %}
+                    <span x-text="t('Server ini belum armed untuk memeriksa rilis, jadi runner menolak seluruh proses deploy sebelum mengambil apa pun — tidak ada rilis yang bisa masuk sampai dijalankan: bash deploy/arm-auto-deploy.sh','This box is not armed to check a release, so the runner refuses the whole run before it fetches anything — no release can land until it is armed: bash deploy/arm-auto-deploy.sh')"></span>
                     {% elif v.key == 'behind' %}
                     <span x-text="t('Runner sudah benar, tetapi checkout tertinggal dari origin/main.','The runner is right, but the checkout is behind origin/main.')"></span>
                     {% elif v.key == 'dirty' %}
@@ -107,6 +109,70 @@
         </div>
     </div>
 
+    <!-- ── the refusal that is about the box, not about a commit ────────── -->
+    {#
+        A refusal the operator cannot otherwise see. When this box is not armed to
+        check a release, the runner refuses the whole run *before* it fetches
+        anything: nothing is pulled, no commit moves, nothing is quarantined, and
+        the site is untouched. From outside that is indistinguishable from "no new
+        commits" — so the record it leaves is the only thing that says a release
+        is being turned away, and the older card's "No commit is held" reads as
+        reassurance while it happens.
+
+        The blank is its own sentence for the same reason the quarantine card's is:
+        "nothing has refused" and "a refusal I cannot read" are different answers
+        with different remedies, and silence must not stand for both.
+    #}
+    {% set u = status.unarmed %}
+    {% set UHELD = {'box': 'bg-rose-50 border-rose-200', 'text': 'text-rose-700', 'icon': 'fa-triangle-exclamation'} %}
+    {% set UCLEAR = {'box': 'bg-surface-50 border-surface-200', 'text': 'text-surface-700', 'icon': 'fa-circle-check'} %}
+    {# Three states, not two: `present` needs acting on, `unreadable` needs a
+       different look, and only `none` is the ordinary answer. #}
+    {% set UL = UCLEAR if u.key == 'none' else UHELD %}
+    <div class="card p-5 border {{ UL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ UL.icon }} {{ UL.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ UL.text }}">
+                    {% if u.present %}
+                    <span x-text="t('Rilis Ditolak — Server Belum Armed','Release Refused — This Server Is Not Armed')"></span>
+                    {% elif u.key == 'unreadable' %}
+                    <span x-text="t('Catatan Penolakan Tidak Terbaca','Refusal Record Unreadable')"></span>
+                    {% elif u.key == 'none' %}
+                    <span x-text="t('Tidak Ada Rilis yang Ditolak karena Server','No Release Refused for a Box-side Reason')"></span>
+                    {% endif %}
+                </h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if u.present %}
+                    <span x-text="t('Runner menolak seluruh proses deploy, jadi tidak ada commit yang diambil dan tidak ada rilis yang masuk. Ini laporan dari pemeriksa armament, apa adanya:','The runner refused the whole deploy run, so nothing was fetched and no release landed. This is the armament checker’s own report, as it stands:')"></span>
+                    {% if u.detail %}<code class="block mt-2 whitespace-pre-wrap break-all font-mono text-xs text-rose-700">{{ u.detail }}</code>{% endif %}
+                    {% elif u.key == 'unreadable' %}
+                    <span x-text="t('Ada catatan penolakan dan halaman ini tidak bisa membacanya, jadi belum bisa dipastikan server ini armed.','There is a refusal on record and this page cannot read it, so this server cannot be said to be armed.')"></span>
+                    {% if u.reason %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ u.reason }}</code>{% endif %}
+                    {% else %}
+                    <span x-text="t('Tidak ada penolakan atas dasar server, jadi rilis terakhir tetap diproses seperti biasa.','Nothing has been refused for a box-side reason, so releases keep being processed as usual.')"></span>
+                    {% endif %}
+                </p>
+
+                {% if u.present %}
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Ditolak sejak','Refused since')"></span>
+                        <span class="text-surface-700">
+                            <code class="font-mono text-xs">{{ u.at or '—' }}</code>
+                            {% if u.age_seconds is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ u.age_seconds }}</strong> <span x-text="t('detik','seconds')"></span></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Berkas','File')"></span>
+                        <code class="font-mono text-xs text-surface-700 break-all text-right">{{ u.path }}</code>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     <!-- ── the release a gate is holding ───────────────────────────────── -->
     {#
         The one deploy failure that has no symptom on any other page: the previous
@@ -134,6 +200,13 @@
                     <span x-text="t('Runner tidak mencoba ulang commit ini, jadi rilis sebelumnya tetap melayani. Satu rilis hanya membeli satu percobaan: kalau gate menolak lagi, commit itu dikarantina lagi.','The runner is not retrying this commit, so the previous release keeps serving. A release buys exactly one attempt: if a gate refuses it again, the commit is quarantined again.')"></span>
                     {% elif q.reason_key == 'unreadable' %}
                     <span x-text="t('Catatan karantina tidak bisa dibaca, jadi halaman ini tidak bisa memastikan tidak ada yang ditahan.','The quarantine record could not be read, so this page cannot say that nothing is held.')"></span>
+                    {#
+                        The captured error, shown because this card exists for an
+                        operator with no shell: "could not be read" is a diagnosis
+                        with no remedy, while `PermissionError: [Errno 13] …` names
+                        the one directory to look at. It was computed and dropped.
+                    #}
+                    {% if q.detail %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ q.detail }}</code>{% endif %}
                     {% elif q.reason_key == 'malformed' %}
                     <span x-text="t('Catatan karantina ada, tetapi isinya tidak dikenali — baca berkasnya sebelum menganggap tidak ada yang ditahan.','The quarantine record exists but its contents are not recognised — read it before assuming nothing is held.')"></span>
                     {% else %}
@@ -154,9 +227,11 @@
                         <span class="text-surface-500 shrink-0" x-text="t('Gate yang menolak','Refusing gate')"></span>
                         <span class="text-right min-w-0">
                             <span class="font-bold text-surface-800">
-                                {% if q.gate_key == 'python_compileall' %}<span x-text="t('kompilasi Python','the Python compile')"></span>
+                                {% if q.gate_key == 'gate_0' %}<span x-text="t('Gate 0 — runner harus dari berkas checkout','Gate 0 — the runner must be the checkout file')"></span>
+                                {% elif q.gate_key == 'python_compileall' %}<span x-text="t('kompilasi Python','the Python compile')"></span>
                                 {% elif q.gate_key == 'app_did_not_construct' %}<span x-text="t('aplikasi tidak bisa dibangun','the app did not construct')"></span>
                                 {% elif q.gate_key == 'app_did_not_come_up_after_the_reload' %}<span x-text="t('aplikasi tidak hidup setelah reload','the app did not come up after the reload')"></span>
+                                {% elif q.gate_key == 'runner_not_armed' %}<span x-text="t('runner belum armed','the runner is not armed')"></span>
                                 {% elif q.gate_key == 'theme_gate' %}<span x-text="t('gerbang tema','the theme gate')"></span>
                                 {% elif q.gate_key == 'smoke_test' %}<span x-text="t('uji asap setelah deploy','the post-deploy smoke test')"></span>
                                 {% elif q.gate_key == 'claims_gate' %}<span x-text="t('gerbang klaim','the claims gate')"></span>
@@ -198,6 +273,122 @@
                 <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
                     <span class="text-surface-500" x-text="t('Catatan karantina','Quarantine record')"></span>
                     <code class="font-mono text-surface-500 break-all">{{ status.quarantine_file }}</code>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── who gets told when the runner goes stale ──────────────────────── -->
+    {#
+        Every other reading on this page needs somebody to open it, which is the
+        failure mode this card closes one level up: a runner can drift for months
+        while the site serves perfectly. The addresses, the threshold and the last
+        send are read from the box, and the button proves the mail path works while
+        nothing is wrong — the moment a channel like this normally gets exercised is
+        the moment it is needed.
+    #}
+    {% set A = alerts %}
+    {% set AINT = A.interval_seconds or 0 %}
+    {% set AHOURS = AINT // 3600 %}
+    {% set AMINS = (AINT % 3600) // 60 %}
+    {% set AHAS = {'box': 'bg-emerald-50 border-emerald-200', 'text': 'text-emerald-700', 'icon': 'fa-envelope-circle-check'} %}
+    {% set ANONE = {'box': 'bg-amber-50 border-amber-200', 'text': 'text-amber-700', 'icon': 'fa-envelope'} %}
+    {% set AL = AHAS if A.to else ANONE %}
+    <div class="card p-5 border {{ AL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ AL.icon }} {{ AL.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ AL.text }}" x-text="t('Peringatan Kesegaran Runner','Runner Staleness Alerts')"></h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if A.to %}
+                    <span x-text="t('Halaman ini hanya terbaca kalau ada yang membukanya, jadi peringatannya dikirim sendiri: sebuah email begitu runner tertinggal lebih dari','This page only reads when somebody opens it, so the alert is sent for you: one email when the runner falls more than')"></span>
+                    <strong>{{ A.min_commits }}</strong>
+                    <span x-text="t('commit dari checkout, atau begitu runner terpasang tidak lagi bisa memeriksa rilis.','commits behind the checkout, or when the installed runner can no longer check a release.')"></span>
+                    {% else %}
+                    <span x-text="t('Peringatan belum bisa dikirim: tidak ada alamat tujuan yang bisa ditentukan.','Alerts cannot be sent yet: no destination address could be resolved.')"></span>
+                    {% if A.source_detail %}<code class="block mt-2 font-mono text-xs break-all">{{ A.source_detail }}</code>{% endif %}
+                    {% endif %}
+                </p>
+
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Dikirim ke','Sent to')"></span>
+                        <span class="text-right min-w-0">
+                            {% if A.to %}
+                            {% for address in A.to %}<code class="block font-mono text-xs text-surface-700 break-all">{{ address }}</code>{% endfor %}
+                            <span class="block text-xs text-surface-500 mt-1">
+                                {% if A.source == 'setting' %}
+                                <span x-text="t('dari system_settings.deploy_alert_recipients','from system_settings.deploy_alert_recipients')"></span>
+                                {% elif A.source == 'super_admins' %}
+                                <span x-text="t('semua super admin yang aktif — setel deploy_alert_recipients untuk daftar tetap','every active super admin — set deploy_alert_recipients for a fixed list')"></span>
+                                {% elif A.source == 'smtp' %}
+                                <span x-text="t('akun SMTP, sebagai cadangan — setel deploy_alert_recipients agar peringatan sampai ke orang, bukan ke kotak pengirimnya','the SMTP account, as a fallback — set deploy_alert_recipients so alerts reach a person rather than the sending mailbox')"></span>
+                                {% endif %}
+                            </span>
+                            {% else %}
+                            <span class="text-surface-500">—</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Diperiksa tiap','Checked every')"></span>
+                        <span class="text-right min-w-0 text-surface-700">
+                            {% if AHOURS %}<strong>{{ AHOURS }}</strong> <span x-text="t('jam','hours')"></span>{% endif %}
+                            {% if AMINS %}<strong>{{ AMINS }}</strong> <span x-text="t('menit','minutes')"></span>{% endif %}
+                            <span class="block text-xs text-surface-500" x-text="t('satu email per keadaan baru, lalu paling banyak satu pengingat per minggu','one email per new state, then at most one reminder a week')"></span>
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Peringatan terakhir','Last alert')"></span>
+                        <span class="text-right min-w-0">
+                            {% if A.last %}
+                            <code class="font-mono text-xs text-surface-700">{{ A.last.sent_at }}</code>
+                            <span class="block text-xs text-surface-500">
+                                {% if A.last.kind == 'copy_predates_gate' %}<span x-text="t('runner terpasang belum mengenal Gate 0','the installed runner predates Gate 0')"></span>
+                                {% elif A.last.kind == 'copy_drifted' %}<span x-text="t('runner terpasang adalah salinan yang menyimpang','the installed runner is a drifted copy')"></span>
+                                {% elif A.last.kind == 'runner_behind' %}<span x-text="t('runner tertinggal dari checkout','the runner is behind the checkout')"></span>
+                                {% elif A.last.kind == 'checkout_behind' %}<span x-text="t('checkout tertinggal dari origin/main','the checkout is behind origin/main')"></span>
+                                {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
+                                {% if A.last.commits is not none %} — <strong>{{ A.last.commits }}</strong> <span x-text="t('commit','commits')"></span>{% endif %}
+                            </span>
+                            {% else %}
+                            <span class="text-xs text-surface-500" x-text="t('belum ada peringatan yang dikirim dari server ini.','nothing has been sent from this server yet.')"></span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    {% if A.state_error %}
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-rose-700 shrink-0" x-text="t('Catatan tidak bisa ditulis','The record cannot be written')"></span>
+                        <code class="text-right font-mono text-xs text-rose-700 break-all">{{ A.state_error }}</code>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-surface-200">
+                    {% if A.to %}
+                    <form method="POST" action="/super-admin/deploy-status/test-alert">
+                        <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-xl font-bold text-sm transition shadow-lg shadow-primary-600/20">
+                            <i class="fas fa-paper-plane mr-1"></i>
+                            <span x-text="t('Kirim email uji','Send a test email')"></span>
+                        </button>
+                        <span class="block text-xs text-surface-500 mt-2" x-text="t('Tidak dicatat sebagai peringatan, jadi tidak bisa membungkam atau menunda peringatan yang sebenarnya.','Not recorded as an alert, so it can neither silence nor delay a real one.')"></span>
+                    </form>
+                    {% else %}
+                    <p class="text-xs text-amber-700" x-text="t('Belum ada tujuan untuk email uji sampai ada alamatnya. Setel system_settings.deploy_alert_recipients, atau pastikan ada super admin aktif dengan alamat email.','There is nowhere to send a test until a destination exists. Set system_settings.deploy_alert_recipients, or make sure an active super admin has an email address.')"></p>
+                    {% endif %}
+
+                    {% if testalert == 'sent' %}
+                    <p class="text-xs text-emerald-700 mt-3" x-text="t('Email uji terkirim — jalur email ini benar-benar hidup.','The test email was sent — this mail path is genuinely live.')"></p>
+                    {% elif testalert == 'no_recipients' %}
+                    <p class="text-xs text-amber-700 mt-3" x-text="t('Tidak ada alamat tujuan, jadi tidak ada yang dikirim.','There was no destination address, so nothing was sent.')"></p>
+                    {% elif testalert == 'send_failed' %}
+                    <p class="text-xs text-rose-700 mt-3" x-text="t('Pengiriman gagal — periksa pengaturan SMTP sebelum mengandalkan peringatan ini.','Sending failed — check the SMTP settings before relying on these alerts.')"></p>
+                    {% endif %}
+                </div>
+
+                <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                    <span class="text-surface-500" x-text="t('Catatan peringatan','Alert record')"></span>
+                    <code class="font-mono text-surface-500 break-all">{{ A.state_dir or '—' }}</code>
                 </div>
             </div>
         </div>

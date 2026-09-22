@@ -51,6 +51,36 @@ def create_app(env=None):
     app.config.from_object(cfg)
     cfg.validate()
 
+    # ── the deploy's probe is refused when this box cannot check a release ────
+    #
+    # A runner that is an installed *copy* of an older deploy script cannot judge
+    # itself (nothing inside it can apply the checkout's logic to itself), and the
+    # one thing on that box which is guaranteed to be the new commit is the app the
+    # copy is about to reload. So the probe that proves the new commit constructs
+    # also asks whether the runner staging it is armed — and answers by refusing,
+    # which fails the release and leaves the previous commit serving.
+    #
+    # Only the probe asks: `DEPLOY_PROBE` is set by the deploy's construct gate and
+    # by nothing else, so gunicorn constructing the same app never reaches this.
+    # The report goes to stderr AND stdout because the probe captures both, and it
+    # carries MARKER so the journal names the runner rather than a Python fault.
+    # See app/utils/armament.py for why the answer comes from the shell checker
+    # that already exists instead of a second implementation here.
+    if app.config.get("DEPLOY_PROBE"):
+        from app.utils import armament
+
+        _reason = armament.unarmed_reason()
+        if _reason:
+            message = (
+                f"{armament.MARKER}: refusing to be deployed by an unarmed runner.\n"
+                f"{_reason}\n"
+                f"This box cannot check a release, so the release must not be kept.\n"
+                f"Fix the runner once, as root: bash "
+                f"{armament.REPO_ROOT / 'deploy' / 'arm-auto-deploy.sh'}"
+            )
+            print(message)
+            raise SystemExit(1)
+
     # Behind nginx every request arrives from the proxy's address, so without
     # this the client IP is 127.0.0.1 for everyone. That silently breaks per-IP
     # rate limiting (all users share one bucket), audit logging, and anti-cheat
@@ -505,6 +535,18 @@ def create_app(env=None):
             start_retention_scheduler(interval=86400, app=app)
         except Exception as e:
             app.logger.warning("Failed to start retention scheduler: %s", e)
+
+        # Start the deploy-staleness alert loop. It mails the super admins when the
+        # runner falls behind the checkout, so staleness is noticed the day it
+        # happens instead of the day somebody opens the status page. It never
+        # sends on a box it cannot read (a laptop, an unreadable runner) and never
+        # sends twice for the same reading, so starting it is always safe.
+        try:
+            from app.services.deploy_alert_service import start_deploy_alert_scheduler
+            start_deploy_alert_scheduler(
+                interval=app.config.get("DEPLOY_ALERT_INTERVAL_SECONDS"), app=app)
+        except Exception as e:
+            app.logger.warning("Failed to start deploy alert scheduler: %s", e)
 
     # CLI commands
     @app.cli.command("purge-data")

@@ -25,18 +25,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from app import create_app  # noqa: E402
 from app.services import capacity_service as capacity  # noqa: E402
 
 MEASUREMENTS = ROOT / "docs" / "measurements"
 LANDING = ROOT / "app" / "templates" / "landing.html"
 PAGE = ROOT / "app" / "templates" / "public" / "capacity.html"
-
-
-@pytest.fixture(scope="module")
-def app():
-    """One app for the whole file: creating it is the expensive part."""
-    return create_app("testing")
 
 
 @pytest.fixture()
@@ -367,6 +360,45 @@ class TestMissingEvidenceIsHonest:
         (perf / "history.jsonl").write_text("{not json\n", encoding="utf-8")
         body = page_text(client(MEASUREMENTS, state=tmp_path))
         assert "No gate record on this server yet" in body
+
+    def test_an_unreachable_state_directory_is_not_reported_as_no_record(
+            self, client, tmp_path):
+        """The distinction an operator needs, and the one `is_file()` destroys.
+
+        On the VPS this was live: `/var/lib/scangrade-deploy` was root:root 0750
+        with no group, so the app could not traverse it, `claims/history.jsonl`
+        answered "not a file", and this page said *no release has been through the
+        gates* — a claim about the box, and false: both gates were recording on
+        every release.
+
+        The path is stood in for by a *directory* where the history file belongs.
+        Opening it raises an OSError that is not FileNotFoundError on every
+        platform (IsADirectoryError on POSIX, PermissionError on Windows), which is
+        the property the code under test has to branch on — a file-shaped parent, by
+        contrast, reads as ENOENT on Windows and would pass vacuously.
+        """
+        state = tmp_path / "state"
+        (state / "claims" / "history.jsonl").mkdir(parents=True)
+
+        body = page_text(client(MEASUREMENTS, state=state))
+        assert "No gate record on this server yet" not in body, (
+            "an unreadable state directory is still being reported as a box whose "
+            "gates never ran — the reassuring blank this page is not allowed to print")
+        assert "cannot be read by the application" in body
+        assert "install-auto-deploy.sh" in body, (
+            "the empty state names no remedy, so the reader is left with the symptom")
+        assert "claims:" in body, (
+            "the captured error is not shown, so the operator cannot tell which of "
+            "the two histories it was")
+
+    def test_the_empty_state_is_still_the_old_sentence_when_nothing_is_there(
+            self, client, tmp_path):
+        """The other half of the pair: an empty directory is not an error."""
+        empty = tmp_path / "empty-state"
+        empty.mkdir()
+        body = page_text(client(MEASUREMENTS, state=empty))
+        assert "No gate record on this server yet" in body
+        assert "cannot be read by the application" not in body
 
 
 # ── 7. the page is a page, not an Alpine-only shell ─────────────────────────

@@ -382,7 +382,7 @@ def test_constructing_the_app_starts_no_schedulers():
     ``purge_all()`` runs on the first loop iteration, so an app built purely to
     be inspected — as the deploy smoke gate does — used to trigger a real purge.
     """
-    from app import create_app
+    from tests.conftest import build_app
     from app.services import cleanup_service, data_retention_service
 
     cleanup_service._cleanup_thread = None
@@ -390,7 +390,7 @@ def test_constructing_the_app_starts_no_schedulers():
     data_retention_service._retention_thread = None
     data_retention_service._running = False
 
-    app = create_app("app.config.TestingConfig")
+    app = build_app("app.config.TestingConfig")
 
     assert app.config["START_BACKGROUND_SCHEDULERS"] is False
     assert not data_retention_service._running, "building the app started the purge loop"
@@ -434,8 +434,8 @@ def test_every_smoke_page_is_a_real_route():
     """
     smoke = _smoke_module()
 
-    from app import create_app
-    app = create_app("app.config.TestingConfig")
+    from tests.conftest import build_app
+    app = build_app("app.config.TestingConfig")
     registered = {rule.rule for rule in app.url_map.iter_rules()}
 
     missing = [p for paths in smoke.ROLE_PAGES.values() for p in paths if p not in registered]
@@ -521,13 +521,43 @@ def test_smoke_test_reports_skip_when_unconfigured(tmp_path):
 def test_deploy_rolls_back_on_smoke_failure_only_when_armed():
     script = DEPLOY_SH.read_text(encoding="utf-8")
 
-    gate = script[script.index("Gate 3"):]
+    gate = script[script.index("Gate 4"):]
     assert "smoke_test.py" in gate, "the gate never runs the smoke test"
     assert 'SMOKE_ENFORCE' in gate, "nothing decides whether a failure rolls back"
     assert 'HEALTHY=0' in gate, "a failed smoke test must feed the rollback path"
-    # Exit 2 is "nothing testable" and must not roll anything back.
-    assert "smoke test skipped" in gate
+    # Exit 2 is "nothing testable": no account it recognises, a conf it cannot
+    # parse, or a base URL this host cannot reach. The last is a property of the
+    # box and never the release's fault — and the release still was not signed in
+    # against, so it is not kept either. It keeps its own arm because the journal
+    # has to say which of the two happened.
     assert re.search(r"\b2\)", gate), "exit code 2 is not handled separately"
+    after_two = gate[gate.index("    2)"):]
+    assert "HEALTHY=0" in after_two[:after_two.index("    *)")], (
+        "a release nobody could sign in against is kept")
+    # The one arm that keeps a bad release: a real failure from a box that has not
+    # armed the gate. install-auto-deploy.sh arms it only after proving that the
+    # accounts actually sign in, so an unarmed gate means a stale password —
+    # evidence about the conf, never about the release.
+    assert "keeping the release" in gate
+
+
+def test_a_smoke_test_that_cannot_run_at_all_is_not_kept():
+    """A gate that could not run is a gate that did not run.
+
+    Each of these used to be one sentence in the journal and nothing else, which
+    made "the gates ran" quietly false: an unarmed box deployed every commit while
+    no release was ever signed in against.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    gate = script[script.index("SMOKE_CONF="):]
+    for branch in ("does not parse", "no $SMOKE_CONF"):
+        at = gate.index(branch)
+        # Up to the reason: a branch that marks the release unhealthy before it
+        # names the gate, and never the other way round.
+        body = gate[at:gate.index("FAIL_REASON=", at)]
+        assert "HEALTHY=0" in body, (
+            f"the smoke gate's {branch!r} path is a skip, not a rollback: a release "
+            "nobody signed in against would ship")
 
 
 def test_installer_arms_the_gate_only_after_proving_the_credentials():
@@ -695,6 +725,12 @@ def test_gate_0_refuses_a_stale_copy_and_allows_the_checkout(tmp_path):
     assert matching.returncode == 0 and "REACHED_END" in matching.stdout, matching
 
 
+#: Gate 0's delimiters. A launcher only runs a deploy script that carries them,
+#: so every stand-in for the checkout's script has to carry them too — see
+#: `test_the_launcher_refuses_a_checkout_that_lost_gate_0` for the other half.
+GATE_0 = "# runner-identity:start\n# runner-identity:end\n"
+
+
 @pytest.mark.skipif(BASH is None, reason="needs a bash to run the launcher")
 def test_the_launcher_cannot_lag_behind_the_checkout(tmp_path):
     """The property the whole arrangement exists for: no matter when a fix lands
@@ -705,7 +741,8 @@ def test_the_launcher_cannot_lag_behind_the_checkout(tmp_path):
     target = repo / "deploy" / "scangrade-deploy.sh"
     # Deliberately not executable: the scripts are committed 0644, so the
     # launcher has to work without the bit.
-    target.write_text('#!/usr/bin/env bash\necho "v1 ran with $# argument(s)"\n', encoding="utf-8")
+    target.write_text(GATE_0 + '#!/usr/bin/env bash\necho "v1 ran with $# argument(s)"\n',
+                      encoding="utf-8")
 
     bins = tmp_path / "bin"
     bins.mkdir()
@@ -715,7 +752,8 @@ def test_the_launcher_cannot_lag_behind_the_checkout(tmp_path):
     assert first.returncode == 0, first.stderr
     assert first.stdout.strip() == "v1 ran with 0 argument(s)"
 
-    target.write_text('#!/usr/bin/env bash\necho "v2 ran with $# argument(s)"\n', encoding="utf-8")
+    target.write_text(GATE_0 + '#!/usr/bin/env bash\necho "v2 ran with $# argument(s)"\n',
+                      encoding="utf-8")
     second = subprocess.run([BASH, str(launcher)], capture_output=True, text=True)
     assert second.stdout.strip() == "v2 ran with 0 argument(s)", (
         "the installed path kept running the old script — it is a copy again"
@@ -726,6 +764,49 @@ def test_the_launcher_cannot_lag_behind_the_checkout(tmp_path):
     steered = subprocess.run([BASH, str(launcher), "--branch", "evil"],
                              capture_output=True, text=True)
     assert steered.stdout.strip() == "v2 ran with 0 argument(s)", steered.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the launcher")
+def test_the_launcher_refuses_a_checkout_that_lost_gate_0(tmp_path):
+    """A deployed commit cannot quietly retire the gate that keeps copies out.
+
+    Gate 0 is what refuses a runner that is not the checkout's. A checkout
+    without it turns every future release into a deploy nobody can audit — and
+    that state is reachable without anyone deciding to: roll back past the commit
+    that added the block, or delete it while debugging. The launcher is the last
+    place that can notice, and it refuses rather than run it.
+    """
+    repo = tmp_path / "repo"
+    (repo / "deploy").mkdir(parents=True)
+    target = repo / "deploy" / "scangrade-deploy.sh"
+    target.write_text('#!/usr/bin/env bash\necho "ran without Gate 0"\n', encoding="utf-8")
+
+    bins = tmp_path / "bin"
+    bins.mkdir()
+    launcher = _render_launcher(bins, repo, "scangrade-deploy")
+
+    run = subprocess.run([BASH, str(launcher)], capture_output=True, text=True)
+    assert run.returncode == 15, run.stdout + run.stderr
+    assert "does not carry Gate 0" in run.stderr
+    assert "runner-identity" in run.stderr, (
+        "the refusal does not name what is missing, so it cannot be acted on")
+    assert "ran without Gate 0" not in run.stdout, "the launcher ran it anyway"
+
+    # Half a block is not a block: a lone `start` is what a half-edited file
+    # looks like, and it must not read as Gate 0 being present.
+    target.write_text('# runner-identity:start\n#!/usr/bin/env bash\necho "half"\n',
+                      encoding="utf-8")
+    half = subprocess.run([BASH, str(launcher)], capture_output=True, text=True)
+    assert half.returncode == 15
+    assert "half" not in half.stdout
+
+    # And the snapshot command is unaffected: it execs a different file, which is
+    # not a deploy script and carries no gates.
+    (repo / "deploy" / "scangrade-db-snapshot.sh").write_text(
+        '#!/usr/bin/env bash\necho "snapshot ok"\n', encoding="utf-8")
+    snapshot = _render_launcher(bins, repo, "scangrade-db-snapshot")
+    ok = subprocess.run([BASH, str(snapshot)], capture_output=True, text=True)
+    assert ok.returncode == 0 and ok.stdout.strip() == "snapshot ok", ok.stderr
 
 
 @pytest.mark.skipif(BASH is None, reason="needs a bash to run the launcher")
@@ -777,6 +858,213 @@ def test_env_bool_reads_the_usual_spellings(name):
     assert env_bool("SG_TEST_BOOL_UNSET", True) is True
 
 
+# ── a box that cannot check a release does not deploy one ────────
+#
+# Every gate below the preflight can be *skipped*, and each skip used to be a
+# sentence in the journal and nothing else: the readability gate without pytest,
+# the smoke gate without its conf, the claims and performance gates without a
+# roster. A box in that state deploys every commit while checking almost none of
+# them — the site stays green and "the gates ran" quietly stops being true. So the
+# armament is judged once, before anything is fetched, and a missing check refuses
+# the run outright. These tests hold the two ends of that: it runs *first*, and it
+# is a refusal to deploy rather than a rollback of a commit.
+
+PREFLIGHT_START = "armament_preflight() {"
+PREFLIGHT_END = "# Armed. The record of a previous refusal"
+
+
+def _preflight_block() -> str:
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return script[script.index(PREFLIGHT_START):script.index(PREFLIGHT_END)]
+
+
+def _preflight_harness(repo: Path, state_dir: Path) -> str:
+    """The preflight and its call, lifted out with the four things it needs.
+
+    `--check` is not run here: `$REPO/deploy/arm-auto-deploy.sh` is a stub, so the
+    question under test is what the deploy *does* with each answer, which is the
+    half the checker's own tests cannot reach.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    block = _preflight_block()
+    tail = script[script.index(PREFLIGHT_END):script.index('\n[ -d "$REPO/.git" ]')]
+    return (
+        "set -uo pipefail\n"
+        f'REPO="{repo}"\n'
+        f'STATE_DIR="{state_dir}"\n'
+        f'UNARMED_FILE="{state_dir}/unarmed"\n'
+        'log() { echo "$*"; }\n'
+        + block + tail + "\necho REACHED\n"
+    )
+
+
+def _stub_checker(repo: Path, code: int, text: str) -> None:
+    (repo / "deploy").mkdir(parents=True, exist_ok=True)
+    (repo / "deploy" / "arm-auto-deploy.sh").write_text(
+        f'#!/usr/bin/env bash\necho "{text}"\nexit {code}\n', encoding="utf-8")
+
+
+def test_the_armament_is_judged_before_anything_is_fetched():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    judged = script.index("if ! armament_preflight; then")
+    for later in ("fetch --quiet origin", "merge --ff-only", "CONSTRUCT_OUT="):
+        assert judged < script.index(later), (
+            f"the armament is judged after {later!r}, so a release is already in "
+            "flight by the time the box says it cannot check one")
+    # And the pause check stays in front of it: a frozen box deploys nothing, and
+    # a fault in a file nobody is running is not worth a journal line every tick.
+    assert script.index('if [ -e "$PAUSE_FILE" ]') < judged
+
+
+def test_a_refusal_to_deploy_is_not_recorded_as_a_commit():
+    """The two records answer different questions and must not be mixed.
+
+    A quarantine is a fact about a *commit* — this one was refused, do not pull
+    it again. A box-side refusal has no commit to name: nothing was fetched, so
+    quarantining it would freeze the release nobody has looked at yet.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    block = _preflight_block()
+    assert "quarantine_write" not in block, (
+        "the preflight quarantines a commit it never looked at")
+    assert 'exit 15' in block and 'exit 16' not in block, (
+        "the refusal has no exit code of its own, so the journal cannot tell it "
+        "apart from a gate that judged a release")
+
+
+def test_the_armed_answer_erases_a_stale_record():
+    """A record must not outlive the state it describes.
+
+    The box can be armed again without a new commit — the installer runs, the
+    roster arrives — and a card that kept saying "every release is refused" would
+    be the page lying in the direction that stops people deploying.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    after = script[script.index(PREFLIGHT_END):]
+    assert 'rm -f "$UNARMED_FILE"' in after[:400], (
+        "the record of a refusal survives the box being armed again")
+
+
+def _gate0_survival_harness(repo: Path) -> str:
+    """The survival check and its refusal, lifted out with what it needs.
+
+    `as_owner` and `quarantine_write` are stubbed, so the question under test is
+    the one this block exists to answer: does the checkout still carry the check
+    that refuses a runner which is not the checkout's? Always against a `repo`
+    under `tmp_path`, never the real checkout — the refusal path runs `git reset
+    --hard`, and a guard that could touch the working tree is a guard nobody runs.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    start = script.index("# ── Gate 0 survives the release")
+    block = script[start:script.index("\nfi\n", start) + len("\nfi\n")]
+    return (
+        "set -uo pipefail\n"
+        f'REPO="{repo}"\n'
+        "BEFORE=deadbeef\n"
+        'FAIL_REASON=""\n'
+        'log() { echo "$*"; }\n'
+        'quarantine_write() { echo QUARANTINE; }\n'
+        'as_owner() { "$@"; }\n'
+        + block + "echo REACHED\n"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the check")
+def test_a_release_that_removes_gate_0_is_refused_and_recorded(tmp_path):
+    """The one path by which "lacks Gate 0" is reachable on purpose.
+
+    Gate 0 refuses a runner that is not the checkout's, and the launcher refuses a
+    checkout that lost the block — but a release *removing* the block is the case
+    this run is the last one that could notice: the file that would notice next is
+    no longer in the checkout. So the release is refused instead of deployed, and
+    recorded, because otherwise the next tick pulls it straight back.
+    """
+    real = DEPLOY_SH.read_text(encoding="utf-8")
+
+    def run_case(text: str):
+        repo = tmp_path / "repo"
+        (repo / "deploy").mkdir(parents=True, exist_ok=True)
+        # Bytes, so bash sees the same LF the checkout has and not a Windows
+        # newline it would read as part of the last word on every line.
+        (repo / "deploy" / "scangrade-deploy.sh").write_bytes(text.encode("utf-8"))
+        return subprocess.run([BASH, "-c", _gate0_survival_harness(repo)],
+                              capture_output=True, text=True)
+
+    kept = run_case(real)
+    assert kept.returncode == 0 and "REACHED" in kept.stdout, kept.stdout + kept.stderr
+    assert "QUARANTINE" not in kept.stdout, (
+        "a checkout that carries Gate 0 is refused, so every release would be told "
+        "its own runner is missing the check")
+
+    stripped = real.split(IDENTITY_START, 1)[0] + real.split(IDENTITY_END, 1)[1]
+    assert IDENTITY_START not in stripped
+    refused = run_case(stripped)
+    assert refused.returncode == 16, refused.stdout + refused.stderr
+    assert "REACHED" not in refused.stdout, "it refused the release and deployed anyway"
+    assert "QUARANTINE" in refused.stdout, (
+        "the refusal is not recorded, so the next tick re-pulls the same commit")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the preflight")
+def test_an_unarmed_box_is_refused_and_the_record_says_why(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _stub_checker(repo, 1, "NOT ARMED — the runner is a copy")
+    state = tmp_path / "state"
+
+    run = subprocess.run([BASH, "-c", _preflight_harness(repo, state)],
+                         capture_output=True, text=True)
+    assert run.returncode == 15, run.stdout + run.stderr
+    assert "REACHED" not in run.stdout, "it refused and carried on anyway"
+    assert "UNARMED" in run.stdout
+    assert "arm-auto-deploy.sh" in run.stdout, (
+        "the refusal does not name the command that arms the box")
+    record = state / "unarmed"
+    assert record.exists(), "nothing is left for the status page to read"
+    body = record.read_text(encoding="utf-8")
+    assert "NOT ARMED — the runner is a copy" in body, (
+        "the record does not carry the checker's own report, so the page has "
+        "nothing to show but a timestamp")
+    assert body.splitlines()[0].startswith("20"), (
+        "the first line is the time it refused, which is what the card ages")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the preflight")
+def test_an_armed_box_carries_on_and_clears_the_record(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _stub_checker(repo, 0, "ARMED — every gate has what it needs.")
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "unarmed").write_text("2026-09-20T00:00:00+00:00\nold refusal\n", encoding="utf-8")
+
+    run = subprocess.run([BASH, "-c", _preflight_harness(repo, state)],
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "REACHED" in run.stdout
+    assert not (state / "unarmed").exists(), (
+        "the box is armed and the page still reports every release refused")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the preflight")
+def test_a_checker_that_is_not_there_is_a_refusal_not_a_crash(tmp_path):
+    """The checker arrives with the installer, so an older box has none.
+
+    "We could not tell" is not "it is fine": the preflight fails closed, with the
+    same exit code and the same record, because a box that cannot say whether it
+    is armed is a box that has not armed.
+    """
+    repo = tmp_path / "repo"
+    (repo / "deploy").mkdir(parents=True)
+    state = tmp_path / "state"
+
+    run = subprocess.run([BASH, "-c", _preflight_harness(repo, state)],
+                         capture_output=True, text=True)
+    assert run.returncode == 15, run.stdout + run.stderr
+    assert "armament checker is missing" in run.stdout, run.stdout
+    assert (state / "unarmed").exists()
+
+
 # ── a refused release is quarantined, not retried forever ────────
 #
 # Every gate rejects a release by resetting the *checkout*. `origin/main` does not
@@ -820,11 +1108,35 @@ def test_the_quarantine_lives_between_its_delimiters():
 def test_a_gate_that_refuses_a_release_records_it():
     script = DEPLOY_SH.read_text(encoding="utf-8")
     calls = QUARANTINE_CALL.findall(script)
-    assert len(calls) == 4, (
+    assert len(calls) == 5, (
         f"{len(calls)} quarantine_write call(s). Every gate that rolls a release "
-        "back has to record it — compileall, app construction, the theme gate and "
-        "the shared post-reload verification — or that gate goes on re-pulling the "
-        "same commit every two minutes")
+        "back has to record it — the check that Gate 0 survives the release, "
+        "compileall, app construction, the theme gate and the shared post-reload "
+        "verification — or that gate goes on re-pulling the same commit every two "
+        "minutes")
+
+
+def test_every_refusal_names_its_gate_and_records_the_commit():
+    """The count above can be satisfied by a sixth call in the wrong place.
+
+    So each refusal is checked by name: the reason is what the operator reads on
+    the status page, and the record has to precede the rollback, because the
+    rollback is what hides the commit from the next tick's `BEFORE`.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    for reason in (
+        "Gate 0 (the release removed the runner-identity block)",
+        "python compileall (exit 8)",
+        "app did not construct (exit 9)",
+        "runner not armed (the app refused to be deployed by it)",
+        "theme gate (exit $THEME_RC)",
+    ):
+        assert reason in script, f"no FAIL_REASON for {reason!r} — the runner changed shape"
+        at = script.index(reason)
+        window = script[at:script.index("reset --hard", at)]
+        assert QUARANTINE_CALL.search(window), (
+            f"the refusal {reason!r} names the gate but never quarantines the commit, "
+            "so the next tick pulls it straight back")
 
 
 def test_the_next_tick_consults_the_quarantine_and_can_be_released():
@@ -1321,8 +1633,21 @@ def test_an_install_that_cannot_happen_is_reported_not_fatal(tmp_path):
 
 
 def _identity_block() -> str:
+    """Gate 0's block **including its delimiters**.
+
+    The delimiters are part of the contract now, not decoration: the launcher
+    refuses to run a checkout whose deploy script does not carry them, and the
+    deploy's own self-preservation check looks for the same two lines. A helper
+    that stripped them would build a stand-in checkout that no real one could be,
+    and the refusal would then look like the launcher being wrong.
+    """
     script = DEPLOY_SH.read_text(encoding="utf-8")
-    return script.split(IDENTITY_START, 1)[1].split(IDENTITY_END, 1)[0]
+    # The trailing newline matters: the end marker has to be a line of its own, or
+    # the next statement the fixtures append lands on the same line as the marker
+    # and a line-anchored check reads the block as absent.
+    return (IDENTITY_START
+            + script.split(IDENTITY_START, 1)[1].split(IDENTITY_END, 1)[0]
+            + IDENTITY_END + "\n")
 
 
 def _stale_launcher(tmp_path: Path, repo: Path) -> Path:
@@ -1428,3 +1753,510 @@ def test_a_drifted_copy_is_refused_and_no_release_can_reach_the_refresh(tmp_path
     assert "exit 14" in script[:call], (
         "the refusal no longer precedes the refresh, so the claim that it cannot be "
         "reached needs re-deriving")
+
+
+# ── the app can reach its own state directory ─────────────────────
+#
+# `/var/lib/scangrade-deploy` is the one directory both sides of the deploy need:
+# root writes the quarantine record into it and the *app* reads it back to render
+# /super-admin/deploy-status and the gates' history on /capacity. The installer
+# owns the arrangement, and it got it wrong in a way no gate could see: it set
+# the mode to 0750 and never set the group, so the directory belonged to
+# root:root and the service user could not traverse it. Every symptom appeared
+# somewhere else:
+#
+#   * the quarantine card could not say what was held — which is the one question
+#     that card exists to answer, for an operator with no shell;
+#   * the release request directory looked absent, so the page named a remedy
+#     ("run the installer") that had already been applied;
+#   * /capacity said "no gate record on this server" on a box whose gates were
+#     recording on every release, because `Path.is_file()` turns a permission
+#     error into "no file".
+#
+# So the property is: the state directory is reachable by the service user's group
+# and not writable by it. Owner root, group read from the *unit* (the identity the
+# app actually runs as, not the checkout's owner), mode 0750 — group read and
+# traverse, no group write.
+
+
+def _state_dir_block() -> str:
+    """Just the installer's statements about the state directory itself.
+
+    The children (`claims/`, `perf/`, `requests/`) are chowned to the service user
+    on purpose and must not be confused with it, so the block ends at `requests`.
+    """
+    text = INSTALL_SH.read_text(encoding="utf-8")
+    start = text.index("mkdir -p /var/lib/scangrade-deploy\n")
+    return text[start:text.index("mkdir -p /var/lib/scangrade-deploy/requests")]
+
+
+class TestTheServiceUserCanReachItsStateDirectory:
+    def test_the_group_comes_from_the_unit_that_runs_the_app(self):
+        """Not a guess and not a hardcoded `scangrade`: the unit is the authority.
+
+        Inferring it from the checkout's owner would look right on the box this was
+        written against and produce the same unreadable directory on a checkout
+        owned by anybody else — an install that reports success and is still blind.
+        """
+        text = INSTALL_SH.read_text(encoding="utf-8")
+        assert "sed -n 's/^Group=//p' \"$REPO/deploy/scangrade.service\"" in text, (
+            "the app's group is not read from the unit that runs the app")
+        assert "sed -n 's/^User=//p' \"$REPO/deploy/scangrade.service\"" in text
+
+    def test_the_state_directory_is_chowned_to_that_group(self):
+        block = _state_dir_block()
+        assert 'chown root:"$SERVICE_GROUP" /var/lib/scangrade-deploy' in block, (
+            "the state directory has no group chown, so a 0750 mode leaves it "
+            "unreachable by the app process — the failure this guards against")
+        assert re.search(r"^chmod 0750 /var/lib/scangrade-deploy$", block, re.M), (
+            "the mode no longer grants the group read and traverse")
+
+    def test_the_group_cannot_write_the_refusal_record_away(self):
+        """Read access is the requirement; write access would be a defect.
+
+        0755 would let any local user read the record; 0770/0755 with a group chown
+        would let the app rewrite a refusal. 0750 is the one that says "the app may
+        look, root decides".
+        """
+        block = _state_dir_block()
+        assert "chmod 0755" not in block and "chmod 077" not in block, (
+            "the state directory is writable by more than root, so a refusal record "
+            "can be edited by the process it constrains")
+
+    def test_each_child_goes_to_the_identity_that_needs_it(self):
+        """Two writers, two arrangements, and neither is the other's.
+
+        The gates write their history as the checkout's owner (`as_owner` in the
+        deploy), so those directories are the owner's — with the unit's group, which
+        is how the app reads them back on /capacity. `requests/` is different: it is
+        *written by the app*, so the app's own user owns it. A group-only chown on
+        the parent would have been the smaller edit and the wrong one, because the
+        0750 parent deliberately has no group write.
+        """
+        text = INSTALL_SH.read_text(encoding="utf-8")
+        for child in ("claims", "perf"):
+            assert re.search(rf'chown "\$OWNER":"\$SERVICE_GROUP" '
+                             rf'/var/lib/scangrade-deploy/{child}\n', text), (
+                f"/var/lib/scangrade-deploy/{child} no longer reaches the app's "
+                f"group, so the gate history is unreadable to the page that reports it")
+        assert re.search(r'chown "\$SERVICE_USER":"\$SERVICE_GROUP" '
+                         r'/var/lib/scangrade-deploy/requests\n', text), (
+            "the one-click release directory is no longer the app user's, so the "
+            "button cannot write the request it exists for")
+
+    def test_the_staleness_alert_has_a_directory_only_the_app_writes(self):
+        """The alert's record cannot live in the checkout, and a box without one
+        mails on every tick.
+
+        This is the second directory that is the app's alone, and its absence is
+        quiet in the worst way: the deploy pulls into `$REPO` **as $OWNER**, so the
+        service user cannot write anywhere inside it, and the alert service reads a
+        *missing* record as "nothing was sent" — one mail per interval, forever,
+        about the same stale runner instead of one a week.
+        """
+        text = INSTALL_SH.read_text(encoding="utf-8")
+        assert re.search(r"mkdir -p /var/lib/scangrade-deploy/alerts\n", text), (
+            "the installer no longer creates the alert's state directory")
+        assert re.search(r'chown "\$SERVICE_USER":"\$SERVICE_GROUP" '
+                         r'/var/lib/scangrade-deploy/alerts\n', text), (
+            "the alert's state directory is not the app user's, so the record "
+            "cannot be written and every tick re-notifies")
+        assert re.search(r"chmod 0750 /var/lib/scangrade-deploy/alerts\n", text)
+
+    def test_the_installer_and_the_service_name_the_same_directory(self):
+        """Two copies of one path, so they are compared rather than trusted.
+
+        The installer creates the directory and the service probes it; a rename on
+        either side alone is an alert that stops recording on a box that looks
+        installed.
+        """
+        from app.services import deploy_alert_service as alerts
+
+        assert re.search(rf"mkdir -p {re.escape(alerts.DEPLOY_STATE_DIR)}\n",
+                         INSTALL_SH.read_text(encoding="utf-8")), (
+            f"the installer does not create {alerts.DEPLOY_STATE_DIR}, which is the "
+            f"directory the alert service probes first")
+
+
+# ── the one page a page-list cannot check ────────────────────────
+#
+# The smoke test's only content assertion lives here: it opens a real exam as a
+# student and reads the two anti-cheat panels out of the served page. Everything
+# it demands is read back out of the template it is talking about, so a renamed
+# flag or a dropped sentence cannot leave the check asserting nothing quietly.
+
+SMOKE_FIXTURE = DEPLOY / "demo_exam_fixture.py"
+TAKE_EXAM = ROOT / "app" / "templates" / "student" / "take_exam.html"
+MANAGE_PY = ROOT / "manage.py"
+
+#: The id in the fake pages: 36 characters of hex and dashes, which is what the
+#: check's link pattern accepts. A made-up short id would test the regex rather
+#: than the check.
+EXAM_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+
+def _fixture_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("sg_demo_exam_fixture_under_test",
+                                                  SMOKE_FIXTURE)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _markers() -> dict:
+    """The page's own markers, taken from the template that has to carry them."""
+    smoke = _smoke_module()
+    template = TAKE_EXAM.read_text(encoding="utf-8")
+    markers = {
+        "FULLSCREEN_PANEL": smoke.FULLSCREEN_PANEL,
+        "FULLSCREEN_WORDS": smoke.FULLSCREEN_WORDS,
+        "AWAY_PANEL": smoke.AWAY_PANEL,
+        "AWAY_WORDS": smoke.AWAY_WORDS,
+        "FULLSCREEN_WATCH": smoke.FULLSCREEN_WATCH,
+        "AWAY_WATCH": smoke.AWAY_WATCH,
+    }
+    missing = [name for name, marker in markers.items() if marker not in template]
+    assert not missing, (
+        f"take_exam.html no longer carries {missing}, so the smoke test would fail "
+        f"every release over a page that is fine"
+    )
+    return markers
+
+
+def _listing(*titles: str) -> str:
+    """An exam list, one card per title, shaped the way the template renders it."""
+    if not titles:
+        titles = (_fixture_module().TITLE,)
+    cards = []
+    for index, title in enumerate(titles):
+        exam_id = EXAM_ID if index == 0 else EXAM_ID[:-1] + str(index)
+        cards.append(f'<div class="card"><h3 class="font-bold">{title}</h3>'
+                     f'<a href="/student/exams/{exam_id}">Mulai Ujian</a></div>')
+    return "<html><body>" + "".join(cards) + "</body></html>"
+
+
+def _sitting(exam_id: str = EXAM_ID, **overrides) -> str:
+    """A sitting page carrying the template's own markers and an armed config."""
+    parts = {
+        "open": f'<div x-data="examApp(60, 5)" data-exam-id="{exam_id}">',
+        "config": 'antiCheat: {"enabled": true, "penalty_per_violation": 5, '
+                  '"fullscreen_required": true},',
+        "grace": "graceSeconds: 10,",
+        **_markers(),
+    }
+    parts.update(overrides)
+    order = ("open", "config", "grace", "FULLSCREEN_PANEL", "FULLSCREEN_WORDS",
+             "AWAY_PANEL", "AWAY_WORDS", "FULLSCREEN_WATCH", "AWAY_WATCH")
+    return ("<html><body>" + "".join(parts[name] for name in order)
+            + "</body></html>")
+
+
+class _Response:
+    def __init__(self, text="", status_code=200, headers=None):
+        self.text = text
+        self.status_code = status_code
+        self.headers = headers or {}
+
+
+class _Session:
+    """Serves the two pages the check asks for, and remembers what was asked."""
+
+    def __init__(self, listing, page, status_code=200, location=""):
+        self.listing = listing
+        self.page = page
+        self.status_code = status_code
+        self.location = location
+        self.asked = []
+
+    def get(self, url, **kwargs):
+        self.asked.append(url)
+        if url.endswith("/student/exams"):
+            return _Response(self.listing)
+        return _Response(self.page, self.status_code,
+                         {"Location": self.location} if self.location else None)
+
+
+def _run_check(listing=None, page=None, **kwargs):
+    smoke = _smoke_module()
+    res = smoke.Result()
+    session = _Session(_listing() if listing is None else listing,
+                       _sitting() if page is None else page, **kwargs)
+    smoke.check_exam_sitting(session, "https://example.test", res)
+    return res, session
+
+
+def test_smoke_opens_the_demo_exam_and_reads_both_panels():
+    res, session = _run_check()
+
+    assert not res.failures, res.failures
+    assert not res.warnings, res.warnings
+    assert res.checked == 7, res.checked
+    assert session.asked[0].endswith("/student/exams")
+    assert session.asked[1].endswith(f"/student/exams/{EXAM_ID}")
+
+
+@pytest.mark.parametrize("case", [
+    "FULLSCREEN_PANEL", "FULLSCREEN_WORDS", "AWAY_PANEL", "AWAY_WORDS",
+    "FULLSCREEN_WATCH", "AWAY_WATCH",
+])
+def test_the_exam_check_bites_when_the_page_loses_a_panel(case):
+    """Each marker is one way the supervision can silently disappear."""
+    res, _ = _run_check(page=_sitting(**{case: ""}))
+
+    assert res.failures, f"a page with no {case} was accepted"
+
+
+@pytest.mark.parametrize("needle,replacement", [
+    # Anti-cheat off: the whole ladder is gated on it, so neither panel would ever
+    # be revealed however intact the markup is.
+    ('"enabled": true', '"enabled": false'),
+    # Fullscreen not required: the blocker is gated on this one.
+    ('"fullscreen_required": true', '"fullscreen_required": false'),
+    # No countdown: the away blur would be an instant fine, which is not what the
+    # page promises a student.
+    ("graceSeconds: 10", "graceSeconds: 0"),
+])
+def test_the_exam_check_bites_when_the_panels_are_not_armed(needle, replacement):
+    res, _ = _run_check(page=_sitting().replace(needle, replacement))
+
+    assert res.failures, f"{needle} -> {replacement} was accepted"
+
+
+def test_the_exam_check_warns_and_opens_nothing_without_the_fixture():
+    """A box whose demo data was cleared must not roll a healthy release back.
+
+    It must also not open anything: a real paper's anti-cheat setting is the
+    teacher's business, and failing over one would be this check lying about what
+    it measured.
+    """
+    res, session = _run_check(listing=_listing("Ujian Fisika"))
+
+    assert not res.failures, res.failures
+    assert res.warnings, "a missing fixture went unreported"
+    assert session.asked == ["https://example.test/student/exams"], session.asked
+    assert res.checked == 0
+
+
+def test_the_exam_check_opens_the_fixture_and_not_the_first_card():
+    """The card the check opens must be the fixture, not whatever is on top."""
+    fixture = _fixture_module()
+    # The second card's id, so the page it is served is the one it asked for.
+    other = EXAM_ID[:-1] + "1"
+    res, session = _run_check(listing=_listing("Ujian Fisika", fixture.TITLE),
+                              page=_sitting(exam_id=other))
+
+    assert not res.failures, res.failures
+    assert session.asked[1].endswith(f"/student/exams/{other}"), session.asked
+
+
+def test_the_exam_check_reports_a_page_that_refused_to_open():
+    """A redirect is the app saying no, and it must not read as a pass."""
+    res, _ = _run_check(status_code=302, location="/student/exams")
+
+    assert res.failures
+    assert "would not open" in " ".join(res.failures)
+
+
+def test_the_exam_check_reports_a_page_that_is_not_the_sitting_page():
+    res, _ = _run_check(page=_sitting().replace(f'data-exam-id="{EXAM_ID}"',
+                                                'data-exam-id="other"'))
+
+    assert res.failures
+    assert "not the sitting page" in " ".join(res.failures)
+
+
+# ── the fixture the check opens ──────────────────────────────────
+
+class _Result:
+    def __init__(self, data):
+        self.data = data
+
+
+class _Table:
+    """Just enough PostgREST for `demo_exam_fixture.ensure`."""
+
+    def __init__(self, client, name):
+        self.client = client
+        self.name = name
+        self.filters = []
+        self.op = "select"
+        self.payload = None
+
+    def select(self, *args, **kwargs):
+        return self
+
+    def insert(self, payload):
+        self.op, self.payload = "insert", payload
+        return self
+
+    def update(self, payload):
+        self.op, self.payload = "update", payload
+        return self
+
+    def eq(self, column, value):
+        self.filters.append(("eq", column, value))
+        return self
+
+    def neq(self, column, value):
+        self.filters.append(("neq", column, value))
+        return self
+
+    def limit(self, count):
+        return self
+
+    def order(self, *args, **kwargs):
+        return self
+
+    def execute(self):
+        if self.op == "insert":
+            row = dict(self.payload, id=f"new-{self.name}")
+            self.client.rows.setdefault(self.name, []).append(row)
+            self.client.writes.append((self.name, "insert", dict(self.payload)))
+            return _Result([row])
+        if self.op == "update":
+            self.client.writes.append((self.name, "update", dict(self.payload)))
+            self.client.updates.append((self.name, dict(self.payload)))
+            return _Result([])
+        rows = list(self.client.rows.get(self.name, []))
+        for kind, column, value in self.filters:
+            rows = [row for row in rows
+                    if (row.get(column) == value) == (kind == "eq")]
+        return _Result(rows)
+
+
+class _FakeSupabase:
+    def __init__(self, exams=(), submissions=()):
+        fixture = _fixture_module()
+        # Every row carries the columns the queries filter on: a fake that omits
+        # them answers "no classes, no teacher", and the fixture is quietly never
+        # written while the test still has something to assert about.
+        self.rows = {
+            "subjects": [{"id": "subject-1", "school_id": "school-1",
+                          "name": fixture.SUBJECT}],
+            "classes": [{"id": "class-a", "school_id": "school-1"},
+                        {"id": "class-b", "school_id": "school-1"}],
+            "teacher_assignments": [{"teacher_id": "teacher-1", "school_id": "school-1",
+                                     "subject_id": "subject-1"}],
+            "profiles": [{"id": "teacher-9", "school_id": "school-1", "role": "guru"}],
+            "exams": list(exams),
+            "submissions": list(submissions),
+        }
+        self.writes = []
+        self.updates = []
+
+    def table(self, name):
+        return _Table(self, name)
+
+    def inserted(self, name):
+        return [payload for table, op, payload in self.writes
+                if (table, op) == (name, "insert")]
+
+    def updated(self, name):
+        return [payload for table, payload in self.updates if table == name]
+
+
+def test_the_fixture_is_written_sittable_in_every_way_the_check_needs():
+    fixture = _fixture_module()
+    client = _FakeSupabase()
+    said = []
+    result = fixture.ensure(client, "school-1", say=said.append)
+
+    payload = client.inserted("exams")[0]
+    assert payload["title"] == fixture.TITLE
+    assert payload["subject_id"] == "subject-1"
+    assert payload["class_ids"] == ["class-a", "class-b"], (
+        "assigned to every class, or the student the check signs in as is refused"
+    )
+    assert payload["start_at"] is None and payload["end_at"] is None, (
+        "a window is a date on which the fixture stops being sittable"
+    )
+    assert payload["anti_cheat_enabled"] is True
+    assert payload["fullscreen_required"] is True, (
+        "without it the blocker can never be revealed"
+    )
+    assert payload["status"] == "active" and payload["is_published"] is True
+    assert payload["teacher_id"], "exams.teacher_id is NOT NULL"
+    assert result == {"exam_id": "new-exams", "classes": 2, "voided": 0}
+    assert said, "the command said nothing about what it did"
+
+
+def test_running_the_fixture_again_repairs_that_row_instead_of_adding_one():
+    fixture = _fixture_module()
+    client = _FakeSupabase(exams=[{"id": "exam-1", "school_id": "school-1",
+                                   "title": fixture.TITLE}])
+
+    fixture.ensure(client, "school-1", say=lambda *_: None)
+
+    assert client.inserted("exams") == [], "a repeated run added a second fixture"
+    updated = client.updated("exams")[0]
+    assert updated["class_ids"] == ["class-a", "class-b"]
+    assert updated["end_at"] is None, (
+        "a teacher's end date on the demo paper would close the gate for good"
+    )
+    assert updated["fullscreen_required"] is True
+
+
+def test_a_standing_attempt_is_voided_so_the_fixture_can_be_sat_again():
+    """A student who has submitted it is not offered it, so it must be re-opened.
+
+    Voided rather than deleted: `retracted` is the app's own word for an attempt
+    that does not stand, and it is what `open_sitting` reopens with a fresh clock.
+    """
+    fixture = _fixture_module()
+    client = _FakeSupabase(
+        exams=[{"id": "exam-1", "school_id": "school-1", "title": fixture.TITLE}],
+        submissions=[{"id": "s1", "exam_id": "exam-1", "status": "graded"},
+                     {"id": "s2", "exam_id": "exam-1", "status": "retracted"}],
+    )
+
+    result = fixture.ensure(client, "school-1", say=lambda *_: None)
+
+    assert client.updated("submissions") == [{"status": "retracted"}]
+    assert result["voided"] == 1, "only the attempt that stood should be counted"
+
+
+def test_the_fixture_spec_is_the_only_place_the_title_is_written():
+    """Two copies of the marker would be two chances for them to drift apart."""
+    fixture = _fixture_module()
+    smoke = _smoke_module()
+
+    assert smoke._fixture().TITLE == fixture.TITLE
+    for path in (SMOKE_PY, MANAGE_PY, DEPLOY_SH):
+        assert fixture.TITLE not in path.read_text(encoding="utf-8"), (
+            f"{path.name} spells the fixture's title out again instead of reading it"
+        )
+
+
+def test_manage_offers_the_fixture_command_and_seeding_makes_one():
+    text = MANAGE_PY.read_text(encoding="utf-8")
+
+    assert '"demo-exam"' in text, "manage.py does not offer `demo-exam`"
+    assert "cmd_demo_exam" in text
+    assert "demo_exam.ensure(supabase, sid)" in text, (
+        "`seed` no longer leaves a sittable fixture behind"
+    )
+
+
+def test_the_runner_refreshes_the_fixture_before_it_is_read():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+
+    step = '"$REPO/manage.py" demo-exam'
+    assert step in script, (
+        "the deploy runner never refreshes the exam the smoke test opens"
+    )
+    at = script.index(step)
+    assert at < script.index("deploy/smoke_test.py"), (
+        "the fixture is refreshed after the check that reads it"
+    )
+    assert "START_BACKGROUND_SCHEDULERS=false" in script[at - 400:at], (
+        "constructing the app here would start the retention loop, which purges"
+    )
+    # Never fatal: a box whose demo data is gone must not roll a healthy release
+    # back, and the smoke test reports the missing fixture itself.
+    block = script[at:script.index("deploy/smoke_test.py")]
+    assert not re.search(r"^\s*exit\b", block, re.M), (
+        "a fixture that could not be written fails the release"
+    )

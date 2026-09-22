@@ -238,8 +238,21 @@
         </div>
         {% endif %}
         {% else %}
+        {#
+            Two empty states, because they need two remedies: a box whose gates
+            have not run, and a box whose gates run but whose state directory the
+            app cannot reach. The second one printed the first one's sentence —
+            "no release has been through the gates" is a claim about the box, and
+            it was false on a VPS whose gates had been running every release.
+        #}
+        {% if cap.deploy.unreadable %}
+        <p class="mt-2 text-xs text-rose-700 leading-relaxed"
+           x-text="t('Catatan gerbang di server ini tidak bisa dibaca oleh aplikasi — jadi halaman ini tidak bisa mengatakan apakah ada rilis yang sudah melewatinya. Sebabnya di bawah; jalankan deploy/install-auto-deploy.sh sekali untuk memperbaiki izin direktori state.','The gate records on this server cannot be read by the application, so this page cannot say whether any release has been through them. The cause is below; run deploy/install-auto-deploy.sh once to fix the state directory’s permissions.')"></p>
+        <p class="mt-1 text-[11px] text-surface-400 font-mono break-all">{{ cap.deploy.unreadable }}</p>
+        {% else %}
         <p class="mt-2 text-xs text-surface-500 leading-relaxed"
            x-text="t('Belum ada catatan gerbang di server ini — mesin pengembangan, atau belum ada rilis yang melewati gerbang sejak pencatatan dimulai. Bagian ini muncul sendiri begitu ada catatan.','No gate record on this server yet — a development machine, or no release has been through the gates since they started recording. This section appears on its own once there is one.')"></p>
+        {% endif %}
         {% endif %}
     </div>
 

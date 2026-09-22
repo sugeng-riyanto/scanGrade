@@ -54,6 +54,35 @@ if [ ! -f "$TARGET" ]; then
   exit 3
 fi
 
+# ── the checkout has to still carry Gate 0 ──────────────────────────────────
+#
+# A launcher's whole promise is that what runs is the *checkout's* deploy logic.
+# That is only a promise worth keeping if the logic can refuse a runner which is
+# not the checkout's — Gate 0 — because that is what keeps a hand-installed copy
+# from deploying yesterday's gates forever. A checkout that no longer carries it
+# is reachable without anybody deciding to: roll back past the commit that added
+# it, or edit the block out while debugging, and every tick after that would
+# deploy with no gate able to notice the runner has drifted. So the launcher
+# refuses rather than run it, and the exit code is its own so the journal does
+# not read as a release that failed a gate.
+#
+# The marker is the block's own delimiters, which is also what the deploy's
+# self-preservation check looks for. Both names must be there: a lone `start` is
+# what a half-edited file looks like.
+if [ "$(basename "$0")" = "scangrade-deploy" ]; then
+  if ! grep -q '^# runner-identity:start$' "$TARGET" 2>/dev/null ||
+     ! grep -q '^# runner-identity:end$' "$TARGET" 2>/dev/null; then
+    echo "!! $TARGET does not carry Gate 0 — refusing to run it." >&2
+    echo "   The launcher runs the checkout's deploy logic, and that logic has to be" >&2
+    echo "   able to refuse a runner that is not the checkout's. Either the checkout" >&2
+    echo "   is on a commit from before Gate 0 existed, or the block was removed from" >&2
+    echo "   this file. Look at what the checkout is on, then look for the block:" >&2
+    echo "       (the checkout's most recent commits, and grep $TARGET)" >&2
+    echo "       for these two lines: # runner-identity:start / # runner-identity:end" >&2
+    exit 15
+  fi
+fi
+
 # Through `bash`, not by exec'ing the file: the scripts are committed 0644, so
 # the executable bit is not part of the checkout, and depending on it would make
 # this launcher fail on a fresh clone. bash sets $0 to the script path either

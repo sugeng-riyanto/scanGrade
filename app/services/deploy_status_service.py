@@ -85,6 +85,7 @@ import os
 import pathlib
 import re
 import shutil
+import stat
 import subprocess
 
 #: Names, not secrets. Each is overridable so the checks can be pointed at a
@@ -101,6 +102,12 @@ DEFAULT_STATE_DIR = "/var/lib/scangrade-deploy"
 DEFAULT_QUARANTINE_FILE = DEFAULT_STATE_DIR + "/quarantined"
 DEFAULT_RELEASE_FILE = "/etc/scangrade-deploy.release"
 DEFAULT_REQUEST_DIR = DEFAULT_STATE_DIR + "/requests"
+#: The runner's record of a refusal that is about the *box* rather than about a
+#: commit: `armament_preflight` writes the checker's own report here and deletes it
+#: the moment the box is armed again. Same directory as the quarantine record, and
+#: the opposite answer — "no commit is held" and "no release will deploy at all"
+#: were being told apart by nothing.
+DEFAULT_UNARMED_FILE = DEFAULT_STATE_DIR + "/unarmed"
 
 #: Where git lives when the service user's PATH does not carry it. The unit runs
 #: the app without a login shell, so `which` is the first guess and these are the
@@ -178,9 +185,11 @@ ORIGIN_KEYS = frozenset({ORIGIN_CURRENT, ORIGIN_NAMED, ORIGIN_UNMATCHED, ORIGIN_
 #: cannot drift apart.
 GATE_UNKNOWN = "unknown"
 GATE_KEYS = frozenset({
+    "gate_0",
     "python_compileall",
     "app_did_not_construct",
     "app_did_not_come_up_after_the_reload",
+    "runner_not_armed",
     "theme_gate",
     "smoke_test",
     "claims_gate",
@@ -275,6 +284,64 @@ def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
     return state
 
 
+# ── the refusal that is about the box, not about a commit ────────────────────
+#
+# The runner refuses a whole run before it fetches anything when this box is not
+# armed to check a release: no launcher but a copy, no gate config, no roster. It
+# then writes the checker's own report here and exits 15. Nothing is deployed and
+# nothing is fetched, so there is no quarantine record to look at, no checkout
+# movement, and no symptom on the site — the box simply stops taking releases,
+# which from outside is indistinguishable from "no new commits". Hence this card.
+#
+# The vocabulary matches the quarantine card's on purpose. `present` and
+# `unreadable` are different keys because they need different remedies, and a
+# blank must never stand for either: absent is the ordinary answer (nothing has
+# refused), and it is the one that has to be said out loud rather than shown by
+# omission.
+UNARMED_NONE = "none"
+UNARMED_PRESENT = "present"
+UNARMED_UNREADABLE = "unreadable"
+UNARMED_KEYS = frozenset({UNARMED_NONE, UNARMED_PRESENT, UNARMED_UNREADABLE})
+
+
+def unarmed_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
+    """The last box-side refusal, as the runner recorded it.
+
+    `deploy/scangrade-deploy.sh` writes two things into the file: the ISO time it
+    refused, then the checker's own multi-line report. The report is shown as it
+    stands — it is the runner's own words, and rewriting it here would put a
+    second, weaker copy of `arm-auto-deploy.sh --check` in this module.
+    """
+    state: dict = {
+        "path": str(path), "present": False, "key": UNARMED_NONE, "at": None,
+        "age_seconds": None, "detail": None, "reason": None,
+    }
+    text, why = _read(path)
+    if text is None:
+        if why != "absent":
+            state["key"] = UNARMED_UNREADABLE
+            state["reason"] = why
+        return state
+
+    lines = text.splitlines()
+    when = lines[0].strip() if lines else ""
+    # The report keeps its own indentation: the checker aligns its readings in a
+    # column, and `.strip()` on the whole block eats the first line's, which is
+    # the one a reader scans. Blank lines before it go; nothing else does.
+    body = lines[1:]
+    while body and not body[0].strip():
+        body.pop(0)
+    report = "\n".join(body).rstrip()
+    state["present"] = True
+    state["key"] = UNARMED_PRESENT
+    state["at"] = when or None
+    state["age_seconds"] = _age_seconds(when or None, now)
+    # A record with nothing after the timestamp is still a refusal on record; the
+    # gap is the checker's silence, not this page's licence to say "absent".
+    state["detail"] = report or None
+    return state
+
+
 def request_release(*, request_file=None, quarantine_file=None, repo=None,
                     now: _dt.datetime | None = None) -> dict:
     """Ask the runner, from the page, to retry the refused commit exactly once.
@@ -335,12 +402,24 @@ def _dir_writable(path: pathlib.Path) -> bool | None:
     `None` is not "no": there is no directory, which needs the installer run once,
     while `False` is a directory whose permissions need looking at. Two different
     remedies, so they are two different answers.
+
+    The temptation is `if not path.is_dir(): return None`, and it is wrong: `is_dir`
+    answers False for *any* OSError, including the permission error this process
+    gets when it cannot traverse a parent directory. That turned "the app cannot
+    reach its own state directory" into "the installer has never been run here" —
+    a remedy that had already been applied. A stat that is allowed to raise keeps
+    the two apart.
     """
     try:
-        if not path.is_dir():
-            return None
-    except OSError:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
         return None
+    except OSError:
+        # It exists (or something on the path does) and we are not allowed to
+        # find out. That is False's job, not None's.
+        return False
+    if not stat.S_ISDIR(mode):
+        return False
     return os.access(path, os.W_OK)
 
 
@@ -762,13 +841,20 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime) -> dict:
 
 # ── the verdict ──────────────────────────────────────────────────────────────
 
-def verdict(runner: dict, checkout: dict, *, paused: bool) -> dict:
+def verdict(runner: dict, checkout: dict, *, paused: bool,
+            unarmed: dict | None = None) -> dict:
     """One level and one reason key, in the order the failures actually bite.
 
     A runner that cannot pass Gate 0 is the headline even when the checkout is
     also behind: it is the one state where *nothing* will deploy, however much is
     waiting. `paused` is reported separately rather than folded in, because a
     frozen box is somebody's decision and a broken runner is not.
+
+    `unarmed` is the runner's own record of refusing a whole run because this box
+    cannot check a release, and it sits above everything below it: the arrangement
+    can be perfect and a stale launcher can be a warning, but a box the deploy
+    refuses deploys nothing at all. Reporting `fresh` beside that record would be
+    the page telling an operator the opposite of what the box is doing.
     """
     out = {"level": UNKNOWN, "key": None, "detail": None, "behind": None,
            "runner_behind": None, "runner_from": None}
@@ -800,6 +886,9 @@ def verdict(runner: dict, checkout: dict, *, paused: bool) -> dict:
         return {**out, "level": WARN,
                 "key": runner["reason_key"] or "launcher_unreadable",
                 "detail": runner["detail"]}
+    if unarmed and unarmed.get("present"):
+        return {**out, "level": BROKEN, "key": "unarmed",
+                "detail": unarmed.get("at")}
     if runner["matches_this_commit"] is False:
         return {**out, "level": WARN, "key": "launcher_stale"}
     if paused:
@@ -829,12 +918,14 @@ REASON_KEYS = frozenset({
     "not_a_checkout", "no_git", "branch_unreadable", "checkout_unreadable",
     # the verdict
     "paused", "dirty", "behind", "fresh",
+    # the runner's record of refusing a whole run (the box, not a commit)
+    "unarmed",
 })
 
 
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
-           quarantine_file=None, request_dir=None, release_request=None,
-           now: _dt.datetime | None = None) -> dict:
+           quarantine_file=None, unarmed_file=None, request_dir=None,
+           release_request=None, now: _dt.datetime | None = None) -> dict:
     """Everything the page shows. Any single part may be `unknown` with a reason."""
     now = now or _dt.datetime.now(_dt.timezone.utc)
     repo = pathlib.Path(repo or os.environ.get("SCANGRADE_REPO") or DEFAULT_REPO)
@@ -847,6 +938,10 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
     quarantine_file = pathlib.Path(
         quarantine_file or os.environ.get("SCANGRADE_QUARANTINE_FILE")
         or DEFAULT_QUARANTINE_FILE)
+    unarmed_file = pathlib.Path(
+        unarmed_file or os.environ.get("SCANGRADE_UNARMED_FILE")
+        or DEFAULT_UNARMED_FILE)
+    unarmed = unarmed_state(unarmed_file, now=now)
     request_dir = pathlib.Path(
         request_dir or os.environ.get("SCANGRADE_REQUEST_DIR") or DEFAULT_REQUEST_DIR)
     release_request = pathlib.Path(
@@ -872,9 +967,11 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "paused": paused,
         "pause_file": str(pause_file),
         "launcher": expect_reason,
-        "verdict": verdict(main, checkout, paused=paused),
+        "verdict": verdict(main, checkout, paused=paused, unarmed=unarmed),
         "quarantine": quarantine_state(quarantine_file, repo, now=now),
         "quarantine_file": str(quarantine_file),
+        "unarmed": unarmed_state(unarmed_file, now=now),
+        "unarmed_file": str(unarmed_file),
         "release_file": DEFAULT_RELEASE_FILE,
         "release_file_present": _exists(pathlib.Path(DEFAULT_RELEASE_FILE)),
         "request_dir": str(request_dir),
