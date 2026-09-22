@@ -23,9 +23,11 @@ insert that failed, a `revoked_at` nobody can parse.
 from __future__ import annotations
 
 import contextlib
+import gc
 import io
 import json
 import re
+import weakref
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -68,6 +70,7 @@ class _Query:
         self.op = op
         self.payload = payload
         self.filters = []
+        self.nulls = []
         self.single = False
         self.order_by = None
         self.desc = False
@@ -80,12 +83,26 @@ class _Query:
         # `select(COLUMNS)` — and the difference is a real defect: a row read
         # without `expires_at` has no expiry, so an expired link reads as active
         # and gets counted as one that was stopped.
-        self.columns = None if str(columns).strip() == "*" else [
+        asked = [] if str(columns).strip() == "*" else [
             name.strip() for name in str(columns).split(",")]
+        if self.store.legacy and "student_id" in asked:
+            # A real 42703, raised the way PostgREST raises it: naming a column the
+            # table does not have refuses the *whole* request, so a caller's
+            # `except` sees an empty answer rather than a missing field.
+            raise RuntimeError('column analysis_share_links.student_id does not exist')
+        self.columns = asked or None
         return self
 
     def eq(self, col, val):
         self.filters.append((col, val))
+        return self
+
+    def is_(self, col, val):
+        """PostgREST's `.is_`, which is how a scope of "the exam's own links" is
+        asked for: `student_id IS NULL`. Only NULL matches, exactly as the database
+        does — treating an empty string as NULL here would let a malformed row pass
+        as the class link."""
+        self.nulls.append((col, str(val).strip().lower()))
         return self
 
     def order(self, col, desc=False):
@@ -110,6 +127,13 @@ class _Query:
         rows = self.store.rows(self.table)
         for col, val in self.filters:
             rows = [row for row in rows if str(row.get(col)) == str(val)]
+        for col, val in self.nulls:
+            if val == "null":
+                rows = [row for row in rows if row.get(col) is None]
+            elif val == "not.null":
+                rows = [row for row in rows if row.get(col) is not None]
+            else:  # pragma: no cover - the app only asks for null / not.null
+                rows = []
         if self.order_by:
             rows = sorted(rows, key=lambda row: str(row.get(self.order_by) or ""),
                           reverse=self.desc)
@@ -131,8 +155,12 @@ class _Table:
     def __init__(self, store, name):
         self.store, self.name = store, name
 
-    def select(self, *_a, **_k):
-        return _Query(self.store, self.name)
+    def select(self, columns="*", **_k):
+        # The column list travels to `_Query`, which is where it is honoured — the
+        # question the service asks is always `table(...).select(...)`, so a table
+        # that swallowed it would make every projection test blind to the one thing
+        # it exists to catch: a query naming a column this schema does not have.
+        return _Query(self.store, self.name).select(columns)
 
     def insert(self, payload):
         return _Query(self.store, self.name, "insert", payload)
@@ -150,10 +178,15 @@ class _Store:
 
     def __init__(self, links=(), exams=None, missing=False, fail_insert=False,
                  none_response=False, lost_insert=False,
-                 update_faults=0, update_lost=False):
+                 update_faults=0, update_lost=False, legacy=False):
         self.links = [dict(row) for row in links]
         self.exams = list(exams or [])
         self.missing = missing
+        #: The table *before* migration 033: no `student_id` column. The migration
+        #: is pasted in by hand, so this is the state a release meets on the day it
+        #: ships — and the one where a wrong read tells a teacher "nothing is
+        #: shared" while the class link still opens the report.
+        self.legacy = legacy
         self.fail_insert = fail_insert
         self.none_response = none_response
         self.lost_insert = lost_insert
@@ -179,6 +212,9 @@ class _Store:
     def insert_row(self, table, payload):
         if table == "analysis_share_links" and (self.missing or self.fail_insert):
             raise RuntimeError("insert refused")
+        if self.legacy and "student_id" in payload:
+            raise RuntimeError('column "student_id" of relation '
+                               '"analysis_share_links" does not exist')
         row = dict(payload)
         row.setdefault("id", f"link-{len(self.links) + 1}")
         row.setdefault("created_at", _iso(days=-1))
@@ -456,6 +492,105 @@ class TestTakingItBack:
         assert share.resolve(store, "theirs") is not None
 
 
+# ── the scope of a link ──────────────────────────────────────────────────────
+#
+# One table, one mechanism, and a nullable `student_id` for what the row is
+# *about* (migration 033): NULL is the exam's report, a profile id is that one
+# learner's. The failure this column exists to prevent is a mix-up — a learner's
+# URL handed back as the class link, or a "stop sharing" click under a child's
+# name that kills the class report four families are reading.
+
+class TestTheScopeOfALink:
+    def test_the_two_scopes_are_two_links(self):
+        store = _Store([
+            _row(id="class", token="class-token"),
+            _row(id="one", token="one-token", student_id="stu-1"),
+        ])
+        assert share.live(store, EXAM_ID)["token"] == "class-token"
+        assert share.live(store, EXAM_ID, "stu-1")["token"] == "one-token"
+        assert share.live(store, EXAM_ID, "stu-2") is None
+
+    def test_one_learners_rows_are_not_the_exams(self):
+        """Every learner has their own link, and asking for one must not answer
+        with another's — the page under it carries a child's name."""
+        store = _Store([
+            _row(id="one", token="one-token", student_id="stu-1"),
+            _row(id="two", token="two-token", student_id="stu-2"),
+        ])
+        assert share.live(store, EXAM_ID, "stu-2")["token"] == "two-token"
+        assert share.live(store, EXAM_ID) is None, \
+            "a learner's link was handed back as the exam's link"
+
+    def test_pressing_the_button_for_one_learner_does_not_move_the_class_link(self):
+        store = _Store([_row(id="class", token="class-token")])
+        created = share.create(store, EXAM_ID, TEACHER_ID, student_id="stu-1")
+        assert created["student_id"] == "stu-1"
+        assert created["token"] != "class-token"
+        assert share.live(store, EXAM_ID)["token"] == "class-token"
+
+    def test_one_learners_button_is_idempotent_too(self):
+        store = _Store()
+        first = share.create(store, EXAM_ID, TEACHER_ID, student_id="stu-1")
+        second = share.create(store, EXAM_ID, TEACHER_ID, student_id="stu-1")
+        assert first["token"] == second["token"]
+        assert len(store.links) == 1
+
+    def test_stopping_one_learner_leaves_the_class_and_the_others_alone(self):
+        """The click is under one child's name. The class report and the three
+        other families' links are not what that teacher meant."""
+        store = _Store([
+            _row(id="class", token="class-token"),
+            _row(id="one", token="one-token", student_id="stu-1"),
+            _row(id="two", token="two-token", student_id="stu-2"),
+        ])
+        assert share.revoke(store, EXAM_ID, "stu-1") == 1
+        assert share.resolve(store, "one-token") is None
+        assert share.resolve(store, "two-token") is not None
+        assert share.resolve(store, "class-token") is not None, \
+            "stopping one learner's link stopped the class report"
+
+    def test_stopping_the_class_report_leaves_every_learner_alone(self):
+        store = _Store([
+            _row(id="class", token="class-token"),
+            _row(id="one", token="one-token", student_id="stu-1"),
+        ])
+        assert share.revoke(store, EXAM_ID) == 1
+        assert share.resolve(store, "class-token") is None
+        assert share.resolve(store, "one-token") is not None, \
+            "the class link's own revoke killed the individual links"
+
+    def test_the_card_says_which_scope_the_link_opens(self):
+        """Two links on one screen, one under a child's name: the token is the
+        only other thing telling them apart."""
+        assert share.card(_row())["student_id"] is None
+        assert share.card(_row(student_id="stu-1"))["student_id"] == "stu-1"
+
+    # ── the day before the migration is pasted in ─────────────────────────
+
+    def test_a_class_link_still_works_before_033_is_applied(self):
+        """The migration is applied by hand, and until it is the table has no
+        `student_id`. Naming that column in a projection is a 42703, which every
+        caller turns into "there is no link" — so the class share would stop
+        minting, stop resolving and report "nothing to stop" while a live link
+        went on serving the report."""
+        store = _Store(legacy=True)
+        created = share.create(store, EXAM_ID, TEACHER_ID)
+        assert created is not None, "the class link could not be minted"
+        assert share.live(store, EXAM_ID)["token"] == created["token"]
+        assert share.resolve(store, created["token"]) is not None, \
+            "an existing class link stopped resolving"
+        assert share.revoke(store, EXAM_ID) == 1
+        assert share.resolve(store, created["token"]) is None
+
+    def test_a_learner_link_cannot_be_minted_before_033_is_applied(self):
+        """Answers `None` rather than writing a row without the scope: a link that
+        opens the *class* report under a child's name is worse than no link."""
+        store = _Store(legacy=True)
+        assert share.create(store, EXAM_ID, TEACHER_ID, student_id="stu-1") is None
+        assert store.links == [], "a scope-less row was written for a learner"
+        assert share.live(store, EXAM_ID, "stu-1") is None
+
+
 # ── counting reads ───────────────────────────────────────────────────────────
 
 class TestCountingReads:
@@ -514,12 +649,6 @@ class TestTheCardTheTeacherSees:
 # through the real app: the routing, the limiter, and the 404 rather than a
 # redirect to a login page the visitor cannot complete.
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 @pytest.fixture
 def anonymous(app, monkeypatch):
     """A client for the share routes, with a fake database and nobody signed in."""
@@ -574,6 +703,59 @@ class TestTheVisitorsDoor:
         body = PUBLIC.split("def shared_analysis_file", 1)[1]
         assert 'if ext not in ("csv", "xlsx", "pdf")' in body, \
             "the download route no longer whitelists its extension"
+
+    def test_the_module_keeps_every_limiter_a_view_may_be_decorated_with(self):
+        """The whole class above answered 500 under the full suite, and this is why.
+
+        Measured, not theorised: `ReferenceError: weakly-referenced object no longer
+        exists`, raised inside flask-limiter's own wrapper. Its decorator stores only
+        a *weak* proxy to its Limiter (`_limits.py: self.limiter = weakref.proxy(...)`),
+        and `_rate_limit` applies that decorator at import time — so the limiter has
+        to outlive every `create_app()`. Assigning a new one to the module global, as
+        the app used to, is what floated the old one and collected the views with it.
+        """
+        from flask_limiter import Limiter
+
+        from app.utils import rate_limiter as rl
+
+        ambient, kept = rl.limiter, list(rl._limiters)
+        try:
+            first = Limiter(key_func=lambda: "test")
+            dying = weakref.ref(first)
+            assert rl.remember_limiter(first) is first, \
+                "adopting a limiter has to return it, so the caller can go on"
+            assert rl.limiter is first, "the module did not adopt it"
+
+            # A second app, which is what a rebuilt app is: `limiter` moves on, and
+            # every view decorated with `first` goes on holding a weak proxy to it.
+            second = Limiter(key_func=lambda: "test")
+            rl.remember_limiter(second)
+            assert rl.limiter is second, "the fixture did not replace the limiter"
+
+            del first
+            gc.collect()
+            assert dying() is not None, (
+                "a limiter a decorated view holds was left collectable once a later "
+                "app replaced it: flask-limiter keeps only weakref.proxy, so that "
+                "view would answer ReferenceError instead of serving")
+        finally:
+            rl.limiter = ambient
+            rl._limiters[:] = kept
+
+    def test_the_app_adopts_its_limiter_instead_of_just_replacing_it(self):
+        """The wiring half, read from the source rather than from a second app.
+
+        Building another app here would start another pair of background schedulers
+        for the sake of one assertion, and the question is only whether
+        `create_app` goes through the call that keeps the limiter alive.
+        """
+        source = (ROOT / "app" / "__init__.py").read_text(encoding="utf-8")
+
+        assert "rl_module.remember_limiter(limiter)" in source, \
+            "create_app replaced the limiter instead of adopting it"
+        assert "rl_module.limiter = limiter" not in source, \
+            "a bare assignment is what left the decorated views pointing at a "\
+            "collected object"
 
     def test_a_stranger_cannot_make_a_link(self, anonymous):
         """Whoever may read the analysis may share it — that is the permission —

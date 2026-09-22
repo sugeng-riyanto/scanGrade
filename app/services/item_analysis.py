@@ -380,6 +380,10 @@ class _Response:
     name: str
     score: float
     late: bool
+    #: The learner's own id, carried so a person can be addressed as a person.
+    #: Two learners in one class can share a full name — that is the reason this
+    #: exists, and the reason nothing below keys a learner by `name`.
+    student_id: str | None = None
     #: question index -> share of the question's marks (0..1), or None when the
     #: question carries no data for this paper at all.
     shares: dict[int, float | None] = field(default_factory=dict)
@@ -425,6 +429,7 @@ def _responses(exam: Mapping[str, Any],
             score=float(sub.get("final_score") if sub.get("final_score") is not None
                         else (sub.get("score") or 0)),
             late=bool(sub.get("submitted_late")),
+            student_id=(str(sub.get("student_id")) if sub.get("student_id") else None),
         )
         for i in range(total):
             qi = str(i)
@@ -724,6 +729,18 @@ class Person:
     se: float | None
     score: float
     extreme: bool
+    #: The learner's own id where the submission carried one. `None` for a paper
+    #: whose row could not name a profile, which is a paper no individual report
+    #: can be addressed to — and saying that is better than matching on `name`.
+    student_id: str | None = None
+    #: Per question, the credit the app's own grader gave this paper (0..1), or
+    #: `None` where the question carries no data for it (blank, unkeyed, or an
+    #: essay the teacher has not marked). Carried on the person so an individual
+    #: report re-reads the same shares the item statistics were built from
+    #: instead of grading the sheet a second time.
+    shares: tuple[float | None, ...] = ()
+    #: Per question, the answer exactly as stored, for the learner's own page.
+    answers: tuple[Any, ...] = ()
     #: A paper's own fit, which is what makes its Real S.E. its own: the same
     #: columns as the item table, with the persons as the rows.
     infit: float | None = None
@@ -1227,6 +1244,9 @@ def analyse(exam: Mapping[str, Any],
             score=row.score,
             extreme=(sum(1 for v in matrix[j] if v is not None) > 0
                      and (sum(1 for v in matrix[j] if v == 1.0) in (0, sum(1 for v in matrix[j] if v is not None)))),
+            student_id=row.student_id,
+            shares=tuple(row.shares.get(i) for i in range(total_questions)),
+            answers=tuple(row.raw.get(i) for i in range(total_questions)),
         )
         for j, row in enumerate(rows)
     )

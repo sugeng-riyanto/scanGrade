@@ -33,12 +33,6 @@ GUIDE = (TEMPLATES / "guide" / "skor.html").read_text(encoding="utf-8")
 TEACHER = (ROOT / "app" / "routes" / "teacher.py").read_text(encoding="utf-8")
 
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 EXAM = {
     "id": "exam-1", "title": "Mid Semester 1", "subject": "Fisika",
     "total_questions": 4,
@@ -572,13 +566,17 @@ class TestTheScoringGuideIsTrue:
         this sentence and the student's are separate paragraphs, so one page
         saying it while the other says something else is the failure."""
         from app.services.anti_cheat_service import PENALIZED_VIOLATION_TYPES
-        assert set(PENALIZED_VIOLATION_TYPES) == {"tab_switch", "fullscreen_exit"}
+        assert set(PENALIZED_VIOLATION_TYPES) == {
+            "tab_switch", "fullscreen_exit", "focus_lost",
+        }
         teacher_tab, student_tab = GUIDE.split("x-show=\"tab==='student'\"", 1)
         for name, tab in (("teacher", teacher_tab), ("student", student_tab)):
             assert "berpindah tab" in tab, \
                 f"the {name} tab stopped naming what is charged"
             assert "keluar dari layar penuh" in tab, \
-                f"the {name} tab names only half of what is charged"
+                f"the {name} tab names only part of what is charged"
+            assert "meninggalkan jendela ujian" in tab, \
+                f"the {name} tab does not name the act the away-blur records"
             # And what is *not* charged, or every recorded event reads as a
             # penalty — a student who right-clicked would ask why they lost marks.
             assert "tidak mengurangi nilai" in tab, \

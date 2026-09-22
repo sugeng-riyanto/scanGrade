@@ -22,12 +22,16 @@ from app.services.question_types import (
     objective_result, question_kind, scheme_in,
 )
 from app.services import mark_scheme
+from app.services.anti_cheat_service import (
+    events_for_exam, events_for_student, leaving_summary,
+)
 from app.services.pdf_service import upload_pdf
 from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_school, invalidate_teacher_assignments,
                                  school_classes, school_subjects, teacher_assignments_for)
 from app.utils import exam_window
-from app.services import analysis_frameworks, analysis_report, analysis_scope, item_analysis
+from app.services import (analysis_frameworks, analysis_report, analysis_scope,
+                          exam_report, item_analysis)
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
                                           usage_message)
 
@@ -1711,7 +1715,31 @@ def _exam_results(supabase, exam_id):
         # chip and the per-row badge cannot disagree about how many there were.
         "late": sum(1 for row in subs if row.get("submitted_late")),
     }
+    # The rows themselves, in the same pass, so `scan_subs` and `online_subs` —
+    # which hold these very dicts — carry the leaving summary too.
+    _attach_leaving(supabase, exam_id, subs, stats)
     return subs, scan_subs, online_subs, stats
+
+
+def _attach_leaving(supabase, exam_id, subs, stats):
+    """Put *when each paper left the screen* on the rows, and count the students.
+
+    One query for the whole sitting, for two reasons. The round-trip is the
+    obvious one, but the decisive one is agreement: the list's badge and the
+    per-paper page it links to both read these rows through the same helper, so a
+    teacher who clicks through finds the same story on the other side.
+
+    ``stats['away']`` counts *students* who left, not events — the header chip sits
+    beside "N peserta" and reads as a headcount, and an event count there would be
+    a bigger number for the same room.
+    """
+    events = events_for_exam(supabase, exam_id)
+    by_student: dict[str, list] = {}
+    for event in events:
+        by_student.setdefault(event.get("user_id"), []).append(event)
+    for row in subs:
+        row.update(leaving_summary(by_student.get(row.get("student_id"), [])))
+    stats["away"] = sum(1 for row in subs if row.get("away_count"))
 
 
 def _final_score(submission):
@@ -1994,18 +2022,193 @@ def exam_analysis(exam_id):
         download_base=f"/teacher/analysis/{exam_id}")
 
 
-def _share_card(supabase, exam_id):
-    """The exam's live public link, as the report's own header renders it.
+@teacher_bp.route("/analysis/<exam_id>/report")
+@teacher_or_admin_required
+def exam_analysis_report(exam_id):
+    """The filed report: one class, one paper, arranged the way a school keeps it.
+
+    A second address rather than a second page on `/analysis/<exam_id>`, because
+    the two documents answer different questions. The analysis page exists to
+    decide what to do about a *question* — difficulty, discrimination, fit, the
+    distractor table — and a teacher reads it with the item list in front of them.
+    This one is the document a school files: a cover, an executive summary, the
+    distributions with the bands named, the ranking, and a statement per learner.
+    Both read the same `item_analysis` result, so no figure on the filed page is
+    computed a second way.
+    """
+    supabase = get_supabase()
+    exam, analysis, err = _analysis_of(supabase, exam_id,
+                                       redirect_to="/teacher/results")
+    if err:
+        return err
+    return render_template(
+        "teacher/analysis_report.html",
+        exam=exam, analysis=analysis,
+        report=exam_report.report(analysis, _report_cover(supabase, exam),
+                                  history=_sitting_history(supabase, exam)),
+        download_base=f"/teacher/analysis/{exam_id}",
+        lang=analysis_scope.language(request.args.get("lang")))
+
+
+@teacher_bp.route("/analysis/<exam_id>/report/student/<student_id>")
+@teacher_or_admin_required
+def exam_analysis_student(exam_id, student_id):
+    """One learner's own page: their questions, their reasons, what to do next.
+
+    Addressed by the learner's id rather than their name. Two learners in one
+    class can share a full name, and a page that picked the first match would
+    confidently describe the wrong child — which is a worse failure than a 404.
+    """
+    supabase = get_supabase()
+    exam, analysis, err = _analysis_of(supabase, exam_id,
+                                       redirect_to="/teacher/results")
+    if err:
+        return err
+    who = exam_report.learner(analysis, _report_cover(supabase, exam), student_id)
+    if not who:
+        abort(404)
+    return render_template(
+        "teacher/analysis_student.html",
+        exam=exam, analysis=analysis, learner=who, public_view=False,
+        share=_share_card(supabase, exam_id, student_id),
+        back_url=f"/teacher/analysis/{exam_id}/report",
+        lang=analysis_scope.language(request.args.get("lang")))
+
+
+def _report_cover(supabase, exam):
+    """The cover fields the exam row does not carry: school, class, teacher.
+
+    Resolved best-effort, the same way the printed sheet resolves them: a cover
+    that could not read a school name still prints its statistics, and refusing to
+    render the report because a lookup failed would hide the numbers the report
+    exists for. An empty line on a cover is a smaller lie than no report.
+    """
+    from app.services.report_card_service import profile_name, school_for
+
+    cover = dict(exam)
+    class_names = _class_names(supabase, exam.get("class_ids"))
+    if not class_names and exam.get("class_id"):
+        class_names = _class_names(supabase, [exam.get("class_id")])
+    cover["class_name"] = ", ".join(class_names)
+    try:
+        cover["school_name"] = (school_for(supabase, exam.get("school_id"))
+                                or {}).get("name", "")
+    except Exception:
+        logger.exception("school name unreadable for %s", exam.get("id"))
+        cover["school_name"] = ""
+    try:
+        cover["teacher_name"] = profile_name(supabase, exam.get("teacher_id")) or ""
+    except Exception:
+        logger.exception("teacher name unreadable for %s", exam.get("id"))
+        cover["teacher_name"] = ""
+    return cover
+
+
+def _sitting_history(supabase, exam, limit=4):
+    """Earlier sittings of the same subject, oldest first, for the trend line.
+
+    "Earlier" means the same teacher and the same subject, which is what a teacher
+    means by "last time": another teacher's paper on the same syllabus is not this
+    class's history, and a different subject is not a trend. When the exam carries
+    no subject there is nothing to compare against, and the page says so —
+    plotting this teacher's other papers against an unstated syllabus is how a
+    trend line ends up comparing a physics test with a history essay.
+    """
+    subject = str(exam.get("subject") or "").strip()
+    teacher = exam.get("teacher_id")
+    if not subject or not teacher:
+        return []
+    try:
+        rows = (supabase.table("exams").select("id,title,subject,created_at,end_at")
+                .eq("teacher_id", teacher).eq("subject", subject)
+                .order("created_at", desc=True).limit(limit + 1).execute().data or [])
+    except Exception:
+        logger.exception("cannot read the sitting history for %s", exam.get("id"))
+        return []
+    earlier = [row for row in rows
+               if str(row.get("id")) != str(exam.get("id"))][:limit]
+    if not earlier:
+        return []
+    marks = analysis_scope.marks_by_exam(supabase, [row["id"] for row in earlier])
+    points = [{
+        "label": str(row.get("title") or ""),
+        "date": str(row.get("end_at") or row.get("created_at") or "")[:10],
+        "mean": analysis_scope.mean_of(marks.get(str(row["id"]), [])),
+    } for row in earlier]
+    # Chronological, because a trend is read left to right whatever order the
+    # query happened to return the rows in.
+    points.sort(key=lambda point: point["date"])
+    return points
+
+
+def _share_card(supabase, exam_id, student_id=None):
+    """The live public link for this scope, as the page's own header renders it.
 
     The URL is built from the request's own root rather than from `APP_URL`, so
     the address a teacher copies is the address they are reading the page on —
     a config value that has drifted is a link that arrives broken. ProxyFix is
     what makes `url_root` the public one behind nginx.
+
+    The scope matters even here: the exam's card and a learner's card are two
+    different links, and asking for one while getting the other would put the
+    class URL under an individual's name.
     """
     from app.services import analysis_share
 
-    return analysis_share.card(analysis_share.live(supabase, exam_id),
-                               base_url=request.url_root)
+    return analysis_share.card(
+        analysis_share.live(supabase, exam_id, student_id),
+        base_url=request.url_root)
+
+
+@teacher_bp.route("/analysis/<exam_id>/report/student/<student_id>/share",
+                  methods=["POST"])
+@teacher_or_admin_required
+def share_student_analysis(exam_id, student_id):
+    """Mint the public link for one learner's page.
+
+    Deliberately a separate click from the class link: the two carry different
+    copy to different readers, and a teacher who meant the class report should
+    not hand out a child's page because the button was next to it.
+    """
+    from app.services import analysis_share
+
+    supabase = get_supabase()
+    _exam, err = _guard_exam(supabase, exam_id, as_json=False,
+                             redirect_to="/teacher/results")
+    if err:
+        return err
+    link = analysis_share.create(supabase, exam_id, g.get("user_id"),
+                                 student_id=student_id)
+    if not link:
+        flash("Tautan laporan murid tidak bisa dibuat sekarang. Coba lagi.", "error")
+    else:
+        log_activity("share_student_analysis", "profile", student_id)
+        flash("Tautan laporan murid dibuat. Isinya halaman murid ini saja — "
+              "tanpa kunci jawaban dan tanpa nama murid lain.", "success")
+    return redirect(f"/teacher/analysis/{exam_id}/report/student/{student_id}")
+
+
+@teacher_bp.route("/analysis/<exam_id>/report/student/<student_id>/share/revoke",
+                  methods=["POST"])
+@teacher_or_admin_required
+def revoke_student_analysis(exam_id, student_id):
+    """Stop this learner's live links. Other learners' links are untouched."""
+    from app.services import analysis_share
+
+    supabase = get_supabase()
+    _exam, err = _guard_exam(supabase, exam_id, as_json=False,
+                             redirect_to="/teacher/results")
+    if err:
+        return err
+    stopped = analysis_share.revoke(supabase, exam_id, student_id)
+    if stopped:
+        log_activity("revoke_student_analysis", "profile", student_id)
+        flash("Berbagi laporan murid ini dihentikan.", "success")
+    elif analysis_share.live(supabase, exam_id, student_id):
+        flash("Tautan masih aktif — penghentian gagal. Coba lagi.", "error")
+    else:
+        flash("Tidak ada tautan aktif untuk murid ini.", "info")
+    return redirect(f"/teacher/analysis/{exam_id}/report/student/{student_id}")
 
 
 @teacher_bp.route("/analysis/<exam_id>/share", methods=["POST"])
@@ -2338,7 +2541,15 @@ def grade_detail(submission_id):
                     exam[_field] = json.loads(_val)
                 except (json.JSONDecodeError, TypeError):
                     exam[_field] = {}
-        return render_template("teacher/grade_detail.html", submission=sub, exam=exam, exam_id=sub["exam_id"], student=student)
+        # What this one paper did while the exam was open — the same rows the
+        # results list summarises, read for one student. Read here rather than
+        # rendered from the submission's own `violations` count, because that
+        # number is a total: it cannot say *when* the paper left the screen, which
+        # is the question a teacher opens this page to answer.
+        violation_events = events_for_student(supabase, sub["exam_id"], sub["student_id"])
+        return render_template("teacher/grade_detail.html", submission=sub, exam=exam,
+                               exam_id=sub["exam_id"], student=student,
+                               violation_events=violation_events)
     except Exception as e:
         current_app.logger.error("grade_detail error: %s", str(e), exc_info=True)
         flash(f"Terjadi kesalahan: {str(e)[:100]}", "error")
