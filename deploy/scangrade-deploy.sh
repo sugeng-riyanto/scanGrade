@@ -53,6 +53,14 @@ RELEASE_REQUEST="$REQUEST_DIR/release"
 #: nothing deploying?"), and read by /super-admin/deploy-status. Written by
 #: armament_preflight, removed the moment the box is armed again.
 UNARMED_FILE="$STATE_DIR/unarmed"
+#: Why the last run refused a release *before it moved*: a dirty checkout, a fetch
+#: that could not reach GitHub, a migration release with no recovery point, a merge
+#: that could not happen. Each of those exits before the release is judged, so none
+#: of them quarantines — a quarantine is a record about a *commit* — and none of
+#: them leaves a symptom: the previous release serves, the site is untouched, and
+#: from outside the box looks like one with no new commits. Read by
+#: /super-admin/deploy-status; see preflight-logic below.
+PREFLIGHT_FILE="$STATE_DIR/refused-before-merge"
 #: (The gate configs themselves are named beside the gate that reads them, not
 #: here: `test_the_deploy_passes_every_generated_setting` in the perf-gate guards
 #: anchors on each conf assignment and checks the environment-list right after it,
@@ -187,6 +195,61 @@ quarantine_gate() {
 }
 # quarantine-logic:end
 
+# ── A refusal that happens *before* the release moves ────────────────────────
+# preflight-logic:start
+# A quarantine is a record about a commit, which is why it is written only after a
+# release has been merged and judged. That leaves the other half of "why is nothing
+# deploying?" with no record at all. The run can refuse before it touches the
+# checkout — a dirty tree, a fetch with no network, a migration release with no
+# recovery point, a merge that cannot happen (a stale `.git/index.lock` is one) —
+# and every one of those exits quietly. Nothing is merged, nothing is quarantined,
+# the previous release keeps serving, and from outside the box is indistinguishable
+# from one with no new commits. Not hypothetical: a box sat five commits behind for
+# three hours, fetching every tick and never merging, while its own status page
+# said "No Held Release" and "0 uncommitted files".
+#
+# So each pre-merge refusal writes down what it was: which step, when, the exit
+# code, and the *command's* output rather than this script's guess about it. The
+# record is positional, like the quarantine's, and the status page reads it:
+#
+#     line 1  the step, as a key the page has a sentence for
+#     line 2  when it refused (ISO)
+#     line 3  the exit code
+#     line 4  the commit under judgement (`origin/$BRANCH`), or empty when the run
+#             refused before there was one
+#     line 5+ the runner's own words
+#
+# The values arrive through globals rather than arguments for the same reason the
+# quarantine block's do: this script takes no arguments at any level
+# (`test_deploy_script_takes_no_arguments`), and a refusal must not be able to name
+# a step other than the one that refused it.
+#
+# It is not a quarantine and it does not try to be one: a fetch that cannot reach
+# GitHub is the world's fault and not the commit's, so the next tick simply tries
+# again. Nothing here decides whether to retry — the exit codes below already do.
+PREFLIGHT_GATE=""
+PREFLIGHT_EXIT=""
+PREFLIGHT_DETAIL=""
+
+preflight_write() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  {
+    printf '%s\n%s\n%s\n%s\n' "${PREFLIGHT_GATE:-unknown}" "$(date -Is)" \
+      "${PREFLIGHT_EXIT:-?}" "${AFTER_FULL:-}"
+    printf '%s\n' "${PREFLIGHT_DETAIL:-}"
+  } > "$PREFLIGHT_FILE" 2>/dev/null || true
+  # Readable by the app (the status page shows this) and owned by root.
+  chmod 0644 "$PREFLIGHT_FILE" 2>/dev/null || true
+}
+
+# A merge is the moment this stage stopped refusing, so a record about failing to
+# get this far no longer describes the box. A later refusal rewrites it; a release
+# that merges and is then rolled back is the *quarantine's* record, not this one's.
+preflight_forget() {
+  rm -f "$PREFLIGHT_FILE" 2>/dev/null || true
+}
+# preflight-logic:end
+
 # ── The installed launcher refreshes itself from the checkout ─────────────
 # refresh-launcher-logic:start
 # The two installed names are rendered from `deploy/entrypoint.sh`, and nothing
@@ -289,6 +352,9 @@ fi
 
 if [ "$(id -u)" -ne 0 ]; then
   log "must run as root (it restarts $SERVICE) — current uid $(id -u)"
+  PREFLIGHT_GATE=not_root PREFLIGHT_EXIT=2 \
+    PREFLIGHT_DETAIL="uid $(id -u) is not root, so this run cannot reload $SERVICE" \
+    preflight_write
   exit 2
 fi
 
@@ -392,8 +458,19 @@ fi
 # Armed. The record of a previous refusal must not outlive the state it describes.
 rm -f "$UNARMED_FILE" 2>/dev/null || true
 
-[ -d "$REPO/.git" ] || { log "$REPO is not a git checkout — refusing"; exit 3; }
-[ -x "$REPO/.venv/bin/gunicorn" ] || { log "no virtualenv at $REPO/.venv — refusing"; exit 3; }
+[ -d "$REPO/.git" ] || {
+  log "$REPO is not a git checkout — refusing"
+  PREFLIGHT_GATE=no_checkout PREFLIGHT_EXIT=3 \
+    PREFLIGHT_DETAIL="$REPO is not a git checkout" preflight_write
+  exit 3
+}
+[ -x "$REPO/.venv/bin/gunicorn" ] || {
+  log "no virtualenv at $REPO/.venv — refusing"
+  PREFLIGHT_GATE=no_virtualenv PREFLIGHT_EXIT=3 \
+    PREFLIGHT_DETAIL="no gunicorn at $REPO/.venv/bin, so nothing here could serve a release" \
+    preflight_write
+  exit 3
+}
 
 # Act as whoever owns the checkout, so git and pip never hit "dubious ownership"
 # and never leave root-owned files behind in a tree another user has to use.
@@ -406,21 +483,49 @@ OWNER_HOME=$(getent passwd "$OWNER" | cut -d: -f6)
 [ -n "$OWNER_HOME" ] || OWNER_HOME=/tmp
 as_owner() { runuser -u "$OWNER" -- env HOME="$OWNER_HOME" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true "$@"; }
 
-cd "$REPO" || exit 3
+cd "$REPO" || {
+  log "cannot enter $REPO — refusing"
+  PREFLIGHT_GATE=no_checkout PREFLIGHT_EXIT=3 \
+    PREFLIGHT_DETAIL="cannot enter $REPO" preflight_write
+  exit 3
+}
 
 # ── Guard against clobbering hand edits ──────────────────────────────────────
-DIRTY=$(as_owner git -C "$REPO" status --porcelain)
+# A `git status` that *failed* used to be read as "no local changes": the command
+# substitution came back empty either way, and empty is what a clean tree looks
+# like. So a checkout git could not read was merged into, which then failed at the
+# merge with a message about fast-forwards. "We could not tell" is not "it is
+# fine" — the same rule `app/utils/armament.py` follows for the armament checker —
+# so an unreadable checkout is its own refusal, with git's own error as the reason.
+DIRTY=""
+if ! DIRTY=$(as_owner git -C "$REPO" status --porcelain 2>&1); then
+  log "could not read the checkout's state — NOT deploying:"
+  printf '%s\n' "$DIRTY" | sed 's/^/    /'
+  PREFLIGHT_GATE=checkout_unreadable PREFLIGHT_EXIT=4 \
+    PREFLIGHT_DETAIL="${DIRTY:-git status exited non-zero with no output}" preflight_write
+  exit 4
+fi
 if [ -n "$DIRTY" ]; then
   log "checkout has local changes — NOT deploying:"
   echo "$DIRTY" | sed 's/^/    /'
+  PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 \
+    PREFLIGHT_DETAIL="$DIRTY" preflight_write
   exit 4
 fi
 
 BEFORE=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 
 # ── Fetch ────────────────────────────────────────────────────────────────────
-if ! as_owner git -C "$REPO" fetch --quiet origin "$BRANCH"; then
+# stderr is captured rather than left to the journal: this is the one refusal whose
+# cause is entirely inside git's own message (credentials, DNS, a proxy), and the
+# status page is for an operator with no shell to read that journal from.
+FETCH_OUT=""
+if ! FETCH_OUT=$(as_owner git -C "$REPO" fetch --quiet origin "$BRANCH" 2>&1); then
   log "git fetch failed (network or credentials) — will retry next tick"
+  [ -n "$FETCH_OUT" ] && printf '%s\n' "$FETCH_OUT" | sed 's/^/    /'
+  PREFLIGHT_GATE=fetch_failed PREFLIGHT_EXIT=5 \
+    PREFLIGHT_DETAIL="${FETCH_OUT:-git fetch exited non-zero with no output}" \
+    preflight_write
   exit 5
 fi
 
@@ -469,30 +574,56 @@ if echo "$CHANGED" | grep -qE '^supabase/migrations/[^/]+\.sql$'; then
   log "release changes supabase/migrations — taking a data snapshot first"
   if ! mkdir -p "$BACKUP_DIR" || ! chmod 0700 "$BACKUP_DIR"; then
     log "cannot use $BACKUP_DIR — refusing to deploy a migration without a snapshot"
+    PREFLIGHT_GATE=snapshot_refused PREFLIGHT_EXIT=12 \
+      PREFLIGHT_DETAIL="cannot create or protect $BACKUP_DIR" preflight_write
     exit 12
   fi
-  if "$REPO/.venv/bin/python" "$SNAPSHOT_CMD" --repo "$REPO" --out "$BACKUP_DIR" \
-       --keep "$BACKUP_KEEP" --label "$AFTER" --quiet 2>&1 | sed 's/^/    /'; then
+  # Captured rather than streamed: when it fails, its own output is the reason the
+  # record carries (`no SUPABASE_URL / SUPABASE_SERVICE_KEY — nothing to do …`), and
+  # that sentence is the difference between a card an operator can act on and
+  # "the snapshot failed".
+  SNAP_OUT=""
+  if SNAP_OUT=$("$REPO/.venv/bin/python" "$SNAPSHOT_CMD" --repo "$REPO" --out "$BACKUP_DIR" \
+       --keep "$BACKUP_KEEP" --label "$AFTER" --quiet 2>&1); then
+    [ -n "$SNAP_OUT" ] && printf '%s\n' "$SNAP_OUT" | sed 's/^/    /'
     SNAPSHOT=$(ls -1t "$BACKUP_DIR"/scangrade-db-*.tar.gz 2>/dev/null | head -1)
     if [ -n "$SNAPSHOT" ]; then
       log "snapshot: $SNAPSHOT"
     else
       log "snapshot command succeeded but left no archive — refusing to deploy"
+      PREFLIGHT_GATE=snapshot_refused PREFLIGHT_EXIT=12 \
+        PREFLIGHT_DETAIL="the snapshot command succeeded but left no archive in $BACKUP_DIR" \
+        preflight_write
       exit 12
     fi
   else
     log "SNAPSHOT FAILED — not deploying a migration release without a recovery point"
     log "nothing has been merged; $BEFORE is untouched. Retry on the next tick."
+    PREFLIGHT_GATE=snapshot_refused PREFLIGHT_EXIT=12 \
+      PREFLIGHT_DETAIL="${SNAP_OUT:-the snapshot command exited non-zero with no output}" \
+      preflight_write
     exit 12
   fi
 else
   log "no migration in this release — no snapshot needed"
 fi
 
-if ! as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH"; then
-  log "not a fast-forward (history rewritten?) — leaving $BEFORE in place"
+# stderr captured for the same reason the fetch's is, and here it is the only thing
+# that can name the cause: a stale `.git/index.lock` makes this fail while `git
+# status` succeeds, so "not a fast-forward" is a guess — and it was the guess the
+# runner printed for three hours while nothing deployed.
+MERGE_OUT=""
+if ! MERGE_OUT=$(as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH" 2>&1); then
+  log "could not merge origin/$BRANCH into $BEFORE — leaving $BEFORE in place"
+  [ -n "$MERGE_OUT" ] && printf '%s\n' "$MERGE_OUT" | sed 's/^/    /'
+  PREFLIGHT_GATE=merge_refused PREFLIGHT_EXIT=6 \
+    PREFLIGHT_DETAIL="${MERGE_OUT:-git merge --ff-only exited non-zero with no output}" \
+    preflight_write
   exit 6
 fi
+# Merged: every pre-merge check passed, so a record of a refusal to get this far is
+# stale, and leaving it would report a box that is deploying as one that is not.
+preflight_forget
 log "pulled; $(echo "$CHANGED" | wc -l) file(s) changed"
 
 # ── Gate 0 survives the release, or the release does not happen ─────────────

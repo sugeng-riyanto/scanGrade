@@ -386,8 +386,15 @@ def test_a_migration_release_needs_a_snapshot():
         "the deploy no longer recognises a migration release, so it would ship a "
         "schema change with no recovery point"
     )
-    assert re.search(r"SNAPSHOT FAILED[\s\S]{0,200}?exit 12", script), (
-        "a failed snapshot no longer stops the deploy"
+    # The refusal now writes the pre-merge record on the way out, so the gap between
+    # the sentence and the exit is its own lines rather than two: what has to hold is
+    # that the failure is *recorded* and then stops the deploy, nothing between.
+    stopped = re.search(r"SNAPSHOT FAILED[\s\S]{0,600}?exit 12", script)
+    assert stopped, "a failed snapshot no longer stops the deploy"
+    assert "PREFLIGHT_GATE=snapshot_refused" in stopped.group(0), (
+        "a migration release that could not be snapshotted stops the deploy without "
+        "recording which step refused — the status page is left with `behind` and no "
+        "reason, which is the state this record exists to end"
     )
 
 

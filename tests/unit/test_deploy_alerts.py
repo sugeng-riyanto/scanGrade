@@ -94,8 +94,18 @@ def report_of(runner: dict | None = None, checkout: dict | None = None,
         "unarmed": {"path": "/var/lib/scangrade-deploy/unarmed", "present": False,
                     "key": "none", "at": None, "age_seconds": None, "detail": None,
                     "reason": None},
+        "preflight": {"path": "/var/lib/scangrade-deploy/refused-before-merge",
+                      "present": False, "key": "none", "gate": None, "gate_key": None,
+                      "at": None, "age_seconds": None, "exit_code": None,
+                      "commit": None, "short": None, "detail": None,
+                      "reason": None},
         "verdict": {"level": "fresh", "key": verdict, "detail": None, "behind": None,
                     "runner_behind": None, "runner_from": None},
+        # The paths the cards print, so a rendered fixture shows a file rather than
+        # a blank where an operator expects to be told which file to read.
+        "quarantine_file": "/var/lib/scangrade-deploy/quarantined",
+        "unarmed_file": "/var/lib/scangrade-deploy/unarmed",
+        "preflight_file": "/var/lib/scangrade-deploy/refused-before-merge",
     }
     report.update(extra)
     return report
@@ -117,10 +127,18 @@ class TestWhatCountsAsStale:
         real = status.report(repo="/nonexistent", runner="/nonexistent",
                              snapshot_runner="/nonexistent",
                              pause_file="/nonexistent",
-                             quarantine_file="/nonexistent")
+                             quarantine_file="/nonexistent",
+                             unarmed_file="/nonexistent",
+                             preflight_file="/nonexistent")
         assert set(real) >= {"runner", "checkout", "verdict", "quarantine", "repo"}
         assert set(real["runner"]) >= set(report_of()["runner"])
         assert set(real["checkout"]) >= set(report_of()["checkout"])
+        # The refusal card is read attribute by attribute (`pf.key`, `pf.exit_code`,
+        # ...), so the fixture has to carry the reader's shape *exactly*: a key the
+        # reader grows and this fixture forgets raises `UndefinedError` inside the
+        # template, which is a 500 on the one page an operator reads to find out why
+        # nothing is deploying.
+        assert set(report_of()["preflight"]) == set(real["preflight"])
         # And the reading the policy keys on is really in there.
         assert "gate0" in real["runner"] and "origin_behind" in real["runner"]
 

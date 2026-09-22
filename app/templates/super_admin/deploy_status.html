@@ -76,6 +76,8 @@
                     <span x-text="t('Launcher terpasang, tetapi bukan hasil render commit ini — deploy/entrypoint.sh sudah berubah sejak dipasang.','The launcher is installed, but it is not what this commit renders — deploy/entrypoint.sh has changed since it was installed.')"></span>
                     {% elif v.key == 'unarmed' %}
                     <span x-text="t('Server ini belum armed untuk memeriksa rilis, jadi runner menolak seluruh proses deploy sebelum mengambil apa pun — tidak ada rilis yang bisa masuk sampai dijalankan: bash deploy/arm-auto-deploy.sh','This box is not armed to check a release, so the runner refuses the whole run before it fetches anything — no release can land until it is armed: bash deploy/arm-auto-deploy.sh')"></span>
+                    {% elif v.key == 'refused' %}
+                    <span x-text="t('Runner sempat mengambil commit dari GitHub lalu menolak memindahkannya ke checkout, jadi tidak ada rilis yang masuk dan rilis sebelumnya tetap melayani. Langkah yang menolak ada di kartu di bawah.','The runner did fetch the commit from GitHub and then refused to move it into the checkout, so no release landed and the previous one keeps serving. Which step refused is on the card below.')"></span>
                     {% elif v.key == 'behind' %}
                     <span x-text="t('Runner sudah benar, tetapi checkout tertinggal dari origin/main.','The runner is right, but the checkout is behind origin/main.')"></span>
                     {% elif v.key == 'dirty' %}
@@ -166,6 +168,98 @@
                     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
                         <span class="text-surface-500 shrink-0" x-text="t('Berkas','File')"></span>
                         <code class="font-mono text-xs text-surface-700 break-all text-right">{{ u.path }}</code>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the refusal that happens before the release moves ────────────── -->
+    {#
+        The third and last place "why is nothing deploying?" can live, and the one
+        that was invisible from outside: the runner fetched, then stopped *before*
+        the merge. Nothing is quarantined (that record is about a commit), no uptime
+        moves, and the checkout's own readings look healthy — a status read and a
+        writer disagree about what a stale `.git/index.lock` means. So this record
+        is the only thing that says a release is being turned away; and the blank
+        state says out loud that it is *not* proof the timer is running.
+    #}
+    {% set pf = status.preflight %}
+    {% set PHELD = {'box': 'bg-rose-50 border-rose-200', 'text': 'text-rose-700', 'icon': 'fa-circle-xmark'} %}
+    {% set PCLEAR = {'box': 'bg-surface-50 border-surface-200', 'text': 'text-surface-700', 'icon': 'fa-circle-check'} %}
+    {% set PL = PCLEAR if pf.key == 'none' else PHELD %}
+    <div class="card p-5 border {{ PL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ PL.icon }} {{ PL.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ PL.text }}">
+                    {% if pf.present %}
+                    <span x-text="t('Percobaan Rilis Ditolak Sebelum Merge','Release Refused Before It Was Merged')"></span>
+                    {% elif pf.key == 'unreadable' %}
+                    <span x-text="t('Catatan Penolakan Sebelum Merge Tidak Terbaca','Pre-merge Refusal Record Unreadable')"></span>
+                    {% elif pf.key == 'malformed' %}
+                    <span x-text="t('Catatan Penolakan Sebelum Merge Tidak Dikenali','Pre-merge Refusal Record Not Recognised')"></span>
+                    {% else %}
+                    <span x-text="t('Tidak Ada Penolakan Sebelum Merge','Nothing Refused Before a Merge')"></span>
+                    {% endif %}
+                </h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if pf.present %}
+                    <span x-text="t('Runner sempat mengambil commit dari GitHub, lalu berhenti di langkah ini sebelum checkout dipindahkan. Tidak ada yang di-merge, tidak ada yang dikarantina, dan rilis sebelumnya tetap melayani. Ini kata-kata perintahnya sendiri, apa adanya:','The runner did fetch the commit from GitHub, then stopped at this step before the checkout moved. Nothing was merged, nothing was quarantined, and the previous release keeps serving. These are the command’s own words, as they stand:')"></span>
+                    {% if pf.detail %}<code class="block mt-2 whitespace-pre-wrap break-all font-mono text-xs text-rose-700">{{ pf.detail }}</code>{% endif %}
+                    {% elif pf.key == 'unreadable' %}
+                    <span x-text="t('Ada catatan penolakan sebelum merge dan halaman ini tidak bisa membacanya, jadi belum bisa dipastikan runner sanggup memindahkan rilis.','There is a pre-merge refusal on record and this page cannot read it, so the runner cannot be said to be able to move a release.')"></span>
+                    {% if pf.reason %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ pf.reason }}</code>{% endif %}
+                    {% elif pf.key == 'malformed' %}
+                    <span x-text="t('Catatan penolakan sebelum merge ada, tetapi isinya tidak dikenali — baca berkasnya sebelum menganggap tidak ada yang ditolak.','The pre-merge refusal record exists but its contents are not recognised — read the file before assuming nothing was refused.')"></span>
+                    {% if pf.reason %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ pf.reason }}</code>{% endif %}
+                    {% else %}
+                    <span x-text="t('Tidak ada penolakan sebelum merge yang tercatat. Ini bukan bukti penjadwalnya berjalan: halaman ini tidak bisa melihat timer, dan rilis yang tidak pernah dicoba juga tidak meninggalkan catatan.','Nothing is on record as refused before a merge. That is not proof the schedule is running: this page cannot see the timer, and a release nobody ever tried leaves no record either.')"></span>
+                    {% endif %}
+                </p>
+
+                {% if pf.present %}
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Langkah yang menolak','Step that refused')"></span>
+                        <span class="text-right min-w-0">
+                            <span class="font-bold text-surface-800">
+                                {% if pf.gate_key == 'not_root' %}<span x-text="t('runner tidak dijalankan sebagai root','the runner did not run as root')"></span>
+                                {% elif pf.gate_key == 'no_checkout' %}<span x-text="t('checkout tidak ada, atau tidak bisa dimasuki','the checkout is missing, or cannot be entered')"></span>
+                                {% elif pf.gate_key == 'no_virtualenv' %}<span x-text="t('tidak ada virtualenv di checkout','there is no virtualenv in the checkout')"></span>
+                                {% elif pf.gate_key == 'checkout_unreadable' %}<span x-text="t('keadaan checkout tidak bisa dibaca (git gagal)','the checkout’s state could not be read (git failed)')"></span>
+                                {% elif pf.gate_key == 'dirty_checkout' %}<span x-text="t('checkout punya perubahan yang belum di-commit','the checkout has uncommitted changes')"></span>
+                                {% elif pf.gate_key == 'fetch_failed' %}<span x-text="t('git fetch gagal — jaringan atau kredensial','git fetch failed — network or credentials')"></span>
+                                {% elif pf.gate_key == 'snapshot_refused' %}<span x-text="t('snapshot data sebelum migrasi tidak bisa diambil','the data snapshot before the migration could not be taken')"></span>
+                                {% elif pf.gate_key == 'merge_refused' %}<span x-text="t('commit tidak bisa di-merge ke checkout','the commit could not be merged into the checkout')"></span>
+                                {% else %}<span x-text="t('langkah dari runner yang lebih baru','a step from a newer runner')"></span>
+                                {% endif %}
+                            </span>
+                            {% if pf.gate %}<code class="block font-mono text-xs text-surface-500 break-words mt-0.5">{{ pf.gate }}</code>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Ditolak pada','Refused at')"></span>
+                        <span class="text-surface-700">
+                            <code class="font-mono text-xs">{{ pf.at or '—' }}</code>
+                            {% if pf.age_seconds is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ pf.age_seconds }}</strong> <span x-text="t('detik','seconds')"></span></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Kode keluar','Exit code')"></span>
+                        <code class="font-mono text-xs text-surface-700">{{ pf.exit_code or '—' }}</code>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Commit yang dicoba','Commit attempted')"></span>
+                        <span class="text-right min-w-0">
+                            {% if pf.short %}<code class="font-mono text-xs text-surface-700">{{ pf.short }}</code>
+                            {% else %}<span class="text-xs text-surface-500" x-text="t('belum ada — run menolak sebelum ada commit yang dinilai','none yet — the run refused before a commit was under judgement')"></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Berkas','File')"></span>
+                        <code class="font-mono text-xs text-surface-700 break-all text-right">{{ pf.path }}</code>
                     </div>
                 </div>
                 {% endif %}

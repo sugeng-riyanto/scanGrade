@@ -199,6 +199,7 @@ one of those the launcher is whatever the last *successful* release installed.
 | **freeze deploys** (e.g. exam week) | `touch /etc/scangrade-deploy.pause` |
 | resume | `rm /etc/scangrade-deploy.pause` |
 | see which commit a gate refused, and why | `cat /var/lib/scangrade-deploy/quarantined` |
+| see which step stopped the last run *before* it merged | `cat /var/lib/scangrade-deploy/refused-before-merge` |
 | retry a quarantined commit once | `touch /etc/scangrade-deploy.release` |
 | stop deploying automatically | `systemctl disable --now scangrade-deploy.timer` |
 | see the last release that stuck | `cat /var/lib/scangrade-deploy/last-deploy` |
@@ -728,9 +729,13 @@ It also stops instead of guessing when:
   `/var/lib/scangrade-deploy/unarmed`) — see
   [An unarmed box deploys nothing](#an-unarmed-box-deploys-nothing);
 - the release itself removes Gate 0 (exit 16, and it is quarantined);
-- the checkout has local changes (it will not clobber hand edits);
-- the update is not a fast-forward (history was rewritten);
-- the release ships a migration and no snapshot of the data can be taken;
+- the checkout has local changes (exit 4 — it will not clobber hand edits);
+- `git status` cannot read the checkout at all (exit 4): *"we could not tell"* is
+  not *"it is clean"*, and an empty answer used to mean both;
+- the fetch cannot reach GitHub (exit 5, network or credentials);
+- the update cannot be merged into the checkout (exit 6 — history rewritten, a
+  stale `.git/index.lock`, an untracked file in the way);
+- the release ships a migration and no snapshot of the data can be taken (exit 12);
 - `requirements.txt` changed and `pip install` failed;
 - the code does not compile;
 - the app cannot construct with all of its blueprints and routes;
@@ -803,6 +808,39 @@ refuses the *run* rather than a commit. Its record is
 `/var/lib/scangrade-deploy/unarmed`, which the status page reads, and it is deleted
 as soon as the box is armed again — a quarantine is a fact about a commit, and there
 is no commit here.
+
+### The other half: refusals *before* the release moves
+
+The list above is about a release that got as far as being merged and judged. The
+other half of "why is nothing deploying?" had no record at all — the run refusing
+*before* it touched the checkout: a dirty tree, an unreadable one, a fetch with no
+network, a migration release with no recovery point, a merge that cannot happen.
+
+That gap is not theoretical. A box fetched `origin/main` every two minutes for three
+hours and merged none of it, while its own status page reported `0 uncommitted
+files`, `No Held Release`, a launcher that passes Gate 0, and `Running` for the
+schedule — all true, and all describing a box that was deploying nothing. The cause
+was a stale `.git/index.lock`, which makes `git merge` fail while `git status`
+succeeds; the journal said `not a fast-forward (history rewritten?)` every tick,
+which names a cause that was not there.
+
+So a refusal that happens before the merge writes its own record:
+
+```
+/var/lib/scangrade-deploy/refused-before-merge
+```
+
+Five parts: the step it refused at (a key the status page has a sentence for),
+when, the exit code `systemctl status` will also report, the commit under judgement
+(empty when the run refused before there was one), and then the **command's own
+output** — git's error, or the snapshot's. It is written by every pre-merge exit and
+removed the moment a release merges, so it always describes the last attempt rather
+than a state that has since been fixed. A later refusal overwrites it; nothing
+stacks.
+
+It is not a quarantine and it does not try to be: a fetch that could not reach
+GitHub is the world's fault, not the commit's, and the next tick simply tries again.
+Nothing in the record decides whether to retry — the exit codes already do.
 
 A **manual** rollback does not write a quarantine — `git reset --hard` by hand
 leaves no record — so after one, the next tick will indeed try the same release

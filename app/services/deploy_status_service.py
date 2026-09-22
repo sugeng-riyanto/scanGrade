@@ -108,6 +108,10 @@ DEFAULT_REQUEST_DIR = DEFAULT_STATE_DIR + "/requests"
 #: the opposite answer — "no commit is held" and "no release will deploy at all"
 #: were being told apart by nothing.
 DEFAULT_UNARMED_FILE = DEFAULT_STATE_DIR + "/unarmed"
+#: The runner's record of a refusal that happens before a release is merged — the
+#: half of "why is nothing deploying?" that had no record at all. A quarantine is
+#: about a commit; this is about the step that stopped the run getting to one.
+DEFAULT_PREFLIGHT_FILE = DEFAULT_STATE_DIR + "/refused-before-merge"
 
 #: Where git lives when the service user's PATH does not carry it. The unit runs
 #: the app without a login shell, so `which` is the first guess and these are the
@@ -339,6 +343,106 @@ def unarmed_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     # A record with nothing after the timestamp is still a refusal on record; the
     # gap is the checker's silence, not this page's licence to say "absent".
     state["detail"] = report or None
+    return state
+
+
+# ── the refusal that happens before the release moves ────────────────────────
+#
+# The quarantine card covers a release a gate refused *after* merging it, and the
+# unarmed card covers a run refused before it fetched anything. Between them sits
+# the failure this page was blind to: a run that fetches fine and then stops before
+# the merge — a dirty checkout, a fetch with no network, a migration release with no
+# recovery point, a merge that cannot happen. Nothing is merged, so nothing is
+# quarantined; nothing is reloaded, so no uptime moves; and the checkout's own
+# readings look healthy, because a status reading and a *writer* disagree about what
+# a stale `.git/index.lock` means. A box in that state fetches every two minutes and
+# deploys nothing, indefinitely, with `No Held Release` on this page.
+#
+# So the runner records which step refused, when, the exit code, the commit under
+# judgement and the command's own words. This reads that record and classifies the
+# step into a key the template can say in either language, the way `gate_key` does
+# for the quarantine. `tests/unit/test_deploy_status.py` lifts every
+# `PREFLIGHT_GATE=` out of the runner and fails if one has no sentence, so a step
+# added to the deploy cannot arrive here as a blank.
+PREFLIGHT_NONE = "none"
+PREFLIGHT_PRESENT = "present"
+PREFLIGHT_UNREADABLE = "unreadable"
+PREFLIGHT_MALFORMED = "malformed"
+PREFLIGHT_KEYS = frozenset({PREFLIGHT_NONE, PREFLIGHT_PRESENT, PREFLIGHT_UNREADABLE,
+                            PREFLIGHT_MALFORMED})
+
+#: The steps that can refuse a release before it moves, as the runner names them.
+PREFLIGHT_GATES = frozenset({
+    "not_root",
+    "no_checkout",
+    "no_virtualenv",
+    "checkout_unreadable",
+    "dirty_checkout",
+    "fetch_failed",
+    "snapshot_refused",
+    "merge_refused",
+})
+
+#: The one step whose refusal is about the world rather than the box: a fetch that
+#: could not reach GitHub retries by itself on the next tick. Warning, not breakage
+#: — this is the only gate here that has ever been right about a healthy box.
+PREFLIGHT_TRANSIENT = frozenset({"fetch_failed"})
+
+#: A step this page does not know (a newer runner wrote the record). Its own name is
+#: shown as it stands; the key only exists so the card has one sentence to give.
+PREFLIGHT_UNKNOWN_GATE = "unknown_gate"
+
+
+def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
+    """The last refusal to get a release merged, as the runner recorded it.
+
+    Five positional lines, the first four being the record's header: the step, the
+    ISO time, the exit code, and the commit the attempt was about (empty when the
+    run refused before a commit was under judgement). Everything after them is the
+    runner's own words and is shown as it stands.
+
+    A record that exists but cannot be read is *reported*, never treated as absent.
+    That distinction is the whole reason this card exists: "nothing has refused" and
+    "a refusal I cannot read" look identical from outside, and only one of them
+    means the box is deploying.
+    """
+    state: dict = {
+        "path": str(path), "present": False, "key": PREFLIGHT_NONE,
+        "gate": None, "gate_key": None, "at": None, "age_seconds": None,
+        "exit_code": None, "commit": None, "short": None, "detail": None,
+        "reason": None,
+    }
+    text, why = _read(path)
+    if text is None:
+        if why != "absent":
+            state["key"] = PREFLIGHT_UNREADABLE
+            state["reason"] = why
+        return state
+
+    lines = text.splitlines()
+    gate = lines[0].strip() if lines else ""
+    when = lines[1].strip() if len(lines) > 1 else ""
+    code = lines[2].strip() if len(lines) > 2 else ""
+    commit = lines[3].strip() if len(lines) > 3 else ""
+    body = "\n".join(lines[4:]).rstrip() if len(lines) > 4 else ""
+    if not re.fullmatch(r"[a-z0-9_]{1,40}", gate):
+        state["key"] = PREFLIGHT_MALFORMED
+        state["reason"] = gate or None
+        return state
+
+    state["present"] = True
+    state["key"] = PREFLIGHT_PRESENT
+    state["gate"] = gate
+    state["gate_key"] = gate if gate in PREFLIGHT_GATES else PREFLIGHT_UNKNOWN_GATE
+    state["at"] = when or None
+    state["age_seconds"] = _age_seconds(when or None, now)
+    state["exit_code"] = code if code.isdigit() else None
+    if re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+        state["commit"] = commit.lower()
+        state["short"] = commit[:7]
+    # A header with nothing after it is still a refusal on record: the silence is
+    # the command's, not this page's licence to say nothing was refused.
+    state["detail"] = body or None
     return state
 
 
@@ -842,7 +946,7 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime) -> dict:
 # ── the verdict ──────────────────────────────────────────────────────────────
 
 def verdict(runner: dict, checkout: dict, *, paused: bool,
-            unarmed: dict | None = None) -> dict:
+            unarmed: dict | None = None, preflight: dict | None = None) -> dict:
     """One level and one reason key, in the order the failures actually bite.
 
     A runner that cannot pass Gate 0 is the headline even when the checkout is
@@ -855,6 +959,14 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
     can be perfect and a stale launcher can be a warning, but a box the deploy
     refuses deploys nothing at all. Reporting `fresh` beside that record would be
     the page telling an operator the opposite of what the box is doing.
+
+    `preflight` is the runner's record of a run that fetched and then refused before
+    merging. It sits above the readings that *infer* the same fact — `dirty`,
+    `behind` — because it says which step refused and what it said, where those only
+    say that something is off. It sits below `paused`, which is somebody's decision
+    rather than a fault, and below `unarmed`, which stops the run even earlier. Only
+    the transient arm (`fetch_failed`) is a warning: that one retries by itself, and
+    crying breakage for a network blip would be wrong the next tick.
     """
     out = {"level": UNKNOWN, "key": None, "detail": None, "behind": None,
            "runner_behind": None, "runner_from": None}
@@ -893,6 +1005,12 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
         return {**out, "level": WARN, "key": "launcher_stale"}
     if paused:
         return {**out, "level": WARN, "key": "paused"}
+    if preflight and preflight.get("present"):
+        gate = preflight.get("gate_key")
+        level = WARN if gate in PREFLIGHT_TRANSIENT else BROKEN
+        return {**out, "level": level, "key": "refused",
+                "detail": preflight.get("gate") or gate,
+                "behind": checkout.get("behind")}
     if not checkout["available"]:
         return {**out, "level": UNKNOWN, "key": checkout["reason_key"] or "checkout_unreadable",
                 "detail": checkout["detail"]}
@@ -920,12 +1038,15 @@ REASON_KEYS = frozenset({
     "paused", "dirty", "behind", "fresh",
     # the runner's record of refusing a whole run (the box, not a commit)
     "unarmed",
+    # the runner's record of refusing a release *before* it merged it
+    "refused",
 })
 
 
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
-           quarantine_file=None, unarmed_file=None, request_dir=None,
-           release_request=None, now: _dt.datetime | None = None) -> dict:
+           quarantine_file=None, unarmed_file=None, preflight_file=None,
+           request_dir=None, release_request=None,
+           now: _dt.datetime | None = None) -> dict:
     """Everything the page shows. Any single part may be `unknown` with a reason."""
     now = now or _dt.datetime.now(_dt.timezone.utc)
     repo = pathlib.Path(repo or os.environ.get("SCANGRADE_REPO") or DEFAULT_REPO)
@@ -942,6 +1063,10 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         unarmed_file or os.environ.get("SCANGRADE_UNARMED_FILE")
         or DEFAULT_UNARMED_FILE)
     unarmed = unarmed_state(unarmed_file, now=now)
+    preflight_file = pathlib.Path(
+        preflight_file or os.environ.get("SCANGRADE_PREFLIGHT_FILE")
+        or DEFAULT_PREFLIGHT_FILE)
+    preflight = preflight_state(preflight_file, now=now)
     request_dir = pathlib.Path(
         request_dir or os.environ.get("SCANGRADE_REQUEST_DIR") or DEFAULT_REQUEST_DIR)
     release_request = pathlib.Path(
@@ -967,11 +1092,14 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "paused": paused,
         "pause_file": str(pause_file),
         "launcher": expect_reason,
-        "verdict": verdict(main, checkout, paused=paused, unarmed=unarmed),
+        "verdict": verdict(main, checkout, paused=paused, unarmed=unarmed,
+                           preflight=preflight),
         "quarantine": quarantine_state(quarantine_file, repo, now=now),
         "quarantine_file": str(quarantine_file),
-        "unarmed": unarmed_state(unarmed_file, now=now),
+        "unarmed": unarmed,
         "unarmed_file": str(unarmed_file),
+        "preflight": preflight,
+        "preflight_file": str(preflight_file),
         "release_file": DEFAULT_RELEASE_FILE,
         "release_file_present": _exists(pathlib.Path(DEFAULT_RELEASE_FILE)),
         "request_dir": str(request_dir),
