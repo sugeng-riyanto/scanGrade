@@ -15,13 +15,6 @@ from unittest.mock import patch, MagicMock
 # ── Fixtures ──────────────────────────────────────────────────
 
 @pytest.fixture
-def app():
-    from app import create_app
-    _app = create_app("app.config.TestingConfig")
-    return _app
-
-
-@pytest.fixture
 def client(app):
     return app.test_client()
 

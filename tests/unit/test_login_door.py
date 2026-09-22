@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import create_app
+from tests.conftest import build_app
 from app.utils import auth as authmod
 from app.utils.auth import login_door_for
 from app.routes import auth as routes_auth
@@ -87,13 +87,14 @@ class FakeSupabase:
 
 @pytest.fixture(scope="module")
 def app():
-    """Built once: ``create_app`` is the expensive part, and nothing here mutates it.
+    """Built once, and its own: the probe rule below has to be registered before
+    this app has answered a request, which the shared app always has.
 
     The probe rule is added here rather than by a fixture of its own because a
     route cannot be registered after the app has handled its first request — and
     with a shared app, that first request belongs to whichever test runs first.
     """
-    application = create_app("app.config.TestingConfig")
+    application = build_app("app.config.TestingConfig")
     application.config["RATELIMIT_ENABLED"] = False
     application.extensions["supabase_auth"] = FakeSupabase()
     application.extensions["supabase"] = FakeSupabase()

@@ -12,12 +12,6 @@ import flask
 import pytest
 
 
-@pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def test_retention_loop_runs_inside_app_context(app, monkeypatch):
     from app.services import data_retention_service as drs
 

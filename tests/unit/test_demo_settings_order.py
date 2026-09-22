@@ -57,12 +57,6 @@ SETTINGS_LABEL = {
 }
 
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def _render(app, template, blob, signed_in=False, **ctx):
     """Render a template as the route would, with ``demo_settings`` pinned.
 

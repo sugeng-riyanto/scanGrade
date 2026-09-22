@@ -74,12 +74,6 @@ class TestTierLimits:
 
 class TestPublicPages:
     @pytest.fixture
-    def app(self):
-        from app import create_app
-        # TestingConfig keeps the suite offline (no real Supabase/Redis calls).
-        return create_app("app.config.TestingConfig")
-
-    @pytest.fixture
     def client(self, app):
         return app.test_client()
 

@@ -17,6 +17,34 @@ logger = logging.getLogger(__name__)
 # Flask-Limiter instance — initialized in create_app(), imported by routes
 limiter = None
 
+#: Every limiter this process has built, kept alive on purpose.
+#:
+#: `_rate_limit` decorates a view with `limiter.limit(...)` at *import* time, and
+#: flask-limiter's decorator holds only a WEAK proxy to that Limiter
+#: (``_limits.py: self.limiter = weakref.proxy(limiter)``). A second `create_app()`
+#: — every test client, and any second app in one process — replaces `limiter`
+#: below, and the one before it is then collected as garbage, leaving every request
+#: through a decorated view answering
+#: ``ReferenceError: weakly-referenced object no longer exists``.
+#:
+#: Measured, not theorised: under the full unit suite `/r/<token>` and the rest of
+#: its class answered 500 with exactly that error, in whichever module happened to
+#: build the second app. Production builds one app and never sees it, which is
+#: precisely why this belongs here rather than in a test: the decorated view keeps
+#: the limiter it was built with.
+_limiters: list = []
+
+
+def remember_limiter(built):
+    """Adopt the limiter `create_app` just built, and keep it alive.
+
+    Returns it, so the caller can carry on treating this as an assignment.
+    """
+    global limiter
+    limiter = built
+    _limiters.append(built)
+    return built
+
 # ── Redis connection pool (singleton, thread-safe) ──────────────
 _redis_pool = None
 _redis_lock = threading.Lock()

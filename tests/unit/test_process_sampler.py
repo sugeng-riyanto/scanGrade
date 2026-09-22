@@ -260,11 +260,6 @@ class TestNothingBlocks:
 # ── the route, and who may read it ───────────────────────────────────────────
 
 class TestTheRoute:
-    @pytest.fixture(scope="class")
-    def app(self):
-        from app import create_app
-        return create_app("app.config.TestingConfig")
-
     @pytest.fixture
     def client(self, app):
         return app.test_client()

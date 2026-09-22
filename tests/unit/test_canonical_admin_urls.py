@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-from app import create_app
 from app.services import device_preview as preview
 from app.utils.legacy_urls import LEGACY_ADMIN_PAGES, legacy_endpoint
 
@@ -38,11 +37,6 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # The two prefixes that own content: school-scoped, and platform-wide.
 ROLE_PREFIXES = ("/admin-sekolah/", "/super-admin/")
-
-
-@pytest.fixture(scope="module")
-def app():
-    return create_app("testing")
 
 
 @pytest.fixture(scope="module")

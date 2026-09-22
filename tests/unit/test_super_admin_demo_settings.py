@@ -78,12 +78,6 @@ class FakeSupabase:
 
 # ── harness ──────────────────────────────────────────────────────
 
-@pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def _call(app, monkeypatch, settings, method="GET", data=None, path="/super-admin/demo-settings"):
     from flask import g
 

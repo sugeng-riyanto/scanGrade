@@ -39,7 +39,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
 
-from app import create_app                                  # noqa: E402
+from tests.conftest import build_app                        # noqa: E402
 from app.utils import query_meter                           # noqa: E402
 from app.utils.cache import cache_delete, cache_get, cache_set   # noqa: E402
 from app.utils.supabase_retry import RetryingClient         # noqa: E402
@@ -101,7 +101,7 @@ class FakeSupabase:
 
 def app_with(routes):
     """A testing app whose data client is a fake, plus the routes to poke at it."""
-    app = create_app("testing")
+    app = build_app("testing")
     app.config["WTF_CSRF_ENABLED"] = False
     for rule, view in routes:
         app.add_url_rule(rule, view.__name__, view)
@@ -192,7 +192,7 @@ class TestTheMeterIsArmedFirst:
     def test_a_hook_registered_after_the_app_sees_an_armed_meter(self):
         """`begin()` must run before every other hook, or the first query is free."""
         seen = {}
-        app = create_app("testing")
+        app = build_app("testing")
 
         @app.before_request
         def later_hook():

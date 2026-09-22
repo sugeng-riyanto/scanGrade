@@ -171,10 +171,8 @@ def _no_session_cache_replay():
 
 
 @pytest.fixture
-def app(monkeypatch):
-    from app import create_app
-
-    application = create_app("app.config.TestingConfig")
+def app(app_session, monkeypatch):
+    application = app_session
     application.config["RATELIMIT_ENABLED"] = False
 
     db = FakeSupabase(ROWS)

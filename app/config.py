@@ -103,6 +103,26 @@ class Config:
     # the app must not mutate data, so this is switchable.
     START_BACKGROUND_SCHEDULERS = env_bool("START_BACKGROUND_SCHEDULERS", True)
 
+    #: True when this construction is the *deploy's* probe rather than the app
+    #: about to serve. `deploy/scangrade-deploy.sh` sets
+    #: START_BACKGROUND_SCHEDULERS=false for the gate that proves the new commit
+    #: constructs, and nothing else in the repository sets it — it dates from the
+    #: first commit of that script, so every copy of the runner ever installed
+    #: carries it. That is what lets the app refuse a release staged by a runner
+    #: which is not the checkout's (see app/utils/armament.py) while gunicorn
+    #: constructing the same app never sees the question.
+    DEPLOY_PROBE = not START_BACKGROUND_SCHEDULERS
+
+    # The runner-staleness alert (app/services/deploy_alert_service.py). Tunable
+    # from the environment on purpose: the alert exists for the case where the
+    # release machinery is not working, so arming or quietening it must not require
+    # a release. `DEPLOY_ALERT_MIN_COMMITS` is the "more than a few commits" line,
+    # and the interval is six hours — 12 cheap `git` calls a day on a 1 vCPU box.
+    DEPLOY_ALERT_MIN_COMMITS = env_int("DEPLOY_ALERT_MIN_COMMITS", 5)
+    DEPLOY_ALERT_INTERVAL_SECONDS = env_int("DEPLOY_ALERT_INTERVAL_SECONDS", 6 * 3600)
+    #: Where the last-alert record is kept. Defaults to Flask's instance folder.
+    DEPLOY_ALERT_STATE_DIR = env_str("SCANGRADE_ALERT_STATE_DIR", "") or None
+
     @classmethod
     def validate(cls):
         required = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SECRET_KEY"]
@@ -144,6 +164,10 @@ class TestingConfig(Config):
     # Creating the app must stay side-effect free: the retention loop purges
     # immediately on start. Tests that exercise it start it themselves.
     START_BACKGROUND_SCHEDULERS = False
+    # Set explicitly rather than derived from the line above: tests construct the
+    # app the same side-effect-free way the deploy's probe does, and the armament
+    # question — "is this box armed" — is about a VPS, not about a test run.
+    DEPLOY_PROBE = False
 
     SUPABASE_URL = os.getenv("TEST_SUPABASE_URL", "http://127.0.0.1:54321")
     SUPABASE_SERVICE_KEY = _TEST_JWT
@@ -152,6 +176,11 @@ class TestingConfig(Config):
 
     # Disable every optional integration so tests stay offline and fast.
     REDIS_URL = ""
+    # ...and named rather than merely blanked: an empty REDIS_URL still loses to a
+    # REDIS_URL in the environment (the checkout's .env sets one), so a test run was
+    # dialling a Redis on every construct and waiting four seconds to be refused.
+    # Naming the limiter's storage ends the argument.
+    RATELIMIT_STORAGE_URI = "memory://"
     SENTRY_DSN = ""
     MIDTRANS_SERVER_KEY = ""
     FONNTE_API_KEY = ""

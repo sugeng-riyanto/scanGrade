@@ -215,24 +215,19 @@ class TestTheRealBuilderShape:
 
 class TestTheAppWrapsItsClient:
 
-    def test_the_extension_is_the_wrapped_client(self):
+    def test_the_extension_is_the_wrapped_client(self, app):
         """A wrapper nobody installs is a wrapper that fixes nothing.
 
         Every call site in the app reaches the database through
         ``current_app.extensions["supabase"]``, so this is the one line that decides
         whether the 676 un-retried call sites are fixed.
         """
-        from app import create_app
-
-        app = create_app("testing")
         assert isinstance(app.extensions["supabase"], RetryingClient), (
             "the app hands out a raw supabase client, so every call site that is not "
             "hand-wrapped is back to raising Server disconnected")
 
-    def test_get_supabase_returns_that_same_wrapped_client(self):
-        from app import create_app
+    def test_get_supabase_returns_that_same_wrapped_client(self, app):
         from app.utils.supabase_client import get_supabase
 
-        app = create_app("testing")
         with app.app_context():
             assert isinstance(get_supabase(), RetryingClient)

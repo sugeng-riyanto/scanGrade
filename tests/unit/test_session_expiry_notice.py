@@ -65,11 +65,15 @@ def _fake_login_result():
     return SimpleNamespace(user=user, session=session)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def app():
-    from app import create_app
+    """Its own app, built once: the probe rule below has to be registered before
+    this app has answered a request, and the shared app has answered thousands.
 
-    application = create_app("app.config.TestingConfig")
+    Everything else here is read-only, so one build for the file is enough."""
+    from tests.conftest import build_app
+
+    application = build_app("app.config.TestingConfig")
     application.config["RATELIMIT_ENABLED"] = False
 
     # A route that is protected by nothing but ``login_required``, so the session

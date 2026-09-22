@@ -233,12 +233,6 @@ def _call_recover(supa, payload, monkeypatch, app):
     return raw if isinstance(raw, tuple) else (raw, 200)
 
 
-@pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 CODE_ROW = [{"id": "c1", "student_id": "stu-1", "exam_id": "exam-1",
              "code": "234567", "created_at": "2026-09-12T00:00:00+00:00"}]
 

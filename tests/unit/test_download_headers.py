@@ -19,11 +19,6 @@ from pathlib import Path
 import pytest
 
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
 ROOT = Path(__file__).resolve().parents[2]
 ROUTES = ROOT / "app" / "routes"
 

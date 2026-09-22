@@ -214,14 +214,8 @@ class TestSigninPacing:
 # ── the route must not charge a rate limit to the login budget ───
 
 @pytest.fixture
-def route_app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
-@pytest.fixture
-def client(route_app):
-    return route_app.test_client()
+def client(app):
+    return app.test_client()
 
 
 @pytest.fixture

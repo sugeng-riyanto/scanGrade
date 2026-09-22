@@ -36,16 +36,6 @@ ALL_TUTORIALS = ("tutorial_guru.html", "tutorial_murid.html", "tutorial_admin_se
 FALLBACK_ICON = "fa-circle-question"
 
 
-@pytest.fixture(scope="module")
-def app():
-    import sys
-
-    sys.path.insert(0, str(ROOT))
-    from app import create_app
-
-    return create_app("app.config.TestingConfig")
-
-
 def render(app, name: str) -> str:
     """One tutorial as a visitor is served it, entities decoded.
 

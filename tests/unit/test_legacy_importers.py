@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from app import create_app
+from tests.conftest import build_app
 from app.routes import admin as admin_module
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -121,10 +121,10 @@ _APP = None
 
 
 def _app():
-    """One app for the file: `create_app` boots the schedulers, ~5s each time."""
+    """One app for the file: every call here would pay for the build again."""
     global _APP
     if _APP is None:
-        _APP = create_app("testing")
+        _APP = build_app("testing")
     return _APP
 
 
