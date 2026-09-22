@@ -85,12 +85,6 @@ class _Client:
 
 
 @pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
-@pytest.fixture
 def fake_db():
     """Patch the client the cache helpers import at call time."""
     log = []

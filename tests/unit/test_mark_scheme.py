@@ -541,12 +541,10 @@ class TestTheMarksAreShownWhereTheyAreEarned:
         assert "q_part_factor(qtype, correct, student_ans) if q_partial" in text
         assert "<strong>{{ q_earned }}</strong> / {{ q_marks }}" in text
 
-    def test_the_jinja_globals_are_the_scoring_functions_themselves(self):
+    def test_the_jinja_globals_are_the_scoring_functions_themselves(self, app):
         """Not lookalikes: the same objects, so the pages and the total cannot
         drift. Checked by identity, because a guard that only compares names would
         pass on a second implementation with the same name."""
-        from app import create_app
-        app = create_app("testing")
         assert app.jinja_env.globals["q_part_factor"] is qt.part_factor
         assert app.jinja_env.globals["q_partial_credit"] is qt.partial_credit
         assert app.jinja_env.globals["q_correct"] is qt.grade_answer

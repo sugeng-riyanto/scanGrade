@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-from app import create_app
+from tests.conftest import app_instance
 from app.routes import api as api_module
 from app.routes.api import api_create_pengumuman, api_list_pengumuman
 
@@ -119,11 +119,6 @@ class FakeSupabase:
         return row
 
 
-@pytest.fixture(scope="module")
-def flask_app():
-    return create_app("testing")
-
-
 def run(view, monkeypatch, fake, *, role="guru", uid=GURU_A, school=SCHOOL_A,
         method="GET", path="/api/pengumuman", payload=None):
     """Call the real view with `g` populated. Returns (body, status_code).
@@ -132,7 +127,7 @@ def run(view, monkeypatch, fake, *, role="guru", uid=GURU_A, school=SCHOOL_A,
     rather than making every test remember which shape it got.
     """
     monkeypatch.setattr(api_module, "get_supabase", lambda: fake)
-    app = create_app("testing")
+    app = app_instance()
     with app.test_request_context(
         path, method=method,
         data=json.dumps(payload) if payload else None,
@@ -166,7 +161,7 @@ def announcements(*rows):
 
 # ── the leak ────────────────────────────────────────────────────────────────
 
-def test_a_school_sees_only_its_own_announcements(flask_app, monkeypatch):
+def test_a_school_sees_only_its_own_announcements(app, monkeypatch):
     fake = FakeSupabase(announcements(
         ("UntuksA", SCHOOL_A, GURU_A),
         ("UntukB", SCHOOL_B, GURU_B),
@@ -178,7 +173,7 @@ def test_a_school_sees_only_its_own_announcements(flask_app, monkeypatch):
     assert titles == ["UntuksA"], "school A must not receive school B's announcement"
 
 
-def test_the_school_filter_applied_is_the_callers_own_uuid(flask_app, monkeypatch):
+def test_the_school_filter_applied_is_the_callers_own_uuid(app, monkeypatch):
     fake = FakeSupabase(announcements(("UntuksA", SCHOOL_A, GURU_A)))
     run(api_list_pengumuman, monkeypatch, fake)
 
@@ -186,7 +181,7 @@ def test_the_school_filter_applied_is_the_callers_own_uuid(flask_app, monkeypatc
     assert 1 not in fake.school_filters, "the legacy shared bucket must never be used"
 
 
-def test_an_empty_school_does_not_read_the_shared_bucket(flask_app, monkeypatch):
+def test_an_empty_school_does_not_read_the_shared_bucket(app, monkeypatch):
     """The old probe treated 'no rows' as 'wrong column type' and fell back to 1."""
     fake = FakeSupabase(announcements(
         ("UntuksA", SCHOOL_A, GURU_A),
@@ -200,7 +195,7 @@ def test_an_empty_school_does_not_read_the_shared_bucket(flask_app, monkeypatch)
     assert 1 not in fake.school_filters
 
 
-def test_super_admin_still_sees_across_schools(flask_app, monkeypatch):
+def test_super_admin_still_sees_across_schools(app, monkeypatch):
     fake = FakeSupabase(announcements(
         ("UntuksA", SCHOOL_A, GURU_A),
         ("UntukB", SCHOOL_B, GURU_B),
@@ -213,7 +208,7 @@ def test_super_admin_still_sees_across_schools(flask_app, monkeypatch):
 
 # ── the write path ──────────────────────────────────────────────────────────
 
-def test_create_stamps_the_senders_own_school(flask_app, monkeypatch):
+def test_create_stamps_the_senders_own_school(app, monkeypatch):
     fake = FakeSupabase()
     _body, status = run(api_create_pengumuman, monkeypatch, fake, method="POST",
                         school=SCHOOL_A, payload={
@@ -227,7 +222,7 @@ def test_create_stamps_the_senders_own_school(flask_app, monkeypatch):
     assert payload["school_id"] == SCHOOL_A
 
 
-def test_create_does_not_retry_with_one_on_a_type_error(flask_app, monkeypatch):
+def test_create_does_not_retry_with_one_on_a_type_error(app, monkeypatch):
     """The old code wrote school_id = 1 on 'invalid input syntax for type integer'."""
     fake = FakeSupabase(fail_insert="invalid input syntax for type integer:")
     body, status = run(api_create_pengumuman, monkeypatch, fake, method="POST",
@@ -239,7 +234,7 @@ def test_create_does_not_retry_with_one_on_a_type_error(flask_app, monkeypatch):
     assert "Gagal" in body.get_json()["error"]
 
 
-def test_create_without_a_school_is_refused(flask_app, monkeypatch):
+def test_create_without_a_school_is_refused(app, monkeypatch):
     fake = FakeSupabase()
     _body, status = run(api_create_pengumuman, monkeypatch, fake, method="POST",
                         school=None,

@@ -231,12 +231,6 @@ class TestClassAssignment:
 ANSWER_SENTINEL = "ZZ-KUNCI-RAHASIA-ZZ"
 
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def _render(app, released):
     submission = {
         "id": "sub-1",

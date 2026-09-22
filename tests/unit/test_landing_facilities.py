@@ -129,7 +129,7 @@ def cards() -> list[str]:
 
 
 @pytest.fixture(scope="module")
-def rendered() -> str:
+def rendered(app) -> str:
     """The landing page as a visitor is served it, entities decoded.
 
     Rendered rather than grepped, because the type list is written by Jinja from
@@ -140,9 +140,7 @@ def rendered() -> str:
 
     sys.path.insert(0, str(ROOT))
     from flask import g
-    from app import create_app
 
-    app = create_app("app.config.TestingConfig")
     with app.test_request_context("/"):
         g.user = None
         body = app.jinja_env.get_template("landing.html").render()

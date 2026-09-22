@@ -57,12 +57,6 @@ class TestEnvParsing:
 
 # ── Email transport ───────────────────────────────────────────
 
-@pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 class TestEmailTransport:
     def test_send_email_uses_configured_smtp_account_on_465(self, app):
         from app.services.notification_service import send_email

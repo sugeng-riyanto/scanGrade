@@ -12,7 +12,7 @@ from unittest import mock
 from flask import request
 
 import app as app_pkg
-from app import create_app
+from tests.conftest import build_app
 from app.config import Config, ProductionConfig, TestingConfig
 
 
@@ -23,7 +23,7 @@ class _ProxyTestingConfig(TestingConfig):
 
 
 def _client_for(config):
-    app = create_app(config)
+    app = build_app(config)
 
     @app.route("/_whoami")
     def _whoami():  # pragma: no cover - trivial echo endpoint

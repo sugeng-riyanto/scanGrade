@@ -23,7 +23,7 @@ from urllib.parse import quote
 
 import pytest
 
-from app import create_app
+from tests.conftest import build_app
 from app.services import device_preview as preview
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,12 +41,6 @@ SESSION = {
 }
 
 PAGE_URL = "/tools/device-preview"
-
-
-@pytest.fixture(scope="module")
-def app():
-    """One app for the read-only checks: building it is the slow part here."""
-    return create_app("testing")
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +74,7 @@ class TestTheListComesFromTheApp:
         """The property that makes the page stay true without anyone remembering."""
         # Its own app: this adds a rule, and a shared map would carry it into the
         # other tests, where an extra page is noise rather than a finding.
-        app = create_app("testing")
+        app = build_app("testing")
         app.add_url_rule("/teacher/brand-new-page", "brand_new_page", lambda: "ok")
         pages = {p["url"]: p for p in preview.preview_pages(app)}
 
@@ -143,7 +137,7 @@ class TestTheListComesFromTheApp:
         checking anything, so the pair is built here instead — same shape, no
         dependency on the app staying broken.
         """
-        app = create_app("testing")
+        app = build_app("testing")
         app.add_url_rule("/teacher/brand-new-page", "collide_a", lambda: "ok")
         app.add_url_rule("/teacher/classes/brand-new-page", "collide_b", lambda: "ok")
         labels = {p["url"]: p["label"] for p in preview.preview_pages(app)}
@@ -212,7 +206,7 @@ class TestNothingIsDroppedInSilence:
     def test_the_landing_page_is_never_skipped(self):
         """`SKIP_EXACT["/"] = None` means "never skipped", not "no reason"."""
         assert preview.skip_reason("/") is None
-        assert "/" in {p["url"] for p in preview.preview_pages(create_app("testing"))}
+        assert "/" in {p["url"] for p in preview.preview_pages(build_app("testing"))}
 
 
 # ── the page and the module are one contract ─────────────────────

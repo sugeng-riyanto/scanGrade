@@ -95,18 +95,30 @@ def create_app(env=None):
         from flask_limiter.util import get_remote_address
         from app.utils import rate_limiter as rl_module
 
-        storage_uri = "memory://"
-        redis_url = cfg.REDIS_URL or os.environ.get("REDIS_URL", "")
-        if redis_url:
-            try:
-                from redis import Redis
-                r = Redis.from_url(redis_url, socket_connect_timeout=3, socket_timeout=5)
-                r.ping()
-                storage_uri = redis_url
-                r.close()
-                app.logger.info("Redis connected for Flask-Limiter")
-            except Exception as e:
-                app.logger.warning("Redis not available for Flask-Limiter (%s) — falling back to memory://", e)
+        # The storage, decided in this order: a config that *names* it (a test
+        # config names "memory://") is obeyed outright and the environment is not
+        # consulted — otherwise `REDIS_URL` from the checkout's own `.env` overrode
+        # the test config's explicit "" and every construct spent four seconds
+        # failing to reach a Redis the tests never use. Otherwise the configured
+        # Redis is used when it answers, and memory:// when it does not.
+        named = getattr(cfg, "RATELIMIT_STORAGE_URI", "")
+        redis_url = ""
+        if named:
+            storage_uri = named
+        else:
+            redis_url = cfg.REDIS_URL or os.environ.get("REDIS_URL", "")
+            storage_uri = redis_url or "memory://"
+            if redis_url:
+                try:
+                    from redis import Redis
+                    r = Redis.from_url(redis_url, socket_connect_timeout=3, socket_timeout=5)
+                    r.ping()
+                    storage_uri = redis_url
+                    r.close()
+                    app.logger.info("Redis connected for Flask-Limiter")
+                except Exception as e:
+                    storage_uri = "memory://"
+                    app.logger.warning("Redis not available for Flask-Limiter (%s) — falling back to memory://", e)
 
         limiter = Limiter(
             app=app,
@@ -115,7 +127,11 @@ def create_app(env=None):
             default_limits=[],
         )
         app.extensions["limiter"] = limiter
-        rl_module.limiter = limiter
+        # Adopted rather than assigned: the views decorated at import time hold only
+        # a weak proxy to a limiter, so replacing this without keeping the old one
+        # alive leaves every one of them dead on the next request (see
+        # rate_limiter._limiters).
+        rl_module.remember_limiter(limiter)
 
         app.config["RATELIMIT_ENABLED"] = True
         app.config["REDIS_URL"] = redis_url

@@ -127,12 +127,6 @@ class FakeSupabase:
         return FakeQuery(self._tables.get(name, []), log)
 
 
-@pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def _base_tables():
     return {
         "exams": EXAMS,
