@@ -67,12 +67,6 @@ def code(name: str) -> str:
     return _COMMENT.sub("", SURFACES[name])
 
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 def _row(name, late):
     """One submission row, with the columns the screens actually read."""
     return {

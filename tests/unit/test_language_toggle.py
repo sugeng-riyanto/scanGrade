@@ -366,20 +366,29 @@ def test_the_dark_mode_labels_follow_the_toggle():
         assert f"t('{label}'" in SOURCE, f"the dark-mode label {label!r} is still hardcoded"
 
 
+# The declaration `deploy/i18n_coverage.py` reads: a page that pins its own
+# language, whatever the reader chose. Mirrored rather than imported, because an
+# import would let a change to the gate's regex quietly widen this one.
+PIN_DECLARED = re.compile(r"{%-?\s*set\s+content_lang\s*=\s*'id'\s*-?%}")
+
+
 def test_server_rendered_counts_use_the_toggle():
     """Jinja interpolates a count once, server-side, so `{{ n }} ujian` stayed
     Indonesian in English mode. A count still followed by a bare lowercase word has
     not been bound.
 
-    Only templates that extend base.html are policed: `monitor.html` is a
+    Only templates that follow the toggle are policed: `monitor.html` is a
     standalone operations page with no header and therefore no language toggle, so
-    there is no choice for it to honour.
+    there is no choice for it to honour — and a page that declares
+    `content_lang = 'id'` has made the same choice for the whole page, which is
+    the state `deploy/i18n_coverage.py` records as backlog and refuses a `t()` pair
+    on. Its server-rendered counts are the pin working, not a defect.
     """
     bound_call = re.compile(r"\bt\(\s*'[^']*'\s*,\s*'[^']*'\s*\)")
     leftovers = []
     for path in TEMPLATES:
         text = path.read_text(encoding="utf-8", errors="replace")
-        if not EXTENDS_BASE.search(text):
+        if not EXTENDS_BASE.search(text) or PIN_DECLARED.search(text):
             continue
         # Blank out the t(...) calls first: they legitimately contain the count
         # pattern on both sides, and matching those would report a bound string
@@ -420,6 +429,15 @@ TRANSLATED = [
     # one that says whether the installed runner is the checkout's launcher —
     # read-only, no shell. Its copy is all pairs, so it belongs here.
     "super_admin/deploy_status.html",
+    # The filed report: every word on it is a pair, including the band names, the
+    # descriptors and the findings, which arrive from the service as `(id, en)`.
+    # It belongs here for the same reason the dashboard does — a school that reads
+    # it in English has to be able to read all of it.
+    "teacher/analysis_report.html",
+    # The individual learner report, for the same reason: a family that reads the
+    # child's page in English reads *all* of it — the states, the level names, the
+    # strengths and the remediation all arrive from the service as pairs.
+    "teacher/analysis_student.html",
     "admin_sekolah/dashboard.html",
     "admin_sekolah/import.html",
     # The exam builder. It is where a teacher spends the most time in the app —
@@ -821,7 +839,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 36, (
+    assert len(TRANSLATED) == 38, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

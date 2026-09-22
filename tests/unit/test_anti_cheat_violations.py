@@ -99,12 +99,6 @@ def log(uid="stu-1", exam="exam-1", vtype="tab_switch"):
     return {"user_id": uid, "exam_id": exam, "violation_type": vtype}
 
 
-@pytest.fixture
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 # ── the CSRF shape that made every event a no-op ─────────────────
 
 def test_a_json_array_cannot_carry_a_csrf_token(app):
@@ -166,10 +160,19 @@ def test_the_acts_that_count_are_tab_switch_and_leaving_fullscreen():
     assert count_penalized_violations(supa, "stu-1", "exam-1") == 3
 
 
-def test_the_penalized_set_is_exactly_those_two():
-    """Pinned so a third type cannot be charged by accident — and so a type that
-    the page only records (a blur, a right-click) cannot start costing points."""
-    assert set(PENALIZED_VIOLATION_TYPES) == {"tab_switch", "fullscreen_exit"}
+def test_the_penalized_set_is_exactly_these_three():
+    """Pinned so a fourth type cannot be charged by accident — and so a kind the
+    page only records (a right-click, a copy) cannot start costing points.
+
+    ``focus_lost`` is the third, and it is the one that had to be measured to be
+    believed: a windowed exam beside another window leaves ``document.hidden``
+    false, so the visibility path never fired and the window-blur handler logged a
+    console line and recorded nothing. The three are one act to a school — the
+    assessment stopped being the thing on screen — so they share the ladder.
+    """
+    assert set(PENALIZED_VIOLATION_TYPES) == {
+        "tab_switch", "fullscreen_exit", "focus_lost",
+    }
 
 
 def test_other_students_and_exams_are_not_counted():
@@ -491,12 +494,22 @@ def test_a_reload_does_not_bill_the_browser_dropping_fullscreen():
 
 def test_the_violation_is_recorded_as_the_act_it_was():
     """The teacher's report can only tell a fullscreen exit from a tab switch if
-    the client names the right type, so the type travels with the request."""
+    the client names the right type, so the type travels with the request — and
+    so does how long the student was gone, which is the number the countdown
+    makes worth reading and the evidence a countdown existed at all."""
     src = _src()
 
-    assert "handleViolation(vtype = 'tab_switch')" in src
+    assert "handleViolation(vtype = 'tab_switch', trigger = null, awaySeconds = null)" in src
     assert "this.handleViolation('fullscreen_exit');" in src
+    assert "this.startAwayGrace('focus_lost', 'window_blur', gone);" in src, \
+        "the window-blur path has to name its own act, or the report cannot"
+    assert "this.startAwayGrace('tab_switch', 'visibilitychange', gone);" in src, \
+        "and the hidden path must not borrow the other one's name"
     assert "violation_type: vtype," in src, "the type must reach the server"
+    assert "trigger: trigger, away_seconds: awaySeconds" in src, \
+        "the act the page saw and the seconds it measured both travel with it"
+    assert "this.handleViolation(kind || 'tab_switch', trigger, away)" in src, \
+        "and the charge carries the very absence the countdown was opened for"
 
 
 def test_the_terms_say_fullscreen_is_required():
@@ -509,6 +522,35 @@ def test_the_terms_say_fullscreen_is_required():
     assert "menghentikan ujian" in src
     assert "keluar dari layar penuh" in src, \
         "and the ladder must name the acts that are counted"
+
+
+def test_the_visible_window_that_loses_focus_blurs_the_paper_under_the_same_guards():
+    """The case the page could not see at all.
+
+    A restored-down browser beside another window leaves ``document.hidden``
+    false: the visibility path never ran, the fullscreen check never ran, and the
+    window-blur handler's whole body was a console line. So a windowed exam could
+    be read off the screen for the length of a sitting with no record that it
+    happened. It now raises the same panel under the same guards and after the
+    same debounce — and, since the second chance, opens the countdown instead of
+    charging on the spot.
+    """
+    src = _src()
+    handler = src.split("window.addEventListener('blur'", 1)[1] \
+               .split("window.addEventListener('focus'", 1)[0]
+
+    assert "if (document.hidden) return;" in handler, \
+        "a hidden document belongs to the visibility handler: one absence, one charge"
+    assert "if (!this._isFocusTab || this.submitted || document.hidden) return;" in handler, \
+        "raised after the guard, never before it"
+    assert "if (this.fullscreenBlocked) return;" in handler, \
+        "an absence the fullscreen overlay already charged is not billed twice"
+    assert "}, 1500);" in handler, \
+        "the same debounce as the hidden path, so a moment's inattention is nothing"
+    assert "this.startAwayGrace('focus_lost', 'window_blur', gone);" in handler, \
+        "the panel goes up and the countdown starts in the same breath"
+    assert "this.handleViolation(" not in handler, \
+        "and the charge waits for the countdown, so a phone call is not a penalty"
 
 
 # ── the paper is blurred, not merely dimmed ──────────────────────
@@ -551,30 +593,43 @@ def test_leaving_the_exam_blurs_the_paper_too():
 def test_the_away_blur_cannot_fire_before_the_terms_are_accepted():
     """Arming on page load watched a student who had not started, and a
     middle-clicked link in a background tab was counted as leaving. The blur is
-    raised in exactly one place: the armed visibility handler.
+    raised in exactly one place — the funnel every armed handler calls — so no
+    path can put the panel up while skipping the guards beside it.
     """
     src = _src()
 
     assert "awayBlurred: false," in src, "it starts clear"
     assert src.count("this.awayBlurred = true;") == 1, \
-        "one site, or it can be raised from somewhere that is not armed"
-    assert "this.setupAntiCheat()" in src.split("armAntiCheat() {", 1)[1], \
-        "and that site lives in the handler arming installs"
+        "one site for both ways the screen is taken away, so the guards cannot " \
+        "be true of one and false of the other"
+    funnel = src.split("startAwayGrace(kind, trigger, since) {", 1)[1] \
+               .split("\n        },", 1)[0]
+    assert "this.awayBlurred = true;" in funnel, "and that site is the funnel"
+    assert "if (this.submitted || !this.antiCheat.enabled) return;" in funnel
+    assert "if (!this._isFocusTab) return;" in funnel, \
+        "the tab in front is the only one that may blur its own paper"
+    armed = src.split("armAntiCheat() {", 1)[1]
+    assert "this.setupAntiCheat()" in armed, \
+        "the handlers live in what arming installs"
+    assert armed.count("this.startAwayGrace(") == 2, \
+        "both of them, so neither can be reached from somewhere that is not armed"
 
 
 def test_the_second_tab_of_the_same_exam_does_not_blur_the_tab_in_front():
     """Two tabs of one exam each counting the other is the defect this ladder was
-    fixed for. The blur has to obey the same rule as the charge beside it: the
-    tab another tab has taken over from stays silent, so the paper a student is
+    fixed for. The countdown obeys the same rule as the charge beside it: a tab
+    another tab has taken over from stays silent, so the paper a student is
     actually working is never blurred by the tab they are not looking at.
     """
     src = _src()
 
     hidden = src.split("if (document.hidden) {", 1)[1].split("} else {", 1)[0]
     assert "if (!this._isFocusTab || this.submitted) return;" in hidden, \
-        "the blur and the charge must share one guard"
-    assert hidden.index("this.awayBlurred = true;") > hidden.index("return;"), \
-        "the blur is raised after the guard, never before it"
+        "the hidden path still refuses a tab another tab took over from"
+    assert "this.startAwayGrace('tab_switch', 'visibilitychange', gone);" in hidden, \
+        "and hands the absence to the funnel, which applies the rule a second time"
+    assert "this.awayBlurred = true;" not in hidden, \
+        "so the blur is never raised outside the guarded funnel"
 
 
 def test_one_click_clears_the_blur_and_re_enters_fullscreen():

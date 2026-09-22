@@ -471,10 +471,15 @@ def take_exam(exam_id):
     # same number rather than two hopeful ones.
     clocks = exam_window.page_facts(exam, exam_started_at)
     anti_cheat_config = json.dumps({k: exam.get(k, v) for k, v in ac_defaults.items()})
+    # The second chance the page offers before an absence costs a point: the two
+    # numbers live in the service (see AWAY_GRACE_SECONDS), so the countdown on
+    # the exam screen, the terms the student agrees to and the guide that
+    # documents them cannot drift apart.
+    from app.services.anti_cheat_service import AWAY_GRACE_CHANCES, AWAY_GRACE_SECONDS
     # The way back in when the phone dies or the WiFi does. Issued with the
     # session and shown in the exam topbar; never a precondition for opening.
     recovery_code = issue_code(supabase, g.user_id, exam_id)
-    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"]))
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 
@@ -831,7 +836,13 @@ def results():
     # Group by subject for total scores
     subjects = {}
     for s in submissions:
-        subj = (s.get("exam") or {}).get("subject", "Lainnya")
+        # `or`, not a `.get` default: a NULL subject is a key that is *present* with
+        # a None value, so the default never applied, the grouping key became None,
+        # and the sort below compared it with a real subject's name — a TypeError
+        # that took the student's whole results page down with a 500. One exam the
+        # builder saved without a subject is all it takes, and the dashboard's own
+        # subject average has read this the safe way (`or "Umum"`) all along.
+        subj = (s.get("exam") or {}).get("subject") or "Lainnya"
         sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
         if subj not in subjects:
             subjects[subj] = {"scores": [], "count": 0}

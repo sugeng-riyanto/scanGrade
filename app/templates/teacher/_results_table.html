@@ -60,6 +60,15 @@
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">Final</span><br><span class="font-extrabold {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</span></div>
             <div class="bg-stone-50 rounded-lg p-1.5"><span class="text-stone-400">NISN</span><br><span class="font-extrabold text-violet-600 text-[9px]">{{ ans.get('_nisn', '-') if is_scan_section else '-' }}</span></div>
         </div>
+        {% if s.away_count %}
+        {# The card only exists below 640px, which is exactly where a teacher
+           checks a room from, so the leaving record has to be on it as well as on
+           the desktop row — the same reason the late mark is in both halves. #}
+        <p class="text-[10px] font-bold text-stone-500"
+           :title="t('Kertas ini meninggalkan layar ujian. Waktu terakhir ada di sini; rincian tiap kejadian ada di halaman koreksi.','This paper left the exam screen. The most recent moment is here; every event is listed on the correction page.')">
+            <i class="fas fa-eye-slash mr-0.5"></i>{{ s.away_count }}&times; &middot; {{ s.away_last_at|tz('%d %b %H:%M') }}
+        </p>
+        {% endif %}
         <div class="flex items-center justify-between pt-1 border-t border-stone-100">
             <span class="text-[9px] text-stone-400">{{ s.submitted_at|tz if s.submitted_at else '-' }}</span>
             <div class="flex gap-1.5">
@@ -117,7 +126,18 @@
                     {% endif %}
                 </td>
                 <td class="py-3 font-bold text-stone-600 text-center">{{ s.score if s.score is not none else '-' }}</td>
-                <td class="py-3 font-bold text-red-600 text-center">{{ s.penalty if s.penalty is not none else 0 }}</td>
+                <td class="py-3 font-bold text-red-600 text-center">{{ s.penalty if s.penalty is not none else 0 }}
+                    {% if s.away_count %}
+                    {# The penalty column is where this belongs: it is what explains
+                       the number above it. The count and the most recent moment,
+                       both from `leaving_summary`, so the badge and the per-paper
+                       page it links to cannot disagree. #}
+                    <span class="block text-[9px] font-bold text-stone-500 mt-0.5 whitespace-nowrap"
+                          :title="t('Kertas ini meninggalkan layar ujian — layar dikaburkan saat siswa berpindah jendela, tab, atau keluar dari layar penuh. Waktu terakhir ada di sini; rincian tiap kejadian ada di halaman koreksi kertas ini.','This paper left the exam screen — it is blurred when the student turns to another window or tab, or leaves fullscreen. The most recent time is here; every event is listed on the correction page for the paper.')">
+                        <i class="fas fa-eye-slash mr-0.5"></i>{{ s.away_count }}&times; &middot; {{ s.away_last_at|tz('%d %b %H:%M') }}
+                    </span>
+                    {% endif %}
+                </td>
                 <td class="py-3 font-extrabold text-center {% if (s.final_score or s.score or 0) >= 70 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ s.final_score if s.final_score is not none else (s.score if s.score is not none else '-') }}</td>
                 {% if is_scan_section %}<td class="py-3 text-center font-bold text-violet-600 text-xs">{{ ans.get('_nisn', '-') }}</td>{% endif %}
                 <td class="py-3 text-xs font-bold text-stone-500 text-center">{{ s.submitted_at|tz if s.submitted_at else '-' }}</td>

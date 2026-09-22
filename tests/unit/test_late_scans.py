@@ -218,12 +218,6 @@ class TestBothScanRoutesRecordIt:
 
 # ── the correction surface ───────────────────────────────────────────────────
 
-@pytest.fixture(scope="module")
-def app():
-    from app import create_app
-    return create_app("app.config.TestingConfig")
-
-
 @contextlib.contextmanager
 def _signed_in(app, path):
     from flask import g

@@ -1,6 +1,8 @@
 from flask import Blueprint, render_template, current_app, flash, redirect
 from app.utils.auth import login_required
 from app.services.anti_cheat_service import (
+    AWAY_GRACE_CHANCES,
+    AWAY_GRACE_SECONDS,
     PENALIZED_VIOLATION_TYPES,
     calculate_graduated_penalty,
 )
@@ -48,7 +50,9 @@ def guide_skor():
     try:
         return render_template("guide/skor.html",
                                penalty_schedule=penalty_schedule(),
-                               charged_violations=len(PENALIZED_VIOLATION_TYPES))
+                               charged_violations=len(PENALIZED_VIOLATION_TYPES),
+                               away_grace_seconds=AWAY_GRACE_SECONDS,
+                               away_grace_chances=AWAY_GRACE_CHANCES)
     except Exception as e:
         current_app.logger.error("Guide skor error: %s", str(e), exc_info=True)
         flash("Terjadi kesalahan: " + str(e)[:100], "error")
