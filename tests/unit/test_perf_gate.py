@@ -346,14 +346,18 @@ Path(out).write_text(Path(os.environ["FAKE_SUMMARY"]).read_text(encoding="utf-8"
 
 
 class _Health(BaseHTTPRequestHandler):
-    status = 200
-    slow_s = 0.0
+    #: A live flag dict rather than a class attribute, so a test can make the box
+    #: busy *in place*. A second server would land on a different port, and the port
+    #: is part of the reference load — so the gate would refuse the comparison
+    #: before it ever probed, and a test about a busy box would never reach the busy
+    #: path. (It didn't: that test was passing on the port mismatch.)
+    flags: dict = {"status": 200, "slow_s": 0.0}
 
     def do_GET(self):  # noqa: N802 - http.server's interface
-        if self.slow_s:
+        if self.flags["slow_s"]:
             import time
-            time.sleep(self.slow_s)
-        self.send_response(self.status)
+            time.sleep(self.flags["slow_s"])
+        self.send_response(self.flags["status"])
         self.send_header("Content-Length", "2")
         self.end_headers()
         self.wfile.write(b"ok")
@@ -368,12 +372,17 @@ def health_server():
     holder = {}
 
     def start(status=200, slow_s=0.0):
-        handler = type("H", (_Health,), {"status": status, "slow_s": slow_s})
+        flags = {"status": status, "slow_s": slow_s}
+        handler = type("H", (_Health,), {"flags": flags})
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         server.daemon_threads = True
         threading.Thread(target=server.serve_forever, daemon=True).start()
         holder["server"] = server
+        holder["flags"] = flags
         return f"http://127.0.0.1:{server.server_address[1]}"
+
+    #: The same box, changing behaviour without changing address.
+    start.now = lambda **kw: holder["flags"].update(kw)
 
     yield start
     holder.get("server") and holder["server"].shutdown()
@@ -464,16 +473,23 @@ class TestTheGateEndToEnd:
 
     def test_a_busy_box_is_not_a_verdict(self, workbench, health_server, monkeypatch,
                                          capsys):
+        """The box, not the release: a 503 on /health keeps the release.
+
+        Same address throughout, busy by flipping the handler in place. A second
+        server would sit on another port, and the port is part of the reference
+        load — the gate would refuse on the shape before probing anything, which is
+        what this test used to do while claiming to test a busy box.
+        """
         bench, base = workbench, health_server()
         assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
         before = bench["baseline"].read_bytes()
 
         bench["summary"].write_text(json.dumps(summary(900, 1800)), encoding="utf-8")
-        busy = health_server(status=503)
-        assert run_gate(bench, busy, monkeypatch) == gate.EXIT_CANNOT_RUN
+        health_server.now(status=503)
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_CANNOT_RUN
         assert "CANNOT MEASURE" in capsys.readouterr().out
-        assert not bench["marker"].exists() or True  # the probe may or may not have run
-        assert bench["baseline"].read_bytes() == before
+        assert bench["baseline"].read_bytes() == before, (
+            "a box that could not be measured wrote a result anyway")
 
     def test_a_changed_reference_load_is_refused_before_any_load_is_placed(self, workbench,
                                                                           health_server,
@@ -482,19 +498,22 @@ class TestTheGateEndToEnd:
         assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
         bench["marker"].unlink(missing_ok=True)
 
-        assert run_gate(bench, base, monkeypatch, {"PERF_SESSIONS": "24"}) == gate.EXIT_CANNOT_RUN
+        # Exit 4, not 2: the comparison this gate exists to make is not happening at
+        # all, so the deploy must not treat the release as measured. The message is
+        # the checker's own and names the remedy.
+        assert run_gate(bench, base, monkeypatch, {"PERF_SESSIONS": "24"}) == gate.EXIT_NOT_ARMED
         out = capsys.readouterr().out
         assert "reference load changed" in out and "re-baseline" in out.replace("rebaseline",
                                                                                 "re-baseline")
         assert not bench["marker"].exists(), (
             "the gate compared nothing and should not have put load on the box")
 
-    def test_a_roster_too_small_for_the_reference_load_is_cannot_measure(self, workbench,
-                                                                        health_server,
-                                                                        monkeypatch, capsys):
+    def test_a_roster_too_small_for_the_reference_load_is_not_armed(self, workbench,
+                                                                  health_server,
+                                                                  monkeypatch, capsys):
         bench, base = workbench, health_server()
         # The roster holds 25 murid; this reference load cannot be staffed.
-        assert run_gate(bench, base, monkeypatch, {"PERF_SESSIONS": "40"}) == gate.EXIT_CANNOT_RUN
+        assert run_gate(bench, base, monkeypatch, {"PERF_SESSIONS": "40"}) == gate.EXIT_NOT_ARMED
         assert "reusing logins" in capsys.readouterr().out
 
     def test_check_validates_the_plumbing_without_loading_anything(self, workbench,
@@ -603,22 +622,50 @@ class TestTheDeployWiring:
             "release deployed, or its verdict is written after the deploy already said OK")
 
     def test_a_confirmed_regression_rolls_back_only_when_asked(self):
+        """Within the confirmed-regression arm, and only there.
+
+        The gate has three other arms that roll back now — exit 4, and the two
+        unarmed paths — so counting across the whole section would be measuring the
+        wrong thing, and the ordering claim only makes sense inside `*)`.
+        """
         block = self.script[self.script.index("# ── Gate 6"):]
         block = block[:block.index('if [ "$HEALTHY" = "1" ]; then')]
         assert 'PERF_ENFORCE' in block
         assert 'if [ "${PERF_ENFORCE:-false}" = "true" ]' in block, (
             "enforcement has to be an explicit switch, like CLAIMS_ENFORCE")
-        assert block.count("HEALTHY=0") == 1
-        assert block.index('if [ "${PERF_ENFORCE:-false}" = "true" ]') < block.index("HEALTHY=0")
-        assert 'keeping the release' in block, (
+        confirmed = block[block.index("    *)"):]
+        assert confirmed.count("HEALTHY=0") == 1
+        assert confirmed.index('if [ "${PERF_ENFORCE:-false}" = "true" ]') \
+            < confirmed.index("HEALTHY=0")
+        assert 'keeping the release' in confirmed, (
             "with enforcement off the release is kept, and the log has to say that")
 
     def test_could_not_measure_is_logged_as_not_compared(self):
+        """Exit 2 is \"the box was in the way\", and it still keeps the release.
+
+        The slice ends at the `4)` arm on purpose: the two answers are adjacent in
+        the case statement and mean opposite things, which is the whole point of
+        splitting them — see `test_not_armed_does_roll_back`.
+        """
         block = self.script[self.script.index("# ── Gate 6"):]
         block = block[:block.index('if [ "$HEALTHY" = "1" ]; then')]
-        cant = block[block.index("    2)"):block.index("    *)")]
+        cant = block[block.index("    2)"):block.index("    4)")]
         assert "HEALTHY=0" not in cant, "exit 2 must never roll a release back"
         assert "NOT compared" in cant
+
+    def test_not_armed_does_roll_back(self):
+        """Exit 4 is the different answer: this release was never compared.
+
+        It used to be exit 2 — the same arm as the busy box above — so a box with
+        no roster deployed every commit while reporting a comparison it never
+        made.
+        """
+        block = self.script[self.script.index("# ── Gate 6"):]
+        block = block[:block.index('if [ "$HEALTHY" = "1" ]; then')]
+        not_armed = block[block.index("    4)"):block.index("    *)")]
+        assert "HEALTHY=0" in not_armed, (
+            "a release that was never compared with the last one that passed is kept")
+        assert "NOT ARMED" in not_armed
 
     def test_a_missing_conf_is_loud_rather_than_silent(self):
         block = self.script[self.script.index("# ── Gate 6"):]

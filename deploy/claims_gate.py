@@ -21,9 +21,20 @@ reason — a broken checker must never be able to take the site down):
 
     0   measured, and the page still describes this box
     1   measured, and the page no longer describes this box
-    2   could not measure — no roster, no reachable base URL, a box already
-        busy with real students, a page whose claim cannot be parsed. Never a
+    2   could not measure — the box was busy with real students, or the probe
+        did not complete, or a divergence could not be confirmed. Never a
         rollback: an absent measurement is not evidence of a bad release.
+    4   not armed — the gate cannot do its job because of how this box was set
+        up: no roster, a roster too small, no harness, no --base, a page whose
+        claim cannot be parsed, a claim above this gate's cap.
+
+2 and 4 are deliberately different answers, because they need different
+remedies and the deploy treats them differently. 2 means the check happened and
+the box was in the way; a rollback there would refuse a good release for a busy
+box. 4 means the release was **not checked at all** — the box is not armed to
+check it — and a deploy that proceeds on that ships code no gate has looked at,
+with a one-line journal entry as the only trace. It used to be one bucket, which
+is how an unarmed box kept shipping.
 
 What this gate does **not** verify, and says so in its own output:
 
@@ -58,6 +69,11 @@ from pathlib import Path
 EXIT_OK = 0
 EXIT_DIVERGED = 1
 EXIT_CANNOT_RUN = 2
+#: The gate is not armed to check anything: a missing roster, a missing harness,
+#: no base URL, a claim it cannot parse or will not load. Distinct from
+#: EXIT_CANNOT_RUN on purpose — see the module docstring. The deploy rolls a
+#: release back on this one and never on 2.
+EXIT_NOT_ARMED = 4
 
 # --sessions 0 means "the rung the page advertises", so the probe is the claim
 # and not a smaller, easier version of it. Kept as a named constant because the
@@ -495,30 +511,31 @@ def main() -> int:
 
     page = Path(args.page)
     if not page.exists():
-        print(f"claims gate: CANNOT MEASURE — {page} is missing")
-        return EXIT_CANNOT_RUN
+        print(f"claims gate: NOT ARMED — {page} is missing, so the claim cannot be read")
+        return EXIT_NOT_ARMED
     try:
         limit, rungs = parse_claims(page)
         rung = rung_for(limit, rungs)
     except ClaimsError as e:
-        print(f"claims gate: CANNOT MEASURE — {e}")
-        return EXIT_CANNOT_RUN
+        print(f"claims gate: NOT ARMED — {e}")
+        return EXIT_NOT_ARMED
 
     print(f"claims gate: page advertises {rung.describe()}")
 
     if not Path(args.harness).exists():
-        print(f"claims gate: CANNOT MEASURE — harness {args.harness} is missing")
-        return EXIT_CANNOT_RUN
+        print(f"claims gate: NOT ARMED — harness {args.harness} is missing")
+        return EXIT_NOT_ARMED
 
     sessions = args.sessions or rung.students
     if sessions > args.max_sessions:
-        # Not a rollback: the gate declined a load it was not willing to place
-        # on a box that is serving students. Loud, because a silently skipped
-        # check is how this kind of gate dies.
-        print(f"claims gate: CANNOT MEASURE — the page's rung is {sessions} sessions, above "
+        # Still 4, and the reason is worth restating: to *proceed* here would be
+        # a release that never had its claim checked, which is what 4 refuses.
+        # The gate declining the load is right; the deploy acting as if the check
+        # happened is not.
+        print(f"claims gate: NOT ARMED — the page's rung is {sessions} sessions, above "
               f"this gate's cap of {args.max_sessions}. Either the claim is larger than this "
               f"gate will load, or --max-sessions should be raised deliberately.")
-        return EXIT_CANNOT_RUN
+        return EXIT_NOT_ARMED
 
     roster = Path(args.roster)
     students, teachers = roster_supply(roster)
@@ -526,12 +543,12 @@ def main() -> int:
         # --check exists to prove the gate *can* run, so a roster too small for
         # the probe is exactly what it must fail on. It used to report CHECK OK
         # here, which would arm a gate that could never measure anything.
-        print(f"claims gate: CANNOT MEASURE — {roster} holds {students} murid / {teachers} guru, "
+        print(f"claims gate: NOT ARMED — {roster} holds {students} murid / {teachers} guru, "
               f"but {sessions} murid / {args.teachers} guru are needed. One account per session "
               "is required: reusing logins turns per-identity rate limiting into fake errors.")
         print("   provision them with: (.venv/bin/python provision_loadtest.py "
               f"{sessions + 5} {args.teachers + 1})")
-        return EXIT_CANNOT_RUN
+        return EXIT_NOT_ARMED
 
     if args.check:
         print(f"claims gate: CHECK OK — page parseable, harness present, roster "
@@ -539,9 +556,9 @@ def main() -> int:
         return EXIT_OK
 
     if not args.base:
-        print("claims gate: CANNOT MEASURE — no --base URL. It must be https in production, "
+        print("claims gate: NOT ARMED — no --base URL. It must be https in production, "
               "because SESSION_COOKIE_SECURE means a plain-HTTP login cannot keep its cookie.")
-        return EXIT_CANNOT_RUN
+        return EXIT_NOT_ARMED
 
     quiet, why = box_is_quiet(args.base, args.quiet_ms)
     if not quiet:
@@ -604,7 +621,8 @@ def main() -> int:
 
     record = {
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "verdict": {EXIT_OK: "ok", EXIT_DIVERGED: "diverged"}.get(code, "cannot_measure"),
+        "verdict": {EXIT_OK: "ok", EXIT_DIVERGED: "diverged",
+                    EXIT_NOT_ARMED: "not_armed"}.get(code, "cannot_measure"),
         "reason": why_code,
         "advertised": {"students": rung.students, "p50_ms": rung.p50_high_ms,
                        "p95_ms": rung.p95_ms, "error_pct": rung.error_pct},

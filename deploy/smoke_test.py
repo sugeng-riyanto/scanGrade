@@ -8,10 +8,19 @@ and the RBAC guards on every role's area.
 
 What it is not
 --------------
-It is not a test suite; it makes no assertions about content and it never writes.
-Every request is a GET apart from the four logins, which have to POST to exist.
-It also runs only when there is a release to verify, so it does not fill the
-audit log on quiet days.
+It is not a test suite: apart from the exam page below it asserts nothing about
+what a page *says*, only that it answers and that the right role can open it.
+
+It is also not quite read-only, and that is worth knowing before changing it.
+Every request is a GET apart from the four logins — but in this app a GET of a
+student's exam page is not a read: opening an exam opens the sitting that belongs
+to it (one row per student and exam, reused by every later open). So the student
+check below leaves one draft sitting behind, for the demo account, on the demo
+fixture that `manage.py demo-exam` keeps sittable for exactly this purpose. No
+other page in the lists writes anything.
+
+It runs only when there is a release to verify, so it does not fill the audit log
+on quiet days.
 
 Options
 -------
@@ -43,17 +52,48 @@ stale credential in the config file cannot.
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import re
 import sys
 import time
 from dataclasses import dataclass, field
+from html import unescape
+from pathlib import Path
 
 import requests
 
 CSRF_RE = re.compile(r'name="csrf-token"\s+content="([^"]+)"')
 REQUEST_TIMEOUT = 20
 CONNECT_TIMEOUT = 10
+
+# ── the one page a page-list cannot check ────────────────────────────────────
+# A student's exam page is where the anti-cheat lives: the fullscreen blocker and
+# the away blur with its countdown exist nowhere else, and they are the whole of
+# what a student sees of the supervision. A release that drops either one leaves
+# every other check in this file green — the page still answers 200 — so the
+# murid check opens a real exam and reads them out of the served document.
+#
+# The exam is the *fixture* `deploy/demo_exam_fixture.py` describes, not whatever
+# paper the account happens to have: a real exam may legitimately have anti-cheat
+# switched off, and failing a release over a teacher's own setting would be this
+# check lying about what it measured.
+EXAM_LINK_RE = re.compile(r'href="/student/exams/([0-9a-fA-F-]{36})"')
+CARD_TITLE_RE = re.compile(r"<h3[^>]*>(.*?)</h3>", re.S)
+TAG_RE = re.compile(r"<[^>]+>")
+ANTI_CHEAT_RE = re.compile(r"antiCheat:\s*(\{[^{}]*\})", re.S)
+GRACE_RE = re.compile(r"graceSeconds:\s*(\d+)")
+
+#: Each marker is a fact about the page rather than a spelling of it: an `x-show`
+#: that no longer names the flag is a panel nothing would ever reveal, and a panel
+#: whose sentence was dropped is a blurred screen with nothing to read.
+FULLSCREEN_PANEL = 'x-show="fullscreenBlocked && !submitted"'
+FULLSCREEN_WORDS = "Ujian ini harus dikerjakan dalam layar penuh"
+AWAY_PANEL = 'x-show="awayBlurred && !submitted"'
+AWAY_WORDS = "soal diburamkan sampai Anda kembali"
+FULLSCREEN_WATCH = "addEventListener('fullscreenchange'"
+AWAY_WATCH = "addEventListener('visibilitychange'"
 
 
 # ── what each role should be able to open ────────────────────────────────────
@@ -244,6 +284,127 @@ def check_pages(session: requests.Session, base: str, acct: Account, res: Result
             res.fail(f"{acct.role}: {path} -> {response.status_code}")
 
 
+def _fixture():
+    """The shared fixture spec, loaded by path.
+
+    By path rather than by name because this file is also executed by a test
+    harness that loads *it* by path, where its own directory is not on
+    `sys.path` — and because the spec has to be the same object `manage.py`
+    writes the row from, or the title this looks for and the title that exists
+    are two strings that can drift apart.
+    """
+    path = Path(__file__).resolve().parent / "demo_exam_fixture.py"
+    spec = importlib.util.spec_from_file_location("sg_demo_exam_fixture", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def sittable_exams(html: str) -> list[tuple[str, str]]:
+    """``[(exam_id, title)]`` — the cards on a student's exam list.
+
+    One card per offered exam, its title in an `<h3>` and the way in at the
+    bottom, so a link's title is the last heading between it and the link above.
+    """
+    found: list[tuple[str, str]] = []
+    marks = list(EXAM_LINK_RE.finditer(html))
+    for index, mark in enumerate(marks):
+        start = marks[index - 1].end() if index else 0
+        titles = CARD_TITLE_RE.findall(html[start:mark.start()])
+        title = unescape(TAG_RE.sub("", titles[-1])).strip() if titles else ""
+        found.append((mark.group(1), title))
+    return found
+
+
+def check_exam_sitting(session: requests.Session, base: str, res: Result) -> None:
+    """Open the demo exam as the student, and read its anti-cheat panels out.
+
+    What "the panels appear" can mean over HTTP, and all of it: the document the
+    browser is served carries both panels with their own words, the exam's own
+    configuration arms them (anti-cheat off, or fullscreen not required, and
+    neither panel would ever be revealed however intact the markup is), the
+    countdown shows the service's own number, and the page watches the two events
+    that set the flags. The render itself is what the preview is for.
+
+    No fixture on the list is a *warning*, not a failure, with the command that
+    puts one back: the demo schools are data, and a box whose demo data was
+    cleared must not roll a healthy release back. A panel missing from a page that
+    *was* served is a failure.
+    """
+    try:
+        listing = session.get(f"{base}/student/exams", timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as exc:
+        res.fail(f"murid: GET /student/exams failed — {type(exc).__name__}: {exc}")
+        return
+    if listing.status_code != 200:
+        res.fail(f"murid: /student/exams -> {listing.status_code}")
+        return
+
+    fixture = _fixture()
+    offered = [(exam_id, title) for exam_id, title in sittable_exams(listing.text)
+               if fixture.is_fixture(title)]
+    if not offered:
+        res.warn("no sittable demo exam on the student's list — the exam page's "
+                 "anti-cheat panels went unchecked")
+        print("         put one back with: python manage.py demo-exam")
+        return
+
+    exam_id, title = offered[0]
+    res.ok(f"murid: the list offers the demo exam ({title})")
+
+    path = f"/student/exams/{exam_id}"
+    try:
+        page = session.get(f"{base}{path}", timeout=REQUEST_TIMEOUT, allow_redirects=False)
+    except requests.RequestException as exc:
+        res.fail(f"murid: GET {path} failed — {type(exc).__name__}: {exc}")
+        return
+    if page.status_code != 200:
+        where = page.headers.get("Location", "")
+        res.fail(f"murid: {path} -> {page.status_code} {where}".rstrip() +
+                 " (the demo exam would not open, so nothing on it could be read)")
+        return
+    res.ok(f"murid: {path}")
+
+    html = page.text
+    if f'data-exam-id="{exam_id}"' not in html or 'x-data="examApp(' not in html:
+        res.fail(f"murid: {path} is not the sitting page for that exam")
+        return
+    res.ok("murid: it is a sitting page for the exam that was asked for")
+
+    found = ANTI_CHEAT_RE.search(html)
+    settings = json.loads(found.group(1)) if found else {}
+    if not settings.get("enabled") or not settings.get("fullscreen_required"):
+        res.fail(f"murid: the exam page arms anti-cheat as {found.group(1) if found else 'nowhere'}"
+                 " — both panels are revealed only when the exam asks for them")
+    else:
+        res.ok("murid: the page asks for anti-cheat and fullscreen")
+
+    missing = []
+    if FULLSCREEN_PANEL not in html or FULLSCREEN_WORDS not in html:
+        missing.append("fullscreen blocker")
+    if AWAY_PANEL not in html or AWAY_WORDS not in html:
+        missing.append("away blur")
+    if missing:
+        res.fail(f"murid: the exam page is missing the {' and the '.join(missing)}")
+    else:
+        res.ok("murid: the fullscreen blocker and the away blur are on the page, "
+               "each with its words")
+
+    grace = GRACE_RE.search(html)
+    if not grace or int(grace.group(1)) <= 0:
+        res.fail("murid: the away blur has no countdown to show (graceSeconds="
+                 f"{grace.group(1) if grace else 'absent'})")
+    else:
+        res.ok(f"murid: the countdown reads {grace.group(1)}s — the service's own number")
+
+    if FULLSCREEN_WATCH not in html or AWAY_WATCH not in html:
+        res.fail("murid: the page does not watch fullscreenchange and "
+                 "visibilitychange, so nothing would set either panel")
+    else:
+        res.ok("murid: the page watches fullscreenchange and visibilitychange")
+
+
 def check_isolation(session: requests.Session, base: str, acct: Account, res: Result) -> None:
     """A role must not be able to open another role's landing page."""
     for other in FORBIDDEN[acct.role]:
@@ -325,6 +486,11 @@ def main() -> int:
             session = sessions[acct.role]
             check_pages(session, base, acct, res)
             check_isolation(session, base, acct, res)
+            # The exam page is the one that is not in the lists above: it needs a
+            # row to exist and a class to be assigned, so it is opened by
+            # discovery — and it is the only page whose *content* this asserts.
+            if acct.role == "murid":
+                check_exam_sitting(session, base, res)
 
     print()
     if res.failures:

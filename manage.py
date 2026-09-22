@@ -5,6 +5,8 @@ Usage:
     python manage.py reset         # Reset all demo data (clean + seed)
     python manage.py seed --exam   # Also create sample exams + submissions
     python manage.py list          # List all demo users
+    python manage.py demo-exam     # Ensure a sittable exam exists (the deploy
+                                   # smoke test opens it; run by the runner)
 """
 import sys, os, json, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -20,6 +22,15 @@ if '--demo' in sys.argv:
         sys.exit(1)
 
 from datetime import datetime, timezone, timedelta
+
+# The exam fixture spec is shared with the deploy smoke test, which runs with no
+# app environment (the deploy runner gives it only the SMOKE_* variables) and so
+# cannot import the app. Keeping the spec in `deploy/` as a stdlib-only module is
+# what lets the row this writes and the marker that check looks for be one thing
+# rather than two titles that drift apart.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "deploy"))
+import demo_exam_fixture as demo_exam  # noqa: E402
+
 from app import create_app
 from app.utils.auth import get_supabase
 
@@ -381,6 +392,38 @@ def _seed_exams(supabase, school_id, school_conf, teacher_ids=None):
                 print(f"   ⚠️  Exam: {str(e)[:60]}")
 
 
+def cmd_demo_exam(args):
+    """Ensure a sittable exam exists in every demo school.
+
+    Run by the deploy runner before the smoke test, so the exam that check opens
+    is one this release just made sure of. A box with no demo schools is not an
+    error — it is a box the check has nothing to open on, and the check says so
+    itself rather than this command failing the release.
+    """
+    seen = 0
+    made = 0
+    with app.app_context():
+        supabase = get_supabase()
+        print("=" * 50)
+        print("🎯 DEMO EXAM FIXTURE")
+        print("=" * 50)
+        for school_conf in DEMO_SCHOOLS:
+            rows = (supabase.table("schools").select("id")
+                    .eq("npsn", school_conf["npsn"]).limit(1).execute().data or [])
+            if not rows:
+                print(f"   – {school_conf['name']}: not on this box, skipped")
+                continue
+            seen += 1
+            print(f"   {school_conf['name']}")
+            if demo_exam.ensure(supabase, rows[0]["id"]):
+                made += 1
+        print()
+        print(f"{made}/{seen} demo school(s) now have a sittable exam")
+        if not seen:
+            print("   (no demo data here — nothing to make sittable)")
+    return 1 if seen > made else 0
+
+
 def _seed_invoices(supabase, school_id, school_conf):
     """Create sample invoices for demo purposes."""
     from datetime import timedelta
@@ -475,6 +518,14 @@ def cmd_seed(args):
             sid = _seed_school(supabase, school)
             if sid: all_school_ids.append((sid, school))
 
+        # Always, not only with --exam: the sittable fixture is what the deploy
+        # smoke test opens, so a seeded box that lacks it is a box whose exam page
+        # goes unchecked. It is created for every demo school, and `--exam` adds
+        # the sample papers a demo is shown with.
+        print("\n🎯 Creating the sittable exam fixture...")
+        for sid, school in all_school_ids:
+            demo_exam.ensure(supabase, sid)
+
         if args.exam:
             print("\n📝 Creating sample exams...")
             for sid, school in all_school_ids:
@@ -550,7 +601,8 @@ def _print_credentials():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ScanGrade Data Management")
-    parser.add_argument("command", choices=["seed", "reset", "reset-data", "list", "migrate", "generate-csv"])
+    parser.add_argument("command", choices=["seed", "reset", "reset-data", "list", "migrate",
+                                           "generate-csv", "demo-exam"])
     parser.add_argument("--exam", action="store_true", help="Also create sample exams (with seed)")
     parser.add_argument("--demo", action="store_true", help="Use .env.demo")
     args = parser.parse_args()
@@ -563,6 +615,8 @@ if __name__ == "__main__":
         cmd_reset_data(args)
     elif args.command == "list":
         cmd_list(args)
+    elif args.command == "demo-exam":
+        sys.exit(cmd_demo_exam(args))
     elif args.command == "migrate":
         print("Migrate not available without DATABASE_URL")
     elif args.command == "generate-csv":

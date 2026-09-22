@@ -42,8 +42,10 @@ Every design choice below is a failure mode it avoids:
 * **A changed shape is "could not measure", never a pass.** Sessions, teachers,
   duration and base URL are part of the comparison: a 20-session probe compared
   against a 60-session one reports a regression that is really a different
-  experiment. A mismatch is exit 2 — an unanswerable question, not evidence
-  against the release.
+  experiment. A mismatch is **exit 4** — not an unanswerable question but a
+  comparison that is not happening, so the deploy must not treat the release as
+  measured. (It was exit 2 until the two answers were separated; see the claims
+  gate's docstring for why.)
 
 * **Two strikes.** One probe on a box that is also running nginx, three gevent
   workers and whatever the students are doing is not evidence. A divergent first
@@ -56,6 +58,9 @@ that script treats this gate exactly like the claims gate:
     0  passed (and the baseline was updated)
     1  confirmed regression — a real rollback when PERF_ENFORCE=true
     2  could not measure — never a rollback
+    4  not armed — no roster, no harness, no base URL, or a baseline from a
+       different reference load. A rollback, because the release was never
+       compared with the one before it.
 """
 import argparse
 import json
@@ -78,6 +83,11 @@ import claims_gate as cg  # noqa: E402
 EXIT_OK = cg.EXIT_OK
 EXIT_REGRESSED = cg.EXIT_DIVERGED
 EXIT_CANNOT_RUN = cg.EXIT_CANNOT_RUN
+#: The gate is not armed to compare anything — no roster, no harness, no base
+#: URL, or a baseline taken at a different reference load. The deploy rolls a
+#: release back on this one, because "no comparison happened" is not the same
+#: finding as "the box was too busy to compare" (see cg's module docstring).
+EXIT_NOT_ARMED = cg.EXIT_NOT_ARMED
 
 DEFAULT_HARNESS = REPO / "loadtest_concurrent.py"
 DEFAULT_ROSTER = REPO / ".freebuff" / "lt_roster.json"
@@ -444,15 +454,15 @@ def main() -> int:
     baseline = load_baseline(baseline_path)
 
     if not Path(args.harness).exists():
-        print(f"perf gate: CANNOT MEASURE — harness {args.harness} is missing")
-        return EXIT_CANNOT_RUN
+        print(f"perf gate: NOT ARMED — harness {args.harness} is missing")
+        return EXIT_NOT_ARMED
     students, teachers = cg.roster_supply(Path(args.roster))
     if students < args.sessions or teachers < args.teachers:
-        print(f"perf gate: CANNOT MEASURE — {args.roster} holds {students} murid / "
+        print(f"perf gate: NOT ARMED — {args.roster} holds {students} murid / "
               f"{teachers} guru, but {args.sessions} murid / {args.teachers} guru are needed. "
               "One account per session is required: reusing logins turns per-identity rate "
               "limiting into errors that look like the server's fault.")
-        return EXIT_CANNOT_RUN
+        return EXIT_NOT_ARMED
     if args.check:
         where = (f"baseline {baseline_path} from {baseline.get('commit')}"
                  if baseline else f"no baseline yet at {baseline_path}")
@@ -460,16 +470,20 @@ def main() -> int:
               f"{teachers} guru, {where}")
         return EXIT_OK
     if not args.base:
-        print("perf gate: CANNOT MEASURE — no --base URL. It must be https in production, "
+        print("perf gate: NOT ARMED — no --base URL. It must be https in production, "
               "because SESSION_COOKIE_SECURE means a plain-HTTP login cannot keep its cookie.")
-        return EXIT_CANNOT_RUN
+        return EXIT_NOT_ARMED
 
     shape = shape_of(args.sessions, args.teachers, args.duration, args.base)
     if baseline and not args.rebaseline:
         mismatch = shape_mismatch(baseline, shape)
         if mismatch:
-            print(f"perf gate: CANNOT MEASURE — {mismatch}")
-            return EXIT_CANNOT_RUN
+            # Classified as not-armed rather than cannot-measure, and that is a
+            # change of mind worth recording: the comparison this gate exists to
+            # make is not happening at all, and letting a release through would
+            # retire the gate silently. The remedy is named in the message.
+            print(f"perf gate: NOT ARMED — {mismatch}")
+            return EXIT_NOT_ARMED
 
     quiet, why = cg.box_is_quiet(args.base, args.quiet_ms)
     if not quiet:

@@ -271,6 +271,27 @@ def _footer_failed(text: str) -> int:
 
 # ── the report ──────────────────────────────────────────────────────────────
 
+def _history_lines(path: Path) -> tuple[list[str], str | None]:
+    """(the file's non-blank lines, why it could not be read).
+
+    The distinction this returns is the whole point. `Path.is_file()` looks like
+    the natural guard and is a trap here: it swallows every `OSError` and answers
+    "no such file", so an unreadable state directory is indistinguishable from a
+    box whose gates never ran. That is exactly what happened — the app could not
+    traverse `/var/lib/scangrade-deploy` (root:root, 0750, no group), and this
+    page reported "no gate record on this server yet" while both gates were
+    running on every release. "Absent" and "cannot be read" need different
+    remedies, so they are different answers.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [], None
+    except OSError as exc:
+        return [], f"{type(exc).__name__}: {exc}"
+    return [line for line in text.splitlines() if line.strip()], None
+
+
 def _deploy_history():
     """The last measurement each deploy gate recorded on this box, if readable.
 
@@ -278,14 +299,19 @@ def _deploy_history():
     gate runs a small reference load **on every release**, so this is what
     updates itself without anyone running a test.
     """
-    out = {"available": False, "claims": None, "perf": [], "note": ""}
+    out = {"available": False, "claims": None, "perf": [], "note": "",
+           "unreadable": None}
     claims = state_dir() / "claims" / "history.jsonl"
     perf = state_dir() / "perf" / "history.jsonl"
     found = False
+    reasons: list[str] = []
 
     try:
-        if claims.is_file():
-            last = [json.loads(l) for l in claims.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines, why = _history_lines(claims)
+        if why:
+            reasons.append(f"claims: {why}")
+        if lines:
+            last = [json.loads(l) for l in lines]
             if last:
                 record = last[-1]
                 measured = record.get("measured") or {}
@@ -305,12 +331,18 @@ def _deploy_history():
                     "rates": len(measured.get("per_endpoint") or {}),
                 }
                 found = True
-    except (OSError, ValueError) as e:
-        logger.debug("capacity: claims history unreadable: %s", e)
+    except ValueError as e:
+        # A malformed line is the pre-existing behaviour: logged, and the section
+        # falls back to its empty state. Only *unreachable* is reported as its own
+        # situation here, because only unreachable has a remedy nobody can guess.
+        logger.debug("capacity: claims history malformed: %s", e)
 
     try:
-        if perf.is_file():
-            rows = [json.loads(l) for l in perf.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines, why = _history_lines(perf)
+        if why:
+            reasons.append(f"perf: {why}")
+        if lines:
+            rows = [json.loads(l) for l in lines]
             for record in rows[-6:]:
                 latency = record.get("latency") or {}
                 shape = record.get("shape") or {}
@@ -328,11 +360,23 @@ def _deploy_history():
                     "server_errors_5xx": record.get("server_errors_5xx"),
                 })
             found = found or bool(out["perf"])
-    except (OSError, ValueError) as e:
-        logger.debug("capacity: perf history unreadable: %s", e)
+    except ValueError as e:
+        logger.debug("capacity: perf history malformed: %s", e)
 
     out["available"] = found
-    if not found:
+    if found:
+        return out
+
+    # Not found: two different situations, two different remedies. An unreadable
+    # state directory is an installation problem and is reported as one, because
+    # "this box has not run a gate" is a claim about the box and it would be false.
+    if reasons:
+        out["unreadable"] = "; ".join(reasons)
+        out["note"] = (f"the deploy gates' history under {state_dir()} could not be "
+                       f"read ({out['unreadable']}) — the app cannot reach its own "
+                       f"state directory, which the installer sets up; re-run "
+                       f"deploy/install-auto-deploy.sh")
+    else:
         out["note"] = (f"no gate history at {state_dir()} — this box has not run a "
                        f"deploy gate since the gates started recording")
     return out

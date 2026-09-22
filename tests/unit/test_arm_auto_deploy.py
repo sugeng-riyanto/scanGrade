@@ -86,7 +86,7 @@ def _python_shim(repo: Path) -> Path:
 
 
 def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
-            perf=True, roster=ROSTER):
+            perf=True, smoke=True, roster=ROSTER):
     """A tree shaped like the box, with only the paths under test populated."""
     repo = tmp_path / "repo"
     (repo / "deploy").mkdir(parents=True, exist_ok=True)
@@ -108,6 +108,11 @@ def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
 
     etc = tmp_path / "etc"
     etc.mkdir()
+    # The smoke test is a gate, so its conf is part of "armed" for the same reason
+    # the other two are: without it the deploy skips "every role still works" and
+    # keeps the release, with a journal line as the only trace.
+    if smoke:
+        (etc / "smoke.conf").write_text('SMOKE_ENFORCE="true"\n', encoding="utf-8")
     if claims:
         (etc / "claims.conf").write_text('CLAIMS_ENFORCE="true"\n', encoding="utf-8")
     if perf:
@@ -131,6 +136,7 @@ def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
         "SG_SNAPSHOT_BIN": str(bin_dir / "scangrade-db-snapshot"),
         "SG_CLAIMS_CONF": str(etc / "claims.conf"),
         "SG_PERF_CONF": str(etc / "perf.conf"),
+        "SG_SMOKE_CONF": str(etc / "smoke.conf"),
         "SG_ROSTER_SRC": str(roster_src),
         "SG_LOG": str(tmp_path / "installer.log"),
     }
@@ -186,6 +192,7 @@ class TestItTellsTheThreeStatesApart:
 class TestEveryMissingPieceIsNamed:
     @pytest.mark.parametrize("broken, expected", [
         ("snapshot", "snapshot   : missing"),
+        ("smoke", "smoke      : MISSING"),
         ("claims", "claims     : MISSING"),
         ("perf", "perf       : MISSING"),
         ("roster", "cannot measure"),

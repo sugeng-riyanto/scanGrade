@@ -287,15 +287,38 @@ class TestTheDeployUsesIt:
         )
 
     def test_a_cannot_measure_is_never_a_rollback(self):
+        """Exit 2 is "the box was in the way", and it still keeps the release.
+
+        The slice ends at the `4)` arm on purpose: the two answers are adjacent in
+        the case statement and mean opposite things, which is the whole point of
+        splitting them. See `test_not_armed_does_roll_back` for the other half.
+        """
         body = DEPLOY.read_text(encoding="utf-8")
         block = body[body.index("CLAIMS_CONF=\"/etc/scangrade-claims.conf\""):]
         block = block[:block.index("\nif [ \"$HEALTHY\" = \"1\" ]")]
-        cannot = block[block.index("    2)"):block.index("    *)")]
+        cannot = block[block.index("    2)"):block.index("    4)")]
         assert "HEALTHY=0" not in cannot, (
             "a gate that could not measure is treated as a failed release. An absent "
             "measurement is not evidence of a bad release, and this would roll back "
             "good code whenever the roster or the network was missing."
         )
+
+    def test_not_armed_does_roll_back(self):
+        """Exit 4 is the different answer: this release was never measured.
+
+        It used to be exit 2 — the same arm as the busy box above — and the effect
+        was that a box with no roster deployed every commit while re-measuring
+        nothing, with one journal line as the only trace.
+        """
+        body = DEPLOY.read_text(encoding="utf-8")
+        block = body[body.index("CLAIMS_CONF=\"/etc/scangrade-claims.conf\""):]
+        block = block[:block.index("\nif [ \"$HEALTHY\" = \"1\" ]")]
+        not_armed = block[block.index("    4)"):block.index("    *)")]
+        assert "HEALTHY=0" in not_armed, (
+            "a release that could not be measured at all is kept, so an unarmed box "
+            "ships code the claims gate never looked at"
+        )
+        assert "not armed" in not_armed.lower()
 
     def test_a_confirmed_divergence_goes_through_the_shared_rollback(self):
         body = DEPLOY.read_text(encoding="utf-8")
@@ -330,9 +353,13 @@ class TestCheckMode:
         roster.write_text(json.dumps([{"role": "murid", "email": "a@b.c", "id": "1"}]),
                           encoding="utf-8")
         proc = self._run("--roster", str(roster))
-        assert proc.returncode == gate.EXIT_CANNOT_RUN, (
+        assert proc.returncode == gate.EXIT_NOT_ARMED, (
             "--check passed with a roster that cannot serve one account per session, so "
             f"the installer would arm a gate that can never measure. Output:\n{proc.stdout}"
+        )
+        assert "NOT ARMED" in proc.stdout, (
+            "the gate does not say *why* it cannot run, so the installer's advice is "
+            "whatever the deploy happens to print"
         )
         assert "account per session" in proc.stdout.lower()
 
@@ -361,11 +388,19 @@ class TestTheInstallerProvesItBeforeArming:
         )
 
     def test_it_creates_the_evidence_directory_for_the_app_user(self):
+        """Two identities, and the split is deliberate: the gate *writes* this
+        history as the checkout's owner (`as_owner` in the deploy), and the app
+        *reads* it back on /capacity through the unit's group.
+
+        It used to be `chown "$OWNER":"$OWNER"`, which satisfied the writer and
+        silently excluded the reader: the group is what carries the page.
+        """
         body = INSTALLER.read_text(encoding="utf-8")
         assert "/var/lib/scangrade-deploy/claims" in body
-        assert re.search(r"chown \"\$OWNER\":\"\$OWNER\" /var/lib/scangrade-deploy/claims", body), (
-            "the evidence directory is not owned by the app user, so the gate cannot "
-            "write the history it exists to keep."
+        assert re.search(r'chown "\$OWNER":"\$SERVICE_GROUP" /var/lib/scangrade-deploy/claims',
+                         body), (
+            "the evidence directory does not reach the app's group, so the gate can "
+            "write the history and /capacity still cannot show it"
         )
 
 

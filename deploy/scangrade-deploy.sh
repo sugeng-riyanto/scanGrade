@@ -47,6 +47,16 @@ RELEASE_FILE="/etc/scangrade-deploy.release"
 #: cannot carry a command.
 REQUEST_DIR="$STATE_DIR/requests"
 RELEASE_REQUEST="$REQUEST_DIR/release"
+#: Why the last run refused to deploy for a reason that is *not* about a commit:
+#: the box is not armed to check releases at all. Kept next to the quarantine
+#: record because it answers the same question from the operator's side ("why is
+#: nothing deploying?"), and read by /super-admin/deploy-status. Written by
+#: armament_preflight, removed the moment the box is armed again.
+UNARMED_FILE="$STATE_DIR/unarmed"
+#: (The gate configs themselves are named beside the gate that reads them, not
+#: here: `test_the_deploy_passes_every_generated_setting` in the perf-gate guards
+#: anchors on each conf assignment and checks the environment-list right after it,
+#: so hoisting them would silently detach a setting from the gate that reads it.)
 #: Where the installer puts the two launchers it renders from
 #: `deploy/entrypoint.sh`. A successful release re-renders them from the checkout
 #: it just deployed, so the installed file cannot fall behind the repo — see
@@ -290,7 +300,6 @@ if [ -e "$PAUSE_FILE" ]; then
   exit 0
 fi
 
-# ── Gate 0: is this the checkout's runner, or a snapshot of an older one? ────
 # runner-identity:start
 # /usr/local/bin/scangrade-deploy is a launcher that execs this file, so what
 # runs is always the commit the checkout is on. It used to be an installed
@@ -329,6 +338,59 @@ if [ "$SELF" != "$REPO_RUNNER" ] && ! cmp -s "$SELF" "$REPO_RUNNER"; then
   exit 14
 fi
 # runner-identity:end
+
+# ── Preflight: is this box armed to check a release at all? ─────────────────
+#
+# Every gate below can be *skipped*, and each skip was a sentence in this journal
+# and nothing else: the readability gate without pytest logs "this release is NOT
+# contrast-checked" and carries on, a missing smoke conf is "skipping the per-role
+# smoke test", and a claims or performance gate that cannot run says "could not
+# measure". A box in that state deploys every commit while checking almost none of
+# them — the site stays green, the journal fills with hedges, and "the gates ran"
+# quietly stops being true. That is an unarmed box, and it is exactly the state
+# that must not ship code no gate has looked at.
+#
+# So the armament is checked once, before anything is fetched, and a missing check
+# refuses the run outright: nothing is pulled, nothing is reloaded, no release is
+# staged. It is a refusal to *deploy*, not a rollback — no release is under
+# judgement here, the box is — which is why it has its own exit code and why it is
+# NOT quarantined: a quarantine is a record about a commit, and the next tick
+# should re-check (cheaply) and say so again rather than stay silent.
+#
+# The definition of "armed" lives in one place: deploy/arm-auto-deploy.sh --check,
+# which judges the installed runner (a copy is unarmed), the gate config and the
+# roster. It is read-only and safe as any user, and it is the same report an
+# operator gets from the console — so the deploy cannot disagree with the tool
+# they arm the box with. Its output *is* the record: filtering it here would put a
+# second, weaker copy of the same judgement in this file.
+armament_preflight() {
+  local checker="$REPO/deploy/arm-auto-deploy.sh"
+  [ -f "$checker" ] || {
+    ARMAMENT_OUT="the armament checker is missing from this checkout: $checker
+it arrives with the installer, and until it is there this box cannot say what is armed"
+    return 1
+  }
+  ARMAMENT_OUT=$(bash "$checker" --check 2>&1)
+}
+
+ARMAMENT_OUT=""
+if ! armament_preflight; then
+  log "UNARMED — REFUSING TO DEPLOY: this box is not set up to check a release"
+  printf '%s\n' "$ARMAMENT_OUT" | sed 's/^/    /'
+  log "    Nothing was fetched and nothing was reloaded. Deploying from this state"
+  log "    would ship code that no gate has looked at."
+  log "    arm it once, as root:  bash $REPO/deploy/arm-auto-deploy.sh"
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  {
+    date -Is
+    printf '%s\n' "$ARMAMENT_OUT"
+  } > "$UNARMED_FILE" 2>/dev/null || true
+  # Readable by the app (the status page shows this) and owned by root.
+  chmod 0644 "$UNARMED_FILE" 2>/dev/null || true
+  exit 15
+fi
+# Armed. The record of a previous refusal must not outlive the state it describes.
+rm -f "$UNARMED_FILE" 2>/dev/null || true
 
 [ -d "$REPO/.git" ] || { log "$REPO is not a git checkout — refusing"; exit 3; }
 [ -x "$REPO/.venv/bin/gunicorn" ] || { log "no virtualenv at $REPO/.venv — refusing"; exit 3; }
@@ -433,6 +495,33 @@ if ! as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH"; then
 fi
 log "pulled; $(echo "$CHANGED" | wc -l) file(s) changed"
 
+# ── Gate 0 survives the release, or the release does not happen ─────────────
+#
+# Gate 0 is the only thing that refuses a runner which is not the checkout's, and
+# this file is now the new commit's: if the block is gone, this very run is the
+# last one that could have noticed. The launcher refuses to exec a checkout
+# without it, so the effect otherwise lands one tick later — as a box that cannot
+# deploy at all, discovered by an operator rather than by the release.
+#
+# Refusing here is cheaper and says the right thing: the commit that removes the
+# check is refused, quarantined, and the previous one keeps serving. It costs two
+# greps and closes the only path by which "lacks Gate 0" could be *reached*
+# deliberately, as opposed to inherited from an old install.
+# The fence's name is spelled in two pieces on purpose. The block above is the
+# only place in this file where the whole marker appears, so a script with that
+# block removed carries no trace of it — which is what makes "does the block
+# survive?" a question this check can answer with a grep rather than a parse.
+IDENTITY_FENCE="runner-identity"
+if ! grep -q "^# ${IDENTITY_FENCE}:start\$" "$REPO/deploy/scangrade-deploy.sh" 2>/dev/null ||
+   ! grep -q "^# ${IDENTITY_FENCE}:end\$" "$REPO/deploy/scangrade-deploy.sh" 2>/dev/null; then
+  log "this release removes Gate 0 — the runner would no longer be able to refuse a"
+  log "    copy of itself, so it is refused rather than deployed: rolling back to $BEFORE"
+  FAIL_REASON="Gate 0 (the release removed the runner-identity block)"
+  quarantine_write
+  as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
+  exit 16
+fi
+
 # ── Dependencies ─────────────────────────────────────────────────────────────
 if echo "$CHANGED" | grep -qx "requirements.txt"; then
   log "requirements.txt changed — installing"
@@ -457,23 +546,45 @@ fi
 # bad import, a duplicate endpoint or a broken key is caught here instead of by
 # whoever opens the site next. The schedulers are switched off explicitly: the
 # retention loop runs a purge pass the moment it starts, and a deploy check has
-# no business deleting anything.
-if ! as_owner env START_BACKGROUND_SCHEDULERS=false "$REPO/.venv/bin/python" -c '
+# no business deleting anything.# START_BACKGROUND_SCHEDULERS=false is the marker that says "this construction is a
+# deploy probe, not the app about to serve" — it is set here and by nothing else in
+# the repository, and it dates from the first commit of this script, so every copy
+# of the runner ever installed carries it. That is what lets the *app* refuse a
+# release from a runner which is not the checkout's, which is the one refusal a
+# stale copy cannot make for itself (nothing inside that copy can judge it).
+#
+# The app refuses only under this marker, so a refusal here always fails the
+# release and never the site: gunicorn constructs the same app without it.
+CONSTRUCT_OUT=$(as_owner env START_BACKGROUND_SCHEDULERS=false "$REPO/.venv/bin/python" -c '
 import sys
 from app import create_app
 app = create_app()          # the production configuration, from .env
 rules = {r.rule for r in app.url_map.iter_rules()}
 missing = {"/auth/login"} - rules
 if missing:
-    sys.exit("missing core routes: %s" % sorted(missing))
+  sys.exit("missing core routes: %s" % sorted(missing))
 print("app constructs ok (%d routes)" % len(rules))
-'; then
-  log "app failed to construct — rolling back to $BEFORE"
-  FAIL_REASON="app did not construct (exit 9)"
+' 2>&1)
+CONSTRUCT_RC=$?
+if [ "$CONSTRUCT_RC" -ne 0 ]; then
+  printf '%s\n' "$CONSTRUCT_OUT" | sed 's/^/    /'
+  if printf '%s\n' "$CONSTRUCT_OUT" | grep -q 'SCANGRADE-UNARMED'; then
+    # The app's own verdict, not a construct error: it read the installed runner
+    # (deploy/arm-auto-deploy.sh --check) and found this box unable to check a
+    # release. "app did not construct" would send the next reader hunting for a
+    # Python fault that is not there.
+    log "the app refused to be deployed by a runner that is not armed — rolling back"
+    log "    to $BEFORE. Fix the runner (install-auto-deploy.sh), not the app."
+    FAIL_REASON="runner not armed (the app refused to be deployed by it)"
+  else
+    log "app failed to construct — rolling back to $BEFORE"
+    FAIL_REASON="app did not construct (exit 9)"
+  fi
   quarantine_write
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 9
 fi
+log "$CONSTRUCT_OUT"
 
 # ── Gate 3: is this release readable? ────────────────────────────────────────
 # A template, or a colour utility one of them uses, can leave a page unreadable
@@ -484,9 +595,14 @@ fi
 # before the app is reloaded, when rolling back is still free.
 #
 # Exit 2 is "the check could not run" — a missing interpreter, or pytest absent
-# from the venv. That is a problem with the gate, not with the release, so it is
-# logged loudly and does not roll back good code: a broken checker must never be
-# able to take the site down. Exit 1 is a real finding and does.
+# from the venv. That used to be logged loudly and waved through, on the argument
+# that a broken checker must not take the site down. The argument is right about
+# the *site* and wrong about the *release*: proceeding means shipping a commit
+# nobody read for contrast, which is the same as having no gate at all. It rolls
+# back now. (The preflight above refuses the whole run when this box cannot run
+# the gate at all, so reaching here with exit 2 means the box changed between the
+# two checks — the rollback is the safe half of that race.) Exit 1 is a real
+# finding and also rolls back.
 #
 # Exit 3 is the one the gate added for a release that *removes the check itself*
 # — a file it runs is gone, or the named tests collected nothing. That is a
@@ -497,13 +613,13 @@ THEME_OUT=$(as_owner bash "$REPO/deploy/theme_gate.sh" 2>&1)
 THEME_RC=$?
 if [ "$THEME_RC" -eq 0 ]; then
   log "$(echo "$THEME_OUT" | tail -1)"
-elif [ "$THEME_RC" -eq 2 ]; then
-  log "theme gate COULD NOT RUN (exit 2) — this release is NOT contrast-checked:"
-  echo "$THEME_OUT" | sed 's/^/    /'
 else
   if [ "$THEME_RC" -eq 3 ]; then
     log "theme gate DISARMED (exit 3) — this release removed the checks, so it is"
     log "    refused rather than shipped unexamined — rolling back to $BEFORE"
+  elif [ "$THEME_RC" -eq 2 ]; then
+    log "theme gate COULD NOT RUN (exit 2) — this release is NOT contrast-checked,"
+    log "    which is not a release to ship: rolling back to $BEFORE"
   else
     log "theme gate FAILED (exit $THEME_RC) — rolling back to $BEFORE"
   fi
@@ -599,8 +715,13 @@ fi
 # the accounts actually sign in, so a stale password cannot roll back good code.
 SMOKE_CONF="/etc/scangrade-smoke.conf"
 if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ] && ! bash -n "$SMOKE_CONF" 2>/dev/null; then
-  # Sourcing a broken file would take the whole deploy script down with it.
-  log "$SMOKE_CONF has a syntax error — skipping the smoke test"
+  # Sourcing a broken file would take the whole deploy script down with it, so it
+  # is not sourced — but a release that skips this gate is a release nobody
+  # signed in as each role against, and that is the whole reason the gate exists.
+  log "$SMOKE_CONF has a syntax error — the per-role smoke test cannot run, and a"
+  log "    release without it is NOT signed in against: rolling back to $BEFORE"
+  HEALTHY=0
+  FAIL_REASON="smoke test (unarmed: $SMOKE_CONF does not parse)"
 elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
   set -a
   # shellcheck disable=SC1090
@@ -612,6 +733,31 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
     [ -n "${!v:-}" ] && SMOKE_ENV+=("$v=${!v}")
   done
 
+  # The one exam the smoke test is allowed to open. It opens a real exam as the
+  # student to prove the fullscreen blocker and the away blur are still on the
+  # page, and a check that opens a paper is only safe if the paper is *meant* to
+  # be sat: assigned to the demo student's class, never closing, nothing to lose.
+  # So the fixture is refreshed here, before the check reads it, on every release
+  # — a fixture left to a one-off seed stops being sittable the first time
+  # somebody submits it, and the check would then quietly warn on every deploy.
+  #
+  # Never fatal: a box whose demo data is gone must not roll a healthy release
+  # back, and the smoke test reports the missing fixture itself. The schedulers
+  # are switched off for the same reason Gate 2 switches them off — constructing
+  # the app starts the retention loop, which purges.
+  if [ -f "$REPO/manage.py" ]; then
+    FIXTURE_OUT=$(as_owner env START_BACKGROUND_SCHEDULERS=false \
+      "$REPO/.venv/bin/python" "$REPO/manage.py" demo-exam 2>&1)
+    FIXTURE_RC=$?
+    printf '%s\n' "$FIXTURE_OUT" | tail -n 3 | sed 's/^/    /'
+    if [ "$FIXTURE_RC" = "0" ]; then
+      log "demo exam fixture refreshed"
+    else
+      log "demo exam fixture could NOT be refreshed (exit $FIXTURE_RC) — the smoke"
+      log "    test will report the sitting page as unchecked; that is not a rollback"
+    fi
+  fi
+
   as_owner env "${SMOKE_ENV[@]}" "$REPO/.venv/bin/python" "$REPO/deploy/smoke_test.py"
   SMOKE_RC=$?
 
@@ -619,9 +765,15 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
     0)
       log "smoke test passed" ;;
     2)
-      # Nothing was testable: no accounts, or the base URL is unreachable from
-      # this box. Neither is evidence that the release is bad.
-      log "smoke test skipped (exit 2) — not treated as a failure" ;;
+      # Exit 2 is "nothing was testable": no accounts configured, an unknown role
+      # in the conf, or a base URL this host cannot reach. The unreachable case is
+      # not the release's fault and never was — but the other two mean this box
+      # has nothing to sign in with, which the preflight already refuses. Either
+      # way the release was not signed in against, so it does not get kept.
+      log "smoke test COULD NOT RUN (exit 2) — no role was signed in against this"
+      log "    release: rolling back to $BEFORE"
+      HEALTHY=0
+      FAIL_REASON="smoke test (exit 2: nothing was testable)" ;;
     *)
       if [ "${SMOKE_ENFORCE:-false}" = "true" ]; then
         log "smoke test FAILED (exit $SMOKE_RC) — rolling back"
@@ -632,7 +784,10 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
       fi ;;
   esac
 elif [ ! -f "$SMOKE_CONF" ]; then
-  log "no $SMOKE_CONF — skipping the per-role smoke test (see docs/AUTO_DEPLOY.md)"
+  log "no $SMOKE_CONF — the per-role smoke test cannot run, so this release is not"
+  log "    signed in against: rolling back to $BEFORE (see docs/AUTO_DEPLOY.md)"
+  HEALTHY=0
+  FAIL_REASON="smoke test (unarmed: no $SMOKE_CONF)"
 fi
 
 # ── Gate 5: do the numbers on the landing page still describe this box? ──────
@@ -650,18 +805,31 @@ fi
 # resetting the checkout without reloading would leave the rejected release
 # running, and the next tick would fail the same way forever.
 #
-# Exit 2 is "could not measure" (no roster, an unreachable base URL, a box
-# already busy with real students, a divergence that a second probe did not
-# confirm). Never a rollback: an absent or unconfirmed measurement is not
-# evidence of a bad release. Exit 1 is a confirmed divergence and does.
+# Exit 2 is "could not measure" — a box already busy with real students, a probe
+# that did not complete, a divergence a second probe did not confirm. Never a
+# rollback: an unconfirmed measurement is not evidence of a bad release, and a
+# busy box must not refuse a good one. Exit 1 is a confirmed divergence and does.
+#
+# Exit 4 is the different answer, and the one this gate used to give as 2: the box
+# is **not armed** to check the claim at all (no roster, a roster too small, no
+# harness, no base URL, a claim above this gate's cap). That release was not
+# measured, and shipping it means the published capacity table is no longer
+# re-checked by anything. So it rolls back, and the preflight above normally
+# refuses the whole run before this point — reaching 4 here means the box changed
+# mid-release, where the rollback is the safe half of the race.
 CLAIMS_CONF="/etc/scangrade-claims.conf"
 if [ "$HEALTHY" != "1" ]; then
   : # already unhealthy; the rollback path owns it
 elif [ ! -f "$CLAIMS_CONF" ]; then
-  log "no $CLAIMS_CONF — the published capacity claims are NOT re-measured"
-  log "    (see docs/AUTO_DEPLOY.md; install-auto-deploy.sh creates this file)"
+  log "no $CLAIMS_CONF — the published capacity claims cannot be re-measured, so"
+  log "    this release is NOT claim-checked: rolling back to $BEFORE"
+  HEALTHY=0
+  FAIL_REASON="claims gate (unarmed: no $CLAIMS_CONF)"
 elif ! bash -n "$CLAIMS_CONF" 2>/dev/null; then
-  log "$CLAIMS_CONF has a syntax error — skipping the claims gate"
+  log "$CLAIMS_CONF does not parse — the claims gate cannot run, so this release"
+  log "    is NOT claim-checked: rolling back to $BEFORE"
+  HEALTHY=0
+  FAIL_REASON="claims gate (unarmed: $CLAIMS_CONF does not parse)"
 else
   set -a
   # shellcheck disable=SC1090
@@ -686,6 +854,12 @@ else
     2)
       log "claims gate could not measure (exit 2) — NOT re-verified this release:"
       echo "$CLAIMS_OUT" | head -3 | sed 's/^/    /' ;;
+    4)
+      log "claims gate NOT ARMED (exit 4) — this release was not measured against"
+      log "    the published claims, so it is not kept: rolling back to $BEFORE"
+      echo "$CLAIMS_OUT" | head -3 | sed 's/^/    /'
+      HEALTHY=0
+      FAIL_REASON="claims gate (not armed: exit 4)" ;;
     *)
       if [ "${CLAIMS_ENFORCE:-false}" = "true" ]; then
         log "claims gate FAILED — the page promises what this box no longer does:"
@@ -718,19 +892,27 @@ fi
 # the code that is now serving, and a failure therefore belongs to the shared
 # rollback path below.
 #
-# Exit 2 is "could not measure" again — no roster, no baseline yet, a reference
-# load that changed, a box already busy, a divergence a second probe did not
-# confirm. Never a rollback. The first run after installation has no baseline, so
-# that release becomes one and passes: the gate arms itself rather than needing an
-# operator to remember it.
+# Exit 2 is "could not measure" — a box already busy, a probe that did not
+# complete, a divergence a second probe did not confirm. Never a rollback. The
+# first run after installation has no baseline, so that release becomes one and
+# passes: the gate arms itself rather than needing an operator to remember it.
+#
+# Exit 4 is "not armed": no roster, a roster too small, no harness, no base URL, or
+# a baseline taken at a different reference load. Then this release was never
+# compared with the last one that passed, which is the only thing the gate is for.
 PERF_CONF="/etc/scangrade-perf.conf"
 if [ "$HEALTHY" != "1" ]; then
   : # already unhealthy; the rollback path owns it
 elif [ ! -f "$PERF_CONF" ]; then
-  log "no $PERF_CONF — this release is NOT compared with the previous one"
-  log "    (see docs/AUTO_DEPLOY.md; install-auto-deploy.sh creates this file)"
+  log "no $PERF_CONF — this release cannot be compared with the previous one, so"
+  log "    it is not kept: rolling back to $BEFORE"
+  HEALTHY=0
+  FAIL_REASON="perf gate (unarmed: no $PERF_CONF)"
 elif ! bash -n "$PERF_CONF" 2>/dev/null; then
-  log "$PERF_CONF has a syntax error — skipping the performance gate"
+  log "$PERF_CONF does not parse — the performance gate cannot run, so this"
+  log "    release is not compared: rolling back to $BEFORE"
+  HEALTHY=0
+  FAIL_REASON="perf gate (unarmed: $PERF_CONF does not parse)"
 else
   set -a
   # shellcheck disable=SC1090
@@ -754,6 +936,12 @@ else
     2)
       log "perf gate could not measure (exit 2) — this release is NOT compared:"
       echo "$PERF_OUT" | grep -m2 '^perf gate' | sed 's/^/    /' ;;
+    4)
+      log "perf gate NOT ARMED (exit 4) — this release was never compared with the"
+      log "    last one that passed, so it is not kept: rolling back to $BEFORE"
+      echo "$PERF_OUT" | grep -m2 '^perf gate' | sed 's/^/    /'
+      HEALTHY=0
+      FAIL_REASON="perf gate (not armed: exit 4)" ;;
     *)
       if [ "${PERF_ENFORCE:-false}" = "true" ]; then
         log "perf gate FAILED — this release is slower than the last one that passed:"

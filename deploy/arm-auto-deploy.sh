@@ -39,6 +39,7 @@ DEPLOY_BIN="${SG_DEPLOY_BIN:-/usr/local/bin/scangrade-deploy}"
 SNAPSHOT_BIN="${SG_SNAPSHOT_BIN:-/usr/local/bin/scangrade-db-snapshot}"
 CLAIMS_CONF="${SG_CLAIMS_CONF:-/etc/scangrade-claims.conf}"
 PERF_CONF="${SG_PERF_CONF:-/etc/scangrade-perf.conf}"
+SMOKE_CONF="${SG_SMOKE_CONF:-/etc/scangrade-smoke.conf}"
 ROSTER_SRC="${SG_ROSTER_SRC:-/tmp/lt_roster.json}"
 ROSTER_DST="$REPO/.freebuff/lt_roster.json"
 LOG="${SG_LOG:-/tmp/installer.log}"
@@ -136,7 +137,11 @@ report_state() {
     armed=0
   fi
 
-  for conf in "$CLAIMS_CONF" "$PERF_CONF"; do
+  # The smoke test is a gate too, and one of the loudest silently-skipped ones:
+  # without its conf the deploy logs "skipping the per-role smoke test" and keeps
+  # the release, so "every role still works" stops being checked by anything. It
+  # belongs in the same list, and its enforcement is reported by the same rule.
+  for conf in "$SMOKE_CONF" "$CLAIMS_CONF" "$PERF_CONF"; do
     local name; name=$(basename "$conf" | sed 's/scangrade-//; s/\.conf//')
     if [ -f "$conf" ]; then
       local enf; enf=$(sed -n 's/^[A-Z_]*ENFORCE=//p' "$conf" | tr -d '"' | head -1)

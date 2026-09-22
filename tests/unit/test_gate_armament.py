@@ -321,12 +321,23 @@ class TestTheShippedRollbackActuallyRollsBack:
             f"exit {theme_rc} did not move the checkout back: HEAD is {head}, the "
             "release that was serving is " + before)
 
-    def test_exit_two_leaves_the_release_alone(self, tmp_path):
-        """A checker that cannot run must not be able to take the site down."""
+    def test_exit_two_puts_the_previous_release_back(self, tmp_path):
+        """"A checker that cannot run must not be able to take the site down" was
+        the old argument here, and it is the one this branch no longer makes.
+
+        It is right about the *site* and wrong about the *release*: carrying on
+        means shipping a commit nobody read for contrast, which is the same as
+        having no gate. The armament preflight refuses the whole run when the box
+        cannot run this gate at all, so reaching exit 2 means the box changed
+        between the two checks — and the rollback is the safe half of that race.
+        """
         proc, head, before = self.run_block(tmp_path, EXIT_CANNOT_RUN)
-        assert proc.returncode == 0, proc.stderr[-600:]
-        assert head != before, "the exit-2 branch rolled back a healthy release"
-        assert "FELL THROUGH" in proc.stdout
+        assert proc.returncode == 13, (
+            "exit 2 kept the release, so an unreadable theme gate deploys anyway")
+        assert head == before, "the exit-2 branch left the un-vetted release in place"
+        assert "COULD NOT RUN" in proc.stderr, (
+            "the journal has to say which of the two it was: the checker could not "
+            "run, or the release failed the check")
 
     def test_a_pass_leaves_the_release_alone(self, tmp_path):
         proc, head, before = self.run_block(tmp_path, 0)

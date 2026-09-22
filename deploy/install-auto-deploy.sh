@@ -39,6 +39,25 @@ fi
 
 [ -d "$REPO/.git" ] || { echo "!! $REPO is not a git checkout"; exit 3; }
 OWNER=$(stat -c '%U' "$REPO")
+# The user and group the app process actually runs as, read from the unit that is
+# about to be installed rather than inferred from the checkout's owner. One
+# directory below needs it: the deploy state dir, which root writes the quarantine
+# record into and the app has to be able to READ. See the chown there for what
+# leaving it out cost — and why the source matters: inferring the group would make
+# a checkout owned by anyone but the service user produce a state directory that
+# looks installed and is unreadable again.
+SERVICE_USER=$(sed -n 's/^User=//p' "$REPO/deploy/scangrade.service" | head -1)
+SERVICE_GROUP=$(sed -n 's/^Group=//p' "$REPO/deploy/scangrade.service" | head -1)
+[ -n "$SERVICE_USER" ] || SERVICE_USER="$OWNER"
+[ -n "$SERVICE_GROUP" ] || SERVICE_GROUP=$(id -gn "$OWNER")
+if [ "$(id -gn "$OWNER")" != "$SERVICE_GROUP" ]; then
+  # Not fatal: it is the *unit* the app runs as that decides. Worth saying out
+  # loud, because every `as_owner` below (the gates, the smoke test) still runs as
+  # the checkout's owner, and a mismatch means two identities are sharing the box.
+  echo "   note: $REPO is owned by $OWNER (group $(id -gn "$OWNER")) but the unit"
+  echo "         runs the app as $SERVICE_USER:$SERVICE_GROUP — the state directory"
+  echo "         is given to the unit's group, which is what the app can read"
+fi
 # The owner's real home — not $REPO — so git looks for credentials where they
 # actually live and pip's cache never lands inside the checkout (an untracked
 # $REPO/.cache would trip the deploy script's own dirty-checkout guard).
@@ -279,7 +298,7 @@ EOF
 fi
 
 mkdir -p /var/lib/scangrade-deploy/claims
-chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/claims
+chown "$OWNER":"$SERVICE_GROUP" /var/lib/scangrade-deploy/claims
 chmod 0750 /var/lib/scangrade-deploy/claims
 
 say "Checking the claims gate"
@@ -318,6 +337,13 @@ else
     2)
       echo "   the gate could not measure (exit 2) -> CLAIMS_ENFORCE stays false."
       echo "   That is not a verdict on the page; fix the measurement and re-run." ;;
+    4)
+      # Its own answer, not the page's: the gate could not run at all (no roster,
+      # no base URL, an unreadable claim). Saying "the page does not describe this
+      # deployment" here would send the operator to edit numbers that are fine.
+      echo "   the gate is NOT ARMED (exit 4) -> CLAIMS_ENFORCE stays false."
+      echo "   Not a verdict on the page: the gate could not run at all. Fix what"
+      echo "   the reason above names, then re-run this installer to arm it." ;;
     *)
       echo "   the page does NOT describe this deployment -> CLAIMS_ENFORCE stays false."
       echo "   Fix one of the two, then re-run this installer to arm the gate:"
@@ -400,12 +426,31 @@ EOF
 fi
 
 mkdir -p /var/lib/scangrade-deploy/perf
-chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/perf
+chown "$OWNER":"$SERVICE_GROUP" /var/lib/scangrade-deploy/perf
 chmod 0750 /var/lib/scangrade-deploy/perf
 # The state dir holds the last successful deploy and the quarantine record. The
 # deploy creates it when it needs it; creating it here too means the quarantine
 # file always has a home, even on a box whose first release is refused.
+#
+# Owner root, group the *unit's* group, mode 0750 — and all three parts matter.
+# Root owns it because the runner (root) writes the quarantine record; the group
+# is the service user's because the APP has to read that record, and a 0750
+# directory owned by root:root is unreadable to it. That is not hypothetical:
+# this line used to be `chmod 0750` with no `chown`, and the cost was three
+# surfaces reporting a falsehood from outside.
+#   * /super-admin/deploy-status printed "The quarantine record could not be
+#     read, so this page cannot say that nothing is held" — an operator could
+#     never see which commit was held, which is the entire point of the card.
+#   * the one-click release, shown only while a commit IS held, reported the
+#     request directory as not writable — so the button was dead exactly when it
+#     was needed.
+#   * /capacity printed "no gate record on this server yet" on a box whose
+#     gates had been running all along: `Path.is_file()` swallows the permission
+#     error and answers "no file", and a blank reads as "nothing to report".
+# Group r-x is also the right amount: the app can read and traverse, and cannot
+# rewrite a refusal away.
 mkdir -p /var/lib/scangrade-deploy
+chown root:"$SERVICE_GROUP" /var/lib/scangrade-deploy
 chmod 0750 /var/lib/scangrade-deploy
 # The one directory in here the *app* may write. It is how /super-admin/deploy-status
 # asks for the one-shot release without a shell: the runner reads the existence of
@@ -413,8 +458,26 @@ chmod 0750 /var/lib/scangrade-deploy
 # the service user because the app runs as that user, 0750 so no other local user
 # can ask for a release, and the runner removes the file when it honours it.
 mkdir -p /var/lib/scangrade-deploy/requests
-chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/requests
+chown "$SERVICE_USER":"$SERVICE_GROUP" /var/lib/scangrade-deploy/requests
 chmod 0750 /var/lib/scangrade-deploy/requests
+# The second directory the app may write, and for a different reason: this one holds
+# the deploy-staleness alert's record (the last alert it sent, and the tick's claim),
+# which the app writes and reads back to show "last alert" on
+# /super-admin/deploy-status. It cannot live in the checkout — the deploy pulls into
+# $REPO as $OWNER, so the service user cannot write anywhere inside it — and a record
+# that cannot be written is not a missing convenience: a MISSING record means send, so
+# the alert would mail on every tick about one stale runner instead of once a week.
+# Owned by the service user because it is the app's alone; root never writes here.
+# The path is duplicated in app/services/deploy_alert_service.py (DEPLOY_STATE_DIR)
+# and the two are compared by tests/unit/test_auto_deploy.py, so moving one alone is
+# a failing test rather than an alert that silently stops recording.
+mkdir -p /var/lib/scangrade-deploy/alerts
+chown "$SERVICE_USER":"$SERVICE_GROUP" /var/lib/scangrade-deploy/alerts
+chmod 0750 /var/lib/scangrade-deploy/alerts
+# The same arrangement for the two gate-history directories: the gates write them
+# as $OWNER, and /capacity reads them through the app process, so they are owned
+# by the service user — plus the group chown on the parent above, without which
+# those 0750 modes bought nobody anything.
 
 say "Checking the performance gate"
 # The conf is read and passed the same way scangrade-deploy reads it, so "the gate

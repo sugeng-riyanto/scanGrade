@@ -32,7 +32,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from app import create_app  # noqa: E402
 from app.services import deploy_status_service as status  # noqa: E402
 
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
@@ -742,12 +741,18 @@ class TestTheVocabularyIsWired:
 
 # ── the page ─────────────────────────────────────────────────────────────────
 
-@pytest.fixture(scope="module")
-def app():
-    return create_app("testing")
+#: What the alert card renders in the tests that are about something else. Armed
+#: with one address, because the page's own default should be the state an operator
+#: is meant to reach: a channel that has somewhere to go.
+ALERTS_ARMED = {
+    "armed": True, "to": ["ops@example.com"], "source": "setting",
+    "source_detail": None, "interval_seconds": 6 * 3600, "min_commits": 5,
+    "last": None, "state_dir": "/var/lib/scangrade-deploy/alerts",
+    "state_error": None,
+}
 
 
-def render_status(app, report) -> str:
+def render_status(app, report, alerts=None, testalert=None, released=None) -> str:
     """The template with a given report — for the tests that read its copy.
 
     `g.user_id` is what base.html branches on to render the signed-in layout; with
@@ -762,7 +767,9 @@ def render_status(app, report) -> str:
         g.user_name = "Tester"
         g.user_email = "t@t"
         g.tz_offset = 7
-        return render_template("super_admin/deploy_status.html", status=report)
+        return render_template("super_admin/deploy_status.html", status=report,
+                               alerts=ALERTS_ARMED if alerts is None else alerts,
+                               testalert=testalert, released=released)
 
 
 class TestThePage:
@@ -866,8 +873,14 @@ class TestThePage:
 
 
 def template_gate_keys() -> set[str]:
-    """The gate names the quarantine card can say in either language."""
-    return set(re.findall(r"q\.gate_key == '([a-z_]+)'",
+    """The gate names the quarantine card can say in either language.
+
+    Digits are allowed because a gate may be numbered — `gate_0` is the runner's
+    own name for the check that refuses an installed copy, and `[a-z_]+` would
+    drop it silently, turning this guard into "every key I could parse has a
+    sentence" while the missing one reads as *unknown* on the page.
+    """
+    return set(re.findall(r"q\.gate_key == '([a-z0-9_]+)'",
                           TEMPLATE.read_text(encoding="utf-8")))
 
 
@@ -970,6 +983,246 @@ def held_report(tmp_path: Path, *, repo: Path | None = None, sha: str = "d" * 40
                          quarantine_file=str(record),
                          request_dir=str(tmp_path / "requests"),
                          release_request=str(tmp_path / "requests" / "release"))
+
+
+# ── the refusal that is about the box, not about a commit ───────────────────
+
+def unarmed_report(tmp_path: Path, *, text: str | None = "2026-09-21T11:26:00+00:00\n"
+                   "   runner     : a COPY of the deploy script\n"
+                   "   claims     : MISSING (/etc/scangrade-claims.conf)\n",
+                   path: Path | None = None) -> dict:
+    """A box the deploy has refused for a box-side reason, and nothing else."""
+    record = path or (tmp_path / "unarmed")
+    # A caller that passes a path is supplying the file itself — a directory, in
+    # the unreadable case — so only the default path is written here.
+    if path is None and text is not None:
+        record.write_text(text, encoding="utf-8")
+    return status.report(repo=str(tmp_path), runner="/nonexistent",
+                         snapshot_runner="/nonexistent",
+                         pause_file=str(tmp_path / "no-pause"),
+                         unarmed_file=str(record),
+                         request_dir=str(tmp_path / "requests"))
+
+
+class TestTheUnarmedRefusal:
+    def test_the_record_is_the_runner_s_own_file(self):
+        """One path, spelled in two languages of the same fact.
+
+        The runner writes `/var/lib/scangrade-deploy/unarmed` and this page reads
+        it. Two spellings that drift means a card that is always blank on a box
+        that always refuses — which is the failure it exists to show.
+        """
+        runner = RUNNER.read_text(encoding="utf-8")
+        state_dir = re.search(r'^STATE_DIR="([^"]+)"', runner, re.M).group(1)
+        written = re.search(r'^UNARMED_FILE="([^"]+)"', runner, re.M).group(1)
+        # The runner may spell it with the variable it already has; what matters is
+        # the path it resolves to, which is what the page is pointed at.
+        assert written.replace("$STATE_DIR", state_dir) == status.DEFAULT_UNARMED_FILE, (
+            f"the page reads {status.DEFAULT_UNARMED_FILE}, the runner writes {written}")
+
+    def test_a_record_is_reported_with_its_own_report_and_age(self, tmp_path):
+        report = unarmed_report(tmp_path)
+        unarmed = report["unarmed"]
+        assert unarmed["present"] is True
+        assert unarmed["key"] == status.UNARMED_PRESENT
+        assert unarmed["at"] == "2026-09-21T11:26:00+00:00"
+        assert unarmed["age_seconds"] is not None and unarmed["age_seconds"] >= 0
+        assert "a COPY of the deploy script" in unarmed["detail"], (
+            "the checker's own words are the evidence; rewriting them here would be "
+            "a second opinion")
+        assert "claims     : MISSING" in unarmed["detail"], (
+            "the multi-line report is kept as the checker wrote it")
+
+    def test_no_record_is_its_own_answer_not_a_reason(self, tmp_path):
+        """\"Nothing has refused\" has a sentence, so it is not a reason key."""
+        report = unarmed_report(tmp_path, text=None)
+        unarmed = report["unarmed"]
+        assert unarmed["present"] is False
+        assert unarmed["key"] == status.UNARMED_NONE
+        assert unarmed["detail"] is None
+
+    def test_a_record_that_cannot_be_read_is_not_reported_as_armed(self, tmp_path):
+        """The trap this file already documents twice: a blank that is not a blank.
+
+        `_read` distinguishes absent from unreadable, and folding the second into
+        the first is how a box that refuses every release looks like a box with
+        nothing to report.
+        """
+        unreadable = tmp_path / "a-directory"
+        unreadable.mkdir()
+        report = unarmed_report(tmp_path, path=unreadable)
+        unarmed = report["unarmed"]
+        assert unarmed["present"] is False
+        assert unarmed["key"] == status.UNARMED_UNREADABLE
+        assert unarmed["reason"], "the reason it could not be read has to travel"
+
+    def test_a_timestamp_that_cannot_be_parsed_still_counts_as_a_refusal(self, tmp_path):
+        """The record's *presence* is the fact; its date is a convenience."""
+        report = unarmed_report(tmp_path, text="not a date\n   runner : a COPY\n")
+        unarmed = report["unarmed"]
+        assert unarmed["present"] is True
+        assert unarmed["at"] == "not a date"
+        assert unarmed["age_seconds"] is None
+        assert unarmed["detail"] == "   runner : a COPY"
+
+    def test_a_refusal_with_nothing_after_the_timestamp_is_still_a_refusal(self, tmp_path):
+        """The checker may have said nothing; that is its silence, not this page's
+        licence to report the ordinary answer."""
+        report = unarmed_report(tmp_path, text="2026-09-21T11:26:00+00:00\n")
+        assert report["unarmed"]["present"] is True
+        assert report["unarmed"]["detail"] is None
+
+    def test_a_refused_box_is_not_given_a_clean_verdict(self, tmp_path):
+        """The arrangement can be perfect while nothing deploys.
+
+        This is the whole point of folding it into the verdict: a runner that is
+        the checkout's launcher, a checkout at `origin/main`, and a record saying
+        every run is refused is a box that deploys nothing — and "Everything in
+        order" is the opposite of what is happening.
+        """
+        report = unarmed_report(tmp_path)
+        fresh_runner = {"kind": "launcher", "reason_key": None, "detail": None,
+                        "gate0": status.GATE0_PASSES, "matches_this_commit": True}
+        ok_checkout = {"available": True, "reason_key": None, "detail": None,
+                       "behind": 0, "dirty": 0}
+        assert status.verdict(fresh_runner, ok_checkout, paused=False)["key"] == "fresh"
+        refused = status.verdict(fresh_runner, ok_checkout, paused=False,
+                                 unarmed=report["unarmed"])
+        assert refused["key"] == "unarmed"
+        assert refused["level"] == status.BROKEN, (
+            "a box that refuses every release is not a warning")
+        assert refused["detail"] == "2026-09-21T11:26:00+00:00", (
+            "how long this has been going on is the first question asked")
+
+    def test_pausing_is_still_not_the_same_answer(self, tmp_path):
+        """A frozen box is somebody's decision; a refused one is a fault."""
+        _ = tmp_path
+        assert status.UNARMED_NONE != status.UNARMED_PRESENT
+
+
+class TestThePageNamesTheUnarmedRefusal:
+    def test_every_unarmed_reading_has_a_sentence_in_both_languages(self):
+        """All three answers, and a separate one for each.
+
+        `present` is the flag; the other two are compared by key. If the card
+        folded `unreadable` into "nothing has refused", a box whose record this
+        process cannot read would be described as armed — on the one page an
+        operator has for the question.
+        """
+        text = TEMPLATE.read_text(encoding="utf-8")
+        by_key = set(re.findall(r"u\.key == '([a-z_]+)'", text))
+        if "u.present" in text:
+            by_key |= {status.UNARMED_PRESENT}
+        assert by_key == status.UNARMED_KEYS, (
+            f"these states have no sentence on the page: "
+            f"{sorted(status.UNARMED_KEYS - by_key)}")
+
+    def test_the_card_is_painted_by_the_state_it_names(self):
+        """A card that always looks calm is a card an operator skims past.
+
+        The palette is the same one the runner card uses — rose for a refusal,
+        surface for the ordinary answer — and it is chosen from the reading, not
+        hard-coded. The sentence is in a language half the readers skim; the colour
+        is what makes them stop and read it.
+        """
+        text = TEMPLATE.read_text(encoding="utf-8")
+        block = text[text.index("{% set u = status.unarmed %}"):
+                     text.index("{% set q = status.quarantine %}")]
+        assert re.search(r"\{%\s*set UL = .*u\.key.*%\}", block), (
+            "the unarmed card's palette does not depend on the state it is showing")
+        assert "bg-rose-50" in block and "bg-surface-50" in block, (
+            "the card has no palette of its own to choose from")
+
+    def test_the_refusal_and_its_report_are_on_the_page(self, app, tmp_path):
+        report = unarmed_report(tmp_path)
+        html = render_status(app, report)
+        assert "Release Refused" in html
+        assert "a COPY of the deploy script" in html
+        assert "claims     : MISSING" in html
+        assert report["unarmed"]["at"] in html
+
+    def test_the_cold_state_says_so_rather_than_showing_a_blank(self, app, tmp_path):
+        html = render_status(app, unarmed_report(tmp_path, text=None))
+        assert "No Release Refused for a Box-side Reason" in html
+        assert "Nothing has been refused for a box-side reason" in html
+
+    def test_an_unreadable_record_is_not_dressed_as_the_ordinary_answer(self, app, tmp_path):
+        """Its own heading, its own sentence, and the captured error."""
+        unreadable = tmp_path / "a-directory"
+        unreadable.mkdir()
+        html = render_status(app, unarmed_report(tmp_path, path=unreadable))
+        assert "Refusal Record Unreadable" in html
+        assert "There is a refusal on record" in html
+        assert "No Release Refused for a Box-side Reason" not in html, (
+            "a record this process cannot read is not evidence that nothing refused")
+
+
+class _Unreachable(type(Path())):
+    """A path that exists as far as the script is concerned and denies us anyway.
+
+    This is what the VPS actually served: asking about anything under
+    `/var/lib/scangrade-deploy` raised EACCES for the service user, because the
+    directory was root:root 0750. A test cannot `chmod` that portably — Windows
+    ignores the mode bits — so the calls the branches depend on are stood in for,
+    each with the error it really raises. Both are needed because the two readers
+    do not go through the same syscall: `_dir_writable` asks `stat()`, and `_read`
+    opens the file.
+    """
+
+    def stat(self, *, follow_symlinks=True):  # noqa: ARG002
+        raise PermissionError(13, "Permission denied")
+
+    def read_text(self, encoding=None, errors=None):  # noqa: ARG002
+        raise PermissionError(13, "Permission denied")
+
+
+class TestADirectoryThatExistsButCannotBeReached:
+    def test_a_missing_directory_is_its_own_answer(self, tmp_path):
+        """`None` means the installer has not run; the page says exactly that."""
+        assert status._dir_writable(tmp_path / "never-created") is None
+
+    def test_a_directory_this_process_may_not_reach_is_not_missing(self, tmp_path):
+        """The distinction that was wrong, and it named the wrong remedy.
+
+        `stat()` raising anything other than FileNotFoundError means the directory
+        is there and we are not allowed to see it. Reporting that as `None` told
+        the operator "the installer has never been run on this server" — on a box
+        where it had been run, which is how a permission problem stays invisible.
+        """
+        assert status._dir_writable(_Unreachable(str(tmp_path / "requests"))) is False
+
+    def test_a_regular_file_where_the_directory_belongs_is_not_writable(self, tmp_path):
+        """Not a directory ⇒ no request can be dropped in it, on any platform."""
+        blocker = tmp_path / "requests"
+        blocker.write_text("not a directory", encoding="utf-8")
+        assert status._dir_writable(blocker) is False
+
+    def test_the_card_shows_why_it_could_not_read_the_record(self, app, tmp_path):
+        """A diagnosis without its cause leaves an operator with no next step.
+
+        The service captured the OSError all along and the card dropped it, so the
+        page said "the quarantine record could not be read" and stopped there — no
+        path, no errno, nothing to look at. This is the one surface an operator
+        without a shell has.
+        """
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"),
+                               quarantine_file=str(tmp_path / "var-lib" / "quarantined"))
+        # `report()` takes paths as strings, so the reading is taken from the
+        # unreachable path directly and dropped in — the same function the route
+        # calls, with the path it cannot stat.
+        report["quarantine"] = status.quarantine_state(
+            _Unreachable(str(tmp_path / "var-lib" / "quarantined")),
+            Path(str(tmp_path)), now=status._dt.datetime.now(status._dt.timezone.utc))
+        assert report["quarantine"]["reason_key"] == "unreadable"
+        html = render_status(app, report)
+        assert "The quarantine record could not be read" in html, (
+            "the unreadable branch is no longer the one the page renders")
+        assert "Permission denied" in html, (
+            "the captured error is not on the page, so the sentinel this branch "
+            "exists to give is missing: a browser-only operator cannot find out "
+            "which directory refused them")
 
 
 class TestTheHeldRelease:
@@ -1183,11 +1436,21 @@ class TestTheReleaseRequest:
                 f"existence may matter (matched {reader!r})")
 
     def test_the_installer_creates_the_directory_the_app_writes_to(self):
-        """Ownership is the permission model here: the app runs as the service
-        user, so that user has to own the directory it writes into."""
+        """Ownership is the permission model here: the app runs as the service user,
+        so that user has to own the directory it writes into.
+
+        And the identity now comes from the *unit* rather than from the checkout's
+        owner, because the group half is what the app reads its state through: with
+        the group left out, `/var/lib/scangrade-deploy` was root:root 0750 and the
+        quarantine card could not read the record it displays. See
+        `test_auto_deploy.TestTheServiceUserCanReachItsStateDirectory`.
+        """
         installer = (ROOT / "deploy" / "install-auto-deploy.sh").read_text(encoding="utf-8")
         assert "mkdir -p /var/lib/scangrade-deploy/requests" in installer
-        assert 'chown "$OWNER":"$OWNER" /var/lib/scangrade-deploy/requests' in installer
+        assert ('chown "$SERVICE_USER":"$SERVICE_GROUP" '
+                '/var/lib/scangrade-deploy/requests') in installer, (
+            "the request directory is not given to the identity the unit runs as, so "
+            "the button writes nowhere or the wrong place")
         assert "chmod 0750 /var/lib/scangrade-deploy/requests" in installer, (
             "a world-writable request directory would let any local user ask for a "
             "release")
