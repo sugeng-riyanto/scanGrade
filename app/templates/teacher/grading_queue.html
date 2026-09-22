@@ -110,6 +110,21 @@
                                     </template>
                                     <span class="text-[9px] text-surface-400 ml-1" x-text="s.graded_essays + '/' + s.essay_count"></span>
                                     <span x-show="s.has_drawing" class="text-primary-400 ml-0.5"><i class="fas fa-paint-brush text-[8px]"></i></span>
+                                    {# One click from the queue to that learner's own
+                                       report. `@click.stop` because the row itself
+                                       selects the student: without it, opening a
+                                       report also moves the queue underneath the
+                                       teacher. The link is not rendered for a row
+                                       the app could not hang on a profile, which is
+                                       exactly the case where the report's route would
+                                       answer 404. #}
+                                    <a x-show="s.student_id" @click.stop
+                                       :href="'/teacher/analysis/{{ exam.id }}/report/student/' + s.student_id"
+                                       target="_blank" rel="noopener"
+                                       data-learner-report
+                                       class="ml-auto pl-1 text-[9px] font-bold text-primary-600 hover:text-primary-700 hover:underline shrink-0 whitespace-nowrap">
+                                        <i class="fas fa-file-lines"></i> Laporan
+                                    </a>
                                 </div>
                             </div>
                         </div>
@@ -177,6 +192,19 @@
                         <div class="flex items-center gap-2 shrink-0">
                             <a :href="'/teacher/grade/' + current.id" class="text-[10px] text-primary-600 hover:text-primary-700 font-bold px-2 py-1 hover:bg-primary-50 rounded-lg transition" target="_blank">
                                 <i class="fas fa-external-link-alt mr-0.5"></i>Detail
+                            </a>
+                            {# The paper's own detail page above grades this one
+                               submission; this one is the learner's report — every
+                               question, with the reason each paid what it paid. Two
+                               different questions, so two doors rather than one
+                               button that changes meaning. Same rule as the queue:
+                               no link when the row names no profile. #}
+                            <a x-show="current.student_id"
+                               :href="'/teacher/analysis/{{ exam.id }}/report/student/' + current.student_id"
+                               target="_blank" rel="noopener"
+                               data-learner-report
+                               class="text-[10px] text-primary-600 hover:text-primary-700 font-bold px-2 py-1 hover:bg-primary-50 rounded-lg transition">
+                                <i class="fas fa-file-lines mr-0.5"></i>Laporan
                             </a>
                             <span class="text-[11px] text-surface-400 font-bold bg-surface-100 px-2 py-0.5 rounded-md"
                                   x-text="(currentIdx + 1) + '/' + filteredList.length"></span>
