@@ -1549,3 +1549,267 @@ class TestTheReleaseRoute:
         assert "log_activity(" in block, (
             "releasing a quarantined release is a consequential act on the box and "
             "leaves no trace otherwise")
+
+
+# ── the refusal that happens before the release moves ────────────────────────
+#
+# The quarantine card covers a release a gate refused after merging it; the unarmed
+# card covers a run refused before it fetched anything. Between them is the run that
+# fetches and then stops before the merge — and from outside that box is
+# indistinguishable from one with no new commits: nothing merged, nothing reloaded,
+# nothing quarantined, and the checkout's own readings perfectly healthy, because a
+# status read and a *writer* disagree about what a stale `.git/index.lock` means.
+# It fetched every two minutes for three hours and deployed nothing.
+
+PREFLIGHT_TEXT = (
+    "merge_refused\n2026-09-22T16:39:16+00:00\n6\n" + "c" * 40 + "\n"
+    "error: Unable to create '/opt/scangrade/.git/index.lock': File exists.\n"
+    "Another git process seems to be running in this repository, e.g.\n")
+
+
+def template_preflight_gate_keys() -> set[str]:
+    """The steps the pre-merge card can say in either language."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    return set(re.findall(r"pf\.gate_key == '([a-z_0-9]+)'", text))
+
+
+def runner_preflight_gates() -> set[str]:
+    """Every step `deploy/scangrade-deploy.sh` records refusing at, by key."""
+    text = RUNNER.read_text(encoding="utf-8")
+    return set(re.findall(r"PREFLIGHT_GATE=([a-z_]+)", text))
+
+
+def preflight_report(tmp_path: Path, *, text: str | None = PREFLIGHT_TEXT,
+                     path: Path | None = None) -> dict:
+    """A box whose last attempt at a release was refused before it merged."""
+    record = path or (tmp_path / "refused-before-merge")
+    # A caller passing a path supplies the file itself (a directory, in the
+    # unreadable case), so only the default path is written here.
+    if path is None and text is not None:
+        record.write_text(text, encoding="utf-8")
+    return status.report(repo=str(tmp_path), runner="/nonexistent",
+                         snapshot_runner="/nonexistent",
+                         pause_file=str(tmp_path / "no-pause"),
+                         preflight_file=str(record),
+                         request_dir=str(tmp_path / "requests"))
+
+
+class TestThePreMergeRefusal:
+    def test_the_record_reads_back_whole(self, tmp_path):
+        state = preflight_report(tmp_path)["preflight"]
+        assert state["present"] is True
+        assert state["key"] == status.PREFLIGHT_PRESENT
+        assert state["gate"] == "merge_refused"
+        assert state["gate_key"] == "merge_refused"
+        assert state["exit_code"] == "6"
+        assert state["commit"] == "c" * 40 and state["short"] == "ccccccc"
+        assert "index.lock" in state["detail"], (
+            "the command's own words are the evidence; a paraphrase would have "
+            "lost the one line that names the cause")
+
+    def test_the_reading_carries_its_own_age(self, tmp_path):
+        state = preflight_report(tmp_path)["preflight"]
+        assert isinstance(state["age_seconds"], int)
+        assert state["at"] == "2026-09-22T16:39:16+00:00"
+
+    def test_a_refusal_before_a_commit_exists_invents_none(self, tmp_path):
+        """The first two exits happen before `origin/main` is read, so the fourth
+        line is empty — and an invented sha would name a commit nobody judged."""
+        state = preflight_report(
+            tmp_path, text="not_root\n2026-09-22T16:39:16+00:00\n2\n\nuid 1000 is not root\n",
+        )["preflight"]
+        assert state["present"] is True
+        assert state["commit"] is None and state["short"] is None
+        assert state["detail"] == "uid 1000 is not root"
+
+    def test_a_fourth_line_that_is_not_a_commit_is_not_shown_as_one(self, tmp_path):
+        """The commit line is read, not trusted: a page naming \"not-a-sha\" as the
+        commit under judgement would send the reader looking for a commit that does
+        not exist."""
+        state = preflight_report(
+            tmp_path, text="dirty_checkout\n2026-09-22T16:39:16+00:00\n4\nnot-a-sha\n?? x\n",
+        )["preflight"]
+        assert state["present"] is True
+        assert state["commit"] is None and state["short"] is None
+
+    def test_absent_is_the_ordinary_answer(self, tmp_path):
+        state = preflight_report(tmp_path, text=None)["preflight"]
+        assert state["key"] == status.PREFLIGHT_NONE
+        assert state["present"] is False
+
+    def test_a_record_that_cannot_be_read_is_not_absent(self, tmp_path):
+        """\"Nothing was refused\" and \"a refusal I cannot read\" look identical
+        from outside, and only one of them means the box is deploying."""
+        path = tmp_path / "a-directory-instead"
+        path.mkdir()
+        state = preflight_report(tmp_path, path=path)["preflight"]
+        assert state["key"] == status.PREFLIGHT_UNREADABLE
+        assert state["reason"]
+
+    def test_a_file_that_is_not_a_record_is_malformed(self, tmp_path):
+        """The header is what is validated, because everything after it is the
+        command's output and can be anything at all. A first line that is not a
+        key is not a record — and it must not render as \"nothing was refused\"."""
+        state = preflight_report(tmp_path, text="this is not a record\n")["preflight"]
+        assert state["key"] == status.PREFLIGHT_MALFORMED
+        assert state["present"] is False
+        assert state["reason"], "what was actually in the file has to travel with it"
+
+    def test_a_step_from_a_newer_runner_keeps_its_own_name(self, tmp_path):
+        """Classifying is for the sentence, never for the evidence."""
+        state = preflight_report(
+            tmp_path, text="a_new_step\n2026-09-22T16:39:16+00:00\n20\n\nsomething\n",
+        )["preflight"]
+        assert state["gate"] == "a_new_step"
+        assert state["gate_key"] == status.PREFLIGHT_UNKNOWN_GATE
+
+    def test_every_step_the_runner_records_is_one_this_service_knows(self):
+        gates = runner_preflight_gates()
+        assert gates, "no PREFLIGHT_GATE literals found — did the runner change shape?"
+        assert gates == status.PREFLIGHT_GATES, (
+            f"the runner records steps this service has no sentence for: "
+            f"{sorted(gates - status.PREFLIGHT_GATES)}")
+
+
+class TestWhatAPreMergeRefusalAddsUpTo:
+    _RUNNER = {"kind": "launcher", "reason_key": None, "detail": None,
+               "gate0": status.GATE0_PASSES, "matches_this_commit": True}
+
+    def _checkout(self, **kw) -> dict:
+        return {"available": True, "reason_key": None, "detail": None,
+                "behind": 0, "dirty": 0, **kw}
+
+    def test_a_recorded_refusal_outranks_the_commit_count(self, tmp_path):
+        """`behind` is the symptom; the record is the cause."""
+        record = preflight_report(tmp_path)["preflight"]
+        verdict = status.verdict(self._RUNNER, self._checkout(behind=5),
+                                 paused=False, preflight=record)
+        assert verdict["key"] == "refused"
+        assert verdict["level"] == status.BROKEN
+        assert verdict["behind"] == 5, "the waiting work is still reported"
+
+    def test_a_recorded_refusal_outranks_the_checkout_s_own_dirty_count(self, tmp_path):
+        record = preflight_report(tmp_path)["preflight"]
+        verdict = status.verdict(self._RUNNER, self._checkout(dirty=2),
+                                 paused=False, preflight=record)
+        assert verdict["key"] == "refused"
+
+    def test_a_recorded_refusal_never_reads_as_fresh_or_behind(self, tmp_path):
+        """The regression this card exists for: a healthy-looking page on a box
+        that has not deployed in hours."""
+        record = preflight_report(tmp_path)["preflight"]
+        for behind in (0, 4):
+            verdict = status.verdict(self._RUNNER, self._checkout(behind=behind),
+                                     paused=False, preflight=record)
+            assert verdict["key"] == "refused", behind
+
+    def test_a_fetch_that_could_not_reach_github_is_a_warning(self, tmp_path):
+        """It retries by itself, so it must not read as the same breakage as a lock
+        file nothing will clear."""
+        record = preflight_report(
+            tmp_path,
+            text="fetch_failed\n2026-09-22T16:39:16+00:00\n5\n\n"
+                 "fatal: could not read Username for 'https://github.com'\n",
+        )["preflight"]
+        verdict = status.verdict(self._RUNNER, self._checkout(),
+                                 paused=False, preflight=record)
+        assert verdict["key"] == "refused"
+        assert verdict["level"] == status.WARN
+
+    def test_an_unarmed_box_still_outranks_a_recorded_refusal(self, tmp_path):
+        """It refuses even earlier, so it is the truer story."""
+        record = preflight_report(tmp_path)["preflight"]
+        verdict = status.verdict(self._RUNNER, self._checkout(), paused=False,
+                                 unarmed={"present": True, "at": "x"},
+                                 preflight=record)
+        assert verdict["key"] == "unarmed"
+
+    def test_a_frozen_box_is_the_freezing_rather_than_the_refusal(self, tmp_path):
+        record = preflight_report(tmp_path)["preflight"]
+        verdict = status.verdict(self._RUNNER, self._checkout(), paused=True,
+                                 preflight=record)
+        assert verdict["key"] == "paused"
+
+    def test_the_absent_record_changes_nothing(self, tmp_path):
+        record = preflight_report(tmp_path, text=None)["preflight"]
+        verdict = status.verdict(self._RUNNER, self._checkout(behind=1),
+                                 paused=False, preflight=record)
+        assert verdict["key"] == "behind"
+
+    def test_the_report_defaults_land_on_the_runner_s_path(self, tmp_path):
+        """The same relation the request file is checked for: one path, two files."""
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"))
+        assert as_path(report["preflight_file"]) == \
+            status.DEFAULT_STATE_DIR + "/refused-before-merge"
+        assert DECLARED_PREFLIGHT_FILE == status.DEFAULT_PREFLIGHT_FILE, (
+            "the runner's constant and the page's default have drifted apart")
+
+
+#: `deploy/scangrade-deploy.sh`'s own constant, resolved through `$STATE_DIR`.
+DECLARED_PREFLIGHT_FILE = as_path(
+    resolved_runner_path("PREFLIGHT_FILE") or "")
+
+
+class TestThePageNamesThePreMergeRefusal:
+    def test_every_step_the_runner_records_has_a_sentence_in_both_languages(self):
+        assert template_preflight_gate_keys() == status.PREFLIGHT_GATES, (
+            f"missing from the page: {sorted(status.PREFLIGHT_GATES - template_preflight_gate_keys())}; "
+            f"invented by the page: {sorted(template_preflight_gate_keys() - status.PREFLIGHT_GATES)}")
+
+    def test_the_page_shows_the_step_the_exit_code_and_the_runner_s_own_words(self, app, tmp_path):
+        report = preflight_report(tmp_path)
+        html = render_status(app, report)
+        assert report["preflight"]["short"] in html
+        assert "index.lock" in html, (
+            "the diagnosis is the command's output; the card has to carry it")
+        assert report["preflight"]["at"] in html
+        assert ">6<" in html or "\n                            6" in html, (
+            "the exit code an operator matches against systemd is not shown")
+        assert "the commit could not be merged into the checkout" in html, (
+            "the step is not named in the reader's language")
+
+    def test_the_card_says_the_release_did_not_move(self, app, tmp_path):
+        html = render_status(app, preflight_report(tmp_path))
+        assert "Release Refused Before It Was Merged" in html
+        assert "nothing was quarantined" in html, (
+            "without this the card reads like the quarantine card and points the "
+            "operator at a release that is not held")
+
+    def test_the_cold_state_says_so_and_does_not_claim_the_timer_is_running(self, app, tmp_path):
+        """The trap this whole card fell into: silence on this page reads as \"no
+        new commits\", and the page cannot see the schedule at all."""
+        html = render_status(app, preflight_report(tmp_path, text=None))
+        assert "Nothing Refused Before a Merge" in html
+        assert "not proof the schedule is running" in html, (
+            "the blank state claims more than the page can know")
+
+    def test_a_record_it_cannot_read_is_not_rendered_as_a_clean_state(self, app, tmp_path):
+        path = tmp_path / "a-directory-instead"
+        path.mkdir()
+        report = preflight_report(tmp_path, path=path)
+        html = render_status(app, report)
+        assert "Pre-merge Refusal Record Unreadable" in html
+        assert "Nothing Refused Before a Merge" not in html
+
+    @needs_git
+    def test_the_verdict_sentence_points_at_the_card(self, app, tmp_path):
+        """Through a whole `report()`, with a real checkout and a real launcher: the
+        verdict's earlier branches (`absent`, `copy_drifted`) must not swallow this
+        one, and `preflight_report`'s missing runner would do exactly that."""
+        repo = checkout(tmp_path)
+        record = tmp_path / "refused-before-merge"
+        record.write_text(PREFLIGHT_TEXT, encoding="utf-8")
+        report = status.report(
+            repo=repo,
+            runner=install(tmp_path, "scangrade-deploy", launcher_for(repo)),
+            snapshot_runner=install(tmp_path, "snap", launcher_for(repo)),
+            pause_file=tmp_path / "no-pause",
+            preflight_file=str(record))
+        assert report["verdict"]["key"] == "refused", (
+            "the report has to reach the verdict, not just the card")
+        assert report["verdict"]["detail"] == "merge_refused", (
+            "the step travels with the verdict rather than being swallowed")
+        html = render_status(app, report)
+        assert "refused to move it into the checkout" in html

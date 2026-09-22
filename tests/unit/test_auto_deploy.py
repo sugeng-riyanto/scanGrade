@@ -2260,3 +2260,259 @@ def test_the_runner_refreshes_the_fixture_before_it_is_read():
     assert not re.search(r"^\s*exit\b", block, re.M), (
         "a fixture that could not be written fails the release"
     )
+
+
+# ── a refusal *before* the release moves is recorded too ─────────────────────
+#
+# A quarantine is a record about a commit, so it is written only after a release
+# has been merged and judged. Everything the run can refuse before that — a dirty
+# checkout, a fetch with no network, an unreadable checkout, a migration release
+# with no recovery point, a merge that cannot happen — used to leave nothing at
+# all: no quarantine, no reload, no moved checkout, and a status page whose own
+# readings (0 uncommitted files, clear quarantine) described the box as fine. A box
+# in that state fetches every tick and deploys nothing, indefinitely.
+#
+# So each of those exits writes a record and, just as importantly, the *command's*
+# own words: a stale `.git/index.lock` makes `git merge` fail while `git status`
+# succeeds, which is exactly the case where the reason has to come from stderr
+# rather than from the script's guess about what a merge failure means.
+
+RECORD_START = "# preflight-logic:start"
+RECORD_END = "# preflight-logic:end"
+RECORD_CALL = re.compile(r"PREFLIGHT_GATE=([a-z_]+) PREFLIGHT_EXIT=(\d+)")
+
+#: Every step the runner can refuse at before the merge. Named here so a new one
+#: has to be added deliberately — the page needs a sentence for each, and the
+#: service's `PREFLIGHT_GATES` has to gain it too.
+RECORD_GATES = {
+    "not_root",
+    "no_checkout",
+    "no_virtualenv",
+    "checkout_unreadable",
+    "dirty_checkout",
+    "fetch_failed",
+    "snapshot_refused",
+    "merge_refused",
+}
+
+
+def _record_block() -> str:
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return script.split(RECORD_START, 1)[1].split(RECORD_END, 1)[0]
+
+
+def _record_calls() -> list:
+    """(gate, the exit code it records, offset) for every recorded refusal."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return [(m.group(1), m.group(2), m.end()) for m in RECORD_CALL.finditer(script)]
+
+
+def test_the_record_lives_between_its_own_delimiters():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert RECORD_START in script and RECORD_END in script, (
+        "the block's delimiters are what let it be tested on its own, the way the "
+        "quarantine's and Gate 0's are; keep them")
+    block = _record_block()
+    for fn in ("preflight_write() {", "preflight_forget() {"):
+        assert fn in block, f"{fn} left the delimited block"
+
+
+def test_every_pre_merge_refusal_is_recorded_and_leaves_with_that_code():
+    """Both halves of the pair, per site.
+
+    The gate key is what the page turns into a sentence and the exit code is what
+    `systemctl status` reports, so the two are written together and have to agree
+    with the `exit` that follows — a record naming a gate the run then does not
+    leave through is worse than no record at all.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    calls = _record_calls()
+    assert {gate for gate, _, _ in calls} == RECORD_GATES, (
+        f"the recorded steps changed: {sorted({g for g, _, _ in calls})}")
+    for gate, code, end in calls:
+        found = re.search(r"^\s*exit (\d+)", script[end:end + 400], re.M)
+        assert found, f"{gate} records a refusal and then does not leave"
+        assert found.group(1) == code, (
+            f"{gate} records exit {code} and then exits {found.group(1)} — the page "
+            "and systemd would disagree about why the run ended")
+
+
+def test_nothing_is_recorded_as_a_pre_merge_refusal_after_the_merge():
+    """The record describes what stopped the release *getting* to the checkout.
+
+    Past the merge there is a different record for that — the quarantine — and one
+    written here would outlive the state it describes.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    # `merge_refused` itself is recorded *at* the merge — that is the refusal — so
+    # the boundary is the moment the merge succeeded and the record was cleared.
+    healed = script.index("preflight_forget", script.index("merge --ff-only"))
+    late = [gate for gate, _, end in _record_calls() if end > healed]
+    assert not late, f"recorded as pre-merge refusals after the merge: {late}"
+    assert "preflight_write" not in script[script.index("Gate 0 survives the release"):], (
+        "a pre-merge refusal record is written after the release was merged")
+
+
+def test_a_merged_release_forgets_the_record():
+    """The box must stop reporting a refusal to get here once it has got here."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    merge = script.index("merge --ff-only")
+    forget = script.index("preflight_forget", merge)
+    assert forget > merge, "nothing clears the record when a release merges"
+    assert forget < script.index("Gate 0 survives the release"), (
+        "the record is cleared after the next gate, so a refusal in between would "
+        "be erased by a release that never finished")
+    assert 'rm -f "$PREFLIGHT_FILE"' in _record_block(), (
+        "preflight_forget does not remove the record it is named for")
+
+
+def test_the_reasons_that_were_thrown_away_are_captured():
+    """`--quiet` hid git's own words, so the runner guessed instead.
+
+    The merge is the one that mattered: "not a fast-forward (history rewritten?)"
+    was printed every two minutes while the real cause was a lock file git could
+    not create. Every command whose failure *is* its message now has its stderr
+    captured, and the captured text is what the record carries.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    for variable, command in (
+        ("FETCH_OUT", 'fetch --quiet origin "$BRANCH" 2>&1'),
+        ("MERGE_OUT", 'merge --ff-only --quiet "origin/$BRANCH" 2>&1'),
+        ("SNAP_OUT", "--quiet 2>&1"),
+    ):
+        assert f"{variable}=$(" in script, f"{variable} is never captured"
+        assert command in script, (
+            f"the {variable} capture does not take the command's stderr, so the "
+            "record can only carry a guess")
+        assert f'PREFLIGHT_DETAIL="${{{variable}:-' in script, (
+            f"{variable} is captured and then not recorded — the page would show a "
+            "paraphrase of a failure whose whole diagnosis is the command's output")
+    assert "not a fast-forward (history rewritten?)" not in script, (
+        "the runner is guessing again: a merge can fail without history having been "
+        "rewritten, and that guess is what hid the lock file")
+
+
+def test_an_unreadable_checkout_is_not_read_as_clean():
+    """`DIRTY=$(git status)` came back empty either way, and empty is what a clean
+    tree looks like — so a checkout git could not read was merged into, and the
+    failure surfaced later as a merge error about fast-forwards."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    guard = script[script.index("Guard against clobbering hand edits"):
+                   script.index("BEFORE=$(as_owner")]
+    assert "checkout_unreadable" in guard, (
+        "a failed `git status` is still treated as a clean checkout")
+    assert "2>&1" in guard, "the failure is still thrown away instead of recorded"
+    assert guard.index("checkout_unreadable") < guard.index("dirty_checkout"), (
+        "the unreadable arm has to come first: afterwards the empty answer has "
+        "already been read as a clean tree")
+    assert not re.search(r'DIRTY=\$\(as_owner git -C "\$REPO" status --porcelain\)', script), (
+        "the uncaptured assignment is back, so an empty answer means both "
+        "\"clean\" and \"git said nothing\"")
+
+
+# ── and it behaves ───────────────────────────────────────────────────────────
+
+SHA_C = "c" * 40
+
+
+def _record_harness(tmp_path: Path) -> str:
+    """The real block, lifted out and given the paths it reads.
+
+    `AFTER_FULL` is deliberately *not* set here: the block has to survive a
+    refusal that happens before a commit is under judgement, which is what the
+    first two exits in the script do under `set -u`.
+    """
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    return (
+        "set -uo pipefail\n"
+        f'STATE_DIR="{state}"\n'
+        f'PREFLIGHT_FILE="{state}/refused-before-merge"\n'
+        + _record_block()
+    )
+
+
+def _run_record(tmp_path: Path, body: str) -> subprocess.CompletedProcess:
+    return subprocess.run([BASH, "-c", _record_harness(tmp_path) + body],
+                          capture_output=True, text=True)
+
+
+needs_a_bash = pytest.mark.skipif(BASH is None, reason="needs a bash to run the record")
+
+
+@needs_a_bash
+def test_the_record_is_five_lines_a_page_can_read(tmp_path):
+    done = _run_record(
+        tmp_path,
+        f'AFTER_FULL="{SHA_C}"\n'
+        'PREFLIGHT_GATE=merge_refused PREFLIGHT_EXIT=6 \\\n'
+        '  PREFLIGHT_DETAIL="error: Unable to create index.lock: File exists" \\\n'
+        "  preflight_write\n",
+    )
+    assert done.returncode == 0, done.stderr
+    lines = (tmp_path / "state/refused-before-merge").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 5, lines
+    assert lines[0] == "merge_refused"
+    assert lines[1].startswith("20"), "the record has no time on it"
+    assert lines[2] == "6"
+    assert lines[3] == SHA_C
+    assert "index.lock" in lines[4], "the command's own words did not reach the record"
+
+
+@needs_a_bash
+def test_a_refusal_before_there_is_a_commit_records_an_empty_one(tmp_path):
+    """The early exits (no root, no checkout) refuse before `origin/main` is read,
+    and `set -u` must not turn that into a crash that loses the record."""
+    done = _run_record(
+        tmp_path,
+        'PREFLIGHT_GATE=not_root PREFLIGHT_EXIT=2 \\\n'
+        '  PREFLIGHT_DETAIL="uid 1000 is not root" preflight_write\n',
+    )
+    assert done.returncode == 0, done.stderr
+    body = (tmp_path / "state/refused-before-merge").read_text(encoding="utf-8")
+    assert body.splitlines()[3] == "", "an empty commit became something else"
+
+
+@needs_a_bash
+def test_the_record_is_readable_by_the_app_that_renders_the_page(tmp_path):
+    """Root writes it and the service user has to read it, so it cannot be 0600
+    inside a directory the app cannot reach."""
+    assert 'chmod 0644 "$PREFLIGHT_FILE"' in DEPLOY_SH.read_text(encoding="utf-8"), (
+        "the record is not made readable by the app that renders the page")
+    done = _run_record(
+        tmp_path,
+        'PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 PREFLIGHT_DETAIL="?? x" '
+        "preflight_write\n",
+    )
+    assert done.returncode == 0, done.stderr
+    assert (tmp_path / "state/refused-before-merge").exists()
+
+
+@needs_a_bash
+def test_a_second_refusal_replaces_the_first_rather_than_stacking(tmp_path):
+    """One record, always the newest: a page showing the oldest refusal would point
+    an operator at a cause that has already been fixed."""
+    done = _run_record(
+        tmp_path,
+        'PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 PREFLIGHT_DETAIL="first" '
+        "preflight_write\n"
+        'PREFLIGHT_GATE=fetch_failed PREFLIGHT_EXIT=5 PREFLIGHT_DETAIL="second" '
+        "preflight_write\n",
+    )
+    assert done.returncode == 0, done.stderr
+    first = (tmp_path / "state/refused-before-merge").read_text(encoding="utf-8")
+    assert first.splitlines()[0] == "fetch_failed"
+
+
+@needs_a_bash
+def test_a_merged_release_removes_the_record_and_a_missing_one_is_not_an_error(tmp_path):
+    done = _run_record(tmp_path, "preflight_forget\n")
+    assert done.returncode == 0, done.stderr
+    assert not (tmp_path / "state/refused-before-merge").exists()
+    done = _run_record(
+        tmp_path,
+        'PREFLIGHT_GATE=snapshot_refused PREFLIGHT_EXIT=12 PREFLIGHT_DETAIL="x" '
+        "preflight_write\npreflight_forget\n",
+    )
+    assert done.returncode == 0, done.stderr
+    assert not (tmp_path / "state/refused-before-merge").exists()
