@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{# The index between the menu and the documents.
+
+   A report is per exam — one class, one paper — so the sidebar can offer the
+   *idea* of a report and a scope, but never "the report for this exam": that is a
+   choice only the reader can make. This page is where the choice is made cheap,
+   listing both halves of it — the class document a school files, and the child's
+   own page — with a door each, for exactly the exams and learners this role may
+   open (`analysis_scope`, the same predicate the statistics page and the report
+   routes use).
+
+   Every string is a pair, so the EN/ID button translates the whole index. #}
+{% block title %}ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Laporan','Reports')"></span>{% endblock %}
+{% block content %}
+<div class="space-y-4 sm:space-y-6"
+     x-data="reportsIndex({{ learner_keys|tojson|forceescape }})"
+     x-effect="document.title = t('Laporan','Reports') + ' - ScanGrade'">
+
+    <!-- Header: whose reports these are -->
+    <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+            <h2 class="text-xl sm:text-2xl font-extrabold text-slate-800"
+                x-text="t('Laporan','Reports')"></h2>
+            <p class="text-sm text-slate-500 font-medium mt-0.5">
+                <span x-text="t('Laporan kelas dan laporan murid untuk','Class and learner reports for')"></span>
+                <span class="font-bold text-slate-600"
+                      x-data="{scope: {{ report.scope_pair|tojson|forceescape }}}"
+                      x-text="t(scope.id, scope.en)"></span>
+            </p>
+        </div>
+    </div>
+
+    <!-- Date range: the same control, and the same two parameters, as the statistics page -->
+    <div class="card p-4 sm:p-5"
+         x-data="{dateFrom: '{{ report.date_from or '' }}', dateTo: '{{ report.date_to or '' }}'}">
+        <form method="GET" action="/teacher/reports"
+              class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+            <div class="flex-1 min-w-0 w-full">
+                <label class="block text-xs font-semibold text-slate-500 mb-1"
+                       x-text="t('Rentang waktu','Date range')"></label>
+                <div class="flex items-center gap-2">
+                    <input type="date" name="date_from" x-model="dateFrom"
+                           class="input text-sm flex-1">
+                    <span class="text-slate-400 text-xs font-bold">—</span>
+                    <input type="date" name="date_to" x-model="dateTo"
+                           class="input text-sm flex-1">
+                </div>
+            </div>
+            <input type="hidden" name="lang" :value="lang">
+            <div class="flex gap-2">
+                <button type="submit"
+                        class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">
+                    <i class="fas fa-filter mr-1"></i><span x-text="t('Terapkan','Apply')"></span>
+                </button>
+                {% if report.date_from or report.date_to %}
+                <a href="/teacher/reports?lang={{ report.lang }}"
+                   class="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-50 transition">
+                    <i class="fas fa-times mr-1"></i><span x-text="t('Reset','Clear')"></span>
+                </a>
+                {% endif %}
+            </div>
+        </form>
+        {% if report.truncated %}
+        <p class="mt-3 text-xs font-semibold text-amber-700">
+            <i class="fas fa-circle-info mr-1"></i>
+            <span x-text="t('Hanya {{ report.limit }} ujian terbaru di cakupan ini yang disertakan.','Only the newest {{ report.limit }} exams in this scope are included.')"></span>
+        </p>
+        {% endif %}
+    </div>
+
+    {# The four numbers the scope is, read from the scope report's own totals.
+       A dash and not a zero where there is nothing to average: a scope with no
+       marks has no mean, and `0` printed over four cards reads as a school that
+       scored nothing rather than one that has not sat anything yet. #}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div class="card p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wide"
+               x-text="t('Ujian','Exams')"></p>
+            <p class="text-2xl font-extrabold text-slate-800 mt-1">{{ report.totals.exams }}</p>
+        </div>
+        <div class="card p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wide"
+               x-text="t('Peserta','Participants')"></p>
+            <p class="text-2xl font-extrabold text-slate-800 mt-1">{{ report.totals.participants }}</p>
+        </div>
+        <div class="card p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wide"
+               x-text="t('Rata-rata','Mean')"></p>
+            <p class="text-2xl font-extrabold text-slate-800 mt-1">{{ report.totals.mean if report.totals.mean is not none else '—' }}</p>
+        </div>
+        <div class="card p-4">
+            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wide"
+               x-text="t('Lulus','Pass rate')"></p>
+            <p class="text-2xl font-extrabold text-emerald-600 mt-1">{% if report.totals.pass_rate is not none %}{{ report.totals.pass_rate }}%{% else %}—{% endif %}</p>
+        </div>
+    </div>
+
+    <!-- ── The class documents ─────────────────────────────────────────────── -->
+    <div class="card" data-report-section="global">
+        <div class="p-4 sm:p-5 border-b border-slate-100">
+            <h3 class="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <i class="fas fa-file-lines text-cyan-600"></i>
+                <span x-text="t('Laporan Kelas (Global)','Class Reports (Global)')"></span>
+            </h3>
+            <p class="text-xs font-medium text-slate-500 mt-1"
+               x-text="t('Satu dokumen per ujian: sampul, ringkasan eksekutif, sebaran nilai, peringkat kelas, dan pernyataan capaian tiap murid.','One document per exam: a cover, an executive summary, the distributions, the class ranking and a statement of achievement for every learner.')"></p>
+        </div>
+
+        <div class="divide-y divide-slate-100">
+            {% for e in report.rows %}
+            <div class="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-5" data-report-row="{{ e.id }}">
+                <div class="flex-1 min-w-0">
+                    <p class="font-extrabold text-slate-800 truncate">{{ e.title }}</p>
+                    <p class="text-xs font-medium text-slate-500 truncate">
+                        {% if e.subject %}{{ e.subject }} &middot; {% endif %}
+                        {% if report.role != 'guru' %}
+                        {{ e.teacher or '—' }}{% if e.school %} &middot; {{ e.school }}{% endif %} &middot;
+                        {% endif %}
+                        <span x-text="t('{{ e.count }} peserta','{{ e.count }} participants')"></span>
+                        &middot;
+                        <span x-text="t('{{ e['items'] }} soal','{{ e['items'] }} questions')"></span>
+                        {% if e.flagged %}
+                        &middot; <span class="font-bold text-rose-600"
+                                      x-text="t('{{ e.flagged }} soal bermasalah','{{ e.flagged }} flagged questions')"></span>
+                        {% endif %}
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 sm:gap-4 shrink-0 text-center">
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase"
+                           x-text="t('Rata-rata','Mean')"></p>
+                        <p class="text-sm font-extrabold text-slate-700">{{ e.mean if e.mean is not none else '—' }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase"
+                           x-text="t('Median','Median')"></p>
+                        <p class="text-sm font-extrabold text-slate-700">{{ e.median if e.median is not none else '—' }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase"
+                           x-text="t('Lulus','Pass')"></p>
+                        <p class="text-sm font-extrabold text-emerald-600">{{ e.pass_pct if e.pass_pct is not none else '—' }}{% if e.pass_pct is not none %}%{% endif %}</p>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-1.5 shrink-0">
+                    {# The document a school files. #}
+                    <a href="/teacher/analysis/{{ e.id }}/report"
+                       class="bg-cyan-50 text-cyan-700 px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-cyan-100 transition whitespace-nowrap">
+                        <i class="fas fa-file-lines mr-1"></i><span x-text="t('Laporan Global','Global Report')"></span>
+                    </a>
+                    {# The paper's behaviour: difficulty, discrimination, distractors. #}
+                    <a href="/teacher/analysis/{{ e.id }}"
+                       class="bg-violet-50 text-violet-700 px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-violet-100 transition whitespace-nowrap">
+                        <i class="fas fa-microscope mr-1"></i><span x-text="t('Analisis Butir','Item Analysis')"></span>
+                    </a>
+                    {# Server-rendered files, so each carries the reader's language. #}
+                    <a :href="'/teacher/analysis/{{ e.id }}/download.pdf?lang=' + lang"
+                       data-download="pdf"
+                       class="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-red-100 transition">
+                        <i class="fas fa-file-pdf"></i>
+                    </a>
+                    <a :href="'/teacher/analysis/{{ e.id }}/download.csv?lang=' + lang"
+                       data-download="csv"
+                       class="bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-emerald-100 transition">
+                        <i class="fas fa-file-csv"></i>
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+            {% if not report.rows %}
+            <p class="p-6 sm:p-8 text-center text-sm font-medium text-slate-400"
+               x-text="t('Belum ada ujian di cakupan ini, jadi belum ada laporan untuk dibuka.','No exams in this scope yet, so there is no report to open.')"></p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ── The learner documents ───────────────────────────────────────────── -->
+    <div class="card" data-report-section="individual">
+        <div class="p-4 sm:p-5 border-b border-slate-100">
+            <h3 class="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <i class="fas fa-user-graduate text-primary-600"></i>
+                <span x-text="t('Laporan Murid (Individu)','Learner Reports (Individual)')"></span>
+            </h3>
+            <p class="text-xs font-medium text-slate-500 mt-1"
+               x-text="t('Satu halaman per murid per ujian: jawabannya, kunci untuk tiap soal, alasan tiap poin, kekuatan, kelemahan, dan rencana perbaikannya.','One page per learner per exam: their answers, the key to every question, the reason each mark was paid, their strengths, weaknesses and a remediation plan.')"></p>
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3 mt-3">
+                <div class="relative flex-1 min-w-[180px]">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                    <input type="search" x-model="q" data-learner-filter
+                           class="input text-sm pl-8 w-full"
+                           :placeholder="t('Cari nama murid atau ujian','Search a learner or an exam')">
+                </div>
+                <p class="text-xs font-bold text-slate-500">
+                    <span x-text="visible()"></span>
+                    <span class="text-slate-400">/ {{ learners|length }}</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="divide-y divide-slate-100 max-h-[70vh] overflow-y-auto">
+            {% for row in learners %}
+            {# The mark is a mark once it is published; before that it is a number
+               that can still move. Saying which is which is why `status` is on
+               this row at all — a blank cell beside a child reads as a zero. #}
+            {% set status_pair = ('Sudah dikoreksi', 'Graded') if row.status == 'graded'
+                                 else ('Belum dikoreksi', 'Ungraded') %}
+            <div class="p-3 sm:px-5 sm:py-3 flex items-center gap-3"
+                 data-learner-row="{{ loop.index0 }}"
+                 x-show="matchAt({{ loop.index0 }})">
+                <div class="flex-1 min-w-0">
+                    <p class="font-bold text-slate-800 text-sm truncate">
+                        {{ row.name or '—' }}
+                    </p>
+                    <p class="text-xs font-medium text-slate-500 truncate">
+                        {{ row.exam_title }}
+                        {% if row.submitted_at %}&middot; {{ row.submitted_at }}{% endif %}
+                    </p>
+                </div>
+                <div class="shrink-0 text-right">
+                    <p class="text-sm font-extrabold {% if row.mark is not none and row.mark >= 70 %}text-emerald-600{% elif row.mark is not none %}text-rose-600{% else %}text-slate-400{% endif %}">
+                        {{ row.mark if row.mark is not none else '—' }}
+                    </p>
+                    {% if row.status and row.status != 'published' %}
+                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded {% if row.status == 'graded' %}bg-emerald-100 text-emerald-600{% else %}bg-amber-100 text-amber-600{% endif %}"
+                          x-text="t('{{ status_pair[0] }}','{{ status_pair[1] }}')"></span>
+                    {% endif %}
+                </div>
+                {# Addressed by the learner's id, and written only for a row that has
+                   one: the learner route answers 404 for a paper the app could not
+                   hang on a profile, and a door that leads nowhere is worse than no
+                   door. The row itself stays on the list either way — it was sat,
+                   and the count above counts it. #}
+                {% if row.student_id %}
+                <a href="/teacher/analysis/{{ row.exam_id }}/report/student/{{ row.student_id }}"
+                   target="_blank" rel="noopener" data-learner-report
+                   class="shrink-0 bg-cyan-50 text-cyan-700 px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-cyan-100 transition whitespace-nowrap">
+                    <i class="fas fa-file-lines mr-1"></i><span x-text="t('Laporan','Report')"></span>
+                </a>
+                {% else %}
+                <span class="shrink-0 text-[10px] font-bold text-slate-400 px-2 py-1 rounded-lg bg-slate-100"
+                      :title="t('Kertas ini tidak terhubung ke akun murid, jadi tidak ada halaman pribadi untuk dibuka.','This paper is not linked to a learner account, so there is no personal page to open.')"
+                      x-text="t('tanpa akun','no account')"></span>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            {# Three states, and they are different: nothing sat at all, nothing
+               matches the search, and the list is cut at the cap. A single
+               "no data" line would say the first for all three. #}
+            {% if not learners %}
+            <p class="p-6 sm:p-8 text-center text-sm font-medium text-slate-400"
+               x-text="t('Belum ada kertas yang bisa dibuka di cakupan ini.','No papers to open in this scope yet.')"></p>
+            {% else %}
+            <p x-show="visible() === 0" x-cloak
+               class="p-6 sm:p-8 text-center text-sm font-medium text-slate-400"
+               x-text="t('Tidak ada murid atau ujian yang cocok dengan pencarian ini.','No learner or exam matches this search.')"></p>
+            {% endif %}
+        </div>
+
+        {% if learners_truncated %}
+        <p class="px-4 sm:px-5 py-3 border-t border-slate-100 text-xs font-semibold text-amber-700">
+            <i class="fas fa-circle-info mr-1"></i>
+            <span x-text="t('Daftar ini dibatasi {{ learner_cap }} kertas terbaru di cakupan ini.','This list is capped at the newest {{ learner_cap }} papers in this scope.')"></span>
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+/* Which learner rows the search actually leaves standing, counted in the browser.
+   The rows are already on the page; a filter that went back to the server would
+   ask a one-core box to re-read forty exams so a reader could type a name they
+   can already see. The keys arrive lowercased (`learner_keys`, built in the
+   route), so folding the case of four hundred rows happens once, not on every
+   keystroke. */
+function reportsIndex(keys) {
+    return {
+        q: '',
+        keys: Array.isArray(keys) ? keys : [],
+        matchAt(i) {
+            const needle = this.q.trim().toLowerCase();
+            return needle === '' || String(this.keys[i] || '').includes(needle);
+        },
+        visible() {
+            let shown = 0;
+            for (let i = 0; i < this.keys.length; i += 1) {
+                if (this.matchAt(i)) shown += 1;
+            }
+            return shown;
+        },
+    };
+}
+</script>
+{% endblock %}

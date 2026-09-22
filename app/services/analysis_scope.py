@@ -20,6 +20,7 @@ documents (CSV, PDF, print) a school files.
 from __future__ import annotations
 
 import io
+import logging
 import statistics
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
@@ -27,6 +28,13 @@ from typing import Any, Mapping, Sequence
 from app.services import item_analysis
 from app.services import analysis_report as report_style
 from app.utils.exam_access import can_manage_exam
+
+logger = logging.getLogger(__name__)
+
+#: How many learner rows the reports index offers. A scope is unbounded and a
+#: list a person reads is not; the page says so when it is cut, because a list
+#: that silently ends looks like a school with that many children in it.
+MAX_LEARNERS = 400
 
 #: How many exams one report covers. A scope is unbounded — a super admin's is
 #: every exam on the box — and a page that tries to analyse all of them is a page
@@ -261,6 +269,57 @@ def _submissions(supabase, exam_ids: Sequence[str]) -> dict[str, list[dict]]:
         for row in rows:
             found.setdefault(str(row.get("exam_id")), []).append(row)
     return found
+
+
+LEARNER_COLUMNS = "exam_id,student_id,score,final_score,status,submitted_at"
+
+
+def learners_in_scope(supabase, exams: Sequence[Mapping[str, Any]], *,
+                      limit: int = MAX_LEARNERS) -> list[dict[str, Any]]:
+    """One row per paper in scope, newest first, with the learner's name.
+
+    The second half of the same question the exam table answers. The class report
+    has a roster per exam, but the index that *offers* those reports is one list
+    across the whole scope — a teacher looking for a child does not know which
+    paper to open first, and forty exam pages is not an index.
+
+    Chunked the way the marks are, so a super admin's forty exams are two
+    round-trips rather than forty. The order is applied here rather than in the
+    query for the same reason: `order()` inside a chunked `.in_` sorts each chunk
+    against itself and the pages arrive in chunks of twenty-five.
+
+    A paper whose row names no profile is still listed with ``student_id: None``
+    — it was sat, and the count beside this list counts it — and the page then
+    prints it without a door rather than one that answers 404.
+    """
+    titles = {str(exam.get("id")): str(exam.get("title") or "")
+              for exam in exams if exam.get("id")}
+    if not titles:
+        return []
+    ids = list(titles)
+    rows: list[dict[str, Any]] = []
+    for start in range(0, len(ids), CHUNK):
+        chunk = ids[start:start + CHUNK]
+        try:
+            found = (supabase.table("submissions").select(LEARNER_COLUMNS)
+                     .in_("exam_id", chunk).execute().data or [])
+        except Exception:
+            # One unreadable chunk must not empty the list the reader is looking
+            # at; the papers that did load are still listed under their exams.
+            logger.exception("cannot read the papers for %s exams", len(chunk))
+            continue
+        rows.extend(found)
+    names = _names(supabase, "profiles", [row.get("student_id") for row in rows])
+    rows.sort(key=lambda row: str(row.get("submitted_at") or ""), reverse=True)
+    return [{
+        "exam_id": str(row.get("exam_id") or ""),
+        "exam_title": titles.get(str(row.get("exam_id")), ""),
+        "student_id": str(row["student_id"]) if row.get("student_id") else None,
+        "name": names.get(str(row.get("student_id"))) or "",
+        "mark": _mark(row),
+        "status": str(row.get("status") or ""),
+        "submitted_at": str(row.get("submitted_at") or "")[:10],
+    } for row in rows[:int(limit)]]
 
 
 def _names(supabase, table: str, ids: Sequence[str]) -> dict[str, str]:

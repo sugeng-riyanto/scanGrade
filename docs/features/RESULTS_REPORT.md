@@ -98,8 +98,17 @@ Halaman: **`/teacher/analysis/<exam_id>/report/student/<student_id>`** · layana
 `exam_report.learner()` · templat: `app/templates/teacher/analysis_student.html` ·
 uji: `tests/unit/test_student_report.py`
 
-Dua pintu masuk dari laporan kelas, dan keduanya diuji: nama di tabel **Peringkat Murid**,
-dan nama di kartu **Pernyataan Capaian**. Halaman ini menjawab pertanyaan yang berbeda dari
+Ada **empat** pintu masuk, dan keempatnya diuji:
+
+| pintu | dari mana | bentuknya |
+|---|---|---|
+| nama di tabel **Peringkat Murid** | laporan resmi | tautan |
+| nama di kartu **Pernyataan Capaian** | laporan resmi | tautan |
+| **Indeks murid kelas** | halaman analisis butir (`/teacher/analysis/<exam_id>`) | daftar tiap murid, urut peringkat |
+| **Laporan** di baris antrean koreksi dan di kepala panel | halaman koreksi (`/teacher/grading/<exam_id>`) | satu klik per kertas, tab baru |
+| **Laporan** di baris daftar hasil | daftar nilai (`/teacher/results?exam_id=…`), kedua bagian: tabel desktop dan kartu HP | satu klik per kertas, tab baru |
+
+Halaman ini menjawab pertanyaan yang berbeda dari
 tabel kelas — bukan "bagaimana kelas ini", tapi "bagaimana **anak ini**, dan apa yang
 harus dikerjakan berikutnya" — jadi halaman ini punya isinya sendiri:
 
@@ -111,6 +120,101 @@ harus dikerjakan berikutnya" — jadi halaman ini punya isinya sendiri:
 | Analisis Tiap Soal | jawaban murid, status, markah, kunci (hanya halaman guru), dan capaian kelas per soal |
 | Kekuatan / Kelemahan / Langkah berikutnya | kalimat yang setiap klaimnya membawa angkanya |
 | Pernyataan Capaian | paragraf yang sama dengan laporan kelas, tidak disalin ke tempat kedua |
+
+### Pintu masuknya: halaman yang guru benar-benar buka
+
+Laporan resmi adalah halaman yang **diarsipkan**; halaman yang dibuka tiap hari adalah
+analisis butir dan antrean koreksi, dan sampai sekarang keduanya tidak punya jalan ke
+halaman seorang murid sama sekali. Dua pintu itu ditambahkan, dan keduanya memakai
+daftar yang sama:
+
+| permukaan | apa yang ditambahkan | aturannya |
+|---|---|---|
+| `/teacher/analysis/<exam_id>` | kartu **Indeks murid kelas**, tepat di bawah pemilih kerangka: satu baris per murid — peringkat, nama, nilai — masing-masing menuju halaman murid itu | urutannya `exam_report.ranking` yang sama dengan laporan resmi, jadi dua daftar tidak bisa mengurutkan kelas dengan dua cara |
+| `/teacher/grading/<exam_id>` | tautan **Laporan** di tiap baris antrean **dan** di kepala panel kertas yang sedang dikoreksi | `@click.stop` di baris antrean, karena barisnya sendiri memilih murid — tanpa itu, membuka laporan juga menggeser antrean |
+| `/teacher/results?exam_id=…` | tautan **Laporan** di baris tabel desktop **dan** di kartu HP pada partial `_results_table.html` | satu guard untuk dua hal: `exam_id and s.student_id` — tanpa ujian tidak ada laporan yang bisa dialamatkan, dan tanpa profil rutenya 404 |
+
+Tiga hal yang gagal tanpa terlihat, dan karenanya diuji:
+
+1. **Tidak ada pintu untuk kertas tanpa profil.** Rute murid menjawab 404 untuk kertas
+yang barisnya tidak menyebut profil, jadi tautannya tidak dirender (`x-show="s.student_id"`,
+`x-show="current.student_id"`) — tetapi muridnya **tetap terdaftar** di indeks (sebagai
+chip tanpa tautan, dengan alasan tertulis): daftar yang diam-diam menghilangkan kertas yang
+tidak bisa ditautkan akan bertentangan dengan total di halaman yang sama.
+2. **Antrean koreksi hanya boleh membaca field yang dikirim API.** `student_id` kini ikut
+dalam payload `api_grading_queue`; uji `test_the_row_only_reads_fields_the_payload_sends`
+membandingkan setiap `s.<field>` di template dengan dict yang dibangun API, sehingga field
+berikutnya yang dipakai markup harus ikut dikirim.
+3. **Tautan itu alamat yang benar-benar dilayani app.** Ujinya membangun URL dari
+`url_map` Flask sendiri (termasuk prefix blueprint), jadi mengganti nama rute tanpa
+mengubah template gagal di suite, bukan di kelas.
+4. **Tidak ada pintu di tampilan semua ujian.** Tanpa `exam_id` pilihannya tidak
+mengarah ke laporan mana pun, dan `href="/teacher/analysis//report/student/…"` adalah
+tautan yang kelihatan utuh tetapi 404 — jadi guard-nya menyebut dua syarat sekaligus,
+`exam_id and s.student_id`.
+
+Baris daftar hasil juga menaruh pintunya **di sebelah `Detail`**, bukan menggantikannya:
+`Detail` adalah halaman *satu kertas* (markah dan umpan balik kertas itu), dan yang baru
+adalah halaman *murid* — dua dokumen berbeda tentang anak yang sama, jadi dua pintu
+alih-alih satu tombol yang artinya bergantung pada tempat menekannya. Di baris ini label
+memakai pasangan `t('Laporan','Report')` seperti lencana terlambat di partial yang sama,
+sehingga kalimatnya ikut toggle pembaca.
+
+Di salinan **tautan publik** tidak ada indeks sama sekali — nama murid adalah yang
+disembunyikan laporan itu — dan penjagaannya dua lapis: templat tidak merendernya saat
+`public_view`, dan rute `/r/<token>` memang tidak pernah menerima daftarnya. Diverifikasi
+live: indeks muncul di halaman analisis sungguhan, tiap tautannya menjawab 200, payload
+antrean mengirim `student_id` untuk setiap baris, dan tautan di antrean juga 200.
+
+### Indeks laporan: satu menu untuk kedua dokumen
+
+Halaman: **`/teacher/reports`** · templat: `app/templates/teacher/reports.html` ·
+layanan: `analysis_scope.learners_in_scope()` (baris baru) + `analysis_scope.report()` yang
+sudah ada lewat `_scope_report()` · uji: `tests/unit/test_reports_hub.py`
+
+Empat pintu di atas menjangkau murid dari setiap daftar yang dibuka guru, tetapi tetap
+tidak ada satu pun di menu: laporan itu **per ujian**, jadi menu tidak bisa menyebut satu
+dokumen — yang bisa disebut menu adalah **indeks** yang membuat pilihannya murah. Satu
+entri sidebar per peran (guru / admin sekolah / super admin), di bawah bagian *Laporan*
+yang sama dengan analitik, menuju satu halaman berisi dua bagian:
+
+| bagian | isi | pintunya |
+|---|---|---|
+| **Laporan Kelas (Global)** | satu baris per ujian di cakupan: judul, mapel, guru & sekolah (untuk admin/super admin), peserta, jumlah soal, soal bermasalah, rata-rata, median, lulus % | `/teacher/analysis/<exam_id>/report` + analisis butir + PDF/CSV (masing-masing membawa bahasa pembaca) |
+| **Laporan Murid (Individu)** | satu baris per **murid per ujian** di cakupan: nama, judul ujian, tanggal, nilai, status penilaian | `/teacher/analysis/<exam_id>/report/student/<student_id>` |
+
+Empat keputusan yang membuat indeks seperti ini jujur:
+
+1. **Perannya adalah peran yang punya lingkup, dan itu satu daftar.** Guard-nya
+`role_required("guru", "admin_sekolah", "super_admin")` dan ada uji yang menyamakannya
+dengan `set(analysis_scope.SCOPE_LABELS)`. Peran yang diterima halaman tetapi tidak
+dikenal lingkup akan merender laporan **kosong tanpa error apa pun** — dan sidebarnya
+akan menawarkannya dengan senang hati. Murid bukan hanya ditolak: ada uji yang memastikan
+entri itu **tidak ada** di menunya.
+2. **Bagian kelas membaca `_scope_report()` yang sama dengan halaman statistik** (dan PDF-nya),
+bukan perhitungan kedua. Ada uji yang menolak `analysis_scope.report(` di badan rute ini,
+sehingga angka di samping sebuah pintu tidak bisa berbeda dengan dokumen di baliknya.
+3. **Setiap pintu adalah alamat yang dilayani app** — dibangun di uji dari `url_map` Flask,
+bukan dibaca dari teks templat — dan baris murid hanya ditulis untuk kertas yang menyebut
+profil. Kertas tanpa profil **tetap terdaftar** (ia dikerjakan, dan total di atasnya
+menghitungnya) dan memakai chip *tanpa akun*, bukan tautan yang 404.
+4. **Daftar yang berhenti diam-diam terlihat seperti sekolah dengan anak sebanyak itu.**
+Karena itu ada batas `MAX_LEARNERS = 400` yang **dicetak** saat tercapai, dan filternya
+berjalan di browser memakai kunci yang sudah di-lowercase sekali di rute. Filter yang
+kembali ke server berarti meminta kotak satu-core membaca ulang empat puluh ujian supaya
+pembaca bisa mengetik nama yang sudah ada di halaman itu.
+
+Dua hal teknis yang perlu diketahui: `learners_in_scope` **tidak** boleh mengandalkan
+`order()` query — kertas dibaca per potongan `CHUNK` dan `order()` di dalam `.in_` yang
+berpotong mengurutkan tiap potongan terhadap dirinya sendiri, jadi kertas terbaru hanya
+terbaru di dalam 25-nya sendiri; pengurutannya di Python, dan ada uji yang gagal kalau
+`order()` muncul kembali. Potongan yang gagal dibaca **di-log dan dilewati** (kertas yang
+berhasil dibaca tetap terdaftar), bukan mengosongkan seluruh daftar.
+
+Satu kelemahan yang masih nyata dan tidak ditutup di sini: bagian kelas melewati
+`_submissions()` di dalam `analysis_scope.report()`, yang belum menangani kegagalan
+sementara Supabase — jadi gangguan jaringan sesaat tetap menjadi 500 di halaman ini,
+sama seperti di halaman statistik. Yang baru menanganinya hanya pembacaan baris murid.
 
 ### Empat aturan yang membentuknya
 
