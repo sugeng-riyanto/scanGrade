@@ -512,6 +512,13 @@ TRANSLATED = [
     # search, sort, and a create form — every label is an Alpine t() pair.
     "admin_sekolah/subjects.html",
     "teacher/subjects.html",
+    # The reports index: the menu's way into both documents at once, for the three
+    # roles that may file one. It is reached from the sidebar of every one of them,
+    # so a reader in the other language meets it on the way to a report — and it is
+    # the page that *names* the documents, so a label in one language is a reader
+    # opening the wrong one. Every string on it is a pair, including the two
+    # counts inside the sentences.
+    "teacher/reports.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -839,7 +846,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 38, (
+    assert len(TRANSLATED) == 39, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

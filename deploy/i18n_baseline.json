@@ -236,7 +236,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 150,
+      "pairs": 153,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -380,7 +380,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 134,
+      "pairs": 159,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -488,7 +488,7 @@
       "frozen": false
     },
     "teacher/_results_table.html": {
-      "pairs": 17,
+      "pairs": 19,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -506,7 +506,7 @@
       "frozen": false
     },
     "teacher/analysis.html": {
-      "pairs": 400,
+      "pairs": 405,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -585,8 +585,8 @@
     },
     "teacher/grading_queue.html": {
       "pairs": 1,
-      "leftovers": 21,
-      "coverage": 4.5,
+      "leftovers": 23,
+      "coverage": 4.2,
       "frozen": true
     },
     "teacher/import_students.html": {
@@ -618,6 +618,12 @@
       "leftovers": 5,
       "coverage": 37.5,
       "frozen": true
+    },
+    "teacher/reports.html": {
+      "pairs": 32,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
     },
     "teacher/results.html": {
       "pairs": 8,

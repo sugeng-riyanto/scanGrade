@@ -2019,6 +2019,16 @@ def exam_analysis(exam_id):
         chart=_chart_payload(analysis, exam, framework=framework),
         framework=framework,
         share=_share_card(supabase, exam_id),
+        # The index: every learner on this paper, each one click from their own
+        # report. The filed report has had two doors into a learner since it was
+        # written — the ranking table and the statement — but the page a teacher
+        # actually opens is this one, and it had none: reaching a child meant
+        # knowing to look under "Laporan Resmi" and finding them in a roster.
+        # It is the same `ranking` the filed report prints, so the two lists
+        # cannot order the class differently, and the id is the one the learner's
+        # own route takes — a paper that could not name a profile carries no id
+        # and the page prints it without a link rather than one that 404s.
+        learners=exam_report.ranking(analysis.people),
         download_base=f"/teacher/analysis/{exam_id}")
 
 
@@ -2947,6 +2957,12 @@ def api_grading_queue(exam_id):
         profile = s.get("profiles") or {}
         result.append({
             "id": s["id"],
+            # The learner the paper belongs to, carried so the queue can open that
+            # learner's own report: this page marks one paper at a time, and "why
+            # did this child land here" is the question the queue raises. `None`
+            # for a row with no profile, and the link is then not rendered — a
+            # door that 404s is worse than no door.
+            "student_id": (str(s["student_id"]) if s.get("student_id") else None),
             "student_name": profile.get("full_name") or "-",
             "status": s["status"],
             "submitted_at": s.get("submitted_at"),
@@ -3085,6 +3101,51 @@ def _scope_report(supabase, lang, *, date_from=None, date_to=None):
                                  date_from=date_from, date_to=date_to)
     cache_set(key, analysis_scope.as_payload(data), ttl=ANALYTICS_TTL)
     return data
+
+
+@teacher_bp.route("/reports")
+@role_required("guru", "admin_sekolah", "super_admin")
+def reports_hub():
+    """Both reports a caller may file, as an index with a door per document.
+
+    A report is *per exam* — one class, one paper — so a menu entry cannot name
+    one, and that is the whole reason this page exists: the sidebar can offer
+    "Analytics" and it can offer a scope, but "the report for this exam" is a
+    choice only the reader can make. What the hub does is make that choice cheap,
+    by listing both halves at once:
+
+    * the **class document** (`/teacher/analysis/<exam_id>/report`) — the one a
+      school files, with the cover, the distributions and a statement per learner;
+    * the **learner document**
+      (`/teacher/analysis/<exam_id>/report/student/<student_id>`) — one child's
+      questions, with the reason each paid what it paid.
+
+    Both lists come from the same scope the statistics page uses, in the same
+    order and by the same predicate, so a child who appears here is a child the
+    report routes will actually open. The exam half reads `_scope_report`, which
+    is the *cached* statistics report — the numbers beside each door are the ones
+    that door's page prints, because a second computation is how an index starts
+    disagreeing with the document it indexes.
+    """
+    supabase = get_supabase()
+    lang = analysis_scope.language(request.args.get("lang"))
+    date_from = request.args.get("date_from") or None
+    date_to = request.args.get("date_to") or None
+    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to)
+    learners = analysis_scope.learners_in_scope(supabase, data["rows"])
+    return render_template(
+        "teacher/reports.html", report=data, learners=learners,
+        # What the page's own filter searches, compared there rather than here:
+        # the list is already rendered, and a filter that went back to the server
+        # would ask the box to re-read forty exams so a reader could type a name
+        # they can already see. The keys are lowercased once, in the route, so the
+        # browser is not asked to fold the case of four hundred rows on each
+        # keystroke.
+        learner_keys=[f"{row['name']} {row['exam_title']}".lower() for row in learners],
+        # The cap, and whether the list hit it: a list that silently stops looks
+        # like a school with that many children in it.
+        learner_cap=analysis_scope.MAX_LEARNERS,
+        learners_truncated=len(learners) >= analysis_scope.MAX_LEARNERS)
 
 
 @teacher_bp.route("/reset-password", methods=["POST"])

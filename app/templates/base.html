@@ -206,6 +206,11 @@
              <a href="/super-admin/feature-flags" class="nav-item {% if request.path == '/super-admin/feature-flags' %}active{% endif %}"><i class="fas fa-toggle-on"></i><span x-text="t('Feature Flags','Feature Flags')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik Semua Sekolah','All-School Analytics')"></span></a>
+            {# The documents the analytics page reports on, as doors. A report is
+               per exam, so a menu cannot name one — this entry names the index
+               that can, scoped to whoever is reading: every school for the super
+               admin, one for the admin, their own papers for a teacher. #}
+            <a href="/teacher/reports" class="nav-item {% if request.path == '/teacher/reports' %}active{% endif %}"><i class="fas fa-file-lines"></i><span x-text="t('Laporan Global &amp; Individu','Global &amp; Individual Reports')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Demo','Demo')"></span></div>
             <a href="/super-admin/demo-settings" class="nav-item {% if request.path == '/super-admin/demo-settings' %}active{% endif %}"><i class="fas fa-flask"></i><span x-text="t('Pengaturan Demo','Demo Settings')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Langganan','Subscription')"></span></div>
@@ -247,6 +252,10 @@
             <a href="/admin-sekolah/subjects" class="nav-item {% if request.path == '/admin-sekolah/subjects' %}active{% endif %}"><i class="fas fa-book"></i><span x-text="t('Mata Pelajaran','Subjects')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik Sekolah','School Analytics')"></span></a>
+            {# Every class report and every learner report this school may file, in
+               one index. The analytics page answers "how is the school doing"; this
+               is where the documents behind that answer are opened. #}
+            <a href="/teacher/reports" class="nav-item {% if request.path == '/teacher/reports' %}active{% endif %}"><i class="fas fa-file-lines"></i><span x-text="t('Laporan Sekolah','School Reports')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
@@ -275,6 +284,11 @@
             <div class="nav-section-title pt-2"><span x-text="t('Laporan','Reports')"></span></div>
             <a href="/teacher/results" class="nav-item {% if request.path.startswith('/teacher/results') %}active{% endif %}"><i class="fas fa-chart-bar"></i><span x-text="t('Hasil Ujian','Exam Results')"></span></a>
             <a href="/teacher/analytics" class="nav-item {% if request.path == '/teacher/analytics' %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik','Analytics')"></span></a>
+            {# The class document a school files and the child's own page, as an
+               index: a teacher who has to hand a report to a parent or a
+               principal should not have to know to open the analysis of one exam
+               first to find it. #}
+            <a href="/teacher/reports" class="nav-item {% if request.path == '/teacher/reports' %}active{% endif %}"><i class="fas fa-file-lines"></i><span x-text="t('Laporan Global &amp; Individu','Global &amp; Individual Reports')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Komunikasi','Communication')"></span></div>
