@@ -1138,6 +1138,25 @@ class TestWhatARefusalLooksLike:
         assert "tidak tersedia untuk akun Anda" in TEACHER
         assert "hubungi admin sekolah" in TEACHER
 
+    def test_every_page_a_refusal_lands_on_can_show_it(self):
+        """A redirect is only a message if the page it lands on renders one. All
+        three destinations rendered **no flash at all**, so the sentence — however
+        it is worded — was dropped and the reader arrived somewhere with no
+        explanation of what had happened."""
+        destinations = {
+            "/teacher/results": "teacher/results.html",
+            "/teacher/grading": "teacher/grading_queue.html",
+            "/teacher/exams": "teacher/exams.html",
+        }
+        for url, template in destinations.items():
+            assert url in TEACHER, f"{url} is no longer a destination this guard uses"
+            text = (TEMPLATES / template).read_text(encoding="utf-8")
+            assert "get_flashed_messages" in text, (
+                f"{template} is where a refused caller is sent, and it renders no "
+                "flash — so the message is dropped")
+        assert 'redirect_to="/teacher/grading"' in TEACHER, \
+            "the guard's own default destination moved; the map above is stale"
+
     def test_the_wording_change_keeps_what_the_message_says(self):
         """`test_exam_recovery` matches on `tidak ditemukan`, and so may a client:
         softening a sentence must not change its meaning."""
