@@ -113,10 +113,10 @@
                    x-text="t('Tautan ini menampilkan halaman murid ini saja — tanpa kunci jawaban dan tanpa nama murid lain — bisa dibuka tanpa login, dan bisa dihentikan kapan saja.','The link shows this learner’s page only — no answer key and no other learner’s name — opens without a login, and can be stopped at any time.')"></p>
             </div>
             <span class="text-[10px] font-bold shrink-0 {{ 'text-emerald-600' if share else 'text-slate-400' }}"
-                  x-show="!linkNote" x-cloak
+                  x-show="!shareNote" x-cloak
                   x-text="{{ "t('Aktif','Active')" if share else "t('Belum dibagikan','Not shared yet')" }}"></span>
-            <span class="text-[11px] font-bold text-emerald-600 shrink-0" x-show="linkNote" x-cloak
-                  x-text="linkNote"></span>
+            <span class="text-[11px] font-bold text-emerald-600 shrink-0" x-show="shareNote" x-cloak
+                  x-text="shareNote"></span>
         </div>
         {% if share %}
         <div class="flex flex-wrap items-center gap-2 mt-2.5">

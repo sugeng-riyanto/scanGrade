@@ -1226,3 +1226,132 @@ class TestTheCopyOnThePage:
         link shows, at the moment they are looking at the button."""
         block = PAGE.split("data-share-card", 1)[1]
         assert "no answer key, no student names" in block
+
+
+# ── the filed report page, and the handler every card depends on ─────────────
+
+REPORT_PAGE = (ROOT / "app" / "templates" / "teacher" / "analysis_report.html"
+               ).read_text(encoding="utf-8")
+STUDENT_PAGE = (ROOT / "app" / "templates" / "teacher" / "analysis_student.html"
+                ).read_text(encoding="utf-8")
+BASE_PAGE = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+PUBLIC_PY = (ROOT / "app" / "routes" / "public.py").read_text(encoding="utf-8")
+TEACHER_PY = (ROOT / "app" / "routes" / "teacher.py").read_text(encoding="utf-8")
+
+
+@contextlib.contextmanager
+def as_teacher(app, path):
+    from flask import g
+    with app.test_request_context(path):
+        g.user_id = TEACHER_ID
+        g.user_name = "Guru Uji"
+        g.user_email = "guru@example.test"
+        g.user_role = "guru"
+        g.tz_offset = 7
+        g.show = {}
+        yield
+
+
+class TestTheFiledReportOffersTheLink:
+    """The report page is the document a teacher hands over, and it had no way to
+    share itself — the control was one page up, on the item analysis. "There is no
+    shareable link here" was the honest reading of the page, and it was reported as
+    exactly that."""
+
+    def _render(self, app, analysis, share=None):
+        from app.services import exam_report
+
+        with as_teacher(app, f"/teacher/analysis/{EXAM_ID}/report"):
+            return app.jinja_env.get_template(
+                "teacher/analysis_report.html").render(
+                    exam=EXAM, analysis=analysis,
+                    report=exam_report.report(analysis, EXAM),
+                    share=share, download_base=f"/teacher/analysis/{EXAM_ID}",
+                    lang="id")
+
+    def test_a_shared_exam_shows_the_url_and_the_copy_button(self, app, analysis):
+        link = share.card(_row(), base_url="https://scangrade.web.id/")
+        html = self._render(app, analysis, share=link)
+
+        assert "data-share-card" in html
+        assert f'value="https://scangrade.web.id/r/{TOKEN}"' in html
+        assert "copyShareLink()" in html
+        assert f"/teacher/analysis/{EXAM_ID}/share/revoke" in html
+
+    def test_an_unshared_exam_is_offered_the_button_and_no_url(self, app, analysis):
+        html = self._render(app, analysis, share=None)
+
+        assert "Create a public link" in html
+        assert "Not shared yet" in html
+        assert re.search(r"<input[^>]*data-share-url", html) is None
+
+    def test_the_card_is_not_printed_into_the_filed_copy(self, app, analysis):
+        """This page is the printable document. A live token printed into a copy a
+        school files is the link handed out without anybody deciding to."""
+        block = REPORT_PAGE.split("data-share-card", 1)[0].rsplit("<div", 1)[1]
+        assert "no-print" in block, "the share card would print with the report"
+
+    def test_the_report_route_hands_the_page_its_link(self):
+        """A card with no `share` renders the "not shared yet" state for an exam
+        that *is* shared — the control would be lying, and quietly: the URL is the
+        one part of the card that cannot be guessed."""
+        call = TEACHER_PY.split('"teacher/analysis_report.html"', 1)[1][:600]
+        assert "share=_share_card(" in call
+
+    def test_the_report_page_is_teacher_only(self):
+        """Which is what lets the card sit there unguarded. The page a share link
+        opens is `analysis.html`; if that ever changed, this card would be rendered
+        for a stranger."""
+        assert "analysis_report.html" not in PUBLIC_PY
+        assert "analysis_report.html" in TEACHER_PY
+
+
+class TestTheCopyHandlerIsReachable:
+    """A handler Alpine cannot resolve is a click that does nothing, and a click
+    that does nothing looks exactly like a click that worked. The learner report's
+    Copy button was dead for exactly that reason: it called a method only the
+    analysis page defined."""
+
+    def _templates(self):
+        return sorted((ROOT / "app" / "templates").rglob("*.html"))
+
+    def test_one_definition_serves_every_card(self):
+        definers = [path.name for path in self._templates()
+                    if "copyShareLink(" in path.read_text(encoding="utf-8")
+                    and "async copyShareLink" in path.read_text(encoding="utf-8")]
+        assert definers == ["base.html"], (
+            f"copyShareLink is defined in {definers}; one definition is what keeps "
+            "a page from drawing the button without the method behind it")
+
+    def test_every_page_that_draws_the_button_inherits_it(self):
+        for path in self._templates():
+            text = path.read_text(encoding="utf-8")
+            if "copyShareLink()" not in text:
+                continue
+            if "async copyShareLink" in text:
+                continue            # the definition itself, not a call to it
+            assert '{% extends "base.html" %}' in text, (
+                f"{path.name} draws the copy button but does not extend base.html, "
+                "so the method it calls is not in scope")
+
+    def test_no_page_names_a_note_that_does_not_exist(self):
+        """`linkNote` was referenced by two pages that never declared it, next to a
+        button that called a method they did not have either."""
+        offenders = [path.name for path in self._templates()
+                     if "linkNote" in path.read_text(encoding="utf-8")]
+        assert offenders == [], (
+            f"{offenders} read a note that no scope declares; the note is "
+            "`shareNote`, in base.html, beside the method that writes it")
+
+    def test_the_base_scope_declares_both_halves(self):
+        assert "shareNote:" in BASE_PAGE
+        assert "async copyShareLink()" in BASE_PAGE
+        assert "[data-share-url]" in BASE_PAGE, (
+            "the button copies the server's field rather than rebuilding the URL")
+
+    def test_the_two_cards_that_share_one_handler_both_show_its_note(self):
+        for name, text in (("analysis_student.html", STUDENT_PAGE),
+                           ("analysis_report.html", REPORT_PAGE)):
+            block = text.split("data-share-card", 1)[1]
+            assert 'x-text="shareNote"' in block, (
+                f"{name} draws the button but shows no note when it is pressed")

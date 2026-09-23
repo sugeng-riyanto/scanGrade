@@ -134,6 +134,36 @@
         // runs outside an Alpine expression (a method on a component, an onclick)
         // cannot reach it — use window.sgT() there instead.
         t(id, en) { return this.lang === 'en' ? en : id; },
+        // The share card's copy button, defined once because more than one page
+        // draws that card. It copies the server's own field rather than rebuilding
+        // the address in JavaScript, where a second version of the URL could drift
+        // from the first.
+        //
+        // It lives here because of a defect that had no symptom: the learner
+        // report's card called a method only the analysis page defined, so its
+        // "Copy link" button did nothing at all — Alpine cannot resolve a handler
+        // that is not in scope, and a click that does nothing looks exactly like a
+        // click that worked. `tests/unit/test_analysis_share.py` now fails if a page
+        // draws the button without the method being reachable.
+        shareNote: '',
+        shareTimer: null,
+        async copyShareLink() {
+            const field = document.querySelector('[data-share-url]');
+            if (!field) return;
+            field.select();
+            let message;
+            try {
+                await navigator.clipboard.writeText(field.value);
+                message = this.t('Tautan tersalin', 'Link copied');
+            } catch (error) {
+                // A refused clipboard (no secure context, no permission) leaves the
+                // text selected, which is the manual path it always had.
+                message = this.t('Tekan Ctrl+C untuk menyalin', 'Press Ctrl+C to copy');
+            }
+            this.shareNote = message;
+            clearTimeout(this.shareTimer);
+            this.shareTimer = setTimeout(() => { this.shareNote = ''; }, 3200);
+        },
         darkMode: localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme:dark)').matches),
         toggleDark() {
             this.darkMode = !this.darkMode;

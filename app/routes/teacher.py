@@ -2056,6 +2056,9 @@ def exam_analysis_report(exam_id):
         exam=exam, analysis=analysis,
         report=exam_report.report(analysis, _report_cover(supabase, exam),
                                   history=_sitting_history(supabase, exam)),
+        # The card is on this page because this is the page a teacher hands over —
+        # the link belongs where the document is, not only one page up.
+        share=_share_card(supabase, exam_id),
         download_base=f"/teacher/analysis/{exam_id}",
         lang=analysis_scope.language(request.args.get("lang")))
 

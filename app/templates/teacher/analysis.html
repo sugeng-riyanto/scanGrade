@@ -214,10 +214,10 @@
                             'The link shows the statistics only — no answer key, no student names — opens for anyone without a login, and can be stopped at any time.')"></p>
             </div>
             <span class="text-[10px] font-bold shrink-0 {{ 'text-emerald-600' if link else 'text-surface-400' }}"
-                  x-show="!linkNote" x-cloak
+                  x-show="!shareNote" x-cloak
                   x-text="{{ "t('Aktif','Active')" if link else "t('Belum dibagikan','Not shared yet')" }}"></span>
-            <span class="text-[11px] font-bold text-emerald-600 shrink-0" x-show="linkNote" x-cloak
-                  x-text="linkNote"></span>
+            <span class="text-[11px] font-bold text-emerald-600 shrink-0" x-show="shareNote" x-cloak
+                  x-text="shareNote"></span>
         </div>
 
         {% if link %}
@@ -1140,7 +1140,6 @@ function itemAnalysis(data) {
         // payload, which falls back to the tones below rather than to nothing.
         tones: data.tones || {},
         copyNote: '',
-        linkNote: '',
         copyTimer: null,
 
         // The colour key, as the five acts a teacher takes rather than the eight
@@ -1156,35 +1155,15 @@ function itemAnalysis(data) {
             }));
         },
 
-        // Two slots, one timer: the copy board reports beside its own buttons and
-        // the share card reports beside the URL. Sharing one note put "Link
-        // copied" next to the chart toolbar, where nobody was looking.
-        flash(message, slot) {
-            if (slot === 'link') { this.linkNote = message; }
-            else { this.copyNote = message; }
+        // The copy board's own note. The share card's note lives in the base scope
+        // beside the button that writes it, because three pages draw that card and
+        // only this one has a copy board.
+        flash(message) {
+            this.copyNote = message;
             if (this.copyTimer) clearTimeout(this.copyTimer);
             this.copyTimer = setTimeout(() => {
                 this.copyNote = '';
-                this.linkNote = '';
             }, 3200);
-        },
-
-        // The share URL is the server's — it is in the field the teacher can read
-        // — so the button copies that field rather than rebuilding the address in
-        // JavaScript, where a second version of it could drift from the first.
-        async copyShareLink() {
-            const field = document.querySelector('[data-share-url]');
-            if (!field) return;
-            field.select();
-            try {
-                await navigator.clipboard.writeText(field.value);
-                this.flash(this.t('Tautan tersalin', 'Link copied'), 'link');
-            } catch (error) {
-                // A refused clipboard (no secure context, no permission) leaves
-                // the text selected, which is the manual path it always had.
-                this.flash(this.t('Tekan Ctrl+C untuk menyalin',
-                                  'Press Ctrl+C to copy'), 'link');
-            }
         },
 
         // What a pasted drawing has to say about itself: which exam, how much data,
