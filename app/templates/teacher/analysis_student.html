@@ -16,6 +16,18 @@
 {% block title %}{{ learner.who.name }} - ScanGrade{% endblock %}
 {% block page_title %}<span x-text="t('Laporan Murid','Learner Report')"></span>{% endblock %}
 
+{% block head_extra %}
+<style>
+/* The paper surface. A student's drawing is ink on transparency, so it needs
+   something light behind it in *both* themes — and `bg-white` is remapped to the
+   dark card in dark mode, which is how the first version of this cell rendered the
+   marks as dark-on-dark and unreadable. A literal background is the same treatment
+   the exam page and the marking page give their paper (`.pdf-container`), and it is
+   here rather than in `theme.css` because it is this page's subject, not a token. */
+.sg-paper { background: #f8fafc; }
+</style>
+{% endblock %}
+
 {% macro pair(value) -%}
     {# One `(id, en)` pair, rendered where it stands. Same shape as the filed
        report's macro, so a translator reads one pattern rather than two. #}
@@ -332,7 +344,14 @@
         <h3 class="text-lg font-extrabold text-slate-800" x-text="t('Analisis Tiap Soal','Question-by-Question Analysis')"></h3>
         <p class="text-xs font-medium text-slate-500"
            x-text="t('Kolom kelas menunjukkan berapa persen kelas memperoleh markah soal itu — pembanding yang menentukan apakah kelemahan ini milik murid atau milik kelas.','The class column is the share of the marks the class earned on that question — the comparison that decides whether a weakness belongs to this learner or to the class.')"></p>
-        <div class="mt-3 overflow-x-auto">
+        {# A4 inside a 720px table that a phone scrolls sideways, so a reader who
+           wants to *read* a drawing needs it on its own. `zoom` holds the src of the
+           image that was tapped: the same value the row already carries, so nothing
+           is downloaded twice and no second copy of it is written into an attribute.
+           The overlay's own surface is the paper colour as well — ink on
+           transparency on a dark scrim is the same unreadable mark this cell already
+           had once. #}
+        <div class="mt-3 overflow-x-auto" x-data="{ zoom: '' }">
             <table class="w-full min-w-[720px] text-xs">
                 <thead>
                     <tr class="text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
@@ -362,19 +381,35 @@
                                 {{ pair(q.state_name) }}
                             </span>
                         </td>
-                        <td class="py-2 pr-2 font-semibold text-slate-700 break-words max-w-[14rem]">
+                        <td class="py-2 pr-2 font-semibold text-slate-700 break-words max-w-[18rem]">
                             {# A drawing is shown, not described. The stored answer *is*
                                the image, and printing it as text put a megabyte of
                                base64 in this cell — on the page a family reads, and
                                in the CSV, XLSX and PDF built from the same row. What
                                the text beside it says is which pages carry work,
-                               written by `describe_attempt`. #}
+                               written by `describe_attempt`.
+
+                               Each one is laid over the page of the paper it was made
+                               on: the student drew on that page, and a mark lifted off
+                               its question is a mark nobody can place. The two images
+                               share one aspect because the drawing layer is sized from
+                               the page image, so stacking them costs no arithmetic. #}
                             {% if q.answered %}{{ q.answered }}{% elif not q.drawings %}<span class="text-slate-400">—</span>{% endif %}
-                            {% for page, drawing in q.drawings %}
-                            <img src="{{ drawing }}" alt=""
-                                 class="mt-1.5 w-full rounded-lg border border-slate-200 bg-white">
-                            <span class="block text-[10px] font-bold text-slate-400 mt-0.5"
-                                  x-text="t('Coretan pada halaman {{ page }}','Drawing on page {{ page }}')"></span>
+                            {% for d in q.drawings %}
+                            <figure class="mt-2 last:mb-0">
+                                <div class="sg-paper relative rounded-lg overflow-hidden border border-slate-200">
+                                    {% if d.paper %}
+                                    <img src="{{ d.paper }}" alt="" loading="lazy" decoding="async"
+                                         class="block w-full">
+                                    {% endif %}
+                                    <img src="{{ d.drawing }}" alt=""
+                                         title="{{ d.label }}"
+                                         class="w-full cursor-zoom-in{% if d.paper %} absolute inset-0 h-full{% endif %}"
+                                         @click="zoom = $event.currentTarget.src">
+                                </div>
+                                <figcaption class="mt-1 text-[10px] font-bold text-slate-400"
+                                            x-text="t('Coretan pada halaman {{ d.label }}','Drawing on page {{ d.label }}')"></figcaption>
+                            </figure>
                             {% endfor %}
                         </td>
                         {% if not public_view %}
@@ -387,6 +422,16 @@
                     {% endfor %}
                 </tbody>
             </table>
+
+            {# Tapping a drawing opens it over the page. `x-cloak` so it is absent
+               until Alpine has run — an overlay that flashes on load is worse than
+               no overlay — and `no-print` so it never reaches the filed document. #}
+            <div x-show="zoom" x-cloak @click="zoom = ''"
+                 @keydown.escape.window="zoom = ''"
+                 class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-2 sm:p-6 no-print">
+                <img :src="zoom" alt=""
+                     class="sg-paper max-h-[88vh] max-w-full rounded-lg object-contain">
+            </div>
         </div>
     </section>
 

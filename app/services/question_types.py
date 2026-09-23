@@ -514,17 +514,26 @@ def page_label(page: Any) -> str:
         return str(page)
 
 
-def answer_drawings(answer: Any) -> list[tuple[str, str]]:
-    """`(page label, data URL)` for every page of the answer that carries a drawing."""
-    out: list[tuple[str, str]] = []
+def answer_drawings(answer: Any) -> list[tuple[int, str, str]]:
+    """`(page index, page label, data URL)` for each page that carries a drawing.
+
+    The index is returned beside the label because the *page image* of the exam is
+    addressed by the same index — `pdf_page_urls[index]` — so a surface that wants
+    to lay the drawing over the paper it was made on does not have to turn a label
+    back into an index and hope.
+    """
+    out: list[tuple[int, str, str]] = []
     pages = answer_pages(answer)
-    for page in sorted(pages, key=_page_index):
+    ordered = sorted(pages, key=_page_index)
+    for position, page in enumerate(ordered):
         content = pages[page]
         if not isinstance(content, Mapping):
             continue
         drawing = content.get(ANSWER_CANVAS)
         if isinstance(drawing, str) and drawing.startswith("data:"):
-            out.append((page_label(page), drawing))
+            index = _page_index(page)
+            out.append((index if index < 10 ** 6 else position,
+                        page_label(page), drawing))
     return out
 
 

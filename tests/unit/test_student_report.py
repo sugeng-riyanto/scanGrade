@@ -681,8 +681,8 @@ class TestADrawingIsShownNotStringified:
 
     def test_the_drawings_travel_as_data_urls_in_page_order(self):
         assert qt.answer_drawings(DRAWN_ANSWER) == [
-            ("6", "data:image/png;base64,AAAA"),
-            ("12", "data:image/png;base64,BBBB"),
+            (5, "6", "data:image/png;base64,AAAA"),
+            (11, "12", "data:image/png;base64,BBBB"),
         ]
         assert qt.answer_drawings("A") == []
         assert qt.answer_drawings(None) == []
@@ -693,10 +693,69 @@ class TestADrawingIsShownNotStringified:
         row = next(q for q in learner_of("stu-1", DRAWN_ROWS)["questions"]
                    if q["no"] == 4)
         assert row["answered"] == "6, 12"
-        assert row["drawings"] == [("6", "data:image/png;base64,AAAA"),
-                                   ("12", "data:image/png;base64,BBBB")]
+        assert [(d["label"], d["drawing"]) for d in row["drawings"]] == [
+            ("6", "data:image/png;base64,AAAA"),
+            ("12", "data:image/png;base64,BBBB"),
+        ]
+
+    def test_the_paper_page_travels_beside_the_drawing(self):
+        """The student drew *on a page of the paper*, and the mark is placed by
+        laying it back on that page. The index the drawing is keyed by is the index
+        of `pdf_page_urls`, so the two cannot drift apart."""
+        exam = dict(EXAM, pdf_page_urls=["/static/page_001.png",
+                                         "/static/page_002.png",
+                                         "/static/page_003.png",
+                                         "/static/page_004.png",
+                                         "/static/page_005.png",
+                                         "/static/page_006.png",
+                                         "/static/page_007.png",
+                                         "/static/page_008.png",
+                                         "/static/page_009.png",
+                                         "/static/page_010.png",
+                                         "/static/page_011.png",
+                                         "/static/page_012.png"])
+        row = next(q for q in learner_of("stu-1", DRAWN_ROWS, exam)["questions"]
+                   if q["no"] == 4)
+        assert [d["paper"] for d in row["drawings"]] == ["/static/page_006.png",
+                                                        "/static/page_012.png"]
+
+    def test_an_exam_with_no_rendered_pages_says_so_rather_than_guessing(self):
+        """A paper photographed by hand has no page images, and the drawing is then
+        shown on its own — its own work, not a broken box."""
+        row = next(q for q in learner_of("stu-1", DRAWN_ROWS)["questions"]
+                   if q["no"] == 4)
+        assert [d["paper"] for d in row["drawings"]] == ["", ""]
+
+        # The other direction: a page index past the end of the rendered set.
+        exam = dict(EXAM, pdf_page_urls=["/static/page_001.png"])
+        row = next(q for q in learner_of("stu-1", DRAWN_ROWS, exam)["questions"]
+                   if q["no"] == 4)
+        assert [d["paper"] for d in row["drawings"]] == ["", ""]
 
     def test_the_rendered_page_shows_the_drawing_and_no_repr(self, app):
+        exam = dict(EXAM, pdf_page_urls=["/static/paper_%d.png" % n for n in range(1, 13)])
+        payload = learner_of("stu-1", DRAWN_ROWS, exam)
+        with app.test_request_context(
+                "/teacher/analysis/exam-1/report/student/stu-1"):
+            html = app.jinja_env.get_template(
+                "teacher/analysis_student.html").render(
+                    exam=exam, analysis=analysis_of(DRAWN_ROWS, exam),
+                    learner=payload, public_view=False, share=None,
+                    back_url="/teacher/analysis/exam-1/report", lang="id")
+
+        assert 'src="data:image/png;base64,AAAA"' in html
+        assert 'src="data:image/png;base64,BBBB"' in html
+        assert 'src="/static/paper_6.png"' in html, "the paper is not behind it"
+        assert 'src="/static/paper_12.png"' in html
+        assert "&#39;pages&#39;" not in html and "'pages'" not in html, \
+            "the stored answer is being printed as its own repr again"
+
+    def test_the_drawing_sits_on_a_surface_that_stays_light_in_dark_mode(self, app):
+        """Ink on transparency is unreadable on a dark card, and `bg-white` *is* a
+        dark card in dark mode — `theme.css` remaps it. This cell rendered the marks
+        as dark-on-dark until a reader reported it, so the surface is asserted to be
+        a literal one, the way the exam page and the marking page treat their paper.
+        """
         payload = learner_of("stu-1", DRAWN_ROWS)
         with app.test_request_context(
                 "/teacher/analysis/exam-1/report/student/stu-1"):
@@ -706,10 +765,42 @@ class TestADrawingIsShownNotStringified:
                     public_view=False, share=None,
                     back_url="/teacher/analysis/exam-1/report", lang="id")
 
-        assert 'src="data:image/png;base64,AAAA"' in html
-        assert 'src="data:image/png;base64,BBBB"' in html
-        assert "&#39;pages&#39;" not in html and "'pages'" not in html, \
-            "the stored answer is being printed as its own repr again"
+        assert "sg-paper" in html, "the drawing has no paper surface"
+        assert ".sg-paper { background:" in html, \
+            "the paper surface lost its literal background"
+        assert re.search(r'class="[^"]*\bsg-paper\b[^"]*"', html)
+        # And the thing it replaced: a drawing on `bg-white` is a drawing that
+        # disappears the moment the reader switches theme. Read from the paper
+        # element itself, not from the page — `bg-white/20` is legal elsewhere.
+        card = re.search(r'<div class="[^"]*\bsg-paper\b[^"]*">(.*?)</div>', html, re.S)
+        assert card, "the paper element could not be read"
+        assert "bg-white" not in card.group(1), \
+            "the drawing surface is a remapped utility again (dark ink on a dark card)"
+
+    def test_a_drawing_can_be_opened_at_full_size(self, app):
+        """A4 inside a 720px table that a phone scrolls sideways is not readable, so
+        tapping one opens it over the page. The overlay shows the image the row
+        already carries — `$event.currentTarget.src` — so a megabyte is not written
+        into a second attribute, and its own surface is the paper colour: the scrim
+        behind it is dark, and ink on transparency would vanish again."""
+        payload = learner_of("stu-1", DRAWN_ROWS)
+        with app.test_request_context(
+                "/teacher/analysis/exam-1/report/student/stu-1"):
+            html = app.jinja_env.get_template(
+                "teacher/analysis_student.html").render(
+                    exam=EXAM, analysis=analysis_of(DRAWN_ROWS), learner=payload,
+                    public_view=False, share=None,
+                    back_url="/teacher/analysis/exam-1/report", lang="id")
+
+        assert 'x-data="{ zoom: &#39;&#39; }"' in html or 'x-data="{ zoom: \'\' }"' in html
+        assert '@click="zoom = $event.currentTarget.src"' in html
+        assert ':src="zoom"' in html, "the overlay builds its own address instead"
+        assert "cursor-zoom-in" in html, "nothing says the drawing can be opened"
+        overlay = html.split('x-show="zoom"', 1)[1][:400]
+        assert "sg-paper" in overlay, "the enlarged drawing lost its paper surface"
+        assert "no-print" in overlay, "the overlay would print into the filed copy"
+        # One copy of the drawing, not two: the overlay reads the src it was tapped.
+        assert html.count("base64,AAAA") == 1
 
     def test_the_documents_never_carry_the_base64(self):
         """A spreadsheet cell holding a megabyte of base64 is a workbook nothing can
