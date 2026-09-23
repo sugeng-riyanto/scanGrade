@@ -200,6 +200,7 @@ one of those the launcher is whatever the last *successful* release installed.
 | resume | `rm /etc/scangrade-deploy.pause` |
 | see which commit a gate refused, and why | `cat /var/lib/scangrade-deploy/quarantined` |
 | see which step stopped the last run *before* it merged | `cat /var/lib/scangrade-deploy/refused-before-merge` |
+| see the step the last run stopped at, whatever stopped it | `cat /var/lib/scangrade-deploy/last-stop` |
 | retry a quarantined commit once | `touch /etc/scangrade-deploy.release` |
 | stop deploying automatically | `systemctl disable --now scangrade-deploy.timer` |
 | see the last release that stuck | `cat /var/lib/scangrade-deploy/last-deploy` |
@@ -733,8 +734,10 @@ It also stops instead of guessing when:
 - `git status` cannot read the checkout at all (exit 4): *"we could not tell"* is
   not *"it is clean"*, and an empty answer used to mean both;
 - the fetch cannot reach GitHub (exit 5, network or credentials);
-- the update cannot be merged into the checkout (exit 6 — history rewritten, a
-  stale `.git/index.lock`, an untracked file in the way);
+- the update cannot be merged into the checkout (exit 6 — history rewritten, an
+  untracked file in the way);
+- the checkout's index is locked and the runner will not force it (exit 17 —
+  something named `git` is running, or the process table could not be read);
 - the release ships a migration and no snapshot of the data can be taken (exit 12);
 - `requirements.txt` changed and `pip install` failed;
 - the code does not compile;
@@ -842,9 +845,86 @@ It is not a quarantine and it does not try to be: a fetch that could not reach
 GitHub is the world's fault, not the commit's, and the next tick simply tries again.
 Nothing in the record decides whether to retry — the exit codes already do.
 
+### The one refusal that heals itself instead of waiting for you
+
+That stale `.git/index.lock` is the reason the runner now looks for it **twice** in
+a run, at both ends of everything that can touch the index (`lock-heal-logic` in the
+script): once before the first read — the dirty guard below reads the index through
+the same lock, so a lock is what makes it report an unreadable checkout — and once
+immediately before the merge, because on a release that ships a migration the first
+heal is minutes old by then (a fetch and a data snapshot run in between) and a lock
+appearing in that window would land on the merge and be read as a merge failure.
+The second call costs one `stat` when there is no lock, and `lock_heal` caches the
+path it asked git for, so the two calls cannot disagree about where the lock is.
+
+A lock file is evidence that a git *was* running, not that one is, and three answers
+are acted on rather than guessed at:
+
+* **nothing holds it** — the file is removed, the journal says so, and the release
+  moves on the same tick. No shell, no root step, nothing to remember.
+* **a git process holds it** — it is left alone, because clearing it would corrupt
+  whatever that git is in the middle of, and the run stops with **exit 17** and a
+  `lock_refused` record whose detail names the holder (`1234 git`), so the status
+  page says a locked checkout instead of showing a box that looks merely idle. The
+  next tick tries again; nothing in this needs an operator.
+* **the process table cannot be read** — also exit 17, also `lock_refused`. "We
+  could not tell" is not "nobody holds it", and removing the file on that basis is
+  the one way this could destroy work.
+
+The lock is found by asking git where its index lives (`rev-parse
+--absolute-git-dir`), so a linked worktree — where `.git` is a *file* — is handled
+too. The holder scan reads `/proc/<pid>/comm`, one read per process: no `pgrep`
+(procps) and no `lsof` (a package), neither of which is a given on a minimal box,
+and a heal that stops working because a tool is missing is the same silent stall in
+a new costume. It is deliberately repo-blind — a git running anywhere counts — and
+being wrong that way costs one delayed tick, where the opposite corrupts somebody's
+in-flight `git add`.
+
+If a merge is refused anyway, the journal names *who* owns the lock — git's own
+stderr says a lock file could not be created, and it cannot say whether anybody is
+holding it. Both answers are printed (`1234 git`, or that a lock is there although
+no git process holds it), so "history rewritten?" is not a reading this box can give
+you again.
+
 A **manual** rollback does not write a quarantine — `git reset --hard` by hand
 leaves no record — so after one, the next tick will indeed try the same release
 again. That is the paragraph at the end of this document.
+
+### The step it stopped at, whatever stopped it
+
+Everything above is written by a branch somebody wrote for a refusal they thought
+of. The hole that leaves is the run that stops where there is no branch: a step
+added later, a command that returns non-zero with no `if` around it, a `pipefail` in
+a helper nobody looked at twice. Those end a run with one line in the middle of a
+1 300-line journal, and `exit 7` is not a step.
+
+So the runner names the phase it is in and its `EXIT` trap writes any non-zero exit
+down itself:
+
+```
+/var/lib/scangrade-deploy/last-stop
+```
+
+Four positional lines: the step, when it stopped, the exit code, and the commit
+under judgement (empty when the run stopped before there was one). The trap being
+the writer is the point — a new failure path cannot forget to record itself — and it
+is installed **before the first exit in the script**, which a test asserts, because
+an exit above it would run unrecorded.
+
+Only a run that reaches the end deletes the record. A tick that exits 0 because
+`origin/main` has not moved, or because another run holds the lock, is not a
+recovery; clearing the record there would erase the evidence every other minute. So
+a record on disk means the box is *still* stopping on that step, and the status page
+says exactly that — including when the record exists but cannot be read, which is
+never rendered as a clean state.
+
+`/super-admin/deploy-status` renders both halves of it: the step and the code, each
+with a plain sentence (a step or a code from a newer runner is shown as itself,
+never guessed at), and a one-line table of every exit code this runner can end with.
+The vocabulary is the runner's own — `EXIT_CODES` and `RUN_STEPS` in
+`app/services/deploy_status_service.py` — and the tests assert it in both
+directions: every `RUN_STEP=` assignment and every `exit N` in the script is in
+those tables, and every row in those tables has a sentence in the page.
 
 ## Why a reload and not a restart
 

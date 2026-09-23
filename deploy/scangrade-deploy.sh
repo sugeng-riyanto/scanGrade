@@ -250,6 +250,189 @@ preflight_forget() {
 }
 # preflight-logic:end
 
+# ── The step a run stopped at, whatever stopped it ───────────────────────────
+# last-stop-logic:start
+# Everything above records the refusals somebody thought of. That is the right
+# place for those, and a card that can say "the fetch could not reach GitHub" is
+# worth more than one that says "the run failed" — but it leaves the other half:
+# the run that stops somewhere nobody wrote a record for. A step added later, a
+# command that exits non-zero with no branch around it, a `pipefail` in a helper
+# nobody looked at twice. Those end the run with a line in the middle of a 1 300-
+# line journal and nothing outside the box can name the step it was in.
+#
+# So the runner tracks the phase it is in and records any non-zero exit itself,
+# whatever caused it. The record is written from the EXIT trap, which is the one
+# place a new failure path cannot forget to write it — the opposite of the rule
+# the named refusals follow, and the reason both exist.
+#
+#     line 1  the step, as a key the status page has a sentence for
+#     line 2  when it stopped (ISO)
+#     line 3  the exit code
+#     line 4  the commit under judgement (`origin/$BRANCH`), or empty when the run
+#             stopped before there was one
+#
+# The step is a global rather than an argument for the same reason the two records
+# above are: this script takes no arguments at any level (a positional parameter
+# anywhere in this file would make root's unattended runner steerable), and a step
+# that could be passed a value could also name the wrong one. `RUN_STEP` is
+# therefore assigned by name at each phase, and nothing else writes it.
+#
+# A run that *finishes* deletes the record, so what is here describes a box that is
+# still stopping on that step rather than one that stopped once and recovered. Only
+# `done` clears it: a tick that exits 0 because it had nothing to do, or because
+# another run held the lock, is not a run that recovered, and treating it as one
+# would erase the record of the tick that is still failing.
+RUN_STEP="start"
+LAST_STOP_CODE=""
+LAST_STOP_FILE="$STATE_DIR/last-stop"
+
+last_stop_write() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  {
+    printf '%s\n%s\n%s\n%s\n' "${RUN_STEP:-unknown}" "$(date -Is)" \
+      "${LAST_STOP_CODE:-?}" "${AFTER_FULL:-}"
+  } > "$LAST_STOP_FILE" 2>/dev/null || true
+  # Readable by the app (the status page shows this) and owned by root.
+  chmod 0644 "$LAST_STOP_FILE" 2>/dev/null || true
+}
+
+last_stop_clear() { rm -f "$LAST_STOP_FILE" 2>/dev/null || true; }
+
+on_exit() {
+  LAST_STOP_CODE="$?"
+  if [ "$LAST_STOP_CODE" -eq 0 ]; then
+    [ "$RUN_STEP" = "done" ] && last_stop_clear
+    return 0
+  fi
+  last_stop_write
+}
+trap on_exit EXIT
+# last-stop-logic:end
+
+# ── A stale index lock is healed before it can stall a release ───────────────
+# lock-heal-logic:start
+# `git merge` writes the index, so a `.git/index.lock` left behind — a git killed
+# mid-write, a box powered off at the wrong moment — stops every release. The only
+# place that says why is git's own stderr, and it is not the place anybody looks.
+#
+# What made that stall invisible is that the guard below does *not* catch it:
+# `git status --porcelain` has no reason to rewrite an index that did not change,
+# so it succeeds — with empty output — through the very lock that stops every
+# write. The checkout therefore passed the dirty guard looking clean, the fetch
+# reached GitHub every two minutes, the merge never happened, and nothing on the
+# box or on the status page could say so. Not hypothetical: a box sat ten commits
+# and three days behind that way, and the only way out was a shell.
+#
+# A lock file is evidence that a git *was* running, not that one is. So it is
+# removed when, and only when, no git process is there to own it, and both answers
+# are acted on rather than guessed at:
+#
+#   * no git process: the file is removed and the run carries on, so the release
+#     moves on the same tick — which is the whole point of doing it here rather
+#     than in a runbook.
+#   * a git process, or a file root could not remove: the run refuses with its own
+#     exit code and a record naming this step, so the page shows a locked checkout
+#     instead of a box that merely looks as though it has no new commits.
+#
+# One call site, before the first thing that reads *or* writes the index — that
+# guard included, because the same lock is what makes it report an unreadable
+# checkout. A lock that appears after it (during a slow fetch, or a long snapshot)
+# is caught by the merge's own refusal, which carries git's words verbatim, and
+# healed by the next tick. No case here needs a human at a console.
+#
+# There is a third answer, and it is refused rather than rounded to "no git": a
+# process table this run cannot read is not evidence that nobody holds the lock,
+# and removing the file on that basis is the one way this could destroy work. The
+# same rule as `checkout_unreadable` and `armament`: "we could not tell" is not
+# "it is fine".
+INDEX_LOCK=""
+LOCK_HOLDERS=""
+#: Where the process table is. A constant rather than a literal so the matching
+#: rule below can be run against a table a test controls, on a machine whose own
+#: `/proc` says nothing about what this box would do.
+PROC_ROOT="/proc"
+
+lock_path() {
+  # Asked of git rather than assumed: a linked worktree keeps its index in the
+  # worktree's own gitdir, and this is that path. Reads only — it cannot create the
+  # lock it is about to look for.
+  if [ -z "$INDEX_LOCK" ]; then
+    local dir
+    dir=$(as_owner git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null)
+    [ -n "$dir" ] || dir="$REPO/.git"
+    INDEX_LOCK="$dir/index.lock"
+  fi
+  printf '%s\n' "$INDEX_LOCK"
+}
+
+#: Whether this run can read a process table at all. `[ -d ]` on a numeric entry
+#: rather than on the directory itself: an empty or unmounted `/proc` is exactly
+#: the case that must not be read as "no git is running".
+process_table_readable() {
+  local pid
+  for pid in "$PROC_ROOT"/[0-9]*; do
+    [ -d "$pid" ] || continue
+    return 0
+  done
+  return 1
+}
+
+lock_holders() {
+  # `<pid>/comm` rather than a process listing: one read per process, no procps
+  # and no `lsof` — neither is a given on a minimal box — and it is the name the
+  # kernel records. Helpers count, so the pattern covers a `git-remote-https` a
+  # fetch left behind; `comm` truncates that at 15 characters, hence `git-*`.
+  #
+  # Deliberately repo-blind: a git running anywhere on the box is treated as a
+  # possible holder. Being wrong that way costs one delayed tick; being wrong the
+  # other way corrupts somebody's in-flight `git add`.
+  local pid comm
+  for pid in "$PROC_ROOT"/[0-9]*; do
+    [ -r "$pid/comm" ] || continue
+    read -r comm < "$pid/comm" 2>/dev/null || continue
+    case "$comm" in
+      git|git-*) printf '%s %s\n' "${pid#"$PROC_ROOT"/}" "$comm" ;;
+    esac
+  done
+}
+
+lock_heal() {
+  local lock
+  lock=$(lock_path)
+  [ -e "$lock" ] || return 0
+
+  if ! process_table_readable; then
+    log "index lock at $lock, and $PROC_ROOT cannot be read — refusing rather than"
+    log "    removing a lock that may have a live owner"
+    PREFLIGHT_GATE=lock_refused PREFLIGHT_EXIT=17 \
+      PREFLIGHT_DETAIL="the index lock at $lock is there and no process table could be read at $PROC_ROOT, so whether a git owns it is unknown" \
+      preflight_write
+    exit 17
+  fi
+
+  LOCK_HOLDERS=$(lock_holders)
+  if [ -n "$LOCK_HOLDERS" ]; then
+    log "index lock at $lock, and a git process is running — leaving it alone:"
+    printf '%s\n' "$LOCK_HOLDERS" | sed 's/^/    /'
+    PREFLIGHT_GATE=lock_refused PREFLIGHT_EXIT=17 \
+      PREFLIGHT_DETAIL="a git process holds the index lock at $lock: $(printf '%s' "$LOCK_HOLDERS" | tr '\n' ' ')" \
+      preflight_write
+    exit 17
+  fi
+
+  if ! rm -f "$lock" 2>/dev/null; then
+    log "index lock at $lock cannot be removed by root — refusing rather than deploying"
+    PREFLIGHT_GATE=lock_refused PREFLIGHT_EXIT=17 \
+      PREFLIGHT_DETAIL="the index lock at $lock exists and root could not remove it" \
+      preflight_write
+    exit 17
+  fi
+
+  log "removed a stale index lock at $lock — no git process held it"
+  return 0
+}
+# lock-heal-logic:end
+
 # ── The installed launcher refreshes itself from the checkout ─────────────
 # refresh-launcher-logic:start
 # The two installed names are rendered from `deploy/entrypoint.sh`, and nothing
@@ -344,6 +527,7 @@ refresh_installed_launchers() {
 # ── Serialise runs ───────────────────────────────────────────────────────────
 # The timer already skips while the unit is active, but a manual run can overlap
 # a timer run. Exiting 0 keeps a skipped run from looking like a failed one.
+RUN_STEP="lock"
 exec 9>"$LOCK" || { log "cannot open lock $LOCK"; exit 0; }
 if ! flock -n 9; then
   log "another deploy is already running — skipping this round"
@@ -391,6 +575,7 @@ fi
 # It sits after the pause check deliberately: a frozen box is deploying nothing,
 # and a fault in a file nobody is running is not worth a journal line every two
 # minutes.
+RUN_STEP="identity"
 SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
 REPO_RUNNER=$(readlink -f "$REPO/deploy/scangrade-deploy.sh" 2>/dev/null || echo "$REPO/deploy/scangrade-deploy.sh")
 if [ "$SELF" != "$REPO_RUNNER" ] && ! cmp -s "$SELF" "$REPO_RUNNER"; then
@@ -439,6 +624,7 @@ it arrives with the installer, and until it is there this box cannot say what is
   ARMAMENT_OUT=$(bash "$checker" --check 2>&1)
 }
 
+RUN_STEP="armament"
 ARMAMENT_OUT=""
 if ! armament_preflight; then
   log "UNARMED — REFUSING TO DEPLOY: this box is not set up to check a release"
@@ -490,6 +676,18 @@ cd "$REPO" || {
   exit 3
 }
 
+# ── A stale index lock, before anything touches the index ────────────────────
+# Called twice in a run, and both times are load-bearing. Here first: the guard
+# below reads the index through the same lock (a lock is what makes it report an
+# unreadable checkout), the fetch writes refs, and the merge at the end writes the
+# index — so the earliest quiet moment covers all three. The second call sits
+# immediately before that merge, because on a release that ships SQL this one is
+# minutes old by then. It costs one `stat` when there is no lock, and `lock_heal`
+# caches the path it asked git for, so the second call cannot disagree with the
+# first about where the lock is.
+RUN_STEP="checkout"
+lock_heal
+
 # ── Guard against clobbering hand edits ──────────────────────────────────────
 # A `git status` that *failed* used to be read as "no local changes": the command
 # substitution came back empty either way, and empty is what a clean tree looks
@@ -519,6 +717,7 @@ BEFORE=$(as_owner git -C "$REPO" rev-parse --short HEAD)
 # stderr is captured rather than left to the journal: this is the one refusal whose
 # cause is entirely inside git's own message (credentials, DNS, a proxy), and the
 # status page is for an operator with no shell to read that journal from.
+RUN_STEP="fetch"
 FETCH_OUT=""
 if ! FETCH_OUT=$(as_owner git -C "$REPO" fetch --quiet origin "$BRANCH" 2>&1); then
   log "git fetch failed (network or credentials) — will retry next tick"
@@ -569,6 +768,7 @@ CHANGED=$(as_owner git -C "$REPO" diff --name-only "$BEFORE" "origin/$BRANCH")
 # The failure that matters is a *silent* one, so this is a hard gate: if the
 # snapshot cannot be taken, the release is not deployed at all. Nothing has been
 # merged at this point, so refusing costs nothing but a retry.
+RUN_STEP="snapshot"
 SNAPSHOT=""
 if echo "$CHANGED" | grep -qE '^supabase/migrations/[^/]+\.sql$'; then
   log "release changes supabase/migrations — taking a data snapshot first"
@@ -608,6 +808,15 @@ else
   log "no migration in this release — no snapshot needed"
 fi
 
+# ── The last look before the merge ───────────────────────────────────────────
+# The heal above ran before the fetch and, on a release that ships a migration,
+# before a data snapshot that can take minutes. A lock that appears in between
+# would land on the merge and be read as a merge failure — the exact confusion
+# this whole block exists to end — so the index is checked once more here, where
+# the write is about to happen.
+RUN_STEP="merge"
+lock_heal
+
 # stderr captured for the same reason the fetch's is, and here it is the only thing
 # that can name the cause: a stale `.git/index.lock` makes this fail while `git
 # status` succeeds, so "not a fast-forward" is a guess — and it was the guess the
@@ -616,6 +825,18 @@ MERGE_OUT=""
 if ! MERGE_OUT=$(as_owner git -C "$REPO" merge --ff-only --quiet "origin/$BRANCH" 2>&1); then
   log "could not merge origin/$BRANCH into $BEFORE — leaving $BEFORE in place"
   [ -n "$MERGE_OUT" ] && printf '%s\n' "$MERGE_OUT" | sed 's/^/    /'
+  # Git's words above are the record; this only adds what git cannot know — who
+  # owns the lock, or that nobody does. Reached on failure alone, so a healthy box
+  # pays one `stat` for the privilege of never being told "history rewritten?".
+  if [ -e "$(lock_path)" ]; then
+    LOCK_HOLDERS=$(lock_holders)
+    if [ -n "$LOCK_HOLDERS" ]; then
+      log "    and the index lock is held by:"
+      printf '%s\n' "$LOCK_HOLDERS" | sed 's/^/        /'
+    else
+      log "    and a .git/index.lock is there even though no git process holds it"
+    fi
+  fi
   PREFLIGHT_GATE=merge_refused PREFLIGHT_EXIT=6 \
     PREFLIGHT_DETAIL="${MERGE_OUT:-git merge --ff-only exited non-zero with no output}" \
     preflight_write
@@ -654,6 +875,7 @@ if ! grep -q "^# ${IDENTITY_FENCE}:start\$" "$REPO/deploy/scangrade-deploy.sh" 2
 fi
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
+RUN_STEP="dependencies"
 if echo "$CHANGED" | grep -qx "requirements.txt"; then
   log "requirements.txt changed — installing"
   if ! as_owner "$REPO/.venv/bin/pip" install -q -r "$REPO/requirements.txt"; then
@@ -664,6 +886,7 @@ if echo "$CHANGED" | grep -qx "requirements.txt"; then
 fi
 
 # ── Gate 1: does it compile? ─────────────────────────────────────────────────
+RUN_STEP="compile"
 if ! as_owner "$REPO/.venv/bin/python" -m compileall -q "$REPO/app" >/dev/null 2>&1; then
   log "python compileall FAILED — rolling back to $BEFORE"
   FAIL_REASON="python compileall (exit 8)"
@@ -686,6 +909,7 @@ fi
 #
 # The app refuses only under this marker, so a refusal here always fails the
 # release and never the site: gunicorn constructs the same app without it.
+RUN_STEP="construct"
 CONSTRUCT_OUT=$(as_owner env START_BACKGROUND_SCHEDULERS=false "$REPO/.venv/bin/python" -c '
 import sys
 from app import create_app
@@ -740,6 +964,7 @@ log "$CONSTRUCT_OUT"
 # property of the release rather than of the box, so it rolls back with exit 1;
 # the journal says which of the two it was, because "unreadable text" and "the
 # gate has been deleted" are fixed in different places.
+RUN_STEP="theme"
 THEME_OUT=$(as_owner bash "$REPO/deploy/theme_gate.sh" 2>&1)
 THEME_RC=$?
 if [ "$THEME_RC" -eq 0 ]; then
@@ -821,6 +1046,7 @@ reload_worker() {
 }
 
 WORKER_STALE=0
+RUN_STEP="reload"
 reload_app
 reload_worker || WORKER_STALE=1
 sleep 3
@@ -844,6 +1070,7 @@ fi
 # are deployment-specific and must never be committed. SMOKE_ENFORCE=true is
 # what arms the rollback; install-auto-deploy.sh only sets it after confirming
 # the accounts actually sign in, so a stale password cannot roll back good code.
+RUN_STEP="verify"
 SMOKE_CONF="/etc/scangrade-smoke.conf"
 if [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ] && ! bash -n "$SMOKE_CONF" 2>/dev/null; then
   # Sourcing a broken file would take the whole deploy script down with it, so it
@@ -1089,6 +1316,7 @@ else
 fi
 
 if [ "$HEALTHY" = "1" ]; then
+  RUN_STEP="done"
   mkdir -p "$STATE_DIR"
   printf '%s\n%s\n%s\n' "$AFTER" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"
   log "DEPLOY OK: $BEFORE -> $AFTER"

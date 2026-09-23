@@ -112,6 +112,13 @@ DEFAULT_UNARMED_FILE = DEFAULT_STATE_DIR + "/unarmed"
 #: half of "why is nothing deploying?" that had no record at all. A quarantine is
 #: about a commit; this is about the step that stopped the run getting to one.
 DEFAULT_PREFLIGHT_FILE = DEFAULT_STATE_DIR + "/refused-before-merge"
+#: The runner's record of the last run that ended non-zero, whatever stopped it.
+#: Written by its `EXIT` trap and deleted by the next run that finishes, so its
+#: presence means the last tick stopped. The named refusals already had records;
+#: this is for the ones that did not — `pip install` failing after a merge, or a
+#: path nobody has written yet — which is why the trap names the *step* as well as
+#: the code: "exit 7" answers nothing on its own.
+DEFAULT_LAST_STOP_FILE = DEFAULT_STATE_DIR + "/last-stop"
 
 #: Where git lives when the service user's PATH does not carry it. The unit runs
 #: the app without a login shell, so `which` is the first guess and these are the
@@ -380,6 +387,7 @@ PREFLIGHT_GATES = frozenset({
     "dirty_checkout",
     "fetch_failed",
     "snapshot_refused",
+    "lock_refused",
     "merge_refused",
 })
 
@@ -391,6 +399,67 @@ PREFLIGHT_TRANSIENT = frozenset({"fetch_failed"})
 #: A step this page does not know (a newer runner wrote the record). Its own name is
 #: shown as it stands; the key only exists so the card has one sentence to give.
 PREFLIGHT_UNKNOWN_GATE = "unknown_gate"
+
+# ── what the runner can end with ─────────────────────────────────────────────
+# `systemctl status scangrade-deploy` reports one number and no words, so a reader
+# with no shell had a journal they could not read. Every code the runner can leave
+# through is listed here with the *reading* it deserves, and the page writes the
+# sentence in both languages.
+#
+# It is a contract in three directions: the runner's own `exit N` statements are
+# parsed and checked against these keys, the page is checked to have a sentence for
+# each, and the third direction is the one that matters to a reader — the row whose
+# code this box last stopped with is marked, so "why is nothing deploying" is
+# answered by the table rather than by a shell.
+#
+#   quiet        nothing was waiting; a tick with no work is not a failure
+#   refused      a release was turned away before it moved; the previous keeps serving
+#   rolled_back  it was merged, judged, and put back; the previous keeps serving
+#   blocked      nothing can deploy at all until somebody acts on the box
+#   attention    the box needs a human now: even the rollback is not serving
+EXIT_TONES = ("quiet", "refused", "rolled_back", "blocked", "attention")
+
+EXIT_CODES: dict[int, str] = {
+    0: "quiet",         # nothing new, already current, another run holds the lock
+    2: "blocked",       # not root: this run cannot reload the service
+    3: "blocked",       # no checkout, or nothing in it that could serve a release
+    4: "refused",       # the checkout could not be read, or carries hand edits
+    5: "refused",       # the fetch could not reach GitHub (network or credentials)
+    6: "refused",       # the release could not be merged into the checkout
+    7: "rolled_back",   # dependencies failed to install, so it went back
+    8: "rolled_back",   # the code did not compile
+    9: "rolled_back",   # the app did not construct with its blueprints and routes
+    10: "rolled_back",  # it reloaded, then failed the verification after it
+    11: "attention",    # the rollback is not serving either
+    12: "refused",      # a migration release with no recovery point
+    13: "rolled_back",  # a template was unreadable in one of the themes
+    14: "blocked",      # the installed runner is a copy that has drifted
+    15: "blocked",      # the box is not armed to check a release
+    16: "rolled_back",  # the release removed Gate 0
+    17: "refused",      # the checkout's index is locked and will not be forced
+}
+
+#: The phases a run passes through, as the runner names them in its record. A step
+#: is what turns "exit 7" into "it stopped installing dependencies", so the page
+#: needs a sentence for each — and a name the runner invents without being added
+#: here shows as itself rather than as a guess.
+RUN_STEPS = frozenset({
+    "start", "lock", "identity", "armament", "checkout", "fetch", "snapshot",
+    "merge", "dependencies", "compile", "construct", "theme", "reload",
+    "verify", "done",
+})
+
+#: A step from a newer runner. Shown as it stands, like the pre-merge gates.
+RUN_STEP_UNKNOWN = "unknown_step"
+
+#: The four answers the last-stop record can give, named the way the pre-merge
+#: record's are: absent, present, unreadable, and not a record at all.
+LAST_STOP_NONE = "none"
+LAST_STOP_PRESENT = "present"
+LAST_STOP_UNREADABLE = "unreadable"
+LAST_STOP_MALFORMED = "malformed"
+LAST_STOP_KEYS = frozenset({LAST_STOP_NONE, LAST_STOP_PRESENT,
+                            LAST_STOP_UNREADABLE, LAST_STOP_MALFORMED})
 
 
 def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
@@ -443,6 +512,57 @@ def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     # A header with nothing after it is still a refusal on record: the silence is
     # the command's, not this page's licence to say nothing was refused.
     state["detail"] = body or None
+    return state
+
+
+def last_stop_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
+    """How the last run that ended non-zero ended, as the runner recorded it.
+
+    Four positional lines: the step it was in, when, the exit code, and the commit
+    under judgement (empty when the run stopped before there was one).
+
+    A run that finishes deletes the record, so what is here describes a box that is
+    *still* stopping on that step rather than one that stopped once and recovered —
+    the same reason `preflight_forget` clears its own record on a merge. And a
+    record that cannot be read is reported rather than treated as absent, which is
+    the rule all four of these answers follow.
+    """
+    state: dict = {
+        "path": str(path), "present": False, "key": LAST_STOP_NONE, "step": None,
+        "step_key": None, "at": None, "age_seconds": None, "exit_code": None,
+        "commit": None, "short": None, "tone": None, "reason": None,
+    }
+    text, why = _read(path)
+    if text is None:
+        if why != "absent":
+            state["key"] = LAST_STOP_UNREADABLE
+            state["reason"] = why
+        return state
+
+    lines = text.splitlines()
+    step = lines[0].strip() if lines else ""
+    when = lines[1].strip() if len(lines) > 1 else ""
+    code = lines[2].strip() if len(lines) > 2 else ""
+    commit = lines[3].strip() if len(lines) > 3 else ""
+    if not re.fullmatch(r"[a-z0-9_]{1,40}", step):
+        state["key"] = LAST_STOP_MALFORMED
+        state["reason"] = step or None
+        return state
+
+    state["present"] = True
+    state["key"] = LAST_STOP_PRESENT
+    state["step"] = step
+    state["step_key"] = step if step in RUN_STEPS else RUN_STEP_UNKNOWN
+    state["at"] = when or None
+    state["age_seconds"] = _age_seconds(when or None, now)
+    if code.isdigit():
+        state["exit_code"] = int(code)
+        # A code this page has no row for is left with no tone: the table shows it
+        # as a code without a reading rather than inventing one.
+        state["tone"] = EXIT_CODES.get(int(code))
+    if re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+        state["commit"] = commit.lower()
+        state["short"] = commit[:7]
     return state
 
 
@@ -1045,7 +1165,7 @@ REASON_KEYS = frozenset({
 
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            quarantine_file=None, unarmed_file=None, preflight_file=None,
-           request_dir=None, release_request=None,
+           last_stop_file=None, request_dir=None, release_request=None,
            now: _dt.datetime | None = None) -> dict:
     """Everything the page shows. Any single part may be `unknown` with a reason."""
     now = now or _dt.datetime.now(_dt.timezone.utc)
@@ -1067,6 +1187,10 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         preflight_file or os.environ.get("SCANGRADE_PREFLIGHT_FILE")
         or DEFAULT_PREFLIGHT_FILE)
     preflight = preflight_state(preflight_file, now=now)
+    last_stop_file = pathlib.Path(
+        last_stop_file or os.environ.get("SCANGRADE_LAST_STOP_FILE")
+        or DEFAULT_LAST_STOP_FILE)
+    last_stop = last_stop_state(last_stop_file, now=now)
     request_dir = pathlib.Path(
         request_dir or os.environ.get("SCANGRADE_REQUEST_DIR") or DEFAULT_REQUEST_DIR)
     release_request = pathlib.Path(
@@ -1100,6 +1224,13 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "unarmed_file": str(unarmed_file),
         "preflight": preflight,
         "preflight_file": str(preflight_file),
+        # The vocabulary the two records are read against, and the table the page
+        # renders: one source for the codes, one for the steps a record can name.
+        "exit_codes": EXIT_CODES,
+        "exit_tones": EXIT_TONES,
+        "run_steps": RUN_STEPS,
+        "last_stop": last_stop,
+        "last_stop_file": str(last_stop_file),
         "release_file": DEFAULT_RELEASE_FILE,
         "release_file_present": _exists(pathlib.Path(DEFAULT_RELEASE_FILE)),
         "request_dir": str(request_dir),

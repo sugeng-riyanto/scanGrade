@@ -101,8 +101,19 @@ def report_of(runner: dict | None = None, checkout: dict | None = None,
                       "reason": None},
         "verdict": {"level": "fresh", "key": verdict, "detail": None, "behind": None,
                     "runner_behind": None, "runner_from": None},
+        # The last-stop card reads attribute by attribute too, so this carries the
+        # reader's shape exactly — the same reason `preflight` does.
+        "last_stop": {"path": "/var/lib/scangrade-deploy/last-stop",
+                      "present": False, "key": "none", "step": None,
+                      "step_key": None, "at": None, "age_seconds": None,
+                      "exit_code": None, "commit": None, "short": None,
+                      "tone": None, "reason": None},
+        # Rendered as the table of codes, so it is the service's own mapping rather
+        # than a copy that could drift from it.
+        "exit_codes": status.EXIT_CODES,
         # The paths the cards print, so a rendered fixture shows a file rather than
         # a blank where an operator expects to be told which file to read.
+        "last_stop_file": "/var/lib/scangrade-deploy/last-stop",
         "quarantine_file": "/var/lib/scangrade-deploy/quarantined",
         "unarmed_file": "/var/lib/scangrade-deploy/unarmed",
         "preflight_file": "/var/lib/scangrade-deploy/refused-before-merge",
@@ -139,6 +150,8 @@ class TestWhatCountsAsStale:
         # template, which is a 500 on the one page an operator reads to find out why
         # nothing is deploying.
         assert set(report_of()["preflight"]) == set(real["preflight"])
+        assert set(report_of()["last_stop"]) == set(real["last_stop"])
+        assert set(report_of()["exit_codes"]) == set(real["exit_codes"])
         # And the reading the policy keys on is really in there.
         assert "gate0" in real["runner"] and "origin_behind" in real["runner"]
 

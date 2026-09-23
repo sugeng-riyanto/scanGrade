@@ -1753,6 +1753,32 @@ DECLARED_PREFLIGHT_FILE = as_path(
 
 
 class TestThePageNamesThePreMergeRefusal:
+    def test_a_locked_checkout_is_named_and_says_no_root_step_is_needed(self, app, tmp_path):
+        """The step the runner's own self-heal can refuse at, rendered.
+
+        The parity test above proves the page *has* a sentence for every step; this
+        proves the reader gets it — plus the half that matters when it fires: the
+        runner clears a lock nobody holds by itself, so a card that only named the
+        lock would send an operator to a console for nothing.
+        """
+        report = preflight_report(
+            tmp_path,
+            text="lock_refused\n2026-09-23T11:14:02+00:00\n17\n" + "a" * 40 +
+                 "\na git process holds the index lock at /opt/scangrade/.git/"
+                 "index.lock: 1234 git\n")
+        html = render_status(app, report)
+        assert report["preflight"]["gate_key"] == "lock_refused"
+        assert "the checkout\u2019s git index is locked by another process" in html, (
+            "the step is not named in the reader's language")
+        assert "1234 git" in html, (
+            "the holder the runner found is not shown, so the journal cannot be "
+            "matched against anything")
+        assert ">17<" in html or "\n                            17" in html, (
+            "the exit code the operator matches against systemd is not shown")
+        assert "this needs no root step" in html, (
+            "the card names the lock without saying the box clears it by itself, "
+            "which is the whole feature")
+
     def test_every_step_the_runner_records_has_a_sentence_in_both_languages(self):
         assert template_preflight_gate_keys() == status.PREFLIGHT_GATES, (
             f"missing from the page: {sorted(status.PREFLIGHT_GATES - template_preflight_gate_keys())}; "

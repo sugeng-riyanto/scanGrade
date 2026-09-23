@@ -208,6 +208,7 @@
                     {% if pf.present %}
                     <span x-text="t('Runner sempat mengambil commit dari GitHub, lalu berhenti di langkah ini sebelum checkout dipindahkan. Tidak ada yang di-merge, tidak ada yang dikarantina, dan rilis sebelumnya tetap melayani. Ini kata-kata perintahnya sendiri, apa adanya:','The runner did fetch the commit from GitHub, then stopped at this step before the checkout moved. Nothing was merged, nothing was quarantined, and the previous release keeps serving. These are the command’s own words, as they stand:')"></span>
                     {% if pf.detail %}<code class="block mt-2 whitespace-pre-wrap break-all font-mono text-xs text-rose-700">{{ pf.detail }}</code>{% endif %}
+                    {% if pf.gate_key == 'lock_refused' %}<span class="block mt-2" x-text="t('Runner tidak menghapus lock yang masih dipegang proses git, dan ini tidak butuh langkah root: begitu prosesnya selesai, tick berikutnya mencoba lagi. Kalau tidak ada yang memegangnya, runner menghapus lock itu sendiri dan rilis berjalan pada tick yang sama.','The runner does not remove a lock a live git process owns, and this needs no root step: once that process finishes, the next tick tries again. When nothing holds it, the runner removes the lock itself and the release goes out on the same tick.')"></span>{% endif %}
                     {% elif pf.key == 'unreadable' %}
                     <span x-text="t('Ada catatan penolakan sebelum merge dan halaman ini tidak bisa membacanya, jadi belum bisa dipastikan runner sanggup memindahkan rilis.','There is a pre-merge refusal on record and this page cannot read it, so the runner cannot be said to be able to move a release.')"></span>
                     {% if pf.reason %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ pf.reason }}</code>{% endif %}
@@ -232,6 +233,7 @@
                                 {% elif pf.gate_key == 'dirty_checkout' %}<span x-text="t('checkout punya perubahan yang belum di-commit','the checkout has uncommitted changes')"></span>
                                 {% elif pf.gate_key == 'fetch_failed' %}<span x-text="t('git fetch gagal — jaringan atau kredensial','git fetch failed — network or credentials')"></span>
                                 {% elif pf.gate_key == 'snapshot_refused' %}<span x-text="t('snapshot data sebelum migrasi tidak bisa diambil','the data snapshot before the migration could not be taken')"></span>
+                                {% elif pf.gate_key == 'lock_refused' %}<span x-text="t('checkout terkunci index git yang masih dipegang proses lain','the checkout’s git index is locked by another process')"></span>
                                 {% elif pf.gate_key == 'merge_refused' %}<span x-text="t('commit tidak bisa di-merge ke checkout','the commit could not be merged into the checkout')"></span>
                                 {% else %}<span x-text="t('langkah dari runner yang lebih baru','a step from a newer runner')"></span>
                                 {% endif %}
@@ -260,6 +262,114 @@
                     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
                         <span class="text-surface-500 shrink-0" x-text="t('Berkas','File')"></span>
                         <code class="font-mono text-xs text-surface-700 break-all text-right">{{ pf.path }}</code>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the step the last run stopped at ─────────────────────────────── -->
+    {#
+        The net under every record above. Each of those is written by a branch
+        somebody wrote for a refusal they thought of; this one is written by the
+        runner's EXIT trap, so a run that stops somewhere nobody wrote a branch for
+        still leaves a step and a code. It is the difference between "exit 7" in a
+        1 300-line journal and "it stopped installing dependencies".
+
+        Only a run that reaches the end deletes it, so a present record describes a
+        box that is *still* stopping on that step — and the blank state says so,
+        rather than being read as a box that recovered.
+    #}
+    {% set ls = status.last_stop %}
+    {% set LSHELD = {'box': 'bg-rose-50 border-rose-200', 'text': 'text-rose-700', 'icon': 'fa-circle-stop'} %}
+    {% set LSCLEAR = {'box': 'bg-surface-50 border-surface-200', 'text': 'text-surface-700', 'icon': 'fa-circle-check'} %}
+    {% set LSL = LSCLEAR if ls.key == 'none' else LSHELD %}
+    <div class="card p-5 border {{ LSL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ LSL.icon }} {{ LSL.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ LSL.text }}">
+                    {% if ls.present %}
+                    <span x-text="t('Run Terakhir Berhenti di Sini','The Last Run Stopped Here')"></span>
+                    {% elif ls.key == 'unreadable' %}
+                    <span x-text="t('Catatan Langkah Terakhir Tidak Terbaca','Last-Stop Record Unreadable')"></span>
+                    {% elif ls.key == 'malformed' %}
+                    <span x-text="t('Catatan Langkah Terakhir Tidak Dikenali','Last-Stop Record Not Recognised')"></span>
+                    {% else %}
+                    <span x-text="t('Tidak Ada Run yang Sedang Berhenti','No Run Is Stopping')"></span>
+                    {% endif %}
+                </h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if ls.present %}
+                    <span x-text="t('Run terakhir yang berakhir dengan kode bukan nol berhenti di langkah ini. Langkah dan kodenya ditulis runner sendiri dari trap keluar, jadi ini juga menangkap kegagalan yang tidak punya kartu sendiri di halaman ini — termasuk langkah yang baru ditambahkan ke runner setelah halaman ini dibuat.','The last run that ended with a non-zero code stopped at this step. The step and the code are written by the runner itself, from its exit trap, so this also catches a failure no other card on this page covers — including a step a newer runner added.')"></span>
+                    {% elif ls.key == 'unreadable' %}
+                    <span x-text="t('Ada catatan langkah terakhir dan halaman ini tidak bisa membacanya, jadi belum bisa dipastikan run terakhir berakhir bersih.','There is a last-stop record and this page cannot read it, so the last run cannot be said to have ended cleanly.')"></span>
+                    {% if ls.reason %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ ls.reason }}</code>{% endif %}
+                    {% elif ls.key == 'malformed' %}
+                    <span x-text="t('Catatan langkah terakhir ada, tetapi isinya tidak dikenali — baca berkasnya sebelum menganggap tidak ada yang berhenti.','The last-stop record exists but its contents are not recognised — read the file before assuming nothing stopped.')"></span>
+                    {% if ls.reason %}<code class="block mt-2 font-mono text-xs text-rose-700 break-all">{{ ls.reason }}</code>{% endif %}
+                    {% else %}
+                    <span x-text="t('Tidak ada catatan langkah terakhir. Ini ditulis setiap kali run berakhir dengan kode bukan nol dan dihapus hanya oleh run yang sampai ke akhir, jadi keadaan kosong berarti run terakhir yang berjalan selesai — bukan bahwa tidak ada run yang berhenti.','There is no last-stop record. It is written every time a run ends with a non-zero code and removed only by a run that reaches the end, so a blank state means the last run that ran finished — not that nothing has stopped.')"></span>
+                    {% endif %}
+                </p>
+
+                {% if ls.present %}
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Langkah','Step')"></span>
+                        <span class="text-right min-w-0">
+                            <span class="font-bold text-surface-800">
+                                {% if ls.step_key == 'start' %}<span x-text="t('sebelum apa pun dikerjakan','before anything was done')"></span>
+                                {% elif ls.step_key == 'lock' %}<span x-text="t('mengambil kunci agar hanya satu rilis berjalan','taking the lock so only one release runs')"></span>
+                                {% elif ls.step_key == 'identity' %}<span x-text="t('memeriksa bahwa runner ini berkas milik checkout','checking that the runner is the checkout’s own file')"></span>
+                                {% elif ls.step_key == 'armament' %}<span x-text="t('memeriksa bahwa kotak ini siap menilai rilis','checking that this box is armed to judge a release')"></span>
+                                {% elif ls.step_key == 'checkout' %}<span x-text="t('membaca keadaan checkout (dan melepas index lock yang basi)','reading the checkout’s state (and clearing a stale index lock)')"></span>
+                                {% elif ls.step_key == 'fetch' %}<span x-text="t('mengambil commit dari GitHub','fetching the commit from GitHub')"></span>
+                                {% elif ls.step_key == 'snapshot' %}<span x-text="t('mengambil titik pemulihan data sebelum migrasi','taking a data recovery point before the migration')"></span>
+                                {% elif ls.step_key == 'merge' %}<span x-text="t('memindahkan commit ke checkout','moving the commit into the checkout')"></span>
+                                {% elif ls.step_key == 'dependencies' %}<span x-text="t('memasang dependensi','installing dependencies')"></span>
+                                {% elif ls.step_key == 'compile' %}<span x-text="t('mengompilasi kode (Gate 1)','compiling the code (Gate 1)')"></span>
+                                {% elif ls.step_key == 'construct' %}<span x-text="t('membangun aplikasi dengan konfigurasi aslinya (Gate 2)','constructing the app under its real configuration (Gate 2)')"></span>
+                                {% elif ls.step_key == 'theme' %}<span x-text="t('memeriksa keterbacaan tema (Gate 3)','checking theme readability (Gate 3)')"></span>
+                                {% elif ls.step_key == 'reload' %}<span x-text="t('me-reload gunicorn dan worker','reloading gunicorn and the worker')"></span>
+                                {% elif ls.step_key == 'verify' %}<span x-text="t('masuk sebagai tiap peran dan membuka halaman penting (Gate 4–6)','signing in as each role and opening the pages that matter (Gates 4–6)')"></span>
+                                {% elif ls.step_key == 'done' %}<span x-text="t('selesai — rilis terverifikasi dan melayani','finished — the release is verified and serving')"></span>
+                                {% else %}<span x-text="t('langkah dari runner yang lebih baru','a step from a newer runner')"></span>
+                                {% endif %}
+                            </span>
+                            <code class="block font-mono text-xs text-surface-500 break-words mt-0.5">{{ ls.step }}</code>
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Berhenti pada','Stopped at')"></span>
+                        <span class="text-surface-700">
+                            <code class="font-mono text-xs">{{ ls.at or '—' }}</code>
+                            {% if ls.age_seconds is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ ls.age_seconds }}</strong> <span x-text="t('detik','seconds')"></span></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Kode keluar','Exit code')"></span>
+                        <span class="text-right min-w-0">
+                            <code class="font-mono text-xs text-surface-700">{{ ls.exit_code if ls.exit_code is not none else '—' }}</code>
+                            {% if ls.tone == 'quiet' %}<span class="block text-xs text-surface-500" x-text="t('tidak ada yang menunggu — tick tanpa kerja bukan kegagalan','nothing was waiting — a tick with no work is not a failure')"></span>
+                            {% elif ls.tone == 'refused' %}<span class="block text-xs text-surface-500" x-text="t('sebuah rilis ditolak sebelum bergerak; rilis sebelumnya tetap melayani','a release was turned away before it moved; the previous one keeps serving')"></span>
+                            {% elif ls.tone == 'rolled_back' %}<span class="block text-xs text-surface-500" x-text="t('rilis sudah masuk, dinilai, lalu dipasang kembali; rilis sebelumnya tetap melayani','the release was merged, judged, and put back; the previous one keeps serving')"></span>
+                            {% elif ls.tone == 'blocked' %}<span class="block text-xs text-surface-500" x-text="t('tidak ada yang bisa deploy sampai seseorang memperbaiki kotaknya','nothing can deploy until somebody acts on the box')"></span>
+                            {% elif ls.tone == 'attention' %}<span class="block text-xs text-surface-500" x-text="t('kotak ini butuh manusia sekarang: bahkan rollback-nya tidak melayani','the box needs a human now: even the rollback is not serving')"></span>
+                            {% else %}<span class="block text-xs text-surface-500" x-text="t('kode yang belum ada di tabel di bawah — dari runner yang lebih baru','a code with no row in the table below — from a newer runner')"></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Commit yang dinilai','Commit under judgement')"></span>
+                        <span class="text-right min-w-0">
+                            {% if ls.short %}<code class="font-mono text-xs text-surface-700">{{ ls.short }}</code>
+                            {% else %}<span class="text-xs text-surface-500" x-text="t('belum ada — run berhenti sebelum ada commit yang dinilai','none yet — the run stopped before a commit was under judgement')"></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Berkas','File')"></span>
+                        <code class="font-mono text-xs text-surface-700 break-all text-right">{{ ls.path }}</code>
                     </div>
                 </div>
                 {% endif %}
@@ -636,6 +746,58 @@
                     {% if status.checkout.origin_age_seconds is not none %}<strong>{{ status.checkout.origin_age_seconds }}</strong> <span x-text="t('detik','seconds')"></span>
                     {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
                 </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── every way this runner can end a run ─────────────────────────── -->
+    {#
+        The table the last-stop card reads against, rendered from the runner's own
+        codes (`status.exit_codes`) rather than a copy — so a code the runner uses
+        with no row here shows as itself instead of as a guess. The meanings are the
+        same sentences the service's own table carries beside each code.
+    #}
+    <div class="card">
+        <div class="px-5 py-4 border-b border-surface-200 flex items-center gap-2">
+            <i class="fas fa-list-ol text-primary-500"></i>
+            <h3 class="font-bold text-surface-800" x-text="t('Kode Keluar Runner','The Runner’s Exit Codes')"></h3>
+        </div>
+        <div class="p-5">
+            <p class="text-xs text-surface-500 mb-3 leading-relaxed" x-text="t('Setiap cara runner mengakhiri run, dan artinya. Run yang berakhir dengan kode bukan nol juga mencatat langkahnya, di kartu di atas.','Every way this runner can end a run, and what each one means. A run that ends with a non-zero code also records the step it stopped at, on the card above.')"></p>
+            <div class="space-y-1.5 text-xs">
+                {% for code, tone in status.exit_codes | dictsort %}
+                <div class="flex items-start gap-3">
+                    <code class="font-mono font-bold text-surface-800 w-7 text-right shrink-0">{{ code }}</code>
+                    <span class="shrink-0 w-24">
+                        {% if tone == 'quiet' %}<span class="text-surface-500" x-text="t('tenang','quiet')"></span>
+                        {% elif tone == 'refused' %}<span class="text-amber-700" x-text="t('ditolak','refused')"></span>
+                        {% elif tone == 'rolled_back' %}<span class="text-amber-700" x-text="t('dipasang kembali','rolled back')"></span>
+                        {% elif tone == 'blocked' %}<span class="text-rose-700" x-text="t('terblokir','blocked')"></span>
+                        {% elif tone == 'attention' %}<span class="text-rose-700 font-bold" x-text="t('butuh manusia','needs a human')"></span>
+                        {% else %}<span class="text-surface-500">{{ tone }}</span>{% endif %}
+                    </span>
+                    <span class="text-surface-600 min-w-0">
+                        {% if code == 0 %}<span x-text="t('tidak ada yang menunggu; sudah terbaru; atau run lain sedang memegang kunci','nothing was waiting; already current; or another run holds the lock')"></span>
+                        {% elif code == 2 %}<span x-text="t('bukan root: run ini tidak bisa me-reload layanan','not root: this run cannot reload the service')"></span>
+                        {% elif code == 3 %}<span x-text="t('tidak ada checkout, atau tidak ada apa pun di dalamnya yang bisa melayani rilis','no checkout, or nothing in it that could serve a release')"></span>
+                        {% elif code == 4 %}<span x-text="t('checkout tidak bisa dibaca, atau membawa suntingan tangan','the checkout could not be read, or carries hand edits')"></span>
+                        {% elif code == 5 %}<span x-text="t('fetch tidak bisa mencapai GitHub (jaringan atau kredensial)','the fetch could not reach GitHub (network or credentials)')"></span>
+                        {% elif code == 6 %}<span x-text="t('rilis tidak bisa di-merge ke checkout','the release could not be merged into the checkout')"></span>
+                        {% elif code == 7 %}<span x-text="t('dependensi gagal dipasang, jadi dipasang kembali','dependencies failed to install, so it went back')"></span>
+                        {% elif code == 8 %}<span x-text="t('kode tidak lolos kompilasi','the code did not compile')"></span>
+                        {% elif code == 9 %}<span x-text="t('aplikasi tidak terbangun dengan blueprint dan route-nya','the app did not construct with its blueprints and routes')"></span>
+                        {% elif code == 10 %}<span x-text="t('sudah di-reload, lalu gagal verifikasi sesudahnya','it reloaded, then failed the verification after it')"></span>
+                        {% elif code == 11 %}<span x-text="t('rollback-nya pun tidak melayani','the rollback is not serving either')"></span>
+                        {% elif code == 12 %}<span x-text="t('rilis bermigrasi tanpa titik pemulihan','a migration release with no recovery point')"></span>
+                        {% elif code == 13 %}<span x-text="t('ada template yang tidak terbaca di salah satu tema','a template was unreadable in one of the themes')"></span>
+                        {% elif code == 14 %}<span x-text="t('runner terpasang adalah salinan yang sudah menyimpang','the installed runner is a copy that has drifted')"></span>
+                        {% elif code == 15 %}<span x-text="t('kotak ini tidak siap menilai rilis','the box is not armed to check a release')"></span>
+                        {% elif code == 16 %}<span x-text="t('rilis ini menghapus Gate 0','the release removed Gate 0')"></span>
+                        {% elif code == 17 %}<span x-text="t('index checkout terkunci dan tidak akan dipaksa','the checkout’s index is locked and will not be forced')"></span>
+                        {% else %}<span x-text="t('kode dari runner yang lebih baru — tidak ada baris untuk ini di sini','a code from a newer runner — there is no row for it here')"></span>{% endif %}
+                    </span>
+                </div>
+                {% endfor %}
             </div>
         </div>
     </div>
