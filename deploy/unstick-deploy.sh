@@ -64,7 +64,7 @@ as_owner() {
 gitdo() { as_owner git -C "$REPO" "$@"; }
 
 # ── 1. what the box is doing now ─────────────────────────────────────────────
-step "1/5  the box as it stands"
+step "1/6  the box as it stands"
 note "host          : $(hostname)   $(date -Is)"
 
 HEAD_SHA="$(gitdo rev-parse --short HEAD 2>/dev/null)"
@@ -100,7 +100,7 @@ if [ "${BEHIND:-0}" = "0" ] && [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" = "$ORIGIN_SH
 fi
 
 # ── 2. the stale index lock ──────────────────────────────────────────────────
-step "2/5  the index lock"
+step "2/6  the index lock"
 
 GITDIR="$(gitdo rev-parse --absolute-git-dir 2>/dev/null)"
 [ -n "$GITDIR" ] || GITDIR="$REPO/.git"
@@ -145,7 +145,7 @@ else
 fi
 
 # ── 3. run the deploy unit, so gates run normally ────────────────────────────
-step "3/5  running $UNIT once"
+step "3/6  running $UNIT once"
 if systemctl start "$UNIT"; then
     note "the runner exited 0"
 else
@@ -157,7 +157,7 @@ NEW_SHA="$(gitdo rev-parse --short HEAD 2>/dev/null)"
 ORIGIN_SHA="$(gitdo rev-parse --short "origin/$BRANCH" 2>/dev/null)"
 
 # ── 4. did it move? ──────────────────────────────────────────────────────────
-step "4/5  did the checkout move?"
+step "4/6  did the checkout move?"
 note "HEAD now      : ${NEW_SHA:-?}   (was ${HEAD_SHA:-?})"
 note "origin/$BRANCH : ${ORIGIN_SHA:-?}"
 
@@ -184,8 +184,27 @@ else
     note "merged and reloaded $SERVICE"
 fi
 
-# ── 5. verify ────────────────────────────────────────────────────────────────
-step "5/5  verify"
+# ── 5. is this box armed? ────────────────────────────────────────────────────
+# The runner that this move puts in place refuses a release on a box that cannot
+# run its gates (exit 15), so an unarmed box would be unstuck once and then stuck
+# again, silently. Worth saying now rather than in two days.
+step "5/6  is this box armed?"
+if [ -f "$REPO/deploy/arm-auto-deploy.sh" ]; then
+    if bash "$REPO/deploy/arm-auto-deploy.sh" --check >/tmp/unstick-armament.log 2>&1; then
+        note "armed — the four gates have what they need"
+    else
+        note "NOT armed. This release is fine, but the NEXT one will be refused"
+        note "until this is fixed:"
+        sed 's/^/   | /' /tmp/unstick-armament.log
+        note "fix once, as root:  bash $REPO/deploy/install-auto-deploy.sh"
+    fi
+else
+    note "no arm-auto-deploy.sh in this checkout yet — once it is there:"
+    note "   bash $REPO/deploy/install-auto-deploy.sh"
+fi
+
+# ── 6. verify ────────────────────────────────────────────────────────────────
+step "6/6  verify"
 note "HEAD          : $(gitdo rev-parse --short HEAD 2>/dev/null)  $(gitdo log -1 --format=%s 2>/dev/null)"
 note "behind        : $(gitdo rev-list --count "HEAD..origin/$BRANCH" 2>/dev/null) commit(s)"
 note "service       : $SERVICE=$(systemctl is-active "$SERVICE" 2>/dev/null)"
