@@ -42,6 +42,7 @@ finding — and no language model writes a word of it.
 """
 from __future__ import annotations
 
+import json
 import math
 import statistics
 from dataclasses import dataclass
@@ -843,6 +844,28 @@ def _state_of(qtype: Any, key: Any, answer: Any, share: float | None) -> str:
     return "full" if share >= 1.0 else ("part" if share > 0 else "none")
 
 
+def _paper_url(exam: Mapping[str, Any] | None, index: int) -> str:
+    """The exam's own page image for that page, or `""` when there is not one.
+
+    `pdf_page_urls` is written by the upload route as a list of static paths, and
+    the same index a drawing is keyed by addresses it. An exam whose pages were
+    never rendered — a paper photographed by hand, or one uploaded before the
+    conversion existed — answers `""`, and the drawing is then shown on its own:
+    the student's work rather than a broken box. A jsonb column may hand this back
+    as a JSON *string*, which is the shape `_normalise_exam_json` exists for.
+    """
+    pages = (exam or {}).get("pdf_page_urls") or ()
+    if isinstance(pages, str):
+        try:
+            pages = json.loads(pages)
+        except (TypeError, ValueError):
+            return ""
+    if not isinstance(pages, (list, tuple)) or not 0 <= index < len(pages):
+        return ""
+    url = pages[index]
+    return url if isinstance(url, str) else ""
+
+
 def learner(analysis: Any, exam: Mapping[str, Any] | None = None,
             student_id: str | None = None, *, with_key: bool = True,
             generated: datetime | None = None) -> dict[str, Any] | None:
@@ -915,11 +938,18 @@ def learner(analysis: Any, exam: Mapping[str, Any] | None = None,
             # *key*, and handed a submission it printed the stored dict — base64
             # and all — into this cell.
             "answered": (qt.describe_attempt(qtype, answer) if answer is not None else ""),
-            # The drawing itself, for the surface that can show one. Carried as
-            # data URLs beside the text so the page does not have to parse them
-            # back out of a string, and so the documents (which never read this
-            # field) cannot print a megabyte of base64 into a spreadsheet cell.
-            "drawings": qt.answer_drawings(answer),
+            # The drawing itself, for the surface that can show one, with the page
+            # of the paper it was made on behind it: the student drew on that page,
+            # and a mark lifted off its question is a mark nobody can read. The
+            # drawings travel as data URLs and the paper as a static URL, because
+            # the paper is a file on disk that a browser can cache while the
+            # drawing cannot. Documents never read this field, which is what keeps
+            # a megabyte of base64 out of a spreadsheet cell.
+            "drawings": [
+                {"label": label, "drawing": drawing,
+                 "paper": _paper_url(exam, index)}
+                for index, label, drawing in qt.answer_drawings(answer)
+            ],
             "key": (qt.describe_answer(qtype, key) if with_key else ""),
             "class_pct": item.pct,
             "class_full": item.full,
