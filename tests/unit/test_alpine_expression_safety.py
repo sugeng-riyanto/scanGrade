@@ -37,6 +37,7 @@ from __future__ import annotations
 import html
 import pathlib
 import re
+from html.parser import HTMLParser
 
 TEMPLATES = pathlib.Path(__file__).resolve().parents[2] / "app" / "templates"
 
@@ -198,3 +199,136 @@ def test_a_chart_component_is_not_initialized_twice():
         " so Alpine runs init() twice and the second Chart.js chart on one canvas"
         " throws:\n  " + "\n  ".join(offenders)
     )
+
+
+# ── a raw double quote inside the attribute that holds the whole app's state ──
+#
+# The third way, and the one with the largest blast radius. `x-data` is delimited
+# by double quotes, so a `"` *inside* it ends the attribute there: the rest of the
+# scope becomes junk attributes on the tag, and every directive that depended on
+# it stops working. The page still renders, nothing raises, and most of it is
+# server-rendered — so the only symptom is that toggles, toasts and buttons do
+# nothing.
+#
+# It was written into a JavaScript *comment* in `base.html`, which is why it is
+# read from the rendered page and not from the source: `report's` in a comment is
+# legal (a single quote inside a double-quoted attribute), and the character that
+# broke it was a pair of quotes around two ordinary words.
+
+#: Members the body's own scope has to expose, each with the punctuation that makes
+#: it a *declaration* rather than a word that merely appears (`shareNote:` is not
+#: satisfied by `shareNoteX:`, which is the difference between a rename and a
+#: truncation). Pages call the rest.
+BODY_MEMBERS = ("sidebarOpen:", "lang:", "t(id, en) {", "setLang(", "docLang(",
+                "toggleDark(", "darkMode:", "notify(", "toastId:",
+                "loading:", "init() {", "shareNote:", "shareTimer:",
+                "async copyShareLink()")
+
+#: A body tag carries a class, the scope and its event bindings — a handful. A
+#: truncated scope turns its own JavaScript into attributes and the count explodes
+#: (measured: 6 attributes intact, 84 truncated).
+BODY_ATTRIBUTE_LIMIT = 12
+
+
+class _BodyTag(HTMLParser):
+    """The `<body>` start tag's attributes, as a browser splits them."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.attributes: dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "body" and not self.attributes:
+            self.attributes = dict(attrs)
+
+
+def balanced(expr: str) -> str | None:
+    """None when every bracket closes, else what is left open.
+
+    Comments are skipped *before* quotes are read — the lesson every reader in this
+    repository has had to learn: an apostrophe in `// report's card` otherwise opens
+    a string literal that swallows the rest of the expression.
+    """
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack: list[str] = []
+    index, length = 0, len(expr)
+    while index < length:
+        char = expr[index]
+        if char in "'\"`":
+            index += 1
+            while index < length and expr[index] != char:
+                index += 2 if expr[index] == "\\" else 1
+        elif char == "/" and index + 1 < length and expr[index + 1] == "/":
+            while index < length and expr[index] != "\n":
+                index += 1
+        elif char in "([{":
+            stack.append(char)
+        elif char in ")]}":
+            if not stack or stack.pop() != pairs[char]:
+                return f"a stray {char!r}"
+        index += 1
+    return f"{len(stack)} unclosed {''.join(stack)}" if stack else None
+
+
+def _rendered_base(app) -> str:
+    from flask import g
+    with app.test_request_context("/"):
+        g.user = None
+        return app.jinja_env.get_template("base.html").render()
+
+
+def test_the_body_scope_survives_being_an_attribute(app):
+    """Read the rendered tag the way a browser does, then check the scope is whole.
+
+    Asserted three ways, because the failure is silent in all of them: the tag has
+    one attribute per attribute, the scope still contains the members the tag and
+    the pages call, and its brackets close.
+    """
+    parser = _BodyTag()
+    parser.feed(_rendered_base(app))
+    scope = parser.attributes.get("x-data", "")
+
+    assert parser.attributes, "base.html no longer has a body tag with a scope"
+    assert len(parser.attributes) <= BODY_ATTRIBUTE_LIMIT, (
+        "the body tag has "
+        f"{len(parser.attributes)} attributes ({sorted(parser.attributes)[:8]}…) — a "
+        "double quote inside x-data ends the attribute there and the rest of the "
+        "scope is parsed as tag junk"
+    )
+    missing = [name for name in BODY_MEMBERS if name not in scope]
+    assert not missing, (
+        f"the body's Alpine scope is missing {missing}: either it was truncated by a "
+        "double quote inside the attribute, or a member was dropped and every page "
+        "that calls it now fails silently"
+    )
+    assert balanced(scope) is None, (
+        f"the body's Alpine scope does not close: {balanced(scope)}"
+    )
+
+
+def test_the_scope_rule_bites_on_the_defect_it_describes():
+    """Pointed at the real text, because a guard that cannot fail is a comment."""
+    truncated = ('<body x-data="{\n'
+                 '        // It lives here because of a defect that had no symptom: the\n'
+                 '        // learner report\'s card called a method only the analysis page\n'
+                 '        // defined, so its "Copy link" button did nothing at all — Alpine\n'
+                 '        // cannot resolve a handler that is not in scope, and a click that\n'
+                 '        // does nothing looks exactly like a click that worked.\n'
+                 '        shareNote: \'\',\n'
+                 '        shareTimer: null,\n'
+                 '      }" @sg\\:unread.window="fetchUnread()">')
+    parser = _BodyTag()
+    parser.feed(truncated)
+    scope = parser.attributes.get("x-data", "")
+
+    assert len(parser.attributes) > BODY_ATTRIBUTE_LIMIT, \
+        "the attribute-count signal stopped firing on the real defect"
+    assert "async copyShareLink()" not in scope
+    assert balanced(scope) is not None, \
+        "the balance signal stopped firing on the real defect"
+
+    # …and the shapes that are legal, which is what keeps this honest.
+    assert balanced("x-data=\"{ a: () => { b(); } }\"") is None
+    assert balanced("{ 'dialog': 1 }") is None, "a single-quoted key is legal"
+    assert balanced("{ // report's card, an apostrophe in a comment\n a: 1 }") is None
+    assert balanced("{ a: 1 ") is not None
