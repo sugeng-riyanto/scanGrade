@@ -1,3 +1,6 @@
+from app.utils import denials
+
+
 def format_mb(num_bytes):
     """Format a byte count as MB the way users read it (1 MB = 1,000,000 bytes).
 
@@ -83,7 +86,7 @@ class NotFoundError(ScanGradeException):
 class ForbiddenError(ScanGradeException):
     status_code = 403
 
-    def __init__(self, reason="Akses ditolak"):
+    def __init__(self, reason=denials.OUT_OF_SCOPE):
         super().__init__(
             f"Forbidden: {reason}", error_code="FORBIDDEN",
             user_message=reason,

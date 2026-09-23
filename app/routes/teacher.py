@@ -30,6 +30,7 @@ from app.services.audit_service import log_activity
 from app.utils.req_cache import (invalidate_school, invalidate_teacher_assignments,
                                  school_classes, school_subjects, teacher_assignments_for)
 from app.utils import exam_window
+from app.utils import denials
 from app.services import (analysis_frameworks, analysis_report, analysis_scope,
                           exam_report, item_analysis)
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
@@ -67,16 +68,12 @@ def _wants_json():
     return False
 
 
-#: What a staff member is told when a paper is outside their scope. It is a
-#: statement about the record rather than about the reader — the person almost
-#: always followed a link from a colleague, and an accusation ("Tidak punya akses
-#: ke ujian ini") both reads as blame and leaves them with nothing to do next — and
-#: it names the one action that helps.
-NO_EXAM_ACCESS = ("Ujian ini tidak tersedia untuk akun Anda. Bila seharusnya Anda "
-                  "bisa membukanya, silakan hubungi admin sekolah.")
-NO_SUBMISSION_ACCESS = ("Lembar jawaban ini tidak tersedia untuk akun Anda. Bila "
-                        "seharusnya Anda bisa membukanya, silakan hubungi admin sekolah.")
-NO_SUCH_EXAM = "Ujian yang Anda cari tidak ditemukan."
+#: The sentences live in `app/utils/denials.py`, with the tone rule. One place,
+#: because the tone drifts a sentence at a time and this is the file a refusal is
+#: reported from.
+NO_EXAM_ACCESS = denials.NO_EXAM_ACCESS
+NO_SUBMISSION_ACCESS = denials.NO_SUBMISSION_ACCESS
+NO_SUCH_EXAM = denials.NO_SUCH_EXAM
 
 
 def _deny(message, as_json, redirect_to="/teacher/exams"):
@@ -103,7 +100,7 @@ def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=Tr
         )
     except Exception:
         logger.exception("Access check failed for exam %s", exam_id)
-        return None, _deny("Tidak dapat memverifikasi akses ke ujian ini", as_json, redirect_to)
+        return None, _deny(denials.CANNOT_VERIFY_EXAM, as_json, redirect_to)
     if not exam:
         if as_json:
             return None, (jsonify({"error": NO_SUCH_EXAM}), 404)
@@ -4295,7 +4292,7 @@ def teacher_subject_create():
         flash("Nama mapel wajib diisi", "error")
         return redirect("/teacher/subjects")
     if not sid:
-        flash("Akses ditolak", "error")
+        flash(denials.OUT_OF_SCOPE, "error")
         return redirect("/teacher/subjects")
     dup = supabase.table("subjects").select("id").eq("school_id", sid).eq("name", name).limit(1).execute()
     if dup.data:

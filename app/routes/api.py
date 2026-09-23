@@ -10,6 +10,7 @@ from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import row_or_none
 from app.utils.exam_access import exam_sitting_allowed
 from app.utils import exam_window
+from app.utils import denials
 from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
@@ -1637,7 +1638,7 @@ def api_import_students():
 
     school_id = g.get("user_school_id")
     if not school_id:
-        return jsonify({"error": "Akses ditolak: sekolah tidak terdaftar"}), 403
+        return jsonify({"error": denials.NO_SCHOOL}), 403
 
     if "csv_file" not in request.files:
         return jsonify({"error": "File CSV diperlukan"}), 400

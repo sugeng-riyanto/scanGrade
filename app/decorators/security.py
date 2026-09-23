@@ -1,6 +1,8 @@
 import functools
 from flask import g, request, jsonify, abort
 
+from app.utils import denials
+
 
 # Roles that may see or alter assessment data for other people's students.
 STAFF_ROLES = ("guru", "admin_sekolah", "super_admin")
@@ -28,7 +30,7 @@ def require_role(*roles):
         def wrapper(*args, **kwargs):
             if g.get("user_role") not in roles:
                 if _wants_json():
-                    return jsonify({"error": "Akses ditolak"}), 403
+                    return jsonify({"error": denials.OUT_OF_SCOPE}), 403
                 abort(403)
             return f(*args, **kwargs)
         return wrapper
@@ -56,7 +58,7 @@ def require_school_access(table, resource_id_param="id", school_join=None):
 
             user_school_id = g.get("user_school_id")
             if not user_school_id:
-                return (jsonify({"error": "Akses ditolak: sekolah tidak terdaftar"}), 403) if _wants_json() else abort(403)
+                return (jsonify({"error": denials.NO_SCHOOL}), 403) if _wants_json() else abort(403)
 
             db = get_supabase()
 
@@ -95,7 +97,7 @@ def require_school_access(table, resource_id_param="id", school_join=None):
                 return (jsonify({"error": "Data tidak ditemukan"}), 404) if _wants_json() else abort(404)
 
             if str(user_school_id) != str(resource_school_id):
-                return (jsonify({"error": "Akses ditolak: data bukan milik sekolah Anda"}), 403) if _wants_json() else abort(403)
+                return (jsonify({"error": denials.NOT_YOUR_SCHOOL}), 403) if _wants_json() else abort(403)
 
             return f(*args, **kwargs)
         return wrapper
