@@ -363,7 +363,19 @@
                             </span>
                         </td>
                         <td class="py-2 pr-2 font-semibold text-slate-700 break-words max-w-[14rem]">
-                            {% if q.answered %}{{ q.answered }}{% else %}<span class="text-slate-400">—</span>{% endif %}
+                            {# A drawing is shown, not described. The stored answer *is*
+                               the image, and printing it as text put a megabyte of
+                               base64 in this cell — on the page a family reads, and
+                               in the CSV, XLSX and PDF built from the same row. What
+                               the text beside it says is which pages carry work,
+                               written by `describe_attempt`. #}
+                            {% if q.answered %}{{ q.answered }}{% elif not q.drawings %}<span class="text-slate-400">—</span>{% endif %}
+                            {% for page, drawing in q.drawings %}
+                            <img src="{{ drawing }}" alt=""
+                                 class="mt-1.5 w-full rounded-lg border border-slate-200 bg-white">
+                            <span class="block text-[10px] font-bold text-slate-400 mt-0.5"
+                                  x-text="t('Coretan pada halaman {{ page }}','Drawing on page {{ page }}')"></span>
+                            {% endfor %}
                         </td>
                         {% if not public_view %}
                         <td class="py-2 pr-2 font-semibold text-slate-500 break-words max-w-[12rem]">

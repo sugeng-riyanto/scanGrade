@@ -28,6 +28,8 @@ import pytest
 
 from app.services import exam_report as er
 from app.services import item_analysis
+from app.services import learner_report as lr
+from app.services import question_types as qt
 
 TEMPLATE = (pathlib.Path(__file__).resolve().parents[2]
             / "app" / "templates" / "teacher" / "analysis_student.html")
@@ -623,3 +625,100 @@ class TestThePage:
                            report)
         assert len(doors) >= 2, \
             "the class report no longer opens a learner's own report from both the ranking and the statement"
+
+
+# ── a drawing is shown, never stringified ────────────────────────────────────
+
+#: The shape the exam page writes, and the one this page was printing as text:
+#: `pages` keyed by page **index**, each carrying a `data:` URL. Two pages so the
+#: ordering is asserted rather than assumed.
+DRAWN_ANSWER = {
+    "pages": {
+        "5": {"canvas": "data:image/png;base64,AAAA", "textBoxes": ["gaya"]},
+        "11": {"canvas": "data:image/png;base64,BBBB"},
+    },
+}
+
+#: One learner, whose essay answer is a drawing. `stu-1` keeps the name the rest of
+#: this file uses so a fixture that drifts shows up as a rename, not as a passing
+#: test on an empty page.
+DRAWN_ROWS = [
+    ("stu-1", "Bella Safira", {"0": "A", "3": DRAWN_ANSWER}, {"3": 60}, 60.0),
+]
+
+
+class TestADrawingIsShownNotStringified:
+    """A cell of this page carried the whole stored answer — the dict, the base64
+    and all — because `describe_answer` is written for *keys* and fell through to
+    `str(value)` on a submission. It was reported from the live page by copying the
+    cell, and the same string reached the CSV, XLSX and PDF built from that row."""
+
+    def test_an_answer_is_described_by_its_pages(self):
+        assert qt.describe_attempt("essay", DRAWN_ANSWER) == "6, 12"
+        assert qt.describe_attempt("mcq", DRAWN_ANSWER) == "6, 12", \
+            "a drawing stored under an objective question is still not a repr"
+
+    def test_the_page_numbers_are_the_readers_own(self):
+        """The map is index-keyed — the exam page writes `page - 1` — so `0` is the
+        paper's page 1, and a label printing the raw key sends a family to a page
+        the paper has not got."""
+        assert qt.page_label("0") == "1"
+        assert qt.describe_attempt("essay", {"pages": {"0": {"canvas": "data:x"}}}) == "1"
+
+    def test_a_plain_answer_reads_exactly_as_it_did(self):
+        assert qt.describe_attempt("mcq", "A") == "A"
+        assert qt.describe_attempt("mcq", ["A", "B"]) == "A, B"
+        assert qt.describe_attempt("true_false", "true") == "True"
+        assert qt.describe_attempt("match",
+                                   {"pairs": [{"left": "air", "right": "cair"}]}) == "air → cair"
+
+    def test_a_structure_this_version_cannot_read_is_empty_not_a_repr(self):
+        """The safety property, stated as one: a shape nothing here recognises comes
+        back as an empty cell. Its repr is what put a megabyte of base64 on a report
+        a family reads."""
+        for value in ({"unknown": 1}, {"canvas": "data:image/png;base64,AAAA"}, {}):
+            assert qt.describe_attempt("mcq", value) == ""
+
+    def test_the_drawings_travel_as_data_urls_in_page_order(self):
+        assert qt.answer_drawings(DRAWN_ANSWER) == [
+            ("6", "data:image/png;base64,AAAA"),
+            ("12", "data:image/png;base64,BBBB"),
+        ]
+        assert qt.answer_drawings("A") == []
+        assert qt.answer_drawings(None) == []
+
+    def test_the_row_carries_the_text_and_the_drawing_separately(self):
+        """Two fields on purpose: the surfaces that cannot show an image read the
+        text, and the page reads the images — and neither can print the other's."""
+        row = next(q for q in learner_of("stu-1", DRAWN_ROWS)["questions"]
+                   if q["no"] == 4)
+        assert row["answered"] == "6, 12"
+        assert row["drawings"] == [("6", "data:image/png;base64,AAAA"),
+                                   ("12", "data:image/png;base64,BBBB")]
+
+    def test_the_rendered_page_shows_the_drawing_and_no_repr(self, app):
+        payload = learner_of("stu-1", DRAWN_ROWS)
+        with app.test_request_context(
+                "/teacher/analysis/exam-1/report/student/stu-1"):
+            html = app.jinja_env.get_template(
+                "teacher/analysis_student.html").render(
+                    exam=EXAM, analysis=analysis_of(DRAWN_ROWS), learner=payload,
+                    public_view=False, share=None,
+                    back_url="/teacher/analysis/exam-1/report", lang="id")
+
+        assert 'src="data:image/png;base64,AAAA"' in html
+        assert 'src="data:image/png;base64,BBBB"' in html
+        assert "&#39;pages&#39;" not in html and "'pages'" not in html, \
+            "the stored answer is being printed as its own repr again"
+
+    def test_the_documents_never_carry_the_base64(self):
+        """A spreadsheet cell holding a megabyte of base64 is a workbook nothing can
+        open, and the same row feeds all three documents."""
+        who = learner_of("stu-1", DRAWN_ROWS)
+
+        assert "data:image" not in lr.learner_csv(who, EXAM, lang="id")
+        assert b"data:image" not in lr.learner_xlsx(who, EXAM, lang="id")
+        assert b"data:image" not in lr.learner_pdf(who, EXAM, lang="id")
+        # …and the page numbers are what they carry instead, so the fact that there
+        # is work on those pages is not lost on the way out.
+        assert "6, 12" in lr.learner_csv(who, EXAM, lang="id")
