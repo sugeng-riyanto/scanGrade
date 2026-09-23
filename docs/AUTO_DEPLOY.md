@@ -204,6 +204,7 @@ one of those the launcher is whatever the last *successful* release installed.
 | retry a quarantined commit once | `touch /etc/scangrade-deploy.release` |
 | stop deploying automatically | `systemctl disable --now scangrade-deploy.timer` |
 | see the last release that stuck | `cat /var/lib/scangrade-deploy/last-deploy` |
+| **unstick a box that fetches and never merges** | `curl -fsSL https://raw.githubusercontent.com/sugeng-riyanto/scanGrade/main/deploy/unstick-deploy.sh \| sudo bash` |
 
 The freeze file is the one to reach for during exams: the timer keeps ticking,
 but the script exits immediately, so nothing restarts while students are working.
