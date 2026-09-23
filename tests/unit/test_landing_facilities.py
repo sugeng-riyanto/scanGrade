@@ -110,6 +110,21 @@ EVIDENCE: dict[str, list[tuple[str, list[str]]]] = {
         # Part-marks are the second half of the card, and they live in the grader.
         ("app/services/question_types.py", [r"\bdef part_factor\b"]),
     ],
+    # "a report you can hand over, and a link you can take back" is two claims:
+    # the documents are built here, and the link that publishes a redacted copy of
+    # one is a service with its own lifecycle (minted, resolved, revoked).
+    "report-share": [
+        ("app/services/learner_report.py",
+         [r"\bdef learner_pdf\b", r"\bdef learner_xlsx\b", r"\bdef learners_zip\b"]),
+        ("app/services/analysis_share.py",
+         [r"\bdef create\b", r"\bdef revoke\b", r"\bdef resolve\b"]),
+        # The redaction is the half that makes a public link safe to hand out, so
+        # the card is anchored on the branches that withhold the students section
+        # and refuse the per-learner appendix on a shared copy — not on the word
+        # "public" appearing somewhere in the file.
+        ("app/services/analysis_report.py",
+         [r"\bif public:", r"\bappendix and public\b"]),
+    ],
     "bilingual-dark": [
         ("app/templates/base.html", [r"\bsetLang\b", r"\btoggleDark\b"]),
         # "a release is refused if any text fails a contrast check" is a deploy
