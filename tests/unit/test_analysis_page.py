@@ -1108,3 +1108,40 @@ class TestTheMeaningIsOnThePage:
         for utility in ("bg-emerald-400", "bg-surface-300"):
             assert PAGE.count(utility) >= 2, (
                 f"{utility} is used once: the key and the bars drifted apart")
+
+
+# ── the refusal is a page, and it is worded for the person reading it ────────
+
+class TestWhatARefusalLooksLike:
+    """`_analysis_of` is the one door, and `as_json` decides whether a refusal is a
+    page or `{"error": …}`. Its default used to be JSON while every caller of it is
+    a browser — the analysis page, the filed report, a learner's page, and the
+    CSV/XLSX/PDF/zip downloads beside them — so a teacher who followed a colleague's
+    link was answered with a blob where a page was expected. That is how it was
+    reported, and the message in it read as blame."""
+
+    def test_the_door_answers_a_browser_with_a_page(self):
+        assert "def _analysis_of(supabase, exam_id, as_json=False" in TEACHER, (
+            "the one door defaults to JSON again, so a browser gets a blob")
+        calls = re.findall(r"_analysis_of\([^)]*\)", TEACHER, re.S)
+        assert len(calls) >= 5, "the call sites could not be read"
+        offenders = [call for call in calls if "as_json=True" in call]
+        assert not offenders, (
+            f"{len(offenders)} caller(s) ask for JSON, and none of them has a JSON "
+            f"consumer: {offenders[0][:140]}")
+
+    def test_the_refusal_is_worded_for_the_reader(self):
+        """A statement about the paper rather than about the person, and one action
+        to take. The line it replaces read as an accusation and offered nothing."""
+        assert "Tidak punya akses ke ujian ini" not in TEACHER
+        assert "Tidak punya akses ke submission ini" not in TEACHER
+        assert "tidak tersedia untuk akun Anda" in TEACHER
+        assert "hubungi admin sekolah" in TEACHER
+
+    def test_the_wording_change_keeps_what_the_message_says(self):
+        """`test_exam_recovery` matches on `tidak ditemukan`, and so may a client:
+        softening a sentence must not change its meaning."""
+        from app.routes.teacher import NO_EXAM_ACCESS, NO_SUCH_EXAM
+
+        assert "tidak ditemukan" in NO_SUCH_EXAM.lower()
+        assert "tidak tersedia" in NO_EXAM_ACCESS.lower()

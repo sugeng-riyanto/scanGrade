@@ -67,6 +67,18 @@ def _wants_json():
     return False
 
 
+#: What a staff member is told when a paper is outside their scope. It is a
+#: statement about the record rather than about the reader — the person almost
+#: always followed a link from a colleague, and an accusation ("Tidak punya akses
+#: ke ujian ini") both reads as blame and leaves them with nothing to do next — and
+#: it names the one action that helps.
+NO_EXAM_ACCESS = ("Ujian ini tidak tersedia untuk akun Anda. Bila seharusnya Anda "
+                  "bisa membukanya, silakan hubungi admin sekolah.")
+NO_SUBMISSION_ACCESS = ("Lembar jawaban ini tidak tersedia untuk akun Anda. Bila "
+                        "seharusnya Anda bisa membukanya, silakan hubungi admin sekolah.")
+NO_SUCH_EXAM = "Ujian yang Anda cari tidak ditemukan."
+
+
 def _deny(message, as_json, redirect_to="/teacher/exams"):
     if as_json:
         return jsonify({"error": message}), 403
@@ -94,13 +106,13 @@ def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=Tr
         return None, _deny("Tidak dapat memverifikasi akses ke ujian ini", as_json, redirect_to)
     if not exam:
         if as_json:
-            return None, (jsonify({"error": "Ujian tidak ditemukan"}), 404)
-        flash("Ujian tidak ditemukan", "error")
+            return None, (jsonify({"error": NO_SUCH_EXAM}), 404)
+        flash(NO_SUCH_EXAM, "error")
         return None, redirect(redirect_to)
     if not can_manage_exam(g.user_id, g.get("user_role"), g.get("user_school_id"), exam):
         logger.warning("Denied exam access: exam=%s user=%s role=%s",
                        exam_id, g.user_id, g.get("user_role"))
-        return None, _deny("Tidak punya akses ke ujian ini", as_json, redirect_to)
+        return None, _deny(NO_EXAM_ACCESS, as_json, redirect_to)
     return exam, None
 
 
@@ -123,7 +135,7 @@ def _guard_submission(supabase, submission_id, as_json=True, redirect_to="/teach
     exam = sub.get("exams") or {}
     if not can_manage_exam(g.user_id, g.get("user_role"), g.get("user_school_id"), exam):
         logger.warning("Denied submission access: submission=%s user=%s", submission_id, g.user_id)
-        return None, _deny("Tidak punya akses ke submission ini", as_json, redirect_to)
+        return None, _deny(NO_SUBMISSION_ACCESS, as_json, redirect_to)
     sub["_exam"] = exam
     return sub, None
 
@@ -1876,13 +1888,21 @@ def submission_late(submission_id):
     return redirect(f"/teacher/results?exam_id={sub.get('exam_id')}")
 
 
-def _analysis_of(supabase, exam_id, as_json=True, redirect_to="/teacher/results"):
+def _analysis_of(supabase, exam_id, as_json=False, redirect_to="/teacher/results"):
     """``(exam, analysis, error)`` — the paper, and what its questions actually did.
 
     The weights are resolved the way the *grader* resolves them: an exam saved
     before schemes existed carries none, and is marked against the 70/30 default.
     Analysing it with an empty weight map would report every question as worth
     nothing and measure a paper nobody sat.
+
+    ``as_json`` defaults to the **page** path, which is the opposite of
+    `_guard_exam`'s own default, because every caller here is a browser: the
+    analysis page, the filed report, a learner's page, and the CSV/XLSX/PDF/zip
+    downloads beside them. Inheriting `True` meant a teacher who followed a
+    colleague's link was answered with `{"error": …}` — a JSON blob where a page
+    was expected, which is how this was reported. A JSON consumer would pass
+    `as_json=_wants_json()`, the way the other routes in this file already do.
     """
     exam, err = _guard_exam(supabase, exam_id, columns="*", as_json=as_json,
                             redirect_to=redirect_to)
@@ -2117,7 +2137,7 @@ def exam_analysis_student_file(exam_id, student_id, ext):
         abort(404)
     supabase = get_supabase()
     lang = request.args.get("lang") or "id"
-    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+    exam, analysis, err = _analysis_of(supabase, exam_id,
                                        redirect_to="/teacher/results")
     if err:
         return err
@@ -2351,7 +2371,7 @@ def exam_analysis_csv(exam_id):
     supabase = get_supabase()
     lang = request.args.get("lang") or "id"
     framework = analysis_frameworks.resolve(request.args.get("framework"))
-    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+    exam, analysis, err = _analysis_of(supabase, exam_id,
                                        redirect_to="/teacher/results")
     if err:
         return err
@@ -2377,7 +2397,7 @@ def exam_analysis_xlsx(exam_id):
     """
     supabase = get_supabase()
     lang = request.args.get("lang") or "id"
-    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+    exam, analysis, err = _analysis_of(supabase, exam_id,
                                        redirect_to="/teacher/results")
     if err:
         return err
@@ -2404,7 +2424,7 @@ def exam_analysis_pdf(exam_id):
 
     supabase = get_supabase()
     lang = request.args.get("lang") or "id"
-    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+    exam, analysis, err = _analysis_of(supabase, exam_id,
                                        redirect_to="/teacher/results")
     if err:
         return err
@@ -2469,7 +2489,7 @@ def exam_analysis_learners_zip(exam_id):
 
     supabase = get_supabase()
     lang = request.args.get("lang") or "id"
-    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+    exam, analysis, err = _analysis_of(supabase, exam_id,
                                        redirect_to="/teacher/results")
     if err:
         return err
