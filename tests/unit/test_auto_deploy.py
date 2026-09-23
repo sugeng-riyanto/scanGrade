@@ -2292,6 +2292,7 @@ RECORD_GATES = {
     "dirty_checkout",
     "fetch_failed",
     "snapshot_refused",
+    "lock_refused",
     "merge_refused",
 }
 
