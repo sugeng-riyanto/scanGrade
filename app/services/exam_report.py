@@ -911,7 +911,15 @@ def learner(analysis: Any, exam: Mapping[str, Any] | None = None,
             # one verification this page invites.
             "earned": (round(float(share or 0.0) * float(item.marks), 2)
                        if state in COUNTED_STATES else None),
-            "answered": (qt.describe_answer(qtype, answer) if answer is not None else ""),
+            # `describe_attempt`, not `describe_answer`: the latter describes a
+            # *key*, and handed a submission it printed the stored dict — base64
+            # and all — into this cell.
+            "answered": (qt.describe_attempt(qtype, answer) if answer is not None else ""),
+            # The drawing itself, for the surface that can show one. Carried as
+            # data URLs beside the text so the page does not have to parse them
+            # back out of a string, and so the documents (which never read this
+            # field) cannot print a megabyte of base64 into a spreadsheet cell.
+            "drawings": qt.answer_drawings(answer),
             "key": (qt.describe_answer(qtype, key) if with_key else ""),
             "class_pct": item.pct,
             "class_full": item.full,

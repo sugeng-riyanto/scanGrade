@@ -518,7 +518,7 @@
       "frozen": false
     },
     "teacher/analysis_student.html": {
-      "pairs": 60,
+      "pairs": 61,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

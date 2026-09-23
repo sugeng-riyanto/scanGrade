@@ -471,6 +471,106 @@ def describe_answer(qtype: Any, key: Any) -> str:
     return "" if key is None else str(key)
 
 
+#: The field a student's drawing lives under, inside an answer's `pages` map:
+#: `{"pages": {"<page index>": {"canvas": "data:image/png;base64,…", "textBoxes": […]}}}`.
+#: Index-keyed, like every other reader of this shape — see `page_label`.
+ANSWER_PAGES = "pages"
+ANSWER_CANVAS = "canvas"
+ANSWER_TEXT_BOXES = "textBoxes"
+
+
+def answer_pages(answer: Any) -> dict[str, Any]:
+    """The pages a student's answer carries, keyed by page index.
+
+    `{}` for an answer that is a plain value — a choice, a boolean, a sequence —
+    which is what makes it safe to ask of every question. A single page kept as
+    `{"canvas": …}` carries no `pages` map and is left alone rather than misread.
+    """
+    if not isinstance(answer, Mapping):
+        return {}
+    pages = answer.get(ANSWER_PAGES)
+    if isinstance(pages, Mapping):
+        return {str(page): content for page, content in pages.items()}
+    return {}
+
+
+def _page_index(page: Any) -> int:
+    try:
+        return int(page)
+    except (TypeError, ValueError):
+        return 10 ** 6                      # an unreadable key sorts last, not first
+
+
+def page_label(page: Any) -> str:
+    """The page as a reader counts them.
+
+    The map is **index**-keyed — `take_exam.html` writes `canvasData[i][page - 1]`
+    and the teacher's overlay the same — so page `"0"` is the paper's page 1. A
+    label printing the raw key would send a family to a page the paper has not got.
+    """
+    try:
+        return str(int(page) + 1)
+    except (TypeError, ValueError):
+        return str(page)
+
+
+def answer_drawings(answer: Any) -> list[tuple[str, str]]:
+    """`(page label, data URL)` for every page of the answer that carries a drawing."""
+    out: list[tuple[str, str]] = []
+    pages = answer_pages(answer)
+    for page in sorted(pages, key=_page_index):
+        content = pages[page]
+        if not isinstance(content, Mapping):
+            continue
+        drawing = content.get(ANSWER_CANVAS)
+        if isinstance(drawing, str) and drawing.startswith("data:"):
+            out.append((page_label(page), drawing))
+    return out
+
+
+def describe_attempt(qtype: Any, answer: Any) -> str:
+    """What a student wrote, as words — never a Python repr of it.
+
+    `describe_answer` describes a **key**: the shapes the builder writes, which
+    never include a drawing. Handed a submission it fell through to `str(value)`,
+    so one table cell of the learner's report — and the matching cell of the CSV,
+    XLSX and PDF built from the same row — carried the whole stored dict, base64
+    and all: a cell of about a megabyte that no reader can use, on a report a
+    family is meant to read.
+
+    A drawing is stored under the page it was made on, so the honest text is which
+    pages carry work. The wording belongs to the surface — a sentence written here
+    would be English on an Indonesian report — so this returns page numbers and
+    each surface says what they are.
+    """
+    pages = answer_pages(answer)
+    if pages:
+        drawn: list[str] = []
+        written: list[str] = []
+        for page in sorted(pages, key=_page_index):
+            content = pages[page]
+            if not isinstance(content, Mapping):
+                continue
+            label = page_label(page)
+            if content.get(ANSWER_CANVAS):
+                drawn.append(label)
+            elif content.get(ANSWER_TEXT_BOXES):
+                written.append(label)
+        return ", ".join([*drawn, *written])
+
+    value = unwrap(answer)
+    text = describe_answer(qtype, answer)
+    if isinstance(value, Mapping) and text.startswith(("{", "[")):
+        # A structured answer whose shape this version does not know — an older
+        # one, or one written by hand. `describe_answer` only ever produces a repr
+        # by falling through to `str(value)`, and a repr is precisely what must not
+        # reach a report: an empty cell is honest, a megabyte of base64 in a
+        # family's table is not. A *string* answer that happens to start with a
+        # brace is left alone — it is text somebody wrote.
+        return ""
+    return text
+
+
 def normalise_key(qtype: Any, key: Any) -> Any:
     """A key as the app stores it, whatever a form posted.
 
