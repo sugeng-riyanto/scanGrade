@@ -512,13 +512,13 @@
       "frozen": false
     },
     "teacher/analysis_report.html": {
-      "pairs": 84,
+      "pairs": 86,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
     },
     "teacher/analysis_student.html": {
-      "pairs": 59,
+      "pairs": 60,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -620,7 +620,7 @@
       "frozen": true
     },
     "teacher/reports.html": {
-      "pairs": 32,
+      "pairs": 34,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

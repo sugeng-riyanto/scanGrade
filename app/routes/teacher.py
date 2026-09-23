@@ -2082,7 +2082,74 @@ def exam_analysis_student(exam_id, student_id):
         exam=exam, analysis=analysis, learner=who, public_view=False,
         share=_share_card(supabase, exam_id, student_id),
         back_url=f"/teacher/analysis/{exam_id}/report",
+        download_base=f"/teacher/analysis/{exam_id}/report/student/{student_id}",
         lang=analysis_scope.language(request.args.get("lang")))
+
+
+#: The three documents a learner's report is handed out as. A whitelist rather
+#: than a format string, the same rule the exam-level route follows: an extension
+#: that chooses a builder must not be one a caller composes.
+_LEARNER_FILES = ("csv", "xlsx", "pdf")
+
+
+@teacher_bp.route("/analysis/<exam_id>/report/student/<student_id>/download.<ext>")
+@teacher_or_admin_required
+def exam_analysis_student_file(exam_id, student_id, ext):
+    """One learner's report as a file — the copy that leaves the building.
+
+    The page's own payload goes to `learner_report`, so the sheet a parent is
+    handed and the screen it came from cannot disagree about a mark. Three files
+    rather than the browser's print dialog because a print is whatever the
+    *screen* happens to be: it cannot be produced at all on a phone, it carries
+    the chrome, and every download of every child lands in one folder under one
+    name.
+
+    Which copy this is decided here and not in the URL: the answer key is printed
+    on the teacher's copy and dropped from the shared one, and a flag a stranger
+    could flip is how a key gets published.
+    """
+    from app.services import learner_report
+
+    if ext not in _LEARNER_FILES:
+        abort(404)
+    supabase = get_supabase()
+    lang = request.args.get("lang") or "id"
+    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+                                       redirect_to="/teacher/results")
+    if err:
+        return err
+    cover = _report_cover(supabase, exam)
+    who = exam_report.learner(analysis, cover, student_id)
+    if not who:
+        abort(404)
+    name = learner_report.filename(who, cover, ext)
+    return _learner_file(who, cover, ext, lang, name, public=False)
+
+
+def _learner_file(who, cover, ext, lang, name, public):
+    """Send one of the three learner documents, whichever route asked for it.
+
+    One function for the teacher's route and the shared one, because the two
+    differ in exactly two arguments — `public`, and therefore the name — and two
+    send-file ladders written twice is how the shared copy ends up with the key
+    column. `public=True` redacts at the *builder*, so a wrong argument there
+    changes the document, not the markup.
+    """
+    from app.services import learner_report
+
+    if ext == "csv":
+        payload = learner_report.learner_csv(who, cover, lang, public=public)
+        return send_file(io.BytesIO(payload.encode("utf-8-sig")), mimetype="text/csv",
+                         as_attachment=True, download_name=name)
+    if ext == "xlsx":
+        book = learner_report.learner_xlsx(who, cover, lang=lang, public=public)
+        return send_file(
+            io.BytesIO(book), as_attachment=True,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            download_name=name)
+    pdf = learner_report.learner_pdf(who, cover, lang=lang, public=public)
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
+                     download_name=name)
 
 
 def _report_cover(supabase, exam):
@@ -2323,7 +2390,13 @@ def exam_analysis_xlsx(exam_id):
 @teacher_bp.route("/analysis/<exam_id>/download.pdf")
 @teacher_or_admin_required
 def exam_analysis_pdf(exam_id):
-    """The analysis as the document that goes in the exam file."""
+    """The analysis as the document that goes in the exam file.
+
+    `?appendix=1` files every learner's own page inside it, so a school that keeps
+    one document per exam does not keep thirty-one. Off by default: the appendix
+    multiplies the page count by the size of the class, and a reader who wants the
+    class report wants the class report.
+    """
     from app.services.report_card_service import profile_name, school_for
 
     supabase = get_supabase()
@@ -2332,13 +2405,77 @@ def exam_analysis_pdf(exam_id):
                                        redirect_to="/teacher/results")
     if err:
         return err
+    cover = _report_cover(supabase, exam)
+    appendix = []
+    if request.args.get("appendix") in ("1", "true", "yes"):
+        appendix = _learner_payloads(analysis, cover)
     pdf = analysis_report.analysis_pdf(
         analysis, exam,
         school=(school_for(supabase, exam.get("school_id")) or {}).get("name", ""),
         teacher=profile_name(supabase, exam.get("teacher_id")), lang=lang,
-        framework=analysis_frameworks.resolve(request.args.get("framework")))
+        framework=analysis_frameworks.resolve(request.args.get("framework")),
+        appendix=appendix, appendix_exam=cover)
+    name = analysis_report.filename(analysis, exam, "pdf")
+    if appendix:
+        # Thirty children's files in one folder need telling apart from the class
+        # report they came in, and a download that overwrites the report it
+        # extends is a download nobody can find afterwards.
+        name = name.replace(".pdf", "-lampiran.pdf")
     return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
-                     download_name=analysis_report.filename(analysis, exam, "pdf"))
+                     download_name=name)
+
+
+def _learner_payloads(analysis, cover, student_id=None):
+    """One learner payload per paper that names a profile, newest order kept.
+
+    Addressed by id, never by name, for the same reason the learner route is: two
+    learners in one class can share a full name, and a document that picked the
+    first match would describe the wrong child. A paper with no profile is
+    *skipped* rather than guessed at — and the count the document prints is the
+    count it carries, so an appendix that is short says so.
+    """
+    if student_id:
+        who = exam_report.learner(analysis, cover, student_id)
+        return [who] if who else []
+    payloads = []
+    for person in analysis.people:
+        sid = getattr(person, "student_id", None)
+        if not sid:
+            continue
+        who = exam_report.learner(analysis, cover, sid)
+        if who:
+            payloads.append(who)
+    return payloads
+
+
+@teacher_bp.route("/analysis/<exam_id>/learners.zip")
+@teacher_or_admin_required
+def exam_analysis_learners_zip(exam_id):
+    """Every learner's own file in one download, instead of thirty clicks.
+
+    The zip is the distribution half and the appendix is the filing half: this one
+    hands out `laporan-<murid>-*.pdf` per child, each byte-for-byte the file that
+    child's own door serves, so a teacher can send one to each family without
+    opening thirty pages and splitting them by hand.
+
+    The learner list is the service's own (`analysis_scope.learners_in_scope` is
+    what the index pages use, and this reads the same `analysis.people` order), so
+    the papers in the zip are the papers the pages list.
+    """
+    from app.services import learner_report
+
+    supabase = get_supabase()
+    lang = request.args.get("lang") or "id"
+    exam, analysis, err = _analysis_of(supabase, exam_id, as_json=True,
+                                       redirect_to="/teacher/results")
+    if err:
+        return err
+    cover = _report_cover(supabase, exam)
+    bundle = learner_report.learners_zip(_learner_payloads(analysis, cover), cover,
+                                         lang=lang)
+    name = analysis_report.filename(analysis, exam, "zip")
+    return send_file(io.BytesIO(bundle), mimetype="application/zip",
+                     as_attachment=True, download_name=name)
 
 
 @teacher_bp.route("/submissions/<submission_id>/print")

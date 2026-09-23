@@ -167,6 +167,21 @@
                        class="bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-emerald-100 transition">
                         <i class="fas fa-file-csv"></i>
                     </a>
+                    {# The class report *and* the children in it, from the list a
+                       teacher scans: the two doors a school actually needs at the
+                       end of a term, in the row where the exam is chosen. #}
+                    <a :href="'/teacher/analysis/{{ e.id }}/download.pdf?appendix=1&lang=' + lang"
+                       data-download="pdf-appendix"
+                       class="bg-red-50 text-red-700 px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-red-100 transition"
+                       :title="t('Laporan kelas beserta lampiran tiap murid','The class report with every learner’s page filed inside it')">
+                        <i class="fas fa-file-pdf"></i><span class="ml-1">+</span>
+                    </a>
+                    <a :href="'/teacher/analysis/{{ e.id }}/learners.zip?lang=' + lang"
+                       data-download="zip"
+                       class="bg-amber-50 text-amber-700 px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold hover:bg-amber-100 transition"
+                       :title="t('Berkas tiap murid dalam satu unduhan','Every learner’s own file, in one download')">
+                        <i class="fas fa-file-zipper"></i>
+                    </a>
                 </div>
             </div>
             {% endfor %}
