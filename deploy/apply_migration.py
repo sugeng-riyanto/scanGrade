@@ -85,6 +85,7 @@ import os
 import re
 import socket
 import sys
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -590,10 +591,30 @@ def status(ledger: Path, migrations: Path) -> int:
 # that is confidently wrong is worse than no verifier at all.
 
 IDENT = r"[a-z_][a-z0-9_$]*"
+#: A quoted identifier — anything between double quotes, with a doubled quote
+#: standing for a literal one. It needs its own pattern because `IDENT` cannot
+#: match `"school-payment-demo"`: the match stops at the hyphen and the report read
+#: the object as `school`, which is how a table that exists made 027 read PARTIAL.
+QUOTED = r'"(?:[^"]|"")*"'
+#: Either spelling, wherever a statement names an object.
+NAME = rf"(?:{QUOTED}|{IDENT})"
 DO_BODY = re.compile(r"\$[a-zA-Z_]*\$.*?\$[a-zA-Z_]*\$", re.S)
 DDL_INSIDE_DO = re.compile(r"\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|POLICY|INDEX|COLUMN)\b",
                            re.I)
 DROPPABLE = ("COLUMN", "POLICY", "INDEX", "CONSTRAINT", "TABLE", "FUNCTION", "TRIGGER")
+
+
+def dequote(name: str) -> str:
+    """A captured identifier spelled the way the catalogue spells it.
+
+    Membership in the snapshot is the entire test, so the two sides have to agree
+    on spelling. Postgres folds an *unquoted* name to lower case and keeps a quoted
+    one exactly as written, hyphens and all — so both halves of that rule are
+    applied here rather than assumed about the SQL files.
+    """
+    if len(name) >= 2 and name.startswith('"') and name.endswith('"'):
+        return name[1:-1].replace('""', '"')
+    return name.lower()
 
 
 def strip_sql_comments(text: str) -> str:
@@ -636,33 +657,35 @@ def declared_objects(text: str) -> list[tuple[str, str, int]]:
         # `ALTER TABLE t ADD COLUMN a ..., ADD COLUMN b ...` names the table once,
         # so the clauses are read from the statement rather than the pattern.
         alter = re.search(
-            rf"\bALTER\s+TABLE\s+(?:ONLY\s+)?(?:{IDENT}\.)?\"?({IDENT})\"?", stmt, re.I)
+            rf"\bALTER\s+TABLE\s+(?:ONLY\s+)?(?:{NAME}\.)?({NAME})", stmt, re.I)
         if alter:
             for column in re.findall(
-                    rf"\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?\"?({IDENT})\"?",
+                    rf"\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?({NAME})",
                     stmt, re.I):
-                found.append(("column", f"column {alter.group(1)}.{column}", index))
+                found.append(("column",
+                              f"column {dequote(alter.group(1))}.{dequote(column)}", index))
             for constraint in re.findall(
-                    rf"\bADD\s+CONSTRAINT\s+\"?({IDENT})\"?", stmt, re.I):
-                found.append(("constraint", f"constraint {constraint}", index))
+                    rf"\bADD\s+CONSTRAINT\s+({NAME})", stmt, re.I):
+                found.append(("constraint", f"constraint {dequote(constraint)}", index))
         for table in re.findall(
-                rf"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:{IDENT}\.)?\"?({IDENT})\"?",
+                rf"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:{NAME}\.)?({NAME})",
                 stmt, re.I):
-            found.append(("table", f"table {table}", index))
+            found.append(("table", f"table {dequote(table)}", index))
         for index_name in re.findall(
                 rf"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?"
-                rf"(?:IF\s+NOT\s+EXISTS\s+)?\"?({IDENT})\"?", stmt, re.I):
-            found.append(("index", f"index {index_name}", index))
+                rf"(?:IF\s+NOT\s+EXISTS\s+)?({NAME})", stmt, re.I):
+            found.append(("index", f"index {dequote(index_name)}", index))
         for policy, owner in re.findall(
-                rf"\bCREATE\s+POLICY\s+\"?({IDENT})\"?\s+ON\s+(?:{IDENT}\.)?\"?({IDENT})\"?",
+                rf"\bCREATE\s+POLICY\s+({NAME})\s+ON\s+(?:{NAME}\.)?({NAME})",
                 stmt, re.I):
-            found.append(("policy", f"policy {owner}.{policy}", index))
+            found.append(("policy",
+                          f"policy {dequote(owner)}.{dequote(policy)}", index))
         for function in re.findall(
-                rf"\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:{IDENT}\.)?\"?({IDENT})\"?",
+                rf"\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:{NAME}\.)?({NAME})",
                 stmt, re.I):
-            found.append(("function", f"function {function}", index))
-        for trigger in re.findall(rf"\bCREATE\s+TRIGGER\s+\"?({IDENT})\"?", stmt, re.I):
-            found.append(("trigger", f"trigger {trigger}", index))
+            found.append(("function", f"function {dequote(function)}", index))
+        for trigger in re.findall(rf"\bCREATE\s+TRIGGER\s+({NAME})", stmt, re.I):
+            found.append(("trigger", f"trigger {dequote(trigger)}", index))
 
     seen: set[tuple[str, str]] = set()
     unique: list[tuple[str, str, int]] = []
@@ -685,9 +708,9 @@ def dropped_names(text: str) -> dict[str, list[int]]:
     for index, stmt in enumerate(sql_statements(text)):
         for kind in DROPPABLE:
             for name in re.findall(
-                    rf"\bDROP\s+{kind}\s+(?:IF\s+EXISTS\s+)?(?:{IDENT}\.)?\"?({IDENT})\"?",
+                    rf"\bDROP\s+{kind}\s+(?:IF\s+EXISTS\s+)?(?:{NAME}\.)?({NAME})",
                     stmt, re.I):
-                found.setdefault(name, []).append(index)
+                found.setdefault(dequote(name), []).append(index)
     return found
 
 
@@ -703,6 +726,40 @@ def gap_note(kind: str, key: str, live: dict[str, str]) -> str:
         if f"table {owner}" not in live:
             return f"   (its table `{owner}` does not exist)"
     return ""
+
+
+# ── declarations a later generation replaced under a different name ──────────
+#
+# The rule above explains an absent object by finding a `DROP` of that name. It
+# cannot see a *generation* change, and that is what these three are:
+# `001_enable_rls_and_policies.sql` carries policies that no other file creates and
+# that no file drops — this database was built from `_COMPLETE_SETUP.sql` and 007,
+# which carry the same scopes under role-specific names and never had the old ones
+# to drop. Under the name rule alone they read as "missing, and nothing drops it",
+# which is exactly the verdict this mode exists to hand out, so they are named here
+# with their reason instead.
+#
+# A heuristic was available and is deliberately not used: "a later file declares
+# policies on the same table" would clear these three, and would equally clear a
+# policy that genuinely never ran the first time a later migration added one policy
+# beside it. A verifier that is confidently wrong is worse than none, so each
+# exception is written down one object at a time — and `tests/unit/
+# test_apply_migration.py` fails if an entry stops naming something the file really
+# declares, so this cannot rot into a blanket excuse.
+SUPERSEDED: dict[str, dict[str, str]] = {
+    "001_enable_rls_and_policies.sql": {
+        "policy schools.schools_read_own":
+            "replaced by the role-scoped generation in 007 / _COMPLETE_SETUP.sql "
+            "(schools_admin_read_own + schools_guru_murid_read_own), which never "
+            "created the old name",
+        "policy classes.classes_read_own_school":
+            "replaced by 007 / _COMPLETE_SETUP.sql "
+            "(classes_guru_murid_read + classes_admin_all_own)",
+        "policy subjects.subjects_read_own_school":
+            "replaced by 007 / _COMPLETE_SETUP.sql "
+            "(subjects_guru_murid_read + subjects_admin_all_own)",
+    },
+}
 
 
 def connect_readonly(url: str):
@@ -738,6 +795,7 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
     print("-" * (width + 52))
 
     gaps: list[tuple[str, list[tuple[str, str]]]] = []
+    named_superseded: list[tuple[str, str, str]] = []
     unchecked = 0
     tally = {"IN": 0, "PARTIAL": 0, "OUT": 0, "superseded": 0, "no objects": 0}
 
@@ -756,7 +814,12 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
             elif any(who != path.name for who in droppers.get(name, ())):
                 explained += 1              # a different file replaced it
             else:
-                gap.append((kind, key + gap_note(kind, key, live)))
+                reason = SUPERSEDED.get(path.name, {}).get(key)
+                if reason:
+                    explained += 1          # named in this tool, with its reason
+                    named_superseded.append((path.name, key, reason))
+                else:
+                    gap.append((kind, key + gap_note(kind, key, live)))
 
         if not declared:
             verdict = "no objects"
@@ -792,6 +855,15 @@ def verify(ledger: Path, migrations: Path, cur) -> int:
             print(f"\n{name}")
             for text in missing:
                 print(f"    MISSING  {text}")
+
+    if named_superseded:
+        print()
+        print("=== superseded by a later generation — named here, with the reason ===")
+        for file_name, key, reason in named_superseded:
+            print(f"\n{file_name}")
+            print(f"    SUPERSEDED  {key}")
+            for line in textwrap.wrap(reason, 66):
+                print(f"                {line}")
 
     if unchecked:
         print()
