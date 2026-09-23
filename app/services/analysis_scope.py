@@ -212,7 +212,9 @@ def _may_scope(role: str) -> bool:
 def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
                    limit: int = MAX_EXAMS, *,
                    date_from: str | None = None,
-                   date_to: str | None = None) -> list[dict[str, Any]]:
+                   date_to: str | None = None,
+                   school_filter: str | None = None,
+                   teacher_filter: str | None = None) -> list[dict[str, Any]]:
     """The exams this caller may analyse, newest first.
 
     The query narrows to what the role can reach — a teacher's own rows, a
@@ -225,6 +227,13 @@ def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
     *date_from* and *date_to* are ISO date strings (``YYYY-MM-DD``). When
     provided the query adds ``created_at >= date_from`` and
     ``created_at < date_to + 1 day`` so that a whole-day range is inclusive.
+
+    *school_filter* and *teacher_filter* are the reader's own choice — the two
+    dropdowns a scope wide enough to need them offers, and they narrow this
+    result. They are applied *after* the predicate, never as a query clause, and
+    only when the value is one the caller's own scope already contains: this is
+    the difference between a filter and a way to ask about somebody else's
+    school. See `_narrow`.
     """
     if not _may_scope(role) or not user_id:
         return []
@@ -249,8 +258,99 @@ def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
             pass
     rows = (query.order("created_at", desc=True).limit(int(limit)).execute().data
             or [])
-    return [row for row in rows
-            if can_manage_exam(user_id, role, school_id, row)]
+    allowed = [row for row in rows
+               if can_manage_exam(user_id, role, school_id, row)]
+    return _narrow(allowed, school_filter=school_filter,
+                   teacher_filter=teacher_filter)
+
+
+def _narrow(rows: Sequence[Mapping[str, Any]], *, school_filter: str | None = None,
+            teacher_filter: str | None = None) -> list[dict[str, Any]]:
+    """The rows a reader's school and teacher choices keep.
+
+    Two rules, and both are about the filter never claiming more than it can know.
+
+    A value the scope does not offer is **not a filter**. The dropdowns can only
+    be built from this caller's own exams, so an id from anywhere else — a stale
+    bookmark, a hand-typed parameter, another school's id — is answered by showing
+    the whole scope rather than an empty page. An empty page would say "you have
+    no exams there", which this function cannot know; and dropping the rows would
+    make a wrong parameter a way to change what a reader sees. It cannot widen
+    anything either: these rows have already been through `can_manage_exam`.
+
+    The two choices are applied in order, so choosing a teacher inside a school
+    narrows by both rather than by whichever was applied last.
+    """
+    chosen = [("school_id", _offered(rows, "school_id", school_filter)),
+              ("teacher_id", _offered(rows, "teacher_id", teacher_filter))]
+    kept = list(rows)
+    for column, value in chosen:
+        if value:
+            kept = [row for row in kept if str(row.get(column) or "") == value]
+    return kept
+
+
+def _offered(rows: Sequence[Mapping[str, Any]], column: str,
+             value: str | None) -> str:
+    """*value* when it names one of these rows, otherwise nothing.
+
+    The comparison is against the rows the caller already has, which is what
+    makes "can this reader filter by it?" and "may this reader see it?" the same
+    question.
+    """
+    wanted = str(value or "").strip()
+    if not wanted:
+        return ""
+    return wanted if any(str(row.get(column) or "") == wanted for row in rows) else ""
+
+
+#: The two filters a scope can offer, each as (the query parameter that carries
+#: the choice, the exam column it narrows by, the table the label comes from, and
+#: the key the page reads). One list, so the page's two dropdowns, the narrowing
+#: above and the validation cannot drift into naming different things.
+SCOPE_FILTERS = (
+    ("school_id", "school_id", "schools", "schools"),
+    ("teacher_id", "teacher_id", "profiles", "teachers"),
+)
+
+
+def scope_choices(supabase, role: str, user_id: str, school_id: str | None,
+                  *, date_from: str | None = None,
+                  date_to: str | None = None) -> dict[str, list[dict[str, str]]]:
+    """The school and teacher choices this scope offers, for the index's filters.
+
+    Read from the *exams* alone — ids and the names to label them with — and not
+    from `report()`, because these are facts about the scope's exams and a second
+    full report (forty exams of item analysis) to build two dropdowns is exactly
+    the cost this module exists to avoid.
+
+    The scope is read **without** the reader's own filters, which is the whole
+    point: a dropdown that offered only what is already selected could never be
+    used to switch back. It goes through `exams_in_scope` like everything else, so
+    a choice can only ever be offered if the caller may open it.
+
+    A row whose exam has no school (or whose teacher has no name on file) offers
+    no choice: it cannot be labelled, and a blank option is a filter a reader
+    would have to guess at. Such papers stay visible under "all".
+    """
+    exams = exams_in_scope(supabase, role, user_id, school_id,
+                           date_from=date_from, date_to=date_to)
+    choices: dict[str, list[dict[str, str]]] = {}
+    for _, column, table, key in SCOPE_FILTERS:
+        names = _names(supabase, table, [exam.get(column) for exam in exams])
+        seen: dict[str, str] = {}
+        for exam in exams:
+            value = str(exam.get(column) or "")
+            label = names.get(value) or ""
+            if value and label:
+                seen.setdefault(value, label)
+        # Sorted by label, so the order a reader sees does not depend on which
+        # exam happened to be read first; the id breaks a tie between two schools
+        # that share a name, which is the one case where the label is not enough.
+        choices[key] = [{"id": value, "name": label} for value, label in
+                        sorted(seen.items(),
+                               key=lambda item: (item[1].lower(), item[0]))]
+    return choices
 
 
 def _submissions(supabase, exam_ids: Sequence[str]) -> dict[str, list[dict]]:
@@ -294,6 +394,14 @@ def learners_in_scope(supabase, exams: Sequence[Mapping[str, Any]], *,
     """
     titles = {str(exam.get("id")): str(exam.get("title") or "")
               for exam in exams if exam.get("id")}
+    # Which school and teacher each paper belongs to, read from the *exam* row:
+    # a paper carries neither fact, and the exam is the only place they exist. A
+    # reader whose scope spans more than one school needs this on the row (three
+    # exams can share one title, and the row is the only separator), and the
+    # page's filter needs it to say what it kept.
+    origins = {str(exam.get("id")): (str(exam.get("school") or ""),
+                                     str(exam.get("teacher") or ""))
+               for exam in exams if exam.get("id")}
     if not titles:
         return []
     ids = list(titles)
@@ -314,6 +422,8 @@ def learners_in_scope(supabase, exams: Sequence[Mapping[str, Any]], *,
     return [{
         "exam_id": str(row.get("exam_id") or ""),
         "exam_title": titles.get(str(row.get("exam_id")), ""),
+        "school": origins.get(str(row.get("exam_id")), ("", ""))[0],
+        "teacher": origins.get(str(row.get("exam_id")), ("", ""))[1],
         "student_id": str(row["student_id"]) if row.get("student_id") else None,
         "name": names.get(str(row.get("student_id"))) or "",
         "mark": _mark(row),
@@ -434,19 +544,26 @@ def _bins(marks: Sequence[float]) -> list[int]:
 def report(supabase, role: str, user_id: str, school_id: str | None,
            lang: str = "id", limit: int = MAX_EXAMS, *,
            date_from: str | None = None,
-           date_to: str | None = None) -> dict[str, Any]:
+           date_to: str | None = None,
+           school_filter: str | None = None,
+           teacher_filter: str | None = None) -> dict[str, Any]:
     """The whole report: one row per exam in scope, plus the totals and the bins.
 
     Nothing here is cached at this level — the caller decides that, because the
     cache key depends on the caller's scope and not on the report.
 
     *date_from* and *date_to* are ISO date strings (``YYYY-MM-DD``) that filter
-    the exams by their ``created_at`` timestamp.
+    the exams by their ``created_at`` timestamp. *school_filter* and
+    *teacher_filter* are the reader's own narrowing, applied to the exams before
+    any total is added up: a report whose rows were narrowed while its totals were
+    not would print two different sizes for one scope.
     """
     lang = language(lang)
     texts = labels(lang)
     exams = exams_in_scope(supabase, role, user_id, school_id, limit,
-                           date_from=date_from, date_to=date_to)
+                           date_from=date_from, date_to=date_to,
+                           school_filter=school_filter,
+                           teacher_filter=teacher_filter)
     answers = _submissions(supabase, [exam["id"] for exam in exams])
     teachers = _names(supabase, "profiles", [exam.get("teacher_id")
                                              for exam in exams])

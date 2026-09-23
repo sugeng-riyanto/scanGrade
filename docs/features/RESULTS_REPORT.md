@@ -216,6 +216,58 @@ Satu kelemahan yang masih nyata dan tidak ditutup di sini: bagian kelas melewati
 sementara Supabase — jadi gangguan jaringan sesaat tetap menjadi 500 di halaman ini,
 sama seperti di halaman statistik. Yang baru menanganinya hanya pembacaan baris murid.
 
+### Saringan sekolah dan guru
+
+Satu lingkup yang lebih lebar dari satu sekolah membuat daftar kertas berisi ratusan nama
+tanpa cara mempersempitnya. Jadi formulir rentang tanggal di atas halaman itu — bentuk
+yang sama, parameter yang dikirim bersama `date_from`/`date_to` — mendapat dua pilihan
+lagi: **sekolah** dan **guru**. Keduanya menyaring **seluruh halaman ini sekaligus**: empat
+angka di atas, daftar ujian, dan daftar kertas. Itu sebabnya kontrolnya duduk di formulir
+lingkup, bukan di samping kotak cari: saringan yang mempersempit daftar kertas sementara
+totalnya tetap menghitung seluruh kotak akan mencetak dua ukuran dari satu lingkup di satu
+halaman.
+
+Lima keputusan yang membuatnya jujur:
+
+1. **Penyempitannya di server, sebelum batas `MAX_LEARNERS`, bukan di browser seperti kotak
+cari.** Daftar itu adalah 400 kertas terbaru dari seluruh lingkup, jadi menyaring setelahnya
+hanya akan menampilkan kertas satu sekolah bila kebetulan ia ada di antara 400 terbaru kotak
+itu — daftar yang tampak benar dan isinya salah. Karena itu `_scope_report()` menerima
+keduanya, dan **keduanya ikut ke dalam kunci cache**: laporan yang dipersempit ke satu
+sekolah bukan laporan seluruh lingkup, dan menyajikan yang satu sebagai yang lain akan
+mencetak total yang salah di samping baris yang benar.
+2. **Nilai yang tidak ditawarkan lingkup bukan saringan** (`analysis_scope._narrow`). Sebuah
+id dari luar — bookmark basi, parameter yang diketik tangan, sekolah orang lain — dijawab
+dengan menampilkan **seluruh lingkup**, bukan halaman kosong: halaman kosong mengatakan
+"Anda tidak punya ujian di sana", yang tidak bisa diketahui fungsi ini, dan membuang barisnya
+akan membuat parameter yang salah menjadi cara mengubah apa yang dilihat pembaca. Ia juga
+tidak bisa melebarkan apa pun — barisnya sudah lewat `can_manage_exam`.
+3. **Pilihannya dibaca dari ujian milik lingkup itu, tanpa saringan pembaca yang sedang
+aktif.** Dropdown yang hanya menawarkan apa yang sudah dipilih tidak akan pernah bisa
+dipakai untuk kembali; dan karena daftarnya dibaca lewat `exams_in_scope`, sebuah pilihan
+hanya bisa ditawarkan bila pembacanya memang boleh membukanya. Baris yang ujiannya tidak
+menyebut sekolah — atau gurunya tidak punya nama — **tidak menawarkan pilihan**: opsi kosong
+adalah saringan yang harus ditebak, dan kertasnya tetap terlihat di bawah "semua". Baris
+kertas kini mencetak `· sekolah` dan `· guru` **hanya bila lingkupnya memuat lebih dari
+satu**, sebab tiga ujian bisa berjudul sama dan pada daftar super admin baris itulah satu-
+satunya pemisahnya.
+4. **Kontrol hanya digambar bila lingkupnya benar-benar menawarkan pilihan** — lingkup guru
+satu sekolah dan satu guru, lingkup admin satu sekolah dan beberapa guru, lingkup super
+admin keduanya — sehingga tidak ada dropdown satu opsi yang hanya menambah kendali tanpa
+mengubah apa pun; dan **setiap saringan bisa dilepas**: ada tombol bersih yang muncul begitu
+salah satunya aktif.
+5. **Lingkup tersaring yang kosong punya kalimatnya sendiri** — "tidak ada kertas di sekolah
+atau guru yang dipilih", bukan "belum ada kertas di cakupan ini": keduanya diperbaiki dengan
+melakukan hal yang berbeda (hapus saringan, atau tunggu ada yang mengerjakan). Kotak cari di
+browser juga ikut membaca kolom sekolah dan guru, karena keduanya kini tercetak di barisnya.
+
+Bukti: `tests/unit/test_reports_hub.py` (**53 uji**, termasuk dua arah antara nama parameter
+templat, rute dan `analysis_scope.SCOPE_FILTERS`, penyempitan lewat `report()` sehingga total
+dan baris tidak bisa berbeda ukuran, kunci cache yang tidak boleh dibagi dua lingkup, dan
+opsi yang tidak boleh berasal dari baris yang tidak boleh dibaca pemanggilnya) +
+`.freebuff/mutate_reports_filters.py` **23/23 tertangkap**; suite unit 3241 lulus; theme gate
+OK, `deploy/i18n_baseline.json` direkam ulang (`teacher/reports.html` 34 → 40 pasangan).
+
 ### Empat aturan yang membentuknya
 
 1. **Murid dialamatkan dengan `id`, tidak pernah dengan nama.** Dua murid dalam satu kelas

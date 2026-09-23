@@ -159,6 +159,46 @@ def _scope_database(role="guru", papers=None, exams=None):
     })
 
 
+#: A box wide enough for the two filters to mean something: two schools, three
+#: teachers, an exam each. A scope of one school cannot offer a school choice, so
+#: the interesting cases all need a fixture wider than it — this is the shape a
+#: super admin's page has, and the reason the filters exist at all.
+WIDE_EXAMS = (
+    {**EXAM, "id": "exam-a", "title": "Fisika 1", "teacher_id": "tea-1",
+     "school_id": "sch-1", "created_at": "2026-06-03T08:00:00+00:00"},
+    {**EXAM, "id": "exam-b", "title": "Fisika 2", "teacher_id": "tea-2",
+     "school_id": "sch-1", "created_at": "2026-06-02T08:00:00+00:00"},
+    {**EXAM, "id": "exam-c", "title": "Kimia 1", "teacher_id": "tea-3",
+     "school_id": "sch-2", "created_at": "2026-06-01T08:00:00+00:00"},
+)
+
+WIDE_PAPERS = (
+    {**PAPERS[0], "exam_id": "exam-a", "student_id": "stu-a",
+     "submitted_at": "2026-06-03T09:00:00+00:00"},
+    {**PAPERS[0], "exam_id": "exam-b", "student_id": "stu-b",
+     "submitted_at": "2026-06-02T09:00:00+00:00"},
+    {**PAPERS[0], "exam_id": "exam-c", "student_id": "stu-c",
+     "submitted_at": "2026-06-01T09:00:00+00:00"},
+)
+
+
+def _wide_database(exams=None, papers=None):
+    """Two schools and three teachers: who the filters are for."""
+    return _Fake({
+        "exams": [dict(exam) for exam in (WIDE_EXAMS if exams is None else exams)],
+        "submissions": list(WIDE_PAPERS if papers is None else papers),
+        "profiles": [{"id": "stu-a", "full_name": "Ani"},
+                     {"id": "stu-b", "full_name": "Budi"},
+                     {"id": "stu-c", "full_name": "Citra"},
+                     {"id": "tea-1", "full_name": "Guru Uji"},
+                     {"id": "tea-2", "full_name": "Guru Dua"},
+                     {"id": "tea-3", "full_name": "Guru Tiga"},
+                     {"id": "adm-1", "full_name": "Admin Uji"}],
+        "schools": [{"id": "sch-1", "name": "SMP Uji"},
+                    {"id": "sch-2", "name": "SMA Uji"}],
+    })
+
+
 def _report(supabase=None, role="guru"):
     supabase = supabase or _scope_database(role=role)
     return analysis_scope.report(supabase, role, "tea-1", "sch-1")
@@ -178,24 +218,31 @@ def _signed_in(app, role="guru", path="/teacher/reports"):
         yield
 
 
-def _render(app, role="guru", supabase=None, report=None, learners=None):
+def _render(app, role="guru", supabase=None, report=None, learners=None,
+            choices=None, school_filter="", teacher_filter=""):
     """The page as the route hands it to Jinja.
 
     `supabase` is passed straight through so a case can change the *data* — a
     paper still being marked, say — without also having to remember to rebuild
-    every argument from it.
+    every argument from it. The choices, the filters and the search keys are built
+    the way the route builds them, from the same data, so a rendering test is
+    measuring the page and not a second hand-written copy of its arguments.
     """
     supabase = supabase if supabase is not None else _scope_database(role=role)
     report = report if report is not None else _report(supabase, role=role)
     learners = (learners if learners is not None
                 else analysis_scope.learners_in_scope(supabase, report["rows"]))
+    choices = (choices if choices is not None
+               else analysis_scope.scope_choices(supabase, role, "tea-1", "sch-1"))
     with _signed_in(app, role=role):
         html = app.jinja_env.get_template("teacher/reports.html").render(
             report=report, learners=learners,
-            learner_keys=[f"{row['name']} {row['exam_title']}".lower()
-                          for row in learners],
+            learner_keys=[f"{row['name']} {row['exam_title']} {row['school']} "
+                          f"{row['teacher']}".lower() for row in learners],
             learner_cap=analysis_scope.MAX_LEARNERS,
-            learners_truncated=len(learners) >= analysis_scope.MAX_LEARNERS)
+            learners_truncated=len(learners) >= analysis_scope.MAX_LEARNERS,
+            scope_choices=choices, school_filter=school_filter,
+            teacher_filter=teacher_filter)
     return {"html": html, "report": report, "learners": learners}
 
 
@@ -401,8 +448,11 @@ class TestTheTemplateOnlyReadsWhatTheScopeSends:
 
     def test_the_learner_row_reads_are_the_scope_s_own_keys(self):
         # `MAX_LEARNERS` is read through `learner_cap`, not through a row.
+        # `school` and `teacher` are on the row from the exam it belongs to: a
+        # reader whose scope spans more than one school cannot tell three papers
+        # apart without them, and that reader is the one the filters are for.
         sent = {"exam_id", "exam_title", "student_id", "name", "mark", "status",
-                "submitted_at"}
+                "submitted_at", "school", "teacher"}
         reads = set(re.findall(r"(?<![\w.])row\.(\w+)", PAGE))
         assert reads <= sent, f"the learner row reads {sorted(reads - sent)}"
         assert sent <= reads, (
@@ -422,7 +472,8 @@ class TestTheTemplateOnlyReadsWhatTheScopeSends:
         supabase = _scope_database()
         report = _report(supabase)
         learners = analysis_scope.learners_in_scope(supabase, report["rows"])
-        keys = [f"{row['name']} {row['exam_title']}".lower() for row in learners]
+        keys = [f"{row['name']} {row['exam_title']} {row['school']} "
+                f"{row['teacher']}".lower() for row in learners]
         assert len(keys) == len(learners)
         assert all(key == key.lower() for key in keys), (
             "the browser is asked to fold the case of every row on each keystroke")
@@ -536,6 +587,43 @@ class TestTheRouteFillsThePage:
             "the filter's keys and the rows it filters are different lengths")
         assert handed["learner_cap"] == analysis_scope.MAX_LEARNERS
         assert handed["learners_truncated"] is False
+        # The filters, always handed over — including when the scope offers no
+        # choice, because the template branches on the choices and would raise on
+        # a page that never offered any.
+        assert set(handed["scope_choices"]) == {"schools", "teachers"}, (
+            "the page was handed no dropdown contents")
+        assert handed["school_filter"] == "" and handed["teacher_filter"] == ""
+        assert all(not row["school"] or row["school"].lower() in key
+                   for row, key in zip(handed["learners"], handed["learner_keys"])), (
+            "the search box does not cover the school name the row prints")
+
+    def test_a_choice_the_page_never_offered_is_not_shown_as_the_choice(
+            self, app, monkeypatch):
+        """The form must not claim a parameter did something it did not. An id the
+        scope does not offer leaves the whole scope on screen, so the page shows
+        "all" beside it — and prints the ordinary empty state rather than the one
+        about the corner you asked for."""
+        import inspect
+
+        import app.routes.teacher as teacher
+
+        supabase = _scope_database()
+        monkeypatch.setattr(teacher, "get_supabase", lambda: supabase)
+        monkeypatch.setattr(teacher, "cache_get", lambda key: None)
+        monkeypatch.setattr(teacher, "cache_set",
+                            lambda key, value, ttl=None: None)
+        handed = {}
+        monkeypatch.setattr(teacher, "render_template",
+                            lambda name, **kw: handed.update({"name": name, **kw})
+                            or "")
+        with _signed_in(app, "guru",
+                        path="/teacher/reports?school_id=another-school"):
+            inspect.unwrap(teacher.reports_hub)()
+
+        assert handed["school_filter"] == "", (
+            "the page would mark a choice no option offers")
+        assert len(handed["learners"]) == 3, (
+            "a parameter the scope does not offer changed what the reader sees")
         assert set(handed["report"]["totals"]) >= {
             "exams", "participants", "mean", "pass_rate"}, (
                 "the KPI strip has no numbers to print")
@@ -567,3 +655,201 @@ class TestItFitsASmallScreen:
     def test_the_door_strips_wrap(self):
         assert PAGE.count("flex flex-wrap gap-1.5") >= 1
         assert "flex flex-wrap items-center gap-2 sm:gap-3" in PAGE
+
+
+# ── the school and teacher filters ───────────────────────────────────────────
+#
+# A super admin's scope is every exam on the box, so the paper list is every paper
+# on the box: the one page in the app where "narrow it down before you scroll" is
+# a request rather than a preference. Two rules make the two controls honest, and
+# both are held here: a choice can only be one the caller's own scope contains
+# (which is what makes "may I filter by this?" and "may I see this?" one
+# question), and the narrowing happens *before* the cap rather than over a list
+# that was already cut.
+
+class TestTheChoicesTheScopeOffers:
+    def test_a_scope_of_one_school_offers_no_choice_because_there_is_none(self, app):
+        """A teacher's page is unchanged: the control is drawn where it can do
+        something and nowhere else."""
+        html = _render(app, role="guru")["html"]
+        assert "data-scope-filter" not in html, (
+            "a one-school scope was given dropdowns with one option each")
+        assert "All schools" not in html
+
+    def test_the_two_roles_between_the_ends_get_what_varies(self):
+        wide = _wide_database()
+        super_admin = analysis_scope.scope_choices(wide, "super_admin", "sa-1", None)
+        assert [o["name"] for o in super_admin["schools"]] == ["SMA Uji", "SMP Uji"], (
+            "the options are not sorted by label, so the order a reader sees "
+            "depends on which exam happened to be read first")
+        assert len(super_admin["teachers"]) == 3
+        admin = analysis_scope.scope_choices(wide, "admin_sekolah", "adm-1", "sch-1")
+        assert [o["name"] for o in admin["schools"]] == ["SMP Uji"], (
+            "an admin of one school was offered another school")
+        assert [o["name"] for o in admin["teachers"]] == ["Guru Dua", "Guru Uji"]
+
+    def test_a_teacher_is_offered_only_their_own(self):
+        choices = analysis_scope.scope_choices(_wide_database(), "guru", "tea-2", "sch-1")
+        assert [o["name"] for o in choices["teachers"]] == ["Guru Dua"]
+        assert [o["name"] for o in choices["schools"]] == ["SMP Uji"]
+
+    def test_a_school_with_no_name_on_file_offers_no_blank_option(self):
+        """A blank option is a filter a reader would have to guess at; the papers
+        stay visible under "all" instead."""
+        wide = _wide_database()
+        wide.tables["schools"] = [{"id": "sch-1", "name": "SMP Uji"}]
+        choices = analysis_scope.scope_choices(wide, "super_admin", "sa-1", None)
+        assert [o["id"] for o in choices["schools"]] == ["sch-1"]
+        assert len(analysis_scope.exams_in_scope(wide, "super_admin", "sa-1", None)) == 3
+
+
+class TestTheFiltersNarrowTheScope:
+    def test_a_school_choice_narrows_the_rows_and_the_totals_together(self):
+        data = analysis_scope.report(_wide_database(), "super_admin", "sa-1", None,
+                                     school_filter="sch-2")
+        assert [row["id"] for row in data["rows"]] == ["exam-c"]
+        assert data["totals"]["exams"] == 1 and data["totals"]["participants"] == 1, (
+            "the rows narrowed and the totals did not: one scope, two sizes")
+
+    def test_a_teacher_choice_narrows_inside_the_school(self):
+        data = analysis_scope.report(_wide_database(), "super_admin", "sa-1", None,
+                                     school_filter="sch-1", teacher_filter="tea-2")
+        assert [row["id"] for row in data["rows"]] == ["exam-b"]
+
+    def test_a_choice_the_scope_does_not_offer_is_not_a_filter(self):
+        """The security-relevant direction: an id from another school, typed into
+        the address by hand, must not narrow anything — and must not be a way to\
+        ask about that school either."""
+        data = analysis_scope.report(_wide_database(), "admin_sekolah", "adm-1",
+                                     "sch-1", school_filter="sch-2",
+                                     teacher_filter="tea-3")
+        assert {row["school"] for row in data["rows"]} == {"SMP Uji"}
+        assert len(data["rows"]) == 2, (
+            "a parameter the page never offered changed what the caller sees")
+
+    def test_a_blank_choice_is_the_whole_scope(self):
+        data = analysis_scope.report(_wide_database(), "super_admin", "sa-1", None,
+                                     school_filter="", teacher_filter="")
+        assert len(data["rows"]) == 3
+
+    def test_the_learners_are_narrowed_before_the_cap(self):
+        """The cap is the newest `MAX_LEARNERS` papers *of the scope*, so a filter
+        applied after it would list one school's papers only if they happened to be
+        among the newest four hundred on the box."""
+        older = [{"exam_id": "exam-c", "student_id": None, "final_score": 70.0,
+                  "status": "published",
+                  "submitted_at": f"2026-05-{i % 28 + 1:02d}T09:00:00+00:00"}
+                 for i in range(analysis_scope.MAX_LEARNERS + 10)]
+        newer = [{"exam_id": "exam-a", "student_id": None, "final_score": 70.0,
+                  "status": "published",
+                  "submitted_at": f"2026-06-30T09:{i % 60:02d}:00+00:00"}
+                 for i in range(analysis_scope.MAX_LEARNERS + 10)]
+        db = _wide_database(papers=older + newer)
+        data = analysis_scope.report(db, "super_admin", "sa-1", None,
+                                     school_filter="sch-2")
+        assert [row["id"] for row in data["rows"]] == ["exam-c"]
+        papers = analysis_scope.learners_in_scope(db, data["rows"])
+        assert {row["exam_id"] for row in papers} == {"exam-c"}, (
+            "the narrowed school's papers were cut by a cap that ran before the "
+            "filter did")
+        assert len(papers) == analysis_scope.MAX_LEARNERS
+
+    def test_the_route_narrows_on_the_server_rather_than_in_the_browser(self):
+        body = TEACHER.split("def reports_hub(", 1)[1].split("\n@teacher_bp", 1)[0]
+        assert "school_filter=school_filter" in body \
+            and "teacher_filter=teacher_filter" in body, (
+                "the route reads the two choices and does not act on them")
+        assert 'learners_in_scope(supabase, data["rows"])' in body, (
+            "the paper list is built from something other than the narrowed scope")
+
+    def test_every_filter_the_service_names_is_one_the_route_reads(self):
+        """One list, two jobs: the names the page's form posts and the names the
+        route reads have to be the ones `SCOPE_FILTERS` declares."""
+        for parameter, _, _, _ in analysis_scope.SCOPE_FILTERS:
+            assert f'name="{parameter}"' in PAGE, (
+                f"the form has no {parameter} field to post the choice with")
+            assert f'request.args.get("{parameter}")' in TEACHER, (
+                f"the route does not read {parameter}")
+
+
+class TestTwoChoicesAreTwoCacheEntries:
+    def test_the_cache_key_carries_the_two_choices(self, app, monkeypatch):
+        """A report narrowed to one school is not the report for the whole scope.
+        Serving one as the other prints the wrong totals beside the right rows, and
+        the date range already taught this codebase that lesson."""
+        import app.routes.teacher as teacher
+
+        keyed = []
+        monkeypatch.setattr(teacher, "cache_get", lambda key: None)
+        monkeypatch.setattr(teacher, "cache_set",
+                            lambda key, value, ttl=None: keyed.append(key))
+        supabase = _wide_database()
+        with _signed_in(app, "super_admin"):
+            teacher._scope_report(supabase, "id")
+            teacher._scope_report(supabase, "id", school_filter="sch-1")
+            teacher._scope_report(supabase, "id", school_filter="sch-2")
+        assert len(set(keyed)) == 3, (
+            "two different scopes share one cache entry")
+
+
+class TestThePageDrawsTheFilters:
+    def test_a_super_admin_sees_both_and_a_note_about_what_they_narrow(self, app):
+        html = _render(app, role="super_admin", supabase=_wide_database())["html"]
+        assert 'data-scope-filter="school_id"' in html
+        assert 'data-scope-filter="teacher_id"' in html
+        schools = html.split('name="school_id"', 1)[1].split("</select>", 1)[0]
+        teachers = html.split('name="teacher_id"', 1)[1].split("</select>", 1)[0]
+        assert "SMA Uji" in schools and "SMP Uji" in schools, (
+            "the school dropdown does not list the scope's schools")
+        assert "Guru Dua" in teachers and "Ani" not in teachers, (
+            "the teacher dropdown is filled from something other than the "
+            "teachers'")
+        assert "narrow this whole page" in html, (
+            "two controls that change the numbers, the exams and the papers are "
+            "shown without saying that they do")
+
+    def test_the_chosen_option_is_the_selected_one(self, app):
+        html = _render(app, role="super_admin", supabase=_wide_database(),
+                       school_filter="sch-2")["html"]
+        assert re.search(r'<option value="sch-2"[^>]*selected', html), (
+            "the form does not show which school the page is about")
+        assert 'value="" x-text' in html, (
+            "there is no way back to the whole scope")
+
+    def test_a_filter_on_its_own_still_offers_a_way_back(self, app):
+        """The Clear link was conditional on the date range before there was
+        anything else to clear."""
+        html = _render(app, role="super_admin", supabase=_wide_database(),
+                       school_filter="sch-2")["html"]
+        assert f'href="{HUB}?lang=' in html, (
+            "a narrowed scope with no way back to the whole one")
+        assert f'href="{HUB}?lang=' not in _render(app, role="guru")["html"], (
+            "a Clear link over nothing")
+
+    def test_the_learner_caption_names_the_origin_only_when_it_separates(self, app):
+        """Three exams can share one title, so on a super admin's list the school
+        and the teacher are the only thing telling the papers apart — and on a
+        teacher's own list they are the same two words on every row."""
+        narrow = _render(app, role="guru")["html"]
+        wide = _render(app, role="super_admin", supabase=_wide_database())["html"]
+
+        def learner_half(html):
+            return html.split('data-report-section="individual"', 1)[1]
+
+        assert "SMP Uji" in learner_half(wide) and "Guru Uji" in learner_half(wide)
+        caption = learner_half(wide).split("Fisika 1", 1)[1][:200]
+        assert "SMP Uji" in caption and "Guru Uji" in caption, (
+            "the row does not say which school and which teacher it came from")
+        assert caption.index("SMP Uji") < caption.index("Guru Uji"), (
+            "the caption is not exam, then school, then teacher")
+        assert "SMP Uji" not in learner_half(narrow)
+
+    def test_an_empty_filtered_list_says_which_of_the_two_it_is(self, app):
+        """\"There is nothing here\" and \"the corner you asked for is empty\" are
+        fixed by doing different things."""
+        filtered = _render(app, role="super_admin", supabase=_wide_database(),
+                           learners=[], school_filter="sch-2")["html"]
+        unfiltered = _render(app, role="super_admin", supabase=_wide_database(),
+                             learners=[])["html"]
+        assert "No paper in the school or teacher you chose" in filtered
+        assert "No papers to open in this scope yet" in unfiltered
