@@ -3216,7 +3216,8 @@ def _kpis(data):
     }
 
 
-def _scope_report(supabase, lang, *, date_from=None, date_to=None):
+def _scope_report(supabase, lang, *, date_from=None, date_to=None,
+                  school_filter=None, teacher_filter=None):
     """The caller's report, computed once per scope, language and range every five minutes.
 
     Built from a batch of queries over every exam in scope, which is the most
@@ -3225,17 +3226,23 @@ def _scope_report(supabase, lang, *, date_from=None, date_to=None):
     row. The language is in the key as well, because the labels are rendered into
     the report rather than looked up at print time.  The date range is also in
     the key so that switching from "this year" to "last semester" does not hand
-    back the cached totals of the other.
+    back the cached totals of the other — and the two narrowing choices are in it
+    for exactly the same reason: a report narrowed to one school is not the report
+    for the whole scope, and serving one as the other would print the wrong totals
+    beside the right rows.
     """
     key = (f"analytics:{g.get('user_role')}:{g.user_id}:"
            f"{g.get('user_school_id') or '-'}:{lang}:"
-           f"{date_from or ''}:{date_to or ''}")
+           f"{date_from or ''}:{date_to or ''}:"
+           f"{school_filter or ''}:{teacher_filter or ''}")
     cached = cache_get(key)
     if cached:
         return analysis_scope.from_payload(cached)
     data = analysis_scope.report(supabase, g.get("user_role") or "", g.user_id,
                                  g.get("user_school_id"), lang=lang,
-                                 date_from=date_from, date_to=date_to)
+                                 date_from=date_from, date_to=date_to,
+                                 school_filter=school_filter,
+                                 teacher_filter=teacher_filter)
     cache_set(key, analysis_scope.as_payload(data), ttl=ANALYTICS_TTL)
     return data
 
@@ -3268,21 +3275,51 @@ def reports_hub():
     lang = analysis_scope.language(request.args.get("lang"))
     date_from = request.args.get("date_from") or None
     date_to = request.args.get("date_to") or None
-    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to)
+    # Two choices a scope wide enough to need them offers: which school, which
+    # teacher. Read from the scope's *exams*, both to narrow this page and to fill
+    # the dropdowns, and deliberately read without the reader's own filters — a
+    # dropdown offering only what is already selected could never be used to
+    # switch back. A value the caller's scope does not contain is not a filter at
+    # all (`analysis_scope._narrow`), so a hand-typed id from another school shows
+    # the whole scope rather than an empty page about somebody else's exams.
+    school_filter = (request.args.get("school_id") or "").strip()
+    teacher_filter = (request.args.get("teacher_id") or "").strip()
+    choices = analysis_scope.scope_choices(
+        supabase, g.get("user_role") or "", g.user_id, g.get("user_school_id"),
+        date_from=date_from, date_to=date_to)
+    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to,
+                         school_filter=school_filter,
+                         teacher_filter=teacher_filter)
+    # Narrowed *before* the cap, which is the whole reason this narrowing is not a
+    # box in the browser: the list is the newest 400 papers of whatever the scope
+    # is, so filtering after that would show one school's papers only if they
+    # happened to be among the newest 400 of the box.
     learners = analysis_scope.learners_in_scope(supabase, data["rows"])
     return render_template(
         "teacher/reports.html", report=data, learners=learners,
-        # What the page's own filter searches, compared there rather than here:
-        # the list is already rendered, and a filter that went back to the server
+        # What the page's own search reads, compared there rather than here: the
+        # list is already rendered, and a search that went back to the server
         # would ask the box to re-read forty exams so a reader could type a name
         # they can already see. The keys are lowercased once, in the route, so the
         # browser is not asked to fold the case of four hundred rows on each
-        # keystroke.
-        learner_keys=[f"{row['name']} {row['exam_title']}".lower() for row in learners],
+        # keystroke. The school and the teacher are in the key because they are on
+        # the row: typing a school is the same narrowing the dropdown does.
+        learner_keys=[f"{row['name']} {row['exam_title']} {row['school']} "
+                      f"{row['teacher']}".lower() for row in learners],
         # The cap, and whether the list hit it: a list that silently stops looks
-        # like a school with that many children in it.
+        # like a school with that many children in it. It is the *narrowed* list
+        # that is capped, so the note below it describes what was cut.
         learner_cap=analysis_scope.MAX_LEARNERS,
-        learners_truncated=len(learners) >= analysis_scope.MAX_LEARNERS)
+        learners_truncated=len(learners) >= analysis_scope.MAX_LEARNERS,
+        # The dropdowns' own contents, and which of them is currently applied — as
+        # the scope's values, not as the raw query string: a choice the scope does
+        # not offer showed the whole scope, so the form must show "all" beside it
+        # rather than pretend the parameter did something.
+        scope_choices=choices,
+        school_filter=school_filter if any(o["id"] == school_filter
+                                           for o in choices["schools"]) else "",
+        teacher_filter=teacher_filter if any(o["id"] == teacher_filter
+                                             for o in choices["teachers"]) else "")
 
 
 @teacher_bp.route("/reset-password", methods=["POST"])

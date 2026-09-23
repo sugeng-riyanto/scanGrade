@@ -31,12 +31,24 @@
         </div>
     </div>
 
-    <!-- Date range: the same control, and the same two parameters, as the statistics page -->
+    {# The scope: a date range, and — for a role whose scope is wider than one
+       school — which school and which teacher. Everything on this page is the
+       same scope: the four numbers, the exam list, and the paper list. That is
+       why the two choices sit in this form rather than beside the search box: a
+       filter that narrowed the papers while the totals still counted the box
+       would print two sizes of one scope on one page.
+
+       A dropdown is drawn only when the scope *offers* a choice — a teacher's
+       scope has one school and one teacher, an admin's has one school and several
+       teachers, a super admin's has both — so the control appears exactly where
+       it can do something. The options are the scope's own exams' schools and
+       teachers, read without the current filter, because a dropdown that listed
+       only what is already selected could never be used to switch back. #}
     <div class="card p-4 sm:p-5"
          x-data="{dateFrom: '{{ report.date_from or '' }}', dateTo: '{{ report.date_to or '' }}'}">
         <form method="GET" action="/teacher/reports"
-              class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
-            <div class="flex-1 min-w-0 w-full">
+              class="flex flex-wrap items-end gap-3">
+            <div class="flex-1 min-w-[180px]">
                 <label class="block text-xs font-semibold text-slate-500 mb-1"
                        x-text="t('Rentang waktu','Date range')"></label>
                 <div class="flex items-center gap-2">
@@ -47,13 +59,41 @@
                            class="input text-sm flex-1">
                 </div>
             </div>
+            {% if scope_choices.schools|length > 1 %}
+            <div class="w-full sm:w-auto">
+                <label class="block text-xs font-semibold text-slate-500 mb-1"
+                       x-text="t('Sekolah','School')"></label>
+                <select name="school_id" data-scope-filter="school_id"
+                        class="input text-sm w-full sm:w-auto">
+                    <option value="" x-text="t('Semua sekolah','All schools')">All schools</option>
+                    {% for option in scope_choices.schools %}
+                    <option value="{{ option.id }}"
+                            {% if option.id == school_filter %}selected{% endif %}>{{ option.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            {% if scope_choices.teachers|length > 1 %}
+            <div class="w-full sm:w-auto">
+                <label class="block text-xs font-semibold text-slate-500 mb-1"
+                       x-text="t('Guru','Teacher')"></label>
+                <select name="teacher_id" data-scope-filter="teacher_id"
+                        class="input text-sm w-full sm:w-auto">
+                    <option value="" x-text="t('Semua guru','All teachers')">All teachers</option>
+                    {% for option in scope_choices.teachers %}
+                    <option value="{{ option.id }}"
+                            {% if option.id == teacher_filter %}selected{% endif %}>{{ option.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
             <input type="hidden" name="lang" :value="lang">
             <div class="flex gap-2">
                 <button type="submit"
                         class="px-4 py-2 bg-primary-600 text-white rounded-xl text-xs font-bold hover:bg-primary-700 transition">
                     <i class="fas fa-filter mr-1"></i><span x-text="t('Terapkan','Apply')"></span>
                 </button>
-                {% if report.date_from or report.date_to %}
+                {% if report.date_from or report.date_to or school_filter or teacher_filter %}
                 <a href="/teacher/reports?lang={{ report.lang }}"
                    class="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-50 transition">
                     <i class="fas fa-times mr-1"></i><span x-text="t('Reset','Clear')"></span>
@@ -61,6 +101,12 @@
                 {% endif %}
             </div>
         </form>
+        {% if scope_choices.schools|length > 1 or scope_choices.teachers|length > 1 %}
+        <p class="mt-3 text-xs font-medium text-slate-500">
+            <i class="fas fa-circle-info mr-1"></i>
+            <span x-text="t('Pilihan sekolah dan guru menyaring seluruh halaman ini: angkanya, daftar ujian, dan daftar kertas.','The school and teacher choices narrow this whole page: the numbers, the exam list and the paper list.')"></span>
+        </p>
+        {% endif %}
         {% if report.truncated %}
         <p class="mt-3 text-xs font-semibold text-amber-700">
             <i class="fas fa-circle-info mr-1"></i>
@@ -206,7 +252,7 @@
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
                     <input type="search" x-model="q" data-learner-filter
                            class="input text-sm pl-8 w-full"
-                           :placeholder="t('Cari nama murid atau ujian','Search a learner or an exam')">
+                           :placeholder="t('Cari murid, ujian, guru, atau sekolah','Search a learner, an exam, a teacher or a school')">
                 </div>
                 <p class="text-xs font-bold text-slate-500">
                     <span x-text="visible()"></span>
@@ -229,8 +275,16 @@
                     <p class="font-bold text-slate-800 text-sm truncate">
                         {{ row.name or '—' }}
                     </p>
+                    {# Which school and which teacher a paper belongs to, printed
+                       only when the scope holds more than one of them: for a
+                       teacher whose own exams this is, it is the same two words on
+                       every row. Three exams can share one title, so on a super
+                       admin's list this line is the only thing that separates
+                       them. #}
                     <p class="text-xs font-medium text-slate-500 truncate">
                         {{ row.exam_title }}
+                        {% if scope_choices.schools|length > 1 and row.school %}&middot; {{ row.school }}{% endif %}
+                        {% if scope_choices.teachers|length > 1 and row.teacher %}&middot; {{ row.teacher }}{% endif %}
                         {% if row.submitted_at %}&middot; {{ row.submitted_at }}{% endif %}
                     </p>
                 </div>
@@ -266,8 +320,17 @@
                matches the search, and the list is cut at the cap. A single
                "no data" line would say the first for all three. #}
             {% if not learners %}
+            {% if school_filter or teacher_filter %}
+            {# A narrowed scope with nothing in it is a different sentence from a
+               scope nobody has sat: "there is nothing here" and "you have asked
+               for a corner of it that is empty" are fixed by doing different
+               things. #}
+            <p class="p-6 sm:p-8 text-center text-sm font-medium text-slate-400"
+               x-text="t('Tidak ada kertas di sekolah atau guru yang dipilih. Hapus saringan di atas untuk melihat seluruh cakupan.','No paper in the school or teacher you chose. Clear the filters above to see the whole scope.')"></p>
+            {% else %}
             <p class="p-6 sm:p-8 text-center text-sm font-medium text-slate-400"
                x-text="t('Belum ada kertas yang bisa dibuka di cakupan ini.','No papers to open in this scope yet.')"></p>
+            {% endif %}
             {% else %}
             <p x-show="visible() === 0" x-cloak
                class="p-6 sm:p-8 text-center text-sm font-medium text-slate-400"
