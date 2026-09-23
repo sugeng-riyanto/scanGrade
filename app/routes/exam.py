@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from app.utils.auth import login_required, teacher_required, get_supabase
 from app.services.pdf_service import upload_pdf
 from app.errors import FileTooLargeError, InvalidPDFError, NotFoundError, ValidationError
+from app.utils import denials
 
 exam_bp = Blueprint("exam", __name__)
 MAX_PDF_SIZE = 50 * 1024 * 1024
@@ -97,7 +98,7 @@ def update_exam(exam_id):
     # Only allow owner teacher or admin_sekolah to update
     if existing.get("teacher_id") != g.user_id and g.get("user_role") not in ("admin_sekolah", "super_admin"):
         if existing.get("school_id") != g.get("user_school_id"):
-            return jsonify({"error": "Tidak punya akses"}), 403
+            return jsonify({"error": denials.NO_EXAM_ACCESS}), 403
     allowed = {"title", "subject", "total_questions", "duration_minutes", "mcq_percentage",
                "essay_percentage", "passing_score", "is_active", "school_id", "class_ids",
                "question_types", "answer_key", "question_weights", "question_pages",
@@ -118,6 +119,6 @@ def delete_exam(exam_id):
     # Only allow owner teacher or admin_sekolah/super_admin to delete
     if existing.get("teacher_id") != g.user_id and g.get("user_role") not in ("admin_sekolah", "super_admin"):
         if existing.get("school_id") != g.get("user_school_id"):
-            return jsonify({"error": "Tidak punya akses"}), 403
+            return jsonify({"error": denials.NO_EXAM_ACCESS}), 403
     supabase.table("exams").delete().eq("id", exam_id).execute()
     return jsonify({"ok": True})

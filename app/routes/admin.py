@@ -9,6 +9,7 @@ from app.decorators.security import require_school_access
 from app.services.notification_service import notify_approval
 from app.services.audit_service import log_activity, log_create, log_delete, fetch_audit_logs, count_audit_logs, get_activity_summary
 from app.utils.security import sanitize_input
+from app.utils import denials
 from app.services.student_import import discard_partial_account as discard_student
 from app.services.teacher_import import discard_partial_account as discard_teacher
 
@@ -95,7 +96,7 @@ def create_class():
     sid = g.get("user_school_id")
     if not sid:
         if request.is_json:
-            return jsonify({"error": "Akses ditolak: sekolah tidak terdaftar"}), 403
+            return jsonify({"error": denials.NO_SCHOOL}), 403
         return redirect("/admin-sekolah/classes")
     data = request.get_json() if request.is_json else request.form.to_dict()
     name = (data.get("name") or "").strip()

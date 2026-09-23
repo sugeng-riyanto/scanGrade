@@ -1,14 +1,20 @@
 {% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}Akses Ditolak - ScanGrade{% endblock %}
+{% block title %}Halaman Terbatas - ScanGrade{% endblock %}
 {% block content %}
+{# The page a visitor actually reads when a 403 is refused. It is pinned to
+   Indonesian (`content_lang = 'id'`) because its copy has no English half, so the
+   sentences live here rather than in `app/utils/denials.py` — and it follows the
+   same rule: what the *page* is, not what the reader did, plus the one action that
+   helps. "Akses Ditolak" and "Anda tidak memiliki izin" read as a telling-off and
+   left a reader who had merely followed a link with nothing to do. #}
 <div class="min-h-[60vh] flex items-center justify-center">
     <div class="text-center max-w-md">
         <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-amber-50 flex items-center justify-center">
             <i class="fas fa-lock text-3xl text-amber-500"></i>
         </div>
-        <h1 class="text-2xl font-extrabold text-surface-800 mb-2">Akses Ditolak</h1>
-        <p class="text-sm text-surface-500 mb-6">Anda tidak memiliki izin untuk mengakses halaman ini.</p>
+        <h1 class="text-2xl font-extrabold text-surface-800 mb-2">Halaman ini di luar akses akun Anda</h1>
+        <p class="text-sm text-surface-500 mb-6">Bila menurut Anda seharusnya halaman ini bisa dibuka, silakan hubungi admin sekolah — mereka dapat menyesuaikan akses untuk akun Anda.</p>
         <a href="/" class="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition">
             <i class="fas fa-home mr-1"></i>Kembali ke Beranda
         </a>

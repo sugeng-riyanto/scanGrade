@@ -2,6 +2,7 @@ import traceback
 
 from flask import jsonify, request, redirect, render_template
 from app.errors import ScanGradeException
+from app.utils import denials
 from app.utils.auth import login_door_for
 from app.utils.logger import get_logger
 
@@ -43,7 +44,7 @@ def register_error_handlers(app):
     @app.errorhandler(403)
     def forbidden(e):
         if _wants_json():
-            return jsonify({"success": False, "error": "FORBIDDEN", "message": "Akses ditolak"}), 403
+            return jsonify({"success": False, "error": "FORBIDDEN", "message": denials.OUT_OF_SCOPE}), 403
         return render_template("errors/403.html"), 403
 
     @app.errorhandler(404)
