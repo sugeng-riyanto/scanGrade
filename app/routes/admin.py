@@ -5,6 +5,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, render_template, g, request, jsonify, redirect, send_file, current_app
 from app.utils.auth import admin_required, super_admin_required, get_supabase, get_auth_client
+from app.decorators.security import require_school_access
 from app.services.notification_service import notify_approval
 from app.services.audit_service import log_activity, log_create, log_delete, fetch_audit_logs, count_audit_logs, get_activity_summary
 from app.utils.security import sanitize_input
@@ -84,14 +85,30 @@ def delete_student(student_id):
 @admin_bp.route("/classes/create", methods=["POST"])
 @admin_required
 def create_class():
+    # The legacy twin of `/admin-sekolah/classes/create`. It survives for a form
+    # written before the prefix moved, and it used to take `school_id` **from the
+    # POST body** (defaulting to `1`) — so an admin of any school could plant a
+    # class in any other school. The row's school is the caller's, never the
+    # request's: that is the whole of what makes this an RBAC'd write rather than
+    # a write with a guard on it.
     supabase = get_supabase()
+    sid = g.get("user_school_id")
+    if not sid:
+        if request.is_json:
+            return jsonify({"error": "Akses ditolak: sekolah tidak terdaftar"}), 403
+        return redirect("/admin-sekolah/classes")
     data = request.get_json() if request.is_json else request.form.to_dict()
+    name = (data.get("name") or "").strip()
+    if not name:
+        if request.is_json:
+            return jsonify({"error": "Nama kelas wajib diisi"}), 400
+        return redirect("/admin-sekolah/classes")
     try:
         supabase.table("classes").insert({
-            "name": data.get("name", ""),
+            "name": name,
             "grade_level": data.get("grade_level", ""),
             "teacher_id": data.get("teacher_id") or None,
-            "school_id": data.get("school_id", 1),
+            "school_id": sid,
         }).execute()
     except Exception as e:
         if request.is_json:
@@ -104,8 +121,15 @@ def create_class():
 
 @admin_bp.route("/classes/<class_id>/delete", methods=["POST"])
 @admin_required
+@require_school_access("classes", "class_id")
 def delete_class(class_id):
+    # Same twin, same fix: the id in the URL picked the row with no school in the
+    # query, so this path reached **every** school's class. `require_school_access`
+    # answers "is this row yours" for the same reason the canonical route carries
+    # it, and both tables holding a pupil's class are nulled so neither keeps an id
+    # that points at nothing.
     supabase = get_supabase()
+    supabase.table("students").update({"class_id": None}).eq("class_id", class_id).execute()
     supabase.table("profiles").update({"class_id": None}).eq("class_id", class_id).execute()
     supabase.table("classes").delete().eq("id", class_id).execute()
     if request.is_json:
