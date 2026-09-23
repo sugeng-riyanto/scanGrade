@@ -141,10 +141,16 @@
         //
         // It lives here because of a defect that had no symptom: the learner
         // report's card called a method only the analysis page defined, so its
-        // "Copy link" button did nothing at all — Alpine cannot resolve a handler
+        // Copy link button did nothing at all — Alpine cannot resolve a handler
         // that is not in scope, and a click that does nothing looks exactly like a
         // click that worked. `tests/unit/test_analysis_share.py` now fails if a page
         // draws the button without the method being reachable.
+        //
+        // No double quote may appear anywhere in this attribute, or in any other
+        // Alpine expression: the character ends the attribute, and everything after
+        // it turns into tag junk — every directive on every page stops working while
+        // the page still renders. A quoted word needs the &quot; entity instead. See
+        // tests/unit/test_alpine_expression_safety.py.
         shareNote: '',
         shareTimer: null,
         async copyShareLink() {
