@@ -11,6 +11,21 @@
    every width, so on a 375 px phone the panel — the part a teacher is actually
    reading — was about 100 px wide. #}
 <div x-data="gradingApp()" x-init="init()" class="flex flex-col min-h-0 lg:h-[calc(100vh-10rem)]" @keydown.window="handleKey($event)">
+    {# This is `_guard_exam`'s default destination, and it rendered no flash: a
+       refused caller landed here with the sentence dropped. Inside the locked
+       column rather than above it — the panel below scrolls, so an alert costs it
+       height instead of adding a scrollbar to a page that is not meant to have one. #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="shrink-0 mb-2 space-y-2">
+        {% for cat, msg in messages %}
+        <div class="p-3 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+            <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 shrink-0">
         <div class="flex items-center gap-3 min-w-0">

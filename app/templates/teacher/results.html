@@ -3,7 +3,21 @@
 {% block title %}Hasil - ScanGrade{% endblock %}
 {% block page_title %}Hasil Ujian{% endblock %}
 {% block content %}
+{# This page is where `_deny` sends a teacher who opened somebody else's paper —
+   every analysis route redirects here — and it rendered no flash at all, so the
+   sentence was dropped and the reader landed on a page with no explanation. Same
+   block the other pages use, so the message looks the same wherever it lands. #}
 <div class="space-y-4 sm:space-y-6 teacher-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
             <h1 class="text-xl sm:text-2xl font-extrabold text-stone-800">{{ exam.title if exam_id else 'Hasil Ujian' }}</h1>

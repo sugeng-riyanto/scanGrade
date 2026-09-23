@@ -3,7 +3,20 @@
 {% block title %}Ujian Saya - ScanGrade{% endblock %}
 {% block page_title %}Ujian Saya{% endblock %}
 {% block content %}
+{# `_deny` sends a refused caller here too, and this page rendered no flash at all:
+   the sentence was dropped and the reader landed somewhere with no explanation. Same
+   block the other pages use, so a message looks the same wherever it lands. #}
 <div class="space-y-6" x-data="{ filter: 'all', search: '' }">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
