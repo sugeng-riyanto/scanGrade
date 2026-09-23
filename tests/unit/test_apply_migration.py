@@ -610,3 +610,97 @@ def test_the_cli_offers_verify_without_needing_a_file():
     assert 'add_argument("--verify"' in SOURCE
     assert "if args.verify:" in SOURCE
     assert "connect_readonly" in SOURCE, "verify must not open a writable session"
+
+
+# ── identifiers the SQL files spell in quotes ────────────────────────────────
+
+def _declared_from(path: Path) -> set[str]:
+    """The keys `--verify` would compute for a real file on disk."""
+    masked, _hidden = app_mig.mask_do_bodies(
+        app_mig.strip_sql_comments(path.read_text(encoding="utf-8-sig")))
+    return {key for _kind, key, _index in app_mig.declared_objects(masked)}
+
+
+def test_a_quoted_table_name_is_read_whole():
+    """`"school-payment-demo"` is the case that mattered: the bare pattern stopped
+    at the hyphen, so the object was read as `school` and a table that is present in
+    the catalogue was reported missing — which is what made 027 read PARTIAL."""
+    keys = [key for _, key, _ in app_mig.declared_objects(
+        'CREATE TABLE IF NOT EXISTS "school-payment-demo" (id BIGINT);')]
+
+    assert keys == ["table school-payment-demo"]
+
+
+def test_a_quoted_policy_name_is_read_whole_and_its_drop_matches():
+    declared = [key for _, key, _ in app_mig.declared_objects(
+        'CREATE POLICY "read own" ON schools FOR SELECT USING (true);')]
+    dropped = app_mig.dropped_names('DROP POLICY IF EXISTS "read own" ON schools;')
+
+    assert declared == ["policy schools.read own"]
+    assert list(dropped) == ["read own"], (
+        "a drop is matched against `bare_name`, so a quoted drop has to dequote to "
+        "the same spelling the declaration produced")
+
+
+def test_an_unquoted_name_is_folded_the_way_postgres_folds_it():
+    """Postgres lower-cases an unquoted identifier, and the snapshot's keys come
+    from the catalogue — so `CREATE TABLE Foo` is `foo` and nothing else."""
+    keys = [key for _, key, _ in app_mig.declared_objects("CREATE TABLE Foo (id uuid);")]
+
+    assert keys == ["table foo"]
+
+
+def test_the_real_027_reads_its_quoted_table_off_the_file():
+    """Tied to the file the fix was written for, so it cannot decay into a unit test
+    of a regex that no migration in this repository exercises."""
+    path = ROOT / "supabase" / "migrations" / "027_schema_contract_drift.sql"
+
+    assert "table school-payment-demo" in _declared_from(path)
+
+
+# ── the objects a later generation replaced under a different name ───────────
+
+def test_every_superseded_entry_names_a_real_file_and_a_reason():
+    for file_name, entries in app_mig.SUPERSEDED.items():
+        path = ROOT / "supabase" / "migrations" / file_name
+        assert path.is_file(), f"{file_name} is not a migration file"
+        for key, reason in entries.items():
+            assert reason.strip(), f"{file_name}: {key} carries no reason"
+
+
+def test_every_superseded_entry_names_something_its_file_really_declares():
+    """The table can only excuse an object the file declares. An entry that stops
+    matching is a reason nobody reads — and the next absent object would then be
+    excused by nothing at all, which is the state this table exists to prevent."""
+    for file_name, entries in app_mig.SUPERSEDED.items():
+        declared = _declared_from(ROOT / "supabase" / "migrations" / file_name)
+        for key in entries:
+            assert key in declared, f"{file_name} no longer declares {key}"
+
+
+def test_a_named_superseded_object_is_reported_with_its_reason_not_as_a_gap(
+        monkeypatch, tmp_path, capsys):
+    code, _ = _verify(monkeypatch, tmp_path, {
+        "001_enable_rls_and_policies.sql":
+            "CREATE POLICY schools_read_own ON schools FOR SELECT USING (true);",
+    }, live={"table schools"})
+
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "MISSING" not in out
+    assert "SUPERSEDED  policy schools.schools_read_own" in out
+    assert "_COMPLETE_SETUP.sql" in out
+
+
+def test_the_named_exception_does_not_leak_to_another_file(monkeypatch, tmp_path,
+                                                           capsys):
+    """The entry is keyed by file as well as by object, so the same statement in a
+    different migration is still judged as whatever that file makes of it."""
+    code, _ = _verify(monkeypatch, tmp_path, {
+        "099_something_else.sql":
+            "CREATE POLICY schools_read_own ON schools FOR SELECT USING (true);",
+    }, live={"table schools"})
+
+    out = capsys.readouterr().out
+    assert code == 6, out
+    assert "MISSING  policy schools.schools_read_own" in out
