@@ -75,6 +75,82 @@ def _school_id() -> str | None:
     return sid
 
 
+def _wants_json() -> bool:
+    """A browser form gets flash + redirect; an API caller gets the answer.
+
+    The same test `admin_subject_delete` already applies inline — named here
+    because the class CRUD answers four routes with it.
+    """
+    return request.is_json or "application/json" in (request.headers.get("Accept") or "")
+
+
+def _back_to(default: str) -> str:
+    r"""Where a form goes once it has answered.
+
+    Only this blueprint's own pages, and only as a path: `next` comes off the
+    wire, so `https://evil.example` or `//evil.example` would make every one of
+    these writes an open redirect, and a browser reads `\` as `/` before it
+    parses the URL — hence both are refused rather than only the obvious one.
+    Anything else falls back to *default*, so a caller that sends nothing still
+    lands somewhere real instead of about:blank.
+    """
+    from urllib.parse import urlsplit
+
+    target = request.form.get("next") or request.args.get("next") or ""
+    if "\\" in target:
+        return default
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc:
+        return default
+    if not parts.path.startswith("/admin-sekolah/"):
+        return default
+    return target
+
+
+def _class_in_school(supabase, class_id, sid) -> dict | None:
+    """The class row when it belongs to *this* school, otherwise nothing.
+
+    Every id in a form decides which class is read and whose students are moved.
+    Without `school_id` in the very same query, the promote form would move
+    **another school's** students into a class of ours — a write, across the one
+    boundary this app's RBAC is built on — and the check is also what stops the
+    crash it used to be: `.single()` on a class that is not ours has no row, and
+    the page answered 500.
+    """
+    if not class_id or not sid:
+        return None
+    rows = (supabase.table("classes")
+            .select("id, name, grade_level, school_id, teacher_id, school_year_id")
+            .eq("id", class_id).eq("school_id", sid)
+            .limit(1).execute().data or [])
+    return rows[0] if rows else None
+
+
+def _teacher_in_school(supabase, teacher_id, sid) -> bool:
+    """Whether `classes.teacher_id` may point at this id.
+
+    The column references **profiles**, so that is the table asked — a teacher id
+    typed in from outside the school would otherwise hang off our class in a
+    dropdown another admin reads.
+    """
+    if not teacher_id or not sid:
+        return not teacher_id
+    rows = (supabase.table("profiles").select("id")
+            .eq("id", teacher_id).eq("role", "guru").eq("school_id", sid)
+            .limit(1).execute().data or [])
+    return bool(rows)
+
+
+def _year_in_school(supabase, year_id, sid) -> bool:
+    """Whether `classes.school_year_id` may point at this id."""
+    if not year_id or not sid:
+        return not year_id
+    rows = (supabase.table("school_years").select("id")
+            .eq("id", year_id).eq("school_id", sid)
+            .limit(1).execute().data or [])
+    return bool(rows)
+
+
 
 
 
@@ -631,18 +707,32 @@ def classes():
 def create_class():
     sid = _school_id()
     supabase = get_supabase()
+    wants_json = _wants_json()
+    back = _back_to("/admin-sekolah/classes")
+
+    def refuse(message, code=400):
+        if wants_json:
+            return jsonify({"error": message}), code
+        flash(message, "error")
+        return redirect(back)
+
     name = request.form.get("name", "").strip()
     grade_level = request.form.get("grade_level", "").strip()
     wali_id = request.form.get("wali_kelas_id") or None
     year_id = request.form.get("school_year_id") or None
     if not name:
-        flash("Nama kelas wajib diisi", "error")
-        return redirect("/admin-sekolah/classes")
+        return refuse("Nama kelas wajib diisi")
     # Check duplicate across all roles
     dup = supabase.table("classes").select("id").eq("school_id", sid).eq("name", name).limit(1).execute()
     if dup.data:
-        flash(f"Kelas '{name}' sudah ada", "error")
-        return redirect("/admin-sekolah/classes")
+        return refuse(f"Kelas '{name}' sudah ada")
+    # The two ids the form may attach are checked against *this* school: a teacher
+    # or a school year chosen from anywhere else would hang our class off somebody
+    # else's roster, and nothing downstream re-checks it.
+    if not _teacher_in_school(supabase, wali_id, sid):
+        return refuse("Guru tersebut bukan milik sekolah ini", 403)
+    if not _year_in_school(supabase, year_id, sid):
+        return refuse("Tahun ajaran bukan milik sekolah ini", 403)
     try:
         res = supabase.table("classes").insert({
             "name": name, "grade_level": grade_level, "school_id": sid,
@@ -651,10 +741,12 @@ def create_class():
         cid = res.data[0]["id"] if res.data else None
         invalidate_school(sid)          # the class list is cached per school
         log_activity("create", "class", cid, new_data={"name": name, "grade_level": grade_level}, user_id=g.user_id)
+        if wants_json:
+            return jsonify({"success": True, "id": cid})
         flash("Kelas berhasil ditambahkan", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
-    return redirect("/admin-sekolah/classes")
+        return refuse(f"Gagal: {e}")
+    return redirect(back)
 
 
 @admin_sekolah_bp.route("/classes/<class_id>/edit", methods=["POST"])
@@ -662,22 +754,51 @@ def create_class():
 @require_school_access("classes", "class_id")
 def edit_class(class_id):
     supabase = get_supabase()
-    data = {}
-    for key in ("name", "grade_level"):
-        val = request.form.get(key)
-        if val is not None:
-            data[key] = val.strip()
-    wali = request.form.get("wali_kelas_id")
-    data["teacher_id"] = wali if wali else None
-    year_id = request.form.get("school_year_id")
-    data["school_year_id"] = year_id if year_id else None
+    wants_json = _wants_json()
+    sid = _school_id()
+    back = _back_to("/admin-sekolah/classes")
+
+    def refuse(message, code=400):
+        if wants_json:
+            return jsonify({"error": message}), code
+        flash(message, "error")
+        return redirect(back)
+
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        return refuse("Nama kelas wajib diisi")
+    wali_id = request.form.get("wali_kelas_id") or None
+    year_id = request.form.get("school_year_id") or None
+    if not _teacher_in_school(supabase, wali_id, sid):
+        return refuse("Guru tersebut bukan milik sekolah ini", 403)
+    if not _year_in_school(supabase, year_id, sid):
+        return refuse("Tahun ajaran bukan milik sekolah ini", 403)
+    # Duplicate name (excluding this row), the rule `/classes/create` already
+    # applies: two "7A" rows would split one class in every dropdown on this page.
+    dup = (supabase.table("classes").select("id").eq("school_id", sid)
+           .eq("name", name).neq("id", class_id).limit(1).execute())
+    if dup.data:
+        return refuse(f"Kelas '{name}' sudah ada")
+    data = {
+        "name": name,
+        "grade_level": (request.form.get("grade_level") or "").strip(),
+        "teacher_id": wali_id,
+        "school_year_id": year_id,
+    }
     try:
-        supabase.table("classes").update(data).eq("id", class_id).execute()
+        # `school_id` in the update as well as in the decorator: the row was
+        # checked a moment ago, and this keeps the write on the same row the check
+        # saw rather than on whatever the id points at now.
+        supabase.table("classes").update(data).eq("id", class_id).eq("school_id", sid).execute()
         invalidate_class(class_id)
         invalidate_school(g.get("user_school_id"))
-        return jsonify({"success": True})
+        log_activity("update", "class", class_id, new_data={"name": name}, user_id=g.user_id)
+        if wants_json:
+            return jsonify({"success": True})
+        flash("Kelas berhasil diperbarui", "success")
+        return redirect(back)
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return refuse(f"Gagal: {e}")
 
 
 @admin_sekolah_bp.route("/classes/<class_id>/delete", methods=["POST"])
@@ -685,14 +806,62 @@ def edit_class(class_id):
 @require_school_access("classes", "class_id")
 def delete_class(class_id):
     supabase = get_supabase()
+    wants_json = _wants_json()
+    back = _back_to("/admin-sekolah/classes")
+
+    # What this delete takes with it — the question `subject_service` already
+    # answers for subjects. The dialog is drawn from this count on the page, but
+    # a bare POST carries no dialog, so the server counts it again: an unconfirmed
+    # delete of a class holding pupils is refused with the number in the sentence.
+    measured = True
     try:
+        occupants = (supabase.table("students").select("id", count="exact")
+                     .eq("class_id", class_id).execute().count or 0)
+    except Exception:
+        # A read that fails is **not** a count of zero — that is the difference
+        # between "nobody is in it" and "we could not tell", and only the first
+        # one may be deleted without asking. Observed live: a dropped connection
+        # during the count returned 0 here and walked straight into the delete of
+        # a class holding a pupil.
+        measured = False
+        occupants = 0
+    if request.form.get("confirm") != "1":
+        if not measured:
+            message = ("Jumlah murid di kelas ini tidak bisa dibaca, jadi tidak "
+                       "diketahui apa yang akan ikut terhapus — ulangi dengan "
+                       "konfirmasi bila Anda yakin.")
+            if wants_json:
+                return jsonify({"error": message, "needs_confirmation": True}), 409
+            flash(message, "warning")
+            return redirect(back)
+        if occupants:
+            message = (f"Kelas ini masih berisi {occupants} murid. Menghapusnya akan "
+                       "melepas semua murid dari kelas ini — bukan memindahkannya — "
+                       "ulangi untuk menghapus.")
+            if wants_json:
+                return jsonify({"error": message, "needs_confirmation": True}), 409
+            flash(message, "warning")
+            return redirect(back)
+    try:
+        # Both tables carry a pupil's class — `students.class_id` is what the
+        # promote form counts, `profiles.class_id` is what the roster reads — so
+        # nulling one and leaving the other leaves a class id pointing at a row
+        # that no longer exists.
         supabase.table("students").update({"class_id": None}).eq("class_id", class_id).execute()
+        supabase.table("profiles").update({"class_id": None}).eq("class_id", class_id).execute()
         supabase.table("classes").delete().eq("id", class_id).execute()
         invalidate_class(class_id)
         invalidate_school(g.get("user_school_id"))
-        return jsonify({"success": True})
+        log_activity("delete", "class", str(class_id), user_id=g.user_id)
+        if wants_json:
+            return jsonify({"success": True})
+        flash("Kelas berhasil dihapus", "success")
+        return redirect(back)
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        if wants_json:
+            return jsonify({"error": str(e)}), 400
+        flash(f"Gagal: {e}", "error")
+        return redirect(back)
 
 
 # ─── SUBJECTS CRUD ────────────────────────────────────
@@ -822,32 +991,55 @@ def promote():
     supabase = get_supabase()
 
     if request.method == "POST":
+        wants_json = _wants_json()
         source_class_id = request.form.get("source_class_id")
         target_class_id = request.form.get("target_class_id")
         create_new = request.form.get("create_new") == "1"
         confirmed = request.form.get("confirmed") == "1"
+        year_id = request.form.get("school_year_id") or None
+
+        def refuse(message, code=400):
+            """One refusal, in the shape the caller asked for."""
+            if wants_json:
+                return jsonify({"error": message}), code
+            flash(message, "error")
+            return redirect("/admin-sekolah/promote")
 
         if not source_class_id:
-            flash("Pilih kelas asal", "error")
-            return redirect("/admin-sekolah/promote")
+            return refuse("Pilih kelas asal")
+
+        # Whose class is this? Answered **before** the preview reads it, because
+        # the preview is the read: a form field was the only thing deciding which
+        # school's students got listed, then moved. Both ids are checked here, on
+        # the same tick, whether or not the request says it is confirmed.
+        src = _class_in_school(supabase, source_class_id, sid)
+        if src is None:
+            return refuse("Kelas asal bukan milik sekolah ini", 403)
+        if not create_new:
+            if not target_class_id:
+                return refuse("Pilih atau buat kelas tujuan")
+            tgt = _class_in_school(supabase, target_class_id, sid)
+            if tgt is None:
+                return refuse("Kelas tujuan bukan milik sekolah ini", 403)
+        elif not _year_in_school(supabase, year_id, sid):
+            return refuse("Tahun ajaran bukan milik sekolah ini", 403)
 
         # Preview mode: show students before executing
         if not confirmed:
-            src_class = supabase.table("classes").select("name,grade_level").eq("id", source_class_id).single().execute().data or {}
             students_to_move = supabase.table("students").select("id, profiles!inner(full_name)").eq("class_id", source_class_id).eq("status", "active").execute().data or []
             preview_students = []
             for s in students_to_move:
                 prof = s.get("profiles") or {}
                 preview_students.append({"name": prof.get("full_name", "?"), "id": s["id"]})
-            # Get target class info
+            # Get target class info — both rows were read from *this* school above,
+            # so the names on this screen are ours to show.
             target_info = {"name": "Kelas Baru", "id": ""}
             if create_new:
                 target_info["name"] = request.form.get("new_class_name", "Kelas Baru")
-            elif target_class_id:
-                tc = supabase.table("classes").select("name").eq("id", target_class_id).single().execute().data or {}
-                target_info = {"name": tc.get("name", "?"), "id": target_class_id}
+            else:
+                target_info = {"name": tgt.get("name", "?"), "id": target_class_id}
             return render_template("admin_sekolah/promote_confirm.html",
-                                   source_name=src_class.get("name", "?"),
+                                   source_name=src.get("name", "?"),
                                    target_name=target_info["name"],
                                    students=preview_students,
                                    source_class_id=source_class_id,
@@ -857,25 +1049,26 @@ def promote():
                                    school_year_id=request.form.get("school_year_id", ""))
 
         # Confirmed: execute the promotion
-        src = supabase.table("classes").select("*").eq("id", source_class_id).single().execute().data
-
         if create_new:
             new_name = request.form.get("new_class_name", "").strip()
             new_level = request.form.get("new_grade_level", "").strip()
-            year_id = request.form.get("school_year_id") or None
             if not new_name:
-                flash("Nama kelas baru wajib diisi", "error")
-                return redirect("/admin-sekolah/promote")
+                return refuse("Nama kelas baru wajib diisi")
+            # The same duplicate rule `/classes/create` applies: a second "7A"
+            # would split one class across two rows in every dropdown below.
+            dup = (supabase.table("classes").select("id")
+                   .eq("school_id", sid).eq("name", new_name).limit(1).execute())
+            if dup.data:
+                return refuse(f"Kelas '{new_name}' sudah ada")
             res = supabase.table("classes").insert({
                 "name": new_name, "grade_level": new_level or src.get("grade_level", ""),
                 "school_id": sid, "school_year_id": year_id,
+                "created_by": g.user_id,
             }).execute()
             invalidate_school(sid)
             target_class_id = res.data[0]["id"] if res.data else None
-
-        if not target_class_id:
-            flash("Pilih atau buat kelas tujuan", "error")
-            return redirect("/admin-sekolah/promote")
+            if not target_class_id:
+                return refuse("Gagal membuat kelas tujuan")
 
         # Move students
         students = supabase.table("students").select("id").eq("class_id", source_class_id).eq("status", "active").execute().data or []
@@ -891,7 +1084,9 @@ def promote():
         flash(f"{moved} murid berhasil dipindahkan ke kelas tujuan", "success")
         return redirect("/admin-sekolah/promote")
 
-    classes_list = supabase.table("classes").select("*, school_years!left(name)").eq("school_id", sid).order("name").execute().data or []
+    classes_list = (supabase.table("classes")
+                    .select("*, school_years!left(name), profiles!classes_teacher_id_fkey(full_name)")
+                    .eq("school_id", sid).order("name").execute().data or [])
     for c in classes_list:
         try:
             sc = supabase.table("profiles").select("id", count="exact").eq("role", "murid").eq("school_id", sid).eq("class_id", c["id"]).execute()
@@ -899,6 +1094,7 @@ def promote():
         except Exception:
             c["student_count"] = 0
         c["school_year_name"] = (c.get("school_years") or {}).get("name", "")
+        c["wali_kelas"] = (c.get("profiles") or {}).get("full_name", "")
     teachers = supabase.table("profiles").select("id, full_name").eq("role", "guru").eq("school_id", sid).execute().data or []
     years = supabase.table("school_years").select("*").eq("school_id", sid).order("name", desc=True).execute().data or []
     return render_template("admin_sekolah/promote.html", classes=classes_list, teachers=teachers, years=years)

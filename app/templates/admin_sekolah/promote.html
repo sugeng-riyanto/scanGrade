@@ -3,6 +3,17 @@
 {% block title %}Naik Kelas - ScanGrade{% endblock %}
 {% block page_title %}Naik Kelas{% endblock %}
 {% block content %}
+{# This page is pinned Indonesian (`content_lang` above), so its copy is written
+   as plain Indonesian like the rest of it — no `t()` pairs, because a pair on a
+   pinned page can never render its English half and the i18n gate rejects a page
+   that becomes frozen. Its floors live in deploy/i18n_baseline.json at 0 pairs.
+
+   The card below is the CRUD the promote form has always needed: the two
+   dropdowns are filled from these classes, and until now a class could only be
+   managed from another page — so the common case was two pages for one job. Every
+   form here posts to the same guarded routes `/admin-sekolah/classes/*` (role
+   `admin_sekolah`, `require_school_access` on the id) and carries `next`, so the
+   answer comes back to this page with its flash message. #}
 <div class="max-w-3xl mx-auto space-y-6">
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -37,7 +48,7 @@
 
             <div x-data="{ targetType: 'existing' }">
                 <label class="block text-sm font-bold text-stone-700 mb-3">Kelas Tujuan</label>
-                <div class="flex gap-3 mb-3">
+                <div class="flex flex-wrap gap-3 mb-3">
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="radio" name="target_type" value="existing" x-model="targetType"
                                class="w-4 h-4 text-orange-500 focus:ring-orange-500">
@@ -61,9 +72,12 @@
                     </select>
                 </div>
 
-                <!-- New class -->
-                <div x-show="targetType === 'new'" x-collapse class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
+                <!-- New class. The year is sent with it: the POST has always read
+                     `school_year_id`, but no field ever sent it, so a class created
+                     here arrived with no year and every dropdown printed a blank
+                     after its name. -->
+                <div x-show="targetType === 'new'" x-collapse class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="sm:col-span-1">
                         <label class="block text-sm font-bold text-stone-700 mb-1.5">Nama Kelas Baru</label>
                         <input type="text" name="new_class_name" placeholder="Contoh: 8A"
                                class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
@@ -74,6 +88,16 @@
                                 class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
                             {% for g in ['7', '8', '9', '10', '11', '12'] %}
                             <option value="{{ g }}">Kelas {{ g }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-stone-700 mb-1.5">Tahun Ajaran</label>
+                        <select name="school_year_id"
+                                class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                            <option value="">- Pilih Tahun -</option>
+                            {% for sy in years %}
+                            <option value="{{ sy.id }}" {% if sy.is_active %}selected{% endif %}>{{ sy.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -90,6 +114,140 @@
                 <i class="fas fa-arrow-up mr-2"></i>Naikkan Kelas
             </button>
         </form>
+    </div>
+
+    <!-- ── Kelas: CRUD yang dua dropdown di atas membacanya ─────────────── -->
+    <div class="card p-6 lg:p-8" x-data="{ showForm: false }">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center"><i class="fas fa-school text-xl"></i></div>
+                <div>
+                    <h3 class="font-extrabold text-stone-800">Kelola Kelas</h3>
+                    <p class="text-sm text-stone-500 font-medium">{{ classes|length }} kelas di sekolah ini — tambah, ubah, atau hapus.</p>
+                </div>
+            </div>
+            <button @click="showForm=!showForm" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-orange-500/25 transition">
+                <i class="fas fa-plus mr-1"></i>Tambah Kelas
+            </button>
+        </div>
+
+        <!-- Tambah. `next` brings the flash back to this page instead of the class list. -->
+        <div x-show="showForm" x-collapse class="mb-5 border border-orange-200 rounded-xl p-4 sm:p-5 bg-stone-50">
+            <form method="POST" action="/admin-sekolah/classes/create" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <input type="hidden" name="next" value="/admin-sekolah/promote">
+                <div>
+                    <label class="block text-sm font-bold text-stone-700 mb-1.5">Nama Kelas</label>
+                    <input type="text" name="name" required placeholder="Contoh: 7A"
+                           class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-stone-700 mb-1.5">Tingkat</label>
+                    <select name="grade_level"
+                            class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                        {% for g in ['7', '8', '9', '10', '11', '12'] %}
+                        <option value="{{ g }}">Kelas {{ g }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-stone-700 mb-1.5">Wali Kelas</label>
+                    <select name="wali_kelas_id"
+                            class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                        <option value="">- Pilih Guru -</option>
+                        {% for teacher in teachers %}
+                        <option value="{{ teacher.id }}">{{ teacher.full_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-stone-700 mb-1.5">Tahun Ajaran</label>
+                    <select name="school_year_id"
+                            class="w-full px-4 py-3 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-stone-700 font-medium bg-white transition">
+                        <option value="">- Pilih Tahun -</option>
+                        {% for sy in years %}
+                        <option value="{{ sy.id }}" {% if sy.is_active %}selected{% endif %}>{{ sy.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="sm:col-span-2 flex flex-col sm:flex-row gap-3 pt-1">
+                    <button type="button" @click="showForm=false" class="flex-1 py-2.5 border border-stone-200 rounded-xl font-bold text-stone-600 hover:bg-stone-100 transition">Batal</button>
+                    <button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-bold shadow-lg shadow-orange-500/25 transition">Simpan Kelas</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="divide-y divide-stone-50">
+            {% for c in classes %}
+            <div class="py-4 flex flex-wrap items-center justify-between gap-3" x-data="{ editing: false }">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 shrink-0 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center font-extrabold">{{ c.grade_level }}</div>
+                    <div class="min-w-0">
+                        <p class="font-bold text-stone-700">{{ c.name }}</p>
+                        <p class="text-xs text-stone-400 font-medium truncate">
+                            {% if c.wali_kelas %}Wali: {{ c.wali_kelas }} &middot; {% endif %}{{ c.student_count or 0 }} murid{% if c.school_year_name %} &middot; {{ c.school_year_name }}{% endif %}
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="editing=!editing" class="text-xs font-bold px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition border border-amber-200">
+                        <i class="fas fa-edit mr-1"></i>Ubah
+                    </button>
+                    {# The dialog names the real count and the form sends
+                       `confirm=1`; the route counts the occupants again and
+                       refuses a bare POST, because a dialog is not a promise a
+                       server can check. #}
+                    <form method="POST" action="/admin-sekolah/classes/{{ c.id }}/delete"
+                          class="inline"
+                          @submit.prevent="if (confirm('Hapus kelas {{ c.name }}? {{ c.student_count or 0 }} murid akan dilepas dari kelas ini.')) $el.submit()">
+                        <input type="hidden" name="next" value="/admin-sekolah/promote">
+                        <input type="hidden" name="confirm" value="1">
+                        <button type="submit" class="text-xs font-bold px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200">
+                            <i class="fas fa-trash mr-1"></i>Hapus
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Ubah inline: same row, same page, `next` back to this list. -->
+                <div x-show="editing" x-collapse x-cloak class="w-full mt-3">
+                    <form method="POST" action="/admin-sekolah/classes/{{ c.id }}/edit"
+                          class="grid grid-cols-1 sm:grid-cols-4 gap-3 p-4 bg-stone-50 rounded-xl">
+                        <input type="hidden" name="next" value="/admin-sekolah/promote">
+                        <input type="text" name="name" value="{{ c.name }}" required
+                               class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium">
+                        <select name="grade_level"
+                                class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium bg-white">
+                            {% for g in ['7', '8', '9', '10', '11', '12'] %}
+                            <option value="{{ g }}" {% if c.grade_level == g %}selected{% endif %}>Kelas {{ g }}</option>
+                            {% endfor %}
+                        </select>
+                        <select name="wali_kelas_id"
+                                class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium bg-white">
+                            <option value="">- Wali Kelas -</option>
+                            {% for teacher in teachers %}
+                            <option value="{{ teacher.id }}" {% if c.teacher_id == teacher.id %}selected{% endif %}>{{ teacher.full_name }}</option>
+                            {% endfor %}
+                        </select>
+                        <select name="school_year_id"
+                                class="px-3 py-2 border border-stone-200 rounded-lg text-sm font-medium bg-white">
+                            <option value="">- Tahun Ajaran -</option>
+                            {% for sy in years %}
+                            <option value="{{ sy.id }}" {% if c.school_year_id == sy.id %}selected{% endif %}>{{ sy.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="sm:col-span-4 flex gap-3">
+                            <button type="button" @click="editing=false" class="flex-1 py-2 border border-stone-200 rounded-lg font-bold text-stone-600 hover:bg-stone-100 transition text-sm">Batal</button>
+                            <button type="submit" class="flex-1 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-sm hover:bg-emerald-200 transition">Simpan</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            {% else %}
+            <div class="px-2 py-10 text-center text-stone-400 font-medium">
+                <i class="fas fa-school text-3xl mb-2 block text-stone-300"></i>
+                Belum ada kelas. Tambahkan kelas pertama di atas, lalu gunakan dropdown di form promosi.
+            </div>
+            {% endfor %}
+        </div>
     </div>
 </div>
 {% endblock %}
