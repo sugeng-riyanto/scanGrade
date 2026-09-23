@@ -245,6 +245,12 @@ def create_app(env=None):
     app.jinja_env.globals["cos"] = _math.cos
     app.jinja_env.globals["sin"] = _math.sin
 
+    # The topbar's trail. Structure in the module (which crumbs a path has, where
+    # each points, which one is the page being read) and the words in the template
+    # beside every other string the reader sees — see `app/utils/breadcrumbs.py`.
+    from app.utils.breadcrumbs import trail as _breadcrumb_trail
+    app.jinja_env.globals["breadcrumb_trail"] = _breadcrumb_trail
+
     from app.utils.csrf import generate_csrf_token, csrf_required
     from app.utils.auth import login_required
     app.jinja_env.globals["csrf_token"] = generate_csrf_token
