@@ -354,68 +354,153 @@
                     <i class="fas fa-bars text-lg"></i>
                 </button>
                 <!-- Breadcrumb -->
-                {# A crumb is a *place*, so an identifier is not one. The trail used
+                {# The trail, built by `app/utils/breadcrumbs.py`: which crumbs a path
+                   has, where each one points, and which is the page being read.
+
+                   A crumb is a *place*, so an identifier is not one. The trail used
                    to be the URL split on '/', title-cased, which put a submission
                    UUID in the header of every dynamic page: on
                    /teacher/grade/<uuid> a teacher read "Aab13794 F5cf 4512 89f6
-                   2632788d4e92" where a page name should be — a meaningless
-                   36-character token, and the widest thing in the chrome on a
-                   phone. Route words are named in both languages (so the trail
-                   follows the toggle with the rest of the chrome); segments that
-                   look like an identifier are dropped. #}
+                   2632788d4e92" where a page name should be. It also named the
+                   URL's prefix rather than the reader — a school admin opening a
+                   teacher's exam analysis read "Teacher" — and its home link went
+                   through the legacy `/admin/dashboard`, which 308s into the
+                   super-admin panel a school admin may not open.
+
+                   The *words* are here, beside every other string the reader sees
+                   and where the coverage gate counts them; the *structure* is in
+                   the module. A test holds the two together: every page segment the
+                   app serves as a GET route is named below (or is a machine
+                   endpoint/artifact listed in the module), so a new page cannot
+                   quietly arrive without a name. #}
+                {% set _crumb_areas = {
+                    'admin_sekolah': ('Admin Sekolah', 'School Admin'),
+                    'guru': ('Guru', 'Teacher'),
+                    'murid': ('Murid', 'Student'),
+                    'super_admin': ('Super Admin', 'Super Admin')
+                } %}
                 {% set _crumb_labels = {
-                    'teacher': ('Guru', 'Teacher'),
-                    'student': ('Murid', 'Student'),
-                    'admin': ('Admin', 'Admin'),
-                    'admin-sekolah': ('Admin Sekolah', 'School Admin'),
-                    'super-admin': ('Super Admin', 'Super Admin'),
+                    'account': ('Akun', 'Account'),
+                    'accreditation-report': ('Laporan Akreditasi', 'Accreditation Report'),
+                    'activation-codes': ('Kode Aktivasi', 'Activation Codes'),
+                    'ai-settings': ('Koreksi AI', 'AI Grading'),
+                    'analysis': ('Analisis Butir', 'Item Analysis'),
+                    'analytics': ('Analitik', 'Analytics'),
+                    'answer-keys': ('Kunci Jawaban', 'Answer Keys'),
+                    'assignments': ('Penugasan', 'Assignments'),
+                    'capacity': ('Kapasitas', 'Capacity'),
+                    'cheat-analysis': ('Deteksi Curang', 'Cheat Analysis'),
+                    'classes': ('Kelas', 'Classes'),
+                    'comms': ('Pesan & Pengumuman', 'Messages & Announcements'),
+                    'compliance': ('Kepatuhan', 'Compliance'),
                     'dashboard': ('Dasbor', 'Dashboard'),
-                    'exams': ('Ujian', 'Exams'),
+                    'deletion-requests': ('Permintaan Penghapusan', 'Deletion Requests'),
+                    'deletion-status': ('Status Penghapusan', 'Deletion Status'),
+                    'demo': ('Demo', 'Demo'),
+                    'demo-settings': ('Pengaturan Demo', 'Demo Settings'),
+                    'deploy-status': ('Kesiapan Runner', 'Runner Health'),
+                    'device-preview': ('Pratinjau Perangkat', 'Device Preview'),
+                    'edit': ('Ubah', 'Edit'),
                     'exam': ('Ujian', 'Exam'),
+                    'exams': ('Ujian', 'Exams'),
+                    'feature-flags': ('Flag Fitur', 'Feature Flags'),
+                    'file-management': ('Manajemen File', 'File Management'),
+                    'generate-answer-sheet': ('Lembar Jawaban', 'Answer Sheets'),
+                    'generate-email': ('Buat Email', 'Compose Email'),
                     'grade': ('Koreksi', 'Grading'),
+                    'grade-question': ('Koreksi per Soal', 'Grade by Question'),
                     'grading': ('Koreksi', 'Grading'),
                     'grading-queue': ('Antrean Koreksi', 'Grading Queue'),
-                    'results': ('Hasil', 'Results'),
-                    'submissions': ('Pengumpulan', 'Submissions'),
-                    'students': ('Murid', 'Students'),
-                    'teachers': ('Guru', 'Teachers'),
-                    'subjects': ('Mata Pelajaran', 'Subjects'),
-                    'classes': ('Kelas', 'Classes'),
+                    'guide': ('Panduan', 'Guide'),
                     'import': ('Impor', 'Import'),
-                    'settings': ('Pengaturan', 'Settings'),
-                    'analytics': ('Analitik', 'Analytics'),
-                    'proctoring': ('Pengawasan', 'Proctoring'),
-                    'reports': ('Laporan', 'Reports'),
                     'invoices': ('Tagihan', 'Invoices'),
-                    'compliance': ('Kepatuhan', 'Compliance'),
+                    'logs': ('Log Audit', 'Audit Log'),
+                    'manage': ('Kelola', 'Manage'),
+                    'midtrans': ('Midtrans', 'Midtrans'),
+                    'new': ('Baru', 'New'),
+                    'omr-test': ('Uji OMR', 'OMR Test'),
+                    'payment': ('Pembayaran', 'Payment'),
+                    'payment-fee-settings': ('Biaya Admin', 'Admin Fees'),
+                    'pdp': ('Perlindungan Data', 'Data Protection'),
+                    'penalty-appeals': ('Banding Penalti', 'Penalty Appeals'),
+                    'pengumuman': ('Pengumuman', 'Announcements'),
+                    'percakapan': ('Percakapan', 'Conversations'),
+                    'pesan': ('Pesan', 'Messages'),
+                    'plans': ('Paket Harga', 'Pricing Plans'),
+                    'preview': ('Pratinjau', 'Preview'),
+                    'pricing': ('Harga', 'Pricing'),
+                    'pricing-settings': ('Model Harga', 'Pricing Model'),
+                    'print': ('Cetak', 'Print'),
+                    'privacy': ('Privasi', 'Privacy'),
+                    'privacy-info': ('Info Privasi', 'Privacy Info'),
+                    'privacy-settings': ('Privasi & Kepatuhan', 'Privacy & Compliance'),
+                    'proctoring': ('Pengawasan', 'Proctoring'),
                     'profile': ('Profil', 'Profile'),
+                    'promote': ('Naik Kelas', 'Promote Students'),
+                    'publish': ('Terbitkan', 'Publish'),
+                    'recipients': ('Penerima', 'Recipients'),
+                    'recipients-by-role': ('Penerima per Peran', 'Recipients by Role'),
+                    'registration-requests': ('Registrasi', 'Registrations'),
+                    'report': ('Laporan', 'Report'),
+                    'reports': ('Laporan', 'Reports'),
+                    'reset-school-data': ('Reset Sekolah', 'Reset School'),
+                    'results': ('Hasil', 'Results'),
+                    'retractions': ('Permintaan Tarik', 'Retraction Requests'),
+                    'scan': ('Scan OMR', 'Scan OMR'),
+                    'school-years': ('Tahun Ajaran', 'Academic Years'),
+                    'schools': ('Sekolah', 'Schools'),
+                    'settings': ('Pengaturan', 'Settings'),
+                    'skor': ('Panduan Skor', 'Scoring Guide'),
+                    'student': ('Murid', 'Student'),
+                    'students': ('Murid', 'Students'),
+                    'subjects': ('Mata Pelajaran', 'Subjects'),
+                    'submissions': ('Pengumpulan', 'Submissions'),
+                    'subscription': ('Langganan', 'Subscription'),
+                    'teachers': ('Guru', 'Teachers'),
+                    'templates': ('Templat', 'Templates'),
+                    'terms': ('Ketentuan', 'Terms'),
+                    'tools': ('Alat', 'Tools'),
+                    'trial-settings': ('Masa Trial', 'Trial Period'),
+                    'tutorial': ('Tutorial', 'Tutorial'),
+                    'upload-pdf': ('Unggah PDF', 'Upload PDF'),
                     'users': ('Pengguna', 'Users'),
-                    'messages': ('Pesan', 'Messages'),
-                    'notifications': ('Notifikasi', 'Notifications'),
-                    'history': ('Riwayat', 'History'),
+                    'whatsapp-settings': ('WhatsApp', 'WhatsApp'),
                     'whiteboard': ('Papan Tulis', 'Whiteboard')
                 } %}
-                {% set _crumbs = [] %}
-                {% for _p in request.path.strip('/').split('/') %}
-                    {# An identifier, not a place: a UUID is 36 characters and a row
-                       id is a run of digits. Every route word here is far shorter. #}
-                    {% if not ((_p|length >= 32) or (_p.isdigit() and _p|length >= 6)) %}
-                        {% set _ = _crumbs.append((_crumb_labels.get(_p|lower),
-                                                   _p|replace('-',' ')|replace('_',' ')|title)) %}
-                    {% endif %}
-                {% endfor %}
+                {% set _trail = breadcrumb_trail(request.path, g.get('user_role')) %}
                 <nav class="flex items-center gap-1.5 text-sm min-w-0 overflow-hidden">
-                    <a href="/{% if g.user_role in ('super_admin','admin_sekolah') %}admin{% elif g.user_role == 'guru' %}teacher{% else %}student{% endif %}/dashboard"
+                    {# The icon is the reader's own dashboard. It used to be
+                       `/{admin|teacher|student}/dashboard`, and `/admin/dashboard`
+                       is a legacy URL that redirects into the super-admin panel —
+                       so a school admin's way back was two redirects and a page
+                       their role is refused. #}
+                    {# The address comes from the trail's own area crumb, so the icon
+                       and the first word cannot point at two different dashboards —
+                       and an unknown role shows no icon at all rather than a link
+                       into a page that may be somebody else's. #}
+                    {% if _trail and _trail[0].kind == 'area' %}
+                    <a href="{{ _trail[0].path }}"
                        class="tap-44 text-surface-400 hover:text-primary-600 font-medium whitespace-nowrap transition shrink-0">
                         <i class="fas fa-home text-xs"></i>
                     </a>
+                    {% endif %}
                     {# Only the deepest crumb is kept on a phone: the trail is
                        context, and the last crumb is the part that answers "where
-                       am I". The rest returns from `sm` up. #}
-                    {% for _pair, _label in _crumbs %}
+                       am I". The rest returns from `sm` up. An unlabelled word is
+                       the safety net, and it is unreachable for a page the app
+                       serves — see `tests/unit/test_breadcrumbs.py`. #}
+                    {% for _crumb in _trail %}
+                    {% set _pair = (_crumb_areas.get(_crumb.key) if _crumb.kind == 'area'
+                                    else _crumb_labels.get(_crumb.key|lower)) %}
+                    {% set _word = _pair[0] if _pair else _crumb.key|replace('-', ' ')|replace('_', ' ')|title %}
                     {% set _rest = '' if loop.last else 'hidden sm:inline-block' %}
                     <i class="fas fa-chevron-right text-[8px] text-surface-300 shrink-0 {{ _rest }}"></i>
-                    <span class="{{ _rest }} text-surface-600 font-semibold truncate max-w-[62vw] sm:max-w-[200px]">{% if _pair %}<span x-text="t('{{ _pair[0] }}','{{ _pair[1] }}')">{{ _pair[0] }}</span>{% else %}<span x-text="'{{ _label }}'"></span>{% endif %}</span>
+                    {% if _crumb.href %}
+                    <a href="{{ _crumb.href }}"
+                       class="{{ _rest }} tap-44 text-surface-400 hover:text-primary-600 font-medium truncate max-w-[62vw] sm:max-w-[200px] transition"><span x-text="t('{{ _word }}','{{ _pair[1] if _pair else _word }}')">{{ _word }}</span></a>
+                    {% else %}
+                    <span class="{{ _rest }} text-surface-600 font-semibold truncate max-w-[62vw] sm:max-w-[200px]"{% if _crumb.current %} aria-current="page"{% endif %}><span x-text="t('{{ _word }}','{{ _pair[1] if _pair else _word }}')">{{ _word }}</span></span>
+                    {% endif %}
                     {% endfor %}
                 </nav>
             </div>
