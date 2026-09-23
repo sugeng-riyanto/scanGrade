@@ -186,7 +186,8 @@ def _shared_learner(supabase, link):
     return render_template(
         "teacher/analysis_student.html", exam=cover, analysis=analysis,
         learner=who, public_view=True, share=None,
-        back_url="/", lang=analysis_scope.language(request.args.get("lang")))
+        back_url="/", download_base=f"/r/{link['token']}",
+        lang=analysis_scope.language(request.args.get("lang")))
 
 
 @public_bp.route("/r/<token>")
@@ -230,6 +231,44 @@ def shared_analysis(token):
         download_base=f"/r/{token}")
 
 
+def _shared_learner_file(supabase, link, ext):
+    """One learner's file, from a token that names them, redacted the same way.
+
+    The learner page's own payload goes to `learner_report` with `public=True`, so
+    the key is absent from the document at the *builder* — not hidden by the
+    markup — and no markup change can start publishing it. The page is built from
+    one person's row, so no other learner's name is in this file at all.
+
+    Deliberately not `analysis_share.register_view`: neither this route nor its
+    exam-level twin counts a download as an open, so a family that opens the page
+    and then saves the file is one visit, not two. The counter lives on the page
+    both routes are linked from.
+    """
+    from app.routes.teacher import _learner_file, _report_cover
+    from app.services import analysis_share  # noqa: F401 - the redaction contract
+    from app.services import exam_report
+
+    from app.services import analysis_scope  # noqa: F401
+
+    exam, analysis = _shared_report(supabase, link["exam_id"])
+    if not analysis:
+        abort(404)
+    cover = _report_cover(supabase, exam)
+    # Rule 3, kept where the redaction lives: the school is named and the person
+    # is not — the shared document carries no teacher's name either.
+    cover["teacher_name"] = ""
+    who = exam_report.learner(analysis, cover, link.get("student_id"), with_key=False)
+    if not who:
+        abort(404)
+    from app.services import learner_report
+
+    lang = request.args.get("lang") or "id"
+    # The *public* name: same person, same exam, and it says so by being built for
+    # the copy that carries no key rather than by a flag the caller passed.
+    return _learner_file(who, cover, ext, lang,
+                         learner_report.filename(who, cover, ext), public=True)
+
+
 @public_bp.route("/r/<token>/download.<ext>")
 @_rate_limit("30 per minute")
 def shared_analysis_file(token, ext):
@@ -246,6 +285,11 @@ def shared_analysis_file(token, ext):
         abort(404)
     supabase = get_supabase()
     link = _link_or_404(supabase, token)
+    # A token's own row decides which document this is, exactly as it does on the
+    # page: the exam's report, or — when the link names a learner — that learner's
+    # own file. One token, one thing to hand out and one thing to revoke.
+    if link.get("student_id"):
+        return _shared_learner_file(supabase, link, ext)
     exam, analysis = _shared_report(supabase, link["exam_id"])
     if not analysis:
         abort(404)

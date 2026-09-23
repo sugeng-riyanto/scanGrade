@@ -69,6 +69,21 @@
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-pdf mr-1 text-rose-600"></i>PDF
             </a>
+            {# The one document a school files, and the thirty files it hands out. The
+               appendix is the *same* PDF with every learner's page inside it, so it
+               is offered from the door it extends rather than as a fourth format;
+               the zip is a second door because a folder of thirty files is a
+               different object from one document. #}
+            <a :href="'/teacher/analysis/{{ exam.id }}/download.pdf?appendix=1&lang=' + lang"
+               data-download="pdf-appendix"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-pdf mr-1 text-rose-600"></i><span x-text="t('PDF + laporan murid','PDF + learner reports')"></span>
+            </a>
+            <a :href="'/teacher/analysis/{{ exam.id }}/learners.zip?lang=' + lang"
+               data-download="zip"
+               class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
+                <i class="fas fa-file-zipper mr-1 text-amber-600"></i><span x-text="t('ZIP tiap murid','ZIP of every learner')"></span>
+            </a>
             <button type="button" @click="window.print()"
                     class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
                 <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>

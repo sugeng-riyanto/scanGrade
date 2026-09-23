@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import csv
 import io
-from typing import Any, Mapping
+import logging
+from typing import Any, Mapping, Sequence
 
 from app.services import analysis_frameworks as af
 
@@ -28,6 +29,8 @@ from app.services import analysis_frameworks as af
 # `reportlab` is a hard requirement of this app either way.
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Flowable
+
+_log = logging.getLogger(__name__)
 
 #: One label table per language. Kept as pairs-by-key rather than two dicts so a
 #: missing translation is a KeyError here and not an Indonesian word on a page
@@ -177,6 +180,55 @@ _LABELS: dict[str, dict[str, str]] = {
         "mastery_unconfigured": "Ujian ini belum menetapkan KKM, jadi ketuntasan tidak dihitung: patokan yang tidak dipilih sekolah bukan patokan yang boleh dikarang.",
         "level": "Tingkat kognitif",
         "unchanged": "Soal yang tidak punya tingkat kognitif belum dilabeli, bukan otomatis tingkat rendah.",
+        # ── the individual learner's own document ───────────────────────────
+        # The words the class file and the learner file share stay in one table
+        # (`exam`, `school`, `marks`, `key`, `kkm`…) so the two documents cannot
+        # name one thing two ways. What is here is only what the learner's
+        # document says on its own: a cover about one child, the two bars of a
+        # level table, and the method note that changes when the copy is shared.
+        "learner_title": "Laporan Individu Murid",
+        # Not `shared`, which is the *class* banner ("nama murid … tidak
+        # disertakan") and is false on a file that is named after the child and
+        # prints their name. What is withheld from this copy is the key alone.
+        "learner_shared": "Salinan berbagi: kunci jawaban tidak disertakan.",
+        # The appendix of the class report: one page per learner, filed inside the
+        # document the school keeps instead of stapled to it.
+        "appendix": "Lampiran: laporan tiap murid",
+        "appendix_note": "Satu halaman per murid, dalam urutan tabel murid di dokumen ini. Setiap halaman adalah berkas yang sama dengan yang bisa diunduh sendiri oleh murid itu.",
+        "appendix_cut": "Hanya {n} dari {total} murid yang muat di dokumen ini.",
+        "learner": "Murid",
+        "learner_final": "Nilai akhir",
+        "learner_mark": "Markah",
+        "learner_class": "Kelas",
+        "learner_subject": "Mata pelajaran",
+        "learner_rank": "Peringkat di kelas",
+        "learner_of": "dari",
+        "learner_percentile": "Persentil",
+        "learner_standard": "KKM sekolah",
+        "learner_unset": "belum diisi",
+        "learner_position": "Posisi dan total",
+        "learner_gap": "Selisih dari rata-rata kelas",
+        "learner_earned": "Markah terkumpul",
+        "learner_possible": "Markah dapat dinilai",
+        "learner_outcomes": "Sebutan tiap soal",
+        "learner_answer": "Jawaban murid",
+        "learner_share": "Capaian murid",
+        "learner_class_share": "Capaian kelas",
+        "learner_q_short": "Soal",
+        "learner_state": "Status",
+        "learner_class_pct": "Kelas (%)",
+        "learner_levels": "Capaian per tingkat kognitif",
+        "learner_questions": "Analisis tiap soal",
+        "learner_strengths": "Kekuatan",
+        "learner_weaknesses": "Kelemahan",
+        "learner_next": "Langkah berikutnya",
+        "learner_statement": "Pernyataan capaian",
+        "learner_method": "Metode dan batasan",
+        "learner_method_marks": "Setiap markah di dokumen ini adalah markah yang sama dengan yang dihitung pada statistik butir — dokumen ini tidak menilai ulang kertasnya.",
+        "learner_method_blank": "Soal yang tidak dijawab dihitung nol untuk murid ini, sementara capaian kelas dihitung dari kertas yang menjawab; kedua kolom karena itu bisa berbeda penyebutnya.",
+        "learner_method_excluded": "Soal esai yang belum dikoreksi guru dan soal tanpa kunci dikeluarkan dari capaian per tingkat, bukan dihitung nol.",
+        "learner_method_shared": "Salinan yang dibagikan tidak memuat kunci jawaban dan tidak memuat nama murid lain.",
+        "learner_method_key": "Kolom kunci jawaban hanya ada di salinan guru, dan tidak ikut terkirim pada tautan yang dibagikan.",
     },
     "en": {
         "title": "Item Analysis",
@@ -312,6 +364,44 @@ _LABELS: dict[str, dict[str, str]] = {
         "mastery_unconfigured": "This exam sets no KKM, so mastery is not computed: a standard the school never chose is not one a report may invent.",
         "level": "Cognitive level",
         "unchanged": "A question with no cognitive level is unlabelled, not lower order by default.",
+        "learner_title": "Individual Learner Report",
+        "learner_shared": "Shared copy: the answer key is not included.",
+        "appendix": "Appendix: every learner’s own report",
+        "appendix_note": "One page per learner, in the order of this document’s learner table. Each page is the same file that learner can download on their own.",
+        "appendix_cut": "Only {n} of {total} learners fit in this document.",
+        "learner": "Learner",
+        "learner_final": "Final mark",
+        "learner_mark": "Marks",
+        "learner_class": "Class",
+        "learner_subject": "Subject",
+        "learner_rank": "Rank in class",
+        "learner_of": "of",
+        "learner_percentile": "Percentile",
+        "learner_standard": "School standard",
+        "learner_unset": "not set",
+        "learner_position": "Position and totals",
+        "learner_gap": "Difference from the class mean",
+        "learner_earned": "Marks earned",
+        "learner_possible": "Marks scoreable",
+        "learner_outcomes": "Question outcomes",
+        "learner_answer": "Learner’s answer",
+        "learner_share": "Learner share",
+        "learner_class_share": "Class share",
+        "learner_q_short": "Q",
+        "learner_state": "Status",
+        "learner_class_pct": "Class (%)",
+        "learner_levels": "Achievement per cognitive level",
+        "learner_questions": "Question-by-question analysis",
+        "learner_strengths": "Strengths",
+        "learner_weaknesses": "Weaknesses",
+        "learner_next": "What to do next",
+        "learner_statement": "Statement of achievement",
+        "learner_method": "Method and limits",
+        "learner_method_marks": "Every mark in this document is the same mark the item statistics were computed from — this document does not grade the paper again.",
+        "learner_method_blank": "A question left unanswered counts as zero for this learner, while the class share is computed over the papers that answered; the two columns can therefore have different denominators.",
+        "learner_method_excluded": "An essay the teacher has not marked, and a question with no key, are excluded from the level shares rather than counted as zero.",
+        "learner_method_shared": "A shared copy carries no answer key and no other learner’s name.",
+        "learner_method_key": "The answer-key column is on the teacher’s copy only, and is not sent with a shared link.",
     },
 }
 
@@ -1256,11 +1346,24 @@ def filename(analysis, exam: Mapping[str, Any] | None, suffix: str) -> str:
 # set is not invented, and a chart with nothing to draw says so in words.
 
 #: Ink. Deliberately few: a chart that needs a legend to be read is a table.
-_ACCENT = "#c2410c"      # bars and dots — the measurements
-_KEY = "#0f766e"        # the option a question is keyed to
-_MUTED = "#64748b"      # axes, ticks, captions
-_GRID = "#e2e8f0"       # the frame
-_STUDENT = "#0ea5e9"    # the ability histogram
+#:
+#: Named publicly because more than one document draws with it: the learner's own
+#: report puts that learner's share beside the class's in the same two inks, and a
+#: second palette written into a second service is how two documents about one exam
+#: come to colour the same measurement differently.
+INK: dict[str, str] = {
+    "accent": "#c2410c",   # bars and dots — the measurements
+    "key": "#0f766e",      # the option a question is keyed to
+    "muted": "#64748b",    # axes, ticks, captions, and the class in a comparison
+    "grid": "#e2e8f0",     # the frame
+    "student": "#0ea5e9",  # the ability histogram, and a learner's own share
+    "rule": "#334155",     # table headings
+}
+_ACCENT = INK["accent"]
+_KEY = INK["key"]
+_MUTED = INK["muted"]
+_GRID = INK["grid"]
+_STUDENT = INK["student"]
 
 #: What each finding looks like, as ink.
 #:
@@ -1905,9 +2008,45 @@ def chart_key(lang: str, charts: list[_Chart]) -> list[tuple[str, str]]:
     return key
 
 
+def _appendix_document(buf: io.BytesIO, title: str):
+    """A landscape report that ends in portrait pages: two templates, one file.
+
+    reportlab holds one page size per document unless the document is built from
+    page templates, and the class report *must* keep the landscape sheet it has
+    always shipped — the item table is sixteen columns wide. The appendix is a
+    child's page, which is portrait, so the document carries both: the landscape
+    frame is exactly the one a single-frame document would have (same page size,
+    same 12 mm margins), so nothing about the existing pages moves, and the
+    portrait frame is exactly the one `learner_pdf` builds its own sheet on.
+    """
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate
+
+    report, sheet = landscape(A4), A4
+    # No padding arguments: a `Frame` defaults to 6 points of padding on each
+    # side, and `SimpleDocTemplate` builds its single frame the same way — so
+    # leaving the defaults here is what makes an appendix-shaped document lay the
+    # class report out *identically* to the document that has always shipped.
+    # Zeroing them widens the frame by 12 points and moves the item table's break.
+    wide = Frame(12 * mm, 12 * mm, report[0] - 24 * mm, report[1] - 24 * mm,
+                 id="report")
+    child = Frame(14 * mm, 13 * mm, sheet[0] - 28 * mm, sheet[1] - 26 * mm,
+                  id="appendix")
+    doc = BaseDocTemplate(buf, pagesize=report,
+                          leftMargin=12 * mm, rightMargin=12 * mm,
+                          topMargin=12 * mm, bottomMargin=12 * mm, title=title)
+    doc.addPageTemplates([PageTemplate(id="report", frames=[wide]),
+                          PageTemplate(id="appendix", frames=[child],
+                                       pagesize=sheet)])
+    return doc
+
+
 def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
                  school: str = "", teacher: str = "", lang: str = "id",
-                 public: bool = False, framework=None) -> bytes:
+                 public: bool = False, framework=None,
+                 appendix: Sequence[Mapping[str, Any]] = (),
+                 appendix_exam: Mapping[str, Any] | None = None) -> bytes:
     """The analysis as a filed report: identity, summary, charts, items, students.
 
     Landscape, because the item table is sixteen columns wide and a portrait A4
@@ -1916,14 +2055,31 @@ def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
     `public=True` is the report generated from a share link: no students table,
     and a line saying so. The identity block keeps the exam, not the teacher — a
     stranger reading a shared report needs to know which paper it is.
+
+    `appendix` is one learner payload per child (`exam_report.learner`), appended
+    as a portrait section so the school files *one* document instead of stapling
+    thirty to the class report. `appendix_exam` is the cover those pages print —
+    the same cover the standalone learner file is built from, so the appendix page
+    and the child's own download cannot name different schools.
     """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
-    from reportlab.platypus import (CondPageBreak, KeepTogether, PageBreak,
-                                    Paragraph, SimpleDocTemplate, Spacer, Table,
-                                    TableStyle)
+    from reportlab.platypus import (CondPageBreak, KeepTogether, NextPageTemplate,
+                                    PageBreak, Paragraph, SimpleDocTemplate, Spacer,
+                                    Table, TableStyle)
+
+    if appendix and public:
+        # Not a branch to tune: a page per child inside a *shared* report is the
+        # leak this whole report is redacted against, and the share route never
+        # asks for the appendix. Dropping it is the safe reading of a caller that
+        # asked for both — and it is logged, because a request that silently does
+        # something other than what it says is worse than a refusal.
+        _log.warning(
+            "appendix refused on a public report (%s learners) — a shared report "
+            "carries no per-learner pages", len(appendix))
+        appendix = ()
 
     lang = language(lang)
     t = labels(lang)
@@ -1937,10 +2093,14 @@ def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
                              leading=13, spaceBefore=8, spaceAfter=3)
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
-                            leftMargin=12 * mm, rightMargin=12 * mm,
-                            topMargin=12 * mm, bottomMargin=12 * mm,
-                            title=f"{t['title']} - {exam.get('title') or analysis.title}")
+    # One page template unless there is an appendix to lay down: the ordinary
+    # document stays on the builder it has always used.
+    doc_title = f"{t['title']} - {exam.get('title') or analysis.title}"
+    doc = (_appendix_document(buf, doc_title) if appendix else
+           SimpleDocTemplate(buf, pagesize=landscape(A4),
+                             leftMargin=12 * mm, rightMargin=12 * mm,
+                             topMargin=12 * mm, bottomMargin=12 * mm,
+                             title=doc_title))
     flow: list[Any] = [Paragraph(str(t["title"]), title)]
 
     identity = [f"{t['exam']}: <b>{exam.get('title') or analysis.title}</b>"]
@@ -2255,6 +2415,17 @@ def analysis_pdf(analysis, exam: Mapping[str, Any] | None = None,
         for note in shown_notes:
             notes.append(Paragraph("&bull; " + _pair(NOTE_LABELS, note, lang), body))
         flow.append(KeepTogether(notes))
+
+    if appendix:
+        # The switch is declared *before* the page break, because a page template
+        # applies to the page that follows it — a claim made after the break would
+        # put the index on a landscape page and every child after it.
+        from app.services import learner_report
+
+        flow.append(NextPageTemplate("appendix"))
+        flow.append(PageBreak())
+        flow.extend(learner_report.appendix_flow(appendix, appendix_exam or exam,
+                                                 lang, public))
 
     doc.build(flow)
     return buf.getvalue()

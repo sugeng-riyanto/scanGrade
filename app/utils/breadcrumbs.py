@@ -89,6 +89,10 @@ MACHINE = frozenset({
 ARTIFACT = frozenset({
     "csv", "pdf", "xlsx", "image", "export", "export-data", "bubble-sheet",
     "template", "public", "r",
+    # `/teacher/analysis/<exam>/learners.zip` is thirty children's files in one
+    # archive: a second artifact with one name, dropped for the same reason
+    # `download.xlsx` is — the crumb is the report page it was built from.
+    "learners.zip",
 })
 
 #: A *login door*. `/auth/login` and its siblings render a different chrome

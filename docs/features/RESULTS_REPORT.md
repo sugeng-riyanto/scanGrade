@@ -261,6 +261,94 @@ tidak ada tautan). Perintahnya:
 python deploy/apply_migration.py supabase/migrations/033_analysis_student_share.sql --commit
 ```
 
+### Berkas per murid: PDF, XLSX, CSV buatan server
+
+Halaman murid dulu hanya bisa dicetak lewat dialog print browser, dan itu bukan berkas:
+yang tercetak adalah **layar** apa adanya (chrome, sidebar, tombol), tidak bisa dibuat sama
+sekali dari ponsel, dan tiga puluh laporan anak mendarat di satu folder dengan satu nama.
+Sekarang ketiganya dibangun di server dari payload yang halaman itu sendiri render
+(`exam_report.learner()` → `app/services/learner_report.py`), sehingga angka di kertas yang
+diterima orang tua tidak bisa berbeda dari angka di layarnya.
+
+| berkas | untuk apa |
+|---|---|
+| **PDF** (A4 potrait) | lembar yang diarsipkan sekolah dan dibaca keluarga — sampul, posisi, enam sebutan soal, tabel tingkat dengan dua batang, tiap soal, kekuatan/kelemahan/langkah, pernyataan capaian, metode |
+| **XLSX** | lembar kerja: angka sebagai angka, bagan Excel yang menempel pada selnya (capaian murid vs kelas, sumbu 0–100) |
+| **CSV** | dibaca dan disaring; satu berkas dengan bagian-bagiannya, bukan empat berkas terpisah |
+
+Empat hal yang membuat berkas seperti ini berbohong, dan bagaimana masing-masing ditahan:
+
+* **Kunci jawaban hanya ada di salinan guru.** `public=True` — argumen *builder*, bukan
+  sembunyian di markup — yang membuangnya dari CSV (kolomnya tidak ditulis), dari XLSX
+  (kolomnya tidak ada) dan dari PDF (kolomnya tidak ditambahkan). Rute yang lupa tidak bisa
+  menerbitkannya, karena rute tidak memutuskan isi berkas; dan payload yang di-resolve
+  tautan sudah dibangun `with_key=False` sebagai sabuk kedua.
+* **Banner salinan berbagi tidak dikarang.** Banner laporan *kelas* berkata "nama murid dan
+  kunci jawaban tidak disertakan" — kalimat yang **salah** pada berkas yang dinamai dengan
+  nama anak itu dan mencetak namanya. Karena itu ada label sendiri (`learner_shared`): yang
+ditahan dari salinan ini adalah kuncinya saja.
+* **Dinamai menurut anaknya.** `laporan-<nama>-<ujian>-<kode>.<ext>`, dilipat ke ASCII dan
+  hanya menyisakan `[A-Za-z0-9-_]` — nama dengan tanda kutip, garis miring atau baris baru
+  adalah header `Content-Disposition` yang pecah, jadi yang tersisa hanyalah yang dibaca
+  header apa adanya (`Ñoño` → `Nono` adalah nama berkas yang lebih baik daripada
+  `laporan.pdf`).
+* **Pintunya adalah alamat yang aplikasinya layani.** Halaman menulis tiga tautan dari
+  `download_base` yang **rutenya sendiri** berikan — rute guru `/teacher/analysis/<ujian>/
+  report/student/<murid>`, tautan berbagi `/r/<token>` — sehingga tidak mungkin menunjuk ke
+  salinan lingkup yang lain, dan rute yang lupa memberikannya tidak menulis pintu sama sekali
+  (alamat setengah jadi terlihat utuh lalu 404). Tautan berbagi menjawab berkas yang sama:
+  `/r/<token>/download.<ext>` membaca baris token dan, bila token itu menunjuk seorang murid,
+  mengirimkan berkas murid itu dengan `public=True`.
+
+Gerbang: `tests/unit/test_learner_files.py` (29 uji — tiga dokumen, redaksi di ketiga
+format, banner, nama berkas yang bermusuhan, dua pintu, posisi whitelist ekstensi sebelum
+pembacaan apa pun) dan `.freebuff/mutate_learner_files.py` (**13/13 cacat yang disuntikkan
+tertangkap**). Bukti langsung pada data nyata: `.freebuff/probe_learner_files_live.py` —
+login sebagai admin sekolah demo, ketiga berkas 200 dengan magic byte dan nama lampiran
+yang benar, lalu tautan murid dibuat, berkasnya diambil **tanpa sesi**, kolom kunci tidak ada
+dan nama guru tidak ikut, dan tautannya dicabut kembali (404).
+
+### Satu dokumen untuk sekolah: lampiran + zip
+
+Sekolah menyimpan satu dokumen per ujian, bukan satu dokumen **ditambah** tiga puluh
+lembar stapler. Jadi laporan kelas kini punya dua pintu tambahan:
+
+| pintu | apa yang keluar |
+|---|---|
+| `download.pdf?appendix=1` | laporan kelas **yang sama**, dengan lampiran: satu halaman potret per murid, diawali indeks nama/band/peringkat/nilai |
+| `learners.zip` | satu berkas `laporan-<murid>-*.pdf` per anak — berkas yang sama persis dengan yang disajikan pintu masing-masing murid |
+
+Empat hal yang membuat keduanya jujur:
+
+* **Halaman kelasnya tidak bergeser.** Lampiran dilukis lewat *page template* kedua,
+  dan bingkai lanskapnya memakai padding bawaan `Frame` (6 pt) yang sama dengan
+  `SimpleDocTemplate` — sehingga dokumen ber-lampiran menata ulang laporan kelas
+  **persis** seperti dokumen yang sudah beredar. Menolkan padding itu melebarkan
+  bingkai 12 pt dan memindahkan titik potong tabel butir; ujinya membandingkan teks
+  tiap halaman laporan lama dengan halaman yang sama di dokumen ber-lampiran.
+* **Halaman lampiran *adalah* berkas anak itu.** Keduanya memakai `learner_story()`
+  yang sama — ujinya mencocokkan halaman lampiran dengan halaman `learner_pdf()` milik
+  murid tersebut, karena dua builder adalah cara halaman yang diarsipkan dan halaman
+yang diserahkan mulai berbeda.
+* **Indeksnya mengikuti urutan dokumennya sendiri** (`analysis.people`, urutan tabel
+  murid di laporan itu), bukan urutan peringkat — jadi labelnya bisa diklaim dan diuji.
+* **Salinan berbagi tidak pernah membawa lampiran.** Penolakannya di *builder*: meminta
+  lampiran pada laporan publik dibuang dan dicatat di log, bukan dipercayakan pada rute
+  yang hari ini kebetulan tidak memintanya. Halaman per anak di dalam tautan publik adalah
+  kegagalan terburuk fitur ini, dan zipnya pun dibangun `public=True` bila diminta begitu.
+
+Keduanya berhenti di `learner_report.MAX_FILES` (120) dan **mengatakannya**: lampiran
+mencetak "hanya {n} dari {total} murid", zipnya menaruh `catatan.txt`. Daftar yang berhenti
+diam-diam terlihat seperti kelas dengan jumlah murid segitu. Nama berkas lampiran diberi
+akhiran `-lampiran.pdf` supaya tidak menimpa laporan kelas di folder unduhan yang sama.
+
+Gerbang: `tests/unit/test_report_appendix.py` (21 uji) dan `.freebuff/mutate_appendix.py`
+(**14/14 cacat tertangkap** — termasuk padding bingkai, urutan indeks, penolakan publik,
+penomoran nama yang bertabrakan, dan hilangnya satu pintu dari halaman). Bukti langsung:
+`.freebuff/probe_appendix_live.py` pada Supabase demo — laporan biasa 2 halaman lanskap,
+`?appendix=1` 5 halaman (2 lanskap + 3 potret) bernama `...-lampiran.pdf`, dan zip berisi
+berkas potret per murid yang menyebut nama anaknya.
+
 ## Batas yang diketahui (belum dikerjakan)
 
 - **Belum ada DOCX.** `python-docx` belum menjadi dependensi. PDF, XLSX, dan CSV sudah ada.

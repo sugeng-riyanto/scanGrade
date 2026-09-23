@@ -69,7 +69,29 @@
             <h2 class="mt-1 text-2xl font-extrabold text-slate-800" x-text="t('Laporan Individu Murid','Individual Learner Report')"></h2>
             <p class="text-sm text-slate-500 font-medium" x-text="t('Setiap soal dengan jawaban murid ini, alasan nilainya, dan langkah berikutnya.','Every question with this learner’s own answer, why it paid, and what to do next.')"></p>
         </div>
-        <div class="flex flex-wrap gap-1.5">
+        <div class="flex flex-wrap items-center gap-1.5">
+            {# The file row: the same report as a document of its own. `download_base`
+               is the route that built this page — the teacher's route or the share
+               link — so the door cannot point at a copy of the *other* scope, and a
+               route that forgets it writes no door at all rather than a broken one.
+               "PDF"/"CSV"/"XLSX" stay untranslated on purpose: they are file formats
+               a reader recognises, not sentences. #}
+            {% if download_base %}
+            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mr-0.5"
+                  x-text="t('Unduh','Download')"></span>
+            <a href="{{ download_base }}/download.pdf"
+               class="border-2 border-surface-200 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-slate-600 transition whitespace-nowrap">
+                <i class="fas fa-file-pdf mr-1 text-rose-500"></i>PDF
+            </a>
+            <a href="{{ download_base }}/download.xlsx"
+               class="border-2 border-surface-200 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-slate-600 transition whitespace-nowrap">
+                <i class="fas fa-file-excel mr-1 text-emerald-600"></i>XLSX
+            </a>
+            <a href="{{ download_base }}/download.csv"
+               class="border-2 border-surface-200 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-slate-600 transition whitespace-nowrap">
+                <i class="fas fa-file-csv mr-1 text-sky-600"></i>CSV
+            </a>
+            {% endif %}
             <button type="button" @click="window.print()"
                     class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
                 <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>
@@ -411,4 +433,8 @@
 {% endmacro %}
 
 {% block content %}{{ body(public_view|default(false, true)) }}{% endblock %}
+{# The anonymous chrome renders this, and the *flag* is passed rather than read from
+   the session: a share link is the only route that reaches this block, so `true` is
+   not a decision — it is the same statement the route makes, made twice on purpose,
+   because the copy a stranger gets must not depend on a cookie. #}
 {% block content_noauth %}{{ body(true) }}{% endblock %}
