@@ -786,7 +786,7 @@ def results():
     submissions = []
     try:
         res = supabase.table("submissions") \
-            .select("id, status, is_published, score, final_score, penalty, submitted_at, exams(id, title, subject)") \
+            .select("id, status, is_published, score, final_score, penalty, submitted_at, exams(id, title, subject, passing_score)") \
             .eq("student_id", g.user_id) \
             .order("submitted_at", desc=True) \
             .execute()

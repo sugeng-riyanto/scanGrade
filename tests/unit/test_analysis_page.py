@@ -1132,11 +1132,16 @@ class TestWhatARefusalLooksLike:
 
     def test_the_refusal_is_worded_for_the_reader(self):
         """A statement about the paper rather than about the person, and one action
-        to take. The line it replaces read as an accusation and offered nothing."""
+        to take. The line it replaces read as an accusation and offered nothing.
+
+        The sentences themselves live in `app/utils/denials.py` — one place, so the
+        tone cannot drift a sentence at a time — and `tests/unit/test_denials.py`
+        holds their wording. What is asserted here is that this file *uses* it."""
         assert "Tidak punya akses ke ujian ini" not in TEACHER
         assert "Tidak punya akses ke submission ini" not in TEACHER
-        assert "tidak tersedia untuk akun Anda" in TEACHER
-        assert "hubungi admin sekolah" in TEACHER
+        assert "from app.utils import denials" in TEACHER
+        assert "denials.NO_EXAM_ACCESS" in TEACHER
+        assert "denials.NO_SUBMISSION_ACCESS" in TEACHER
 
     def test_every_page_a_refusal_lands_on_can_show_it(self):
         """A redirect is only a message if the page it lands on renders one. All
