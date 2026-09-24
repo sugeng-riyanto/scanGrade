@@ -188,7 +188,9 @@ def test_dashboard_metrics_skip_unreleased_marks(app, monkeypatch):
     assert ctx["avg_score"] == 88.0, "the unreleased 77 must not be averaged in"
     assert ctx["mastery_level"] == ("Baik", "Good")   # 88 → Baik, 82.5 would too
     assert ctx["subject_averages"] == {"Fisika": 88.0}
-    assert [t["score"] for t in ctx["score_trend"]] == [88.0]
+    # The points the visual summary is drawn from: released marks only, so the
+    # unreleased 77 cannot become a bar at 77 — a mark nobody awarded.
+    assert [p["score"] for p in ctx["chart_points"]] == [88.0]
     assert [w["score"] for w in ctx["weak_areas"]] == []
 
 
@@ -223,9 +225,11 @@ class TestTheMasteryLabelFollowsTheReader:
     def test_the_cached_shape_cannot_come_back_as_its_first_character(self):
         """The context is cached for 30 s, and the key is part of the shape's
         contract: an unchanged key hands the new template an old string, and `[0]`
-        of a string is its first letter."""
+        of a string is its first letter. It is at v3 because `chart_points` replaced
+        `score_trend` — a v2 entry has no points, so the shared card would tell a
+        student with nine released marks that nothing had been released."""
         src = (ROOT / "app" / "routes" / "student.py").read_text(encoding="utf-8")
-        assert 'cache_key = f"dash:v2:{g.user_id}"' in src
+        assert 'cache_key = f"dash:v3:{g.user_id}"' in src
 
 
 class TestNeedsAttentionIsThePapersStandard:

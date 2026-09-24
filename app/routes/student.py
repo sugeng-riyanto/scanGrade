@@ -47,6 +47,38 @@ def _student_submissions(supabase, student_id):
         return []
 
 
+def _chart_points(rows):
+    """The one shape the visual summary is drawn from: `{title, subject, score, at}`.
+
+    Both student pages hand this same list to the same factory, so a distribution on
+    the dashboard cannot disagree with the distribution on the results page. A row
+    whose mark has not been released is skipped rather than plotted at zero — both
+    routes blank those fields before they get here, and a bar at zero is a mark nobody
+    awarded. `subject` stays None when the paper has none: the page labels it with its
+    own `t()` pair, because a default chosen in Python is copy the language toggle
+    cannot reach.
+    """
+    points = []
+    for s in rows:
+        score = s.get("final_score")
+        if score is None:
+            score = s.get("score")
+        if score is None:
+            continue
+        try:
+            value = float(score)
+        except (TypeError, ValueError):
+            continue
+        exam = s.get("exam") or s.get("exams") or {}
+        points.append({
+            "title": (exam.get("title") or "-")[:20],
+            "subject": exam.get("subject"),
+            "score": value,
+            "at": s.get("submitted_at") or "",
+        })
+    return points
+
+
 def _offerable(exam, student_class_id, draft_exam_ids, now=None):
     """Should this exam appear on the student's list?
 
@@ -83,8 +115,10 @@ def dashboard():
     # Try cache first (30s TTL). The key carries a version because the *shape* of
     # what is cached is part of this key's contract: `mastery_level` used to be a
     # plain string and is an (id, en) pair now, and a stale entry would render as
-    # its first character (`t('S','a')`) for the remainder of its TTL.
-    cache_key = f"dash:v2:{g.user_id}"
+    # its first character (`t('S','a')`) for the remainder of its TTL. v3 because
+    # `chart_points` replaced `score_trend`: an entry from v2 would reach the shared
+    # visual summary with no points and draw the "nothing released yet" sentence.
+    cache_key = f"dash:v3:{g.user_id}"
     cached = cache_get(cache_key)
     if cached:
         return render_template("student/dashboard.html", **cached)
@@ -162,15 +196,12 @@ def dashboard():
             subject_scores[subject].append(float(sc))
     subject_averages = {k: round(sum(v) / len(v), 1) for k, v in subject_scores.items()}
 
-    # Score trend (last 5 exams, oldest first)
-    score_trend = []
-    for s in reversed(completed_exams[:5]):
-        sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
-        if sc is not None:
-            score_trend.append({
-                "title": (s.get("exam") or {}).get("title", "-")[:20],
-                "score": float(sc)
-            })
+    # ── Score trend was here ────────────────────────────────────────────────
+    # A hand-rolled bar list of the last five marks, rendered server-side and printing
+    # every one of them while the average above it sat behind the page's switch. The
+    # dashboard draws the same information — over every released mark, not five — from
+    # `_chart_points` and the shared visual summary, and the switch now governs all of
+    # it.
 
     # Weak areas: an exam this student came in *under the standard it was judged
     # by*, which is the paper's own KKM when it sets one and 70 when it does not.
@@ -244,7 +275,7 @@ def dashboard():
         "subject_count": subject_count,
         "active_whiteboards": active_whiteboards,
         "subject_averages": subject_averages,
-        "score_trend": score_trend,
+        "chart_points": _chart_points(completed_exams),
         "weak_areas": weak_areas,
         "mastery_level": mastery_level,
     }
@@ -881,7 +912,9 @@ def results():
             "exam_count": len(scores),
         })
     subject_totals.sort(key=lambda x: x["name"])
-    return render_template("student/results.html", submissions=submissions, subject_totals=subject_totals)
+    return render_template("student/results.html", submissions=submissions,
+                           subject_totals=subject_totals,
+                           chart_points=_chart_points(submissions))
 
 
 @student_bp.route("/results/<submission_id>")

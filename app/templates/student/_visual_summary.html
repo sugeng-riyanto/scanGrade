@@ -1,0 +1,262 @@
+{# ── The three views of the same marks ──────────────────────────────────────────
+   Rendered by both student pages (dashboard + results) from this one file, and drawn
+   by one factory — `window.sgVisualSummary`. Two implementations of "the same three
+   charts" is how the two pages would start printing different distributions of the
+   same marks, which is the defect this repository keeps paying for.
+
+   Nothing here reads the host component's own rows: the points arrive as JSON built
+   by the route (`_chart_points`) in *one shape for both pages*, already blanked for
+   any mark the teacher has not released. That is also why the switch here is the
+   `showScores` both pages already carry: a chart is a loud way to print the score the
+   table masks, and a switch that hid the table while the axis printed every mark is a
+   switch that does not work.
+
+   Three states, and the two that are not charts used to be one grey sentence —
+   "marks are hidden" and "nothing has been released yet" looked identical, so a
+   reader whose marks were not out yet was told to press a button, and a reader who
+   pressed it got empty axes. #}
+<section class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-5">
+    <h3 class="text-sm font-extrabold text-surface-700 mb-3 flex items-center gap-1.5"><i class="fas fa-chart-pie text-primary-500"></i><span x-text="t('Ringkasan Visual','Visual Summary')"></span></h3>
+
+    <div x-show="showScores && hasMarks" x-cloak>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="rounded-xl border border-surface-200 p-3">
+                <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Sebaran Nilai','Score Distribution')"></p>
+                {# A canvas needs a parent with a height: `maintainAspectRatio: false`
+                   with an unsized one makes the canvas grow on every resize. #}
+                <div class="h-56"><canvas x-ref="histoCanvas"></canvas></div>
+            </div>
+            <div class="rounded-xl border border-surface-200 p-3">
+                <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Perkembangan Nilai','Score Progression')"></p>
+                <div class="h-56"><canvas x-ref="seriesCanvas"></canvas></div>
+            </div>
+            <div class="rounded-xl border border-surface-200 p-3">
+                <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Ujian per Mata Pelajaran','Exams per Subject')"></p>
+                <div class="h-56"><canvas x-ref="pieCanvas"></canvas></div>
+                {# A pie of *averages* would be a picture of a number that is not a
+                   part of anything. The slices are counts, and the caption says so. #}
+                <p class="text-[10px] font-medium text-surface-400 mt-2"
+                   x-text="t('Tiap bagian adalah jumlah ujian, bukan rata-rata.','Each slice is a count of exams, not an average.')"></p>
+            </div>
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+            <template x-for="slice in pieSlices" :key="'legend-' + slice.name">
+                <span class="inline-flex items-center gap-1.5 text-[11px] font-bold text-surface-500">
+                    <span class="w-3 h-3 rounded-sm" :style="'background:' + slice.color"></span>
+                    <span x-text="slice.name"></span>
+                    <span class="text-surface-400 font-medium" x-text="'(' + slice.value + ')'"></span>
+                </span>
+            </template>
+        </div>
+    </div>
+
+    <div x-show="!showScores" class="rounded-xl border border-dashed border-surface-200 p-4 text-center">
+        <p class="text-sm font-medium text-surface-400 mb-3"
+           x-text="t('Nilai disembunyikan. Tekan “Tampilkan Nilai” untuk melihat grafiknya.','Marks are hidden. Press “Show Scores” to see the charts.')"></p>
+        {# The way back sits where the charts would be: a reader wondering where they
+           went should not have to find the control at the top of the page first. #}
+        <button type="button" @click="showScores = true"
+                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-surface-100 text-surface-600 border border-surface-200 hover:bg-surface-200 transition">
+            <i class="fas fa-eye"></i>
+            <span x-text="t('Tampilkan Nilai','Show Scores')"></span>
+        </button>
+    </div>
+
+    <p x-show="showScores && !hasMarks" class="text-sm font-medium text-surface-400"
+       x-text="t('Belum ada nilai yang dibagikan untuk Anda, jadi belum ada yang bisa digambarkan.','No marks have been released to you yet, so there is nothing to plot.')"></p>
+</section>
+
+<script id="sg-chart-points" type="application/json">{{ chart_points | default([], true) | tojson | safe }}</script>
+<script>
+/* ── One implementation of the three views, and the pie drawn by hand ──────────
+   The points come from the page as `{title, subject, score, at}` — one row per mark
+   the teacher has released, built by the route in one shape for both student pages,
+   so these charts cannot disagree with the table beside them.
+
+   The pie is 3D by hand rather than by a plugin. Chart.js has no 3D pie, and the
+   alternatives were a vendored third-party plugin (one more blob to keep current on
+   a box with spotty WiFi) or a projection this file can do in thirty lines: the top
+   face is an ellipse, the wall is the same ellipse shifted down and joined, and the
+   shading is the slice colour darkened — which is the whole trick a 3D pie is. */
+window.sgVisualSummary = function () {
+    return {
+        plotted: JSON.parse(document.getElementById('sg-chart-points')?.textContent || '[]'),
+
+        //: The palette is literal hexes rather than theme tokens: a canvas cannot
+        //: read a CSS variable per slice, and these eight are legible on both the
+        //: light and the dark card.
+        palette: ['#6366f1', '#10b981', '#f59e0b', '#ef4444',
+                  '#0ea5e9', '#8b5cf6', '#14b8a6', '#f97316'],
+
+        get hasMarks() { return this.plotted.length > 0; },
+
+        //: Every point the route hands over already carries a released mark — the
+        //: ones that do not are blanked server-side, so there is nothing to filter.
+        get released() { return this.plotted; },
+
+        get bands() {
+            const edges = [0, 60, 70, 80, 90, 101];
+            return [0, 1, 2, 3, 4].map(i => ({
+                label: edges[i] + '-' + (edges[i + 1] - 1),
+                value: this.released.filter(p => p.score >= edges[i] && p.score < edges[i + 1]).length,
+            }));
+        },
+
+        get series() {
+            return this.released
+                .slice()
+                .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
+                .map(p => ({ label: String(p.title || '-').slice(0, 14), value: p.score }));
+        },
+
+        get pieSlices() {
+            const by = {};
+            this.released.forEach(p => {
+                const name = p.subject || this.t('Umum', 'General');
+                by[name] = (by[name] || 0) + 1;
+            });
+            return Object.keys(by).sort().map((name, i) => ({
+                name, value: by[name], color: this.palette[i % this.palette.length],
+            }));
+        },
+
+        //: Called from the host component's own `init()`: a mixin that defined `init`
+        //: would be a second one, and Alpine only calls the component's own.
+        initCharts() {
+            this.$watch('showScores', () => { this.$nextTick(() => this.drawCharts()); });
+            this.$watch('lang', () => { this.$nextTick(() => this.drawCharts()); });
+            this.$nextTick(() => this.drawCharts());
+        },
+
+        drawCharts() {
+            if (!this.showScores) return;          // a hidden canvas measures 0x0
+            this.drawHistogram();
+            this.drawSeries();
+            this.drawPie3D();
+        },
+
+        //: Every canvas is sized from its own box, not from a fixed number: a phone
+        //: and a 1280px laptop get the same chart, and a rotate re-draws the same.
+        _ctx(ref) {
+            const canvas = this.$refs[ref];
+            if (!canvas) return null;
+            const w = canvas.clientWidth, h = canvas.clientHeight;
+            if (!w || !h) return null;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            return { ctx, w, h };
+        },
+
+        _destroy(key) {
+            if (this[key]) { this[key].destroy(); this[key] = null; }
+        },
+
+        drawHistogram() {
+            const box = this._ctx('histoCanvas');
+            if (!box) return;
+            const labels = this.bands.map(b => b.label);
+            const values = this.bands.map(b => b.value);
+            this._destroy('histoChart');
+            this.histoChart = new Chart(box.ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{ data: values, backgroundColor: '#6366f1', borderRadius: 6 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { precision: 0 },
+                             title: { display: true, text: this.t('Jumlah ujian', 'Number of exams') } },
+                        x: { title: { display: true, text: this.t('Rentang nilai', 'Score range') } },
+                    },
+                },
+            });
+        },
+
+        drawSeries() {
+            const box = this._ctx('seriesCanvas');
+            if (!box) return;
+            this._destroy('seriesChart');
+            this.seriesChart = new Chart(box.ctx, {
+                type: 'line',
+                data: {
+                    labels: this.series.map(p => p.label),
+                    datasets: [{
+                        data: this.series.map(p => p.value),
+                        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.15)',
+                        fill: true, tension: 0.3, pointRadius: 3,
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, max: 100, title: { display: true, text: this.t('Nilai', 'Score') } },
+                        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+                             title: { display: true, text: this.t('Ujian', 'Exam') } },
+                    },
+                },
+            });
+        },
+
+        drawPie3D(depth) {
+            const box = this._ctx('pieCanvas');
+            if (!box) return;
+            const slices = this.pieSlices;
+            if (!slices.length) return;
+            const ctx = box.ctx;
+            const drop = depth || Math.max(12, Math.round(Math.min(box.w, box.h) * 0.12));
+            const cx = box.w / 2;
+            const cy = (box.h - drop) / 2;
+            const rx = Math.max(20, Math.min(box.w / 2 - 8, (box.h - drop) / 2 * 1.7));
+            const ry = rx * 0.55;
+
+            const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
+            let angle = -Math.PI / 2;
+            const parts = slices.map(s => {
+                const from = angle;
+                const to = angle + (s.value / total) * Math.PI * 2;
+                angle = to;
+                return { color: s.color, from, to };
+            });
+
+            // The wall shows only on the near half — the slices whose arc points down
+            // the screen — and is drawn first so the near ones overlap correctly.
+            parts.filter(p => Math.sin((p.from + p.to) / 2) > 0).forEach(p => {
+                ctx.beginPath();
+                ctx.ellipse(cx, cy + drop, rx, ry, 0, p.from, p.to);
+                ctx.ellipse(cx, cy, rx, ry, 0, p.to, p.from, true);
+                ctx.closePath();
+                ctx.fillStyle = shade(p.color, 0.72);
+                ctx.fill();
+            });
+
+            parts.forEach(p => {
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.ellipse(cx, cy, rx, ry, 0, p.from, p.to);
+                ctx.closePath();
+                ctx.fillStyle = p.color;
+                ctx.fill();
+                // A separator that reads on either theme: the slices are literal
+                // colours, so a themed stroke would vanish on one of them.
+                ctx.strokeStyle = 'rgba(255,255,255,.85)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            });
+        },
+    };
+};
+
+function shade(hex, factor) {
+    const n = parseInt(String(hex).replace('#', ''), 16);
+    const r = Math.round(((n >> 16) & 255) * factor);
+    const g = Math.round(((n >> 8) & 255) * factor);
+    const b = Math.round((n & 255) * factor);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+</script>

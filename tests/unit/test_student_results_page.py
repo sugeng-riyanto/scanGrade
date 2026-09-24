@@ -12,6 +12,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW = (ROOT / "app" / "templates" / "student" / "results.html").read_text(encoding="utf-8")
+CHARTS_RAW = (ROOT / "app" / "templates" / "student" / "_visual_summary.html").read_text(encoding="utf-8")
+DASH_RAW = (ROOT / "app" / "templates" / "student" / "dashboard.html").read_text(encoding="utf-8")
 STUDENT = (ROOT / "app" / "routes" / "student.py").read_text(encoding="utf-8")
 TOGGLE = (ROOT / "tests" / "unit" / "test_language_toggle.py").read_text(encoding="utf-8")
 #: The page's markup without its comments, for the assertions that look for text.
@@ -19,6 +21,8 @@ TOGGLE = (ROOT / "tests" / "unit" / "test_language_toggle.py").read_text(encodin
 #: finds the fix described rather than applied — the lesson every guard in this
 #: repository has had to learn, twice.
 PAGE = re.sub(r"\{#.*?#\}", " ", RAW, flags=re.S)
+CHARTS = re.sub(r"\{#.*?#\}", " ", CHARTS_RAW, flags=re.S)
+DASH = re.sub(r"\{#.*?#\}", " ", DASH_RAW, flags=re.S)
 
 
 class TestThePassLineIsThePapers:
@@ -67,11 +71,17 @@ class TestTheCountReadsLikeOne:
 
 
 class TestTheThreeCharts:
+    """The three views live in `student/_visual_summary.html`, rendered by both student
+    pages from that one file. These assertions follow the copy rather than the page — a
+    chart is a chart wherever it is written — and the last one holds the *reason* it
+    moved there: a second implementation is how two pages start drawing different
+    pictures of the same marks."""
+
     def test_each_canvas_has_a_parent_with_a_height(self):
         """`maintainAspectRatio: false` with an unsized parent makes the canvas grow
         on every resize — measured elsewhere in this repository at 5 400-8 300px."""
         for ref in ("histoCanvas", "seriesCanvas", "pieCanvas"):
-            block = PAGE.split('x-ref="%s"' % ref, 1)[0]
+            block = CHARTS.split('x-ref="%s"' % ref, 1)[0]
             parent = block.rsplit("<div", 1)[1]
             assert re.search(r'class="h-\d+', parent), (
                 f"{ref} has no sized parent, so it will grow without bound")
@@ -79,24 +89,75 @@ class TestTheThreeCharts:
     def test_the_charts_are_behind_the_same_switch_as_the_marks(self):
         """A chart is a loud way to show a score. A toggle that hides the column
         while an axis prints every mark is a switch that does not work."""
-        section = PAGE.split('t(\'Ringkasan Visual\'', 1)[1]
-        assert 'x-show="showScores"' in section.split("</section>", 1)[0]
-        assert "if (!this.showScores) return;" in PAGE, \
+        section = CHARTS.split("t('Ringkasan Visual'", 1)[1]
+        assert 'x-show="showScores' in section.split("</section>", 1)[0]
+        assert "if (!this.showScores) return;" in CHARTS, \
             "a hidden canvas measures 0x0 and must not be drawn into"
 
     def test_the_pie_is_drawn_rather_than_charted(self):
         """Chart.js has no 3D pie. The slices are counts — a pie of *averages* would
         be a picture of a number that is not part of anything — and the caption says
         so on the page."""
-        assert "drawPie3D" in PAGE
-        assert "ctx.ellipse(" in PAGE, "the projection is gone"
-        assert "shade(" in PAGE, "the wall has no depth without shading"
-        assert "not an average" in PAGE and "bukan rata-rata" in PAGE
-        assert "type: 'pie'" not in PAGE, (
+        assert "drawPie3D" in CHARTS
+        assert "ctx.ellipse(" in CHARTS, "the projection is gone"
+        assert "shade(" in CHARTS, "the wall has no depth without shading"
+        assert "not an average" in CHARTS and "bukan rata-rata" in CHARTS
+        assert "type: 'pie'" not in CHARTS, (
             "a 2D pie came back while the caption still claims a count")
+
+    def test_both_student_pages_render_the_one_implementation(self):
+        """The dashboard drew its own bars and the results page its own three charts —
+        the same marks, two arrangements, and nothing that could tell them apart when
+        they drifted."""
+        assert "{% include 'student/_visual_summary.html' %}" in PAGE, \
+            "the results page no longer renders the shared card"
+        assert "{% include 'student/_visual_summary.html' %}" in DASH, \
+            "the dashboard no longer renders the shared card"
+        for page, name in ((PAGE, "results"), (DASH, "dashboard")):
+            assert "<canvas" not in page, (
+                f"the {name} page carries a canvas of its own again — two "
+                f"implementations of one set of charts is how they disagree")
+            assert "new Chart(" not in page, (
+                f"the {name} page builds its own chart again")
+
+
+class TestTheDashboardHidesEveryMarkItPrints:
+    """The dashboard's switch hid the overall average while the subject list printed
+    each subject's average *and* drew a bar for it, and a hand-rolled trend list printed
+    every mark of the last five exams. One number hidden, seven printed, and no error
+    anywhere — which is why the switch was worth making true rather than decorative."""
+
+    def test_the_subject_averages_follow_the_switch(self):
+        assert 'class="space-y-3" x-show="showScores"' in DASH, \
+            "the subject averages print their marks regardless of the switch"
+        assert "x-show=\"!showScores\"" in DASH, \
+            "nothing says the list is hidden rather than empty"
+
+    def test_the_hand_rolled_trend_is_gone(self):
+        """A bar list rendered server-side, with a colour rule on a literal 70 and no
+        relation to the switch. Its information is in the shared card now, over every
+        released mark rather than five.
+
+        The Python half reads *code*, not prose: the route explains the removal in a
+        comment that names the field, and a guard that reads its own documentation is
+        the mistake this file's header already warns about."""
+        assert "score_trend" not in DASH, "the bar list is back in the template"
+        used = [ln.strip() for ln in STUDENT.splitlines()
+                if "score_trend" in ln and not ln.lstrip().startswith("#")]
+        assert not used, f"the route computes the bar list again: {used[:2]}"
+
+    def test_the_component_mixes_in_the_shared_charts(self):
+        """The page has to *call* the factory, and call `initCharts()` from its own
+        `init` — Alpine only calls the component's own `init`, so a mixin that
+        declared one would never run."""
+        assert 'x-data="studentDashboard()"' in DASH
+        assert "Object.assign(sgVisualSummary(), {" in DASH
+        assert "this.initCharts();" in DASH
+        assert "initCharts() {" in CHARTS, "the factory cannot be started"
 
     def test_the_charts_are_rebuilt_when_the_language_changes(self):
         """A chart's axis labels are strings built in JavaScript, and `t()` cannot
-        re-run inside a canvas — the watcher is what redraws them."""
-        assert "$watch('lang'" in PAGE
-        assert "$watch('showScores'" in PAGE
+        re-run inside a canvas — the watcher is what redraws them. It lives with the
+        factory now, so both pages get it."""
+        assert "$watch('lang'" in CHARTS
+        assert "$watch('showScores'" in CHARTS
