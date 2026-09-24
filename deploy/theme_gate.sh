@@ -189,7 +189,8 @@ SCHEMA_OUT=$("$PY" "$REPO/deploy/schema_contract.py" 2>&1)
 SCHEMA_RC=$?
 
 if [ "$SCHEMA_RC" -eq 1 ]; then
-  echo >&2    echo "theme gate: FAILED — the code and the database disagree, a policy lets in a" >&2
+  echo >&2
+  echo "theme gate: FAILED — the code and the database disagree, a policy lets in a" >&2
     echo "            caller with no session, or a role is compared against a name the" >&2
     echo "            database cannot hold. Each one answers 200 with the wrong page: a" >&2
     echo "            refused query renders empty, a row any caller can read is a row" >&2

@@ -11,38 +11,72 @@
    table masks, and a switch that hid the table while the axis printed every mark is a
    switch that does not work.
 
-   Three states, and the two that are not charts used to be one grey sentence —
-   "marks are hidden" and "nothing has been released yet" looked identical, so a
-   reader whose marks were not out yet was told to press a button, and a reader who
-   pressed it got empty axes. #}
-<section class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-5">
+   Four things this file deliberately does **not** own:
+
+   * the theme's text and grid colours — one reader in `base.html` sets
+     `Chart.defaults` from the same CSS tokens everything else uses, so a chart cannot
+     invent a palette the rest of the app does not have;
+   * the point data — the route builds it, once, for both pages;
+   * the `t()` copy — the host page's `t` is the same pair table the rest of it uses;
+   * the switch — `showScores` is the host's own.
+
+   What it does own: the *data* colours (the band ramp), the hover, and the redraw.
+   The last two exist because of the pie. Chart.js resizes and re-themes its own
+   canvases; a canvas painted by hand gets neither for free, so the pie was stale
+   after every rotate and silent under the cursor, which on a phone is the only way to
+   read a slice. #}
+<section class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-5 transition-all duration-300 hover:shadow-xl hover:border-primary-200">
     <h3 class="text-sm font-extrabold text-surface-700 mb-3 flex items-center gap-1.5"><i class="fas fa-chart-pie text-primary-500"></i><span x-text="t('Ringkasan Visual','Visual Summary')"></span></h3>
 
     <div x-show="showScores && hasMarks" x-cloak>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div class="rounded-xl border border-surface-200 p-3">
+        {# One column on a phone, two on a tablet, three only where a column is wide
+           enough to hold an axis — `lg` is where this page's sidebar appears, so three
+           columns at 1024 would leave each chart about 220px, narrower than the phone's
+           single one. `md`/`xl` are the widths a chart can actually be read at. #}
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+            <div class="rounded-xl border border-surface-200 p-3 transition-colors hover:border-primary-300 hover:bg-surface-50">
                 <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Sebaran Nilai','Score Distribution')"></p>
                 {# A canvas needs a parent with a height: `maintainAspectRatio: false`
                    with an unsized one makes the canvas grow on every resize. #}
-                <div class="h-56"><canvas x-ref="histoCanvas"></canvas></div>
+                {# `w-full h-full` on the canvases Chart.js manages, so the layout is
+                   right *before* Chart.js writes its own inline size — which is when
+                   `_small()` is answered. `h-full` is not enough for the hand-drawn
+                   pie: measured, the pie's own height attribute drove its layout, so
+                   every redraw grew it (a 224px holder, a 1665px canvas, and a card as
+                   tall as the page). That one is sized from its holder instead. #}
+                <div class="h-52 sm:h-56"><canvas x-ref="histoCanvas" class="w-full h-full"></canvas></div>
             </div>
-            <div class="rounded-xl border border-surface-200 p-3">
+            <div class="rounded-xl border border-surface-200 p-3 transition-colors hover:border-primary-300 hover:bg-surface-50">
                 <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Perkembangan Nilai','Score Progression')"></p>
-                <div class="h-56"><canvas x-ref="seriesCanvas"></canvas></div>
+                <div class="h-52 sm:h-56"><canvas x-ref="seriesCanvas" class="w-full h-full"></canvas></div>
             </div>
-            <div class="rounded-xl border border-surface-200 p-3">
+            <div class="rounded-xl border border-surface-200 p-3 transition-colors hover:border-primary-300 hover:bg-surface-50">
                 <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Ujian per Mata Pelajaran','Exams per Subject')"></p>
-                <div class="h-56"><canvas x-ref="pieCanvas"></canvas></div>
+                {# The one canvas Chart.js does not own, so the one that needs a cursor:
+                   `hoverSlice` is set by the pointer *and* by the legend below. It is
+                   also the one nothing sizes for it — see `_pieCtx`. #}
+                <div class="h-52 sm:h-56">
+                    <canvas x-ref="pieCanvas"
+                            @pointermove="onPieMove($event)"
+                            @pointerleave="hoverSlice = null; drawPie3D()"
+                            :style="hoverSlice === null ? 'cursor:default' : 'cursor:pointer'"></canvas>
+                </div>
                 {# A pie of *averages* would be a picture of a number that is not a
                    part of anything. The slices are counts, and the caption says so. #}
                 <p class="text-[10px] font-medium text-surface-400 mt-2"
                    x-text="t('Tiap bagian adalah jumlah ujian, bukan rata-rata.','Each slice is a count of exams, not an average.')"></p>
+                <p class="text-[10px] font-medium text-surface-400 mt-0.5"
+                   x-text="t('Sentuh atau arahkan kursor ke potongan untuk detailnya.','Tap or hover a slice for its detail.')"></p>
             </div>
         </div>
 
-        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-            <template x-for="slice in pieSlices" :key="'legend-' + slice.name">
-                <span class="inline-flex items-center gap-1.5 text-[11px] font-bold text-surface-500">
+        {# The legend is an input, not a label: hovering a subject lights its slice,
+           which is how a reader answers "which colour is Fisika" without counting. #}
+        <div class="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+            <template x-for="(slice, i) in pieSlices" :key="'legend-' + slice.name">
+                <span class="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-surface-500 transition-colors hover:bg-surface-100"
+                      @mouseenter="hoverSlice = i; drawPie3D()"
+                      @mouseleave="hoverSlice = null; drawPie3D()">
                     <span class="w-3 h-3 rounded-sm" :style="'background:' + slice.color"></span>
                     <span x-text="slice.name"></span>
                     <span class="text-surface-400 font-medium" x-text="'(' + slice.value + ')'"></span>
@@ -83,11 +117,22 @@ window.sgVisualSummary = function () {
     return {
         plotted: JSON.parse(document.getElementById('sg-chart-points')?.textContent || '[]'),
 
-        //: The palette is literal hexes rather than theme tokens: a canvas cannot
-        //: read a CSS variable per slice, and these eight are legible on both the
-        //: light and the dark card.
-        palette: ['#6366f1', '#10b981', '#f59e0b', '#ef4444',
-                  '#0ea5e9', '#8b5cf6', '#14b8a6', '#f97316'],
+        //: Which slice the pointer is on, or null. Shared by the canvas and the legend
+        //: so the two cannot disagree about which one is lit.
+        hoverSlice: null,
+
+        //: The ramp is the page's own: under 60 red, 60s amber, 70s the primary blue,
+        //: 80s emerald, 90s a deeper green. The dashboard paints its subject bars with
+        //: these same boundaries, so a bar there and a bar here cannot call one mark
+        //: two different things. Literal hexes rather than theme tokens because a
+        //: canvas cannot read a variable per bar — and these five are mid-tone, which
+        //: is what keeps them legible on the white card *and* on the dark one.
+        bandColors: ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#059669'],
+
+        //: The pie is a count of exams per subject, so its slices are *names*: no ramp
+        //: applies, and eight distinct hues is the whole point.
+        palette: ['#6366f1', '#f59e0b', '#14b8a6', '#ec4899',
+                  '#0ea5e9', '#8b5cf6', '#22c55e', '#f97316'],
 
         get hasMarks() { return this.plotted.length > 0; },
 
@@ -100,7 +145,17 @@ window.sgVisualSummary = function () {
             return [0, 1, 2, 3, 4].map(i => ({
                 label: edges[i] + '-' + (edges[i + 1] - 1),
                 value: this.released.filter(p => p.score >= edges[i] && p.score < edges[i + 1]).length,
+                color: this.bandColors[i],
             }));
+        },
+
+        //: The ramp, asked per mark: a point on the line is coloured by the band its
+        //: score falls in, so a dip is visibly a dip and not only a lower pixel.
+        bandColor(score) {
+            const edges = [0, 60, 70, 80, 90, 101];
+            let i = 0;
+            while (i < this.bandColors.length - 1 && score >= edges[i + 1]) i++;
+            return this.bandColors[i];
         },
 
         get series() {
@@ -126,7 +181,22 @@ window.sgVisualSummary = function () {
         initCharts() {
             this.$watch('showScores', () => { this.$nextTick(() => this.drawCharts()); });
             this.$watch('lang', () => { this.$nextTick(() => this.drawCharts()); });
+            // A rotate, a sidebar collapsing, a keyboard opening: Chart.js resizes its
+            // own canvases and re-draws them, and the hand-painted pie has to be told.
+            // Debounced, because a drag-resize fires this continuously.
+            this._onResize = () => {
+                clearTimeout(this._resizeTimer);
+                this._resizeTimer = setTimeout(() => this.drawCharts(), 150);
+            };
+            window.addEventListener('resize', this._onResize);
             this.$nextTick(() => this.drawCharts());
+        },
+
+        //: Alpine calls this when the component leaves the page. Without it a resize
+        //: on any other page would keep calling into a detached canvas.
+        destroy() {
+            window.removeEventListener('resize', this._onResize);
+            clearTimeout(this._resizeTimer);
         },
 
         drawCharts() {
@@ -152,26 +222,89 @@ window.sgVisualSummary = function () {
             return { ctx, w, h };
         },
 
+        //: On a phone one chart is about 300px wide and a rotated axis title costs a
+        //: fifth of it. Below this the titles go and the ticks shrink — the values
+        //: stay, which is what the chart is for.
+        _small(box) { return box.w < 340; },
+
+        //: A tooltip that can be read on either theme. It carries its own surface
+        //: rather than inheriting the card's, because the default is a white slab with
+        //: the theme's tick colour on it.
+        _tip(formatter) {
+            return {
+                backgroundColor: 'rgba(15,23,42,.92)',
+                titleColor: '#f8fafc', bodyColor: '#e2e8f0',
+                padding: 10, cornerRadius: 10, displayColors: false,
+                callbacks: { label: (c) => ' ' + formatter(c) },
+            };
+        },
+
+        //: A pointer over something that answers is the cheapest affordance there is.
+        _cursor(evt, els) {
+            const t = evt && evt.native && evt.native.target;
+            if (t && t.style) t.style.cursor = (els && els.length) ? 'pointer' : 'default';
+        },
+
         _destroy(key) {
             if (this[key]) { this[key].destroy(); this[key] = null; }
+        },
+
+        //: The pie's canvas is sized *here*, from its holder's box, because nothing
+        //: else will: Chart.js writes an inline size for the canvases it manages, and
+        //: a percentage height is not enough for this one — measured in a real browser,
+        //: the canvas's own `height` attribute drove its layout, so every redraw grew
+        //: it (a 224px holder holding a 1665px canvas, and a card as tall as the page).
+        //: Both dimensions are set in CSS pixels and the backing store in device ones,
+        //: which is what keeps it crisp on a phone.
+        _pieCtx() {
+            const canvas = this.$refs.pieCanvas;
+            const holder = canvas && canvas.parentElement;
+            if (!canvas || !holder) return null;
+            const w = holder.clientWidth, h = holder.clientHeight;
+            if (!w || !h) return null;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            return { ctx, w, h };
         },
 
         drawHistogram() {
             const box = this._ctx('histoCanvas');
             if (!box) return;
-            const labels = this.bands.map(b => b.label);
-            const values = this.bands.map(b => b.value);
+            const small = this._small(box);
+            const tick = { font: { size: small ? 9 : 11 } };
             this._destroy('histoChart');
             this.histoChart = new Chart(box.ctx, {
                 type: 'bar',
-                data: { labels, datasets: [{ data: values, backgroundColor: '#6366f1', borderRadius: 6 }] },
+                data: {
+                    labels: this.bands.map(b => b.label),
+                    datasets: [{
+                        data: this.bands.map(b => b.value),
+                        backgroundColor: this.bandColors,
+                        //: A deeper shade of the same hue is the hover cue, and it
+                        //: works on both cards because the hue is what changes.
+                        hoverBackgroundColor: this.bandColors.map(c => shade(c, 0.82)),
+                        borderRadius: 8, borderSkipped: false, maxBarThickness: 44,
+                    }],
+                },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
+                    onHover: this._cursor,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: this._tip((c) => this.t('Jumlah ujian', 'Number of exams')
+                            + ': ' + c.parsed.y),
+                    },
                     scales: {
-                        y: { beginAtZero: true, ticks: { precision: 0 },
-                             title: { display: true, text: this.t('Jumlah ujian', 'Number of exams') } },
-                        x: { title: { display: true, text: this.t('Rentang nilai', 'Score range') } },
+                        y: { beginAtZero: true, ticks: { ...tick, precision: 0 },
+                             title: { display: !small, text: this.t('Jumlah ujian', 'Number of exams') } },
+                        x: { ticks: { ...tick, maxRotation: 0, autoSkip: false },
+                             title: { display: !small, text: this.t('Rentang nilai', 'Score range') } },
                     },
                 },
             });
@@ -180,6 +313,17 @@ window.sgVisualSummary = function () {
         drawSeries() {
             const box = this._ctx('seriesCanvas');
             if (!box) return;
+            const small = this._small(box);
+            const tick = { font: { size: small ? 9 : 11 } };
+            // A gradient stroke and a fading fill, so the line is one of the three
+            // *colourful* views rather than three grey ones with a coloured pie.
+            const stroke = box.ctx.createLinearGradient(0, 0, box.w, 0);
+            stroke.addColorStop(0, '#8b5cf6');
+            stroke.addColorStop(0.5, '#0ea5e9');
+            stroke.addColorStop(1, '#10b981');
+            const fill = box.ctx.createLinearGradient(0, 0, 0, box.h);
+            fill.addColorStop(0, 'rgba(14,165,233,.28)');
+            fill.addColorStop(1, 'rgba(14,165,233,0)');
             this._destroy('seriesChart');
             this.seriesChart = new Chart(box.ctx, {
                 type: 'line',
@@ -187,49 +331,130 @@ window.sgVisualSummary = function () {
                     labels: this.series.map(p => p.label),
                     datasets: [{
                         data: this.series.map(p => p.value),
-                        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.15)',
-                        fill: true, tension: 0.3, pointRadius: 3,
+                        borderColor: stroke, backgroundColor: fill,
+                        fill: true, tension: 0.35, borderWidth: 3,
+                        pointRadius: 4, pointHoverRadius: 7, pointHoverBorderWidth: 3,
+                        pointBackgroundColor: this.series.map(p => this.bandColor(p.value)),
+                        pointBorderColor: '#ffffff', pointBorderWidth: 2,
                     }],
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
+                    //: Nearest point wins, not the whole column: on a phone the labels
+                    //: are 6 ticks apart and index mode highlights the wrong one.
+                    interaction: { mode: 'nearest', intersect: false },
+                    onHover: this._cursor,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: this._tip((c) => this.t('Nilai', 'Score') + ': ' + c.parsed.y),
+                    },
                     scales: {
-                        y: { beginAtZero: true, max: 100, title: { display: true, text: this.t('Nilai', 'Score') } },
-                        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
-                             title: { display: true, text: this.t('Ujian', 'Exam') } },
+                        y: { beginAtZero: true, max: 100, ticks: tick,
+                             title: { display: !small, text: this.t('Nilai', 'Score') } },
+                        x: { ticks: { ...tick, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+                             title: { display: !small, text: this.t('Ujian', 'Exam') } },
                     },
                 },
             });
         },
 
+        //: The pie's geometry, in one place: the drawing and the hit test both ask
+        //: here, because a hit test with its own ellipse arithmetic is how a slice
+        //: starts answering for its neighbour.
+        _pieGeom(w, h, depth) {
+            const drop = depth || Math.max(12, Math.round(Math.min(w, h) * 0.12));
+            // `ry` is derived from `rx` and never recomputed: the hit test asks this
+            // same function, and two copies of the ellipse arithmetic is how a slice
+            // starts answering for its neighbour.
+            const rx = Math.max(20, Math.min(w / 2 - 8, (h - drop) / 2 * 1.7));
+            return { drop, cx: w / 2, cy: (h - drop) / 2, rx, ry: rx * 0.55 };
+        },
+
+        //: Which slice is under this point, or null. The wall counts as its slice: on
+        //: a phone the wall is a fifth of the pie and a reader aiming at "the teal one"
+        //: does not know which face they hit.
+        _sliceAt(x, y, w, h) {
+            const slices = this.pieSlices;
+            if (!slices.length) return null;
+            const g = this._pieGeom(w, h);
+            const top = Math.hypot((x - g.cx) / g.rx, (y - g.cy) / g.ry) <= 1;
+            const wall = y > g.cy
+                && Math.hypot((x - g.cx) / g.rx, (y - g.cy - g.drop) / g.ry) <= 1;
+            if (!top && !wall) return null;
+            let ang = Math.atan2((y - g.cy) / g.ry, (x - g.cx) / g.rx);
+            if (ang < -Math.PI / 2) ang += Math.PI * 2;
+            const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
+            let acc = -Math.PI / 2;
+            for (let i = 0; i < slices.length; i++) {
+                const span = (slices[i].value / total) * Math.PI * 2;
+                if (ang < acc + span) return i;
+                acc += span;
+            }
+            return slices.length - 1;
+        },
+
+        onPieMove(evt) {
+            const canvas = this.$refs.pieCanvas;
+            if (!canvas) return;
+            const rect = canvas.getBoundingClientRect();
+            const i = this._sliceAt(evt.clientX - rect.left, evt.clientY - rect.top,
+                                    canvas.clientWidth, canvas.clientHeight);
+            if (i === this.hoverSlice) return;      // redraw only when it changed
+            this.hoverSlice = i;
+            this.drawPie3D();
+        },
+
+        _pill(ctx, text, cx, cy) {
+            ctx.font = '700 12px Inter, system-ui, sans-serif';
+            const w = ctx.measureText(text).width + 20, h = 26;
+            const x = cx - w / 2, y = cy - h / 2, r = 9;
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+            //: Its own surface, like the tooltips: it sits on a slice colour, not on a
+            //: card, so it cannot inherit either theme's text colour and stay legible.
+            ctx.fillStyle = 'rgba(15,23,42,.88)';
+            ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, cx, cy + 1);
+        },
+
         drawPie3D(depth) {
-            const box = this._ctx('pieCanvas');
+            const box = this._pieCtx();
             if (!box) return;
             const slices = this.pieSlices;
             if (!slices.length) return;
             const ctx = box.ctx;
-            const drop = depth || Math.max(12, Math.round(Math.min(box.w, box.h) * 0.12));
-            const cx = box.w / 2;
-            const cy = (box.h - drop) / 2;
-            const rx = Math.max(20, Math.min(box.w / 2 - 8, (box.h - drop) / 2 * 1.7));
-            const ry = rx * 0.55;
+            const g = this._pieGeom(box.w, box.h, depth);
+            const { cx, cy, rx, ry, drop } = g;
 
             const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
             let angle = -Math.PI / 2;
-            const parts = slices.map(s => {
+            const parts = slices.map((s, i) => {
                 const from = angle;
                 const to = angle + (s.value / total) * Math.PI * 2;
                 angle = to;
-                return { color: s.color, from, to };
+                const mid = (from + to) / 2;
+                //: The hovered slice steps out of the ring, the way a slice of a real
+                //: 3D pie does when it is pulled — the cue is the motion, so it reads
+                //: even where the colour has nothing left to darken.
+                const out = this.hoverSlice === i ? 7 : 0;
+                return { color: s.color, from, to,
+                         dx: Math.cos(mid) * out, dy: Math.sin(mid) * out * 0.55 };
             });
 
             // The wall shows only on the near half — the slices whose arc points down
             // the screen — and is drawn first so the near ones overlap correctly.
             parts.filter(p => Math.sin((p.from + p.to) / 2) > 0).forEach(p => {
                 ctx.beginPath();
-                ctx.ellipse(cx, cy + drop, rx, ry, 0, p.from, p.to);
-                ctx.ellipse(cx, cy, rx, ry, 0, p.to, p.from, true);
+                ctx.ellipse(cx + p.dx, cy + drop + p.dy, rx, ry, 0, p.from, p.to);
+                ctx.ellipse(cx + p.dx, cy + p.dy, rx, ry, 0, p.to, p.from, true);
                 ctx.closePath();
                 ctx.fillStyle = shade(p.color, 0.72);
                 ctx.fill();
@@ -237,8 +462,8 @@ window.sgVisualSummary = function () {
 
             parts.forEach(p => {
                 ctx.beginPath();
-                ctx.moveTo(cx, cy);
-                ctx.ellipse(cx, cy, rx, ry, 0, p.from, p.to);
+                ctx.moveTo(cx + p.dx, cy + p.dy);
+                ctx.ellipse(cx + p.dx, cy + p.dy, rx, ry, 0, p.from, p.to);
                 ctx.closePath();
                 ctx.fillStyle = p.color;
                 ctx.fill();
@@ -248,6 +473,11 @@ window.sgVisualSummary = function () {
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
             });
+
+            if (this.hoverSlice !== null && slices[this.hoverSlice]) {
+                const s = slices[this.hoverSlice];
+                this._pill(ctx, s.name + ' · ' + s.value, cx, cy);
+            }
         },
     };
 };

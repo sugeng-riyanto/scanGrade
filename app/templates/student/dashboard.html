@@ -17,7 +17,7 @@
 
     <!-- Class & Subject Info -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 flex items-center gap-4">
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 flex items-center gap-4 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
             <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20 shrink-0">
                 <i class="fas fa-school text-white text-lg"></i>
             </div>
@@ -26,7 +26,7 @@
                 <p class="font-extrabold text-surface-800 text-xl">{{ student_class.name if student_class else '-' }}</p>
             </div>
         </div>
-        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 flex items-center gap-4">
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 flex items-center gap-4 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
             <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20 shrink-0">
                 <i class="fas fa-book-open text-white text-lg"></i>
             </div>
@@ -66,7 +66,7 @@
     {% if completed_exams %}
     <div class="grid grid-cols-1 gap-4">
         <!-- Mastery Level -->
-        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
+        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
             <div class="flex items-center gap-3 mb-4">
                 <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-200/40">
                     <i class="fas fa-trophy text-white text-sm"></i>

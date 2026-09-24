@@ -161,3 +161,126 @@ class TestTheDashboardHidesEveryMarkItPrints:
         factory now, so both pages get it."""
         assert "$watch('lang'" in CHARTS
         assert "$watch('showScores'" in CHARTS
+
+
+class TestTheChartsAreColourful:
+    """Three views of one set of marks, and every one of them coloured — a five-hue
+    ramp for the bands, a gradient for the line, eight hues for the pie. A chart whose
+    colour carries nothing is a chart that has to be read twice: the ramp is the same
+    red-under-60 / amber / blue / emerald rule the dashboard paints its subject bars
+    with, so a colour means the same thing in both places."""
+
+    def test_the_band_ramp_is_the_pages_own_rule(self):
+        ramp = re.search(r"bandColors: \[([^\]]+)\]", CHARTS)
+        assert ramp, "the band ramp is gone"
+        colors = re.findall(r"#[0-9a-f]{6}", ramp.group(1))
+        assert len(colors) == 5, f"five bands need five colours, found {colors}"
+        #: The dashboard's own boundaries: fail / low / pass / good / very good.
+        assert colors[0] == "#ef4444", "the failing band is no longer red"
+        assert colors[3] == "#10b981", "the 80s band left the emerald the app uses"
+
+    def test_every_bar_carries_its_band_colour(self):
+        assert "backgroundColor: this.bandColors" in CHARTS, \
+            "the histogram is one flat colour again"
+        assert "color: this.bandColors[i]" in CHARTS, \
+            "a band does not know its own colour"
+
+    def test_the_line_is_a_gradient_and_its_points_are_banded(self):
+        assert "createLinearGradient" in CHARTS, "the stroke is one flat colour"
+        assert "pointBackgroundColor: this.series.map(p => this.bandColor(p.value))" in CHARTS, \
+            "a point does not say which band its score is in"
+
+    def test_the_point_colour_reads_the_same_edges_as_the_bars(self):
+        """Two ways of asking "which band is this?" would let a 75 draw an amber bar
+        and a blue dot. Both read one list of edges."""
+        assert CHARTS.count("const edges = [0, 60, 70, 80, 90, 101];") == 2, \
+            "the band edges are stated somewhere else as well"
+
+
+class TestThePieAnswersThePointer:
+    """The pie is the one canvas Chart.js does not own, so it is the one that had no
+    tooltip, no cursor and no redraw — it was stale after every rotate and silent
+    under every cursor, which on a phone is the only way to read a slice."""
+
+    def test_the_pointer_lights_a_slice(self):
+        assert '@pointermove="onPieMove($event)"' in CHARTS
+        assert "onPieMove(evt)" in CHARTS
+        assert "hoverSlice" in CHARTS
+
+    def test_the_hit_test_and_the_drawing_share_one_geometry(self):
+        """A hit test with its own ellipse arithmetic is how a slice starts answering
+        for its neighbour — so there is exactly one place that computes it."""
+        assert CHARTS.count("w / 2 - 8") == 1, \
+            "the pie's ellipse is computed in two places"
+        assert "ry: rx * 0.55" in CHARTS, \
+            "`ry` is derived from `rx` again, so the two can drift"
+        assert "this._pieGeom(box.w, box.h, depth)" in CHARTS, "the drawing left the shared geometry"
+        assert "this._pieGeom(w, h)" in CHARTS, "the hit test left the shared geometry"
+
+    def test_the_legend_is_an_input(self):
+        assert '@mouseenter="hoverSlice = i; drawPie3D()"' in CHARTS, \
+            "hovering a subject no longer lights its slice"
+        assert "x-for=\"(slice, i) in pieSlices\"" in CHARTS, \
+            "the legend has no index to point at"
+
+    def test_the_hovered_slice_steps_out_and_is_named(self):
+        assert "const out = this.hoverSlice === i ? 7 : 0;" in CHARTS
+        assert "_pill(" in CHARTS, "the hovered slice is not named"
+
+    def test_the_pie_is_redrawn_on_resize_and_unregistered_after(self):
+        assert "window.addEventListener('resize', this._onResize)" in CHARTS
+        assert "destroy()" in CHARTS and "removeEventListener('resize'" in CHARTS, \
+            "a detached canvas keeps being drawn into"
+
+    def test_the_pie_canvas_is_sized_by_its_holder(self):
+        """Measured in a real browser, and the reason this exists: with a percentage
+        height the pie's own `height` attribute drove its layout, so every redraw grew
+        it — a 224px holder holding a 1665px canvas, and a card as tall as the page.
+        Chart.js writes an inline size for the canvases it manages; nothing does for
+        this one, so it is sized here, in css pixels, with the backing store in device
+        ones."""
+        assert "_pieCtx()" in CHARTS
+        assert "const w = holder.clientWidth, h = holder.clientHeight;" in CHARTS
+        assert "canvas.style.width = w + 'px';" in CHARTS
+        assert "canvas.style.height = h + 'px';" in CHARTS
+        assert "ctx.setTransform(dpr, 0, 0, dpr, 0, 0);" in CHARTS, \
+            "a 1x backing store is blurred on every phone"
+        assert "this._ctx('pieCanvas')" not in CHARTS, \
+            "the pie is back on the path that sets only the backing store, which is " \
+            "what let its attribute drive its own layout"
+
+    def test_every_canvas_is_sized_before_the_compact_decision_is_made(self):
+        """`_small()` reads the canvas width, so a canvas that has not been laid out yet
+        answers "narrow" and the axis titles are never drawn — measured at 1920px, where
+        the titles were missing on a 573px chart."""
+        assert CHARTS.count('class="w-full h-full"') == 2, \
+            "the Chart.js canvases must be laid out from css, not from an attribute"
+
+
+class TestTheChartsHoverAndServeEveryWidth:
+    def test_the_chart_interaction_is_wired(self):
+        assert "onHover: this._cursor" in CHARTS, "nothing sets the pointer cursor"
+        assert "backgroundColor: 'rgba(15,23,42,.92)'" in CHARTS, \
+            "the tooltip inherits whatever surface the card has"
+
+    def test_the_card_and_its_three_views_respond_to_hover(self):
+        assert "hover:shadow-xl hover:border-primary-200" in CHARTS, "the card does not lift"
+        assert CHARTS.count("hover:border-primary-300 hover:bg-surface-50") == 3, \
+            "one of the three views has no hover state"
+
+    def test_three_columns_only_where_a_chart_is_wide_enough(self):
+        """`lg` is where this page's sidebar appears, so a 3-up grid there leaves each
+        chart about 220px — narrower than the phone's single one."""
+        assert "md:grid-cols-2 xl:grid-cols-3" in CHARTS
+        assert "lg:grid-cols-3" not in CHARTS, "three columns are back at the sidebar's width"
+
+    def test_a_narrow_chart_drops_its_axis_titles_rather_than_squeezing(self):
+        assert "_small(box)" in CHARTS
+        assert CHARTS.count("title: { display: !small") == 4, \
+            "an axis title is drawn at a width that cannot hold it"
+
+    def test_the_other_dashboard_cards_lift_like_their_neighbours(self):
+        """The stat cards and the exam/whiteboard cards already did; the two info cards
+        and the mastery card sat still, which reads as "this one is not interactive"."""
+        assert DASH.count("hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300") >= 6, \
+            "some dashboard cards still do not respond to the pointer"
