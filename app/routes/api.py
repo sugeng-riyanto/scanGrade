@@ -70,13 +70,15 @@ def _check_rate_limit(user_id, exam_id, min_interval=5):
     if now - _sync_last_cleanup > _SYNC_CLEANUP_INTERVAL:
         _sync_last_cleanup = now
         cutoff = now - 3600  # remove entries older than 1 hour
+        # One table, pruned by age. It used to also prune a second table of
+        # per-key locks (`_sync_locks`, guarded by `_sync_lock_mutex`) that no
+        # longer exists — and since nothing bound either name, the `with` here
+        # raised `NameError` on the first request after the 600 s interval. The
+        # throttle is still per-process (see the note above `_sync_last`): it is
+        # a fair-use guard on a 3 s interval, not a boundary.
         stale_keys = [k for k, v in _sync_last.items() if v < cutoff]
         for k in stale_keys:
             del _sync_last[k]
-        with _sync_lock_mutex:
-            stale_locks = [k for k in _sync_locks if k not in _sync_last]
-            for k in stale_locks:
-                del _sync_locks[k]
     return True
 
 
@@ -724,65 +726,13 @@ def _cleanup_scan_tmp(age_hours=1):
     clean_temp_files(max_age=age_hours * 3600)
 
 
-@api_bp.route("/student/auto-save", methods=["POST"])
-@login_required
-def student_auto_save():
-    """Auto-save student's in-progress exam draft — saves to localStorage mirror on server."""
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data"}), 400
-    exam_id = data.get("exam_id")
-    answers = data.get("answers", {})
-    if not exam_id or not answers:
-        return jsonify({"saved": True, "at": int(time.time())})
-    if not _check_rate_limit(g.user_id, exam_id, min_interval=5):
-        return jsonify({"saved": True, "at": int(time.time()), "throttled": True})
-    lock = _get_sync_lock(g.user_id, exam_id)
-    if not lock.acquire(blocking=False):
-        return jsonify({"saved": True, "at": int(time.time()), "busy": True})
-    try:
-        supabase = get_supabase()
-        # This route previously accepted ANY exam_id and wrote to whatever
-        # submission it found. Two holes followed: it created a draft for exams
-        # belonging to another school or not published yet, and it accepted a
-        # write to a submission already marked "submitted" — so answers could be
-        # replaced after the exam had been handed in. Both are closed here.
-        exam = row_or_none(
-            supabase.table("exams")
-            .select("id,school_id,class_ids,is_published,status")
-            .eq("id", exam_id).maybe_single().execute()
-        )
-        allowed, _reason = exam_sitting_allowed(supabase, exam or {}, exam_id, g.user_id)
-        if not allowed:
-            current_app.logger.warning("auto-save denied: exam %s user %s", exam_id, g.user_id)
-            return jsonify({"saved": True, "at": int(time.time()), "denied": True})
-
-        existing = supabase.table("submissions").select("id,status,answers").eq("exam_id", exam_id).eq("student_id", g.user_id).execute().data
-        if existing:
-            sub = existing[0]
-            # Only an open attempt may be auto-saved. A handed-in, marked, or
-            # released submission is final.
-            if sub.get("status") != "draft":
-                return jsonify({"saved": True, "at": int(time.time()), "note": "not_draft"})
-            merged = sub.get("answers") or {}
-            if isinstance(merged, dict):
-                merged.update(answers)
-                answers = merged
-            supabase.table("submissions").update({"answers": answers}).eq("id", sub["id"]).execute()
-        else:
-            supabase.table("submissions").insert({
-                "exam_id": exam_id,
-                "student_id": g.user_id,
-                "answers": answers,
-                "score": 0,
-                "max_score": 100,
-                "status": "draft",
-            }).execute()
-    except Exception as e:
-        current_app.logger.warning("Auto-save failed for exam %s user %s: %s", exam_id, g.user_id, str(e))
-    finally:
-        lock.release()
-    return jsonify({"saved": True, "at": int(time.time())})
+# `POST /api/student/auto-save` used to live here. It was a second write path to
+# the same draft `sync-draft` owns, it had no caller in any template or script,
+# and it could not have served one: its first line called `_get_sync_lock`, a
+# name nothing defined, so every request answered 500. A duplicate path that
+# nothing calls is a path nothing keeps correct — this one had already drifted
+# away from `sync-draft` on the exam-window rule. Deleted rather than repaired;
+# the tests in `tests/unit/test_sync_path_integrity.py` pin both halves of that.
 
 
 def _get_exam_cached(exam_id, supabase):
