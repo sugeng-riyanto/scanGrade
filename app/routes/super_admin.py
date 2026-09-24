@@ -6,7 +6,11 @@ from datetime import datetime, timezone, timedelta
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, current_app, send_file
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import read_with_retry, row_or_none
-from app.services.audit_service import log_activity
+from app.services.audit_service import log_activity, fetch_audit_logs
+# Aliased on purpose: the view below is itself named `trial_settings`, and a bare
+# module name would be shadowed by the function the moment it is defined — the
+# body would then look up a function and fail on the first attribute access.
+from app.services import trial_settings as trial_cfg
 from app.services.demo_settings import (
     GROUPS as DEMO_GROUPS,
     effective_flags as demo_effective_flags,
@@ -662,34 +666,85 @@ def plan_delete(plan_id):
 
 
 # ─── Trial Settings ───────────────────────────────────────────────────
+#
+# One row, so the page is a real settings page only if it can say three things
+# the old form could not: what the value currently *is*, whether it is something
+# an operator set or the built-in default (the old page rendered the default as
+# if it were saved), and how to stop configuring it at all. All three live in the
+# service; this route is the RBAC-guarded door onto it.
+#
+#   GET                read    — value, its source, who set it, and the history
+#   POST action=save   create/update — validated, then stored
+#   POST action=reset  delete — removes the override, the default applies again
 
 @super_bp.route("/trial-settings", methods=["GET", "POST"])
 @_sa_required
 def trial_settings():
     supabase = get_supabase()
     if request.method == "POST":
-        days = int(request.form.get("trial_days", 14))
-        try:
-            existing = supabase.table("trial_settings").select("id").limit(1).execute()
-            data = {"trial_days": days, "updated_by": g.user_id, "updated_at": datetime.now(timezone.utc).isoformat()}
-            if existing.data:
-                supabase.table("trial_settings").update(data).eq("id", existing.data[0]["id"]).execute()
+        action = (request.form.get("action") or "save").strip().lower()
+        if action == "reset":
+            if trial_settings_reset(supabase, g.user_id):
+                flash(f"Pengaturan trial dihapus. Sekolah baru kembali mendapat "
+                      f"{trial_cfg.DEFAULT_TRIAL_DAYS} hari bawaan.", "success")
             else:
-                supabase.table("trial_settings").insert(data).execute()
-            log_activity("update", "trial_settings", "1", new_data={"trial_days": days}, user_id=g.user_id)
-            flash(f"Trial duration diubah ke {days} hari", "success")
+                flash("Gagal menghapus pengaturan trial", "error")
+            return redirect("/super-admin/trial-settings")
+
+        try:
+            days = trial_cfg.parse_days(request.form.get("trial_days"))
+        except ValueError as e:
+            # The bounds are named in the refusal, because "gagal" on its own
+            # leaves an operator guessing what the field accepts.
+            flash(f"Gagal: {e}. Masukkan angka antara "
+                  f"{trial_cfg.MIN_TRIAL_DAYS} dan {trial_cfg.MAX_TRIAL_DAYS} hari.", "error")
+            return redirect("/super-admin/trial-settings")
+        try:
+            trial_cfg.save(days, g.user_id, supabase=supabase)
+            log_activity("update", "trial_settings", "1",
+                         new_data={"trial_days": days}, user_id=g.user_id)
+            flash(f"Masa trial diubah ke {days} hari", "success")
         except Exception as e:
             flash(f"Gagal: {str(e)[:60]}", "error")
         return redirect("/super-admin/trial-settings")
 
-    trial = {"trial_days": 14}
+    return render_template(
+        "super_admin/trial_settings.html",
+        trial=trial_cfg.describe(supabase),
+        history=_trial_settings_history(),
+        trial_min=trial_cfg.MIN_TRIAL_DAYS,
+        trial_max=trial_cfg.MAX_TRIAL_DAYS,
+        trial_default=trial_cfg.DEFAULT_TRIAL_DAYS,
+    )
+
+
+def _trial_settings_history(limit: int = 8) -> list:
+    """The last few changes to this setting, newest first.
+
+    The audit log already holds them (the write above is what puts them there),
+    and reading it back is the difference between a settings page and a settings
+    form: "who shortened every new school's trial to 3 days" is answerable from
+    this page instead of from the database. A missing log is an empty list, never
+    an error — the setting itself must not depend on the log being readable.
+    """
     try:
-        res = supabase.table("trial_settings").limit(1).execute()
-        if res.data:
-            trial = res.data[0]
+        return fetch_audit_logs(entity_type="trial_settings", limit=limit) or []
     except Exception:
-        pass
-    return render_template("super_admin/trial_settings.html", trial=trial)
+        return []
+
+
+def trial_settings_reset(supabase, user_id) -> bool:
+    """Delete the override and record it. Kept as a named step so the audit entry
+    and the deletion cannot drift apart — an unlogged delete is the change nobody
+    can find later."""
+    removed = trial_cfg.reset(supabase=supabase)
+    if removed:
+        try:
+            log_activity("delete", "trial_settings", "1",
+                         old_data={"action": "reset_to_default"}, user_id=user_id)
+        except Exception:
+            pass
+    return removed
 
 
 # ─── Payment Fee Settings ───────────────────────────────────────────────
@@ -913,15 +968,14 @@ def activate_cash(school_id):
         }).execute()
 
         now = datetime.now(timezone.utc)
-        trial = supabase.table("trial_settings").select("trial_days").limit(1).execute()
-        trial_days = trial.data[0]["trial_days"] if trial.data else 14
+        trial_days = trial_cfg.get_trial_days(supabase)
 
         supabase.table("school_subscriptions").insert({
             "school_id": school_id,
             "status": "active",
             "trial_days": trial_days,
             "trial_start": now.isoformat(),
-            "trial_end": (now + timedelta(days=trial_days)).isoformat(),
+            "trial_end": trial_cfg.days_until(now, trial_days).isoformat(),
             "subscription_start": now.isoformat(),
             "activation_code": code,
         }).execute()

@@ -78,9 +78,14 @@ EVIDENCE: dict[str, list[tuple[str, list[str]]]] = {
         ("app/utils/auth.py", [r"\buser_school_id\b"]),
         ("supabase/migrations/002_school_classes_nisn.sql", [r"(?i)\bnpsn\b"]),
     ],
+    # The trial is half the card, and it has to be proved where it now *lives*:
+    # the length was a hard-coded 14 inside the registration flow until the
+    # setting page was made real, so a needle naming that literal would only keep
+    # passing while the defect it was written about existed.
     "online-payment": [
         ("app/services/midtrans_service.py", [r"\bdef create_snap_transaction\b"]),
-        ("app/routes/admin_sekolah.py", [r"\btrial_days = 14\b"]),
+        ("app/services/trial_settings.py", [r"\bDEFAULT_TRIAL_DAYS = 14\b",
+                                            r"\bdef get_trial_days\b"]),
     ],
     "scientific-calculator": [
         ("app/templates/student/take_exam.html", [r"\bcalcSciFunc\b", r"\{l:'sin'"]),
