@@ -1,0 +1,21 @@
+# ScanGrade — the Python floor, declared where tooling actually reads it.
+#
+# The project needs 3.12 or newer. Two test files use PEP 701 f-strings (an
+# f-string expression containing the quote character and a backslash), which
+# 3.11 cannot parse, so a run on 3.11 dies at *collection* with a bare
+# SyntaxError instead of naming the cause.
+#
+# Three places, each doing a different job:
+#
+#   * `requires-python` here — what pip, uv and editors read.
+#   * `.python-version` — what pyenv/uv pick an interpreter from.
+#   * `python_requires.py` — the check that actually *refuses*, because a venv
+#     somebody already built with 3.11 ignores both files above.
+#
+# The three are asserted to agree in tests/unit/test_python_requirement.py.
+
+[project]
+name = "scangrade"
+version = "1.0.0"
+description = "Sistem koreksi ujian digital — ScanGrade"
+requires-python = ">=3.12"

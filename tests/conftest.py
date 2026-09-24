@@ -24,6 +24,13 @@ Two ways in:
   refuses that on an app that has — and a shared app always has).
 """
 
+# Deliberately the first import: it refuses an interpreter the suite cannot run
+# on *before* pytest parses a test file and before a dependency is imported, so a
+# 3.11 run is told the reason instead of dying at collection with a bare
+# SyntaxError in a test file the reader did not touch. See the module for why the
+# declaration in pyproject.toml is not enough on its own.
+import python_requires  # noqa: F401  (imported for its side effect)
+
 import collections
 
 import pytest
