@@ -307,8 +307,14 @@
       "coverage": 100.0,
       "frozen": false
     },
+    "student/_visual_summary.html": {
+      "pairs": 13,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "student/dashboard.html": {
-      "pairs": 30,
+      "pairs": 28,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -332,7 +338,7 @@
       "frozen": true
     },
     "student/results.html": {
-      "pairs": 49,
+      "pairs": 36,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false

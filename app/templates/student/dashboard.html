@@ -2,7 +2,7 @@
 {% block title %}Beranda Murid - ScanGrade{% endblock %}
 {% block page_title %}Beranda{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ showScores: false }">
+<div class="space-y-6" x-data="studentDashboard()">
     <!-- Welcome Banner -->
     <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-primary-700 p-6 lg:p-8">
         <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
@@ -64,7 +64,7 @@
 
     <!-- Learning Progress -->
     {% if completed_exams %}
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 gap-4">
         <!-- Mastery Level -->
         <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
             <div class="flex items-center gap-3 mb-4">
@@ -77,7 +77,12 @@
                 </div>
             </div>
             {% if subject_averages %}
-            <div class="space-y-3">
+            {# Masked with everything else on this page. The overall average in the card
+               above was behind the switch while this list printed every subject's
+               average *and* drew a bar for it — the number and a picture of the number.
+               The bar goes too, because a bar that keeps its length has not hidden
+               anything: it is the same value in a different shape. #}
+            <div class="space-y-3" x-show="showScores">
                 {% for subject, avg in subject_averages.items() %}
                 <div>
                     <div class="flex justify-between text-xs mb-1">
@@ -90,35 +95,20 @@
                 </div>
                 {% endfor %}
             </div>
+            <p class="text-sm font-medium text-surface-400" x-show="!showScores"
+               x-text="t('Nilai disembunyikan. Tekan ikon mata di kartu rata-rata untuk menampilkannya.','Marks are hidden. Press the eye on the average card to show them.')"></p>
             {% endif %}
         </div>
 
-        <!-- Score Trend -->
-        <div class="bg-white rounded-2xl p-5 shadow-lg shadow-surface-200/40 border border-surface-100">
-            <div class="flex items-center gap-3 mb-4">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-blue-600 flex items-center justify-center shadow-lg shadow-primary-200/40">
-                    <i class="fas fa-chart-line text-white text-sm"></i>
-                </div>
-                <div>
-                    <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="t('Tren Nilai','Score Trend')"></p>
-                    <p class="text-xs text-surface-400" x-text="t('5 ujian terakhir','Last 5 exams')"></p>
-                </div>
-            </div>
-            {% if score_trend %}
-            <div class="flex items-end gap-2 h-24">
-                {% for item in score_trend %}
-                <div class="flex-1 flex flex-col items-center">
-                    <span class="text-[10px] font-bold {% if item.score >= 70 %}text-emerald-600{% else %}text-red-500{% endif %}">{{ item.score }}</span>
-                    <div class="w-full {% if item.score >= 80 %}bg-emerald-500{% elif item.score >= 70 %}bg-primary-500{% elif item.score >= 60 %}bg-amber-500{% else %}bg-red-500{% endif %} rounded-t mt-1" style="height: {{ [item.score * 0.8, 10] | max }}px"></div>
-                    <span class="text-[9px] text-surface-400 mt-1 truncate w-full text-center">{{ item.title }}</span>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-sm text-surface-400 text-center py-4" x-text="t('Belum ada data','No data yet')"></p>
-            {% endif %}
-        </div>
     </div>
+
+    {# The three views of the same marks — the same card the results page renders, from
+       the same factory, so the two pages cannot draw different pictures of one term.
+
+       What sat in this grid's second column was a hand-rolled bar list that printed
+       every mark while the average above it was masked: a switch that hid one number
+       and printed the rest. The charts follow `showScores` like everything else here. #}
+    {% include 'student/_visual_summary.html' %}
 
     <!-- Weak Areas -->
     {% if weak_areas %}
@@ -285,4 +275,25 @@
     </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── This page's own Alpine component ────────────────────────────────────────
+   One field and the shared charts: `showScores` is the switch this page already had
+   (the eye beside the average), and everything that prints a mark now follows it —
+   the average, the subject averages and the three views. `studentDashboard()` is
+   defined here rather than left as an inline object because the shared factory has to
+   be mixed in, and `init()` is where the charts learn to redraw on a toggle or a
+   language change. */
+function studentDashboard() {
+    return Object.assign(sgVisualSummary(), {
+        showScores: false,
+
+        init() {
+            this.initCharts();
+        },
+    });
+}
+</script>
 {% endblock %}
