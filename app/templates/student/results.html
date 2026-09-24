@@ -1,46 +1,39 @@
-{% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}Hasil Ujian - ScanGrade{% endblock %}
-{% block page_title %}Hasil Ujian{% endblock %}
+{# This page used to pin itself to Indonesian (`content_lang = 'id'`) because its
+   copy had no English half. It has one now, so the pin is gone: a pinned page cannot
+   carry pairs — their English half could never render — and `deploy/i18n_coverage.py`
+   refuses a page that pins while carrying them. #}
+{% block title %}ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Hasil Ujian','Exam Results')"></span>{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ filter:'all', search:'', showScores: false, sortKey:'', sortDir:'asc',
-  submissions: JSON.parse(document.getElementById('submissions-data')?.textContent || '[]'),
-  tzOffset: parseInt(document.cookie.split('; ').find(r=>r.startsWith('tz_offset='))?.split('=')[1] || '7'),
-  formatDate(iso) {
-    if (!iso) return '-';
-    const d = new Date(iso);
-    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-    const local = new Date(utc + this.tzOffset * 3600000);
-    return local.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
-  },
-  get sortedSubmissions() {
-    let arr = [...this.submissions];
-    if (this.sortKey === 'exam') {
-      arr.sort((a,b) => {
-        let va = (a.exam?.title || '').toLowerCase(), vb = (b.exam?.title || '').toLowerCase();
-        return this.sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
-      });
-    }
-    return arr.filter(s => (this.filter==='all'||s.status===this.filter||(this.filter==='graded'&&(s.status==='graded'||s.status==='published'))) && (!this.search||(s.exam?.title||'').toLowerCase().includes(this.search.toLowerCase())));
-  }
-}">
+<div class="space-y-6" x-data="resultsApp()" x-effect="document.title = t('Hasil Ujian','Exam Results') + ' - ScanGrade'">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div class="flex items-center gap-3">
             <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20"><i class="fas fa-chart-bar text-white text-lg"></i></div>
-            <div><h1 class="text-2xl font-extrabold text-surface-800">Hasil Ujian</h1><p class="text-sm text-surface-500 font-medium" x-text="submissions.length + ' submission'"></p></div>
+            <div>
+                <h1 class="text-2xl font-extrabold text-surface-800" x-text="t('Hasil Ujian','Exam Results')"></h1>
+                {# A count with a plural, not a word glued to a number: this read
+                   `submissions.length + ' submission'` — English, in an Indonesian
+                   screen, saying "2 submission". Two spans because English needs the
+                   plural and the sweep needs both halves literal: a pair built by
+                   concatenation is invisible to it, and invisible is how a string
+                   stops being translated. #}
+                <span class="text-sm text-surface-500 font-medium" x-show="shown === 1" x-text="'1 ' + t('ujian','exam')"></span>
+                <span class="text-sm text-surface-500 font-medium" x-show="shown !== 1" x-text="shown + ' ' + t('ujian','exams')"></span>
+            </div>
         </div>
         <button @click="showScores = !showScores" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm"
                 :class="showScores ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-surface-100 text-surface-500 border border-surface-200 hover:bg-surface-200'">
             <i class="fas" :class="showScores ? 'fa-eye' : 'fa-eye-slash'"></i>
-            <span x-text="showScores ? 'Sembunyikan' : 'Tampilkan Nilai'"></span>
+            <span x-text="showScores ? t('Sembunyikan','Hide') : t('Tampilkan Nilai','Show Scores')"></span>
         </button>
     </div>
 
     <!-- Subject Averages -->
     {% if subject_totals %}
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-5">
-        <h3 class="text-sm font-extrabold text-surface-700 mb-3 flex items-center gap-1.5"><i class="fas fa-chart-simple text-primary-500"></i>Rata-rata per Mata Pelajaran</h3>
+        <h3 class="text-sm font-extrabold text-surface-700 mb-3 flex items-center gap-1.5"><i class="fas fa-chart-simple text-primary-500"></i><span x-text="t('Rata-rata per Mata Pelajaran','Average per Subject')"></span></h3>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {% for st in subject_totals %}
             <div class="bg-gradient-to-br from-surface-50 to-primary-50/30 rounded-xl p-3 border border-surface-200">
@@ -49,22 +42,76 @@
                     <span x-show="showScores">{{ st.avg }}</span>
                     <span x-show="!showScores" class="text-surface-300">•••</span>
                 </p>
-                <p class="text-[10px] font-bold text-surface-400">{{ st.exam_count }} ujian</p>
+                {# Jinja picks the English word for the count, Alpine picks the
+                   language: one pair, both halves literal, and "1 ujian" reads
+                   "1 exam" rather than "1 exams". #}
+                <p class="text-[10px] font-bold text-surface-400"
+                   x-text="t('{{ st.exam_count }} ujian', '{{ st.exam_count }} {{ 'exam' if st.exam_count == 1 else 'exams' }}')"></p>
             </div>
             {% endfor %}
         </div>
     </div>
     {% endif %}
 
+    <!-- ── The three views of the same marks ─────────────────────────────────
+         Distribution, progression and composition. All three are built from the
+         `submissions` the page already carries — no second query, and no figure here
+         can disagree with the table below it.
+
+         The whole block is behind the same switch as the table's marks: a chart is a
+         loud way to show a score, and a `showScores` that hid the column while the
+         axis printed every mark would be a switch that does not work. #}
+    {% if submissions %}
+    <section class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-5">
+        <h3 class="text-sm font-extrabold text-surface-700 mb-3 flex items-center gap-1.5"><i class="fas fa-chart-pie text-primary-500"></i><span x-text="t('Ringkasan Visual','Visual Summary')"></span></h3>
+
+        <div x-show="showScores" x-cloak>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="rounded-xl border border-surface-200 p-3">
+                    <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Sebaran Nilai','Score Distribution')"></p>
+                    {# A canvas needs a parent with a height: `maintainAspectRatio: false`
+                       with an unsized one makes the canvas grow on every resize. #}
+                    <div class="h-56"><canvas x-ref="histoCanvas"></canvas></div>
+                </div>
+                <div class="rounded-xl border border-surface-200 p-3">
+                    <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Perkembangan Nilai','Score Progression')"></p>
+                    <div class="h-56"><canvas x-ref="seriesCanvas"></canvas></div>
+                </div>
+                <div class="rounded-xl border border-surface-200 p-3">
+                    <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Ujian per Mata Pelajaran','Exams per Subject')"></p>
+                    <div class="h-56"><canvas x-ref="pieCanvas"></canvas></div>
+                    {# A pie of *averages* would be a picture of a number that is not a
+                       part of anything. The slices are counts, and the caption says so. #}
+                    <p class="text-[10px] font-medium text-surface-400 mt-2"
+                       x-text="t('Tiap bagian adalah jumlah ujian, bukan rata-rata.','Each slice is a count of exams, not an average.')"></p>
+                </div>
+            </div>
+
+            <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+                <template x-for="slice in pieSlices" :key="'legend-' + slice.name">
+                    <span class="inline-flex items-center gap-1.5 text-[11px] font-bold text-surface-500">
+                        <span class="w-3 h-3 rounded-sm" :style="'background:' + slice.color"></span>
+                        <span x-text="slice.name"></span>
+                        <span class="text-surface-400 font-medium" x-text="'(' + slice.value + ')'"></span>
+                    </span>
+                </template>
+            </div>
+        </div>
+
+        <p x-show="!showScores" class="text-sm font-medium text-surface-400"
+           x-text="t('Nilai disembunyikan. Tekan “Tampilkan Nilai” untuk melihat grafiknya.','Marks are hidden. Press “Show Scores” to see the charts.')"></p>
+    </section>
+    {% endif %}
+
     <!-- Filters -->
     <div class="flex flex-col sm:flex-row gap-3">
         <div class="flex bg-surface-100 rounded-xl p-1">
-            <button @click="filter='all'" :class="filter==='all'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition">Semua</button>
-            <button @click="filter='submitted'" :class="filter==='submitted'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition">Menunggu</button>
-            <button @click="filter='graded'" :class="filter==='graded'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition">Dinilai</button>
-            <button @click="filter='retracted'" :class="filter==='retracted'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition">Ditarik</button>
+            <button @click="filter='all'" :class="filter==='all'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition" x-text="t('Semua','All')"></button>
+            <button @click="filter='submitted'" :class="filter==='submitted'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition" x-text="t('Menunggu','Waiting')"></button>
+            <button @click="filter='graded'" :class="filter==='graded'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition" x-text="t('Dinilai','Graded')"></button>
+            <button @click="filter='retracted'" :class="filter==='retracted'?'bg-white shadow text-primary-600':'text-surface-500'" class="px-4 py-2 rounded-lg text-sm font-bold transition" x-text="t('Ditarik','Retracted')"></button>
         </div>
-        <input type="text" x-model="search" placeholder="Cari ujian..." class="flex-1 px-4 py-2 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition">
+        <input type="text" x-model="search" :placeholder="t('Cari ujian...','Search exams...')" class="flex-1 px-4 py-2 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition">
     </div>
 
     {% if submissions %}
@@ -76,15 +123,15 @@
             <thead class="bg-surface-50 border-b border-surface-200">
                 <tr>
                     <th class="text-left px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider cursor-pointer select-none" @click="sortKey='exam'; sortDir=sortDir==='asc'?'desc':'asc'">
-                        Ujian <i class="fas fa-sort ml-1 text-surface-300" x-show="sortKey!=='exam'"></i>
+                        <span x-text="t('Ujian','Exam')"></span> <i class="fas fa-sort ml-1 text-surface-300" x-show="sortKey!=='exam'"></i>
                         <i class="fas fa-sort-up ml-1 text-primary-500" x-show="sortKey==='exam' && sortDir==='asc'"></i>
                         <i class="fas fa-sort-down ml-1 text-primary-500" x-show="sortKey==='exam' && sortDir==='desc'"></i>
                     </th>
-                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider">Nilai</th>
-                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider">Penalti</th>
-                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider">Status</th>
-                    <th class="text-left px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider">Dikumpulkan</th>
-                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider">Aksi</th>
+                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider" x-text="t('Nilai','Score')"></th>
+                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider" x-text="t('Penalti','Penalty')"></th>
+                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider" x-text="t('Status','Status')"></th>
+                    <th class="text-left px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider" x-text="t('Dikumpulkan','Submitted')"></th>
+                    <th class="text-center px-5 py-3 font-bold text-surface-600 text-xs uppercase tracking-wider" x-text="t('Aksi','Action')"></th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-surface-50">
@@ -104,7 +151,10 @@
                         </td>
                         <td class="px-5 py-3 text-center">
                             <template x-if="s.final_score!=null || s.score!=null">
-                                <span x-show="showScores" class="text-lg font-extrabold" :class="(s.final_score??s.score??0)>=70?'text-emerald-600':'text-red-600'" x-text="s.final_score??s.score"></span>
+                                {# The pass line is the paper's own KKM. A hard-coded 70
+                                   painted a red 74 for a school whose standard is 75,
+                                   and a green 68 for one whose standard is 65. #}
+                                <span x-show="showScores" class="text-lg font-extrabold" :class="passed(s)?'text-emerald-600':'text-red-600'" x-text="s.final_score??s.score"></span>
                             </template>
                             <template x-if="s.final_score==null && s.score==null">
                                 <span class="text-surface-400 font-bold">-</span>
@@ -117,7 +167,7 @@
                                     <span class="text-sm font-extrabold" :class="s.penalty>0?'text-red-600':'text-surface-400'" x-text="s.penalty>0?'-'+s.penalty:'0'"></span>
                                     <template x-if="s.penalty > 0">
                                         <div class="mt-1">
-                                            <a :href="'/student/results/'+s.id" class="text-[10px] font-bold text-amber-600 hover:text-amber-700 underline">Banding</a>
+                                            <a :href="'/student/results/'+s.id" class="text-[10px] font-bold text-amber-600 hover:text-amber-700 underline" x-text="t('Banding','Appeal')"></a>
                                         </div>
                                     </template>
                                 </div>
@@ -130,29 +180,35 @@
                             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
                                   :class="s.status==='published'?'bg-emerald-50 text-emerald-700':s.status==='graded'?'bg-amber-50 text-amber-700':s.status==='submitted'?'bg-blue-50 text-blue-700':s.status==='draft'?'bg-slate-100 text-slate-500':s.status==='retracted'?'bg-red-50 text-red-600':'bg-surface-100 text-surface-600'">
                                 <i class="fas mr-0.5 text-xs" :class="s.status==='published'?'fa-check':s.status==='graded'?'fa-spinner':s.status==='submitted'?'fa-clock':s.status==='draft'?'fa-pen':s.status==='retracted'?'fa-undo':'fa-file'"></i>
-                                <span x-text="s.status==='draft'?'Draft (belum dikumpulkan)':s.status==='submitted'?'Menunggu':s.status==='graded' && !s.is_published?'On Progress':s.status==='graded'?'Draft Nilai':s.status==='published'?'Dipublikasikan':s.status"></span>
+                                <span x-text="statusLabel(s)"></span>
                             </span>
                             <template x-if="s.answers?._retract_request?.status==='pending'">
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600 ml-1"><i class="fas fa-hourglass-half"></i> Menunggu</span>
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600 ml-1"><i class="fas fa-hourglass-half"></i> <span x-text="t('Menunggu','Waiting')"></span></span>
                             </template>
                         </td>
                         <td class="px-5 py-3 text-surface-500 font-medium text-xs" x-text="formatDate(s.submitted_at)"></td>
                         <td class="px-5 py-3">
                             <div class="flex items-center justify-center gap-1.5">
                                 <template x-if="s.status==='draft' && s.exam?.id">
-                                    <a :href="'/student/exams/'+s.exam.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-600 text-white hover:bg-primary-700 transition"><i class="fas fa-play mr-1"></i>Lanjutkan</a>
+                                    <a :href="'/student/exams/'+s.exam.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-600 text-white hover:bg-primary-700 transition"><i class="fas fa-play mr-1"></i><span x-text="t('Lanjutkan','Continue')"></span></a>
                                 </template>
-                                <a :href="'/student/results/'+s.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-50 text-primary-700 hover:bg-primary-100 transition">Detail</a>
+                                <a :href="'/student/results/'+s.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary-50 text-primary-700 hover:bg-primary-100 transition" x-text="t('Detail','Detail')"></a>
                                 <template x-if="(s.status==='submitted'||s.status==='draft') && (!s.answers?._retract_request || s.answers?._retract_request?.status!=='pending')">
-                                    <form method="POST" :action="'/student/submissions/'+s.id+'/retract'" class="inline" onsubmit="return confirm('Yakin tarik jawaban?')">
-                                        <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">Tarik</button>
+                                    {# `sgT`, not `t`: an inline handler runs in the
+                                       global scope, where Alpine's method is not
+                                       visible — and `:onsubmit` would assign a
+                                       *string* to a property that has to be a
+                                       function, which silently removes the
+                                       confirmation instead of translating it. #}
+                                    <form method="POST" :action="'/student/submissions/'+s.id+'/retract'" class="inline" onsubmit="return confirm(sgT('Yakin tarik jawaban?','Retract this answer?'))">
+                                        <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 hover:bg-red-100 transition" x-text="t('Tarik','Retract')"></button>
                                     </form>
                                 </template>
                                 <template x-if="s.answers?._retract_request?.status==='pending'">
-                                    <span class="px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-50 text-purple-500"><i class="fas fa-hourglass-half mr-1"></i> Menunggu</span>
+                                    <span class="px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-50 text-purple-500"><i class="fas fa-hourglass-half mr-1"></i> <span x-text="t('Menunggu','Waiting')"></span></span>
                                 </template>
                                 <template x-if="s.status==='retracted' && s.exam?.id">
-                                    <a :href="'/student/exams/'+s.exam.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition">Kirim Ulang</a>
+                                    <a :href="'/student/exams/'+s.exam.id" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition" x-text="t('Kirim Ulang','Resubmit')"></a>
                                 </template>
                             </div>
                         </td>
@@ -164,14 +220,239 @@
     {% else %}
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-12 text-center text-surface-400">
         <div class="w-16 h-16 mx-auto rounded-full bg-surface-100 flex items-center justify-center mb-4"><i class="fas fa-clipboard-list text-surface-300 text-3xl"></i></div>
-        <p class="text-lg font-bold text-surface-500">Belum ada hasil ujian</p>
-        <p class="text-sm font-medium mt-1">Kerjakan ujian untuk melihat hasil di sini</p>
+        <p class="text-lg font-bold text-surface-500" x-text="t('Belum ada hasil ujian','No exam results yet')"></p>
+        <p class="text-sm font-medium mt-1" x-text="t('Kerjakan ujian untuk melihat hasil di sini','Take an exam to see the results here')"></p>
         <a href="/student/exams" class="inline-flex items-center gap-2 mt-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 transition">
-            <i class="fas fa-file-alt"></i>Lihat Ujian
+            <i class="fas fa-file-alt"></i><span x-text="t('Lihat Ujian','View Exams')"></span>
         </a>
     </div>
     {% endif %}
 </div>
 {% endblock %}
 {% block scripts %}
+<script>
+/* ── The three views, and the pie drawn by hand ──────────────────────────────
+   Everything here reads the `submissions` the page already carries, so the charts
+   cannot disagree with the table: one source, three arrangements.
+
+   The pie is 3D by hand rather than by a plugin. Chart.js has no 3D pie, and the
+   alternatives were a vendored third-party plugin (one more blob to keep current on
+   a box with spotty WiFi) or a projection this file can do in thirty lines: the top
+   face is an ellipse, the wall is the same ellipse shifted down and joined, and the
+   shading is the slice colour darkened — which is the whole trick a 3D pie is. */
+function shade(hex, factor) {
+    const n = parseInt(String(hex).replace('#', ''), 16);
+    const r = Math.round(((n >> 16) & 255) * factor);
+    const g = Math.round(((n >> 8) & 255) * factor);
+    const b = Math.round((n & 255) * factor);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+
+function resultsApp() {
+    return {
+        filter: 'all', search: '', showScores: false, sortKey: '', sortDir: 'asc',
+        submissions: JSON.parse(document.getElementById('submissions-data')?.textContent || '[]'),
+        tzOffset: parseInt(document.cookie.split('; ').find(r => r.startsWith('tz_offset='))?.split('=')[1] || '7'),
+        //: The palette is literal hexes rather than theme tokens: a canvas cannot
+        //: read a CSS variable per slice, and these eight are legible on both the
+        //: light and the dark card.
+        palette: ['#6366f1', '#10b981', '#f59e0b', '#ef4444',
+                  '#0ea5e9', '#8b5cf6', '#14b8a6', '#f97316'],
+
+        init() {
+            this.$watch('showScores', () => { this.$nextTick(() => this.drawCharts()); });
+            this.$watch('lang', () => { this.$nextTick(() => this.drawCharts()); });
+            this.$nextTick(() => this.drawCharts());
+        },
+
+        formatDate(iso) {
+            if (!iso) return '-';
+            const d = new Date(iso);
+            const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+            const local = new Date(utc + this.tzOffset * 3600000);
+            const locale = this.lang === 'en' ? 'en-GB' : 'id-ID';
+            return local.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        },
+
+        get sortedSubmissions() {
+            let arr = [...this.submissions];
+            if (this.sortKey === 'exam') {
+                arr.sort((a, b) => {
+                    let va = (a.exam?.title || '').toLowerCase(), vb = (b.exam?.title || '').toLowerCase();
+                    return this.sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+                });
+            }
+            return arr.filter(s => (this.filter === 'all' || s.status === this.filter || (this.filter === 'graded' && (s.status === 'graded' || s.status === 'published'))) && (!this.search || (s.exam?.title || '').toLowerCase().includes(this.search.toLowerCase())));
+        },
+
+        get shown() { return this.submissions.length; },
+
+        //: A row's mark, or null when it has not been released — the route blanks
+        //: those server-side, so this is the same value the table prints.
+        mark(s) { const v = s.final_score ?? s.score; return v == null ? null : Number(v); },
+
+        //: The paper's own standard, with the app's default only when the paper has
+        //: none. The template used to compare against a literal 70.
+        passed(s) { const kkm = Number(s.exam?.passing_score ?? 70); return this.mark(s) >= kkm; },
+
+        get released() { return this.submissions.filter(s => this.mark(s) !== null); },
+
+        get bands() {
+            const edges = [0, 60, 70, 80, 90, 101];
+            return [0, 1, 2, 3, 4].map(i => ({
+                label: edges[i] + '-' + (edges[i + 1] - 1),
+                value: this.released.filter(s => this.mark(s) >= edges[i] && this.mark(s) < edges[i + 1]).length,
+            }));
+        },
+
+        get series() {
+            return this.released
+                .slice()
+                .sort((a, b) => String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')))
+                .map(s => ({ label: (s.exam?.title || '-').slice(0, 14), value: this.mark(s) }));
+        },
+
+        get pieSlices() {
+            const by = {};
+            this.released.forEach(s => {
+                const name = (s.exam?.subject || this.t('Lainnya', 'Other'));
+                by[name] = (by[name] || 0) + 1;
+            });
+            return Object.keys(by).sort().map((name, i) => ({
+                name, value: by[name], color: this.palette[i % this.palette.length],
+            }));
+        },
+
+        statusLabel(s) {
+            if (s.status === 'draft') return this.t('Draf (belum dikumpulkan)', 'Draft (not submitted)');
+            if (s.status === 'submitted') return this.t('Menunggu', 'Waiting');
+            if (s.status === 'graded' && !s.is_published) return this.t('Sedang dinilai', 'Being marked');
+            if (s.status === 'graded') return this.t('Nilai belum dibagikan', 'Marks not released');
+            if (s.status === 'published') return this.t('Dipublikasikan', 'Published');
+            return s.status;
+        },
+
+        drawCharts() {
+            if (!this.showScores) return;          // a hidden canvas measures 0x0
+            this.drawHistogram();
+            this.drawSeries();
+            this.drawPie3D();
+        },
+
+        //: Every canvas is sized from its own box, not from a fixed number: a phone
+        //: and a 1280px laptop get the same chart, and a rotate re-draws the same.
+        _ctx(ref) {
+            const canvas = this.$refs[ref];
+            if (!canvas) return null;
+            const w = canvas.clientWidth, h = canvas.clientHeight;
+            if (!w || !h) return null;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            return { ctx, w, h };
+        },
+
+        drawHistogram() {
+            const box = this._ctx('histoCanvas');
+            if (!box) return;
+            const labels = this.bands.map(b => b.label);
+            const values = this.bands.map(b => b.value);
+            this._destroy('histoChart');
+            this.histoChart = new Chart(box.ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{ data: values, backgroundColor: '#6366f1', borderRadius: 6 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { precision: 0 },
+                             title: { display: true, text: this.t('Jumlah ujian', 'Number of exams') } },
+                        x: { title: { display: true, text: this.t('Rentang nilai', 'Score range') } },
+                    },
+                },
+            });
+        },
+
+        drawSeries() {
+            const box = this._ctx('seriesCanvas');
+            if (!box) return;
+            this._destroy('seriesChart');
+            this.seriesChart = new Chart(box.ctx, {
+                type: 'line',
+                data: {
+                    labels: this.series.map(p => p.label),
+                    datasets: [{
+                        data: this.series.map(p => p.value),
+                        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.15)',
+                        fill: true, tension: 0.3, pointRadius: 3,
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, max: 100, title: { display: true, text: this.t('Nilai', 'Score') } },
+                        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+                             title: { display: true, text: this.t('Ujian', 'Exam') } },
+                    },
+                },
+            });
+        },
+
+        _destroy(key) {
+            if (this[key]) { this[key].destroy(); this[key] = null; }
+        },
+
+        drawPie3D(depth) {
+            const box = this._ctx('pieCanvas');
+            if (!box) return;
+            const slices = this.pieSlices;
+            if (!slices.length) return;
+            const ctx = box.ctx;
+            const drop = depth || Math.max(12, Math.round(Math.min(box.w, box.h) * 0.12));
+            const cx = box.w / 2;
+            const cy = (box.h - drop) / 2;
+            const rx = Math.max(20, Math.min(box.w / 2 - 8, (box.h - drop) / 2 * 1.7));
+            const ry = rx * 0.55;
+
+            const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
+            let angle = -Math.PI / 2;
+            const parts = slices.map(s => {
+                const from = angle;
+                const to = angle + (s.value / total) * Math.PI * 2;
+                angle = to;
+                return { color: s.color, from, to };
+            });
+
+            // The wall shows only on the near half — the slices whose arc points down
+            // the screen — and is drawn first so the near ones overlap correctly.
+            parts.filter(p => Math.sin((p.from + p.to) / 2) > 0).forEach(p => {
+                ctx.beginPath();
+                ctx.ellipse(cx, cy + drop, rx, ry, 0, p.from, p.to);
+                ctx.ellipse(cx, cy, rx, ry, 0, p.to, p.from, true);
+                ctx.closePath();
+                ctx.fillStyle = shade(p.color, 0.72);
+                ctx.fill();
+            });
+
+            parts.forEach(p => {
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.ellipse(cx, cy, rx, ry, 0, p.from, p.to);
+                ctx.closePath();
+                ctx.fillStyle = p.color;
+                ctx.fill();
+                // A separator that reads on either theme: the slices are literal
+                // colours, so a themed stroke would vanish on one of them.
+                ctx.strokeStyle = 'rgba(255,255,255,.85)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            });
+        },
+    };
+}
+</script>
 {% endblock %}

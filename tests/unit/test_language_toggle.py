@@ -422,6 +422,11 @@ TRANSLATED = [
     # ones reported as "content di dalam cards belum eng/id": a card body here is
     # an Alpine binding, so the text-node-only sweep never looked at it.
     "student/dashboard.html",
+    # The student's own results page. It used to pin itself to Indonesian —
+    # `content_lang = 'id'` above `{% extends %}` — because its copy had no English
+    # half; it has one now, so the pin is gone and the page switches like the
+    # dashboard does. Reported as "main pages students banyak yang belum eng/id".
+    "student/results.html",
     "teacher/dashboard.html",
     "admin/dashboard.html",
     "super_admin/dashboard.html",
@@ -846,7 +851,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 39, (
+    assert len(TRANSLATED) == 40, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")
