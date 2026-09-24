@@ -12,6 +12,7 @@ from app.utils.auth import admin_sekolah_required, get_supabase, subscription_wr
 from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
+from app.services import trial_settings as trial_cfg
 from app.services.student_import import create_student_account
 from app.utils.req_cache import invalidate_class, invalidate_school
 from app.services.teacher_import import create_teacher_account
@@ -1544,13 +1545,9 @@ def subscription():
     except Exception:
         pass
 
-    trial_days = 14
-    try:
-        tr = supabase.table("trial_settings").select("trial_days").limit(1).execute()
-        if tr.data:
-            trial_days = tr.data[0].get("trial_days", 14)
-    except Exception:
-        pass
+    # The same read the grant sites make, so the sentence this page prints is the
+    # length a new school in this school's position would actually receive.
+    trial_days = trial_cfg.get_trial_days(supabase)
 
     from app.services.midtrans_service import get_pricing_config, calculate_plan_price, get_student_count_for_school, get_payment_fee_config
     pricing_config = get_pricing_config()

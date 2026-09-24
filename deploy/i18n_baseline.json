@@ -470,10 +470,10 @@
       "frozen": true
     },
     "super_admin/trial_settings.html": {
-      "pairs": 6,
-      "leftovers": 2,
-      "coverage": 75.0,
-      "frozen": true
+      "pairs": 29,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
     },
     "super_admin/user_management.html": {
       "pairs": 0,

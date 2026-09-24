@@ -443,6 +443,11 @@ TRANSLATED = [
     # one that says whether the installed runner is the checkout's launcher —
     # read-only, no shell. Its copy is all pairs, so it belongs here.
     "super_admin/deploy_status.html",
+    # The trial-length setting. Its copy was already a pair everywhere, but the
+    # page pinned itself to Indonesian while the pairs answered the toggle, so a
+    # screen reader read English words in an Indonesian voice. The pin is gone;
+    # the page switches.
+    "super_admin/trial_settings.html",
     # The filed report: every word on it is a pair, including the band names, the
     # descriptors and the findings, which arrive from the service as `(id, en)`.
     # It belongs here for the same reason the dashboard does — a school that reads
@@ -878,7 +883,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 42, (
+    assert len(TRANSLATED) == 43, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

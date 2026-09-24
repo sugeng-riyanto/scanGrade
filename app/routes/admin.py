@@ -12,6 +12,7 @@ from app.utils.security import sanitize_input
 from app.utils import denials
 from app.services.student_import import discard_partial_account as discard_student
 from app.services.teacher_import import discard_partial_account as discard_teacher
+from app.services import trial_settings
 
 def _gen_password(length=12) -> str:
     import secrets
@@ -429,14 +430,20 @@ def approve_request(request_id):
             }).eq("id", req["profile_id"]).execute()
 
         # ── Create trial subscription ──
+        #
+        # The length comes from `trial_settings`, not from a literal: this is the
+        # door nearly every school arrives through, and it used to ignore the page
+        # that exists to set this number. One read, used for both the stored
+        # `trial_days` and the computed `trial_end`, so the row cannot claim one
+        # length while expiring after another.
+        trial_days = trial_settings.get_trial_days(supabase)
         now_utc = datetime.now(timezone.utc)
-        trial_end = now_utc + timedelta(days=14)
         supabase.table("school_subscriptions").insert({
             "school_id": school_id,
             "status": "trial",
-            "trial_days": 14,
+            "trial_days": trial_days,
             "trial_start": now_utc.isoformat(),
-            "trial_end": trial_end.isoformat(),
+            "trial_end": trial_settings.days_until(now_utc, trial_days).isoformat(),
             "activation_code": code,
         }).execute()
 
