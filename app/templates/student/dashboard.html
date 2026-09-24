@@ -73,7 +73,7 @@
                 </div>
                 <div>
                     <p class="text-xs font-bold text-surface-500 uppercase tracking-wider" x-text="t('Tingkat Penguasaan','Mastery Level')"></p>
-                    <p class="text-lg font-extrabold text-surface-800">{{ mastery_level }}</p>
+                    <p class="text-lg font-extrabold text-surface-800" x-text="t('{{ mastery_level[0] }}','{{ mastery_level[1] }}')"></p>
                 </div>
             </div>
             {% if subject_averages %}

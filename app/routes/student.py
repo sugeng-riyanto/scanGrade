@@ -27,7 +27,8 @@ student_bp = Blueprint("student", __name__)
 # result cards, and it used to fetch the same submissions row set three times.
 SUBMISSION_COLUMNS = ("id, exam_id, student_id, score, max_score, violations, penalty, "
                       "final_score, status, is_published, submitted_at, graded_at, "
-                      "exams(id, title, question_types, total_questions)")
+                      "exams(id, title, subject, passing_score, question_types, "
+                      "total_questions)")
 
 
 def _student_submissions(supabase, student_id):
@@ -79,8 +80,11 @@ def dashboard():
     if g.get("user_role") != "murid":
         return redirect("/teacher/dashboard")
 
-    # Try cache first (30s TTL)
-    cache_key = f"dash:{g.user_id}"
+    # Try cache first (30s TTL). The key carries a version because the *shape* of
+    # what is cached is part of this key's contract: `mastery_level` used to be a
+    # plain string and is an (id, en) pair now, and a stale entry would render as
+    # its first character (`t('S','a')`) for the remainder of its TTL.
+    cache_key = f"dash:v2:{g.user_id}"
     cached = cache_get(cache_key)
     if cached:
         return render_template("student/dashboard.html", **cached)
@@ -168,28 +172,45 @@ def dashboard():
                 "score": float(sc)
             })
 
-    # Weak areas (exams with score < 70)
+    # Weak areas: an exam this student came in *under the standard it was judged
+    # by*, which is the paper's own KKM when it sets one and 70 when it does not.
+    # A fixed 70 called a 72 a weak spot at a school whose standard is 75, and
+    # called a 68 fine at one whose standard is 65. `subject` rides on the embed
+    # above — it was not selected before, so every card read "Umum" whatever the
+    # paper was (a column left out of a select reads as absent, never as an error).
     weak_areas = []
     for s in completed_exams:
         sc = s.get("final_score") if s.get("final_score") is not None else s.get("score")
-        if sc is not None and float(sc) < 70:
-            exam = s.get("exam") or {}
+        exam = s.get("exam") or {}
+        if sc is None:
+            continue
+        standard = exam.get("passing_score")
+        try:
+            standard = float(standard) if standard is not None else 70.0
+        except (TypeError, ValueError):
+            standard = 70.0
+        if float(sc) < standard:
             weak_areas.append({
                 "title": exam.get("title", "-")[:30],
                 "subject": exam.get("subject") or "Umum",
-                "score": float(sc)
+                "score": float(sc),
+                "standard": standard,
             })
 
-    # Mastery level (based on avg score)
+    # Mastery level (based on avg score). The bands are this page's own vocabulary on
+    # a 0-100 scale — not the school's KKM, which is what the pass line on a result
+    # uses — and they travel as an (id, en) pair because they are copy: built here as
+    # Indonesian they rendered Indonesian in English mode, which is the one string on
+    # the card the language toggle could not reach.
     if all_scores:
         avg = sum(all_scores) / len(all_scores)
-        if avg >= 90: mastery_level = "Sangat Baik"
-        elif avg >= 80: mastery_level = "Baik"
-        elif avg >= 70: mastery_level = "Cukup"
-        elif avg >= 60: mastery_level = "Perlu Perbaikan"
-        else: mastery_level = "Sangat Perlu Bimbingan"
+        if avg >= 90: mastery_level = ("Sangat Baik", "Excellent")
+        elif avg >= 80: mastery_level = ("Baik", "Good")
+        elif avg >= 70: mastery_level = ("Cukup", "Fair")
+        elif avg >= 60: mastery_level = ("Perlu Perbaikan", "Needs improvement")
+        else: mastery_level = ("Sangat Perlu Bimbingan", "Needs close support")
     else:
-        mastery_level = "Belum Ada Data"
+        mastery_level = ("Belum Ada Data", "No data yet")
 
     # Class and subject count come out of the shared cache: the class row is the
     # same for every student in the class, and the count is the same for the whole
