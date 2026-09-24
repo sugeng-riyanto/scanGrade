@@ -430,6 +430,12 @@ TRANSLATED = [
     # The list of papers a student may sit, for the same reason and from the same
     # report: pinned to Indonesian, unpinned and translated here.
     "student/exam_list.html",
+    # The communication page, shared by all four roles (`/student/comms` and its
+    # teacher, school-admin and super-admin siblings render this one template), so
+    # one page of pairs fixes four screens. It was the worst of the report at 5.8%:
+    # 5 pairs against 81 leftovers, of which 34 were `fetch()` routes and role
+    # slugs — data, excused by `is_data` in both readers now.
+    "shared/comms.html",
     "teacher/dashboard.html",
     "admin/dashboard.html",
     "super_admin/dashboard.html",
@@ -591,6 +597,24 @@ INDONESIAN_MARKERS = {
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z'-]+")
 _EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+# A route is not copy, and neither is a role slug — the two things an Alpine page
+# is full of that no translator can touch. `/api/pengumuman?limit=50` is the same
+# string in both languages because the *endpoint* is named in Indonesian, and
+# `'guru'` is what a row in `profiles` contains; the screens that display a role
+# do it through `roleLabel`, whose labels are pairs. Kept byte-for-byte in step
+# with `deploy/i18n_coverage.py` — `tests/unit/test_i18n_coverage.py` compares the
+# two readers template by template, and this is one of the places they can drift.
+_PATH = re.compile(r"^/[A-Za-z0-9_\-./?=&%:+,]*$")
+_ROLE_SLUGS = frozenset({"guru", "murid", "admin_sekolah", "super_admin",
+                         "teacher", "student", "admin"})
+
+
+def is_data(literal: str) -> bool:
+    """The literal is the same in both languages because it is not copy."""
+    s = literal.strip()
+    return bool(_EMAIL.match(s)) or bool(_PATH.match(s)) or s in _ROLE_SLUGS
+
+
 _T_CALL = re.compile(r"\bt\(\s*'[^']*'\s*,\s*'[^']*'\s*\)")
 # `lang === 'en' ? 'English' : 'Indonesia'` in full, both arms included. The
 # old pattern stopped at the first quote after the colon — its class excluded `'`
@@ -723,8 +747,8 @@ def _visible_strings(text: str) -> list[str]:
     # Demo credentials are data, not copy. An address like
     # `guru_mtk_smp@scan-grade.app` is the same string in both languages, and its
     # local part contains a marker word, so scanning it would report the demo page
-    # as untranslated forever.
-    return [c for c in found if not _EMAIL.match(c.strip())]
+    # as untranslated forever. Routes and role slugs are the same question.
+    return [c for c in found if not is_data(c)]
 
 
 def _markers_in(chunk: str) -> set[str]:
@@ -854,7 +878,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 41, (
+    assert len(TRANSLATED) == 42, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

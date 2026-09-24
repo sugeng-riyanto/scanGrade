@@ -112,6 +112,27 @@ INDONESIAN_MARKERS = {
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z'-]+")
 _EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+# A route is not copy. `/api/pengumuman?limit=50` is the same string in both
+# languages — the reason it reads as Indonesian is that the endpoint is named in
+# Indonesian, which is a fact about the API and not about the page. Without this,
+# every Alpine page was charged for its own `fetch()` calls: `shared/comms.html`
+# alone carried 23 of them, and a page cannot translate a URL.
+_PATH = re.compile(r"^/[A-Za-z0-9_\-./?=&%:+,]*$")
+# A role slug is a value the database stores, not a word a screen says. `'guru'`
+# is what a row contains and what an API payload carries; the screens that
+# *display* a role do it through `roleLabel`, whose labels are pairs — so excusing
+# the slug cannot hide a label, and the legacy spellings are here for the same
+# reason the role vocabulary keeps them: an old payload still arrives with one.
+_ROLE_SLUGS = frozenset({"guru", "murid", "admin_sekolah", "super_admin",
+                         "teacher", "student", "admin"})
+
+
+def is_data(literal: str) -> bool:
+    """The literal is the same in both languages because it is not copy."""
+    s = literal.strip()
+    return bool(_EMAIL.match(s)) or bool(_PATH.match(s)) or s in _ROLE_SLUGS
+
+
 _T_CALL = re.compile(r"\bt\(\s*'[^']*'\s*,\s*'[^']*'\s*\)")
 _SGT_CALL = re.compile(r"\bsgT\(\s*'[^']*'\s*,\s*'[^']*'\s*\)")
 _TERNARY = re.compile(
@@ -199,8 +220,7 @@ def counts(text: str) -> tuple:
     pairs += len(_T_CALL.findall(text)) + len(_SGT_CALL.findall(text)) \
         + len(_TERNARY.findall(text))
 
-    leftovers = [c for c in _visible_strings(keys, excused)
-                 if not _EMAIL.match(c.strip())]
+    leftovers = [c for c in _visible_strings(keys, excused) if not is_data(c)]
     return pairs, leftovers
 
 
