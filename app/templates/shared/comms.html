@@ -1,4 +1,3 @@
-{% set content_lang = 'id' %}
 {% extends "base.html" %}
 {% block title %}Komunikasi - ScanGrade{% endblock %}
 {# No chart script here: base.html already loads the local vendored Chart.js, and a
@@ -144,7 +143,7 @@
         fetch('/api/pengumuman', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
             .then(r => r.json())
             .then(d => {
-                if (d.error) { alert('Gagal: '+d.error); return; }
+                if (d.error) { alert(this.t('Gagal: ','Failed: ')+d.error); return; }
                 this.showCreatePengumuman = false;
                 this.formTitle = ''; this.formContent = ''; this.formTargetRole = ''; this.formClassId = '';
                 this.formRecipientType = 'all'; this.formSelectedRecipients = []; this.recipientList = [];
@@ -172,7 +171,7 @@
         fetch('/api/pengumuman/' + this.editPengumumanId, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title: this.editFormTitle, content: this.editFormContent})})
             .then(r => r.json())
             .then(d => {
-                if (d.error) { alert('Gagal: '+d.error); return; }
+                if (d.error) { alert(this.t('Gagal: ','Failed: ')+d.error); return; }
                 this.showEditPengumuman = false;
                 if (this.selectedPengumuman) {
                     this.selectedPengumuman.title = this.editFormTitle;
@@ -191,7 +190,7 @@
     },
 
     deletePengumuman(id) {
-        if (!confirm('Hapus pengumuman ini?')) return;
+        if (!confirm(this.t('Hapus pengumuman ini?','Delete this announcement?'))) return;
         fetch('/api/pengumuman/' + id, {method:'DELETE'})
             .then(r => r.json())
             .then(d => {
@@ -229,7 +228,7 @@
                             this._readPieChart = new C(pc, {
                                 type: 'doughnut',
                                 data: {
-                                    labels: ['Sudah Dibaca', 'Belum Dibaca'],
+                                    labels: [this.t('Sudah Dibaca','Read'), this.t('Belum Dibaca','Unread')],
                                     datasets: [{
                                         data: [d.total_read, d.total_unread],
                                         backgroundColor: ['#22c55e', '#ef4444'],
@@ -250,9 +249,9 @@
                             this._readBarChart = new C(bc, {
                                 type: 'bar',
                                 data: {
-                                    labels: ['Sudah Dibaca', 'Belum Dibaca'],
+                                    labels: [this.t('Sudah Dibaca','Read'), this.t('Belum Dibaca','Unread')],
                                     datasets: [{
-                                        label: 'Jumlah',
+                                        label: this.t('Jumlah','Total'),
                                         data: [d.total_read, d.total_unread],
                                         backgroundColor: ['rgba(34,197,94,0.8)', 'rgba(239,68,68,0.8)'],
                                         borderColor: ['#22c55e', '#ef4444'],
@@ -306,7 +305,7 @@
     get targetRoleOptions() {
         const opts = [];
         const allowed = {'super_admin':['admin_sekolah','guru','murid'], 'admin_sekolah':['super_admin','guru','murid'], 'guru':['admin_sekolah','guru','murid']};
-        const labels = {'super_admin':'Super Admin','admin_sekolah':'Admin Sekolah','guru':'Guru','murid':'Murid'};
+        const labels = {'super_admin':'Super Admin', 'admin_sekolah':this.t('Admin Sekolah','School Admin'), 'guru':this.t('Guru','Teacher'), 'murid':this.t('Murid','Student')};
         const targets = allowed[this.userRole] || [];
         targets.forEach(v => opts.push({value:v, label:labels[v] || v}));
         return opts;
@@ -320,7 +319,7 @@
             fetch('/api/percakapan', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({recipient_id: contact.id})})
                 .then(r => r.json())
                 .then(d => {
-                    if (d.error) { alert('Gagal: '+d.error); return; }
+                    if (d.error) { alert(this.t('Gagal: ','Failed: ')+d.error); return; }
                     const conv = d.percakapan || d;
                     this.openPercakapan(conv.id);
                     this.fetchContacts();
@@ -339,7 +338,7 @@
         return colors[role] || 'bg-surface-400';
     },
     roleLabel(role) {
-        const labels = {guru:'Guru', murid:'Murid', admin_sekolah:'Admin Sekolah', super_admin:'Super Admin'};
+        const labels = {guru:this.t('Guru','Teacher'), murid:this.t('Murid','Student'), admin_sekolah:this.t('Admin Sekolah','School Admin'), super_admin:'Super Admin'};
         return labels[role] || role;
     },
 
@@ -373,7 +372,7 @@
         fetch('/api/percakapan/' + this.selectedPercakapan + '/pesan', {method:'POST', headers:{'Content-Type':'application/json'}, body})
             .then(r => r.json())
             .then(d => {
-                if (d.error) { alert('Gagal: '+d.error); return; }
+                if (d.error) { alert(this.t('Gagal: ','Failed: ')+d.error); return; }
                 const exists = this.pesanList.some(m => m.id === d.id);
                 if (!exists) this.pesanList.push(d);
                 this.newMessage = '';
@@ -392,7 +391,7 @@
     },
 
     deletePesan(id) {
-        if (!confirm('Hapus pesan ini?')) return;
+        if (!confirm(this.t('Hapus pesan ini?','Delete this message?'))) return;
         fetch('/api/pesan/' + id, {method:'DELETE'})
             .then(r => r.json())
             .then(d => {
@@ -421,8 +420,8 @@
             } catch (_) {}
         }
         if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('Pesan baru di ScanGrade', {
-                body: 'Ada pesan baru di chat',
+            new Notification(this.t('Pesan baru di ScanGrade','New message on ScanGrade'), {
+                body: this.t('Ada pesan baru di chat','You have a new chat message'),
                 icon: '/static/favicon.ico'
             });
         }
@@ -430,8 +429,8 @@
 }">
 
     <div class="flex items-center justify-between mb-4">
-        <h1 class="text-xl font-extrabold text-surface-800"><i class="fas fa-comments text-primary-500 mr-2"></i>Komunikasi</h1>
-        <button @click="toggleMute()" class="text-surface-400 hover:text-primary-500 transition text-lg" :title="muted ? 'Aktifkan suara' : 'Matikan suara'">
+        <h1 class="text-xl font-extrabold text-surface-800"><i class="fas fa-comments text-primary-500 mr-2"></i><span x-text="t('Komunikasi','Communication')"></span></h1>
+        <button @click="toggleMute()" class="text-surface-400 hover:text-primary-500 transition text-lg" :title="muted ? t('Aktifkan suara','Unmute') : t('Matikan suara','Mute')">
             <i :class="muted ? 'fas fa-volume-off text-red-400' : 'fas fa-volume-up'"></i>
         </button>
     </div>
@@ -442,7 +441,7 @@
             <template x-if="chatUnreadCount > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="chatUnreadCount"></span></template>
         </button>
         <button @click="activeTab='pengumuman'; stopPolling()" :class="activeTab==='pengumuman' ? 'bg-white shadow-sm text-primary-600' : 'text-surface-500'" class="flex-1 py-2.5 text-sm font-bold rounded-lg text-center transition relative">
-            <i class="fas fa-bullhorn mr-1.5"></i>Pengumuman
+            <i class="fas fa-bullhorn mr-1.5"></i><span x-text="t('Pengumuman','Announcements')"></span>
             <template x-if="unreadPengumuman > 0"><span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" x-text="unreadPengumuman"></span></template>
         </button>
     </div>
@@ -451,14 +450,14 @@
     <div x-show="activeTab==='pengumuman'">
         <template x-if="userRole !== 'murid'">
             <button @click="showCreatePengumuman=true" class="w-full mb-4 px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm shadow-lg transition flex items-center justify-center gap-2">
-                <i class="fas fa-plus-circle"></i>Buat Pengumuman
+                <i class="fas fa-plus-circle"></i><span x-text="t('Buat Pengumuman','New Announcement')"></span>
             </button>
         </template>
 
         <div class="space-y-3">
             <div x-show="pengumumanList.length===0 && !loading" class="text-center py-12 text-surface-400">
                 <i class="fas fa-bullhorn text-4xl mb-3"></i>
-                <p class="text-sm font-bold">Belum ada pengumuman</p>
+                <p class="text-sm font-bold" x-text="t('Belum ada pengumuman','No announcements yet')"></p>
             </div>
             <template x-for="item in pengumumanList" :key="item.id">
                 <div @click="openPengumuman(item)" class="bg-white rounded-2xl p-4 shadow-sm border border-surface-100 cursor-pointer hover:shadow-md transition relative">
@@ -483,7 +482,7 @@
         <div class="w-full md:w-[350px] shrink-0 bg-white rounded-2xl border border-surface-100 shadow-sm flex flex-col overflow-hidden"
              :class="selectedPercakapan ? 'hidden md:flex' : 'flex'">
             <div class="p-3 border-b border-surface-100">
-                <input type="text" x-model="searchChat" placeholder="Cari kontak..." class="w-full px-3 py-2.5 bg-surface-50 border-0 rounded-lg text-sm text-surface-700 placeholder:text-surface-400">
+                <input type="text" x-model="searchChat" :placeholder="t('Cari kontak...','Search contacts...')" class="w-full px-3 py-2.5 bg-surface-50 border-0 rounded-lg text-sm text-surface-700 placeholder:text-surface-400">
             </div>
             <div class="flex-1 overflow-y-auto">
                 <template x-for="c in filteredContacts" :key="c.id">
@@ -499,9 +498,9 @@
                                 <span x-show="c.last_message_at" class="text-[11px] text-surface-400 shrink-0 ml-1" x-text="formatDate(c.last_message_at)"></span>
                             </div>
                             <div class="flex items-center gap-1.5 mt-0.5">
-                                <span class="text-[11px] text-surface-400" x-text="c.role==='guru'?'Guru':c.role==='murid'?'Murid':c.role==='admin_sekolah'?'Admin':'Super Admin'"></span>
+                                <span class="text-[11px] text-surface-400" x-text="c.role==='guru'?t('Guru','Teacher'):c.role==='murid'?t('Murid','Student'):c.role==='admin_sekolah'?t('Admin','Admin'):'Super Admin'"></span>
                                 <span x-show="c.last_message" class="text-[13px] text-surface-500 truncate">· <span x-text="c.last_message"></span></span>
-                                <span x-show="!c.conversation_id" class="text-xs text-primary-500 font-medium">Baru</span>
+                                <span x-show="!c.conversation_id" class="text-xs text-primary-500 font-medium" x-text="t('Baru','New')"></span>
                             </div>
                         </div>
                         <div x-show="c.unread_count > 0">
@@ -511,7 +510,7 @@
                 </template>
                 <div x-show="filteredContacts.length===0" class="p-6 text-center text-surface-400">
                     <i class="fas fa-users text-3xl mb-2"></i>
-                    <p class="text-sm font-medium">Tidak ada kontak</p>
+                    <p class="text-sm font-medium" x-text="t('Tidak ada kontak','No contacts')"></p>
                 </div>
             </div>
         </div>
@@ -534,19 +533,19 @@
                 <!-- Messages -->
                 <div x-ref="pesanContainer" class="flex-1 overflow-y-auto px-4 py-3 space-y-1" style="background-color:#efeae2">
                     <div x-show="pesanList.length===0" class="flex items-center justify-center h-full">
-                        <p class="text-sm text-surface-400">Belum ada pesan. Kirim pesan pertama!</p>
+                        <p class="text-sm text-surface-400" x-text="t('Belum ada pesan. Kirim pesan pertama!','No messages yet. Send the first one!')"></p>
                     </div>
                     <template x-for="msg in pesanList" :key="msg.id">
                         <div class="flex" :class="msg.sender_id === userId ? 'justify-end' : 'justify-start'">
                             <div class="max-w-[80%] md:max-w-[65%] min-w-[120px] rounded-lg px-3 py-2 shadow-sm"
                                  :class="msg.sender_id === userId ? 'bg-[#dcf8c6] text-[#111b21] rounded-br-none' : 'bg-white text-[#111b21] rounded-bl-none border border-surface-150'">
                                 <template x-if="msg.is_deleted">
-                                    <p class="italic text-surface-400 text-xs"><i class="fas fa-trash-can mr-1"></i>Pesan dihapus</p>
+                                    <p class="italic text-surface-400 text-xs"><i class="fas fa-trash-can mr-1"></i><span x-text="t('Pesan dihapus','Message deleted')"></span></p>
                                 </template>
                                 <template x-if="!msg.is_deleted">
                                     <div>
                                         <p class="text-[15px] leading-relaxed whitespace-pre-wrap break-words" x-text="msg.content"></p>
-                                        <p x-show="msg.is_edited" class="text-[11px] text-surface-400 italic mt-0.5">diedit</p>
+                                        <p x-show="msg.is_edited" class="text-[11px] text-surface-400 italic mt-0.5" x-text="t('diedit','edited')"></p>
                                     </div>
                                 </template>
                                 <div class="flex items-center justify-end gap-1 mt-1">
@@ -563,7 +562,7 @@
                 <!-- Input -->
                 <div class="px-4 py-3 border-t border-surface-200 bg-surface-50">
                     <div class="flex items-end gap-2 bg-white rounded-xl border border-surface-200 px-3 py-2">
-                        <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-800 text-sm resize-none outline-none max-h-24 bg-transparent" placeholder="Ketik pesan..." @keydown.enter.prevent="sendMessage()"></textarea>
+                        <textarea x-model="newMessage" rows="1" class="flex-1 border-0 focus:ring-0 text-surface-800 text-sm resize-none outline-none max-h-24 bg-transparent" :placeholder="t('Ketik pesan...','Type a message...')" @keydown.enter.prevent="sendMessage()"></textarea>
                         <button @click="sendMessage()" :disabled="sending||!newMessage.trim()" class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all"
                                 :class="newMessage.trim() ? 'bg-primary-600 text-white shadow-md' : 'bg-surface-100 text-surface-400'">
                             <i class="fas fa-paper-plane text-sm"></i>
@@ -576,7 +575,7 @@
             <div x-show="!selectedPercakapan" class="flex-1 hidden md:flex items-center justify-center bg-surface-50/50">
                 <div class="text-center text-surface-400">
                     <i class="fas fa-comments text-5xl mb-3"></i>
-                    <p class="text-sm font-medium">Pilih kontak untuk mulai chat</p>
+                    <p class="text-sm font-medium" x-text="t('Pilih kontak untuk mulai chat','Pick a contact to start chatting')"></p>
                 </div>
             </div>
         </div>
@@ -586,14 +585,14 @@
     <div x-show="showCreatePengumuman" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showCreatePengumuman=false">
         <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-5">
-                <h2 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i>Buat Pengumuman</h2>
+                <h2 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i><span x-text="t('Buat Pengumuman','New Announcement')"></span></h2>
                 <button @click="showCreatePengumuman=false" class="text-surface-400 hover:text-surface-600 text-xl leading-none">&times;</button>
             </div>
             <form @submit.prevent="submitPengumuman()" class="space-y-4">
                 <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Tujuan</label>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5" x-text="t('Tujuan','Audience')"></label>
                     <select x-model="formTargetRole" @change="onTargetRoleChange()" required class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium bg-white">
-                        <option value="">-- Pilih --</option>
+                        <option value="" x-text="t('-- Pilih --','-- Select --')"></option>
                         <template x-for="opt in targetRoleOptions" :key="opt.value">
                             <option :value="opt.value" x-text="opt.label"></option>
                         </template>
@@ -602,31 +601,31 @@
 
                 <!-- Target: All / Specific / By Class -->
                 <div x-show="formTargetRole">
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Jangkauan</label>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5" x-text="t('Jangkauan','Reach')"></label>
                     <div class="flex flex-wrap gap-2">
                         <label class="cursor-pointer px-4 py-2 rounded-xl border-2 text-xs font-bold transition"
                                :class="formRecipientType==='all' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-surface-200 text-surface-500 hover:border-surface-300'">
                             <input type="radio" value="all" x-model="formRecipientType" class="sr-only">
-                            <i class="fas fa-users mr-1"></i>Semua <span x-text="targetRoleOptions.find(o=>o.value===formTargetRole)?.label || formTargetRole"></span>
+                            <i class="fas fa-users mr-1"></i><span x-text="t('Semua','All')"></span> <span x-text="targetRoleOptions.find(o=>o.value===formTargetRole)?.label || formTargetRole"></span>
                         </label>
                         <label x-show="formTargetRole==='murid'" class="cursor-pointer px-4 py-2 rounded-xl border-2 text-xs font-bold transition"
                                :class="formRecipientType==='class' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-surface-200 text-surface-500 hover:border-surface-300'">
                             <input type="radio" value="class" x-model="formRecipientType" class="sr-only">
-                            <i class="fas fa-school mr-1"></i>Per Kelas
+                            <i class="fas fa-school mr-1"></i><span x-text="t('Per Kelas','By class')"></span>
                         </label>
                         <label class="cursor-pointer px-4 py-2 rounded-xl border-2 text-xs font-bold transition"
                                :class="formRecipientType==='specific' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-surface-200 text-surface-500 hover:border-surface-300'">
                             <input type="radio" value="specific" x-model="formRecipientType" class="sr-only">
-                            <i class="fas fa-user-check mr-1"></i>Spesifik
+                            <i class="fas fa-user-check mr-1"></i><span x-text="t('Spesifik','Specific people')"></span>
                         </label>
                     </div>
                 </div>
 
                 <!-- Class selector (for murid per-class) -->
                 <div x-show="formTargetRole==='murid' && (formRecipientType==='class' || formRecipientType==='specific')">
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Pilih Kelas</label>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5" x-text="t('Pilih Kelas','Choose a class')"></label>
                     <select x-model="formClassId" @change="fetchRecipients()" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium bg-white">
-                        <option value="">-- Semua Kelas --</option>
+                        <option value="" x-text="t('-- Semua Kelas --','-- All classes --')"></option>
                         <template x-for="cls in classList" :key="cls.id">
                             <option :value="cls.id" x-text="cls.name"></option>
                         </template>
@@ -636,8 +635,8 @@
                 <!-- Recipient list (for specific selection) -->
                 <div x-show="formRecipientType==='specific' && recipientList.length > 0">
                     <label class="block text-sm font-bold text-surface-700 mb-1.5">
-                        Pilih <span x-text="targetRoleOptions.find(o=>o.value===formTargetRole)?.label || formTargetRole"></span>
-                        <span class="text-surface-400 font-normal">(<span x-text="formSelectedRecipients.length"></span> dipilih)</span>
+                        <span x-text="t('Pilih','Choose')"></span> <span x-text="targetRoleOptions.find(o=>o.value===formTargetRole)?.label || formTargetRole"></span>
+                        <span class="text-surface-400 font-normal">(<span x-text="formSelectedRecipients.length"></span> <span x-text="t('dipilih','selected')"></span>)</span>
                     </label>
                     <div class="max-h-40 overflow-y-auto border border-surface-200 rounded-xl divide-y divide-surface-100">
                         <template x-for="u in recipientList" :key="u.id">
@@ -649,21 +648,21 @@
                     </div>
                 </div>
                 <div x-show="formRecipientType==='specific' && recipientList.length===0 && formTargetRole" class="text-xs text-surface-400 italic">
-                    <i class="fas fa-info-circle mr-1"></i>Muat data penerima...
+                    <i class="fas fa-info-circle mr-1"></i><span x-text="t('Muat data penerima...','Loading recipients...')"></span>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5" x-text="t('Judul','Title')"></label>
                     <input type="text" x-model="formTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium">
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Isi Pengumuman</label>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5" x-text="t('Isi Pengumuman','Announcement text')"></label>
                     <textarea x-model="formContent" required rows="4" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium"></textarea>
                 </div>
                 <button type="submit" class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition" :disabled="sending">
-                    <span x-text="sending ? 'Mengirim...' : 'Kirim Pengumuman'"></span>
+                    <span x-text="sending ? t('Mengirim...','Sending...') : t('Kirim Pengumuman','Send Announcement')"></span>
                 </button>
-                <button type="button" @click="showCreatePengumuman=false" class="w-full px-4 py-3 text-surface-500 hover:text-surface-700 font-bold">Batal</button>
+                <button type="button" @click="showCreatePengumuman=false" class="w-full px-4 py-3 text-surface-500 hover:text-surface-700 font-bold" x-text="t('Batal','Cancel')"></button>
             </form>
         </div>
     </div>
@@ -681,13 +680,13 @@
                 <span x-text="formatDateTime(selectedPengumuman?.created_at)"></span>
             </div>
             <div x-show="selectedPengumuman?.read_by_count > 0" class="mt-2 text-xs text-surface-400">
-                <i class="fas fa-eye mr-1"></i>Dibaca <span x-text="selectedPengumuman?.read_by_count || 0"></span> orang
+                <i class="fas fa-eye mr-1"></i><span x-text="t('Dibaca','Read by')"></span> <span x-text="selectedPengumuman?.read_by_count || 0"></span> <span x-text="t('orang','people')"></span>
             </div>
 
             <!-- Read Status Button (sender or super_admin) -->
             <div x-show="selectedPengumuman?.sender_id === userId || userRole === 'super_admin'" class="mt-3">
                 <button @click="fetchReadStatus(selectedPengumuman.id)" class="w-full px-3 py-2 bg-primary-50 text-primary-700 hover:bg-primary-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5">
-                    <i class="fas fa-chart-pie"></i> Lihat Status Bacaan
+                    <i class="fas fa-chart-pie"></i> <span x-text="t('Lihat Status Bacaan','See who has read it')"></span>
                 </button>
             </div>
 
@@ -696,9 +695,9 @@
                 <div x-show="readStatus && readStatus.total_target > 0">
                     <div>
                         <div class="flex items-center justify-between mb-3 text-xs font-bold text-surface-600">
-                            <span><span x-text="readStatus.total_target"></span> target penerima</span>
-                            <span class="text-green-600"><span x-text="readStatus.total_read"></span> sudah baca</span>
-                            <span class="text-red-600"><span x-text="readStatus.total_unread"></span> belum baca</span>
+                            <span><span x-text="readStatus.total_target"></span> <span x-text="t('target penerima','recipients')"></span></span>
+                            <span class="text-green-600"><span x-text="readStatus.total_read"></span> <span x-text="t('sudah baca','read')"></span></span>
+                            <span class="text-red-600"><span x-text="readStatus.total_unread"></span> <span x-text="t('belum baca','not read')"></span></span>
                         </div>
                         <!-- Progress bar -->
                         <div class="w-full h-3 bg-surface-200 rounded-full overflow-hidden mb-4">
@@ -713,7 +712,7 @@
                         <div class="space-y-2 text-xs max-h-40 overflow-y-auto">
                             <template x-if="readStatus.read_users.length > 0">
                                 <div>
-                                    <p class="font-bold text-green-700 mb-1"><i class="fas fa-check-circle mr-1"></i>Sudah Dibaca (<span x-text="readStatus.read_users.length"></span>)</p>
+                                    <p class="font-bold text-green-700 mb-1"><i class="fas fa-check-circle mr-1"></i><span x-text="t('Sudah Dibaca','Read')"></span> (<span x-text="readStatus.read_users.length"></span>)</p>
                                     <template x-for="u in readStatus.read_users" :key="u.id">
                                         <div class="flex items-center justify-between px-2 py-1 rounded hover:bg-white">
                                             <span class="text-surface-700" x-text="u.full_name"></span>
@@ -724,7 +723,7 @@
                             </template>
                             <template x-if="readStatus.unread_users.length > 0">
                                 <div class="mt-2">
-                                    <p class="font-bold text-red-700 mb-1"><i class="fas fa-clock mr-1"></i>Belum Dibaca (<span x-text="readStatus.unread_users.length"></span>)</p>
+                                    <p class="font-bold text-red-700 mb-1"><i class="fas fa-clock mr-1"></i><span x-text="t('Belum Dibaca','Not read')"></span> (<span x-text="readStatus.unread_users.length"></span>)</p>
                                     <template x-for="u in readStatus.unread_users" :key="u.id">
                                         <div class="px-2 py-1 rounded hover:bg-white">
                                             <span class="text-surface-700" x-text="u.full_name"></span>
@@ -736,16 +735,16 @@
                     </div>
                 </div>
                 <div x-show="readStatus && readStatus.total_target === 0">
-                    <p class="text-xs text-surface-400 text-center py-4">Tidak ada data penerima.</p>
+                    <p class="text-xs text-surface-400 text-center py-4" x-text="t('Tidak ada data penerima.','No recipient data.')"></p>
                 </div>
             </div>
 
             <div x-show="selectedPengumuman?.sender_id === userId || userRole === 'super_admin'" class="mt-4 pt-3 border-t border-surface-100 flex gap-2">
                 <button @click="openEditPengumuman(selectedPengumuman)" class="flex-1 px-3 py-2 bg-primary-50 text-primary-700 hover:bg-primary-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1">
-                    <i class="fas fa-pen"></i>Edit
+                    <i class="fas fa-pen"></i><span x-text="t('Edit','Edit')"></span>
                 </button>
                 <button @click="deletePengumuman(selectedPengumuman.id)" class="flex-1 px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1">
-                    <i class="fas fa-trash"></i>Hapus
+                    <i class="fas fa-trash"></i><span x-text="t('Hapus','Delete')"></span>
                 </button>
             </div>
         </div>
@@ -755,22 +754,22 @@
     <div x-show="showEditPengumuman" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showEditPengumuman=false">
         <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg">
             <div class="flex items-center justify-between mb-5">
-                <h2 class="font-extrabold text-surface-800"><i class="fas fa-pen text-primary-500 mr-2"></i>Edit Pengumuman</h2>
+                <h2 class="font-extrabold text-surface-800"><i class="fas fa-pen text-primary-500 mr-2"></i><span x-text="t('Edit Pengumuman','Edit Announcement')"></span></h2>
                 <button @click="showEditPengumuman=false" class="text-surface-400 hover:text-surface-600 text-xl leading-none">&times;</button>
             </div>
             <form @submit.prevent="editPengumuman()" class="space-y-4">
                 <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Judul</label>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5" x-text="t('Judul','Title')"></label>
                     <input type="text" x-model="editFormTitle" required class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium">
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-surface-700 mb-1.5">Isi Pengumuman</label>
+                    <label class="block text-sm font-bold text-surface-700 mb-1.5" x-text="t('Isi Pengumuman','Announcement text')"></label>
                     <textarea x-model="editFormContent" required rows="4" class="w-full px-4 py-3 border border-surface-200 rounded-xl text-surface-700 font-medium"></textarea>
                 </div>
                 <button type="submit" class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold shadow-lg transition" :disabled="sending">
-                    <span x-text="sending ? 'Menyimpan...' : 'Simpan Perubahan'"></span>
+                    <span x-text="sending ? t('Menyimpan...','Saving...') : t('Simpan Perubahan','Save Changes')"></span>
                 </button>
-                <button type="button" @click="showEditPengumuman=false" class="w-full px-4 py-3 text-surface-500 hover:text-surface-700 font-bold">Batal</button>
+                <button type="button" @click="showEditPengumuman=false" class="w-full px-4 py-3 text-surface-500 hover:text-surface-700 font-bold" x-text="t('Batal','Cancel')"></button>
             </form>
         </div>
     </div>

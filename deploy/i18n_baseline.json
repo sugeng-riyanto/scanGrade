@@ -63,8 +63,8 @@
     },
     "admin/teachers.html": {
       "pairs": 13,
-      "leftovers": 8,
-      "coverage": 61.9,
+      "leftovers": 7,
+      "coverage": 65.0,
       "frozen": true
     },
     "admin/users.html": {
@@ -147,13 +147,13 @@
     },
     "admin_sekolah/subscription.html": {
       "pairs": 12,
-      "leftovers": 21,
-      "coverage": 36.4,
+      "leftovers": 19,
+      "coverage": 38.7,
       "frozen": true
     },
     "admin_sekolah/teachers.html": {
       "pairs": 0,
-      "leftovers": 26,
+      "leftovers": 25,
       "coverage": 0.0,
       "frozen": false
     },
@@ -302,10 +302,10 @@
       "frozen": false
     },
     "shared/comms.html": {
-      "pairs": 5,
-      "leftovers": 81,
-      "coverage": 5.8,
-      "frozen": true
+      "pairs": 75,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
     },
     "student/dashboard.html": {
       "pairs": 29,
@@ -429,7 +429,7 @@
     },
     "super_admin/pricing_settings.html": {
       "pairs": 1,
-      "leftovers": 38,
+      "leftovers": 37,
       "coverage": 2.6,
       "frozen": true
     },
@@ -441,7 +441,7 @@
     },
     "super_admin/reset_school_data.html": {
       "pairs": 0,
-      "leftovers": 20,
+      "leftovers": 18,
       "coverage": 0.0,
       "frozen": false
     },
@@ -687,7 +687,7 @@
     },
     "teacher/whiteboard_list.html": {
       "pairs": 0,
-      "leftovers": 13,
+      "leftovers": 12,
       "coverage": 0.0,
       "frozen": false
     },

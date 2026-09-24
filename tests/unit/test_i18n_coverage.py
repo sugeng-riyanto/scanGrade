@@ -390,3 +390,68 @@ class TestTheGateRunsIt:
         forbidden = re.findall(r"^\s*(?:import|from)\s+(requests|flask|supabase|app)\b",
                                src, re.M)
         assert not forbidden, f"the coverage tool imports {forbidden}"
+
+
+# ── what is not copy ─────────────────────────────────────────────────────────
+
+class TestRoutesAndRoleSlugsAreData:
+    """An Alpine page is mostly `fetch()` URLs and role slugs, and neither can be
+    translated: `/api/pengumuman?limit=50` reads as Indonesian because the
+    *endpoint* is, and `'guru'` is what a row in `profiles` contains.
+
+    Both were being counted as untranslated copy until this exemption existed —
+    `shared/comms.html` alone carried 34 of them, 42% of its total — so the number
+    it reported was a page that could not reach 100% no matter who translated it.
+    The risk in fixing that is the opposite one, and it is what most of this class
+    is about: an exemption that quietly excused a label would be worse than the
+    over-count it replaces.
+    """
+
+    REAL = ["/api/pengumuman?limit=50", "/api/percakapan/contacts", "/api/pengumuman",
+            "/r/abc", "/privacy", "guru", "murid", "admin_sekolah", "super_admin",
+            "teacher", "student", "admin", "guru_mtk_smp@scan-grade.app"]
+
+    COPY = ["Guru", "Murid", "Admin Sekolah", "Hapus", "Belum ada pengumuman",
+            "Guru Matematika", "Pilih Kelas", "/teacher/analysis is a page",
+            "api/pengumuman", "guru.", "Si guru berkata"]
+
+    def test_the_tool_reads_both_kinds_correctly(self):
+        for lit in self.REAL:
+            assert cov.is_data(lit), f"{lit!r} is data and was counted as copy"
+        for lit in self.COPY:
+            assert not cov.is_data(lit), f"{lit!r} is copy and was excused as data"
+
+    def test_the_sweep_reads_them_the_same_way(self, sweep):
+        """The exemption is copied between two files that cannot import each
+        other, so this is the assertion that keeps the copy honest — the same
+        arrangement the marker vocabulary uses."""
+        for lit in self.REAL + self.COPY:
+            assert cov.is_data(lit) == sweep.is_data(lit), (
+                f"the two readers disagree about {lit!r}")
+
+    def test_a_sentence_that_merely_contains_a_slug_is_still_copy(self):
+        """The narrowness is the whole safety of it: `'guru'` is a value,
+        `'Guru'` is a word somebody reads, and only one of them is exempt."""
+        assert cov.is_data("guru")
+        assert not cov.is_data("Guru")
+        assert not cov.is_data("Guru Fisika")
+
+    def test_a_page_of_fetches_is_not_a_page_of_copy(self):
+        """Through the real counter, not through `is_data` — the exemption has to
+        survive the pass that reads script bodies."""
+        text = ("<div x-data=\"{ r: 'guru', go(){ fetch('/api/pengumuman?limit=50'); } }\">"
+                "<p>Belum ada pengumuman</p></div>")
+        _, leftovers = cov.counts(text)
+        assert leftovers == ["Belum ada pengumuman"], (
+            f"the route or the slug was reported as copy: {leftovers}")
+
+    def test_the_page_this_was_measured_on_is_clean_and_on_the_contract(self, sweep):
+        """`shared/comms.html` renders four roles' communication screens, so one
+        page of pairs fixes four of them. Its copy is all pairs now, and it is on
+        the sweep's list — which is what stops it drifting back one string at a
+        time."""
+        rel = "shared/comms.html"
+        assert cov.counts((ROOT / "app" / "templates" / rel)
+                          .read_text(encoding="utf-8", errors="replace"))[1] == [], \
+            "an untranslated string is back on the communication page"
+        assert rel in sweep.TRANSLATED
