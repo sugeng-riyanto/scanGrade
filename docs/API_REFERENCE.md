@@ -85,8 +85,7 @@ Unathenticated requests return 401.
 | POST | /api/scan/process | Yes | OMR scan image |
 | POST | /api/violation/log | Yes | Log anti-cheat violation |
 | GET | /api/violation/count | Yes | Get violation count |
-| POST | /api/student/auto-save | Yes | Auto-save draft |
-| POST | /api/student/sync-draft | Yes | Sync draft |
+| POST | /api/student/sync-draft | Yes | Sync draft (the exam page's only save path) |
 | POST | /api/grade/auto-save/<sub_id> | Yes | Save grading draft |
 | POST | /api/grade/batch | Yes | Batch grade exam |
 | POST | /api/grade/ai-suggest | Yes | AI essay grading |
