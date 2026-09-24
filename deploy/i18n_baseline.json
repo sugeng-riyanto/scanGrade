@@ -314,9 +314,9 @@
       "frozen": false
     },
     "student/exam_list.html": {
-      "pairs": 0,
-      "leftovers": 11,
-      "coverage": 0.0,
+      "pairs": 14,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "student/recover.html": {
