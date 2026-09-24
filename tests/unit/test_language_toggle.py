@@ -427,6 +427,9 @@ TRANSLATED = [
     # half; it has one now, so the pin is gone and the page switches like the
     # dashboard does. Reported as "main pages students banyak yang belum eng/id".
     "student/results.html",
+    # The list of papers a student may sit, for the same reason and from the same
+    # report: pinned to Indonesian, unpinned and translated here.
+    "student/exam_list.html",
     "teacher/dashboard.html",
     "admin/dashboard.html",
     "super_admin/dashboard.html",
@@ -851,7 +854,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 40, (
+    assert len(TRANSLATED) == 41, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

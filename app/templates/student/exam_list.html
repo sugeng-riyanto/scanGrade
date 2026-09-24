@@ -1,14 +1,19 @@
-{% set content_lang = 'id' %}
 {% extends "base.html" %}
-{% block title %}Ujian - ScanGrade{% endblock %}
-{% block page_title %}Ujian{% endblock %}
+{# Pinned to Indonesian until now (`content_lang = 'id'`): the pin is what let its
+   copy stay one-language, because a pinned page's strings have no English half to
+   render. Reported with the other student pages as "banyak yang belum eng/id". #}
+{% block title %}ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Ujian','Exams')"></span>{% endblock %}
 {% block content %}
-<div class="space-y-6">
+<div class="space-y-6" x-effect="document.title = t('Ujian','Exams') + ' - ScanGrade'">
     <div class="flex items-center gap-3 mb-6">
         <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20"><i class="fas fa-file-alt text-white text-lg"></i></div>
-        <div><h1 class="text-2xl font-extrabold text-surface-800">Ujian Tersedia</h1><p class="text-sm text-surface-500 font-medium">Ujian yang bisa Anda kerjakan sekarang</p></div>
+        <div>
+            <h1 class="text-2xl font-extrabold text-surface-800" x-text="t('Ujian Tersedia','Available Exams')"></h1>
+            <p class="text-sm text-surface-500 font-medium" x-text="t('Ujian yang bisa Anda kerjakan sekarang','Exams you can take now')"></p>
+        </div>
         <a href="/student/recover" class="ml-auto inline-flex items-center gap-1.5 px-4 py-2 border-2 border-amber-200 rounded-xl hover:bg-amber-50 text-xs font-bold text-amber-700 transition whitespace-nowrap">
-            <i class="fas fa-history"></i>Lanjutkan Ujian
+            <i class="fas fa-history"></i><span x-text="t('Lanjutkan Ujian','Resume an Exam')"></span>
         </a>
     </div>
 
@@ -22,6 +27,7 @@
            route parses it now; this is the belt to that pair of braces. #}
         {% set qtypes = e.question_types if e.question_types is mapping else {} %}
         {% set has_essay = q_any_essay(qtypes.values()) %}
+        {% set n = e.total_questions or 0 %}
         <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
             <div class="p-5">
                 <div class="flex items-start justify-between mb-3">
@@ -29,29 +35,32 @@
                         <i class="fas fa-file-alt text-white text-lg"></i>
                     </div>
                     {% if e.sg_in_progress %}
-                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">Sedang dikerjakan</span>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200" x-text="t('Sedang dikerjakan','In progress')"></span>
                     {% else %}
-                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Tersedia</span>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200" x-text="t('Tersedia','Available')"></span>
                     {% endif %}
                 </div>
                 <h3 class="font-bold text-surface-800 mb-1">{{ e.title }}</h3>
                 <p class="text-sm text-surface-500 font-medium">{{ e.subject or '-' }}</p>
                 <div class="flex flex-wrap gap-3 mt-3 text-xs text-surface-500 font-semibold">
-                    <span><i class="fas fa-question-circle mr-1"></i>{{ e.total_questions or 0 }} soal</span>
-                    <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes or 60 }} min</span>
-                    {% if has_essay %}<span class="text-amber-600"><i class="fas fa-pencil-alt mr-1"></i>Essay</span>{% endif %}
+                    {# Jinja picks the English plural for the count, Alpine picks the
+                       language — one pair, both halves literal, and "1 soal" reads
+                       "1 question" rather than "1 questions". #}
+                    <span><i class="fas fa-question-circle mr-1"></i><span x-text="t('{{ n }} soal', '{{ n }} {{ 'question' if n == 1 else 'questions' }}')"></span></span>
+                    <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes or 60 }} <span x-text="t('menit','min')"></span></span>
+                    {% if has_essay %}<span class="text-amber-600"><i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Esai','Essay')"></span></span>{% endif %}
                 </div>
                 {# The window on the card: the last instant a student may begin, so it is
                    not something they learn from a refusal. #}
                 {% if e.end_at %}
-                <p class="text-xs text-amber-700 font-semibold mt-2"><i class="fas fa-hourglass-end mr-1"></i>Mulai terakhir: {{ (e.end_at[:19] + '+00:00') | tz('%d %b %H:%M') }}</p>
+                <p class="text-xs text-amber-700 font-semibold mt-2"><i class="fas fa-hourglass-end mr-1"></i><span x-text="t('Mulai terakhir','Last start')"></span>: {{ (e.end_at[:19] + '+00:00') | tz('%d %b %H:%M') }}</p>
                 {% if e.auto_submit_on_window_end %}
-                <p class="text-[11px] text-rose-600 font-semibold"><i class="fas fa-stopwatch mr-1"></i>Otomatis dikumpulkan saat jendela berakhir</p>
+                <p class="text-[11px] text-rose-600 font-semibold"><i class="fas fa-stopwatch mr-1"></i><span x-text="t('Otomatis dikumpulkan saat jendela berakhir','Submitted automatically when the window ends')"></span></p>
                 {% endif %}
                 {% endif %}
                 <a href="/student/exams/{{ e.id }}"
                    class="mt-4 block text-center bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/25 transition">
-                    <i class="fas fa-play mr-1"></i>Mulai Ujian
+                    <i class="fas fa-play mr-1"></i><span x-text="t('Mulai Ujian','Start Exam')"></span>
                 </a>
             </div>
         </div>
@@ -60,8 +69,8 @@
     {% else %}
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 border border-surface-100 p-12 text-center text-surface-400">
         <div class="w-16 h-16 mx-auto rounded-full bg-surface-100 flex items-center justify-center mb-4"><i class="fas fa-inbox text-surface-300 text-3xl"></i></div>
-        <p class="text-lg font-bold text-surface-500">Tidak ada ujian tersedia</p>
-        <p class="text-sm font-medium mt-1">Tidak ada ujian aktif saat ini. Hubungi guru Anda.</p>
+        <p class="text-lg font-bold text-surface-500" x-text="t('Tidak ada ujian tersedia','No exams available')"></p>
+        <p class="text-sm font-medium mt-1" x-text="t('Tidak ada ujian aktif saat ini. Hubungi guru Anda.','There are no active exams right now. Please ask your teacher.')"></p>
     </div>
     {% endif %}
 </div>
