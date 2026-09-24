@@ -227,6 +227,20 @@ class TestThePieAnswersThePointer:
         assert "const out = this.hoverSlice === i ? 7 : 0;" in CHARTS
         assert "_pill(" in CHARTS, "the hovered slice is not named"
 
+    def test_nothing_rewrites_the_pie_canvas_style(self):
+        """Reported from the live site: the pie left its card the moment it was hovered.
+        The canvas carried `:style="hoverSlice === null ? …"`, and an Alpine *string*
+        style binding rewrites the whole style attribute — wiping the inline size
+        `_pieCtx()` had set. Measured, the canvas then rendered at its attribute size
+        (2x its css size at dpr 2) and overflowed the card. The cursor is set from
+        `drawPie3D`, where the hover state lives, and no binding touches the canvas."""
+        tag = re.search(r'<canvas x-ref="pieCanvas"[^>]*>', CHARTS, re.S)
+        assert tag, "the pie canvas is gone"
+        assert ":style=" not in tag.group(0), \
+            "an Alpine :style binding wipes the inline size _pieCtx() sets"
+        assert "canvas.style.cursor = this.hoverSlice === null ? 'default' : 'pointer';" in CHARTS, \
+            "the cursor is no longer driven from the hover state"
+
     def test_the_pie_is_redrawn_on_resize_and_unregistered_after(self):
         assert "window.addEventListener('resize', this._onResize)" in CHARTS
         assert "destroy()" in CHARTS and "removeEventListener('resize'" in CHARTS, \
