@@ -52,14 +52,17 @@
             </div>
             <div class="rounded-xl border border-surface-200 p-3 transition-colors hover:border-primary-300 hover:bg-surface-50">
                 <p class="text-xs font-bold text-surface-600 mb-2" x-text="t('Ujian per Mata Pelajaran','Exams per Subject')"></p>
-                {# The one canvas Chart.js does not own, so the one that needs a cursor:
-                   `hoverSlice` is set by the pointer *and* by the legend below. It is
-                   also the one nothing sizes for it — see `_pieCtx`. #}
+                {# The one canvas Chart.js does not own: `hoverSlice` is set by the
+                   pointer *and* by the legend below, and `_pieCtx` sizes it. It carries
+                   **no** `:style` binding on purpose. An Alpine string style rewrites
+                   the whole style attribute, which wipes the inline size `_pieCtx` set —
+                   measured, the canvas then rendered at its attribute size (2x its css
+                   size on a phone) and left its card the moment it was hovered. The
+                   cursor is set by `drawPie3D`, where the hover state lives. #}
                 <div class="h-52 sm:h-56">
                     <canvas x-ref="pieCanvas"
                             @pointermove="onPieMove($event)"
-                            @pointerleave="hoverSlice = null; drawPie3D()"
-                            :style="hoverSlice === null ? 'cursor:default' : 'cursor:pointer'"></canvas>
+                            @pointerleave="hoverSlice = null; drawPie3D()"></canvas>
                 </div>
                 {# A pie of *averages* would be a picture of a number that is not a
                    part of anything. The slices are counts, and the caption says so. #}
@@ -478,6 +481,13 @@ window.sgVisualSummary = function () {
                 const s = slices[this.hoverSlice];
                 this._pill(ctx, s.name + ' · ' + s.value, cx, cy);
             }
+
+            //: The cursor is set here, next to the state it reflects, and never by a
+            //: template binding: an Alpine `:style` string writes the whole style
+            //: attribute, which would wipe the size `_pieCtx` just set — measured, the
+            //: canvas then grew to its attribute size on the first hover and pushed the
+            //: pie out of its card.
+            ctx.canvas.style.cursor = this.hoverSlice === null ? 'default' : 'pointer';
         },
     };
 };
