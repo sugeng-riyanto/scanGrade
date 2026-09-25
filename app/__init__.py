@@ -542,6 +542,19 @@ def create_app(env=None):
         except Exception as e:
             app.logger.warning("Failed to start retention scheduler: %s", e)
 
+        # Close sittings whose deadline has passed. Until this existed the only
+        # thing that ended a sitting was the exam page's own countdown, so a
+        # browser that closed at minute 59 left the row a `draft` forever — not a
+        # submission, so absent from the teacher's list, the analysis and the
+        # exam's statistics. The arithmetic is `exam_window`'s and the write is
+        # `finish_sitting`'s, so a clock-closed paper is recorded like any other.
+        try:
+            from app.services.deadline_service import start_deadline_scheduler
+            start_deadline_scheduler(
+                interval=app.config.get("DEADLINE_SWEEP_INTERVAL_SECONDS"), app=app)
+        except Exception as e:
+            app.logger.warning("Failed to start deadline sweep: %s", e)
+
         # Start the deploy-staleness alert loop. It mails the super admins when the
         # runner falls behind the checkout, so staleness is noticed the day it
         # happens instead of the day somebody opens the status page. It never
