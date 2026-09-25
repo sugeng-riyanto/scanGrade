@@ -21,11 +21,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from app.utils.logger import get_logger
+
+logger = get_logger("submission_service")
+
 # An attempt that stands. Never overwritten: a duplicate submit answers
 # "already submitted" instead.
 LIVE_STATUSES = ("submitted", "graded", "published")
 # A row that may be reused: the sitting continues, or a voided attempt is reopened.
-ROW_COLUMNS = "id,status,started_at"
+# The exam relation is embedded because the attempt summary is scoped to a school
+# and this is the read that tells it which one.
+ROW_COLUMNS = "id,status,started_at,exam_id,student_id,exams(school_id)"
 
 
 def _stamp() -> str:
@@ -109,6 +115,42 @@ def open_sitting(supabase, exam_id, student_id):
     return {**row, **patch}, True
 
 
+def _school_of(row):
+    """The school id of a row read with ``exams(school_id)`` embedded."""
+    exams = row.get("exams")
+    if isinstance(exams, list):
+        exams = exams[0] if exams else None
+    if isinstance(exams, dict):
+        return exams.get("school_id")
+    return None
+
+
+def _record_summary(supabase, row, exam_id, student_id, submission):
+    """Measure the sitting now that it has ended — best-effort, by design.
+
+    Losing a summary is a gap in a dashboard; losing the submission is a lost
+    exam. So this never raises into the caller, and it is skipped entirely when
+    the row was read without the exam relation: an unscoped summary would be a
+    page that cannot say whose sitting it describes.
+    """
+    if not isinstance(row, dict) or "exams" not in row:
+        return
+    try:
+        from app.services import attempt_summary
+        attempt_summary.record_for_attempt(
+            supabase,
+            attempt_id=row.get("id"),
+            exam_id=exam_id,
+            student_id=student_id,
+            school_id=_school_of(row),
+            sitting_ms=attempt_summary.sitting_ms_for(row, submission),
+        )
+    except Exception:  # noqa: BLE001 — derived data must never cost a submission
+        logger.exception(
+            "Could not record the attempt summary for exam=%s user=%s", exam_id, student_id
+        )
+
+
 def finish_sitting(supabase, exam_id, student_id, submission, rows=None):
     """Write a finished attempt into this (student, exam)'s row.
 
@@ -126,13 +168,17 @@ def finish_sitting(supabase, exam_id, student_id, submission, rows=None):
     target = sitting_target(rows)
     if target is not None:
         supabase.table("submissions").update(submission).eq("id", target["id"]).execute()
+        _record_summary(supabase, target, exam_id, student_id, submission)
         return target["id"]
     if rows:
         # The only row this student has for this exam is a live attempt.
         return "already_submitted"
     try:
         created = supabase.table("submissions").insert(submission).execute().data or []
-        return created[0].get("id") if created else None
+        if created:
+            _record_summary(supabase, created[0], exam_id, student_id, submission)
+            return created[0].get("id")
+        return None
     except Exception as exc:  # noqa: BLE001 — re-raised unless it is the collision
         if "23505" not in str(exc) and "duplicate key" not in str(exc):
             raise
@@ -140,4 +186,5 @@ def finish_sitting(supabase, exam_id, student_id, submission, rows=None):
         if target is None:
             return "already_submitted"
         supabase.table("submissions").update(submission).eq("id", target["id"]).execute()
+        _record_summary(supabase, target, exam_id, student_id, submission)
         return target["id"]

@@ -657,7 +657,8 @@ def submit_exam(exam_id):
 
     # ── Query 3: GET existing submissions (single query for both checks) ──
     max_attempts = exam.get("max_attempts", 1)
-    all_subs = supabase.table("submissions").select("id,status,started_at").eq(
+    all_subs = supabase.table("submissions").select(
+        "id,status,started_at,exam_id,student_id,exams(school_id)").eq(
         "exam_id", exam_id).eq("student_id", g.user_id).execute().data or []
 
     # Check attempts (exclude draft + retracted)
@@ -786,10 +787,10 @@ def submit_exam(exam_id):
     # that loses its network in the last minute must not lose the answers. But "this
     # paper was timed" and "this paper arrived twenty minutes after the deadline" are
     # different facts about a result, and only one of them was observable before.
+    completed_at = datetime.now(timezone.utc)
     sitting_started = next((s.get("started_at") for s in all_subs
                             if s.get("status") == "draft"), None)
-    submitted_late = exam_window.is_late(exam, sitting_started,
-                                         datetime.now(timezone.utc))
+    submitted_late = exam_window.is_late(exam, sitting_started, completed_at)
 
     submission = {
         "exam_id": exam_id,
@@ -803,6 +804,10 @@ def submit_exam(exam_id):
         "status": "submitted",
         "is_published": exam.get("publish_mode") == "auto",
         "submitted_late": submitted_late,
+        # Stamped here rather than left to the column default: the attempt summary
+        # measures the sitting from `started_at` to this instant, and a value the
+        # write does not carry is one the measurement never sees.
+        "submitted_at": completed_at.isoformat(),
     }
     try:
         # ── Query 5: write into the row this (student, exam) already owns ──
