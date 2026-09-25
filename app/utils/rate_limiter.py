@@ -224,6 +224,54 @@ def _check_limit_memory(key, max_req, window):
         return True, 0
 
 
+# ── One-at-a-time claims, shared across workers ─────────────────
+#
+#: The in-process fallback for `claim`, used only when Redis is unreachable. Keyed
+#: by the full claim key, holding the instant it was last granted. Bounded, so a
+#: long-lived worker cannot grow it without limit.
+_claims = {}
+_CLAIM_MAX = 4096
+
+
+def claim(key, seconds):
+    """True when this caller is the first for ``key`` within ``seconds``.
+
+    The answer has to be the *store's*, not this process's. One Redis ``SET NX EX``
+    is atomic, so two workers cannot both read "no recent write" and both write,
+    and the key's own TTL is what reopens the window — there is no second table to
+    prune, and so no maintenance branch that a long-running worker can enter once
+    and break in. That is exactly what the answer-sync throttle needed: it kept this
+    in a dict per worker, which was invisible with one process and wrong with
+    three, since each gevent worker counted its own clock (see
+    `app/routes/api.py::_check_rate_limit`).
+
+    Falls back to a per-process table when Redis is unavailable — the same policy as
+    everything else here, because a cache outage must not stop a paper from being
+    saved — and never raises: a broken store must not become a refused sync.
+    """
+    if not key or not seconds or seconds <= 0:
+        return True
+
+    full = f"sgl:claim:{key}"
+    conn = _get_redis_conn()
+    if conn is not None:
+        try:
+            return bool(conn.set(full, str(time.time()), nx=True, ex=int(seconds)))
+        except Exception as e:
+            logger.debug("Redis claim failed: %s — counting this one in-process", e)
+
+    now = time.time()
+    with _limits_lock:
+        if now - _claims.get(full, 0.0) < seconds:
+            return False
+        if len(_claims) >= _CLAIM_MAX:
+            cutoff = now - max(seconds, 3600)
+            for stale in [k for k, v in _claims.items() if v < cutoff]:
+                _claims.pop(stale, None)
+        _claims[full] = now
+    return True
+
+
 def _count(conn, key, max_req, window):
     """One rate-limit check against Redis, or the in-memory fallback."""
     if conn:

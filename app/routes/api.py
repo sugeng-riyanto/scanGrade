@@ -19,7 +19,7 @@ from app.services.question_types import (
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
-from app.utils.rate_limiter import limiter
+from app.utils.rate_limiter import claim, limiter
 
 def _rate_limit(n):
     return limiter.limit(n) if limiter else (lambda f: f)
@@ -53,33 +53,22 @@ def _release_lock(redis_conn, key):
     except Exception:
         pass
 
-_sync_last = {}
-_SYNC_CLEANUP_INTERVAL = 600  # seconds
-_sync_last_cleanup = time.time()
-
-
 def _check_rate_limit(user_id, exam_id, min_interval=5):
-    global _sync_last_cleanup
-    now = time.time()
-    key = f"{user_id}:{exam_id}"
-    last = _sync_last.get(key, 0)
-    if now - last < min_interval:
-        return False
-    _sync_last[key] = now
-    # Periodic cleanup of stale entries (every 10 min)
-    if now - _sync_last_cleanup > _SYNC_CLEANUP_INTERVAL:
-        _sync_last_cleanup = now
-        cutoff = now - 3600  # remove entries older than 1 hour
-        # One table, pruned by age. It used to also prune a second table of
-        # per-key locks (`_sync_locks`, guarded by `_sync_lock_mutex`) that no
-        # longer exists — and since nothing bound either name, the `with` here
-        # raised `NameError` on the first request after the 600 s interval. The
-        # throttle is still per-process (see the note above `_sync_last`): it is
-        # a fair-use guard on a 3 s interval, not a boundary.
-        stale_keys = [k for k, v in _sync_last.items() if v < cutoff]
-        for k in stale_keys:
-            del _sync_last[k]
-    return True
+    """One sync per ``min_interval`` for this (student, exam) — for *every* worker.
+
+    This used to be a dict in the worker's own memory. With one process that is
+    invisible; with the three gevent workers this box runs it is wrong, because each
+    worker counts its own clock: the same student can sync three times as often as
+    the limit says, and which worker answers is not something the client controls,
+    so the effective limit is neither 3 s nor 1 s but a lottery.
+
+    It is now a claim in the shared store (`rate_limiter.claim`, one atomic
+    ``SET NX EX``), so the number is the same wherever the request lands. It stays a
+    fair-use guard rather than a security boundary, and it still fails open: if the
+    store is unreachable the claim is counted in-process, which is stricter than
+    allowing everything and still never refuses a sync.
+    """
+    return claim(f"sync:{user_id}:{exam_id}", min_interval)
 
 
 @api_bp.route("/violation/log", methods=["POST"])

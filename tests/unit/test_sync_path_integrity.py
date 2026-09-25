@@ -24,6 +24,14 @@ prune, and the dead route is **deleted rather than repaired**. A second write pa
 that nothing calls is a second path that can drift, and ``sync-draft`` is the one
 the exam page uses and the one that carries the exam-window rule.
 
+That throttle has since moved again, and not because of a defect in this release:
+the decision left the worker's own memory for the shared store, so that three
+gevent workers count one limit instead of three. The table this file used to
+exercise by name is gone, and its tests moved with it — see
+``tests/unit/test_sync_throttle_shared.py``. What stays here is what this file is
+really about: the module must not read a name nothing binds, and the dead route
+must not come back.
+
 The template-side guards live in ``test_anti_cheat_violations.py`` and
 ``test_away_events.py``; these are about the server path's ability to stay up.
 """
@@ -43,46 +51,16 @@ API_PY = pathlib.Path(__file__).resolve().parents[2] / "app" / "routes" / "api.p
 GHOSTS = ("_sync_lock_mutex", "_sync_locks", "_get_sync_lock")
 
 
-# ── the throttle survives its own cleanup ────────────────────────────────────
-
-def test_the_prune_survives_the_cleanup_interval(monkeypatch):
-    """A sync after the prune window must be answered, not raised.
-
-    This is the failing case the release fixes: the branch is entered only once
-    per ``_SYNC_CLEANUP_INTERVAL``, so it stayed invisible to every short test and
-    to every fresh worker.
-    """
-    monkeypatch.setattr(api_module, "_sync_last", {"old-user:old-exam": 0.0})
-    # Zero means "the last prune was at the epoch", i.e. it is due now.
-    monkeypatch.setattr(api_module, "_sync_last_cleanup", 0.0)
-
-    allowed = api_module._check_rate_limit("u-1", "e-1", min_interval=5)
-
-    assert allowed is True, "the request inside the window should be allowed"
-
-
-def test_the_prune_still_drops_entries_older_than_an_hour(monkeypatch):
-    """Removing the ghost branch must not remove the cleanup it was tangled with."""
-    monkeypatch.setattr(api_module, "_sync_last", {"old-user:old-exam": 0.0})
-    monkeypatch.setattr(api_module, "_sync_last_cleanup", 0.0)
-
-    api_module._check_rate_limit("u-2", "e-2", min_interval=5)
-
-    assert "old-user:old-exam" not in api_module._sync_last, (
-        "an entry untouched for more than an hour should have been pruned"
-    )
-    assert "u-2:e-2" in api_module._sync_last, (
-        "the prune must not take the entry it just recorded"
-    )
-
-
-def test_the_throttle_still_refuses_a_second_call_inside_the_window(monkeypatch):
-    """The throttle is the reason this helper exists; it must keep working."""
-    monkeypatch.setattr(api_module, "_sync_last", {})
-    monkeypatch.setattr(api_module, "_sync_last_cleanup", api_module.time.time())
-
-    assert api_module._check_rate_limit("u-3", "e-3", min_interval=60) is True
-    assert api_module._check_rate_limit("u-3", "e-3", min_interval=60) is False
+# ── the throttle's own tests now live with the shared store ──────────────────
+#
+# Three tests used to sit here — "a sync after the prune window is answered", "the
+# prune does not take the entry it just recorded", "a second call inside the window
+# is refused" — each reaching for `_sync_last` / `_sync_last_cleanup`. That table no
+# longer exists: the decision moved into the shared store so that three gevent
+# workers count one limit instead of three. All three properties are asserted
+# against the new home in `tests/unit/test_sync_throttle_shared.py`; nothing was
+# dropped, and one of them got stronger there (a *forgotten* worker memory is the
+# case the old table could not see).
 
 
 # ── no ghost names may come back ─────────────────────────────────────────────
