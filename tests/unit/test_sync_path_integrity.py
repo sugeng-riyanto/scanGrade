@@ -24,13 +24,15 @@ prune, and the dead route is **deleted rather than repaired**. A second write pa
 that nothing calls is a second path that can drift, and ``sync-draft`` is the one
 the exam page uses and the one that carries the exam-window rule.
 
-That throttle has since moved again, and not because of a defect in this release:
-the decision left the worker's own memory for the shared store, so that three
-gevent workers count one limit instead of three. The table this file used to
-exercise by name is gone, and its tests moved with it — see
-``tests/unit/test_sync_throttle_shared.py``. What stays here is what this file is
-really about: the module must not read a name nothing binds, and the dead route
-must not come back.
+That throttle has since moved twice, and neither move was for a defect in this
+release. First the decision left the worker's own memory for a Redis claim, so that
+three gevent workers count one limit instead of three. Then — because a claim with
+a per-process fallback is the same defect off the happy path — it left the store
+altogether and is derived from the row the sync writes
+(``submissions.updated_at``). The table this file used to exercise by name is gone,
+and its tests moved with it — see ``tests/unit/test_sync_eligibility.py``. What
+stays here is what this file is really about: the module must not read a name
+nothing binds, and the dead route must not come back.
 
 The template-side guards live in ``test_anti_cheat_violations.py`` and
 ``test_away_events.py``; these are about the server path's ability to stay up.
@@ -51,16 +53,17 @@ API_PY = pathlib.Path(__file__).resolve().parents[2] / "app" / "routes" / "api.p
 GHOSTS = ("_sync_lock_mutex", "_sync_locks", "_get_sync_lock")
 
 
-# ── the throttle's own tests now live with the shared store ──────────────────
+# ── the throttle's own tests now live with the row it is derived from ────────
 #
 # Three tests used to sit here — "a sync after the prune window is answered", "the
 # prune does not take the entry it just recorded", "a second call inside the window
-# is refused" — each reaching for `_sync_last` / `_sync_last_cleanup`. That table no
-# longer exists: the decision moved into the shared store so that three gevent
-# workers count one limit instead of three. All three properties are asserted
-# against the new home in `tests/unit/test_sync_throttle_shared.py`; nothing was
-# dropped, and one of them got stronger there (a *forgotten* worker memory is the
-# case the old table could not see).
+# is refused" — each reaching for `_sync_last` / `_sync_last_cleanup`. Neither that
+# table nor the Redis claim that replaced it exists any more: eligibility is read
+# from the row the sync writes, so the limit is one number for every worker without
+# anybody keeping state. All three properties are asserted against the new home in
+# `tests/unit/test_sync_eligibility.py`; nothing was dropped, and one of them got
+# stronger there (a *forgotten* worker memory — which is what a second worker is —
+# is the case the old table could not see).
 
 
 # ── no ghost names may come back ─────────────────────────────────────────────
