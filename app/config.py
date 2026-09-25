@@ -120,6 +120,11 @@ class Config:
     # and the interval is six hours — 12 cheap `git` calls a day on a 1 vCPU box.
     DEPLOY_ALERT_MIN_COMMITS = env_int("DEPLOY_ALERT_MIN_COMMITS", 5)
     DEPLOY_ALERT_INTERVAL_SECONDS = env_int("DEPLOY_ALERT_INTERVAL_SECONDS", 6 * 3600)
+
+    #: How often the server closes sittings whose deadline has passed. The exam
+    #: page's countdown is a display; this is the enforcement, so it runs whether or
+    #: not a browser is still open (app/services/deadline_service.py).
+    DEADLINE_SWEEP_INTERVAL_SECONDS = env_int("DEADLINE_SWEEP_INTERVAL_SECONDS", 60)
     #: Where the last-alert record is kept. Defaults to Flask's instance folder.
     DEPLOY_ALERT_STATE_DIR = env_str("SCANGRADE_ALERT_STATE_DIR", "") or None
 
