@@ -19,7 +19,7 @@ from app.services.question_types import (
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
-from app.utils.rate_limiter import claim, limiter
+from app.utils.rate_limiter import limiter
 
 def _rate_limit(n):
     return limiter.limit(n) if limiter else (lambda f: f)
@@ -53,22 +53,38 @@ def _release_lock(redis_conn, key):
     except Exception:
         pass
 
-def _check_rate_limit(user_id, exam_id, min_interval=5):
-    """One sync per ``min_interval`` for this (student, exam) — for *every* worker.
+def _check_rate_limit(row, server_now, min_interval=5):
+    """May this sync write now? Answered by the row's own last write time.
 
-    This used to be a dict in the worker's own memory. With one process that is
-    invisible; with the three gevent workers this box runs it is wrong, because each
-    worker counts its own clock: the same student can sync three times as often as
-    the limit says, and which worker answers is not something the client controls,
-    so the effective limit is neither 3 s nor 1 s but a lottery.
+    This guard has kept state in two wrong places already. It was a dict in the
+    worker's memory — invisible with one process, wrong with the three gevent
+    workers this box runs, where each counted its own clock so the same student
+    could sync three times as often as the limit says. It then became a Redis claim
+    (`rate_limiter.claim`, one atomic ``SET NX EX``) with a per-process dict behind
+    it as the fallback — still two mechanisms for one number, and the fallback was
+    the same defect off the happy path.
 
-    It is now a claim in the shared store (`rate_limiter.claim`, one atomic
-    ``SET NX EX``), so the number is the same wherever the request lands. It stays a
-    fair-use guard rather than a security boundary, and it still fails open: if the
-    store is unreachable the claim is counted in-process, which is stricter than
-    allowing everything and still never refuses a sync.
+    It keeps no state at all now, because it is derived from the only thing that
+    already knows when this paper was last written: ``submissions.updated_at``, read
+    by the very query this endpoint makes anyway to merge into ``answers``. The row
+    lives in the shared database, so every worker reads one number by construction:
+    there is no table to forget and no cache to be unreachable. It also stops a
+    write rather than the read — the write is the part that amplifies, since each
+    one rewrites the JSONB column.
+
+    It **fails open**, in every direction: no row, no stamp, a stamp this code
+    cannot read, or a stamp ahead of this process's clock all mean "allow". A
+    fair-use guard that a cache outage, a schema drift or a clock skew could turn
+    into a refused save would be worse than the writes it exists to trim, and the
+    one clock it compares to is this request's own.
     """
-    return claim(f"sync:{user_id}:{exam_id}", min_interval)
+    stamp = exam_window.parse_dt((row or {}).get("updated_at"))
+    if stamp is None:
+        return True
+    age = server_now - int(stamp.timestamp())
+    # A stamp in the future is skew, not evidence; only a *past* write inside the
+    # window is what this guard refuses.
+    return not (0 <= age < min_interval)
 
 
 @api_bp.route("/violation/log", methods=["POST"])
@@ -751,8 +767,9 @@ def student_sync_draft():
     is_light = data.get("light", True)
     if not exam_id:
         return jsonify({"saved": True, "at": int(time.time())})
-    if not _check_rate_limit(g.user_id, exam_id, min_interval=3 if is_light else 10):
-        return jsonify({"saved": True, "at": int(time.time()), "throttled": True})
+    # The throttle is decided further down, from the row this sync writes — the row
+    # read it needs is one the merge below was going to make anyway. See
+    # `_check_rate_limit`.
     # Verify the student may sit this exam. Delegated to the shared rule so this
     # path and the page routes cannot drift apart again — and it DENIES on error.
     # The previous version wrapped the whole check in `except Exception: pass`,
@@ -773,6 +790,9 @@ def student_sync_draft():
     if not rlock:
         return jsonify({"saved": True, "at": int(time.time()), "busy": True})
     server_now = int(time.time())
+    # The stamp this sync writes into the row, from the same instant the next
+    # request will be judged against — one clock, not two.
+    server_iso = datetime.fromtimestamp(server_now, tz=timezone.utc).isoformat()
     server_time_left = None
     try:
         from app.utils.auth import get_supabase
@@ -780,12 +800,14 @@ def student_sync_draft():
         # Use cached exam fetch — avoids duplicate queries when many students sync simultaneously
         exam_data = _get_exam_cached(exam_id, supabase)
         duration = (exam_data["duration_minutes"] * 60) if exam_data and exam_data.get("duration_minutes") else None
-        existing = supabase.table("submissions").select("id,status,answers,started_at").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute().data
+        existing = supabase.table("submissions").select("id,status,answers,started_at,updated_at").eq("exam_id", exam_id).eq("student_id", g.user_id).limit(1).execute().data
         if existing:
             sub = existing[0]
             if sub.get("status") in ("submitted", "graded", "published"):
                 current_app.logger.warning("sync-draft blocked: submission %s already %s", sub["id"], sub.get("status"))
                 return jsonify({"saved": True, "at": int(time.time()), "note": "already_submitted"})
+            if not _check_rate_limit(sub, server_now, min_interval=10 if not is_light else 3):
+                return jsonify({"saved": True, "at": server_now, "throttled": True})
             if is_light and sub.get("answers"):
                 merged = sub["answers"]
                 if isinstance(merged, dict):
@@ -822,7 +844,13 @@ def student_sync_draft():
                                 answers[qk]["pages"][str(pk)]["canvas"] = canvasUrl
                     except Exception:
                         pass
-            supabase.table("submissions").update({"answers": answers}).eq("id", sub["id"]).execute()
+            # `updated_at` is written here as well as by the database's own trigger
+            # (`supabase/schema.sql`), so the stamp the next sync is judged by keeps
+            # moving even on a box where that trigger is missing. Where it exists it
+            # wins, with the database's `NOW()` — which only makes it more truthful.
+            supabase.table("submissions").update({
+                "answers": answers, "updated_at": server_iso,
+            }).eq("id", sub["id"]).execute()
             # Timer reconciliation: validasi started_at antar device
             client_started = data.get("started_at")
             existing_started = sub.get("started_at")
@@ -881,6 +909,7 @@ def student_sync_draft():
                 "max_score": 100,
                 "status": "draft",
                 "started_at": started_at_dt,
+                "updated_at": server_iso,
             }).execute()
             # A brand-new sitting gets the same answer as an existing one, so a
             # device that opens the page late in the window is told the truth about
