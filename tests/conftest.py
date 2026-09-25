@@ -24,12 +24,13 @@ Two ways in:
   refuses that on an app that has — and a shared app always has).
 """
 
-# Deliberately the first import: it refuses an interpreter the suite cannot run
-# on *before* pytest parses a test file and before a dependency is imported, so a
-# 3.11 run is told the reason instead of dying at collection with a bare
-# SyntaxError in a test file the reader did not touch. See the module for why the
-# declaration in pyproject.toml is not enough on its own.
-import python_requires  # noqa: F401  (imported for its side effect)
+# The interpreter floor, asked about *this run* rather than about this box: below
+# 3.12 the hook at the bottom compiles the files the run targets and refuses only
+# a run that would die at collection, naming them. An import-time refusal was the
+# first shape of it, and it refused every run — including the seven theme tests
+# `deploy/theme_gate.sh` runs on the box, which is how a release quarantined
+# itself. See the module.
+import python_requires
 
 import collections
 
@@ -47,6 +48,18 @@ TESTING_CONFIG = "app.config.TestingConfig"
 def build_app(config: str = TESTING_CONFIG) -> Flask:
     """A new app, for the tests whose subject is construction itself."""
     return create_app(config)
+
+
+# ── the interpreter floor, asked about *this run* ─────────────────────────────
+#
+# Not at import, and not about "this box": a run that targets files this
+# interpreter can parse is allowed even below the floor, because the floor exists
+# for the files that use 3.12 syntax. See `python_requires`.
+
+def pytest_configure(config) -> None:
+    refusal = python_requires.refusal_for_run(python_requires.run_targets(config))
+    if refusal:
+        raise pytest.UsageError(refusal)
 
 
 #: The shared app, once it exists. A list rather than a bare global so the
