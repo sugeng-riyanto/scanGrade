@@ -60,8 +60,9 @@ MACHINE = {
 }
 
 # The largest measured rung that still holds 0% errors and a comfortable p95: the
-# 50-student row (worst p95 3.7 s). At 100 the p95 rises to 4.2 s and at 150 to
-# 15.2 s. This is a *recommendation derived from a row*, so the guard checks that
+# 50-student row (worst p95 3.7 s, re-measured 25 Sep 2026). At 100 the p95 rises to
+# 8.5 s and at 150 to 11.4 s. This is a *recommendation derived from a row*, so the
+# guard checks that
 # the row exists, that it really is 0% errors, and that the landing page states
 # the same limit — the two pages are not allowed to disagree.
 COMFORTABLE_STUDENTS = 50

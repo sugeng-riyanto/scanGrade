@@ -54,14 +54,18 @@ class TestThePageIsTheSourceOfTheClaim:
         assert limit == 50, "the gate no longer reads the comfortable limit off the page"
         rung = gate.rung_for(limit, rungs)
         assert rung.students == 50
-        assert rung.p50_high_ms == pytest.approx(962.0), (
+        # 2,200 ms since the 25 Sep 2026 re-measurement: the page's 50-row is the
+        # union of the 14 Sep Locust run (94–620 ms) and the 25 Sep harness run
+        # (510–2186 ms), and the pessimistic end of the range is what the gate
+        # compares against.
+        assert rung.p50_high_ms == pytest.approx(2200.0), (
             "the p50 bound the gate compares against is no longer the one the page "
             f"publishes (got {rung.p50_high_ms}). Either the page changed and this "
             "test should follow it, or the parser is reading the wrong cell."
         )
         # 3,700 ms since the 50-student row became a union of two artifacts: the
-        # 60-second harness run measured a 3.1 s worst p95 and the 90-second Locust
-        # run measured 3.7 s, and the page publishes the worse of the two.
+        # 25 Sep 60-second harness run measured a 2.8 s worst p95 and the 14 Sep
+        # 90-second Locust run measured 3.7 s, and the page publishes the worse one.
         assert rung.p95_ms == pytest.approx(3700.0), (
             "the p95 bound the gate compares against is no longer the worst figure the "
             "artifacts recorded. If a re-measurement moved it, update this number in the "

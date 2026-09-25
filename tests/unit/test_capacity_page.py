@@ -201,9 +201,23 @@ class TestTheDateIsNeverInvented:
         assert (first["at"], first["at_source"]) == ("2026-09-14", "artifact")
 
     def test_an_artifact_without_one_falls_back_to_its_commit_date(self, read):
-        """`rung-050.json` predates the field, so it is dated by `git log`."""
+        """`rung-500-endurance.txt` cannot carry the field, so `git log` dates it.
+
+        This used to point at `rung-050.json`, which predated `measured_at`. When
+        the rungs were re-measured on 25 Sep 2026 that file gained the field like
+        every other JSON artifact, and the fallback's live subject became the 500*
+        run — a `.txt` whose evidence *is* the printed table, with nowhere to put a
+        date. Asserting the file has no field keeps a future edit from moving the
+        fallback's only subject away without this test noticing.
+        """
+        raw = (MEASUREMENTS / "rung-500-endurance.txt").read_text(encoding="utf-8")
+        assert "measured_at" not in raw, (
+            "the dateless artifact grew a date, so the git fallback below is no "
+            "longer the branch under test"
+        )
         read(MEASUREMENTS)
-        first = next(m for m in capacity.build()["measurements"] if m["name"] == "rung-050.json")
+        first = next(m for m in capacity.build()["measurements"]
+                     if m["name"] == "rung-500-endurance.txt")
         assert first["at_source"] == "git", first
         assert re.match(r"\d{4}-\d{2}-\d{2}", first["at"]), first
 
