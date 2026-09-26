@@ -22,6 +22,9 @@ import json
 import re
 import subprocess
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -63,10 +66,12 @@ class TestThePageIsTheSourceOfTheClaim:
             f"publishes (got {rung.p50_high_ms}). Either the page changed and this "
             "test should follow it, or the parser is reading the wrong cell."
         )
-        # 3,700 ms since the 50-student row became a union of two artifacts: the
-        # 25 Sep 60-second harness run measured a 2.8 s worst p95 and the 14 Sep
-        # 90-second Locust run measured 3.7 s, and the page publishes the worse one.
-        assert rung.p95_ms == pytest.approx(3700.0), (
+        # 4,800 ms since the 26 Sep 2026 re-scan (`rescan-050.json`, the harness run
+        # by hand at the advertised rung): it measured a 4.8 s worst p95, above the
+        # 3.7 s the 14 Sep Locust run had set and the 2.8 s of the 25 Sep harness
+        # run. Three artifacts of one rung, and the page publishes the worst figure
+        # any of them recorded — never the better one.
+        assert rung.p95_ms == pytest.approx(4800.0), (
             "the p95 bound the gate compares against is no longer the worst figure the "
             "artifacts recorded. If a re-measurement moved it, update this number in the "
             "same commit as the page."
@@ -112,6 +117,27 @@ class TestThePageIsTheSourceOfTheClaim:
         rung = gate.rung_for(limit, rungs)
         assert rung.p50_high_ms == pytest.approx(620.0)
         assert rung.p95_ms == pytest.approx(1700.0)
+
+    def test_a_range_in_either_cell_is_read_pessimistically(self, tmp_path):
+        """A published range is two figures; the gate may only use the worse one.
+
+        On the real page the p50 cell is a range ("0.1–2.2 s") and the p95 cell is a
+        single figure, so nothing there exercises this rule for p95 at all — and a
+        gate that took the *better* end of a range would be checking the box against
+        the page's most flattering sample, which is the defect this gate exists to
+        catch. Both cells carry a range here so the rule is held for each on its own.
+        """
+        page = tmp_path / "landing.html"
+        page.write_text(
+            "<p>comfortable limit is ~50 concurrent students per exam session</p>"
+            "<table><tr><td>50</td><td>0.2-2.4 s</td><td>1.1-3.9 s</td><td>0%</td></tr></table>",
+            encoding="utf-8")
+        limit, rungs = gate.parse_claims(page)
+        rung = gate.rung_for(limit, rungs)
+        assert rung.p50_high_ms == pytest.approx(2400.0), (
+            "the p50 bound is the low end of a published range, not its high one")
+        assert rung.p95_ms == pytest.approx(3900.0), (
+            "the p95 bound is the low end of a published range, not its high one")
 
 
 # ── 2. the tolerances have to be tighter than a real gap ─────────────────────
@@ -260,6 +286,98 @@ class TestTheTwoStrikeRule:
     def test_a_clean_first_probe_never_needs_a_second(self):
         code, _ = gate.verdict([], None)
         assert code == gate.EXIT_OK
+
+
+# ── 4b. the quiet probe asks a page, not the machine endpoint ────────────────
+
+class _Probe(BaseHTTPRequestHandler):
+    """A box that can be busy on one path and idle on another, in place.
+
+    The two paths have to be controllable separately, because that difference is
+    the defect: `/health` renders no template and touches no page code, so a box
+    whose workers are all busy rendering student pages can still answer it in a
+    millisecond.
+    """
+
+    flags: dict = {"status": 200, "slow_s": 0.0, "pages": {}, "seen": []}
+
+    def do_GET(self):  # noqa: N802 - http.server's interface
+        self.flags.setdefault("seen", []).append(self.path)
+        page = (self.flags.get("pages") or {}).get(self.path) or {}
+        slow = float(page.get("slow_s", self.flags["slow_s"]))
+        if slow:
+            time.sleep(slow)
+        status = int(page.get("status", self.flags["status"]))
+        self.send_response(status)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *a):  # keep the test output readable
+        pass
+
+
+@pytest.fixture
+def quiet_probe():
+    """A loopback box for the gate's 'is this box quiet' probe."""
+    holder = {}
+
+    def start():
+        flags = {"status": 200, "slow_s": 0.0, "pages": {}, "seen": []}
+        handler = type("H", (_Probe,), {"flags": flags})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        holder.update(server=server, flags=flags)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    #: Make one path busy without changing the address (the port is the box).
+    start.paths = lambda pages: holder["flags"]["pages"].update(pages)
+    start.seen = lambda: list(holder["flags"]["seen"])
+    yield start
+    holder.get("server") and holder["server"].shutdown()
+
+
+class TestTheQuietProbeRendersAPage:
+    """A box busy rendering has to be found *before* the gate loads it.
+
+    The probe is cheap by construction, but the question it asks has to be about
+    the same work the gate then measures: rendering pages. `/health` is a machine
+    endpoint that renders nothing, so a box saturated by exactly the pages this
+    gate is about can still look idle — the gate then loads it, measures the
+    students' slow pages, and reads them as a divergence from the published
+    numbers. That is a release rolled back for being busy.
+    """
+
+    def test_it_asks_a_page_to_render_and_not_the_machine_endpoint(self, quiet_probe):
+        base = quiet_probe()
+        quiet, why = gate.box_is_quiet(base, 5000.0, samples=1, gap_s=0.0)
+        assert quiet, why
+        seen = quiet_probe.seen()
+        assert "/" in seen, (
+            "the quiet probe never asked a page to render, so it cannot tell a box "
+            f"saturated on page rendering from an idle one: {seen!r}"
+        )
+        assert "/health" not in seen, (
+            "the quiet probe still measures the machine endpoint, whose whole point is "
+            f"to answer without rendering a page: {seen!r}"
+        )
+
+    def test_a_busy_page_behind_a_fast_machine_endpoint_is_not_quiet(self, quiet_probe):
+        base = quiet_probe()
+        quiet_probe.paths({"/": {"slow_s": 0.25}})
+        quiet, why = gate.box_is_quiet(base, 50.0, samples=1, gap_s=0.0)
+        assert not quiet, (
+            "a box whose page needs 250 ms while /health stays instant was reported as "
+            "idle — the gate would load it and read the students' slow pages as a "
+            "divergence"
+        )
+        assert "/health" not in why, why
+
+    def test_an_idle_page_is_quiet(self, quiet_probe):
+        base = quiet_probe()
+        quiet, why = gate.box_is_quiet(base, 5000.0, samples=1, gap_s=0.0)
+        assert quiet, why
 
 
 # ── 5. the deploy and the installer have to actually use it ──────────────────

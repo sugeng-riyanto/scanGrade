@@ -38,6 +38,14 @@ STATE_DIR="/var/lib/scangrade-deploy"
 #: same gate again; and the two one-shot files that override it. See
 #: quarantine-logic.
 QUARANTINE_FILE="$STATE_DIR/quarantined"
+#: The last few refusals, kept beside the quarantine record. A quarantine is
+#: *replaced* by the next refusal and *removed* by the release that lifts it — both
+#: correct for the tick, and both erasing the evidence exactly when a later release
+#: has passed and somebody comes looking. So every refusal is copied here, byte for
+#: byte, into a bounded directory: the current record still answers "what is held",
+#: and this answers "what has been refused lately". See quarantine-logic.
+REFUSALS_DIR="$STATE_DIR/refusals"
+REFUSALS_KEEP=5
 RELEASE_FILE="/etc/scangrade-deploy.release"
 #: The same one-shot release, asked for from the app instead of a shell. The app
 #: runs as the service user and cannot write /etc, so the installer creates this
@@ -138,13 +146,90 @@ quarantine_reason() {
 # (`AFTER_FULL`, set once from origin/$BRANCH), which also removes any chance of
 # quarantining a commit other than the one a gate actually refused.
 
+# ── the last few refusals, so a lift does not erase the evidence ─────────────
+#
+# A quarantine is at its most useful to read exactly when it is gone. The next
+# commit on the branch replaces the held record, and an explicit release removes it
+# outright — both correct, because the *current* refusal is the one the tick must
+# act on — but the gate's numbers and the commit they are about leave the box at the
+# same moment, which is when somebody has come to ask why nothing deployed. The
+# perf card already recovers the *held* commit's own measurement from the gate's
+# history; this keeps the whole record, so the run of refusals is readable even
+# after a later release passes.
+#
+# A directory rather than one file, because each record has to be the quarantine
+# file's *exact* bytes — a gate's own output is the evidence and framing it into a
+# larger file would mean inventing a delimiter its lines could collide with. The
+# name is the wall-clock second plus the candidate's short sha, so sorting by name
+# is sorting by time and a record is found by the commit it names. Nothing here
+# decides whether to retry: a history write that fails is ignored, because it must
+# never stop a refusal from being recorded.
+refusal_history_name() {
+  printf 'refused-%s-%s\n' "$(date +%s)" "${AFTER:-unknown}"
+}
+
+# Keep the newest `$REFUSALS_KEEP` records and drop the rest. Names sort by time, so
+# this needs no timestamps to stat: list newest-first and delete everything past the
+# limit. A record is one refusal; the count is the roster's size, not a duration.
+refusal_history_prune() {
+  local keep="${REFUSALS_KEEP:-5}" n=0 name=""
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    n=$((n + 1))
+    [ "$n" -le "$keep" ] && continue
+    rm -f "$REFUSALS_DIR/$name" 2>/dev/null || true
+  done < <(ls -1 "$REFUSALS_DIR" 2>/dev/null | sort -r)
+}
+
+refusal_history_write() {
+  local name="" n=0
+  mkdir -p "$REFUSALS_DIR" 2>/dev/null || return 0
+  # Readable by the app (the status page shows this) and traversable by it whatever
+  # root's umask happens to be, the way the quarantine record is meant to be.
+  chmod 0755 "$REFUSALS_DIR" 2>/dev/null || true
+  [ -s "$QUARANTINE_FILE" ] || return 0
+  name=$(refusal_history_name)
+  # The name is second-resolution, so two refusals inside one second would otherwise
+  # overwrite each other. Suffix rather than skip: a lost record is the very thing
+  # this file exists to prevent.
+  while [ -e "$REFUSALS_DIR/$name" ]; do
+    n=$((n + 1))
+    name="$(refusal_history_name).$n"
+  done
+  cp "$QUARANTINE_FILE" "$REFUSALS_DIR/$name" 2>/dev/null || return 0
+  chmod 0644 "$REFUSALS_DIR/$name" 2>/dev/null || true
+  refusal_history_prune
+  return 0
+}
+
 # Record a refusal. Called only after a gate has judged a *merged* release, so a
 # transient failure earlier in the run can never freeze a good commit.
 quarantine_write() {
   local reason="${FAIL_REASON:-unknown gate}"
+  # How many of the gate's lines, and how wide each one, are decided *here* rather
+  # than at each gate. A gate's job is to say which of its lines are the finding;
+  # the record's shape is this function's, so a gate added later that forgets to
+  # bound its own output cannot put a transcript on the status page. A traceback and
+  # a pytest assertion both fit; a whole log does not.
+  local detail_lines=6 detail_width=400
   mkdir -p "$STATE_DIR" 2>/dev/null || true
-  printf '%s\n%s\n%s\n' "$AFTER_FULL" "$(date -Is)" "$reason" \
-    > "$QUARANTINE_FILE" 2>/dev/null || true
+  {
+    printf '%s\n%s\n%s\n' "$AFTER_FULL" "$(date -Is)" "$reason"
+    # The three lines above keep their meaning, and the gate's own words follow
+    # them: the status page reads the first three positionally, so line 3 is still
+    # the gate's *name* for every reader that predates this.
+    if [ -n "${FAIL_DETAIL:-}" ]; then
+      printf '%s\n' "$FAIL_DETAIL" \
+        | cut -c-"$detail_width" | sed -n "1,${detail_lines}p"
+    fi
+    true
+  } > "$QUARANTINE_FILE" 2>/dev/null || true
+  # Kept, before the detail is cleared: this is the copy that survives the lift, and
+  # it has to be the same bytes the current record has.
+  refusal_history_write
+  # Written once: keeping it would let the next refusal quote a gate that did not
+  # refuse it, and nothing has to stay true for the record to be honest.
+  FAIL_DETAIL=""
   log "QUARANTINED ${AFTER:-?} ($reason) — it will not be retried"
   log "    a new commit on $BRANCH lifts this by itself; to retry it as-is:"
   log "        touch $RELEASE_FILE"
@@ -737,6 +822,19 @@ AFTER_FULL=$(as_owner git -C "$REPO" rev-parse "origin/$BRANCH")
 # until something refuses; every refusal path sets it before quarantining.
 FAIL_REASON=""
 
+# The refusing gate's *own* output, written under FAIL_REASON in the same record.
+# FAIL_REASON is the runner's summary — "perf gate (slower than the last release
+# that passed)" — and a summary of a measurement is not actionable: the question an
+# operator has to answer is by how much, and whether two noisy probes on a 1-vCPU
+# box could have produced it. The gate printed exactly that, and the runner was
+# keeping only its own sentence, so the numbers reached nobody who was not reading
+# the journal over ssh — which is the trip the status page exists to remove.
+#
+# Bounded, because a record an operator reads is the finding rather than the gate's
+# transcript, and cleared by `quarantine_write` once it has been written, so a second
+# refusal in the same tick can never inherit the first gate's numbers.
+FAIL_DETAIL=""
+
 # An operator's explicit release is consumed even when there is nothing to
 # deploy, so a pending request cannot sit on the box and surprise a later tick.
 quarantine_honour_release
@@ -935,6 +1033,9 @@ if [ "$CONSTRUCT_RC" -ne 0 ]; then
     log "app failed to construct — rolling back to $BEFORE"
     FAIL_REASON="app did not construct (exit 9)"
   fi
+  # The traceback's own last lines, which are the fault and its message: a Python
+  # exception says nothing useful at the top and everything at the bottom.
+  FAIL_DETAIL=$(printf '%s\n' "$CONSTRUCT_OUT" | grep -vE '^[[:space:]]*$' | tail -n 6)
   quarantine_write
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 9
@@ -981,6 +1082,10 @@ else
   fi
   echo "$THEME_OUT" | sed 's/^/    /'
   FAIL_REASON="theme gate (exit $THEME_RC)"
+  # The verdict first, then the failing assertion: the record is capped, and the
+  # gate's own conclusion is the line that must never be the one that got cut.
+  FAIL_DETAIL=$({ printf '%s\n' "$THEME_OUT" | grep -E '^theme gate:'
+                  printf '%s\n' "$THEME_OUT" | grep -E '^FAILED |^E '; })
   quarantine_write
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 13
@@ -1116,8 +1221,24 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
     fi
   fi
 
-  as_owner env "${SMOKE_ENV[@]}" "$REPO/.venv/bin/python" "$REPO/deploy/smoke_test.py"
-  SMOKE_RC=$?
+  # The smoke test prints each check as it makes it, and that stream to the journal
+  # is worth keeping: an operator watching a deploy sees which role is being opened
+  # rather than a silence that ends in a verdict. That was the reason this gate was
+  # the one that quoted nothing into the quarantine record — the stream *was* its
+  # output. The two are not exclusive: `tee` keeps the stream and leaves a copy, and
+  # the copy is what a refusal quotes.
+  #
+  # Three details make the copy safe and honest. It is a fresh file outside the
+  # checkout, because a refusal that also leaves the tree dirty is a second
+  # refusal; the exit status comes from PIPESTATUS, because a pipeline reports
+  # `tee`'s success as readily as the smoke test's failure; and stderr is folded in
+  # because a traceback is the finding when there are no check lines.
+  SMOKE_LOG=$(mktemp "${TMPDIR:-/tmp}/scangrade-smoke.XXXXXX")
+  as_owner env "${SMOKE_ENV[@]}" "$REPO/.venv/bin/python" "$REPO/deploy/smoke_test.py" 2>&1 \
+    | tee "$SMOKE_LOG"
+  SMOKE_RC=${PIPESTATUS[0]}
+  SMOKE_OUT=$(cat "$SMOKE_LOG" 2>/dev/null)
+  rm -f "$SMOKE_LOG"
 
   case "$SMOKE_RC" in
     0)
@@ -1131,12 +1252,16 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
       log "smoke test COULD NOT RUN (exit 2) — no role was signed in against this"
       log "    release: rolling back to $BEFORE"
       HEALTHY=0
-      FAIL_REASON="smoke test (exit 2: nothing was testable)" ;;
+      FAIL_REASON="smoke test (exit 2: nothing was testable)"
+      FAIL_DETAIL=$({ printf '%s\n' "$SMOKE_OUT" | grep -E '^RESULT: '
+                      printf '%s\n' "$SMOKE_OUT" | grep -E '^   FAIL '; }) ;;
     *)
       if [ "${SMOKE_ENFORCE:-false}" = "true" ]; then
         log "smoke test FAILED (exit $SMOKE_RC) — rolling back"
         HEALTHY=0
         FAIL_REASON="smoke test (exit $SMOKE_RC)"
+        FAIL_DETAIL=$({ printf '%s\n' "$SMOKE_OUT" | grep -E '^RESULT: '
+                        printf '%s\n' "$SMOKE_OUT" | grep -E '^   FAIL '; })
       else
         log "smoke test FAILED (exit $SMOKE_RC) but SMOKE_ENFORCE is not 'true' — keeping the release"
       fi ;;
@@ -1217,7 +1342,8 @@ else
       log "    the published claims, so it is not kept: rolling back to $BEFORE"
       echo "$CLAIMS_OUT" | head -3 | sed 's/^/    /'
       HEALTHY=0
-      FAIL_REASON="claims gate (not armed: exit 4)" ;;
+      FAIL_REASON="claims gate (not armed: exit 4)"
+      FAIL_DETAIL=$(printf '%s\n' "$CLAIMS_OUT" | grep -E '^claims gate: NOT ARMED') ;;
     *)
       if [ "${CLAIMS_ENFORCE:-false}" = "true" ]; then
         log "claims gate FAILED — the page promises what this box no longer does:"
@@ -1225,6 +1351,12 @@ else
         log "rolling $AFTER back rather than publishing numbers we cannot deliver"
         HEALTHY=0
         FAIL_REASON="claims gate (the page promises what this box no longer does)"
+        # The gate's own verdict and its divergent lines, which carry the ratio
+        # between what the page advertises and what the box now answers. The verdict
+        # comes first because the record is capped: a release with a wall of divergent
+        # metrics must not lose the sentence that says it diverged.
+        FAIL_DETAIL=$({ printf '%s\n' "$CLAIMS_OUT" | grep -E '^claims gate: (DIVERGED|CANNOT MEASURE)'
+                        printf '%s\n' "$CLAIMS_OUT" | grep -E '^    - '; })
       else
         log "claims gate FAILED but CLAIMS_ENFORCE is not 'true' — keeping the release:"
         echo "$CLAIMS_OUT" | head -6 | sed 's/^/    /'
@@ -1299,7 +1431,8 @@ else
       log "    last one that passed, so it is not kept: rolling back to $BEFORE"
       echo "$PERF_OUT" | grep -m2 '^perf gate' | sed 's/^/    /'
       HEALTHY=0
-      FAIL_REASON="perf gate (not armed: exit 4)" ;;
+      FAIL_REASON="perf gate (not armed: exit 4)"
+      FAIL_DETAIL=$(printf '%s\n' "$PERF_OUT" | grep -E '^perf gate: NOT ARMED') ;;
     *)
       if [ "${PERF_ENFORCE:-false}" = "true" ]; then
         log "perf gate FAILED — this release is slower than the last one that passed:"
@@ -1307,6 +1440,13 @@ else
         log "rolling $AFTER back rather than serving it"
         HEALTHY=0
         FAIL_REASON="perf gate (slower than the last release that passed)"
+        # The numbers themselves: the gate's verdict line and the `    - ` lines it
+        # refused on, each carrying a ratio against the baseline commit. This is the
+        # reading that turns "slower" into something an operator can adjudicate. The
+        # verdict is selected *first* — the progressed narration that the gate also
+        # prints would otherwise fill the cap and cut the reasons off the bottom.
+        FAIL_DETAIL=$({ printf '%s\n' "$PERF_OUT" | grep -E '^perf gate: (REGRESSED|CANNOT MEASURE)'
+                        printf '%s\n' "$PERF_OUT" | grep -E '^    - '; })
       else
         log "perf gate FAILED but PERF_ENFORCE is not 'true' — keeping the release:"
         echo "$PERF_OUT" | grep -E '^perf gate|^    -' | head -8 | sed 's/^/    /'

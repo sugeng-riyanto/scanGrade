@@ -1,0 +1,218 @@
+{% set content_lang = 'id' %}
+{% extends "base.html" %}
+{% block title %}Sesi Ujian - {{ exam.title }}{% endblock %}
+{% block page_title %}Sesi Ujian{% endblock %}
+{% block content %}
+<div x-data="{
+    data: null, loading: true, error: '', open: {}, autoRefresh: false,
+    init() {
+        this.fetchData();
+        setInterval(() => { if (this.autoRefresh) this.fetchData(); }, 10000);
+    },
+    fetchData() {
+        fetch('/teacher/api/exams/{{ exam_id }}/sessions-data')
+            .then(r => r.json())
+            .then(d => { this.data = d; this.loading = false; })
+            .catch(() => { this.error = 'Data sesi tidak bisa dimuat. Coba muat ulang.'; this.loading = false; });
+    },
+    confidence(id) {
+        return {low: 'Rendah', medium: 'Sedang', high: 'Tinggi'}[id] || id;
+    },
+    confidenceClass(id) {
+        return id === 'high' ? 'bg-surface-100 text-surface-600 border-surface-200'
+             : id === 'medium' ? 'bg-amber-50 text-amber-700 border-amber-200'
+             : 'bg-surface-50 text-surface-500 border-surface-200';
+    },
+    factsFor(id) { return (this.data && this.data.facts && this.data.facts[id]) || []; }
+}" class="max-w-6xl mx-auto" x-init="init()">
+
+    <!-- Header -->
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-200 p-4 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+            <a href="/teacher/results?exam_id={{ exam_id }}" class="text-surface-400 hover:text-primary-500 text-lg p-1.5 hover:bg-primary-50 rounded-xl transition">
+                <i class="fas fa-arrow-left"></i>
+            </a>
+            <div class="min-w-0">
+                <h1 class="font-extrabold text-surface-800 text-sm sm:text-base truncate">{{ exam.title }}</h1>
+                <p class="text-[10px] text-surface-400">Satu halaman sesi untuk ujian ini</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold"
+                 :class="autoRefresh ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-surface-100 text-surface-400 border border-surface-200'">
+                <i class="fas fa-sync-alt" :class="{'fa-spin': autoRefresh}"></i>
+                <label class="cursor-pointer"><input type="checkbox" x-model="autoRefresh" class="mr-1">Perbarui otomatis</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- How to read this page -->
+    <div class="bg-primary-50/60 border border-primary-100 rounded-2xl p-4 mb-4">
+        <h2 class="font-extrabold text-primary-800 text-sm mb-2 flex items-center gap-2">
+            <i class="fas fa-circle-info"></i>Cara membaca halaman ini
+        </h2>
+        <ul class="text-[11px] text-surface-600 space-y-1.5 leading-relaxed">
+            <li><strong>Halaman ini hanya membaca.</strong> Tidak ada penalti, tidak ada penutupan ujian, dan tidak ada tindakan otomatis yang dijalankan dari sini: semua yang tampil sudah terjadi saat ujian berjalan.</li>
+            <li><strong>Pola bukan bukti.</strong> Korelasi tidak sama dengan sebab. Angka di halaman ini menunjukkan apa yang <em>terlihat</em>, bukan apa yang dilakukan seseorang, dan tidak membuktikan apa pun tentang niat.</li>
+            <li><strong>Tiap catatan membawa penjelasan wajarnya sendiri.</strong> Notifikasi, panggilan masuk, layar yang tidur, jaringan sekolah yang goyah, dan jam perangkat yang bergeser menghasilkan angka yang sama persis dengan satu kertas yang dipakai bersama.</li>
+            <li><strong>Keyakinan rendah pada catatan per murid itu disengaja.</strong> Satu murid tidak punya pembanding; yang bisa dibaca hanya seluruh kelas.</li>
+            <li><strong>Yang tidak terdeteksi:</strong> ponsel kedua, mesin virtual, atau orang lain di ruangan. Tidak ada halaman yang bisa melihat ketiganya, dan halaman ini tidak berpura-pura bisa.</li>
+            <li><strong>Jawaban setiap murid tidak ditampilkan di sini,</strong> termasuk kunci jawaban sebuah ujian.</li>
+        </ul>
+    </div>
+
+    <!-- Loading / error -->
+    <div x-show="loading" class="text-center py-12">
+        <div class="w-10 h-10 mx-auto rounded-full border-2 border-primary-200 border-t-primary-600 animate-spin"></div>
+        <p class="text-sm font-bold text-surface-500 mt-3">Memuat sesi...</p>
+    </div>
+    <div x-show="!loading && error" class="text-center py-12 text-red-500 font-bold text-sm" x-text="error"></div>
+
+    <template x-if="!loading && data">
+        <div class="space-y-4">
+
+            <!-- Stats -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-surface-200 text-center">
+                    <p class="text-2xl font-extrabold text-primary-600" x-text="data.room.length"></p>
+                    <p class="text-[10px] font-bold text-surface-500">Murid terdaftar</p>
+                </div>
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-surface-200 text-center">
+                    <p class="text-2xl font-extrabold text-primary-600" x-text="data.sittings"></p>
+                    <p class="text-[10px] font-bold text-surface-500">Kertas terukur</p>
+                </div>
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-surface-200 text-center">
+                    <p class="text-2xl font-extrabold text-emerald-600"
+                       x-text="data.room.filter(s => ['submitted','graded','published'].includes(s.status)).length"></p>
+                    <p class="text-[10px] font-bold text-surface-500">Sudah dikumpulkan</p>
+                </div>
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-surface-200 text-center">
+                    <p class="text-2xl font-extrabold text-amber-600"
+                       x-text="data.shared_window ? Math.round(data.shared_window.share * 100) + '%' : '—'"></p>
+                    <p class="text-[10px] font-bold text-surface-500">Kelas di satu menit</p>
+                </div>
+            </div>
+
+            <!-- Unmeasured notice -->
+            <div x-show="data.sittings > data.measured"
+                 class="bg-amber-50/70 border border-amber-200 rounded-2xl p-4">
+                <p class="text-[11px] text-amber-800 leading-relaxed">
+                    <strong x-text="(data.sittings - data.measured)"></strong> kertas tidak punya catatan kejadian sama sekali
+                    (umumnya ujian yang lebih tua dari pencatatan kejadian). Untuk kertas itu, kolom konektivitas
+                    <strong>belum terukur</strong> — bukan nol. Nol berarti "tidak pernah terjadi", dan itu berbeda.
+                </p>
+            </div>
+
+            <!-- Observations -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-surface-200">
+                <h2 class="font-extrabold text-surface-800 mb-1 flex items-center gap-2">
+                    <i class="fas fa-magnifying-glass text-primary-500"></i>Yang terlihat di sesi ini
+                </h2>
+                <p class="text-[11px] text-surface-500 mb-4">
+                    Tiap baris di bawah adalah satu pengamatan beserta pembandingnya, penjelasan wajarnya,
+                    dan satu langkah manusiawi. Urutannya bukan urutan siapa yang paling perlu diperiksa.
+                </p>
+
+                <div x-show="data.observations.length === 0" class="text-center py-8 text-surface-400">
+                    <i class="fas fa-circle-check text-3xl mb-2 text-emerald-400"></i>
+                    <p class="font-bold text-sm">Tidak ada yang menonjol dari kebiasaan kelas ini</p>
+                    <p class="text-[11px] mt-1">Yang berarti kelasnya seragam, bukan berarti tidak ada apa-apa.</p>
+                </div>
+
+                <div class="space-y-3">
+                    <template x-for="(o, i) in data.observations" :key="i">
+                        <div class="rounded-xl border border-surface-200 p-4">
+                            <div class="flex items-start justify-between gap-3 mb-2">
+                                <h3 class="font-bold text-sm text-surface-800" x-text="o.title"></h3>
+                                <span class="text-[9px] font-extrabold px-2 py-0.5 rounded-full border whitespace-nowrap"
+                                      :class="confidenceClass(o.confidence)"
+                                      x-text="'Keyakinan: ' + confidence(o.confidence)"></span>
+                            </div>
+                            <dl class="grid sm:grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
+                                <div>
+                                    <dt class="font-bold text-surface-500 text-[10px] uppercase tracking-wide">Bukti</dt>
+                                    <dd class="text-surface-700" x-text="o.evidence"></dd>
+                                </div>
+                                <div>
+                                    <dt class="font-bold text-surface-500 text-[10px] uppercase tracking-wide">Pembanding</dt>
+                                    <dd class="text-surface-700" x-text="o.comparison"></dd>
+                                </div>
+                                <div>
+                                    <dt class="font-bold text-surface-500 text-[10px] uppercase tracking-wide">Penjelasan yang mungkin</dt>
+                                    <dd class="text-surface-700" x-text="o.explanation"></dd>
+                                </div>
+                                <div>
+                                    <dt class="font-bold text-surface-500 text-[10px] uppercase tracking-wide">Langkah berikutnya</dt>
+                                    <dd class="text-surface-700" x-text="o.follow_up"></dd>
+                                </div>
+                            </dl>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- The room -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-surface-200">
+                <h2 class="font-extrabold text-surface-800 mb-1 flex items-center gap-2">
+                    <i class="fas fa-users text-primary-500"></i>Ruang ujian
+                </h2>
+                <p class="text-[11px] text-surface-500 mb-4">
+                    Urutan abjad dari daftar kelas. Klik satu baris untuk melihat angka sesi murid itu
+                    beserta pembanding kelasnya.
+                </p>
+
+                <div x-show="data.room.length === 0" class="text-center py-8 text-surface-400">
+                    <p class="text-sm font-bold">Tidak ada murid terdaftar untuk ujian ini</p>
+                </div>
+
+                <div class="divide-y divide-surface-100">
+                    <template x-for="s in data.room" :key="s.id">
+                        <div>
+                            <button type="button" class="w-full text-left py-2.5 flex items-center gap-3 hover:bg-surface-50 rounded-lg px-2 transition"
+                                    @click="open[s.id] = !open[s.id]">
+                                <span class="flex-1 min-w-0">
+                                    <span class="font-bold text-sm text-surface-800 block truncate" x-text="s.name"></span>
+                                    <span class="text-[10px] text-surface-400"
+                                          x-text="s.status === 'not_started' ? 'Belum mulai'
+                                                : s.answers_count + ' jawaban tercatat · ' + (s.updated_at || '')"></span>
+                                </span>
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                                      :class="s.status === 'not_started'
+                                          ? 'bg-surface-50 text-surface-500 border-surface-200'
+                                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'"
+                                      x-text="s.status"></span>
+                                <i class="fas text-surface-300 text-xs" :class="open[s.id] ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                            </button>
+                            <div x-show="open[s.id]" x-cloak class="px-2 pb-3">
+                                <div x-show="factsFor(s.id).length === 0"
+                                     class="text-[11px] text-surface-400 py-2">
+                                    Belum ada ringkasan sesi untuk kertas ini.
+                                </div>
+                                {# A grid rather than a table on purpose: three columns of
+                                   numbers a phone cannot scroll sideways is the right-hand column
+                                   nobody reads, and nothing here needs a table's semantics. #}
+                                <div class="grid grid-cols-2 gap-x-3 text-[11px]">
+                                    <template x-for="(f, fi) in factsFor(s.id)" :key="fi">
+                                        <div class="contents">
+                                            <div class="pt-1.5 text-surface-600" x-text="f.label"></div>
+                                            <div class="pt-1.5 text-right font-bold"
+                                                 :class="f.far ? 'text-amber-700' : 'text-surface-800'"
+                                                 x-text="f.value"></div>
+                                            <div class="col-span-2 pb-1.5 border-b border-surface-50 text-[10px] text-surface-400"
+                                                 x-text="f.comparison"></div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <p class="text-[10px] text-surface-400 text-center pb-4">
+                Angka sesi dihitung saat kertas dikumpulkan oleh sistem yang mencatatnya, bukan dihitung ulang di halaman ini.
+            </p>
+        </div>
+    </template>
+</div>
+{% endblock %}

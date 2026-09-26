@@ -1209,6 +1209,7 @@ def _quarantine_harness(tmp_path: Path) -> str:
         "set -uo pipefail\n"
         f'STATE_DIR="{state}"\n'
         f'QUARANTINE_FILE="{state}/quarantined"\n'
+        f'REFUSALS_DIR="{state}/refusals"\n'
         f'RELEASE_FILE="{tmp_path}/scangrade-deploy.release"\n'
         f'REQUEST_DIR="{requests}"\n'
         f'RELEASE_REQUEST="{requests}/release"\n'
@@ -1219,11 +1220,418 @@ def _quarantine_harness(tmp_path: Path) -> str:
     )
 
 
-def _run_quarantine(tmp_path: Path, body: str, *, after_full: str = SHA_A):
+def _run_quarantine(tmp_path: Path, body: str, *, after_full: str = SHA_A,
+                    reason: str = "theme gate (exit 13)", detail: str = ""):
+    """`detail` is the refusing gate's own output, as the real runner passes it.
+
+    Written as a single-quoted literal so the lines land byte-for-byte: a gate's
+    numbers are the evidence, and a harness that expanded or word-split them would
+    be testing a different string than the box writes.
+    """
     program = (_quarantine_harness(tmp_path)
-               + f'\nAFTER_FULL="{after_full}"\nFAIL_REASON="theme gate (exit 13)"\n'
+               + f'\nAFTER_FULL="{after_full}"\n'
+               + f"FAIL_REASON='{reason}'\nFAIL_DETAIL='{detail}'\n"
                + body)
-    return subprocess.run([BASH, "-c", program], capture_output=True, text=True)
+    # Written to a file rather than passed as `bash -c`: this platform's bash
+    # truncates a long command line, and a gate's output is exactly the input that is
+    # long. The first version of these tests passed a 4000-character detail through
+    # `-c` and bash reported "unexpected EOF while looking for matching `'`" — the
+    # string had been cut mid-quote, so the harness was measuring its own argv limit
+    # instead of the record the runner writes.
+    script = tmp_path / "quarantine-program.sh"
+    script.write_text(program, encoding="utf-8")
+    return subprocess.run([BASH, str(script)], capture_output=True, text=True)
+
+
+# ── the gate's own lines, under the runner's summary ────────────────
+#
+# The record's first three lines answer *which* gate refused. That is not enough to
+# act on when the refusal was a measurement: "slower than the last release that
+# passed" cannot be told from two noisy probes without the ratio, and the ratio was
+# printed by the gate and then discarded — it lived only in the journal, which is
+# the place an operator without a shell cannot read. So each gate that has output
+# quotes itself into the record, under the runner's three lines, and the status page
+# renders it.
+#
+# The three-line shape has to stay valid, because a reader (and an older copy of
+# this page) reads positionally: the gate sentence is line 3, and everything from
+# line 4 on is the gate's own words.
+
+#: What the perf gate actually prints on a refusal, as the runner captures it.
+PERF_DETAIL = (
+    "perf gate: REGRESSED — both probes diverged from 366abdf"
+    "\n    - slowest page p50 812 ms against 480 ms on 366abdf (1.69x, allowed 1.50x)"
+    " — worst endpoint(s): GET /teacher/results"
+    "\n    - slowest page p95 1900 ms against 900 ms on 366abdf (2.11x, allowed 1.60x)"
+)
+
+
+def _record(tmp_path: Path) -> list[str]:
+    return (tmp_path / "state" / "quarantined").read_text(
+        encoding="utf-8").splitlines()
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_record_carries_the_gate_s_own_lines_below_the_runner_s(tmp_path):
+    run = _run_quarantine(
+        tmp_path, 'quarantine_write',
+        reason="perf gate (slower than the last release that passed)",
+        detail=PERF_DETAIL)
+    assert run.returncode == 0, run.stderr
+    record = _record(tmp_path)
+    assert record[0] == SHA_A
+    assert record[2] == "perf gate (slower than the last release that passed)", (
+        "line 3 is the gate's name: a reader parses the first three lines positionally")
+    assert record[3:] == PERF_DETAIL.splitlines(), (
+        "the gate's own output is not in the record — the ratio that makes the "
+        f"refusal actionable was dropped again: {record[3:]!r}")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_a_gate_with_nothing_to_quote_still_writes_the_three_line_record(tmp_path):
+    run = _run_quarantine(tmp_path, 'quarantine_write', reason="python compileall (exit 8)")
+    assert run.returncode == 0, run.stderr
+    assert len(_record(tmp_path)) == 3, (
+        "a gate with no captured output must not pad the record with a blank line — "
+        "a reader that treats line 4 as the finding would show an empty one")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_a_wall_of_gate_output_is_bounded_but_quoted_from_the_top(tmp_path):
+    """A gate can print a transcript. The record is the finding, not the transcript."""
+    lines = [f"finding {i}" for i in range(1, 31)]
+    run = _run_quarantine(tmp_path, 'quarantine_write', detail="\n".join(lines))
+    assert run.returncode == 0, run.stderr
+    quoted = _record(tmp_path)[3:]
+    assert 0 < len(quoted) <= 6, f"{len(quoted)} lines recorded from a 30-line gate"
+    assert quoted == lines[:len(quoted)], (
+        "the record keeps the *end* of a gate's output, which for these gates is "
+        "the trailing blank lines rather than the finding")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_no_single_quoted_line_can_blow_out_the_record(tmp_path):
+    run = _run_quarantine(tmp_path, 'quarantine_write', detail="x" * 4000)
+    assert run.returncode == 0, run.stderr
+    quoted = _record(tmp_path)[3:]
+    assert quoted and len(quoted[0]) <= 400, (
+        f"one line is {len(quoted[0]) if quoted else 0} characters wide; the status "
+        "page has to render this and a gate can print a traceback")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_detail_is_cleared_once_it_is_written(tmp_path):
+    """Two refusals in one tick would otherwise share the first gate's numbers.
+
+    Nothing writes twice today, and the point of clearing it is that nothing has to
+    keep being true for the record to stay honest: the second write reads whatever
+    the second gate set, not the first gate's evidence.
+    """
+    body = (
+        'quarantine_write\n'
+        "FAIL_REASON='python compileall (exit 8)'\n"
+        'quarantine_write\n'
+    )
+    run = _run_quarantine(tmp_path, body, detail=PERF_DETAIL)
+    assert run.returncode == 0, run.stderr
+    record = _record(tmp_path)
+    assert record[2] == "python compileall (exit 8)"
+    assert record[3:] == [], (
+        "the second refusal inherited the first gate's measurements: the page would "
+        "name numbers no gate produced for this refusal")
+
+
+# ── the refusal history, kept past the lift ─────────────────────────────────
+#
+# A quarantine answers "what is held now", and the runner keeps exactly one: the
+# next refusal replaces it and the release that lifts it deletes it. Both are right
+# for the tick, and both erase the gate's numbers at the moment a later release has
+# passed — which is when somebody comes to ask why nothing deployed. So each refusal
+# is also copied, byte for byte, into a bounded directory.
+
+HISTORY_PREFIX = "refused-"
+
+
+def _history(tmp_path: Path) -> list[Path]:
+    directory = tmp_path / "state" / "refusals"
+    if not directory.is_dir():
+        return []
+    return sorted(p for p in directory.iterdir() if p.name.startswith(HISTORY_PREFIX))
+
+
+def _sha(n: int) -> str:
+    """A distinct 40-hex commit for each call, so no record overwrites another."""
+    return f"{n:040x}"
+
+
+def test_the_refusal_history_lives_beside_the_quarantine():
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert re.search(r'^REFUSALS_DIR="\$STATE_DIR/refusals"', script, re.M), (
+        "the history directory is not named next to the quarantine file the runner "
+        "already writes")
+    assert re.search(r"^REFUSALS_KEEP=\d+", script, re.M), (
+        "the history is unbounded, so a box that has refused many releases would "
+        "grow a directory forever")
+    block = _quarantine_block()
+    for fn in ("refusal_history_write() {", "refusal_history_prune() {",
+               "refusal_history_name() {"):
+        assert fn in block, f"{fn} left the delimited quarantine block"
+    # And the write is *called*, before the gate's detail is cleared: the copy has to
+    # be the same bytes the current record has.
+    call = block.index("  refusal_history_write")
+    cleared = block.index('FAIL_DETAIL=""', call)
+    assert call < cleared, (
+        "the history is written after the gate's detail is cleared, so it would keep "
+        "a record with the numbers already thrown away")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_history_record_is_the_quarantine_file_byte_for_byte(tmp_path):
+    run = _run_quarantine(
+        tmp_path,
+        'quarantine_write\n'
+        'newest=$(ls -1 "$REFUSALS_DIR" | sort | tail -n1)\n'
+        'cmp -s "$QUARANTINE_FILE" "$REFUSALS_DIR/$newest" && echo IDENTICAL'
+        ' || echo DIFFERENT\n',
+        reason="perf gate (slower than the last release that passed)",
+        detail=PERF_DETAIL)
+    assert run.returncode == 0, run.stderr
+    assert "IDENTICAL" in run.stdout, (
+        "the history record is not the quarantine file's own bytes — which is the "
+        "whole reason it is a directory of copies rather than one framed file")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_history_outlives_the_quarantine_that_is_lifted(tmp_path):
+    """The point of the whole change: a lift must not empty the history."""
+    for n in (1, 2, 3):
+        run = _run_quarantine(tmp_path, 'quarantine_write', after_full=_sha(n),
+                              reason=f"theme gate (exit 13{n})")
+        assert run.returncode == 0, run.stderr
+    assert len(_history(tmp_path)) == 3
+
+    # The lift the runner performs when the branch moves on: the branch now points at
+    # a commit that is not the held one, so the quarantine is removed. The history
+    # must survive it — that is the whole point of keeping it.
+    run = _run_quarantine(
+        tmp_path,
+        f"AFTER='deadbee'\nAFTER_FULL='{_sha(9)}'\nquarantine_gate\n",
+        after_full=_sha(3))
+    assert run.returncode == 0, run.stderr
+    assert "quarantine lifted" in run.stdout, (
+        "the harness did not exercise the lift, so this proves nothing")
+    assert not (tmp_path / "state" / "quarantined").exists()
+    kept = _history(tmp_path)
+    assert len(kept) == 3, (
+        f"the lift erased the history: {kept!r} — the gate's numbers are exactly "
+        "what a reader comes for after a later release passes")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_only_the_newest_few_refusals_are_kept(tmp_path):
+    keep = int(re.search(r"^REFUSALS_KEEP=(\d+)",
+                         DEPLOY_SH.read_text(encoding="utf-8"), re.M).group(1))
+    for n in range(1, keep + 4):
+        run = _run_quarantine(tmp_path, 'quarantine_write', after_full=_sha(n))
+        assert run.returncode == 0, run.stderr
+    kept = _history(tmp_path)
+    assert len(kept) == keep, (
+        f"{len(kept)} records kept against a bound of {keep} — an unbounded "
+        "directory on the box the deploy writes to")
+    # The newest are the ones kept: the name sorts by time, so the oldest go first.
+    contents = "\n".join(p.read_text(encoding="utf-8") for p in kept)
+    assert _sha(keep + 3) in contents, "the newest refusal was pruned away"
+    assert _sha(1) not in contents, "the oldest refusal survived the bound"
+
+
+def _detail_filter(reason: str) -> str:
+    """The `FAIL_DETAIL=` statement the runner runs for one refusal, verbatim.
+
+    Sliced out of the script by bracket balance rather than by a regex, because the
+    statement spans two lines and a normalising regex is how the probe that first
+    checked this reported a working filter as `'^perf gate|^ - '`.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    window = script[script.index(f'FAIL_REASON="{reason}"'):][:1600]
+    start = window.index("FAIL_DETAIL=")
+    depth = 0
+    for end in range(start, len(window)):
+        if window[end] == "(":
+            depth += 1
+        elif window[end] == ")":
+            depth -= 1
+            if depth == 0:
+                return window[start:end + 1]
+    raise AssertionError("the refusal sets no FAIL_DETAIL — the runner changed shape")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the gate's filter")
+def test_the_selected_lines_are_the_finding_and_not_the_narration(tmp_path):
+    """A gate prints progress, then its reasons, then its verdict — and the record is
+    capped. Selecting by a broad prefix fills the cap with the progress and cuts the
+    verdict and the numbers off the end, which is the failure this checks for: the
+    refusal would reach the page with everything except the reason for it.
+    """
+    printed = "\n".join(
+        ["perf gate: box is quiet (p95 21 ms on /landing); probing 20 concurrent "
+         "students for 20s",
+         "perf gate: first probe is worse than the baseline —",
+         "    - slowest page p50 812 ms against 480 ms on 366abdf (1.69x, allowed "
+         "1.50x) — worst endpoint(s): GET /teacher/results",
+         "    - heaviest page sends 240.3 KB against 224.6 KB on 366abdf (1.07x, "
+         "allowed 1.05x) — GET /student/exams",
+         "perf gate: confirming with a second probe before refusing the release ...",
+         "perf gate: REGRESSED — both probes diverged from 366abdf",
+         "perf gate: find what the release changed that costs response time."])
+    program = ("set -uo pipefail\n"
+               "PERF_OUT=$(cat <<'GATEOUT'\n" + printed + "\nGATEOUT\n)\n"
+               + _detail_filter("perf gate (slower than the last release that passed)")
+               + '\nprintf \'%s\\n\' "$FAIL_DETAIL"')
+    script = tmp_path / "filter.sh"
+    script.write_text(program, encoding="utf-8")
+    run = subprocess.run([BASH, str(script)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    kept = run.stdout.splitlines()
+
+    assert any("REGRESSED" in ln for ln in kept), (
+        "the gate's verdict was cut, so the record says a release was refused "
+        f"without saying what the gate concluded: {kept!r}")
+    assert any("1.69x" in ln for ln in kept), (
+        f"the ratio that makes the refusal checkable is not in the record: {kept!r}")
+    assert not any("probing 20 concurrent" in ln or "find what the release" in ln
+                   for ln in kept), (
+        f"the gate's narration filled the record instead of the finding: {kept!r}")
+
+
+def test_every_gate_that_has_output_quotes_it():
+    """The static half: each refusal with something to quote puts it in the record.
+
+    A gate that reads the box and refuses on what it read has the number that made
+    it refuse. The check is by name, because a `FAIL_DETAIL=` anywhere in the file
+    would satisfy a looser one — the requirement is that the detail is set *between*
+    the gate's FAIL_REASON and the write that records it.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    for reason in (
+        "app did not construct (exit 9)",
+        "theme gate (exit $THEME_RC)",
+        "claims gate (the page promises what this box no longer does)",
+        "claims gate (not armed: exit 4)",
+        "perf gate (slower than the last release that passed)",
+        "perf gate (not armed: exit 4)",
+        # The smoke test used to be the exception here, on the grounds that its output
+        # is *streamed* to the journal as it runs, so the stream was the output. That
+        # is a choice about the journal, not a reason the record cannot carry the
+        # failing checks: the runner tees the stream and quotes the copy (see
+        # `test_the_smoke_gate_streams_and_keeps_a_copy_to_quote`).
+        "smoke test (exit 2: nothing was testable)",
+        "smoke test (exit $SMOKE_RC)",
+    ):
+        at = script.index(reason)
+        window = script[at:at + 700]
+        window = window[:window.index("quarantine_write")] if "quarantine_write" in window else window
+        assert "FAIL_DETAIL=" in window, (
+            f"the refusal {reason!r} has something to quote and does not quote "
+            "it, so the page can only say that something was refused")
+
+
+#: A smoke transcript as the runner tees it: progress, some checks that passed, some
+#: that failed, and the verdict — so a filter can be judged on whether it picks the
+#: failing checks rather than the narration, the same failure mode the perf gate's
+#: filter is held to.
+SMOKE_TRANSCRIPT = "\n".join([
+    "smoke test against https://scangrade.web.id — 4 role(s)",
+    "   ok    super_admin: signed in as superadmin@scan-grade.app",
+    "   ok    super_admin: /super-admin/dashboard",
+    "   ok    guru: signed in as guru_smp@scan-grade.app",
+    "   ok    guru: /teacher/dashboard",
+    "   FAIL  murid: GET /student/exams -> 500 (expected 200)",
+    "   warn  murid: /student/results answered as a different account",
+    "   FAIL  RBAC LEAK: murid opened /teacher/dashboard belonging to guru_sekolah",
+    "RESULT: FAIL — 2 problem(s), 4 check(s) passed",
+    "   - murid: GET /student/exams -> 500 (expected 200)",
+    "   - RBAC LEAK: murid opened /teacher/dashboard belonging to guru_sekolah",
+    "(12.4s)",
+])
+
+
+def test_the_smoke_gate_streams_and_keeps_a_copy_to_quote():
+    """The journal's live stream and the record's copy are not a trade.
+
+    This gate prints each check as it makes it, so an operator watching the journal
+    sees which role is being opened instead of a silence that ends in a verdict —
+    which is why it was the one gate that quoted nothing into the quarantine record.
+    `tee` keeps both: the stream still reaches the journal, and the copy is what a
+    refusal quotes. Three things make that the same gate and not a second one: the
+    copy is taken, the exit status is the smoke test's rather than the pipe's, and
+    the copy lives outside the checkout the release is judged on — a refusal must not
+    be the thing that also makes the tree dirty.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    # From the copy's creation to the run itself: the assertions are about the shape
+    # of that block, so the window has to hold `mktemp`, the run, and the teardown.
+    at = script.index("SMOKE_LOG=$(mktemp")
+    invocation = script[at:at + 500]
+    assert "smoke_test.py" in invocation, "the teed block is not the smoke gate"
+    assert "| tee " in invocation, (
+        "the smoke test's output is no longer teed, so either the journal loses the "
+        "live stream or the record has nothing to quote")
+    assert "PIPESTATUS" in invocation, (
+        "the exit status is read from the pipeline, so a `tee` that succeeded would "
+        "report a failed smoke test as a pass")
+    assert "mktemp" in invocation, (
+        "the transcript is copied into a fresh file; a fixed path would let one "
+        "release read the previous one's transcript")
+    assert "rm -f" in invocation, "the copy is never removed"
+    assert "${REPO}/" not in invocation and "$REPO/.freebuff" not in invocation, (
+        "the transcript is written inside the checkout — the runner refuses a dirty "
+        "tree, and a refusal must not be what makes one")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the gate's filter")
+def test_the_smoke_filter_selects_the_failing_checks_and_not_the_pass_notes(tmp_path):
+    """A smoke run prints more `ok` lines than failures; the record holds six lines.
+
+    So the filter has to pick the failing checks and the verdict, not the progress —
+    a broad prefix fills the cap with "signed in as ..." and cuts the checks off the
+    end, which is the refusal reaching the page with everything except its reason.
+    """
+    program = ("set -uo pipefail\n"
+               "SMOKE_OUT=$(cat <<'SMOKEOUT'\n" + SMOKE_TRANSCRIPT + "\nSMOKEOUT\n)\n"
+               + _detail_filter("smoke test (exit $SMOKE_RC)")
+               + '\nprintf \'%s\\n\' "$FAIL_DETAIL"')
+    script = tmp_path / "filter.sh"
+    script.write_text(program, encoding="utf-8")
+    run = subprocess.run([BASH, str(script)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    kept = run.stdout.splitlines()
+
+    assert any("RESULT: FAIL" in ln for ln in kept), (
+        f"the record would not say how many checks failed: {kept!r}")
+    assert sum("FAIL  " in ln for ln in kept) == 2, (
+        f"the failing checks are not quoted, or the passing ones are: {kept!r}")
+    assert not any("   ok    " in ln for ln in kept), (
+        f"passing checks filled the record's few lines: {kept!r}")
+    assert not any("smoke test against" in ln for ln in kept), (
+        f"the gate's narration filled the record instead of the finding: {kept!r}")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_record_carries_the_smoke_test_s_failing_checks(tmp_path):
+    """The filter and the writer, wired the way the runner wires them."""
+    body = ("SMOKE_OUT=$(cat <<'SMOKEOUT'\n" + SMOKE_TRANSCRIPT + "\nSMOKEOUT\n)\n"
+            + _detail_filter("smoke test (exit $SMOKE_RC)")
+            + "\nquarantine_write\n")
+    run = _run_quarantine(tmp_path, body, reason="smoke test (exit 1)")
+    assert run.returncode == 0, run.stderr
+    record = _record(tmp_path)
+    assert record[2] == "smoke test (exit 1)"
+    quoted = "\n".join(record[3:])
+    assert "GET /student/exams -> 500" in quoted, (
+        "the failing check a reader came for is not in the record")
+    assert "RBAC LEAK" in quoted
+    assert "signed in as" not in quoted, (
+        "passing checks are padded into a record that is meant to be the finding")
 
 
 @pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")

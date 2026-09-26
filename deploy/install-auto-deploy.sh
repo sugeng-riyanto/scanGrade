@@ -380,10 +380,17 @@ else
 #
 # It compares three things, because they fail independently: response time (the
 # symptom a student feels), the bytes the heaviest page sends (what a phone on a
-# school connection pays), and the Supabase round-trips a render spends -- the last
-# read from the app's own X-Supabase-Roundtrips header, which is the *cause* the
-# other two only reflect. A page can stay just as fast while gaining three queries
-# or 200 KB of script, and that is exactly the release this refuses.
+# school connection pays), and the Supabase queries a render issues -- the last read
+# from the app's own X-Supabase-Queries header, which is the *cause* the other two
+# only reflect. A page can stay just as fast while gaining three queries or 200 KB
+# of script, and that is exactly the release this refuses.
+#
+# Neither bytes nor queries is a signature of the code on its own: both grow when
+# the school grows, and round-trips (X-Supabase-Roundtrips) grow when the transport
+# retries. So the cost axes are normalized against the rows the pages read
+# (X-Supabase-Rows) and only what a render issued is scored, so a bigger dataset or
+# a retried query is not read as a slower release. Any of that is printed as a
+# "perf gate: note" beside the verdict.
 #
 # It must be HTTPS: production sets SESSION_COOKIE_SECURE, so over plain HTTP the
 # session cookie is dropped and every probe would look like a failed login.

@@ -55,15 +55,16 @@
             <a href="/teacher/analysis/{{ exam_id }}" class="border-2 border-cyan-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-cyan-50 text-[11px] sm:text-sm font-bold text-cyan-700 transition whitespace-nowrap">
                 <i class="fas fa-chart-bar mr-1"></i><span class="hidden sm:inline" :lang="lang" x-text="t('Analisis Butir','Item Analysis')"></span><span class="sm:hidden">Analisis</span>
             </a>
-            <a href="/teacher/exams/{{ exam_id }}/proctoring" class="border-2 border-violet-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-violet-50 text-[11px] sm:text-sm font-bold text-violet-700 transition whitespace-nowrap">
-                <i class="fas fa-desktop mr-1"></i><span class="hidden sm:inline">Proctoring</span>
+            {# One page for the sitting itself: the live room, each paper's own session
+               facts, and every reading with its own plausible explanation. The two
+               pages this replaced (Pengawasan and Deteksi Curang) each described half
+               of the same exam, and the half they disagreed in was the judging. #}
+            <a href="/teacher/exams/{{ exam_id }}/sessions" class="border-2 border-violet-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-violet-50 text-[11px] sm:text-sm font-bold text-violet-700 transition whitespace-nowrap">
+                <i class="fas fa-desktop mr-1"></i><span class="hidden sm:inline" :lang="lang" x-text="t('Sesi Ujian','Exam Sessions')"></span><span class="sm:hidden">Sesi</span>
             </a>
             <button onclick="generateRemedial('{{ exam_id }}')" class="border-2 border-emerald-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-emerald-50 text-[11px] sm:text-sm font-bold text-emerald-700 transition whitespace-nowrap">
                 <i class="fas fa-book-open mr-1"></i><span class="hidden sm:inline">Remedial</span>
             </button>
-            <a href="/teacher/exams/{{ exam_id }}/cheat-analysis" class="border-2 border-red-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-red-50 text-[11px] sm:text-sm font-bold text-red-700 transition whitespace-nowrap">
-                <i class="fas fa-shield-alt mr-1"></i><span class="hidden sm:inline">Deteksi Curang</span>
-            </a>
             <form method="POST" action="/teacher/exams/{{ exam_id }}/recalculate" class="inline" onsubmit="return confirm('Hitung ulang nilai semua siswa?')">
                 <button type="submit" class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
                     <i class="fas fa-calculator mr-1"></i><span class="hidden sm:inline">Hitung Ulang Nilai</span>

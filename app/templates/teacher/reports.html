@@ -52,11 +52,16 @@
                 <label class="block text-xs font-semibold text-slate-500 mb-1"
                        x-text="t('Rentang waktu','Date range')"></label>
                 <div class="flex items-center gap-2">
+                    {# `flex-1` alone is not a phone fit for a date input: a
+                       `<input>`'s automatic minimum size is its intrinsic width
+                       (~170px), so two of them claim ~356px and the second was
+                       clipped off the right edge at 320 and 375. `min-w-0` is
+                       what lets the pair share the row. #}
                     <input type="date" name="date_from" x-model="dateFrom"
-                           class="input text-sm flex-1">
+                           class="input text-sm flex-1 min-w-0">
                     <span class="text-slate-400 text-xs font-bold">—</span>
                     <input type="date" name="date_to" x-model="dateTo"
-                           class="input text-sm flex-1">
+                           class="input text-sm flex-1 min-w-0">
                 </div>
             </div>
             {% if scope_choices.schools|length > 1 %}
@@ -155,8 +160,14 @@
 
         <div class="divide-y divide-slate-100">
             {% for e in report.rows %}
-            <div class="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-5" data-report-row="{{ e.id }}">
-                <div class="flex-1 min-w-0">
+            {# At `lg` the row is horizontal, and the title's `flex-1 min-w-0`
+               let the two `shrink-0` blocks beside it — three statistics and six
+               buttons — take everything: measured at a 1024px viewport the exam
+               title was **37px**, an ellipsis with one letter in it. The row wraps
+               at `lg` instead, so the title keeps the first line, and only from
+               `xl` do the three share one line with a 16rem floor under the name. #}
+            <div class="p-4 sm:p-5 flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-3 lg:gap-5" data-report-row="{{ e.id }}">
+                <div class="w-full min-w-0 xl:flex-1 xl:min-w-[16rem]">
                     <p class="font-extrabold text-slate-800 truncate">{{ e.title }}</p>
                     <p class="text-xs font-medium text-slate-500 truncate">
                         {% if e.subject %}{{ e.subject }} &middot; {% endif %}
@@ -268,10 +279,14 @@
                this row at all — a blank cell beside a child reads as a zero. #}
             {% set status_pair = ('Sudah dikoreksi', 'Graded') if row.status == 'graded'
                                  else ('Belum dikoreksi', 'Ungraded') %}
-            <div class="p-3 sm:px-5 sm:py-3 flex items-center gap-3"
+            {# Same squeeze, one row down: at 320px the learner's name was left
+               76px beside the mark cell and the report link — ten characters of a
+               child's name, ellipsised. The row wraps on phones so the name has
+               the line to itself. #}
+            <div class="p-3 sm:px-5 sm:py-3 flex flex-wrap items-center gap-3"
                  data-learner-row="{{ loop.index0 }}"
                  x-show="matchAt({{ loop.index0 }})">
-                <div class="flex-1 min-w-0">
+                <div class="w-full min-w-0 sm:w-auto sm:flex-1">
                     <p class="font-bold text-slate-800 text-sm truncate">
                         {{ row.name or '—' }}
                     </p>

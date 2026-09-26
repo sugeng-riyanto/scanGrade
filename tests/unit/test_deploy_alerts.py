@@ -117,6 +117,19 @@ def report_of(runner: dict | None = None, checkout: dict | None = None,
         "quarantine_file": "/var/lib/scangrade-deploy/quarantined",
         "unarmed_file": "/var/lib/scangrade-deploy/unarmed",
         "preflight_file": "/var/lib/scangrade-deploy/refused-before-merge",
+        # The performance gate's last judgement. Built by the service rather than
+        # written out by hand, so this fixture cannot drift from the shape the card
+        # reads — an absent history is the cold reading, which is what this report is.
+        "perf": status.perf_state(Path("/nonexistent/perf/history.jsonl")),
+        "perf_file": "/var/lib/scangrade-deploy/perf/history.jsonl",
+        "perf_baseline_file": "/var/lib/scangrade-deploy/perf/baseline.json",
+        "perf_verdicts": status.PERF_VERDICTS,
+        # The last few refusals, kept past the quarantine's lift. Built by the
+        # service for the same reason `perf` is: a hand-written fixture could drift
+        # from the shape the card reads, and an absent history is the cold reading.
+        "refusals": status.refusal_history_state(Path("/nonexistent/refusals"),
+                                                 Path("/nonexistent"), now=NOW),
+        "refusals_dir": "/var/lib/scangrade-deploy/refusals",
     }
     report.update(extra)
     return report
@@ -151,6 +164,7 @@ class TestWhatCountsAsStale:
         # nothing is deploying.
         assert set(report_of()["preflight"]) == set(real["preflight"])
         assert set(report_of()["last_stop"]) == set(real["last_stop"])
+        assert set(report_of()["refusals"]) == set(real["refusals"])
         assert set(report_of()["exit_codes"]) == set(real["exit_codes"])
         # And the reading the policy keys on is really in there.
         assert "gate0" in real["runner"] and "origin_behind" in real["runner"]

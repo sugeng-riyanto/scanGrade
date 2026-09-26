@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -100,6 +101,13 @@ DEFAULT_PAUSE_FILE = "/etc/scangrade-deploy.pause"
 #: paths above are: the checks point them at a temporary tree.
 DEFAULT_STATE_DIR = "/var/lib/scangrade-deploy"
 DEFAULT_QUARANTINE_FILE = DEFAULT_STATE_DIR + "/quarantined"
+#: The runner's bounded history of past refusals, beside the quarantine record — see
+#: `REFUSALS_DIR` in `deploy/scangrade-deploy.sh`. A quarantine answers "what is held
+#: now"; it is replaced by the next refusal and deleted by the release that lifts it,
+#: so the numbers behind a refusal left the page at the moment a later release passed
+#: and somebody came to look. This answers "what has been refused lately" from the
+#: records the runner already wrote.
+DEFAULT_REFUSALS_DIR = DEFAULT_STATE_DIR + "/refusals"
 DEFAULT_RELEASE_FILE = "/etc/scangrade-deploy.release"
 DEFAULT_REQUEST_DIR = DEFAULT_STATE_DIR + "/requests"
 #: The runner's record of a refusal that is about the *box* rather than about a
@@ -119,6 +127,22 @@ DEFAULT_PREFLIGHT_FILE = DEFAULT_STATE_DIR + "/refused-before-merge"
 #: path nobody has written yet — which is why the trap names the *step* as well as
 #: the code: "exit 7" answers nothing on its own.
 DEFAULT_LAST_STOP_FILE = DEFAULT_STATE_DIR + "/last-stop"
+#: What the *performance* gate measured, in its own words. `deploy/perf_gate.py`
+#: appends one JSON line per judgement to the history file — the commit under
+#: judgement, the verdict, every number, and on a regression the `reasons` it
+#: printed — and writes the baseline it compared against beside it. Both are named
+#: by the gate (`DEFAULT_EVIDENCE`, `DEFAULT_BASELINE`), and `install-auto-deploy.sh`
+#: writes those same two paths into `/etc/scangrade-perf.conf` (`PERF_EVIDENCE`,
+#: `PERF_BASELINE`) instead of inventing its own — so the three agree by
+#: construction, and when this page cannot find the history it says so rather than
+#: reporting that nothing was ever refused.
+#:
+#: The page already names the gate and quotes the runner's one-line reason, which is
+#: a *which* and not a *what*: "slower than the last release that passed" cannot be
+#: told from two noisy probes, or acted on, without the numbers underneath it. Those
+#: numbers were being written down and then read by nobody but `journalctl`.
+DEFAULT_PERF_HISTORY_FILE = DEFAULT_STATE_DIR + "/perf/history.jsonl"
+DEFAULT_PERF_BASELINE_FILE = DEFAULT_STATE_DIR + "/perf/baseline.json"
 
 #: Where git lives when the service user's PATH does not carry it. The unit runs
 #: the app without a login shell, so `which` is the first guess and these are the
@@ -215,10 +239,16 @@ QUARANTINE_REASON_KEYS = frozenset({"unreadable", "malformed"})
 #: What a release request can answer.
 RELEASE_WRITTEN = "written"
 RELEASE_NOTHING_HELD = "nothing_held"
+#: A release asked for one commit when a *different* one is under judgement. The
+#: runner deploys `origin/$BRANCH`, so it can retry a refused commit only while the
+#: branch still points at it; a request naming an older commit is not one the runner
+#: could honour, and writing the file anyway would clear a quarantine for the wrong
+#: release. This is the answer for that row.
+RELEASE_NOT_HELD = "not_held"
 RELEASE_DIR_MISSING = "dir_missing"
 RELEASE_NOT_WRITABLE = "not_writable"
 RELEASE_FAILED = "failed"
-RELEASE_KEYS = frozenset({RELEASE_WRITTEN, RELEASE_NOTHING_HELD,
+RELEASE_KEYS = frozenset({RELEASE_WRITTEN, RELEASE_NOTHING_HELD, RELEASE_NOT_HELD,
                           RELEASE_DIR_MISSING, RELEASE_NOT_WRITABLE, RELEASE_FAILED})
 
 
@@ -248,16 +278,53 @@ def _commit_subject(repo: pathlib.Path, sha: str) -> str | None:
     if git is None:
         return None
     rc, line = _git_out(git, repo, "log", "-1", "--format=%s", sha)
-    return line if rc == 0 and line else None
+    return line if rc == 0 and line else None#: How many of the refusing gate's own lines the card shows, and how wide each one.
+#: The runner bounds what it *writes*; this bounds what the page *renders*, because
+#: the record is a file an operator — or an older runner — can put anything into,
+#: and the card is a page a browser has to lay out.
+QUARANTINE_DETAIL_SHOWN = 6
+QUARANTINE_DETAIL_WIDTH = 400
+
+#: How many past refusals the page lists, and the prefix the runner names each record
+#: with. The bound is the *page's* own rather than the runner's: the directory is a
+#: file tree an operator — or an older runner — can put anything into, so the page
+#: renders at most this many and reports how many it found.
+REFUSALS_SHOWN = 5
+REFUSAL_PREFIX = "refused-"
+#: What the history reader can answer. `none` is the ordinary answer (nothing has
+#: been refused, or the runner predates the history), and it is said out loud rather
+#: than shown by a blank; `unreadable` is the different answer that must not be read
+#: as `none`. `present` carries the records themselves.
+REFUSALS_NONE = "none"
+REFUSALS_PRESENT = "present"
+REFUSALS_UNREADABLE = "unreadable"
+REFUSALS_KEYS = frozenset({REFUSALS_NONE, REFUSALS_PRESENT, REFUSALS_UNREADABLE})
+#: Control bytes that must never reach the page. A gate's output is text, but a
+#: file is not obliged to be: a card a reader cannot read is worse than no card.
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
-def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
+def _gate_lines(raw: list[str]) -> list[str]:
+    """The gate's own lines, cleaned and bounded for a page to render."""
+    out = []
+    for line in raw:
+        cleaned = _CONTROL.sub("", line).strip()
+        if cleaned:
+            out.append(cleaned[:QUARANTINE_DETAIL_WIDTH])
+    return out
+
+
+def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *, 
                      now: _dt.datetime) -> dict:
-    """The commit the runner is holding, by which gate, since when.
+    """The commit the runner is holding, by which gate, since when, and why.
 
-    The runner writes three lines — the full sha, the time it was refused, and the
-    gate's own sentence — so this reads the runner's record instead of keeping a
-    second copy of the same fact, and a page cannot disagree with the box.
+    The runner writes the full sha, the time it was refused, and the gate's own
+    sentence as the first three lines — so this reads the runner's record instead of
+    keeping a second copy of the same fact, and a page cannot disagree with the box.
+    Everything from line 4 on is the refusing gate's own output, written there for
+    the refusals that *were* a measurement: "slower than the last release that
+    passed" is a which, and the ratio that makes it actionable was reaching nobody
+    without a shell.
 
     Anything unreadable or malformed is *reported*, not treated as "nothing held":
     a blank here would read as "no release is stuck", which is the one wrong answer
@@ -267,6 +334,7 @@ def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
         "path": str(path), "held": False, "reason_key": None, "detail": None,
         "sha": None, "short": None, "subject": None, "refused_at": None,
         "age_seconds": None, "gate": None, "gate_key": None,
+        "reasons": [], "reasons_total": 0,
     }
     text, detail = _read(path)
     if text is None:
@@ -280,6 +348,9 @@ def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
     when = lines[1].strip() if len(lines) > 1 else ""
     reason = lines[2].strip() if len(lines) > 2 else ""
     if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        # A record whose sha is not one is not the record this card describes, so the
+        # lines under it are not findings about a held release — they are whatever
+        # that file happens to say.
         state["reason_key"] = "malformed"
         state["detail"] = sha or None
         return state
@@ -292,6 +363,106 @@ def quarantine_state(path: pathlib.Path, repo: pathlib.Path, *,
     state["gate"] = reason or None
     state["gate_key"] = gate_key(reason)
     state["subject"] = _commit_subject(repo, sha)
+    quoted = _gate_lines(lines[3:])
+    state["reasons_total"] = len(quoted)
+    state["reasons"] = quoted[:QUARANTINE_DETAIL_SHOWN]
+    return state
+
+
+def _refusal_record(text: str, *, now: _dt.datetime,
+                    name: str | None = None) -> dict:
+    """One record as the runner wrote it, without the commit's subject resolved.
+
+    The same three positional lines as the quarantine file, on purpose: a record the
+    runner keeps in its history is byte-for-byte the quarantine file, so a reader
+    that could parse one and not the other would be two answers to one question.
+    """
+    record: dict = {
+        "name": name, "held": False, "sha": None, "short": None, "subject": None,
+        "refused_at": None, "age_seconds": None, "gate": None, "gate_key": None,
+        "reasons": [], "reasons_total": 0, "reason_key": None, "detail": None,
+    }
+    lines = text.splitlines()
+    sha = lines[0].strip() if lines else ""
+    when = lines[1].strip() if len(lines) > 1 else ""
+    reason = lines[2].strip() if len(lines) > 2 else ""
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        # A record whose first line is not a sha is not this card's kind of record;
+        # it is reported rather than dropped, because a gap in the history is how
+        # "nothing was refused" starts reading as the truth.
+        record["reason_key"] = "malformed"
+        record["detail"] = sha or None
+        return record
+    record["held"] = True
+    record["sha"] = sha.lower()
+    record["short"] = sha[:7]
+    record["refused_at"] = when or None
+    record["age_seconds"] = _age_seconds(when or None, now)
+    record["gate"] = reason or None
+    record["gate_key"] = gate_key(reason)
+    quoted = _gate_lines(lines[3:])
+    record["reasons_total"] = len(quoted)
+    record["reasons"] = quoted[:QUARANTINE_DETAIL_SHOWN]
+    return record
+
+
+def refusal_history_state(directory: pathlib.Path, repo: pathlib.Path, *,
+                          now: _dt.datetime,
+                          limit: int = REFUSALS_SHOWN) -> dict:
+    """The last few refusals the runner kept, newest first.
+
+    A quarantine is replaced by the next refusal and removed by the release that
+    lifts it — both correct for the tick, and both erasing the evidence exactly when
+    a later release has passed and somebody comes looking. This reads the copies the
+    runner keeps for that reason, so the numbers behind a refusal outlive the release
+    that replaces it.
+
+    `none`, `present` and `unreadable` are three different answers, and the empty
+    directory is `none` rather than an error: a box that has never had a refusal, or
+    one whose runner predates the history, is not a box whose history could not be
+    read. Only being unable to list a directory that is there is `unreadable`.
+    """
+    state: dict = {
+        "path": str(directory), "key": REFUSALS_NONE, "records": [],
+        "total": 0, "shown": limit, "detail": None,
+    }
+    try:
+        entries = [entry for entry in directory.iterdir()
+                   if entry.name.startswith(REFUSAL_PREFIX)]
+    except FileNotFoundError:
+        return state
+    except OSError as exc:                                 # pragma: no cover - rare
+        state["key"] = REFUSALS_UNREADABLE
+        state["detail"] = str(exc)
+        return state
+    # The name is `refused-<epoch>-<short sha>`, so sorting by name is sorting by
+    # time and this needs no timestamp to stat. Newest first, because the newest
+    # refusal is the one a reader is asking about.
+    entries.sort(key=lambda entry: entry.name, reverse=True)
+    state["total"] = len(entries)
+    if not entries:
+        return state
+    state["key"] = REFUSALS_PRESENT
+    subjects: dict = {}
+    for entry in entries[:limit]:
+        text, detail = _read(entry)
+        if text is None:
+            state["records"].append({
+                "name": entry.name, "held": False, "sha": None, "short": None,
+                "subject": None, "refused_at": None, "age_seconds": None,
+                "gate": None, "gate_key": None, "reasons": [], "reasons_total": 0,
+                "reason_key": "unreadable", "detail": detail,
+            })
+            continue
+        record = _refusal_record(text, now=now, name=entry.name)
+        sha = record["sha"]
+        if record["held"] and sha is not None:
+            # Resolved once per commit: a retried refusal names the same commit, and
+            # a page request should not ask git the same question per record.
+            if sha not in subjects:
+                subjects[sha] = _commit_subject(repo, sha)
+            record["subject"] = subjects[sha]
+        state["records"].append(record)
     return state
 
 
@@ -461,6 +632,45 @@ LAST_STOP_MALFORMED = "malformed"
 LAST_STOP_KEYS = frozenset({LAST_STOP_NONE, LAST_STOP_PRESENT,
                             LAST_STOP_UNREADABLE, LAST_STOP_MALFORMED})
 
+#: The performance gate's reading, named the same way the three records above are.
+PERF_NONE = "none"
+PERF_PRESENT = "present"
+PERF_UNREADABLE = "unreadable"
+PERF_MALFORMED = "malformed"
+PERF_KEYS = frozenset({PERF_NONE, PERF_PRESENT, PERF_UNREADABLE, PERF_MALFORMED})
+
+#: Every verdict `deploy/perf_gate.py` can write, and the word for one this page has
+#: not been taught. The page must have a sentence per key *and* must not reach for
+#: the nearest one: a gate that grows a fifth verdict would otherwise have its
+#: refusal — or its pass — rendered as whichever of these four it was closest to.
+PERF_VERDICTS = frozenset({"baseline", "pass", "unconfirmed", "regressed"})
+PERF_VERDICT_UNKNOWN = "unknown"
+
+#: How many of the gate's `reasons` the page shows. A refusal is a handful of lines;
+#: `reasons_total` carries the count so a truncated list cannot read as the whole
+#: finding, and the cap is what keeps a pathological one off the page.
+PERF_REASONS_SHOWN = 6
+
+#: How much of the end of the history file is read. It is append-only and grows by a
+#: line per deploy for the life of the box, so a page render reads a bounded tail
+#: rather than however many years of judgements happen to have accumulated.
+PERF_TAIL_BYTES = 64 * 1024
+
+#: The held commit's own judgement, looked up in the same history by its sha. Named
+#: the way the four readings above are, and the point of the split is that "this gate
+#: never judged the held commit" and "its judgement is older than the window this
+#: page reads" are different answers with different remedies: only the second is
+#: fixed by looking at the file, and reporting a lookup that ran out of window as a
+#: gate that never ran sends an operator to the wrong place.
+PERF_HELD_NONE = "none"
+PERF_HELD_PRESENT = "present"
+PERF_HELD_NO_JUDGEMENT = "no_judgement"
+PERF_HELD_OUT_OF_WINDOW = "out_of_window"
+PERF_HELD_UNREADABLE = "unreadable"
+PERF_HELD_KEYS = frozenset({PERF_HELD_NONE, PERF_HELD_PRESENT,
+                            PERF_HELD_NO_JUDGEMENT, PERF_HELD_OUT_OF_WINDOW,
+                            PERF_HELD_UNREADABLE})
+
 
 def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     """The last refusal to get a release merged, as the runner recorded it.
@@ -566,7 +776,468 @@ def last_stop_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     return state
 
 
+def perf_state(path: pathlib.Path, *, baseline_path: pathlib.Path | None = None,
+               repo: pathlib.Path | None = None,
+               now: _dt.datetime | None = None,
+               held_commit: str | None = None,
+               limit: int = PERF_REASONS_SHOWN) -> dict:
+    """What the performance gate measured, from the line it wrote itself.
+
+    `report()`'s rule holds here as everywhere else: a part that cannot be read is
+    reported with a reason rather than treated as absent, and a number that was not
+    measured is `None` rather than zero. The one thing this adds is that the *gate's
+    own sentence* is carried through unedited — `reasons` is the answer to "what got
+    slower", and a paraphrase would drop the numbers that make it checkable.
+    """
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    state: dict = {
+        "path": str(path), "present": False, "key": PERF_NONE, "reason": None,
+        "verdict": None, "verdict_key": None,
+        "commit": None, "short": None, "subject": None,
+        "measured_at": None, "age_seconds": None,
+        "p50_ms": None, "p95_ms": None, "endpoints": [], "samples": None,
+        "error_pct": None, "server_errors_5xx": None,
+        "bytes": None, "bytes_endpoint": None,
+        "roundtrips": None, "roundtrips_endpoint": None,
+        "reasons": [], "reasons_total": 0, "shown": limit,
+        "baseline": {"path": str(baseline_path) if baseline_path else None,
+                     "present": False, "key": PERF_NONE,
+                     "commit": None, "short": None, "p50_ms": None, "p95_ms": None},
+        "held": {"key": PERF_HELD_NONE, "commit": None, "short": None,
+                 "subject": None, "verdict": None, "verdict_key": None,
+                 "measured_at": None, "p50_ms": None, "p95_ms": None,
+                 "endpoints": [], "samples": None, "reasons": [],
+                 "reasons_total": 0, "skipped": 0, "same_as_latest": False},
+    }
+
+    # The held commit's lookup does not depend on the latest line's, so it runs even
+    # when that line is absent or unreadable: the two are different questions and the
+    # page needs both answers.
+    state["held"] = _held_judgement(path, held_commit, repo=repo, limit=limit)
+
+    line, why = _read_tail(path)
+    if line is None:
+        # A file that is not there and a file with no judgements in it are the same
+        # reading — "the gate has recorded nothing for this page to show" — while a
+        # file that exists and cannot be read is a different one with a different
+        # remedy, and is reported as such.
+        if why not in ("absent", "no_lines"):
+            state["key"] = PERF_UNREADABLE
+            state["reason"] = why
+        return state
+
+    try:
+        record = json.loads(line)
+    except (ValueError, TypeError):
+        state["key"] = PERF_MALFORMED
+        state["reason"] = line[:200]
+        return state
+    if not isinstance(record, dict):
+        state["key"] = PERF_MALFORMED
+        state["reason"] = line[:200]
+        return state
+
+    state["present"] = True
+    state["key"] = PERF_PRESENT
+
+    verdict = record.get("verdict")
+    if isinstance(verdict, str) and verdict:
+        state["verdict"] = verdict
+        state["verdict_key"] = (verdict if verdict in PERF_VERDICTS
+                                else PERF_VERDICT_UNKNOWN)
+
+    sha = record.get("commit")
+    if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        state["commit"] = sha.lower()
+        state["short"] = sha[:7]
+        if repo is not None:
+            state["subject"] = _commit_subject(pathlib.Path(repo), sha)
+
+    when = record.get("measured_at")
+    if isinstance(when, str) and when:
+        state["measured_at"] = when
+        state["age_seconds"] = _age_seconds(when, now)
+
+    latency = record.get("latency")
+    if isinstance(latency, dict):
+        state["p50_ms"] = _number(latency.get("p50_ms"))
+        state["p95_ms"] = _number(latency.get("p95_ms"))
+        state["samples"] = _number(latency.get("samples"))
+        ends = latency.get("endpoints")
+        if isinstance(ends, list):
+            state["endpoints"] = [e for e in ends if isinstance(e, str)]
+
+    cost = record.get("page_cost")
+    if isinstance(cost, dict):
+        state["bytes"] = _number(cost.get("bytes"))
+        state["bytes_endpoint"] = cost.get("bytes_endpoint") or None
+        state["roundtrips"] = _number(cost.get("roundtrips"))
+        state["roundtrips_endpoint"] = cost.get("roundtrips_endpoint") or None
+
+    state["error_pct"] = _number(record.get("error_pct"))
+    state["server_errors_5xx"] = _number(record.get("server_errors_5xx"))
+
+    reasons = record.get("reasons")
+    if isinstance(reasons, list):
+        kept = [r for r in reasons if isinstance(r, str) and r.strip()]
+        state["reasons_total"] = len(kept)
+        state["reasons"] = kept[:limit]
+
+    # "the held commit is also the latest judgement" is the one case where the page
+    # would otherwise print the same numbers twice, once as the latest and once as
+    # the refusal — so the lookup is told which record it landed on.
+    if (state["held"]["key"] == PERF_HELD_PRESENT and state["commit"]
+            and state["held"]["commit"] == state["commit"]):
+        state["held"]["same_as_latest"] = True
+
+    if baseline_path is not None:
+        state["baseline"] = _perf_baseline(pathlib.Path(baseline_path), repo=repo)
+    return state
+
+
+def _judgement_fields(out: dict, record: dict, *, limit: int) -> None:
+    """One history record's own fields, into a judgement of the shape the page reads."""
+    verdict = record.get("verdict")
+    if isinstance(verdict, str) and verdict:
+        out["verdict"] = verdict
+        out["verdict_key"] = (verdict if verdict in PERF_VERDICTS
+                              else PERF_VERDICT_UNKNOWN)
+    when = record.get("measured_at")
+    if isinstance(when, str) and when:
+        out["measured_at"] = when
+    latency = record.get("latency")
+    if isinstance(latency, dict):
+        out["p50_ms"] = _number(latency.get("p50_ms"))
+        out["p95_ms"] = _number(latency.get("p95_ms"))
+        out["samples"] = _number(latency.get("samples"))
+        ends = latency.get("endpoints")
+        if isinstance(ends, list):
+            out["endpoints"] = [e for e in ends if isinstance(e, str)]
+    cost = record.get("page_cost")
+    if isinstance(cost, dict):
+        out["bytes"] = _number(cost.get("bytes"))
+        out["bytes_endpoint"] = cost.get("bytes_endpoint") or None
+    reasons = record.get("reasons")
+    if isinstance(reasons, list):
+        kept = [r for r in reasons if isinstance(r, str) and r.strip()]
+        out["reasons_total"] = len(kept)
+        out["reasons"] = kept[:limit]
+
+
+def _empty_judgement(*, commit: str | None = None) -> dict:
+    """The reading before a lookup: every answer `None`/absent, never a zero."""
+    return {
+        "key": PERF_HELD_NONE, "commit": commit,
+        "short": commit[:7] if commit else None, "subject": None,
+        "verdict": None, "verdict_key": None, "measured_at": None,
+        "p50_ms": None, "p95_ms": None, "endpoints": [], "samples": None,
+        "bytes": None, "bytes_endpoint": None,
+        "reasons": [], "reasons_total": 0, "skipped": 0, "same_as_latest": False,
+    }
+
+
+def _perf_tail_records(path: pathlib.Path) -> tuple[dict[str, dict], bool, int, str | None]:
+    """Every judgement in the bounded tail, keyed by the sha it is about.
+
+    Read once for however many commits a page needs, because the histories it
+    serves — the held commit and every commit in the refusal history — are the same
+    file, and a reader that opened it per commit would read the tail N times to
+    answer one question. Returns `(records, partial, skipped, error)`, where `error`
+    is `absent`, `unreadable`, or `None`, and `partial` says whether the window cut
+    the file so a commit that was not found may be older rather than never judged.
+
+    The window starts mid-record whenever one record is larger than the tail, and
+    that leading fragment is *counted* as a line this reader could not read rather
+    than dropped: a dropped line is how "not found" starts reading as "never
+    judged".
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            partial = size > PERF_TAIL_BYTES
+            if partial:
+                # One byte of context before the window, so a boundary that lands on
+                # a line ending is recognised and the record after it read whole.
+                fh.seek(size - PERF_TAIL_BYTES - 1)
+            raw = fh.read()
+    except FileNotFoundError:
+        return {}, False, 0, "absent"
+    except OSError:
+        return {}, False, 0, "unreadable"
+
+    text = raw.decode("utf-8", errors="replace")
+    skipped = 0
+    if partial:
+        head, _, rest = text.partition("\n")
+        if head.strip():
+            skipped += 1
+        text = rest
+
+    records: dict[str, dict] = {}
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (ValueError, TypeError):
+            skipped += 1
+            continue
+        if not isinstance(rec, dict):
+            skipped += 1
+            continue
+        rec_sha = rec.get("commit")
+        if not (isinstance(rec_sha, str)
+                and re.fullmatch(r"[0-9a-fA-F]{40}", rec_sha)):
+            continue
+        # Last judgement for a sha wins: the gate appends, so a later line is the
+        # newer measurement of the same commit.
+        records[rec_sha.lower()] = rec
+    return records, partial, skipped, None
+
+
+def _perf_index_path(history: pathlib.Path) -> pathlib.Path:
+    """The index the gate keeps beside its history.
+
+    Derived with the same rule `deploy/perf_gate.py::index_path()` writes it with, so
+    the writer and this reader cannot be pointed at different files.
+    """
+    return pathlib.Path(str(history) + ".index")
+
+
+def _perf_index(history: pathlib.Path) -> dict[str, int]:
+    """sha -> byte offset, from the small index beside the history.
+
+    Read *whole*, on purpose: it is one short line per judgement, so it stays cheap
+    to read long after the history it points into has outgrown the bounded tail this
+    page reads — which is exactly the reason it exists. An absent or unreadable index
+    is `{}` rather than an error: a gate from before it wrote none, and the tail scan
+    is the fallback.
+    """
+    try:
+        text = _perf_index_path(history).read_text(encoding="utf-8",
+                                                   errors="replace")
+    except OSError:
+        return {}
+    offsets: dict[str, int] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        sha = record.get("commit")
+        offset = record.get("offset")
+        if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha)):
+            continue
+        if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+            continue
+        # Last entry for a commit wins: the gate appends, so the last line is the
+        # newest judgement of that commit.
+        offsets[sha.lower()] = offset
+    return offsets
+
+
+def _record_at(history: pathlib.Path, offset: int) -> dict | None:
+    """The one record starting at `offset`, or None when it is not a record."""
+    try:
+        with history.open("rb") as fh:
+            fh.seek(offset)
+            raw = fh.readline()
+    except OSError:
+        return None
+    try:
+        record = json.loads(raw.decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _perf_records(path: pathlib.Path, shas):
+    """Records for the wanted commits: the tail, plus the index beyond it.
+
+    The tail scan alone stops answering once a judgement falls outside the read
+    window, which for a held commit is exactly when somebody comes looking. So the
+    index is consulted for whatever the tail did not have, and its offsets are read
+    directly — the file may be arbitrarily long; the seek is not.
+
+    The tail wins any commit it *does* hold, because a later append sits nearer the
+    end of the file: if the tail has the commit at all, it has the newest judgement.
+    Returns `(records, partial, skipped, error)` with the same meanings the tail
+    reader gives, so a commit found by neither is reported the way it always was.
+    """
+    wanted = [sha.lower() for sha in shas
+              if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha)]
+    records, partial, skipped, error = _perf_tail_records(path)
+    if error is not None:
+        return {}, partial, skipped, error
+    found = {sha: records[sha] for sha in wanted if sha in records}
+    missing = [sha for sha in wanted if sha not in found]
+    if missing:
+        offsets = _perf_index(path)
+        for sha in missing:
+            offset = offsets.get(sha)
+            if offset is None:
+                continue
+            record = _record_at(path, offset)
+            if record is None:
+                continue
+            rec_sha = record.get("commit")
+            # A stale offset points at another commit's line (the history was
+            # rotated or rewritten), and that is not this commit's judgement.
+            if (isinstance(rec_sha, str)
+                    and re.fullmatch(r"[0-9a-fA-F]{40}", rec_sha)
+                    and rec_sha.lower() == sha):
+                found[sha] = record
+    return found, partial, skipped, None
+
+
+def _held_judgement(path: pathlib.Path, sha: str | None, *,
+                    repo: pathlib.Path | None = None,
+                    limit: int = PERF_REASONS_SHOWN) -> dict:
+    """The held commit's own judgement, found in the same history by its sha.
+
+    The perf card shows the gate's *last* judgement, and that is exactly what a held
+    commit loses: a refused commit is quarantined and stops being judged, so the next
+    line belongs to a later release that passed, and the numbers behind the refusal —
+    the ones the quarantine file quotes only in prose — leave the page just as
+    somebody finally comes looking.
+
+    So the held commit is looked up in the same file, by the sha parsed out of each
+    record rather than matched as text (the window starts mid-record whenever one is
+    bigger than the tail, and a fragment that happens to contain the sha is not a
+    judgement of it), and "not found" is split two ways: a page that read only a
+    bounded tail cannot say "this gate never judged it" when the truth is "its
+    judgement is older than the window" — different facts, different next steps.
+    """
+    out = _empty_judgement()
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        return out
+    sha = sha.lower()
+    out["commit"] = sha
+    out["short"] = sha[:7]
+    if repo is not None:
+        out["subject"] = _commit_subject(pathlib.Path(repo), sha)
+
+    records, partial, skipped, error = _perf_records(path, [sha])
+    out["skipped"] = skipped
+    if error == "absent":
+        out["key"] = PERF_HELD_NO_JUDGEMENT
+        return out
+    if error == "unreadable":
+        out["key"] = PERF_HELD_UNREADABLE
+        return out
+
+    found = records.get(sha)
+    if found is None:
+        out["key"] = PERF_HELD_OUT_OF_WINDOW if partial else PERF_HELD_NO_JUDGEMENT
+        return out
+    out["key"] = PERF_HELD_PRESENT
+    _judgement_fields(out, found, limit=limit)
+    return out
+
+
+def perf_judgements(path: pathlib.Path, shas, *,
+                    limit: int = PERF_REASONS_SHOWN) -> dict[str, dict]:
+    """Each given commit's own judgement, from one read of the history.
+
+    The refusal card shows the gate's *last* judgement (and the held commit's in its
+    own block), which leaves the older quarantined commits with nothing but the
+    runner's prose: their measurement is in the same history and was reaching only a
+    shell. So every commit in the refusal history is looked up here, by the sha
+    parsed out of each record, and each keeps the same four answers a single lookup
+    does — present, no judgement, older than the window, unreadable — because a
+    commit whose evidence is merely outside the tail must not read as one the gate
+    never judged.
+    """
+    wanted = []
+    for sha in shas:
+        if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+            wanted.append(sha.lower())
+    out: dict[str, dict] = {}
+    for sha in wanted:
+        out.setdefault(sha, _empty_judgement())
+    if not out:
+        return out
+
+    records, partial, skipped, error = _perf_records(path, wanted)
+    for sha, judgement in out.items():
+        judgement["commit"] = sha
+        judgement["short"] = sha[:7]
+        judgement["skipped"] = skipped
+        if error == "absent":
+            judgement["key"] = PERF_HELD_NO_JUDGEMENT
+            continue
+        if error == "unreadable":
+            judgement["key"] = PERF_HELD_UNREADABLE
+            continue
+        found = records.get(sha)
+        if found is None:
+            judgement["key"] = (PERF_HELD_OUT_OF_WINDOW if partial
+                                else PERF_HELD_NO_JUDGEMENT)
+            continue
+        judgement["key"] = PERF_HELD_PRESENT
+        _judgement_fields(judgement, found, limit=limit)
+    return out
+
+
+def _perf_baseline(path: pathlib.Path, *, repo: pathlib.Path | None = None) -> dict:
+    """The release the gate compared against — named, not just implied.
+
+    "the last release that passed" is a commit, and a reader deciding whether a
+    refusal is real needs to see the pair: what this release measured against what
+    the previous one did.
+    """
+    out: dict = {"path": str(path), "present": False, "key": PERF_NONE,
+                 "commit": None, "short": None, "p50_ms": None, "p95_ms": None,
+                 "measured_at": None, "reason": None}
+    text, why = _read(path)
+    if text is None:
+        if why != "absent":
+            out["key"] = PERF_UNREADABLE
+            out["reason"] = why
+        return out
+    try:
+        record = json.loads(text)
+    except (ValueError, TypeError):
+        out["key"] = PERF_MALFORMED
+        return out
+    if not isinstance(record, dict):
+        out["key"] = PERF_MALFORMED
+        return out
+    out["present"] = True
+    out["key"] = PERF_PRESENT
+    sha = record.get("commit")
+    if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        out["commit"] = sha.lower()
+        out["short"] = sha[:7]
+    if isinstance(record.get("measured_at"), str):
+        out["measured_at"] = record["measured_at"] or None
+    latency = record.get("latency")
+    if isinstance(latency, dict):
+        out["p50_ms"] = _number(latency.get("p50_ms"))
+        out["p95_ms"] = _number(latency.get("p95_ms"))
+    return out
+
+
+def _number(value) -> float | None:
+    """A measured number, or `None` — which is not the same reading as zero."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def request_release(*, request_file=None, quarantine_file=None, repo=None,
+                    expect_sha: str | None = None,
                     now: _dt.datetime | None = None) -> dict:
     """Ask the runner, from the page, to retry the refused commit exactly once.
 
@@ -579,6 +1250,11 @@ def request_release(*, request_file=None, quarantine_file=None, repo=None,
     quarantine would sit in that directory and release the *next* refusal — the
     standing override the runner's own design refuses to have. So the honest answer
     is "there is nothing to release", never a file waiting for something to release.
+
+    `expect_sha` is the commit a per-row button asked for. The runner deploys the
+    branch head, so it can retry a refusal only while that commit *is* the head; a
+    request naming any other commit is refused here rather than written, because the
+    file it would leave behind would silently release whatever is held instead.
     """
     now = now or _dt.datetime.now(_dt.timezone.utc)
     repo = pathlib.Path(repo or os.environ.get("SCANGRADE_REPO") or DEFAULT_REPO)
@@ -596,6 +1272,15 @@ def request_release(*, request_file=None, quarantine_file=None, repo=None,
     if not held["held"]:
         result["key"] = RELEASE_NOTHING_HELD
         return result
+    if expect_sha is not None:
+        # `held["sha"]` is already a lowercased 40-char sha — `quarantine_state`
+        # refuses to call a record held otherwise — so the only question left is
+        # whether the row named the commit that is actually under judgement.
+        wanted = expect_sha.strip().lower()
+        if wanted != held["sha"]:
+            result["key"] = RELEASE_NOT_HELD
+            result["expected"] = expect_sha.strip() or None
+            return result
     if not request_file.parent.is_dir():
         result["key"] = RELEASE_DIR_MISSING
         result["detail"] = str(request_file.parent)
@@ -734,6 +1419,54 @@ def _read_bytes(path: pathlib.Path) -> tuple[bytes | None, str | None]:
         return None, "absent"
     except OSError as exc:
         return None, f"{type(exc).__name__}: {exc}"
+
+
+def _read_tail(path: pathlib.Path, limit: int = PERF_TAIL_BYTES) -> tuple[str | None, str | None]:
+    """(the last line, why it could not be read).
+
+    For a file that is appended to once per deploy and never rotated: what a reader
+    wants is the *last* judgement, and reading the whole history to find it would
+    make a page render slower every month the box stays up. So the tail is read and
+    the last complete line taken.
+
+    The line is returned even when it is not complete — when the last record itself
+    is larger than the window, the truncated text is what the caller gets, and the
+    JSON parse fails on it. That is the honest answer ("there is a record and this
+    page cannot read it") where returning nothing would say the gate had never
+    judged anything, and returning the *previous* line would present an older pass
+    as this box's latest judgement.
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            partial = size > limit
+            if partial:
+                # One byte of context before the window, so a boundary that happens
+                # to be a line ending is recognised and the whole line kept.
+                fh.seek(size - limit - 1)
+            raw = fh.read()
+    except FileNotFoundError:
+        return None, "absent"
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+    if not raw.strip():
+        return None, "no_lines"
+
+    tail = raw.decode("utf-8", errors="replace")
+    text = tail
+    if partial:
+        # A first segment with no newline behind it cannot be a whole record; the
+        # one byte read for context tells the two cases apart.
+        text = text[1:] if text.startswith("\n") else text.split("\n", 1)[-1]
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        # The window landed entirely inside one (enormous) record, so there is no
+        # whole line to return. The truncated record is returned rather than
+        # nothing: the caller's verdict is then "there is a record and this page
+        # cannot read it", which is true, where "nothing was recorded" is not.
+        return tail.strip()[:4000], None
+    return lines[-1], None
 
 
 def _blob_sha(data: bytes) -> str:
@@ -1166,6 +1899,7 @@ REASON_KEYS = frozenset({
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            quarantine_file=None, unarmed_file=None, preflight_file=None,
            last_stop_file=None, request_dir=None, release_request=None,
+           perf_history_file=None, perf_baseline_file=None, refusals_dir=None,
            now: _dt.datetime | None = None) -> dict:
     """Everything the page shows. Any single part may be `unknown` with a reason."""
     now = now or _dt.datetime.now(_dt.timezone.utc)
@@ -1191,6 +1925,34 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         last_stop_file or os.environ.get("SCANGRADE_LAST_STOP_FILE")
         or DEFAULT_LAST_STOP_FILE)
     last_stop = last_stop_state(last_stop_file, now=now)
+    perf_history_file = pathlib.Path(
+        perf_history_file or os.environ.get("SCANGRADE_PERF_HISTORY_FILE")
+        or DEFAULT_PERF_HISTORY_FILE)
+    perf_baseline_file = pathlib.Path(
+        perf_baseline_file or os.environ.get("SCANGRADE_PERF_BASELINE_FILE")
+        or DEFAULT_PERF_BASELINE_FILE)
+    # Read once: `perf_state` needs the held sha to look up the refusal's own
+    # numbers, and the quarantine card below needs the same record.
+    quarantine = quarantine_state(quarantine_file, repo, now=now)
+    perf = perf_state(perf_history_file, baseline_path=perf_baseline_file,
+                      repo=repo, now=now, held_commit=quarantine["sha"])
+    refusals_dir = pathlib.Path(
+        refusals_dir or os.environ.get("SCANGRADE_REFUSALS_DIR")
+        or DEFAULT_REFUSALS_DIR)
+    refusals = refusal_history_state(refusals_dir, repo, now=now)
+    # Every quarantined commit's own measurement, from one read of the same history
+    # the perf card reads. Without this only the held commit has numbers: the older
+    # refusals keep the runner's prose and lose the evidence behind it.
+    judgements = perf_judgements(
+        perf_history_file,
+        [record["sha"] for record in refusals["records"] if record["sha"]],
+    )
+    for record in refusals["records"]:
+        record["perf"] = judgements.get(record["sha"]) if record["sha"] else None
+        # The held commit's numbers are already on this page (its own block, or the
+        # latest judgement when it is that too), so its inline copy is suppressed to
+        # keep the page from printing the same measurement twice.
+        record["is_current"] = bool(record["sha"] and record["sha"] == quarantine["sha"])
     request_dir = pathlib.Path(
         request_dir or os.environ.get("SCANGRADE_REQUEST_DIR") or DEFAULT_REQUEST_DIR)
     release_request = pathlib.Path(
@@ -1218,8 +1980,12 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "launcher": expect_reason,
         "verdict": verdict(main, checkout, paused=paused, unarmed=unarmed,
                            preflight=preflight),
-        "quarantine": quarantine_state(quarantine_file, repo, now=now),
+        "quarantine": quarantine,
         "quarantine_file": str(quarantine_file),
+        # The same refusals, kept past the lift: what the quarantine card must
+        # forget so the tick can act, this remembers so a reader can.
+        "refusals": refusals,
+        "refusals_dir": str(refusals_dir),
         "unarmed": unarmed,
         "unarmed_file": str(unarmed_file),
         "preflight": preflight,
@@ -1231,6 +1997,12 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "run_steps": RUN_STEPS,
         "last_stop": last_stop,
         "last_stop_file": str(last_stop_file),
+        # The perf gate's own last judgement: what it measured, against which
+        # release, and — when it refused one — the lines it refused on.
+        "perf": perf,
+        "perf_file": str(perf_history_file),
+        "perf_baseline_file": str(perf_baseline_file),
+        "perf_verdicts": PERF_VERDICTS,
         "release_file": DEFAULT_RELEASE_FILE,
         "release_file_present": _exists(pathlib.Path(DEFAULT_RELEASE_FILE)),
         "request_dir": str(request_dir),

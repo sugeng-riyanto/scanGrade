@@ -74,8 +74,8 @@ PREFIXES = frozenset({"super-admin", "admin-sekolah", "admin", "teacher",
 #: reaches from a script rather than from a link.
 MACHINE = frozenset({
     "api", "ai", "class", "me", "count", "read-status", "unread-count",
-    "members", "slides", "snapshots", "ops", "can-annotate", "cheat-data",
-    "proctoring-data", "wizard-status", "check-pdf", "contacts", "task",
+    "members", "slides", "snapshots", "ops", "can-annotate", "sessions-data",
+    "wizard-status", "check-pdf", "contacts", "task",
     "violation", "status", "transaction", "evidence", "data", "school",
     # The box's own probes, which are read outside the app: `/monitor` parses a
     # log file, `/health` and `/metrics` answer JSON, `/static` serves assets, and
@@ -105,6 +105,14 @@ DOORS = frozenset({
     "reset-password",
 })
 
+#: An *address that only redirects*. `/teacher/exams/<id>/proctoring` and
+#: `.../cheat-analysis` were two pages describing one sitting; each now answers 301
+#: to the single session page that replaced them. The trail has nothing to name
+#: there — the crumb a reader gets belongs to the page they land on, not to the
+#: address they typed, and naming the old one would put a second name on the same
+#: page.
+MOVED = frozenset({"proctoring", "cheat-analysis"})
+
 #: A segment that *mounts* a module rather than naming a place: `/wb/teacher/whiteboard`
 #: is the whiteboard, and `wb` is only where the module lives, so the trail reads
 #: "Teacher › Whiteboard" instead of "Teacher › Wb Teacher Whiteboard".
@@ -120,6 +128,7 @@ GROUPS: tuple[tuple[str, frozenset[str]], ...] = (
     ("a machine endpoint — JSON, an asset, or an ops probe", MACHINE),
     ("a file rather than a page — the crumb is the page it came from", ARTIFACT),
     ("a login door, which renders a different chrome and shows no trail", DOORS),
+    ("an address that only redirects to the page that replaced it", MOVED),
     ("a module's mount point, whose page is named by the segment under it", MODULES),
     ("a document that renders no chrome at all", NO_CHROME),
 )

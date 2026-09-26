@@ -1,6 +1,7 @@
 ﻿import io
 import os
 import json
+import threading
 import zipfile
 import uuid
 import time
@@ -11,6 +12,7 @@ from app.utils.helpers import row_or_none
 from app.utils.exam_access import exam_sitting_allowed
 from app.utils import exam_window
 from app.utils import denials
+from app.utils import lock_health
 from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
@@ -20,6 +22,10 @@ from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
 from app.errors import ValidationError, NotFoundError, GradingError, AIProcessingError
 from app.utils.rate_limiter import limiter
+
+#: This module's own logger. `current_app.logger` needs a request, and the lock's
+#: fallback path must be able to say why it fell back from places that have none.
+logger = get_logger("api")
 
 def _rate_limit(n):
     return limiter.limit(n) if limiter else (lambda f: f)
@@ -31,25 +37,124 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 UPLOAD_SCAN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "uploads", "scans")
 
-def _redis_lock(key, timeout=10):
-    """Redis-based cross-worker lock (SETNX pattern)."""
-    try:
-        from redis import Redis
-        r = Redis.from_url(current_app.config.get("REDIS_URL", "redis://localhost:6379/0"))
-        lock_key = f"scan_grade:lock:{key}"
-        # SETNX: only set if key doesn't exist, with expiry
-        if r.setnx(lock_key, "1"):
-            r.expire(lock_key, timeout)
-            return r
-        return None
-    except Exception:
-        return None
+# ─── The lock for one (student, exam) draft write ────────────────────────────
+#
+# This lock is taken once per `sync-draft`, so it is one of the app's hottest
+# paths and it had two inherited defects.
+#
+# It opened **its own client per call** (`Redis.from_url(...)`) and never closed
+# it. Every other Redis user in this app rides one pooled, health-checked,
+# resettable connection — the rate limiter, the account limiter, `kv_cache`, and
+# the `claim` this lock was supposed to share (`app/utils/rate_limiter.py`, 20
+# connections). Bypassing that pool meant a fresh TCP connection per sync: 500
+# students syncing is 500 connections per pass instead of 20 handed back.
+#
+# And it took the lock with `SETNX` **then** a separate `EXPIRE`. Two round trips
+# for one decision, with a window in between: a process that died there left the
+# key behind **with no TTL at all**, which is not a stale lock but a permanent
+# one — that student's syncs stayed refused for good rather than until the
+# timeout. `SET ... NX EX` is one atomic command that carries its own expiry,
+# which is exactly what the rate limiter's own claim used.
+#
+# The fallback is the other half, and it is the part a cache outage makes
+# visible. Returning `None` on a store failure reads to the caller as "someone
+# else holds it", so an unreachable store answered *every* sync in the school
+# with `busy: True` and saved nothing at all. Refusing to store the paper is the
+# one outcome this app says a cache outage must never produce, so the lock now
+# falls back to a table in this worker: the common case still serialises.
+#
+# That fallback is weaker, and the weakness is real rather than theoretical: with
+# the store down, three gevent workers hold three different locks, so two
+# concurrent writes from one student can interleave and one answer set can win.
+# A rare collision between two writers is not the same loss as dropping every
+# write, which is the trade taken here and recorded rather than hidden.
+#
+# Both outcomes are now *recorded*, in `app/utils/lock_health.py`, because which
+# one happened is a fact about the whole appliance and this module's only trace of
+# it used to be one `logger.warning` — and on the path where `_lock_conn()` returns
+# `None` (a box with no store configured, which is the normal state of a dev box
+# and a misconfiguration on the installed one) there was not even that. The status
+# page reads it: how many locks went to the store, how many to this worker alone,
+# and the reason the store gave.
+#
+#: Locks held in this worker while the shared store is unreachable. Keyed like the
+#: Redis keys, valued with the instant (from `time.monotonic`, so a wall-clock
+#: step cannot extend a lock) they stop being held.
+_local_locks: dict = {}
+_local_locks_guard = threading.Lock()
 
-def _release_lock(redis_conn, key):
-    """Release a Redis lock."""
+
+def _lock_conn():
+    """The shared pooled Redis, or `None` when it is not configured or reachable."""
+    from app.utils.rate_limiter import _get_redis_conn
+    return _get_redis_conn()
+
+
+def _local_lock(key, timeout):
+    """The lock in this worker alone, for when the shared store cannot be reached."""
+    now = time.monotonic()
+    with _local_locks_guard:
+        held = _local_locks.get(key)
+        if held is not None and held > now:
+            return None
+        # Pruned while we are here: with the store down for hours this table is
+        # the only thing that accumulates, and nothing else would clean it.
+        for stale in [k for k, expiry in _local_locks.items() if expiry <= now]:
+            del _local_locks[stale]
+        _local_locks[key] = now + timeout
+    return ("local", None)
+
+
+def _redis_lock(key, timeout=10):
+    """Take the lock for one key, on the connection the app already pools.
+
+    Returns a handle for `_release_lock`, or `None` when it is already held.
+    """
+    lock_key = f"scan_grade:lock:{key}"
     try:
-        if redis_conn:
-            redis_conn.delete(f"scan_grade:lock:{key}")
+        conn = _lock_conn()
+    except Exception as e:
+        conn = None
+        lock_health.record_fallback(f"{type(e).__name__}: {e}")
+    if conn is not None:
+        try:
+            # One atomic command, expiry included — see the note above for what the
+            # two-step version left behind when a process died between the steps.
+            taken = conn.set(lock_key, "1", nx=True, ex=timeout)
+        except Exception as e:
+            logger.warning(
+                "Lock store unreachable (%s) — holding %s in this worker instead", e, key)
+            lock_health.record_fallback(f"{type(e).__name__}: {e}")
+        else:
+            # The store decided, either way. A held lock is the lock working, not an
+            # outage, so both answers count as the store serving this sync.
+            lock_health.record_shared()
+            return ("redis", conn) if taken else None
+    else:
+        # No connection at all. The reason is the store's own word for it, so the
+        # page can tell "nobody configured a store" from "the store is down" — the
+        # two have opposite remedies and this path used to be entirely silent.
+        from app.utils.rate_limiter import redis_failure_reason
+        lock_health.record_fallback(redis_failure_reason())
+    return _local_lock(key, timeout)
+
+def _release_lock(handle, key):
+    """Release a lock taken by `_redis_lock`, whichever kind it turned out to be."""
+    try:
+        if not handle:
+            return
+        lock_key = f"scan_grade:lock:{key}"
+        if isinstance(handle, tuple):
+            kind, conn = handle
+            if kind == "local":
+                with _local_locks_guard:
+                    _local_locks.pop(key, None)
+            elif conn is not None:
+                conn.delete(lock_key)
+        else:
+            # A caller that handed us a bare connection — the shape this function
+            # took before the pool. Released the same way, by the same key name.
+            handle.delete(lock_key)
     except Exception:
         pass
 

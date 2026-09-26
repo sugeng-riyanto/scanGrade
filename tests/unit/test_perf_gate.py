@@ -60,11 +60,14 @@ GATES = {
 def summary(p50: float, p95: float, sessions: int = 20, error_pct: float = 0.0,
             fivexx: int = 0, logins: int | None = None,
             endpoint: str = "GET /student/dashboard",
-            payload: float | None = None, queries: float | None = None) -> dict:
+            payload: float | None = None, queries: float | None = None,
+            asked: float | None = None, rows: float | None = None) -> dict:
     """A harness summary in the shape the real one writes.
 
     `payload` and `queries` are opt-in: left out, the summary is one an older harness
-    would have written, which is its own case to test.
+    would have written, which is its own case to test. `asked` is the queries the
+    render *issued* (as opposed to the attempts the database served) and `rows` is how
+    much data it read; both are also opt-in, for the same reason.
     """
     ok = sessions if logins is None else logins
     row = {"n": 300, "p50": p50, "p95": p95}
@@ -72,6 +75,10 @@ def summary(p50: float, p95: float, sessions: int = 20, error_pct: float = 0.0,
         row["bytes_p50"] = payload
     if queries is not None:
         row["roundtrips_p50"] = queries
+    if asked is not None:
+        row["queries_p50"] = asked
+    if rows is not None:
+        row["rows_p50"] = rows
     return {
         "sessions_launched": sessions,
         "logins_ok": ok,
@@ -90,7 +97,9 @@ def summary(p50: float, p95: float, sessions: int = 20, error_pct: float = 0.0,
 
 def baseline_from(p50: float, p95: float, commit: str = "abc1234",
                   payload: float | None = None, queries: float | None = None,
-                  **extra) -> dict:
+                  asked: float | None = None, rows: float | None = None,
+                  floor_bytes: float | None = None,
+                  floor_queries: float | None = None, **extra) -> dict:
     record = {
         "commit": commit,
         "shape": gate.shape_of(20, 2, 20.0, "https://example.test"),
@@ -100,10 +109,20 @@ def baseline_from(p50: float, p95: float, commit: str = "abc1234",
         "server_errors_5xx": extra.pop("fivexx", 0),
     }
     if payload is not None or queries is not None:
-        record["page_cost"] = {"bytes": float(payload or 0),
-                              "bytes_endpoint": "GET /student/dashboard",
-                              "roundtrips": float(queries or 0),
-                              "roundtrips_endpoint": "GET /student/dashboard"}
+        cost = {"bytes": float(payload or 0),
+                "bytes_endpoint": "GET /student/dashboard",
+                "roundtrips": float(queries or 0),
+                "roundtrips_endpoint": "GET /student/dashboard"}
+        if rows is not None:
+            cost["bytes_rows"] = float(rows)
+            cost["roundtrips_rows"] = float(rows)
+        if asked is not None:
+            cost["roundtrips_queries"] = float(asked)
+        if floor_bytes is not None:
+            cost["floor_bytes"] = float(floor_bytes)
+        if floor_queries is not None:
+            cost["floor_queries"] = float(floor_queries)
+        record["page_cost"] = cost
     record.update(extra)
     return record
 
@@ -274,6 +293,174 @@ class TestTheCostOfAPage:
         assert record["page_cost"]["roundtrips"] == 6
         assert record["page_cost"]["bytes_endpoint"] == "GET /student/dashboard"
 
+    def test_the_floor_the_growth_is_measured_from_is_the_smallest_page(self):
+        """The intercept of the cost model, measured rather than assumed.
+
+        A render is a shared layout plus the data it drew, and the layout does not
+        grow with the roster — which is why the growth normalization has to hold
+        that part constant, byte for byte. The smallest signed-in page the run
+        loaded is the cheapest honest estimate of it. Taking the *largest* instead
+        would put the intercept above every page, so nothing would ever look
+        growth-explained and the normalization would be decoration.
+        """
+        measured = summary(200, 400, payload=100_000, queries=6, asked=6, rows=50)
+        measured["per_endpoint"]["GET /student/settings"] = {
+            "n": 10, "p50": 90, "p95": 150, "bytes_p50": 9_000,
+            "roundtrips_p50": 1, "queries_p50": 1, "rows_p50": 4,
+        }
+        record = gate.baseline_record("deadbee",
+                                      gate.shape_of(20, 2, 20.0, "https://x.test"),
+                                      measured, claims.claim_latency(measured))
+        assert record["page_cost"]["floor_bytes"] == 9_000, (
+            "the part of a page that does not scale with rows is the cheapest page "
+            "this run loaded")
+        assert record["page_cost"]["floor_queries"] == 1
+
+
+# ── 1c. the growth the data explains, and the growth it does not ─────────────
+
+class TestWhatTheDataExplains:
+    """A page can cost more because the release got heavier or because the school
+    got bigger, and the gate used to be able to tell only one of them apart.
+
+    Bytes are deterministic given (code, data), which is measurable rather than
+    argued: on production, a day apart on the *same* release, every endpoint's page
+    bytes were identical to the byte — while `/teacher/dashboard` went from 1
+    round-trip to 3. So a page that grew is not evidence of anything on its own,
+    and the only way to separate the two causes is to ask how much data the page
+    read. `rows` is that number; where it is missing, the old absolute rule stands.
+
+    A cost increase the data explains is not this release's doing and must not roll
+    it back. A cost increase the data does *not* explain is the defect this axis
+    exists for, and the normalization must not become a way to smuggle one past.
+    """
+
+    #: 40 KB of shared layout, 5 KB of data at 50 rows, 3 queries issued (floor 1).
+    TEN_X = dict(payload=45_000, queries=3, asked=3, rows=50,
+                 floor_bytes=40_000, floor_queries=1)
+
+    def test_a_page_that_grew_because_it_read_more_rows_is_not_a_regression(self):
+        """Ten times the rows, and the page is ten times its data section larger."""
+        base = baseline_from(200, 400, **self.TEN_X)
+        now = summary(205, 420, payload=90_000, queries=21, asked=21, rows=500)
+        assert gate.regression(base, now) == [], (
+            "the page read 10x the rows and grew exactly as much as that explains; "
+            "refusing this is refusing the release for the school's data")
+
+    def test_a_heavier_render_at_the_same_row_count_is_still_a_regression(self):
+        base = baseline_from(200, 400, **self.TEN_X)
+        now = summary(205, 420, payload=70_000, queries=3, asked=3, rows=50)
+        reasons = gate.regression(base, now)
+        assert reasons and "grew" in reasons[0], reasons
+
+    def test_growth_the_rows_cannot_explain_is_still_a_regression(self):
+        """Twice the rows, but the page grew past what twice the data accounts for."""
+        base = baseline_from(200, 400, **self.TEN_X)
+        now = summary(205, 420, payload=120_000, queries=3, asked=3, rows=100)
+        reasons = gate.regression(base, now)
+        assert reasons and "117.2 KB" in reasons[0] and "43.9 KB" in reasons[0], reasons
+        assert "the data accounts for 4.9 KB" in reasons[0], (
+            "the message has to say what the data accounted for, or the reader cannot "
+            f"tell a heavier release from a bigger school: {reasons[0]}")
+
+    def test_a_fixed_query_added_to_a_page_that_also_grew_is_still_refused(self):
+        """The whole reason the data's own share is *added*, not multiplied.
+
+        A page whose data grows fourfold may spend four times the queries that scale
+        with rows; the queries that do *not* scale with rows are still the release's,
+        and here there is one of them too many. Adding the data's share as the absolute
+        amount it is justifies 10 queries (the fourfold rows, the baseline's slack and
+        grace); the render issued 11. Multiplying the allowance by the growth instead
+        would have justified 12 and swallowed the extra query — which is the defect
+        this test exists to refuse, and why the margin is deliberately wider than the
+        two numbers that used to sit either side of it.
+        """
+        base = baseline_from(200, 400, **self.TEN_X)
+        # Bytes are exactly what four times the rows explains — 40 KB of layout plus
+        # 4 x 5 KB of data — so this test is about the query axis alone.
+        now = summary(205, 420, payload=60_000, queries=11, asked=11, rows=200)
+        reasons = gate.regression(base, now)
+        assert reasons and "queries" in reasons[0], reasons
+
+    def test_the_explanation_never_tightens_the_rule(self):
+        """A dataset that shrank does not license refusing an unchanged page."""
+        base = baseline_from(200, 400, **self.TEN_X)
+        now = summary(205, 420, payload=45_000, queries=3, asked=3, rows=50)
+        assert gate.regression(base, now) == []
+        fewer_rows = summary(205, 420, payload=45_000, queries=3, asked=3, rows=5)
+        assert gate.regression(base, fewer_rows) == [], (
+            "the data's share may explain growth; it may never make a page that did "
+            "not change look heavier than the data says it should have been")
+
+    def test_a_baseline_without_rows_falls_back_to_the_absolute_rule(self):
+        """Every baseline written before this existed is one of these.
+
+        The old rule is the safe one here: it may refuse a release the data would
+        have explained, and it cannot let a heavier one through.
+        """
+        base = baseline_from(200, 400, payload=45_000, queries=3)
+        reasons = gate.regression(base, summary(205, 420, payload=90_000, queries=21,
+                                                asked=21, rows=500))
+        assert reasons, "without rows there is nothing to explain the growth with"
+
+    def test_a_run_that_reports_rows_but_no_queries_is_not_scored_on_bytes_alone(self):
+        """Half a measurement is not a measurement gap; the axes are independent."""
+        base = baseline_from(200, 400, payload=45_000, queries=3, asked=3, rows=50,
+                             floor_bytes=40_000, floor_queries=1)
+        now = summary(205, 420, payload=90_000, rows=500)
+        assert gate.regression(base, now) == [], (
+            "bytes are explained by rows even when the run reported no query count")
+
+
+# ── 1d. retries are the box, not the release ─────────────────────────────────
+
+class TestRetriesAreTheBox:
+    """`X-Supabase-Roundtrips` counts *attempts*: a retried read costs two.
+
+    That was deliberate — "a release that makes retries routine pays the database
+    twice" — but it made the number answer two questions at once. The measurement
+    above is the whole argument: identical code, byte-identical pages, and
+    `/teacher/dashboard` reporting 1 round-trip one day and 3 the next. Scored as a
+    ratio, that is a regression on a release that changed nothing.
+
+    So attempts are reported and never scored; what a render *issued* is what a
+    release changes, and only that number is compared.
+    """
+
+    def test_round_trips_that_were_retried_do_not_refuse_the_release(self):
+        base = baseline_from(200, 400, payload=57_570, queries=1, asked=1, rows=12,
+                             floor_bytes=45_285, floor_queries=1)
+        now = summary(205, 420, payload=57_570, queries=3, asked=1, rows=12)
+        assert gate.regression(base, now) == [], (
+            "one query, served three times because the transport retried it, is the "
+            "measured production case and must not read as a slower release")
+
+    def test_and_the_notes_say_so_in_words(self):
+        base = baseline_from(200, 400, payload=57_570, queries=1, asked=1, rows=12,
+                             floor_bytes=45_285, floor_queries=1)
+        now = summary(205, 420, payload=57_570, queries=3, asked=1, rows=12)
+        notes = " ".join(gate.explanations(base, now))
+        assert "retr" in notes.lower() and "box" in notes.lower(), notes
+
+    def test_more_queries_than_the_render_issued_are_still_the_release(self):
+        base = baseline_from(200, 400, payload=57_570, queries=1, asked=1, rows=12,
+                             floor_bytes=45_285, floor_queries=1)
+        now = summary(205, 420, payload=57_570, queries=9, asked=9, rows=12)
+        reasons = gate.regression(base, now)
+        assert reasons and "queries" in reasons[0], reasons
+
+    def test_a_growing_dataset_is_reported_as_such(self):
+        base = baseline_from(200, 400, **TestWhatTheDataExplains.TEN_X)
+        now = summary(205, 420, payload=90_000, queries=21, asked=21, rows=500)
+        notes = " ".join(gate.explanations(base, now))
+        assert "10" in notes and "row" in notes.lower(), notes
+
+    def test_nothing_is_explained_when_nothing_moved(self):
+        base = baseline_from(200, 400, **TestWhatTheDataExplains.TEN_X)
+        now = summary(205, 420, payload=45_000, queries=3, asked=3, rows=50)
+        assert gate.explanations(base, now) == [], (
+            "the gate's output stays quiet on a release that changed nothing")
+
 
 # ── 2. the baseline survives a bad release ───────────────────────────────────
 
@@ -351,13 +538,19 @@ class _Health(BaseHTTPRequestHandler):
     #: is part of the reference load — so the gate would refuse the comparison
     #: before it ever probed, and a test about a busy box would never reach the busy
     #: path. (It didn't: that test was passing on the port mismatch.)
-    flags: dict = {"status": 200, "slow_s": 0.0}
+    #:
+    #: `pages` is per-path, because the box can be busy on the page it renders while
+    #: the machine endpoint stays instant — and *that* difference is what the quiet
+    #: probe has to be able to see.
+    flags: dict = {"status": 200, "slow_s": 0.0, "pages": {}}
 
     def do_GET(self):  # noqa: N802 - http.server's interface
-        if self.flags["slow_s"]:
+        page = (self.flags.get("pages") or {}).get(self.path) or {}
+        slow = float(page.get("slow_s", self.flags["slow_s"]))
+        if slow:
             import time
-            time.sleep(self.flags["slow_s"])
-        self.send_response(self.flags["status"])
+            time.sleep(slow)
+        self.send_response(int(page.get("status", self.flags["status"])))
         self.send_header("Content-Length", "2")
         self.end_headers()
         self.wfile.write(b"ok")
@@ -368,11 +561,11 @@ class _Health(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def health_server():
-    """A loopback /health, so the gate's 'is the box quiet' probe has an answer."""
+    """A loopback box, so the gate's 'is the box quiet' probe has an answer."""
     holder = {}
 
-    def start(status=200, slow_s=0.0):
-        flags = {"status": status, "slow_s": slow_s}
+    def start(status=200, slow_s=0.0, pages=None):
+        flags = {"status": status, "slow_s": slow_s, "pages": dict(pages or {})}
         handler = type("H", (_Health,), {"flags": flags})
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         server.daemon_threads = True
@@ -473,7 +666,7 @@ class TestTheGateEndToEnd:
 
     def test_a_busy_box_is_not_a_verdict(self, workbench, health_server, monkeypatch,
                                          capsys):
-        """The box, not the release: a 503 on /health keeps the release.
+        """The box, not the release: a 503 keeps the release.
 
         Same address throughout, busy by flipping the handler in place. A second
         server would sit on another port, and the port is part of the reference
@@ -488,6 +681,34 @@ class TestTheGateEndToEnd:
         health_server.now(status=503)
         assert run_gate(bench, base, monkeypatch) == gate.EXIT_CANNOT_RUN
         assert "CANNOT MEASURE" in capsys.readouterr().out
+        assert bench["baseline"].read_bytes() == before, (
+            "a box that could not be measured wrote a result anyway")
+
+    def test_a_box_busy_on_the_page_it_renders_is_not_a_verdict(self, workbench,
+                                                               health_server,
+                                                               monkeypatch, capsys):
+        """The quiet check has to measure a page, or a busy box reads as a bad release.
+
+        `/health` renders nothing and touches no page code, so a box whose workers
+        are saturated rendering student pages still answers it instantly. Judging
+        *that* says "idle", the gate loads a box it should have left alone, and the
+        pages it then measures are the students' slow ones — a confirmed divergence,
+        and a rollback for a release that changed nothing. `pages` makes the page
+        busy while /health stays fast; the gate must stop before it places any load.
+        """
+        bench, base = workbench, health_server()
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        before = bench["baseline"].read_bytes()
+        bench["marker"].unlink(missing_ok=True)
+
+        bench["summary"].write_text(json.dumps(summary(900, 1800)), encoding="utf-8")
+        health_server.now(pages={"/": {"status": 503}})
+
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_CANNOT_RUN
+        out = capsys.readouterr().out
+        assert "CANNOT MEASURE" in out, out
+        assert not bench["marker"].exists(), (
+            "the gate put load on a box it had already found busy")
         assert bench["baseline"].read_bytes() == before, (
             "a box that could not be measured wrote a result anyway")
 
@@ -536,6 +757,42 @@ class TestTheGateEndToEnd:
         lines = [json.loads(l) for l in bench["evidence"].read_text(encoding="utf-8").splitlines()]
         assert [l["verdict"] for l in lines] == ["baseline", "regressed"]
         assert lines[1]["reasons"], "a refusal has to leave its reasons in the history"
+
+    def test_every_run_indexes_the_record_it_just_wrote(self, workbench, health_server,
+                                                        monkeypatch):
+        """The index is what lets the page find a judgement past its read window.
+
+        Each offset has to point at that judgement's own line — an index that only
+        roughly points is worse than none, because the reader trusts it.
+        """
+        bench, base = workbench, health_server()
+        sha = "a" * 40
+        assert run_gate(bench, base, monkeypatch, None, "--commit", sha) == gate.EXIT_OK
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch, None, "--commit", sha) == gate.EXIT_REGRESSED
+
+        index = gate.index_path(bench["evidence"])
+        assert index.exists(), "no index was written beside the history"
+        entries = [json.loads(l) for l in index.read_text(encoding="utf-8").splitlines()]
+        assert len(entries) == 2, f"one entry per judgement expected, got {entries!r}"
+        data = bench["evidence"].read_bytes()
+        for entry in entries:
+            line = data[entry["offset"]:].split(b"\n", 1)[0]
+            record = json.loads(line.decode("utf-8"))
+            assert record["commit"] == entry["commit"], (
+                f"the index offset {entry['offset']} does not point at its own "
+                f"record: {record.get('commit')!r}")
+
+    def test_the_index_sits_beside_the_history_it_indexes(self):
+        assert gate.index_path(Path("/x/perf/history.jsonl")) == \
+            Path("/x/perf/history.jsonl.index")
+
+    def test_a_judgement_with_no_commit_is_not_indexed(self, tmp_path):
+        evidence = tmp_path / "history.jsonl"
+        gate.record_evidence(evidence, {"verdict": "pass"})
+        assert evidence.exists(), "the history is the evidence; it must still be written"
+        assert not gate.index_path(evidence).exists(), (
+            "a record with no commit names nothing a page could look up")
 
     def test_a_release_that_ships_a_heavier_page_is_refused(self, workbench, health_server,
                                                            monkeypatch, capsys):

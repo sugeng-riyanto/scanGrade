@@ -1,0 +1,141 @@
+{
+  "base": "https://scangrade.web.id",
+  "duration_s": 60.0,
+  "error_rate_pct": 0.0,
+  "identity_checked": 51,
+  "identity_ok": 51,
+  "identity_wrong": {},
+  "latency_ms": {
+    "p50": 1002.7857000004587,
+    "p95": 5283.965999999964,
+    "p99": 12435.310500000014
+  },
+  "logins_failed": 0,
+  "logins_ok": 51,
+  "measured_at": "2026-09-25T21:09:12+00:00",
+  "per_endpoint": {
+    "GET /auth/me": {
+      "bytes_p50": 135,
+      "n": 51,
+      "p50": 1525.4120999998122,
+      "p95": 1956.5618999995422,
+      "p99": 2240.214799999194,
+      "roundtrips_p50": 0
+    },
+    "GET /health": {
+      "bytes_p50": 135,
+      "n": 150,
+      "p50": 500.5879999998797,
+      "p95": 4605.6813000004695,
+      "p99": 5084.576700000071,
+      "roundtrips_p50": 0
+    },
+    "GET /student/dashboard": {
+      "bytes_p50": 46871,
+      "n": 275,
+      "p50": 579.2207000004055,
+      "p95": 4424.197000000277,
+      "p99": 5683.782500000234,
+      "roundtrips_p50": 3
+    },
+    "GET /student/exams": {
+      "bytes_p50": 42973,
+      "n": 443,
+      "p50": 982.2500000000218,
+      "p95": 4762.189999999464,
+      "p99": 5839.547200000197,
+      "roundtrips_p50": 2
+    },
+    "GET /student/exams/<id>": {
+      "bytes_p50": 42973,
+      "n": 186,
+      "p50": 885.1267999998527,
+      "p95": 4574.202400000104,
+      "p99": 6044.392099999641,
+      "roundtrips_p50": 2
+    },
+    "GET /student/results": {
+      "bytes_p50": 48931,
+      "n": 92,
+      "p50": 1655.1828999999998,
+      "p95": 2187.0122999998785,
+      "p99": 5505.414400000518,
+      "roundtrips_p50": 1
+    },
+    "GET /student/settings": {
+      "bytes_p50": 61104,
+      "n": 50,
+      "p50": 1865.96980000013,
+      "p95": 2539.753999999448,
+      "p99": 10257.429399999637,
+      "roundtrips_p50": 1
+    },
+    "GET /teacher/dashboard": {
+      "bytes_p50": 57570,
+      "n": 7,
+      "p50": 834.8734999999579,
+      "p95": 4695.81079999989,
+      "p99": 4695.81079999989,
+      "roundtrips_p50": 3
+    },
+    "GET /teacher/exams": {
+      "bytes_p50": 47571,
+      "n": 8,
+      "p50": 561.9098999995913,
+      "p95": 1732.1421999995437,
+      "p99": 1732.1421999995437,
+      "roundtrips_p50": 1
+    },
+    "GET /teacher/results": {
+      "bytes_p50": 45510,
+      "n": 4,
+      "p50": 494.2848000000595,
+      "p95": 1162.4007000000347,
+      "p99": 1162.4007000000347,
+      "roundtrips_p50": 1
+    },
+    "GET /teacher/templates": {
+      "bytes_p50": 45285,
+      "n": 5,
+      "p50": 960.6346000000485,
+      "p95": 2370.6523999999263,
+      "p99": 2370.6523999999263,
+      "roundtrips_p50": 1
+    },
+    "LOGIN guru": {
+      "bytes_p50": 57570,
+      "n": 1,
+      "p50": 21205.57910000025,
+      "p95": 21205.57910000025,
+      "p99": 21205.57910000025,
+      "roundtrips_p50": 3
+    },
+    "LOGIN murid": {
+      "bytes_p50": 46871,
+      "n": 50,
+      "p50": 7548.121499999979,
+      "p95": 21135.300099999768,
+      "p99": 28304.97959999957,
+      "roundtrips_p50": 3
+    },
+    "POST settings/pdp-update": {
+      "bytes_p50": 70,
+      "n": 50,
+      "p50": 4022.1701999998913,
+      "p95": 4625.967400000263,
+      "p99": 12359.446500000558,
+      "roundtrips_p50": 2
+    }
+  },
+  "rate_limited_429": 0,
+  "requests_total": 1372,
+  "roster_source": "F:\\opencode\\ScanGrade\\scanGrade\\.freebuff\\lt_roster.json",
+  "server_errors_5xx": 0,
+  "sessions_launched": 51,
+  "status_breakdown": {
+    "200": 1372
+  },
+  "throughput_rps": 14.62,
+  "transport_errors": 0,
+  "wall_s": 93.87
+}

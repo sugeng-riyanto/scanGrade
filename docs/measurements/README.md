@@ -10,11 +10,12 @@ Publishing a number is therefore not possible without a measurement behind it.
 
 ## What was measured
 
-Production, `https://scangrade.web.id`, on **14 Sep 2026** (WIB evening) and again
-on **25 Sep 2026** (11:42–11:51 UTC): **1 vCPU, 957 MB**, 3 gevent workers,
-bottleneck CPU spent rendering pages. The 25 Sep run is what the landing page
-currently publishes, and it is **slower** than the first one — why, and by how
-much, is the section [Re-measured on 25 Sep](#re-measured-on-25-sep).
+Production, `https://scangrade.web.id`, on **14 Sep 2026** (WIB evening), again on
+**25 Sep 2026** (11:42–11:51 UTC) and once more on **26 Sep 2026** (04:09 WIB,
+25 Sep 21:09 UTC): **1 vCPU, 957 MB**, 3 gevent workers, bottleneck CPU spent
+rendering pages. Every one of those runs is in this directory, and each moved the
+row it belongs to — why, and by how much, is in [Re-measured on
+25 Sep](#re-measured-on-25-sep) and [Re-checked on 26 Sep](#re-checked-on-26-sep).
 
 Method: `loadtest_concurrent.py` in endurance mode — one account per session, each
 session signs in for real, its identity is confirmed through `/auth/me`, then it
@@ -60,24 +61,33 @@ is live. The suffix is `.txt`, not `.log`, on purpose: `.gitignore` excludes
 `*.log`, so as a `.log` this file existed only on the machine that measured it and
 no fresh clone could back the row it belongs to.
 
-## Two measurements, one published bound
+## Three measurements, one published bound
 
-Two artifacts now back the 50-student row, and they do not agree to the
-millisecond — they were taken minutes apart on a shared box:
+Three artifacts now back the 50-student row, and they do not agree to the
+millisecond — they were taken at different hours on a shared box:
 
 | Artifact | Measured | Sessions | Student pages | p50 | worst p95 | errors |
 |---|---|---|---|---|---|---|
 | `rung-050.json` (harness, 60 s) | 25 Sep 2026 | 50 murid + 1 guru | 5 | 510–2186 ms | 2.8 s | 0% |
+| `rescan-050.json` (harness, 60 s) | 26 Sep 2026 | 50 murid + 1 guru | 5 | 579–1866 ms | **4.8 s** | 0% |
 | `locust-050.json` (Locust, 90 s) | 14 Sep 2026 | 50 murid + 5 guru | 4 | 94–620 ms | 3.7 s | 0% |
-| **published** | | | | **0.1–2.2 s** | **3.7 s** | **0%** |
+| **published** | | | | **0.1–2.2 s** | **4.8 s** | **0%** |
 
-The published bound is the **worst** figure either measurement produced, which is
-why the row now reads 0.1–2.2 s: the low end is the 14 Sep Locust run's 94 ms and
-the high end is the 25 Sep run's 2186 ms. Publishing the *better* number is not
-available to a page that is held to its own advertisement: the deploy gate refuses
-a release when the box measures more than 2x what the page says, and this box has
-really been observed at p50 **1464 ms** on the 50-student rung — a published bound
-of 620 ms turns a busy afternoon into a failed release.
+The published bound is the **worst** figure any measurement produced, and the two
+halves of the row do not come from the same run: the p50 range is 0.1–2.2 s
+because the 14 Sep Locust run's low end is 94 ms and the 25 Sep harness run's high
+end is 2186 ms, while the p95 is the 26 Sep re-scan's 4.8 s. Publishing the
+*better* number is not available to a page that is held to its own advertisement:
+the deploy gate refuses a release when the box measures more than 2x what the page
+says, and this box has really been observed at p50 **1464 ms** and at p95 3.7 s on
+the 50-student rung — a published bound of 620 ms turns a busy afternoon into a
+failed release.
+
+The same rule is why the re-scan did not *delete* the 25 Sep artifact. Replacing
+it would have been the tidier file, and it would also have narrowed the p50 bound
+from 2186 ms to 1866 ms — quietly tightening the gate against a box that has been
+observed slower than that, using a run that happened to be taken at 04:09 WIB. A
+re-measurement may add an observation; it may not withdraw one.
 
 The Locust mix covers four of the five student pages; `GET /student/exams/<id>`
 could not be exercised because the load-test accounts currently have no exams
@@ -93,7 +103,7 @@ across those pages, p95 is the worst of them.
 
 | Concurrent students | p50 | worst p95 | errors | artifact |
 |---|---|---|---|---|
-| 50 | 0.1–2.2 s | 3.7 s | 0% | `rung-050.json` (25 Sep) + `locust-050.json` (14 Sep) |
+| 50 | 0.1–2.2 s | 4.8 s | 0% | `rung-050.json` (25 Sep) + `rescan-050.json` (26 Sep) + `locust-050.json` (14 Sep) |
 | 100 | 4.0–7.6 s | 8.5 s | 0% | `rung-100.json` (25 Sep) |
 | 150 | 6.6–9.8 s | 11.4 s | 0% | `rung-150.json` (25 Sep) |
 | 500* | 5.6–7.0 s | 10.8 s | 2.3% | `rung-500-endurance.txt` (14 Sep) |
@@ -150,7 +160,7 @@ figure, a date or a recommendation.
 
 The page recommends **~50 concurrent students per exam session** on this
 configuration. That is the largest measured rung holding **0% errors and a worst
-page p95 of 3.7 s**; at 100 the p95 rises to 8.5 s and at 150 to 11.4 s, where the
+page p95 of 4.8 s**; at 100 the p95 rises to 8.5 s and at 150 to 11.4 s, where the
 box is still alive but no longer comfortable. The recommendation does not exceed
 what was measured — `tests/unit/test_landing_claims.py` enforces that.
 
@@ -196,6 +206,56 @@ check before a published number is moved, and this is it.
 90 s on the same box: at 30 s the worst page p50 is **3019 ms** and at 90 s it is
 **3777 ms**, so no window length makes the 14 Sep row true again. 60 s is published
 because that is the shape the other rows use.
+
+## Re-checked on 26 Sep
+
+The p95 the page advertised was not the harness's figure at all: it was the 14 Sep
+Locust run's 3.7 s, while the harness's own 25 Sep run had measured 2.8 s. That gap
+is what a third artifact settles — the same harness, at the same rung, run by hand
+against production instead of from a deploy:
+
+```bash
+python loadtest_concurrent.py 50 1 --base https://scangrade.web.id --duration 60 \\
+       --json docs/measurements/rescan-050.json
+```
+
+It measured a worst page p95 of **4.8 s** (`/student/exams`) — above the 3.7 s the
+page was publishing. So the row moved, 3.7 s → **4.8 s**: the worst figure any of
+the three artifacts recorded.
+
+What the run says, and what it does not:
+
+* **Healthy, and the same shape as the published rows.** 51/51 sessions signed in,
+  identity confirmed through `/auth/me` for all 51, 1,372 requests, **0% errors,
+  0 x 429, 0 x 5xx, 0 transport errors**, 93.9 s wall, 14.6 req/s.
+* **The p50 bound deliberately did not move.** This run's worst page p50 was
+  1866 ms — *better* than the 25 Sep artifact's 2186 ms. Publishing the newer, lower
+  number would have narrowed the advertised range from 2186 ms to 1866 ms, and the
+  gate holds the box to 2x of whatever the page says: the box has already been seen
+  at 3019 ms (30 s window) and 3777 ms (90 s). A re-measurement may add an
+  observation; it may not withdraw one, so the 25 Sep artifact stays and the union
+  is unchanged.
+* **The steady state is still the fast half.** First half p50 1260 ms, second half
+  856 ms: what varies between runs is the cold opening, not the box under load.
+* **Only the 50-student rung was re-run.** It is the rung the deploy gate compares
+  against, and the row that was wrong. The 100, 150 and 500 rows are untouched and
+  still rest on the 25 Sep and 14 Sep runs.
+* **Its date reads as 25 Sep, and it is the 26 Sep run.** `measured_at` is UTC:
+  `2026-09-25T21:09:12+00:00` is 04:09 on 26 Sep in WIB, which is why
+  `/capacity/evidence/rescan-050.json` prints 2026-09-25.
+
+The deploy gate was then run by hand against production, on the republished page:
+
+```
+claims gate: OK — 51 sessions, worst of 9 page endpoints (n=716): p50 2671 ms
+             (page <= 2200 ms), p95 3527 ms (page <= 4800 ms), errors 0.00%
+claims gate: the published numbers still describe this deployment
+```
+
+That verdict is worth reading for what it does *not* say. This probe is 30 seconds
+where the published rows are 60; it loads exactly the rung the page recommends; and
+it measures read traffic only. It confirms the row, not the curve and not the
+endurance claim.
 
 ## Supporting VPS samples
 

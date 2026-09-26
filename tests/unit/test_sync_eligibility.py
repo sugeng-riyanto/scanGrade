@@ -416,16 +416,32 @@ def sitting(monkeypatch):
     forget_every_process_local_copy()
 
 
-def sync(supa, monkeypatch, app, clock=None, light=True):
-    """Drive the real view, as a logged-in student, with the clock pinned."""
+def sync(supa, monkeypatch, app, clock=None, light=True, lock="stub"):
+    """Drive the real view, as a logged-in student, with the clock pinned.
+
+    ``lock="stub"`` takes the draft lock out of the picture, which is what every
+    test about *eligibility* wants — the throttle is its subject, not the lock.
+    ``lock="real"`` keeps the real lock and makes the shared store unreachable,
+    which is the one thing only the route can show: what a Redis outage does to a
+    student's save.
+    """
     from flask import g
 
     app.extensions["supabase"] = supa
-    monkeypatch.setattr(api_module, "_redis_lock", lambda key: object())
-    monkeypatch.setattr(api_module, "_release_lock", lambda conn, key: None)
+    if lock == "real":
+        monkeypatch.setattr(api_module, "_lock_conn", lambda: None)
+    else:
+        monkeypatch.setattr(api_module, "_redis_lock", lambda key: object())
+        monkeypatch.setattr(api_module, "_release_lock", lambda conn, key: None)
     monkeypatch.setattr(api_module, "exam_sitting_allowed",
                         lambda sb, exam, eid, sid: (True, ""))
-    monkeypatch.setattr(api_module, "time", SimpleNamespace(time=lambda: (clock or [NOW])[0]))
+    # Both clocks the route reads, pinned to the same instant: the throttle asks
+    # `time()`, and the lock's process-local fallback measures its own holding with
+    # `monotonic()`. A stub that answered only one of them would turn a fallback
+    # into an AttributeError, which is a test measuring itself.
+    pinned = lambda: (clock or [NOW])[0]
+    monkeypatch.setattr(api_module, "time",
+                        SimpleNamespace(time=pinned, monotonic=pinned))
 
     payload = {"exam_id": "exam-1", "answers": {"q1": "a"}, "light": light,
                "started_at": NOW}
@@ -494,6 +510,24 @@ def test_a_fresh_worker_cannot_reset_the_window(sitting, monkeypatch, app):
     assert len(subs.writes) == 1, (
         "the refused sync still wrote to the row, so the guard saved nothing"
     )
+
+
+def test_a_store_outage_still_stores_the_paper(sitting, monkeypatch, app):
+    """A lock that cannot be reached must not cost the answers.
+
+    `_redis_lock` returned `None` whenever the store was unreachable, and this
+    route reads `None` as "another writer holds it" — so one Redis blip answered
+    every sync in the school with `busy: True` and wrote nothing. The paper is what
+    all of this exists to protect, so a cache outage may not be the reason it is
+    dropped; the lock falls back to this worker instead.
+    """
+    subs = sitting.table("submissions")
+
+    out = sync(sitting, monkeypatch, app, lock="real")
+
+    assert out.get("busy") is not True, (
+        "an unreachable lock store refused the sync, so the student's work was lost")
+    assert len(subs.writes) == 1, "the sync was refused and the answers were never written"
 
 
 def test_the_write_moves_the_stamp_the_guard_reads(sitting, monkeypatch, app):

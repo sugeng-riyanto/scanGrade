@@ -52,6 +52,32 @@ _redis_init_attempted = False
 _redis_available = False
 
 
+def _redis_url() -> str:
+    """The store this app was told to use, or "" when it was told nothing.
+
+    Shared with `redis_failure_reason` so "is a store even configured?" has one
+    answer: the environment first, then the app config, then nowhere.
+    """
+    url = os.environ.get("REDIS_URL", "") or ""
+    if not url:
+        try:
+            url = current_app.config.get("REDIS_URL", "") or ""
+        except RuntimeError:
+            pass
+    return url
+
+
+def redis_failure_reason() -> str:
+    """Why the shared store is not being used, in the store's own two words.
+
+    `not_configured` and `unreachable` look like the same outage from inside a
+    request (both leave the caller with a per-worker fallback) but they have
+    opposite remedies: one is a missing setting, the other is a dead server. The
+    status page shows which it is, so the distinction has to survive the trip.
+    """
+    return "not_configured" if not _redis_url() else "unreachable"
+
+
 def _get_redis_pool():
     """Get or create a Redis connection pool (singleton per process)."""
     global _redis_pool, _redis_init_attempted, _redis_available
@@ -71,12 +97,7 @@ def _get_redis_pool():
             from redis import Redis
             from redis.connection import ConnectionPool
 
-            url = os.environ.get("REDIS_URL", "") or ""
-            if not url:
-                try:
-                    url = current_app.config.get("REDIS_URL", "")
-                except RuntimeError:
-                    pass
+            url = _redis_url()
 
             if not url:
                 logger.warning("REDIS_URL not configured — using in-memory rate limiting (not shared across workers)")

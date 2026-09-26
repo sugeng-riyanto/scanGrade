@@ -22,6 +22,7 @@ from app.services.question_types import (
     objective_result, question_kind, scheme_in,
 )
 from app.services import mark_scheme
+from app.services import session_review
 from app.services.anti_cheat_service import (
     events_for_exam, events_for_student, leaving_summary,
 )
@@ -3766,110 +3767,53 @@ def exam_reprocess_pdf(exam_id):
     return jsonify({"error": "No PDF source found (no local PDF, no temp files)"}), 404
 
 
+@teacher_bp.route("/exams/<exam_id>/sessions")
+@teacher_or_admin_required
+def exam_sessions(exam_id):
+    """One exam, one session page: the room, each sitting, and what was seen.
+
+    The single surface that replaced the live room *and* the pattern page. Two
+    pages describing one sitting was two chances to disagree, and the copy they
+    disagreed in was the part that judged. Read-only by construction: a page that
+    describes a sitting must not be able to change one.
+    """
+    exam, err = _guard_exam(
+        get_supabase(), exam_id, as_json=_wants_json(), redirect_to="/teacher/exams",
+        columns="id,teacher_id,school_id,title,subject,total_questions,"
+                "duration_minutes,start_at,status,class_ids")
+    if err:
+        return err
+    return render_template("teacher/session_review.html", exam=exam, exam_id=exam_id)
+
+
 @teacher_bp.route("/exams/<exam_id>/proctoring")
 @teacher_or_admin_required
 def exam_proctoring(exam_id):
-    """Proctoring dashboard — live view of student exam progress."""
+    """The live room moved into the session page. A bookmark is a promise."""
+    _, err = _guard_exam(get_supabase(), exam_id, as_json=_wants_json(),
+                         redirect_to="/teacher/exams",
+                         columns="id,teacher_id,school_id")
+    if err:
+        return err
+    return redirect(url_for("teacher.exam_sessions", exam_id=exam_id), code=301)
+
+
+@teacher_bp.route("/api/exams/<exam_id>/sessions-data")
+@teacher_or_admin_required
+def exam_sessions_data(exam_id):
+    """Everything the session page shows, in one read.
+
+    One endpoint instead of two because the two it replaced returned overlapping
+    halves of one exam — the same submissions, parsed twice, with the pattern half
+    shipping the answer key into the process for a page that only ever saw counts.
+    """
     supabase = get_supabase()
     exam, err = _guard_exam(
-        supabase, exam_id, as_json=_wants_json(), redirect_to="/teacher/exams",
-        columns="id,teacher_id,school_id,title,subject,total_questions,"
-                "duration_minutes,start_at,status")
+        supabase, exam_id,
+        columns="id,teacher_id,school_id,title,class_ids,total_questions")
     if err:
         return err
-    return render_template("teacher/proctoring.html", exam=exam, exam_id=exam_id)
-
-
-@teacher_bp.route("/api/exams/<exam_id>/proctoring-data")
-@teacher_or_admin_required
-def exam_proctoring_data(exam_id):
-    """API: return live proctoring data (submissions + violations) for an exam."""
-    supabase = get_supabase()
-
-    # Live answers and violation detail for every student in the room — scoped to
-    # the exam's owner (or the school's admin), like the grading queue.
-    exam, err = _guard_exam(supabase, exam_id,
-                            columns="id,teacher_id,school_id,class_ids,total_questions")
-    if err:
-        return err
-    class_ids = exam.get("class_ids") or []
-    total_q = exam.get("total_questions", 0)
-
-    students = []
-    if class_ids:
-        # The class a pupil sits in is `profiles.class_id`; there is no
-        # `student_classes` join table in this database, and the request for one
-        # did not return an empty list — PostgREST answers `PGRST205` and the
-        # route raised, so the proctoring panel was a 500 rather than a room.
-        students = supabase.table("profiles") \
-            .select("id,full_name") \
-            .in_("class_id", class_ids) \
-            .eq("role", "murid") \
-            .execute().data or []
-
-    # Get submissions for this exam
-    subs = supabase.table("submissions") \
-        .select("student_id,status,answers,submitted_at,updated_at") \
-        .eq("exam_id", exam_id) \
-        .execute().data or []
-
-    sub_map = {s["student_id"]: s for s in subs}
-
-    # Get violation counts
-    try:
-        viols = supabase.table("violation_logs") \
-            .select("user_id") \
-            .eq("exam_id", exam_id) \
-            .execute().data or []
-    except Exception:
-        viols = []
-
-    viol_count = {}
-    for v in viols:
-        uid = v.get("user_id", "")
-        viol_count[uid] = viol_count.get(uid, 0) + 1
-
-    now = datetime.now(timezone.utc)
-
-    result = []
-    for s in students:
-        sid = s["id"]
-        sub = sub_map.get(sid)
-        answers = sub.get("answers") or {} if sub else {}
-        if isinstance(answers, str):
-            try:
-                answers = json.loads(answers)
-            except Exception:
-                answers = {}
-
-        # Count how many questions have answers
-        ans_count = 0
-        if isinstance(answers, dict):
-            for v in answers.values():
-                if isinstance(v, dict) and v.get("answer"):
-                    ans_count += 1
-                elif isinstance(v, str) and v:
-                    ans_count += 1
-                elif isinstance(v, dict):
-                    ans_count += 1
-
-        result.append({
-            "id": sid,
-            "name": s.get("full_name", sid[:12]),
-            "status": sub.get("status", "not_started") if sub else "not_started",
-            "answers_count": ans_count,
-            "total_questions": total_q,
-            "violations": viol_count.get(sid, 0),
-            "updated_at": (sub.get("updated_at") or sub.get("submitted_at") or "").split(".")[0].replace("T", " ") if sub else "",
-        })
-
-    return jsonify({
-        "students": result,
-        "timestamp": now.isoformat(),
-        "total_students": len(result),
-        "started": sum(1 for r in result if r["status"] != "not_started"),
-        "submitted": sum(1 for r in result if r["status"] in ("submitted", "graded", "published")),
-    })
+    return jsonify(session_review.review_for_exam(supabase, exam))
 
 
 @teacher_bp.route("/exams/<exam_id>/generate-remedial", methods=["POST"])
@@ -4020,112 +3964,12 @@ def generate_remedial(exam_id):
 @teacher_bp.route("/exams/<exam_id>/cheat-analysis")
 @teacher_or_admin_required
 def cheat_analysis(exam_id):
-    """Cheat pattern detection dashboard."""
+    """The pattern page was the same sitting seen twice. It also left a link."""
     _, err = _guard_exam(get_supabase(), exam_id, as_json=_wants_json(),
                          redirect_to="/teacher/exams")
     if err:
         return err
-    return render_template("teacher/cheat_analysis.html", exam_id=exam_id)
-
-
-@teacher_bp.route("/api/exams/<exam_id>/cheat-data")
-@teacher_or_admin_required
-def cheat_analysis_data(exam_id):
-    """API: analyze submissions for cheating patterns."""
-    supabase = get_supabase()
-    # Returns every student's answers and the answer key, so it follows the same
-    # rule — and the row the check loads is the row this handler needs.
-    exam, err = _guard_exam(
-        supabase, exam_id,
-        columns="id,teacher_id,school_id,title,question_types,answer_key,total_questions")
-    if err:
-        return err
-
-    answer_key = exam.get("answer_key") or {}
-    if isinstance(answer_key, str):
-        try: answer_key = json.loads(answer_key)
-        except: answer_key = {}
-    qtypes = exam.get("question_types") or {}
-    if isinstance(qtypes, str):
-        try: qtypes = json.loads(qtypes)
-        except: qtypes = {}
-
-    subs = supabase.table("submissions") \
-        .select("id,student_id,answers,submitted_at,created_at,profiles(full_name)") \
-        .eq("exam_id", exam_id) \
-        .in_("status", ["submitted", "graded", "published"]) \
-        .execute().data or []
-
-    parsed = []
-    for s in subs:
-        answers = s.get("answers") or {}
-        if isinstance(answers, str):
-            try: answers = json.loads(answers)
-            except: answers = {}
-        profile = s.get("profiles") or {}
-        parsed.append({
-            "id": s["id"],
-            "student_id": s["student_id"],
-            "name": profile.get("full_name", s["student_id"][:12]),
-            "answers": answers,
-            "submitted_at": s.get("submitted_at") or s.get("created_at") or "",
-        })
-
-    # 1. Identical Wrong Answer Detection
-    total_q = exam.get("total_questions", 0)
-    wrong_answers = {}
-    for p in parsed:
-        ans = p["answers"]
-        wrong_pattern = []
-        for qi in range(total_q):
-            qi_str = str(qi)
-            stu_ans = ans.get(qi_str, "")
-            if isinstance(stu_ans, dict):
-                stu_ans = stu_ans.get("answer", "")
-            key = answer_key.get(qi_str, "")
-            if key and stu_ans and stu_ans != key:
-                wrong_pattern.append(f"{qi}:{stu_ans}")
-        if wrong_pattern:
-            pattern = "|".join(wrong_pattern)
-            if pattern not in wrong_answers:
-                wrong_answers[pattern] = []
-            wrong_answers[pattern].append(p["name"])
-
-    identical_groups = [{"students": v, "count": len(v), "pattern": k[:100]}
-                        for k, v in wrong_answers.items() if len(v) >= 2]
-    identical_groups.sort(key=lambda x: x["count"], reverse=True)
-
-    # 2. Submission Timing Cluster
-    from collections import defaultdict
-    time_clusters = []
-    timestamps = [(p["name"], p["submitted_at"]) for p in parsed if p.get("submitted_at")]
-    import datetime
-    from datetime import timezone
-    for i, (n1, t1) in enumerate(timestamps):
-        cluster = [n1]
-        for j, (n2, t2) in enumerate(timestamps):
-            if i != j and t1 and t2:
-                try:
-                    dt1 = datetime.datetime.fromisoformat(t1.replace("Z", "+00:00").split(".")[0])
-                    dt2 = datetime.datetime.fromisoformat(t2.replace("Z", "+00:00").split(".")[0])
-                    diff = abs((dt1 - dt2).total_seconds())
-                    if diff < 3:
-                        cluster.append(n2)
-                except: pass
-        if len(cluster) >= 3:
-            cluster.sort()
-            key = ",".join(cluster)
-            if not any(key == c.get("key") for c in time_clusters):
-                time_clusters.append({"key": key, "students": list(set(cluster)), "count": len(set(cluster))})
-
-    time_clusters.sort(key=lambda x: x["count"], reverse=True)
-
-    return jsonify({
-        "exam_title": exam.get("title", ""),
-        "identical_groups": identical_groups[:10],
-        "time_clusters": time_clusters[:10],
-        "total_students": len(parsed),
-    })
+    return redirect(url_for("teacher.exam_sessions", exam_id=exam_id), code=301)
 
 
 @teacher_bp.route("/exams/<exam_id>/accreditation-report")
