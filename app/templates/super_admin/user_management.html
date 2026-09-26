@@ -2,21 +2,64 @@
 {% extends "base.html" %}
 {% block title %}Manajemen User - ScanGrade{% endblock %}
 {% block page_title %}Manajemen User{% endblock %}
+
+{# A sortable header keeps the other filters in the URL, so ordering never silently
+   drops the role or status you are looking at. Clicking the column you are already
+   sorting by flips the direction; any other column starts ascending. #}
+{% macro sort_head(field, label, align='left') %}
+    {% set next_dir = 'desc' if (sort == field and dir == 'asc') else 'asc' %}
+    <a href="?q={{ q|urlencode }}&role={{ role|urlencode }}&status={{ status|urlencode }}&sort={{ field }}&dir={{ next_dir }}"
+       class="inline-flex items-center gap-1 hover:text-purple-600 transition {{ 'text-purple-600' if sort == field else '' }}">
+        {{ label }}
+        {% if sort == field %}
+            {% if dir == 'desc' %}
+            <i class="fas fa-sort-down"></i>
+            {% else %}
+            <i class="fas fa-sort-up"></i>
+            {% endif %}
+        {% else %}
+            <i class="fas fa-sort text-surface-300"></i>
+        {% endif %}
+    </a>
+{% endmacro %}
+
 {% block content %}
 <div class="space-y-4" x-data="{ showPw: null, editEmail: null }">
-    <form class="flex gap-3" method="GET">
+    <form class="flex flex-col sm:flex-row gap-3" method="GET">
         <input type="text" name="q" value="{{ q }}" placeholder="Cari email atau ID user..." class="flex-1 px-4 py-2.5 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500">
+        <select name="role" class="px-4 py-2.5 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500">
+            <option value="">Semua role</option>
+            {% for r in roles %}
+            <option value="{{ r }}" {{ 'selected' if r == role }}>{{ r }}</option>
+            {% endfor %}
+        </select>
+        <select name="status" class="px-4 py-2.5 border border-surface-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500">
+            <option value="">Semua status</option>
+            {% for s in statuses %}
+            <option value="{{ s }}" {{ 'selected' if s == status }}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        {# Searching keeps the ordering you chose instead of resetting it. #}
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="dir" value="{{ dir }}">
         <button type="submit" class="px-5 py-2.5 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition"><i class="fas fa-search mr-1"></i>Cari</button>
+        {% if q or role or status or sort %}
+        <a href="/super-admin/users/manage" class="px-5 py-2.5 bg-surface-100 text-surface-600 rounded-xl font-bold text-sm hover:bg-surface-200 transition text-center">Reset</a>
+        {% endif %}
     </form>
+
+    <p class="text-xs text-surface-500 font-medium">
+        Menampilkan {{ users|length }} dari {{ total }} user{% if role or status or q %} (terfilter){% endif %}
+    </p>
 
     <div class="card overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
             <thead class="bg-surface-50 border-b">
                 <tr>
-                    <th class="text-left px-4 py-3 font-bold text-surface-600 text-xs">Nama</th>
-                    <th class="text-left px-4 py-3 font-bold text-surface-600 text-xs">Email</th>
-                    <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">Role</th>
-                    <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">Status</th>
+                    <th class="text-left px-4 py-3 font-bold text-surface-600 text-xs">{{ sort_head('name', 'Nama') }}</th>
+                    <th class="text-left px-4 py-3 font-bold text-surface-600 text-xs">{{ sort_head('email', 'Email') }}</th>
+                    <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">{{ sort_head('role', 'Role', 'center') }}</th>
+                    <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">{{ sort_head('status', 'Status', 'center') }}</th>
                     <th class="text-center px-4 py-3 font-bold text-surface-600 text-xs">Aksi</th>
                 </tr>
             </thead>
@@ -59,7 +102,7 @@
     {% if total_pages > 1 %}
     <div class="flex items-center justify-center gap-2">
         {% for p in range(1, total_pages + 1) %}
-        <a href="?q={{ q }}&page={{ p }}" class="px-3 py-1.5 rounded-lg text-sm font-bold {{ 'bg-purple-600 text-white' if p == page else 'bg-surface-100 text-surface-600 hover:bg-surface-200' }}">{{ p }}</a>
+        <a href="?q={{ q|urlencode }}&role={{ role|urlencode }}&status={{ status|urlencode }}&sort={{ sort }}&dir={{ dir }}&page={{ p }}" class="px-3 py-1.5 rounded-lg text-sm font-bold {{ 'bg-purple-600 text-white' if p == page else 'bg-surface-100 text-surface-600 hover:bg-surface-200' }}">{{ p }}</a>
         {% endfor %}
     </div>
     {% endif %}
