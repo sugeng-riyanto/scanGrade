@@ -1,0 +1,125 @@
+{% set content_lang = 'id' %}
+{% extends "base.html" %}
+{% block title %}Pengaturan Email - ScanGrade{% endblock %}
+{% block page_title %}Pengaturan Email (SMTP){% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {% if msg[1] == 'smtp_saved' %}
+        <span x-text="t('Pengaturan email tersimpan.','Email settings saved.')"></span>
+        {% elif msg[1] == 'smtp_save_failed' %}
+        <span x-text="t('Gagal menyimpan — periksa log server.','Could not save — check the server log.')"></span>
+        {% elif msg[1] == 'smtp_test_sent' %}
+        <span x-text="t('Email uji terkirim — jalur email ini benar-benar hidup.','The test email was sent — this mail path is genuinely live.')"></span>
+        {% elif msg[1] == 'smtp_test_send_failed' %}
+        <span x-text="t('Pengiriman gagal — periksa host, port, dan kata sandi aplikasi.','Sending failed — check the host, port and app password.')"></span>
+        {% elif msg[1] == 'smtp_test_not_configured' %}
+        <span x-text="t('Belum ada kredensial SMTP, jadi tidak ada yang dikirim.','No SMTP credential is set, so nothing was sent.')"></span>
+        {% elif msg[1] == 'smtp_test_no_recipient' %}
+        <span x-text="t('Tidak ada alamat tujuan, jadi tidak ada yang dikirim.','There was no destination address, so nothing was sent.')"></span>
+        {% else %}
+        {{ msg[1] }}
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    {# The one fact the page exists to answer: can this box send mail, and where
+       does the credential come from? #}
+    <div class="card p-5 border {% if configured %}border-emerald-200 bg-emerald-50/40{% else %}border-amber-200 bg-amber-50/40{% endif %}">
+        <div class="flex items-start gap-4">
+            <i class="fas {% if configured %}fa-circle-check text-emerald-600{% else %}fa-triangle-exclamation text-amber-600{% endif %} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {% if configured %}text-emerald-700{% else %}text-amber-700{% endif %}">
+                    {% if configured %}
+                    <span x-text="t('Email siap dikirim','Email is ready to send')"></span>
+                    {% else %}
+                    <span x-text="t('Email belum bisa dikirim','Email cannot be sent yet')"></span>
+                    {% endif %}
+                </h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if configured %}
+                    <span x-text="t('Kredensial ada, sehingga reset kata sandi dan email persetujuan bisa sampai ke penerima.','A credential is present, so password resets and approval emails can reach their recipients.')"></span>
+                    {% else %}
+                    <span x-text="t('Tanpa kata sandi aplikasi yang valid, halaman lupa kata sandi tidak bisa mengirim kode. Isi kolom di bawah dengan kata sandi aplikasi dari penyedia email.','Without a valid app password the forgot-password page cannot send a code. Fill the fields below with an app password from your mail provider.')"></span>
+                    {% endif %}
+                </p>
+                <div class="mt-4 flex flex-wrap gap-2 text-xs">
+                    <span class="px-2 py-1 rounded-lg font-bold {% if source == 'database' %}bg-primary-100 text-primary-700{% else %}bg-surface-100 text-surface-600{% endif %}">
+                        {% if source == 'database' %}
+                        <span x-text="t('Sumber: pengaturan aplikasi (basis data)','Source: app settings (database)')"></span>
+                        {% else %}
+                        <span x-text="t('Sumber: berkas server (.env)','Source: server file (.env)')"></span>
+                        {% endif %}
+                    </span>
+                    <span class="px-2 py-1 rounded-lg font-bold bg-surface-100 text-surface-600">
+                        {% if password_set %}
+                        <span x-text="t('Kata sandi tersimpan','A password is stored')"></span>
+                        {% else %}
+                        <span x-text="t('Belum ada kata sandi tersimpan','No password stored yet')"></span>
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card p-6">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600 text-xl"><i class="fas fa-envelope"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800" x-text="t('Akun Pengirim','Sending Account')"></h3>
+                <p class="text-sm text-slate-500 font-medium" x-text="t('Dipakai untuk reset kata sandi, persetujuan sekolah, dan notifikasi.','Used for password resets, school approvals and notifications.')"></p>
+            </div>
+        </div>
+
+        <form method="POST" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-bold text-slate-700 mb-1" x-text="t('Host SMTP','SMTP host')"></label>
+                    <input type="text" name="smtp_host" value="{{ settings.get('smtp_host','') }}" class="input" placeholder="smtp.gmail.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-1" x-text="t('Port','Port')"></label>
+                    <input type="number" name="smtp_port" value="{{ settings.get('smtp_port','') }}" class="input" placeholder="465">
+                    <p class="text-xs text-slate-400 mt-1" x-text="t('465 = SSL, 587 = STARTTLS','465 = SSL, 587 = STARTTLS')"></p>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1" x-text="t('Email / Pengguna','Email / username')"></label>
+                <input type="email" name="smtp_user" value="{{ settings.get('smtp_user','') }}" class="input" placeholder="scangrade9@gmail.com">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1" x-text="t('Kata Sandi Aplikasi','App password')"></label>
+                <input type="password" name="smtp_password" value="" class="input" autocomplete="new-password"
+                       placeholder="{% if password_set %}••••••••{% endif %}">
+                <p class="text-xs text-slate-400 mt-1" x-text="t('Hanya untuk ditulis — kata sandi tidak pernah ditampilkan kembali. Biarkan kosong untuk mempertahankan yang sudah tersimpan.','Write-only — the password is never shown again. Leave blank to keep the stored one.')"></p>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1" x-text="t('Alamat Pengirim (opsional)','From address (optional)')"></label>
+                <input type="text" name="smtp_from" value="{{ settings.get('smtp_from','') }}" class="input" placeholder="ScanGrade <scangrade9@gmail.com>">
+            </div>
+            <div class="flex items-center gap-3 pt-2">
+                <button type="submit" class="btn btn-primary px-6" x-text="t('Simpan','Save')"></button>
+                <a href="/super-admin/dashboard" class="btn btn-ghost" x-text="t('Kembali','Back')"></a>
+            </div>
+        </form>
+    </div>
+
+    <div class="card p-6">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 text-xl"><i class="fas fa-paper-plane"></i></div>
+            <div>
+                <h3 class="font-extrabold text-lg text-slate-800" x-text="t('Kirim Email Uji','Send a Test Email')"></h3>
+                <p class="text-sm text-slate-500 font-medium" x-text="t('Buktikan jalur email benar-benar bekerja sebelum diandalkan.','Prove the mail path really works before relying on it.')"></p>
+            </div>
+        </div>
+        <form method="POST" action="/super-admin/email-settings/test" class="flex flex-col sm:flex-row gap-3">
+            <input type="email" name="test_to" class="input flex-1" placeholder="nama@sekolah.sch.id"
+                   value="{{ settings.get('smtp_user','') }}">
+            <button type="submit" class="btn btn-primary px-6 whitespace-nowrap" x-text="t('Kirim Uji','Send test')"></button>
+        </form>
+        <p class="text-xs text-slate-400 mt-2" x-text="t('Kosongkan untuk mengirim ke akun pengirim itu sendiri.','Leave blank to send to the sending account itself.')"></p>
+    </div>
+</div>
+{% endblock %}

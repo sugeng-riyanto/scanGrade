@@ -261,9 +261,8 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
     invalidate_school_active(school_id)
 
     # Send activation email to admin
+    from app.services import smtp_settings
     try:
-        import smtplib, ssl
-        from email.mime.text import MIMEText
         admin = supabase.table("profiles").select("id, full_name, phone").eq("school_id", school_id).eq("role", "admin_sekolah").limit(1).execute().data
         if admin:
             admin_email = None
@@ -275,7 +274,7 @@ def _activate_subscription(school_id, plan_id, order_id, supabase):
             recovery_email = admin[0].get("phone", "")
             recipient = recovery_email if "@" in recovery_email else admin_email
             if recipient:
-                msg = MIMEText(f"""Yth. {admin[0].get('full_name', 'Admin Sekolah')},
+                body = f"""Yth. {admin[0].get('full_name', 'Admin Sekolah')},
 
 Selamat! Pembayaran langganan ScanGrade Anda telah berhasil dikonfirmasi.
 
@@ -291,18 +290,13 @@ Link Login: https://scangrade.web.id/admin-sekolah/dashboard
 
 Hormat kami,
 Tim ScanGrade
-https://scangrade.web.id""", "plain", "utf-8")
-                msg["Subject"] = "🎉 ScanGrade — Pembayaran Berhasil! Akun Aktif"
-                msg["From"] = "ScanGrade <scangrade9@gmail.com>"
-                msg["To"] = recipient
-                smtp_email = current_app.config.get("SMTP_EMAIL", "")
-                smtp_pass = current_app.config.get("SMTP_PASSWORD", "")
-                if smtp_email and smtp_pass:
-                    context = ssl.create_default_context()
-                    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-                        server.login(smtp_email, smtp_pass)
-                        server.sendmail(smtp_email, recipient, msg.as_string())
-                current_app.logger.info(f"Activation email sent to {recipient}")
+https://scangrade.web.id"""
+                ok, err = smtp_settings.send(
+                    recipient, "🎉 ScanGrade — Pembayaran Berhasil! Akun Aktif", body)
+                if ok:
+                    current_app.logger.info(f"Activation email sent to {recipient}")
+                else:
+                    current_app.logger.warning(f"Activation email not sent to {recipient}: {err}")
     except Exception as e:
         current_app.logger.error(f"Failed to send activation email: {e}")
 

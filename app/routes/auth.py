@@ -614,26 +614,17 @@ def _send_email(to_email: str, subject: str, body: str) -> bool:
     answers 200 while sending nothing is the one failure a visitor cannot tell
     from success, so the answer is a bool the caller has to look at.
     """
-    import smtplib, ssl
-    from email.mime.text import MIMEText
-    smtp_email = current_app.config.get("SMTP_EMAIL", "")
-    smtp_pass = current_app.config.get("SMTP_PASSWORD", "")
-    if not smtp_email or not smtp_pass:
-        current_app.logger.warning("SMTP not configured — email not sent")
-        return False
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = f"ScanGrade <{smtp_email}>"
-    msg["To"] = to_email
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-            server.login(smtp_email, smtp_pass)
-            server.sendmail(smtp_email, to_email, msg.as_string())
-    except Exception as exc:  # noqa: BLE001 — reported, not raised: the caller renders it
-        current_app.logger.error("Could not send to %s: %s", to_email, exc)
-        return False
-    return True
+    from app.services import smtp_settings
+
+    # One resolver, so a credential set in the admin panel actually reaches this
+    # path. When this function read `config.SMTP_PASSWORD` directly it saw only the
+    # environment, which on a hosted box is an empty `SMTP_PASSWORD=` line — the
+    # reset email then failed no matter what the operator had configured.
+    ok, error = smtp_settings.send(to_email, subject, body)
+    if not ok:
+        current_app.logger.warning(
+            "Could not send to %s: %s", to_email, error or "not configured")
+    return ok
 
 
 @auth_bp.route("/forgot-password", methods=["GET", "POST"])

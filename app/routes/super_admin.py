@@ -212,13 +212,14 @@ def api_reset_admin_pw(school_id):
         return jsonify({"error": "Admin not found"}), 404
     new_pw = secrets.token_hex(8)
     supabase.auth.admin.update_user_by_id(admin[0]["id"], {"password": new_pw})
-    # Send email via SMTP
+    # Send email via the one resolver, so the panel's credential reaches this path.
+    from app.services import smtp_settings
+    admin_email = None
+    email_sent = False
     try:
-        import smtplib, ssl
-        from email.mime.text import MIMEText
         admin_email = supabase.auth.admin.get_user_by_id(admin[0]["id"]).user.email
         if admin_email:
-            msg = MIMEText(f"""Yth. Bpk/Ibu {admin[0].get('full_name', 'Admin Sekolah')},
+            body = f"""Yth. Bpk/Ibu {admin[0].get('full_name', 'Admin Sekolah')},
 
 Dengan hormat,
 
@@ -233,20 +234,12 @@ Jika ada pertanyaan, jangan ragu untuk menghubungi tim dukungan kami.
 
 Hormat kami,
 Tim ScanGrade
-https://scangrade.web.id""", "plain", "utf-8")
-            msg["Subject"] = "🔐 ScanGrade — Kata Sandi Berhasil Diatur Ulang"
-            msg["From"] = "ScanGrade <scangrade9@gmail.com>"
-            msg["To"] = admin_email
-            smtp_email = current_app.config.get("SMTP_EMAIL", "")
-            smtp_pass = current_app.config.get("SMTP_PASSWORD", "")
-            if smtp_email and smtp_pass:
-                context = ssl.create_default_context()
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-                    server.login(smtp_email, smtp_pass)
-                    server.sendmail(smtp_email, admin_email, msg.as_string())
-    except Exception as e:
-        pass  # Email is best-effort; password is returned in response
-    return jsonify({"success": True, "password": new_pw, "email_sent": bool(admin_email if 'admin_email' in dir() else False)})
+https://scangrade.web.id"""
+            email_sent, _err = smtp_settings.send(
+                admin_email, "🔐 ScanGrade — Kata Sandi Berhasil Diatur Ulang", body)
+    except Exception:  # noqa: BLE001 — email is best-effort; the password is returned either way
+        pass
+    return jsonify({"success": True, "password": new_pw, "email_sent": email_sent})
 
 
 @super_bp.route("/users")
@@ -1898,3 +1891,66 @@ def api_privacy_settings_save():
             "saved": saved,
         }), 500
     return jsonify({"success": True, "saved": saved})
+
+
+@super_bp.route("/email-settings", methods=["GET", "POST"])
+@_sa_required
+def email_settings():
+    """Where this instance's outbound mailbox is set — without a shell.
+
+    The credential used to live only in ``/opt/scangrade/.env``, whose installer
+    line is ``SMTP_PASSWORD=`` (empty), so a hosted box could reach "send the reset
+    code" and always fail with no remedy short of root. Resolving it here means the
+    one person who owns the mailbox can set it from the panel they already use.
+
+    The password is write-only: it is read for sending and never handed to this
+    template, and a blank submit keeps the stored one rather than erasing it.
+    """
+    from app.services import smtp_settings
+
+    if request.method == "POST":
+        data = request.form.to_dict()
+        try:
+            saved = smtp_settings.save(data)
+        except Exception as exc:  # noqa: BLE001 — the operator must see this, not a 500
+            current_app.logger.error("SMTP settings not saved: %s", exc)
+            flash("smtp_save_failed", "error")
+            return redirect("/super-admin/email-settings")
+        resolved = smtp_settings.resolve()
+        # The password is never echoed into the audit log — only the source that
+        # now answers "where does this box's mail come from".
+        log_activity("update", "smtp_settings", ",".join(saved) or "none",
+                     new_data={"keys": saved, "source": resolved["source"]},
+                     user_id=g.user_id)
+        flash("smtp_saved", "success")
+        return redirect("/super-admin/email-settings")
+
+    store = smtp_settings.load()
+    resolved = smtp_settings.resolve()
+    return render_template(
+        "super_admin/email_settings.html",
+        settings={k: v for k, v in store.items() if k != "smtp_password"},
+        configured=resolved["configured"],
+        source=resolved["source"],
+        password_set=bool((store.get("smtp_password") or "").strip()),
+    )
+
+
+@super_bp.route("/email-settings/test", methods=["POST"])
+@_sa_required
+def email_settings_test():
+    """Send a test message and say exactly what happened.
+
+    Four outcomes map to four sentences on the page, so "sent" can only mean the
+    relay accepted the message — never that the button was pressed.
+    """
+    from app.services import smtp_settings
+
+    target = (request.form.get("test_to") or "").strip()
+    if not target:
+        target = (smtp_settings.resolve().get("user") or "").strip()
+    result = smtp_settings.send_test(target)
+    log_activity("create", "smtp_settings_test", result["outcome"], user_id=g.user_id)
+    flash(f"smtp_test_{result['outcome']}",
+          "success" if result["outcome"] == "sent" else "error")
+    return redirect("/super-admin/email-settings")
