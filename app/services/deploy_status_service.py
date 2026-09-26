@@ -251,6 +251,18 @@ RELEASE_FAILED = "failed"
 RELEASE_KEYS = frozenset({RELEASE_WRITTEN, RELEASE_NOTHING_HELD, RELEASE_NOT_HELD,
                           RELEASE_DIR_MISSING, RELEASE_NOT_WRITABLE, RELEASE_FAILED})
 
+#: What a re-baseline request can answer. A release request retries a refused commit;
+#: this one asks the runner to re-describe the *box*, so it shares the write answers
+#: and the "nothing is pending" one, and has no per-commit objection of its own.
+REBASELINE_WRITTEN = "written"
+REBASELINE_NOTHING_HELD = "nothing_held"
+REBASELINE_DIR_MISSING = "dir_missing"
+REBASELINE_NOT_WRITABLE = "not_writable"
+REBASELINE_FAILED = "failed"
+REBASELINE_KEYS = frozenset({REBASELINE_WRITTEN, REBASELINE_NOTHING_HELD,
+                             REBASELINE_DIR_MISSING, REBASELINE_NOT_WRITABLE,
+                             REBASELINE_FAILED})
+
 
 def gate_key(reason: str | None) -> str:
     """Which gate refused this, as a stable key rather than a sentence.
@@ -1376,6 +1388,65 @@ def request_release(*, request_file=None, quarantine_file=None, repo=None,
     return result
 
 
+def request_rebaseline(*, request_file=None, quarantine_file=None, repo=None,
+                       now: _dt.datetime | None = None) -> dict:
+    """Ask the runner, from the page, to re-measure the box on its next attempt.
+
+    A release request retries a refused commit; this one also tells the perf gate to
+    rewrite its baseline from the box as it is now (`--rebaseline`). They are two
+    different asks: retrying with the same yardstick re-refuses a release the box's
+    drift, not the code, made slow, which is the deadlock an operator could only
+    leave from a shell.
+
+    Written only while a commit is held, for the reason the release request is: the
+    runner consumes the file on its next tick whatever it finds, so a request left
+    behind with nothing to deploy would be spent on a tick that measured nothing
+    instead of on the release the operator meant. "Nothing is pending" is the honest
+    answer then, never a file waiting for something to spend it on.
+
+    One bit wide, like the release request: only the file's *existence* is read, so
+    nothing a page can write is ever executed.
+    """
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    repo = pathlib.Path(repo or os.environ.get("SCANGRADE_REPO") or DEFAULT_REPO)
+    quarantine_file = pathlib.Path(
+        quarantine_file or os.environ.get("SCANGRADE_QUARANTINE_FILE")
+        or DEFAULT_QUARANTINE_FILE)
+    request_file = pathlib.Path(
+        request_file or os.environ.get("SCANGRADE_REBASELINE_REQUEST")
+        or (DEFAULT_REQUEST_DIR + "/rebaseline"))
+
+    held = quarantine_state(quarantine_file, repo, now=now)
+    result = {"key": None, "written": False, "path": str(request_file),
+              "detail": None, "held": held["sha"], "gate": held["gate"]}
+
+    if not held["held"]:
+        result["key"] = REBASELINE_NOTHING_HELD
+        return result
+    if not request_file.parent.is_dir():
+        result["key"] = REBASELINE_DIR_MISSING
+        result["detail"] = str(request_file.parent)
+        return result
+
+    try:
+        request_file.write_text(
+            f"{now.isoformat(timespec='seconds')}\n"
+            f"re-baseline requested from /super-admin/deploy-status\n",
+            encoding="utf-8")
+    except PermissionError as exc:
+        result["key"] = REBASELINE_NOT_WRITABLE
+        result["detail"] = str(exc)
+        return result
+    except OSError as exc:
+        result["key"] = REBASELINE_FAILED
+        result["detail"] = f"{type(exc).__name__}: {exc}"
+        return result
+
+    result["key"] = REBASELINE_WRITTEN
+    result["written"] = True
+    return result
+
+
 def _dir_writable(path: pathlib.Path) -> bool | None:
     """Whether this process could drop a request here.
 
@@ -2029,6 +2100,9 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
     release_request = pathlib.Path(
         release_request or os.environ.get("SCANGRADE_RELEASE_REQUEST")
         or str(request_dir / "release"))
+    rebaseline_request = pathlib.Path(
+        os.environ.get("SCANGRADE_REBASELINE_REQUEST")
+        or str(request_dir / "rebaseline"))
 
     expect, expect_reason = expected_launcher(repo)
     main = runner_state(runner, repo, expect=expect)
@@ -2079,6 +2153,8 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "request_dir": str(request_dir),
         "request_path": str(release_request),
         "request_pending": _exists(release_request),
+        "rebaseline_path": str(rebaseline_request),
+        "rebaseline_pending": _exists(rebaseline_request),
         "request_dir_writable": _dir_writable(request_dir),
     }
 

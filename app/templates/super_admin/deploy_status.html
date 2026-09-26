@@ -57,6 +57,34 @@
     </div>
     {% endif %}
     {% endif %}
+    {% if rebaselined %}
+    {% if rebaselined == 'written' %}
+    <div class="card p-4 border bg-emerald-50 border-emerald-200 flex items-start gap-3">
+        <i class="fas fa-circle-check text-emerald-700 mt-0.5"></i>
+        <p class="text-sm text-emerald-700" x-text="t('Permintaan ukur-ulang dicatat — runner akan mengukur ulang kotak pada tick berikutnya dan menyimpan baseline itu, lalu membandingkan rilis berikutnya secara ketat lagi.','Re-baseline requested — the runner will re-measure the box on the next tick, keep that baseline, and compare the next release strictly again.')"></p>
+    </div>
+    {% elif rebaselined == 'nothing_held' %}
+    <div class="card p-4 border bg-surface-100 border-surface-200 flex items-start gap-3">
+        <i class="fas fa-circle-info text-surface-600 mt-0.5"></i>
+        <p class="text-sm text-surface-600" x-text="t('Tidak ada commit yang ditahan, jadi tidak ada yang perlu diukur ulang sekarang.','No commit is being held, so there is nothing to re-measure right now.')"></p>
+    </div>
+    {% elif rebaselined == 'dir_missing' %}
+    <div class="card p-4 border bg-amber-50 border-amber-200 flex items-start gap-3">
+        <i class="fas fa-triangle-exclamation text-amber-700 mt-0.5"></i>
+        <p class="text-sm text-amber-700" x-text="t('Permintaan tidak bisa ditulis: direktori permintaannya belum ada. Jalankan installer sekali (install-auto-deploy.sh).','The request could not be written: the request directory does not exist yet. Run the installer once (install-auto-deploy.sh).')"></p>
+    </div>
+    {% elif rebaselined == 'not_writable' %}
+    <div class="card p-4 border bg-rose-50 border-rose-200 flex items-start gap-3">
+        <i class="fas fa-circle-xmark text-rose-700 mt-0.5"></i>
+        <p class="text-sm text-rose-700" x-text="t('Permintaan tidak bisa ditulis: direktori permintaan tidak boleh ditulis oleh proses aplikasi.','The request could not be written: the request directory is not writable by the app process.')"></p>
+    </div>
+    {% elif rebaselined == 'failed' %}
+    <div class="card p-4 border bg-rose-50 border-rose-200 flex items-start gap-3">
+        <i class="fas fa-circle-xmark text-rose-700 mt-0.5"></i>
+        <p class="text-sm text-rose-700" x-text="t('Permintaan ukur-ulang gagal ditulis.','The re-baseline request could not be written.')"></p>
+    </div>
+    {% endif %}
+    {% endif %}
     <!-- ── the verdict ──────────────────────────────────────────────────── -->
     <div class="card p-5 border {{ L.box }}">
         <div class="flex items-start gap-4">
@@ -486,8 +514,8 @@
                 {% endif %}
 
                 <div class="mt-4 pt-4 border-t border-surface-200">
-                    {% if status.request_pending or status.release_file_present %}
-                    <p class="text-xs text-emerald-700" x-text="t('Permintaan rilis sudah menunggu — runner akan menghormatinya pada tick berikutnya (tiap dua menit).','A release request is already waiting — the runner honours it on the next tick (every two minutes).')"></p>
+                    {% if status.request_pending or status.release_file_present or status.rebaseline_pending %}
+                    <p class="text-xs text-emerald-700" x-text="t('Permintaan sudah menunggu — runner akan menghormatinya pada tick berikutnya (tiap dua menit).','A request is already waiting — the runner honours it on the next tick (every two minutes).')"></p>
                     {% elif status.request_dir_writable is none %}
                     <p class="text-xs text-amber-700" x-text="t('Belum bisa dirilis dari sini: direktori permintaan belum ada, yang berarti installer belum pernah dijalankan di server ini. Jalankan install-auto-deploy.sh, atau dari shell: touch /etc/scangrade-deploy.release.','This cannot release from here yet: the request directory does not exist, which means the installer has never been run on this server. Run install-auto-deploy.sh, or from a shell: touch /etc/scangrade-deploy.release.')"></p>
                     {% elif not status.request_dir_writable %}
@@ -499,6 +527,13 @@
                             <span x-text="t('Rilis sekali (satu percobaan)','Release once (one attempt)')"></span>
                         </button>
                         <span class="block text-xs text-surface-500 mt-2" x-text="t('Sama dengan touch /etc/scangrade-deploy.release dari shell — satu percobaan, lalu berkasnya dikonsumsi.','The same as touch /etc/scangrade-deploy.release from a shell — one attempt, then the file is consumed.')"></span>
+                    </form>
+                    <form method="POST" action="/super-admin/deploy-status/rebaseline" class="mt-4 pt-4 border-t border-surface-200">
+                        <button type="submit" class="bg-surface-700 hover:bg-surface-800 text-white px-4 py-2 rounded-xl font-bold text-sm transition">
+                            <i class="fas fa-gauge-high mr-1"></i>
+                            <span x-text="t('Ukur ulang kotak ini (satu percobaan)','Re-measure this box (one attempt)')"></span>
+                        </button>
+                        <span class="block text-xs text-surface-500 mt-2" x-text="t('Menulis ulang baseline kinerja dari kotak sebagaimana adanya sekarang, alih-alih mengulang rilis yang sama terhadap tolok ukur yang sudah tidak menggambarkan kotak ini. Pakai ini ketika yang melambat adalah kotaknya, bukan kodenya.','Rewrites the performance baseline from the box as it is now, instead of retrying the same release against a yardstick that no longer describes it. Use it when the box, not the code, is what got slower.')"></span>
                     </form>
                     {% endif %}
                 </div>

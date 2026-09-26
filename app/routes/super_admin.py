@@ -22,6 +22,7 @@ from app.services.deploy_status_service import (
     PERF_DOWNLOADS as DEPLOY_PERF_FILES,
     perf_download as deploy_status_perf_download,
     report as deploy_status_report,
+    request_rebaseline as deploy_status_request_rebaseline,
     request_release as deploy_status_request_release,
 )
 from app.services.deploy_alert_service import (
@@ -323,7 +324,8 @@ def deploy_status():
     return render_template("super_admin/deploy_status.html", status=status,
                            alerts=alerts, locks=lock_health.state(),
                            testalert=request.args.get("testalert"),
-                           released=request.args.get("released"))
+                           released=request.args.get("released"),
+                           rebaselined=request.args.get("rebaselined"))
 
 
 @super_bp.route("/deploy-status/perf/<which>")
@@ -396,6 +398,31 @@ def deploy_status_release():
                      new_data={"request": "release", "gate": result.get("gate")},
                      user_id=g.user_id)
     return redirect(f"/super-admin/deploy-status?released={result['key']}")
+
+
+@super_bp.route("/deploy-status/rebaseline", methods=["POST"])
+@_sa_required
+def deploy_status_rebaseline():
+    """Re-measure the box, so a release held by the box's own drift can pass.
+
+    Distinct from the release button beside it: retrying a slow release against the
+    same baseline refuses it again whenever the *box* — not the code — is what got
+    slow, which is a deadlock whose only exit used to be a shell. This writes the
+    request the runner turns into `perf_gate.py --rebaseline`: the next attempt
+    rewrites the baseline from the box as it is now and compares strictly after.
+
+    Written only while a commit is held, because the runner consumes the request on
+    its next tick whatever it finds — a file left behind would be spent on a tick
+    with nothing to measure. The answer is a key; the copy lives in the template.
+    """
+    result = deploy_status_request_rebaseline()
+    invalidate("deploy_status:report")
+    if result.get("written"):
+        log_activity("update", "deploy_quarantine",
+                     result.get("held") or "unknown",
+                     new_data={"request": "rebaseline", "gate": result.get("gate")},
+                     user_id=g.user_id)
+    return redirect(f"/super-admin/deploy-status?rebaselined={result['key']}")
 
 
 @super_bp.route("/deploy-status/test-alert", methods=["POST"])
