@@ -4,8 +4,9 @@ import os
 import threading
 import time
 from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
-from app.utils.auth import (login_required, get_supabase, get_auth_client, invalidate_session,
-                            set_auth_cookie, login_door_for, session_role, _extract_token)
+from app.utils.auth import (login_required, get_supabase, get_auth_client, get_auth_admin,
+                            find_auth_user_by_email, invalidate_session, set_auth_cookie,
+                            login_door_for, session_role, _extract_token)
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
@@ -602,23 +603,37 @@ def _delete_reset_code(email: str):
     _RESET_CODES.pop(email, None)
 
 
-def _send_email(to_email: str, subject: str, body: str):
-    """Send email via SMTP (scangrade9@gmail.com)."""
+def _send_email(to_email: str, subject: str, body: str) -> bool:
+    """Send email via SMTP (scangrade9@gmail.com). ``True`` when it went out.
+
+    It used to return ``None`` — and, on a box with no ``SMTP_PASSWORD``, log
+    `SMTP not configured — email not sent` and return from *inside* the caller's
+    `try`, which no `except` can see. The visitor was then shown the "enter your
+    6-character code" page for a code that was never sent, and the only place
+    that knew otherwise was a log line on a server they cannot read. A relay that
+    answers 200 while sending nothing is the one failure a visitor cannot tell
+    from success, so the answer is a bool the caller has to look at.
+    """
     import smtplib, ssl
     from email.mime.text import MIMEText
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = "ScanGrade <scangrade9@gmail.com>"
-    msg["To"] = to_email
-    context = ssl.create_default_context()
     smtp_email = current_app.config.get("SMTP_EMAIL", "")
     smtp_pass = current_app.config.get("SMTP_PASSWORD", "")
     if not smtp_email or not smtp_pass:
         current_app.logger.warning("SMTP not configured — email not sent")
-        return
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-        server.login(smtp_email, smtp_pass)
-        server.sendmail(smtp_email, to_email, msg.as_string())
+        return False
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = f"ScanGrade <{smtp_email}>"
+    msg["To"] = to_email
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+            server.login(smtp_email, smtp_pass)
+            server.sendmail(smtp_email, to_email, msg.as_string())
+    except Exception as exc:  # noqa: BLE001 — reported, not raised: the caller renders it
+        current_app.logger.error("Could not send to %s: %s", to_email, exc)
+        return False
+    return True
 
 
 @auth_bp.route("/forgot-password", methods=["GET", "POST"])
@@ -650,8 +665,7 @@ def forgot_password():
             .eq("phone", email).maybe_single().execute()
         )
         if prof:
-            auth_client = get_auth_client()
-            au = auth_client.admin.get_user_by_id(prof["id"])
+            au = get_auth_admin().get_user_by_id(prof["id"])
             user_data = {
                 "auth_email": au.user.email,
                 "recovery_email": email,
@@ -674,8 +688,7 @@ def forgot_password():
                 )
                 if rec:
                     prof = rec.get("profiles") or {}
-                    auth_client = get_auth_client()
-                    au = auth_client.admin.get_user_by_id(rec["id"])
+                    au = get_auth_admin().get_user_by_id(rec["id"])
                     recovery = prof.get("phone", "")
                     target_email = recovery if "@" in recovery else au.user.email
                     user_data = {
@@ -691,28 +704,22 @@ def forgot_password():
 
     # 3. Search by auth email directly
     if not user_data:
-        try:
-            auth_client = get_auth_client()
-            users = auth_client.admin.list_users()
-            for u in users:
-                if u.email and u.email.lower() == email:
-                    prof = row_or_none(
-                        supabase.table("profiles").select("phone, full_name, role")
-                        .eq("id", u.id).maybe_single().execute()
-                    )
-                    p = prof or {}
-                    recovery = p.get("phone", "")
-                    target_email = recovery if "@" in recovery else u.email
-                    user_data = {
-                        "auth_email": u.email,
-                        "recovery_email": recovery if "@" in recovery else "",
-                        "user_id": u.id,
-                        "role": p.get("role", "murid"),
-                        "full_name": p.get("full_name", ""),
-                    }
-                    break
-        except Exception:
-            pass
+        u = find_auth_user_by_email(email)
+        if u:
+            prof = row_or_none(
+                supabase.table("profiles").select("phone, full_name, role")
+                .eq("id", u.id).maybe_single().execute()
+            )
+            p = prof or {}
+            recovery = p.get("phone", "")
+            target_email = recovery if "@" in recovery else u.email
+            user_data = {
+                "auth_email": u.email,
+                "recovery_email": recovery if "@" in recovery else "",
+                "user_id": u.id,
+                "role": p.get("role", "murid"),
+                "full_name": p.get("full_name", ""),
+            }
 
     if not user_data:
         return render_template("auth/forgot_password.html", error=auth_error("forgot_not_found"))
@@ -722,10 +729,12 @@ def forgot_password():
     code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
     _store_reset_code(target_email, code)
 
-    # Send code via SMTP
+    # Send code via SMTP. The stored code is left to expire on its own (10 minutes)
+    # when this fails, so a retry is a normal new request rather than a recovery.
     name = user_data.get("full_name", "Pengguna")
+    sent = False
     try:
-        _send_email(
+        sent = _send_email(
             target_email,
             "🔐 ScanGrade — Kode Verifikasi Reset Password",
             f"""Yth. {name},
@@ -749,6 +758,8 @@ https://scangrade.web.id"""
         )
     except Exception as e:
         current_app.logger.error(f"Failed to send reset code: {e}")
+        sent = False
+    if not sent:
         return render_template("auth/forgot_password.html", error=auth_error("forgot_email_failed"))
 
     return render_template("auth/verify_code.html", email=target_email, auth_email=user_data["auth_email"])
@@ -808,7 +819,6 @@ def set_new_password():
 
     # Find user and update password
     supabase = get_supabase()
-    auth_client = get_auth_client()
     user_id = None
     role = "murid"
 
@@ -819,17 +829,16 @@ def set_new_password():
             .eq("phone", email).maybe_single().execute()
         )
         if not prof:
-            # Find by auth email
-            users = auth_client.admin.list_users()
-            for u in users:
-                if u.email and u.email.lower() == email:
-                    user_id = u.id
-                    p2 = row_or_none(
-                        supabase.table("profiles").select("role")
-                        .eq("id", u.id).maybe_single().execute()
-                    )
-                    role = p2.get("role", "murid") if p2 else "murid"
-                    break
+            # Find by auth email. Scoped to an id here — a full search needs the
+            # service key and the paged walk, not a single page of the listing.
+            u = find_auth_user_by_email(email)
+            if u:
+                p2 = row_or_none(
+                    supabase.table("profiles").select("role")
+                    .eq("id", u.id).maybe_single().execute()
+                )
+                user_id = u.id
+                role = p2.get("role", "murid") if p2 else "murid"
         else:
             user_id = prof["id"]
             role = prof.get("role", "murid")
@@ -840,7 +849,7 @@ def set_new_password():
         return render_template("auth/set_new_password.html", email=email, error=auth_error("reset_user_missing"))
 
     try:
-        auth_client.admin.update_user_by_id(user_id, {"password": password})
+        get_auth_admin().update_user_by_id(user_id, {"password": password})
         session.pop("reset_email", None)
 
         # Role-based redirect

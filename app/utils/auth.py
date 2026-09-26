@@ -2,11 +2,16 @@ import base64
 import functools
 import hashlib
 import json
+import logging
 import time
 from flask import g, request, jsonify, current_app, redirect, flash
 from supabase import Client
 
 from app.utils.auth_messages import auth_error, first
+
+#: Module-level logger: the auth-user lookup below runs outside a request in the
+#: helper tests, and a logging call must never be the thing that breaks a lookup.
+logger = logging.getLogger(__name__)
 
 # Role-based session timeout (OWASP + UU PDP standard)
 SESSION_TIMEOUTS = {
@@ -100,6 +105,73 @@ def get_supabase() -> Client:
 
 def get_auth_client() -> Client:
     return current_app.extensions["supabase_auth"]
+
+
+def get_auth_admin():
+    """The GoTrue **admin** interface, on the service-role client.
+
+    These are two different keys for two different jobs and there is no single
+    client that is right for both. `get_auth_client()` is the anon-key client:
+    sign-in, `set_session`, `update_user` and `sign_out` are *user* calls and
+    belong on it. `admin.list_users()` / `get_user_by_id()` /
+    `update_user_by_id()` are the GoTrue **admin** API and need the service
+    role — the anon key is refused with `AuthApiError: User not allowed`.
+
+    The password-reset flow asked the anon client for all three, inside
+    `except Exception: pass`, so the refusal never reached a log and a box in
+    perfect health answered "Email atau NISN tidak ditemukan" for accounts that
+    sign in fine. `extensions["supabase"]` already holds the service-role client
+    (`RetryingClient` passes `.auth` through unchanged), so this is the key that
+    was always there, under a name that says which job it is for.
+    """
+    return current_app.extensions["supabase"].auth.admin
+
+
+#: How far :func:`find_auth_user_by_email` will page before giving up. The
+#: project holds ~800 users; the cap exists so a runaway tenant cannot turn one
+#: reset request into an unbounded series of calls to the auth service.
+AUTH_USER_LOOKUP_MAX_PAGES = 25
+
+
+def find_auth_user_by_email(email: str, *, per_page: int = 1000,
+                            max_pages: int = AUTH_USER_LOOKUP_MAX_PAGES):
+    """The GoTrue user whose address is *email*, or ``None``.
+
+    `admin.list_users()` is **paged** — 50 users by default — and this project
+    has hundreds, so reading it once was never a search. The addresses past the
+    first page were invisible even to a caller holding the right key, which is
+    why a wrong key was not the only reason the reset flow found nobody.
+
+    It walks until a page comes back **empty**, not until a page looks "short":
+    the page size is the server's to decide (asking for 1000 does not promise
+    1000), so a short page is no proof of the end — and taking it for one is the
+    same mistake, a layer down, that hid these accounts in the first place. One
+    extra call on a miss is the price of never losing an account.
+
+    Comparison is case-insensitive because the address arrives from a form. A
+    refusal is logged rather than swallowed: "the auth service said no" and
+    "nobody has that address" are different answers with different remedies, and
+    conflating them is what hid this for so long.
+    """
+    wanted = (email or "").strip().lower()
+    if not wanted:
+        return None
+    admin = get_auth_admin()
+    for page in range(1, max_pages + 1):
+        try:
+            users = admin.list_users(page=page, per_page=per_page)
+        except Exception:
+            logger.warning("auth user lookup for %s refused on page %s",
+                           wanted, page, exc_info=True)
+            return None
+        if not users:
+            return None          # past the end of the listing
+        for user in users:
+            if user.email and user.email.lower() == wanted:
+                return user
+    logger.warning("auth user lookup for %s stopped after %s page(s) without "
+                   "a match", wanted, max_pages)
+    return None
 
 
 def _wants_json():
