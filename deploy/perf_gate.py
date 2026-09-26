@@ -176,6 +176,19 @@ DEFAULT_ROUNDTRIPS_GRACE = 1.0   # ... plus one query, so a new feature detail p
 #: short enough that a box stalled for a fortnight is measured against the box it is.
 DEFAULT_BASELINE_MAX_AGE_S = 14 * 24 * 3600
 
+#: A release may *declare* that the box's own measurement conditions have changed —
+#: a busier host, a neighbour that appeared, a re-provisioned VPS, a kernel or nginx
+#: that moved — by committing a token to this file. The token is a deliberate act a
+#: reviewer sees in the diff, not a setting that drifts, and it is honoured **once**:
+#: the baseline records the token it honoured, so the next tick compares against the
+#: box as it is now and the declaration is spent. Without it the gate has a state it
+#: cannot leave — once the box drifts enough that every release diverges, no release
+#: passes, so the baseline is never rewritten, so every release diverges — and the
+#: only exit is a shell on the host. This is that exit, delivered by the release the
+#: repository already deploys. It never weakens a *fresh* comparison: a baseline that
+#: does not carry the token still refuses a slow release exactly as before.
+DEFAULT_REBASELINE_INTENT = REPO / "deploy" / "perf_rebaseline.intent"
+
 #: The paths whose change can move a number this gate compares: the app that renders
 #: the student and teacher pages, the harness that measures them, the checkout's
 #: dependencies, and a migration that changes what a page reads. Deliberately wide —
@@ -229,6 +242,36 @@ def load_baseline(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) and data.get("latency") else None
+
+
+def rebaseline_intent(path: Path | str | None = None) -> str | None:
+    """The declared measurement-drift token in the checkout, or None.
+
+    The first non-comment, non-blank line is the token; the rest of the file is the
+    operator's note. `PERF_REBASELINE_INTENT` points this elsewhere so a test can hand
+    it a file instead of writing into the checkout.
+    """
+    target = Path(path or os.environ.get("PERF_REBASELINE_INTENT")
+                  or DEFAULT_REBASELINE_INTENT)
+    try:
+        text = target.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
+def intent_is_spent(baseline: dict | None, intent: str | None) -> bool:
+    """Whether this baseline already acted on `intent`.
+
+    The whole of "once": the token lives in the baseline the release writes, so a
+    declaration cannot re-open the gate on every later tick. An absent or empty
+    intent is never a declaration.
+    """
+    return bool(intent) and (baseline or {}).get("rebaseline_intent") == intent
 
 
 # ── the baseline can go stale ────────────────────────────────────────────────
@@ -908,6 +951,11 @@ def main() -> int:
                                     duration=args.duration)
     baseline_path = Path(args.baseline_file)
     baseline = load_baseline(baseline_path)
+    # A token a release committed to say the box's measurement conditions changed.
+    # Honoured once — the baseline records it — so it cannot re-open the gate on a
+    # later tick. See DEFAULT_REBASELINE_INTENT.
+    intent = rebaseline_intent()
+    declared = bool(intent) and not intent_is_spent(baseline, intent)
 
     if not Path(args.harness).exists():
         print(f"perf gate: NOT ARMED — harness {args.harness} is missing")
@@ -931,7 +979,7 @@ def main() -> int:
         return EXIT_NOT_ARMED
 
     shape = shape_of(args.sessions, args.teachers, args.duration, args.base)
-    if baseline and not args.rebaseline:
+    if baseline and not args.rebaseline and not declared:
         mismatch = shape_mismatch(baseline, shape)
         if mismatch:
             # Classified as not-armed rather than cannot-measure, and that is a
@@ -990,6 +1038,22 @@ def main() -> int:
         print("perf gate: " + save_baseline(baseline_path, record))
         print("perf gate: " + record_evidence(Path(args.evidence_file),
                                                  dict(record, verdict="baseline")))
+        return EXIT_OK
+
+    # A declared drift, honoured before any comparison: the baseline describes a box
+    # whose conditions a release has said are gone, so comparing against it charges
+    # the release for drift no release caused. Re-baseline on the box as it is now
+    # and record the token that licensed it, so the declaration is spent and the next
+    # release is compared against the box it actually ran on.
+    if declared:
+        print(f"perf gate: OK — this release declares the box's measurement conditions "
+              f"changed ({intent}), so it is measured against the box as it is now "
+              f"instead of against a baseline that predates the change. Re-baselining.")
+        print("perf gate: " + save_baseline(baseline_path,
+                                            dict(record, rebaseline_intent=intent)))
+        print("perf gate: " + record_evidence(
+            Path(args.evidence_file),
+            dict(record, rebaseline_intent=intent, verdict="declared_drift")))
         return EXIT_OK
 
     reasons = regression(baseline, measured, args.latency_slack, args.p95_slack,

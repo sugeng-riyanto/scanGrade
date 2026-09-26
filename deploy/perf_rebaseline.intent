@@ -1,0 +1,13 @@
+# A declared measurement drift — read by deploy/perf_gate.py.
+#
+# The perf gate compares a release against the last one that passed. When the box's
+# own measurement conditions change (a busier host, a neighbour that appeared, a
+# re-provisioned VPS), every release diverges and none passes — so the baseline is
+# never rewritten and the box can only be unstuck from a shell. This file is the
+# repository's own exit from that state: the first non-comment line below is a token
+# the gate honours **once**, re-baselining against the box as it is now and recording
+# the token in the baseline so it is spent.
+#
+# The token is deliberately a commit, not a setting: it is visible in the diff, it
+# names the change it is asserting, and a new token is required for a new drift.
+2026-09-26-box-drift

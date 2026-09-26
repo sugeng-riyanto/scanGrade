@@ -48,6 +48,20 @@ def _load(path: Path, name: str):
 gate = _load(GATE_PATH, "perf_gate")
 claims = _load(CLAIMS_PATH, "claims_gate")
 
+
+@pytest.fixture(autouse=True)
+def _no_repo_rebaseline_intent(monkeypatch, tmp_path_factory):
+    """Point the declared-drift token at nothing, unless a test says otherwise.
+
+    `deploy/perf_rebaseline.intent` is a real file in the repository — it is how a
+    release declares that the box's measurement conditions changed. A test that
+    drives `main()` and does not say otherwise would read it, treat every baseline
+    as unspent and re-baseline instead of comparing, which is the opposite of what
+    these tests are for. The drift tests set this explicitly.
+    """
+    missing = tmp_path_factory.mktemp("declared-drift") / "intent"
+    monkeypatch.setenv("PERF_REBASELINE_INTENT", str(missing))
+
 # (conf variable, gate source, the one switch the deploy reads itself) per gate.
 GATES = {
     "perf": ("PERF_CONF", GATE_PATH.read_text(encoding="utf-8"), "PERF_ENFORCE"),
@@ -1406,3 +1420,85 @@ class TestTheConfReachesTheGate:
         assert gate.EXIT_OK == claims.EXIT_OK == 0
         assert gate.EXIT_REGRESSED == claims.EXIT_DIVERGED == 1
         assert gate.EXIT_CANNOT_RUN == claims.EXIT_CANNOT_RUN == 2
+
+
+class TestADeclaredMeasurementDrift:
+    """The gate's own exit from a state it cannot leave.
+
+    Once the box drifts enough that every release diverges, no release passes, so
+    the baseline is never rewritten, so every release diverges — a loop whose only
+    exit used to be a shell on the host. A release may now commit a token declaring
+    the box changed, and the gate re-baselines on the box as it is now. These tests
+    hold both halves: the token re-opens the gate, and it does so exactly once, so a
+    fresh baseline still refuses a genuinely slow release.
+    """
+
+    def test_the_token_is_the_first_non_comment_line(self, tmp_path):
+        path = tmp_path / "intent"
+        path.write_text("# a note\n\n  drift-1  \n# later\ndrift-2\n", encoding="utf-8")
+        assert gate.rebaseline_intent(path) == "drift-1"
+
+    def test_no_file_and_a_comment_only_file_are_no_declaration(self, tmp_path):
+        assert gate.rebaseline_intent(tmp_path / "missing") is None
+        path = tmp_path / "intent"
+        path.write_text("# just a note\n\n", encoding="utf-8")
+        assert gate.rebaseline_intent(path) is None
+
+    def test_a_token_the_baseline_recorded_is_spent(self):
+        assert gate.intent_is_spent({"rebaseline_intent": "t1"}, "t1") is True
+        assert gate.intent_is_spent({"rebaseline_intent": "t1"}, "t2") is False
+        assert gate.intent_is_spent({}, "t1") is False
+        assert gate.intent_is_spent({"rebaseline_intent": "t1"}, None) is False
+
+    def test_a_declared_drift_rebaselines_instead_of_refusing(self, workbench,
+                                                              health_server, monkeypatch,
+                                                              capsys):
+        bench, base = workbench, health_server()
+        intent = bench["tmp"] / "intent"
+        monkeypatch.setenv("PERF_REBASELINE_INTENT", str(intent))
+
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        # The box drifts: this release is one the gate would refuse.
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
+
+        intent.write_text("# declared\nbox-drift-1\n", encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        out = capsys.readouterr().out
+        assert "declares the box's measurement conditions changed" in out
+
+        recorded = json.loads(bench["baseline"].read_text(encoding="utf-8"))
+        assert recorded["rebaseline_intent"] == "box-drift-1", (
+            "the baseline did not record the token, so it would re-baseline forever")
+        assert recorded["latency"]["p50_ms"] == 700, (
+            "the box as it is now did not become the new yardstick")
+        lines = [json.loads(l) for l in bench["evidence"].read_text(
+            encoding="utf-8").splitlines()]
+        assert lines[-1]["verdict"] == "declared_drift"
+
+    def test_the_declaration_is_spent_after_one_release(self, workbench, health_server,
+                                                        monkeypatch):
+        bench, base = workbench, health_server()
+        intent = bench["tmp"] / "intent"
+        monkeypatch.setenv("PERF_REBASELINE_INTENT", str(intent))
+
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        intent.write_text("box-drift-1\n", encoding="utf-8")
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK   # re-baselines once
+        # The same token, and now a slower release: the gate is live again.
+        bench["summary"].write_text(json.dumps(summary(1400, 3000)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
+
+    def test_a_declared_drift_also_re_baselines_a_changed_reference_load(self, workbench,
+                                                                        health_server,
+                                                                        monkeypatch):
+        bench, base = workbench, health_server()
+        intent = bench["tmp"] / "intent"
+        monkeypatch.setenv("PERF_REBASELINE_INTENT", str(intent))
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+
+        # A changed reference load is normally exit 4; a declared drift names this as
+        # part of the conditions that changed, so it re-baselines rather than stalling.
+        intent.write_text("box-drift-1\n", encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch, {"PERF_SESSIONS": "24"}) == gate.EXIT_OK
