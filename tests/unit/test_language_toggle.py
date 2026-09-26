@@ -538,6 +538,11 @@ TRANSLATED = [
     # opening the wrong one. Every string on it is a pair, including the two
     # counts inside the sentences.
     "teacher/reports.html",
+    # The mail credential. Its copy was a pair everywhere — the only super-admin
+    # page a school rarely opens and cannot fix without reading — yet it pinned
+    # itself to Indonesian, so English words were read in an Indonesian voice. The
+    # pin is gone; the page switches like the trial-length setting does.
+    "super_admin/email_settings.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -883,7 +888,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 43, (
+    assert len(TRANSLATED) == 44, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")
