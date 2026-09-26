@@ -199,6 +199,7 @@ one of those the launcher is whatever the last *successful* release installed.
 | **freeze deploys** (e.g. exam week) | `touch /etc/scangrade-deploy.pause` |
 | resume | `rm /etc/scangrade-deploy.pause` |
 | see which commit a gate refused, and why | `cat /var/lib/scangrade-deploy/quarantined` |
+| see the last few refusals, kept past the current one | `ls -t /var/lib/scangrade-deploy/refusals` |
 | see which step stopped the last run *before* it merged | `cat /var/lib/scangrade-deploy/refused-before-merge` |
 | see the step the last run stopped at, whatever stopped it | `cat /var/lib/scangrade-deploy/last-stop` |
 | retry a quarantined commit once | `touch /etc/scangrade-deploy.release` |
@@ -320,8 +321,16 @@ this gate used `3x` and passed it).
 It declines to measure, rather than guessing, when the box is already busy — the
 same 1 vCPU serves real students, and loading it during a live exam would both
 disturb the exam and produce a number that means nothing. It judges the *best* of
-several `/health` samples, so a box that has just been reloaded is not mistaken
-for a busy one.
+several samples of a **rendered page** (the landing page), so a box that has just
+been reloaded is not mistaken for a busy one.
+
+It asks a page rather than `/health`, and that is not a detail. `/health` renders
+no template and touches no page code, so a box whose three workers are saturated
+on exactly the pages these gates measure can still answer it in a millisecond.
+Judging *that* said "idle", the gate loaded a box it should have left alone, and
+the slow pages it then measured were the students' — read as a divergence and
+rolled back. The question the probe asks has to be about the same work the gate
+is about.
 
 ### Arming it
 
@@ -379,17 +388,43 @@ gate's job.
 Three things are compared, because they fail independently: the response time of
 the slowest signed-in page (the symptom a student feels), the **bytes** the
 heaviest page sends (what a phone on a school connection pays for), and the
-**Supabase round-trips** the busiest render spends — read from the app's own
-`X-Supabase-Roundtrips` header, which is the *cause* the other two only reflect. A
+**Supabase queries** the busiest render issues — read from the app's own
+`X-Supabase-Queries` header, which is the *cause* the other two only reflect. A
 page can stay exactly as fast while gaining three queries or a 200 KB script, and
 that is the release this refuses. Each axis carries a ratio **and** an absolute
 grace (1.25x + 8 KiB of payload, 1.25x + 1 query), so a list that honestly got
 longer is not mistaken for a leak — a release has to clear both to be refused. The
-round-trip number is what the page costs *when it does its work*, not what a cache
+query number is what the page costs *when it does its work*, not what a cache
 hit spent: a warm entry replays the cost it was built with, because otherwise the
 busiest student page reads as free on every request. For the same reason the
 program's bytecode is dropped before a mutation run — see
 `.freebuff/mutate_page_cost.py`.
+
+#### Why there are two more numbers than there used to be
+
+Bytes and queries alone cannot say *who* spent them, and the app now sends four
+per render for exactly that reason: `X-Supabase-Queries` (issued once per query),
+`X-Supabase-Roundtrips` (one per **attempt**, retries included), `X-Supabase-Rows`
+(records read), and the page bytes the harness weighs. Two measurements on
+production, same release a day apart, are the whole argument: every endpoint's page
+bytes were identical to the byte while `/teacher/dashboard` went from 1 round-trip
+to 3. Nothing about that page changed, so a gate scoring attempts as a ratio was one
+bad afternoon away from rolling back a release for the transport.
+
+So the round-trip axis is scored on what the render **issued**, and the cost axes are
+**normalized against the data**: today's rows against the baseline's rows, holding the
+part of a page that does not scale with the roster constant (the baseline records the
+smallest signed-in page its run loaded as that floor — a layout does not grow with the
+roster). The data's share is *added* to the allowance as the absolute amount it is, never
+multiplied into it: scaling a page's allowance by its growth would make the most-grown
+page the most forgiving, which is where a fixed addition is easiest to hide. Growth is
+growth only — a dataset that shrank does not license refusing a page that did not change.
+Both the normalization and the retry split are reported as `perf gate: note — …` lines
+next to the verdict, on passes as well as refusals, because they are answers rather than
+excuses. A baseline written before any of this carries no row counts, and there the old
+absolute rule stands: it may refuse a release the data would have excused, and it cannot
+let a heavier one through. The guards are mutation-checked by
+`.freebuff/mutate_perf_attribution.py`.
 
 | Result | Outcome |
 |---|---|
@@ -453,6 +488,15 @@ says gunicorn is up; it says nothing about whether login still works, whether a
 page `500`s for one role, or whether an RBAC guard was loosened — and "deployed
 but teachers cannot open anything" is exactly what a reachability probe waves
 through.
+
+Its output is streamed to the journal as it runs, so an operator watching the
+deploy sees each role being opened rather than a silence that ends in a verdict.
+A refusal keeps that stream *and* is recorded: the runner tees the transcript to a
+fresh file outside the checkout, and the quarantine record quotes the failing
+checks (`FAIL …`) and the verdict line from that copy, so "why did nothing
+deploy" names the check that failed without a shell. The exit status is read from
+the pipe's first command rather than the pipeline, because a `tee` that succeeded
+must not report a smoke test that failed as a pass.
 
 It checks four things:
 
@@ -790,6 +834,141 @@ touch /etc/scangrade-deploy.release     # one attempt, then consumed
 It is deliberately one-shot: the file is deleted whether the retry passes or
 fails, so it cannot become a standing override that quietly pins a known-bad
 commit in place. If the release is refused again it is quarantined again.
+
+### The refused release's numbers outlive the release after it
+
+The performance gate appends one line per judgement to
+`/var/lib/scangrade-deploy/perf/history.jsonl`, and the status page shows the
+**last** line — which is exactly what a quarantined commit loses. Once it is held
+it stops being judged, so the next line belongs to a later release that passed,
+and the measurement the refusal was made from leaves the page just as somebody
+comes looking. The quarantine file still quotes the gate's sentence, but the
+numbers behind it (`slowest page p50 812 ms against 480 ms (1.69x, allowed
+1.50x)`) were reaching nobody without a shell.
+
+So the held commit's own judgement is looked up in the same file, **by the sha
+parsed out of each record** rather than matched as text, and shown beside the
+latest judgement on the deploy-status page (`The Refused Release’s Own Numbers`).
+Two distinctions it keeps, because a missing lookup is a wrong answer that looks
+like a right one:
+
+* **"not judged" and "older than the window" are different.** The history is read
+  as a bounded tail, so a lookup that ran out of window reports
+  `older than the history window` rather than "this gate never judged it" — only
+  the first is fixed by looking at the file.
+* **A fragment is not a judgement.** The window starts mid-record whenever one is
+  larger than the tail, and a line the page cannot read is counted as *skipped*,
+  not dropped — a dropped line is how "not found" starts reading as "never
+  judged".
+
+When the held commit is still the latest judgement the second block is not
+rendered at all, so the same numbers never appear twice.
+
+#### The index beside the history
+
+The history is append-only and grows by a line per deploy for the life of the box,
+and the page deliberately reads only a bounded tail of it (`PERF_TAIL_BYTES`, 64
+KiB). That bound is what the `older than the history window` answer above is made
+from — correct, and still a reader opening the file by hand. So the gate also keeps
+a small index beside it:
+
+```
+/var/lib/scangrade-deploy/perf/history.jsonl.index
+```
+
+one short line per judgement — the commit and the byte offset of its record. The
+page reads the index **whole** (it is far smaller than the history and stays cheap
+far longer) and seeks straight to a record the tail no longer covers, so a held
+commit's numbers are found however long the history has been accumulating. The path
+is the history's own name plus `.index`, **derived in both places** rather than
+configured, so the gate that writes it and the page that reads it cannot be pointed
+at different files (`perf_gate.index_path()` and
+`deploy_status_service._perf_index_path()`).
+
+Three things it does *not* do:
+
+* **It never overrides the tail.** If the tail already holds a commit, its judgement
+  is the newer one (a later append sits nearer the end), so the tail wins and the
+  index only fills what the window lost.
+* **It is not evidence.** The history remains the authority; an index that is
+  absent, unreadable or corrupt just means the tail scan answers as it always did —
+  which is what a box whose gate predates the index gets.
+* **A stale offset is not a judgement.** A rotated or rewritten history can leave an
+  offset pointing at another commit's line, so the reader checks that the record it
+  landed on names the commit it asked for; a mismatch is discarded, never shown.
+
+### The whole refusal, kept past the lift
+
+The perf card above recovers the *held* commit's measurement from the gate's own
+history. The rest of the refusal — which commit, which gate, and the lines that gate
+printed — still had no survivor: the next refusal overwrote the quarantine file, and
+the release that lifted it deleted the file outright. So the runner also copies each
+refusal, **byte for byte**, into
+
+```
+/var/lib/scangrade-deploy/refusals/refused-<epoch>-<short sha>
+```
+
+a directory rather than one framed file, because each record has to be the
+quarantine file's exact bytes and a single file would need a delimiter the gate's own
+output could collide with. The name sorts by time, so the newest are found without
+statting anything. Nothing here decides whether to retry: a history write that fails
+is ignored, and the copy is made **before** the gate's detail is cleared from the
+runner's variables, so the record kept is the one the box acted on.
+
+The last **five** are kept (`REFUSALS_KEEP`); older ones are pruned. A list that
+never shrinks is a directory that grows forever on the box the deploy writes to.
+
+The status page reads them into a card (`The Last Few Refusals`), newest first, with
+each refusal's gate sentence and the gate's own lines verbatim. Two readings carry
+the weight, because a missing record is a wrong answer that looks like a right one:
+
+* **`none` and `unreadable` are different.** No refusals yet (or a runner from
+  before the history) is the ordinary answer and is said out loud; a directory that
+  exists and cannot be read is its own sentence, never rendered as the empty one.
+* **A file that is not a record is reported, not dropped.** A record whose first
+  line is not a sha is shown as *not recognised* rather than silently skipped — a gap
+  in the history is how "nothing was refused" starts reading as the truth.
+
+Everything the page lists is the runner's own words: the detail lines are the
+evidence, and the card renders them under the runner's three-line header exactly as
+the quarantine card does.
+
+**Each of those refusals also carries its own measurement.** The block above shows
+the *held* commit's numbers, and the perf card shows the *latest* judgement, but the
+older quarantined commits had only the runner's prose while their measurement sat in
+the same `history.jsonl` — reachable only by a shell. So every commit in the refusal
+history is looked up by its sha (`perf_judgements()`), from **one** read of the tail,
+and the card prints each one's verdict and its p50/p95 beside the gate's lines. The
+four answers a single lookup gives are kept per commit — `present`, no judgement,
+older than the window, unreadable — because a commit whose evidence is merely outside
+the read tail must not read as one the gate never judged. The held commit's inline
+copy is suppressed: its numbers are already on the page in its own block (or in the
+latest judgement, when it is that too), and the same measurement must not print
+twice.
+
+#### A row can release the commit it names
+
+The one-click release above the list is a form posting to
+`/super-admin/deploy-status/release`. Each row has the same button, and it posts a
+hidden `sha` field naming *that row's* commit. The field is not decoration: the
+runner deploys `origin/$BRANCH` and honours a quarantine only for the commit it
+currently **holds**, so a bare request from an older row would clear the quarantine
+for the wrong commit — silently, from a row that names a different one. So the
+service refuses the request when the sha it is given is not the held commit
+(`not_held`), and writes nothing; the page turns that into a sentence rather than a
+release. Case is normalised, because a sha is hex and the same commit in different
+case is the same commit.
+
+Only the row whose commit is *under judgement* offers a working button. An older row
+is disabled with the reason beside it — the branch has moved past that commit, so
+the runner cannot check it out again, and a control that promised otherwise would be
+a lie. Rows from a history whose quarantine has since been lifted (nothing is held)
+are disabled for the other reason: there is nothing to release.
+
+The button is deliberately still a `POST` form rather than a fetch, so the CSRF
+injection in `base.html` reaches it, and the route is `POST`-only and super-admin
+gated like the one above.
 
 ### What is *not* quarantined
 

@@ -96,6 +96,24 @@ def test_the_academic_year_dates_render_as_dates():
     assert '<span x-text="{{ active_year.end_date' not in text
 
 
+def test_the_results_page_does_not_comment_out_the_card_it_calls():
+    """The other half of the same defect, read from the page that lost it.
+
+    The page's component calls `Object.assign(sgVisualSummary(), {...})`, and the
+    factory is defined in the card it includes — so the include has to be outside
+    every HTML comment. Being inside one is exactly this: the last `<!--` before
+    the include comes after the last `-->`.
+    """
+    raw = (ROOT / "app" / "templates" / "student" / "results.html") \
+        .read_text(encoding="utf-8")
+    include = "{% include 'student/_visual_summary.html' %}"
+    i = raw.index(include)
+    assert raw.rfind("<!--", 0, i) < raw.rfind("-->", 0, i), (
+        "the shared card is included inside an HTML comment, so its markup and its "
+        "`window.sgVisualSummary` factory are comment text: the page's component "
+        "throws on that name and the results table renders empty")
+
+
 def test_the_exam_subject_renders_as_text():
     text = (ROOT / "app" / "templates" / "teacher" / "dashboard.html") \
         .read_text(encoding="utf-8")
@@ -165,6 +183,55 @@ def test_the_analytics_visibility_checks_use_tojson():
     assert "{{ stats.total_submissions|tojson|forceescape }}" in text
     assert 'x-show="{{ stats.total_submissions }}' not in text
 
+
+
+def test_no_template_opens_an_html_comment_it_closes_as_a_jinja_one():
+    """`<!-- ... #}` is not a comment at all: it is a comment that never ends.
+
+    Jinja only closes a comment with `#}` when it opened it with `{#`. Written the
+    other way round, the `#}` is emitted into the HTML verbatim, and the browser
+    reads everything up to the next real `-->` as comment text — markup, scripts
+    and all. Nothing is parsed and nothing runs, and because the browser is right
+    to do that, the page still answers 200. `student/results.html` lost its whole
+    chart card this way, including `window.sgVisualSummary`: the page's own
+    component calls that factory, threw `sgVisualSummary is not defined`, and
+    every Alpine binding on the page — the row list, the score toggle, the filters
+    — failed with it, so the student's results table rendered empty while the route
+    had handed the page three papers.
+
+    A blind spot worth naming: this reads the file, not the rendered page, so it
+    would also flag a legal `<!-- {# note #} -->`. That is deliberate — two comment
+    syntaxes nested in each other is the mistake, and one of them never reaches the
+    browser.
+    """
+    closed_by_jinja = []
+    never_closed = []
+    for path in TEMPLATES:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for m in re.finditer(r"<!--", text):
+            end = text.find("-->", m.start())
+            segment = text[m.start():end if end != -1 else len(text)]
+            if "#}" in segment:
+                line = text.count(chr(10), 0, m.start()) + 1
+                closed_by_jinja.append(f"{path.relative_to(ROOT)}:{line}")
+        # With every real Jinja comment gone, an `<!--` left in the file can only
+        # be markup — so it must reach a `-->`. This is the same defect one step
+        # further on: a comment that is never closed at all.
+        stripped = re.sub(r"\{#.*?#\}", " ", text, flags=re.S)
+        for m in re.finditer(r"<!--", stripped):
+            if stripped.find("-->", m.start()) == -1:
+                line = stripped.count(chr(10), 0, m.start()) + 1
+                never_closed.append(f"{path.relative_to(ROOT)}:{line}")
+
+    assert not closed_by_jinja, (
+        "an HTML comment is 'closed' by a Jinja `#}`, so it never closes: the browser "
+        "reads everything up to the next `-->` as comment text, and whatever it "
+        "wrapped is never parsed or run. Use `{# ... #}` or `<!-- ... -->`, never one "
+        "opening the other:\n  " + "\n  ".join(closed_by_jinja))
+    assert not never_closed, (
+        "an HTML comment in these files is never closed, so everything after it — to "
+        "the next `-->` anywhere in the document — is comment text and never renders:\n  "
+        + "\n  ".join(never_closed))
 
 
 def test_the_literal_interpolation_exemption_does_not_hide_data():

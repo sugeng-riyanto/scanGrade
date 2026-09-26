@@ -386,7 +386,7 @@
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 223,
+      "pairs": 325,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -541,12 +541,6 @@
       "coverage": 0.0,
       "frozen": false
     },
-    "teacher/cheat_analysis.html": {
-      "pairs": 0,
-      "leftovers": 13,
-      "coverage": 0.0,
-      "frozen": false
-    },
     "teacher/classes.html": {
       "pairs": 0,
       "leftovers": 8,
@@ -613,12 +607,6 @@
       "coverage": 0.0,
       "frozen": false
     },
-    "teacher/proctoring.html": {
-      "pairs": 0,
-      "leftovers": 5,
-      "coverage": 0.0,
-      "frozen": false
-    },
     "teacher/publish_preview.html": {
       "pairs": 3,
       "leftovers": 5,
@@ -632,9 +620,9 @@
       "frozen": false
     },
     "teacher/results.html": {
-      "pairs": 8,
+      "pairs": 9,
       "leftovers": 9,
-      "coverage": 47.1,
+      "coverage": 50.0,
       "frozen": true
     },
     "teacher/retractions.html": {
@@ -648,6 +636,12 @@
       "leftovers": 72,
       "coverage": 5.3,
       "frozen": true
+    },
+    "teacher/session_review.html": {
+      "pairs": 0,
+      "leftovers": 34,
+      "coverage": 0.0,
+      "frozen": false
     },
     "teacher/settings.html": {
       "pairs": 0,

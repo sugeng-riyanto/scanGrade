@@ -715,14 +715,18 @@ def _register_performance_middleware(app):
         if hasattr(g, "start"):
             duration_ms = int((time.time() - g.start) * 1000)
             response.headers["X-Response-Time-ms"] = str(duration_ms)
-        # How many Supabase round-trips this render spent. It rides beside the
-        # response time because the two answer the same question from opposite
-        # ends: response time is the symptom a student feels, round-trips are the
-        # cause a release changes. The load harness reads this header per page and
-        # deploy/perf_gate.py compares it with the last release that passed.
-        roundtrips = query_meter.header_value()
-        if roundtrips is not None:
-            response.headers[query_meter.HEADER] = roundtrips
+        # What this render cost and where the cost came from. Response time is the
+        # symptom a student feels; the three counts are the causes, and they are
+        # three because one alone cannot be attributed: round-trips are *attempts*
+        # (so the box's retries move them), queries are what the render *issued*
+        # (so only a release moves them), and rows are how much *data* it read (so
+        # only the school's size moves them). The load harness reads them per page
+        # and deploy/perf_gate.py compares them with the last release that passed.
+        for header, value in ((query_meter.HEADER, query_meter.header_value()),
+                              (query_meter.QUERY_HEADER, query_meter.queries_header_value()),
+                              (query_meter.ROW_HEADER, query_meter.rows_header_value())):
+            if value is not None:
+                response.headers[header] = value
         if request.path.startswith("/static/"):
             # 7 days for static assets (CSS/JS/images/fonts)
             response.cache_control.max_age = 604800

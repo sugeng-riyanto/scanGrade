@@ -77,6 +77,8 @@ class FakeQuery:
     eq = _step
     order = _step
     limit = _step
+    single = _step
+    maybe_single = _step
 
     def execute(self):
         self.calls += 1
@@ -403,14 +405,115 @@ class TestTheHarnessReadsWhatTheAppWrites:
             "the harness reads its own copy of the header name so it can run without "
             "importing the app; the copy has drifted and the gate would measure nothing")
 
+    def test_it_declares_the_two_headers_that_say_where_the_cost_came_from(self):
+        """Round-trips alone cannot tell a heavier release from a busier box or a
+        bigger dataset, which is why the other two numbers exist. Each copy is its
+        own constant here, so each one can drift on its own — and did."""
+        assert harness.QUERY_HEADER == query_meter.QUERY_HEADER
+        assert harness.ROW_HEADER == query_meter.ROW_HEADER
+
+
+# ── 5b. what the render asked for, and how much data it read ─────────────────
+
+class TestWhatTheRenderAskedFor:
+    """`X-Supabase-Roundtrips` counts *attempts*, so it answers two questions at
+    once and neither one well: a render that issues three queries is not the same
+    finding as a render that issues one query which the transport retried twice.
+
+    Measured on production, on the same release a day apart: every endpoint's page
+    bytes were identical to the byte while `/teacher/dashboard` went from 1
+    round-trip to 3. Nothing about that page changed, which means the gate was
+    one bad afternoon away from refusing a release for the box retrying.
+    """
+
+    def test_two_queries_with_one_retry_are_three_attempts_but_two_queries(self):
+        app = app_with([])
+
+        def probe():
+            get = app.extensions["supabase"]
+            get.table("exams").select("id").execute()          # dropped, then retried
+            get.table("submissions").select("id").execute()
+            return "ok"
+
+        app.add_url_rule("/__asked", "probe_asked", probe)
+        query_of(app, "GET", [httpx.RemoteProtocolError("Server disconnected"),
+                              SimpleNamespace(data=[{"id": 1}, {"id": 2}]),
+                              SimpleNamespace(data=[{"id": 3}])])
+        resp = app.test_client().get("/__asked")
+        assert resp.status_code == 200
+        assert resp.headers.get(query_meter.HEADER) == "3", (
+            "attempts: two queries, one of them sent twice")
+        assert resp.headers.get(query_meter.QUERY_HEADER) == "2", (
+            "queries: what the render asked for, which is what a release changes")
+        assert resp.headers.get(query_meter.ROW_HEADER) == "3", (
+            "rows read: 2 from the retried query's eventual answer plus 1")
+
+    def test_a_retry_does_not_count_the_same_rows_twice(self):
+        """The retry re-reads the same rows; that is one dataset, not two."""
+        app = app_with([])
+
+        def probe():
+            app.extensions["supabase"].table("exams").select("id").execute()
+            return "ok"
+
+        app.add_url_rule("/__retry_rows", "probe_retry_rows", probe)
+        query_of(app, "GET", [httpx.RemoteProtocolError("Server disconnected"),
+                              SimpleNamespace(data=[{"id": 1}, {"id": 2}, {"id": 3}])])
+        resp = app.test_client().get("/__retry_rows")
+        assert resp.headers.get(query_meter.HEADER) == "2"
+        assert resp.headers.get(query_meter.ROW_HEADER) == "3", (
+            "the same three rows were read twice; counting six would say the dataset "
+            "doubled because the transport hiccuped")
+
+    def test_a_page_that_reads_nothing_reports_zero_for_each(self):
+        app = app_with([("/__idle", lambda: "ok")])
+        resp = app.test_client().get("/__idle")
+        assert resp.headers.get(query_meter.QUERY_HEADER) == "0"
+        assert resp.headers.get(query_meter.ROW_HEADER) == "0", (
+            "a page with no data is the measurement's floor and has to say so")
+
+    def test_a_single_row_read_counts_as_one(self):
+        app = app_with([])
+
+        def probe():
+            app.extensions["supabase"].table("profiles").select("id").single().execute()
+            return "ok"
+
+        app.add_url_rule("/__one", "probe_one", probe)
+        query_of(app, "GET", [SimpleNamespace(data={"id": "abc"})])
+        resp = app.test_client().get("/__one")
+        assert resp.headers.get(query_meter.ROW_HEADER) == "1", (
+            "`.single()` answers one record, not a list of characters")
+
+    def test_the_new_counters_are_silent_outside_a_request(self):
+        seen = {}
+
+        def fresh_context():
+            query_meter.query()
+            query_meter.read_rows(5)
+            seen["queries"] = query_meter.queries_header_value()
+            seen["rows"] = query_meter.rows_header_value()
+
+        thread = threading.Thread(target=fresh_context)
+        thread.start()
+        thread.join()
+        assert seen["queries"] is None and seen["rows"] is None, (
+            "an unarmed meter must report nothing, not zero")
+
 
 # ── 6. what the harness records, and what the gate will see ──────────────────
 
 class _Resp:
-    def __init__(self, status=200, body=b"x" * 100, roundtrips=None):
+    def __init__(self, status=200, body=b"x" * 100, roundtrips=None,
+                 queries=None, rows=None):
         self.status_code = status
         self.content = body
-        self.headers = {} if roundtrips is None else {harness.ROUNDTRIP_HEADER: str(roundtrips)}
+        self.headers = {}
+        for header, value in ((harness.ROUNDTRIP_HEADER, roundtrips),
+                              (harness.QUERY_HEADER, queries),
+                              (harness.ROW_HEADER, rows)):
+            if value is not None:
+                self.headers[header] = str(value)
 
 
 class TestTheHarnessRecordsCost:
@@ -426,6 +529,13 @@ class TestTheHarnessRecordsCost:
         row = harness.summary(r, 1.0, 1)["per_endpoint"]["GET /student/dashboard"]
         assert row["bytes_p50"] == 4096
         assert row["roundtrips_p50"] == 7
+
+    def test_a_page_records_what_it_asked_for_and_how_much_it_read(self):
+        r = self._results_with([("GET /student/dashboard", _Resp(
+            body=b"y" * 4096, roundtrips=7, queries=5, rows=120))])
+        row = harness.summary(r, 1.0, 1)["per_endpoint"]["GET /student/dashboard"]
+        assert row["queries_p50"] == 5
+        assert row["rows_p50"] == 120
 
     def test_a_page_that_did_not_answer_200_records_no_cost(self):
         """A 302 or a 500 has a body of nothing.

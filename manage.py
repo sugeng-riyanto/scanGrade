@@ -7,6 +7,9 @@ Usage:
     python manage.py list          # List all demo users
     python manage.py demo-exam     # Ensure a sittable exam exists (the deploy
                                    # smoke test opens it; run by the runner)
+    python manage.py seed-anticheat            # Plan the five synthetic classes
+    python manage.py seed-anticheat --write    # Write them into every demo school
+    python manage.py seed-anticheat --clear    # Remove them again, by marker
 """
 import sys, os, json, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -21,7 +24,7 @@ if '--demo' in sys.argv:
         print("⚠️  .env.demo not found. Copy .env.production.example to .env.demo")
         sys.exit(1)
 
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 # The exam fixture spec is shared with the deploy smoke test, which runs with no
 # app environment (the deploy runner gives it only the SMOKE_* variables) and so
@@ -30,6 +33,7 @@ from datetime import datetime, timezone, timedelta
 # rather than two titles that drift apart.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "deploy"))
 import demo_exam_fixture as demo_exam  # noqa: E402
+import anticheat_seed as cheat_seed  # noqa: E402
 
 from app import create_app
 from app.utils.auth import get_supabase
@@ -424,6 +428,41 @@ def cmd_demo_exam(args):
     return 1 if seen > made else 0
 
 
+def cmd_seed_anticheat(args):
+    """Write — or clear — the five synthetic anti-cheat classes in every demo school.
+
+    Dry by default: a seeder that creates ~113 accounts because nobody typed
+    `--write` is a seeder nobody runs twice. The classes, exams and accounts all
+    carry a marker, so `--clear` removes exactly these rows and nothing a teacher
+    made. This is demo tooling, never a request path — the dashboard reads the data
+    it leaves, the request handlers never know it exists.
+    """
+    day = date.fromisoformat(args.day)
+    with app.app_context():
+        supabase = get_supabase()
+        print("=" * 50)
+        print("🧪 ANTI-CHEAT SEED" + ("  (clear)" if args.clear else
+                                      "" if args.write else "  (dry run)"))
+        print("=" * 50)
+        seen = 0
+        for school_conf in DEMO_SCHOOLS:
+            rows = (supabase.table("schools").select("id")
+                    .eq("npsn", school_conf["npsn"]).limit(1).execute().data or [])
+            if not rows:
+                print(f"   – {school_conf['name']}: not on this box, skipped")
+                continue
+            seen += 1
+            print(f"\n   {school_conf['name']}")
+            if args.clear:
+                cheat_seed.clear(supabase, rows[0]["id"])
+            else:
+                cheat_seed.ensure(supabase, rows[0]["id"], day=day,
+                                  dry_run=not args.write)
+        if not seen:
+            print("   (no demo data here — nothing to seed)")
+    return 0
+
+
 def _seed_invoices(supabase, school_id, school_conf):
     """Create sample invoices for demo purposes."""
     from datetime import timedelta
@@ -602,9 +641,15 @@ def _print_credentials():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ScanGrade Data Management")
     parser.add_argument("command", choices=["seed", "reset", "reset-data", "list", "migrate",
-                                           "generate-csv", "demo-exam"])
+                                           "generate-csv", "demo-exam", "seed-anticheat"])
     parser.add_argument("--exam", action="store_true", help="Also create sample exams (with seed)")
     parser.add_argument("--demo", action="store_true", help="Use .env.demo")
+    parser.add_argument("--write", action="store_true",
+                        help="seed-anticheat: actually write (default is a dry run)")
+    parser.add_argument("--clear", action="store_true",
+                        help="seed-anticheat: remove the synthetic rows instead")
+    parser.add_argument("--day", default=cheat_seed.DEFAULT_DAY.isoformat(),
+                        help="seed-anticheat: the school day the sittings happen on")
     args = parser.parse_args()
 
     if args.command == "seed":
@@ -617,6 +662,8 @@ if __name__ == "__main__":
         cmd_list(args)
     elif args.command == "demo-exam":
         sys.exit(cmd_demo_exam(args))
+    elif args.command == "seed-anticheat":
+        sys.exit(cmd_seed_anticheat(args))
     elif args.command == "migrate":
         print("Migrate not available without DATABASE_URL")
     elif args.command == "generate-csv":

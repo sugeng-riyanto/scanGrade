@@ -85,25 +85,49 @@ def wrap_query(obj):
     return obj
 
 
-class RetryingQuery:
-    """One postgrest query, a retry for the transport failing under it, and a count.
+def rows_in(response) -> int:
+    """How many records a postgrest answer carried, for the row counter.
 
-    The count is a round-trip per *attempt*, not per query: a retry is a round-trip
-    the database really served, and a release that quietly makes retries routine is
-    a release that costs the same database twice. Wrapping the callable is how the
-    attempt gets counted, because `read_with_retry` re-invokes it for every try.
+    ``data`` is a list for a select and a single object for ``.single()``/``.single``
+    shaped reads, which is one record and not one character per key. Anything else —
+    a storage answer, an insert with no ``returning`` — is no rows read, which is the
+    honest answer: the render did not read a dataset.
+    """
+    data = getattr(response, "data", None)
+    if isinstance(data, list):
+        return len(data)
+    return 1 if isinstance(data, dict) else 0
+
+
+class RetryingQuery:
+    """One postgrest query, a retry for the transport failing under it, and counts.
+
+    Three numbers, and the difference between them is the point. A **query** is what
+    the render issued — once, here, before anything touches the network. An
+    **attempt** is a round-trip the database really served, counted per try because
+    `read_with_retry` re-invokes the callable: a release that quietly makes retries
+    routine is a release that costs the same database twice, and that stays visible.
+    And the **rows** are what came back, counted once per query for the first
+    success — the retry re-reads the same records, and counting them twice would say
+    the school's data doubled because the transport hiccuped.
     """
 
-    __slots__ = ("_query",)
+    __slots__ = ("_query", "_rows_counted")
 
     def __init__(self, query) -> None:
         self._query = query
+        self._rows_counted = False
 
     def _counted_execute(self):
         query_meter.trip()
-        return self._query.execute()
+        response = self._query.execute()
+        if not self._rows_counted:
+            self._rows_counted = True
+            query_meter.read_rows(rows_in(response))
+        return response
 
     def execute(self):
+        query_meter.query()
         if is_read(self._query):
             return read_with_retry(self._counted_execute)
         query_meter.trip()

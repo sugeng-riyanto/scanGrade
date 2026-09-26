@@ -291,6 +291,70 @@ class TestEveryPublishedRowMatchesItsArtifact:
         )
 
 
+# ── 4b. the same row, written in the four places that restate it ─────────────
+
+README = MEASUREMENTS / "README.md"
+
+
+def _p95_number(text):
+    """'≤ 4.8 s' -> '4.8', so a sentence may write the figure in its own units."""
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    assert match, f"no figure in {text!r}"
+    return match.group(0)
+
+
+class TestEveryRestatementOfTheFiftyRowAgrees:
+    """The 50-student row is written out four times, and only two were checked.
+
+    `test_each_measured_row_matches_its_json` holds the *table* to the artifacts,
+    and `test_the_headline_card_matches_the_50_row` holds the card to the table. The
+    sentence beneath the table and `docs/measurements/README.md`'s own published
+    row both restate the same figures and were held to nothing at all — and a
+    number stated in more than one place is a number that will eventually disagree
+    with itself, which is the whole defect this directory exists to prevent. It was
+    a real disagreement when these guards were written: the page published a 3.7 s
+    p95 that the harness had measured at 4.8 s.
+    """
+
+    def test_the_sentence_under_the_table_repeats_the_row_it_is_about(self):
+        body = page()
+        p95 = _p95_number(_published_rows()[50][1])
+        indonesian = f"p95 {p95.replace('.', ',')} detik"
+        assert indonesian in body, (
+            f"the paragraph under the table does not restate the row's p95 ({indonesian!r} "
+            "is missing). It is the sentence a reader takes the recommendation from; a "
+            "figure there that disagrees with the table is the claim drifting in prose."
+        )
+
+    def test_the_readme_publishes_the_same_bound_as_the_page(self):
+        """The evidence document restates the row; hold it to the row."""
+        cells = None
+        for line in README.read_text(encoding="utf-8").splitlines():
+            row = [c.strip().strip("*").strip()
+                   for c in line.strip().strip("|").split("|")]
+            if row and row[0] == "published":
+                cells = row
+                break
+        assert cells, (
+            "docs/measurements/README.md no longer has a 'published' row, so nothing "
+            "there can be compared with the page. It is where a reader audits a figure."
+        )
+        p50, p95, errors = _published_rows()[50]
+        assert p50 in cells, f"the README's published p50 is {cells}, the page's is {p50}"
+        assert _p95_number(p95) + " s" in cells, (
+            f"the README's published p95 is {cells}, the page's is {p95}"
+        )
+        assert errors in cells, f"the README's published errors are {cells}, the page's are {errors}"
+
+    def test_the_comfortable_limit_quotes_the_row_it_recommends(self):
+        explain = README.read_text(encoding="utf-8")
+        p95 = _p95_number(_published_rows()[50][1])
+        assert f"page p95 of {p95} s" in explain, (
+            f"the 'comfortable limit' section does not quote the {p95} s p95 of the row "
+            "the recommendation is derived from"
+        )
+
+
 # ── 5. an artifact git will not carry is not evidence ─────────────────────────
 
 GITIGNORE = ROOT / ".gitignore"

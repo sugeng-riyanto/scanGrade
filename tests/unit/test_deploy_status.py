@@ -985,6 +985,22 @@ def held_report(tmp_path: Path, *, repo: Path | None = None, sha: str = "d" * 40
                          release_request=str(tmp_path / "requests" / "release"))
 
 
+def held_report_with_lines(tmp_path: Path, lines, **kwargs) -> dict:
+    """The same, with the refusing gate's own output under the runner's three lines
+    — the record shape the runner writes once a gate is told to quote itself."""
+    sha = kwargs.pop("sha", "d" * 40)
+    since = kwargs.pop("since", "2026-09-25T19:15:48+07:00")
+    gate = kwargs.pop("gate", "perf gate (slower than the last release that passed)")
+    record = tmp_path / "quarantined"
+    record.write_text("\n".join([sha, since, gate, *lines]) + "\n", encoding="utf-8")
+    return status.report(repo=str(tmp_path), runner="/nonexistent",
+                         snapshot_runner="/nonexistent",
+                         pause_file=str(tmp_path / "no-pause"),
+                         quarantine_file=str(record),
+                         request_dir=str(tmp_path / "requests"),
+                         release_request=str(tmp_path / "requests" / "release"))
+
+
 # ── the refusal that is about the box, not about a commit ───────────────────
 
 def unarmed_report(tmp_path: Path, *, text: str | None = "2026-09-21T11:26:00+00:00\n"
@@ -1297,6 +1313,99 @@ class TestTheHeldRelease:
         assert report["quarantine"]["subject"] is None
 
 
+class TestTheGateQuotesItself:
+    """The runner's summary says *which* gate; the gate's own lines say *how much*.
+
+    "perf gate (slower than the last release that passed)" cannot be told from two
+    noisy probes without the ratio, and the ratio is what the gate printed. The
+    runner now writes those lines under its own three, and this card renders them.
+    """
+
+    GATE = "perf gate (slower than the last release that passed)"
+    #: As the gate prints them on stdout, indentation and all.
+    LINES_AS_PRINTED = [
+        "perf gate: REGRESSED — both probes diverged from 366abdf",
+        "    - slowest page p50 812 ms against 480 ms on 366abdf (1.69x, allowed "
+        "1.50x) — worst endpoint(s): GET /teacher/results",
+    ]
+    #: As the card renders them. The gate's leading spaces exist to align a terminal;
+    #: inside a `<li>` they are not content (HTML collapses them), so the reading
+    #: trims the edges of each line rather than carrying invisible bytes into the
+    #: page. Nothing else about the line changes.
+    LINES = [line.strip() for line in LINES_AS_PRINTED]
+
+    def test_the_gate_s_own_lines_survive_into_the_reading(self, tmp_path):
+        report = held_report_with_lines(tmp_path, self.LINES_AS_PRINTED, gate=self.GATE)
+        held = report["quarantine"]
+        assert held["reasons"] == self.LINES, (
+            "the record's gate lines were dropped, so the page can only report that "
+            "something was refused")
+        assert held["reasons_total"] == len(self.LINES)
+        assert held["gate"] == self.GATE, (
+            "line 3 is still the gate's name; the lines below it must not displace it")
+        assert held["gate_key"] == "perf_gate"
+
+    def test_a_three_line_record_is_still_a_record(self, tmp_path):
+        """Every record written before this change is three lines, and an older
+        runner keeps writing three: absent detail is an empty list, not a fault."""
+        report = held_report(tmp_path)
+        held = report["quarantine"]
+        assert held["held"] is True
+        assert held["reasons"] == [] and held["reasons_total"] == 0
+
+    def test_a_wall_of_gate_lines_is_bounded_and_counted(self, tmp_path):
+        many = [f"finding {i}" for i in range(1, 21)]
+        held = held_report_with_lines(tmp_path, many)["quarantine"]
+        assert len(held["reasons"]) == status.QUARANTINE_DETAIL_SHOWN
+        assert held["reasons_total"] == 20, (
+            "a truncated list that does not say so reads as the whole finding")
+
+    def test_a_line_wide_enough_to_break_the_card_is_cut(self, tmp_path):
+        held = held_report_with_lines(tmp_path, ["y" * 5000])["quarantine"]
+        assert held["reasons"] and len(held["reasons"][0]) <= status.QUARANTINE_DETAIL_WIDTH
+
+    def test_the_binary_that_sometimes_lands_in_a_record_is_not_rendered(self, tmp_path):
+        """A gate's output can carry control bytes; a page that renders them is a
+        page whose card can be made unreadable by the thing it is describing."""
+        held = held_report_with_lines(
+            tmp_path, ["\x07\x08", "good line", "\x00\x1f"])["quarantine"]
+        assert held["reasons"] == ["good line"]
+        assert held["reasons_total"] == 1, (
+            "an empty line was counted as a finding")
+
+    def test_the_detail_cannot_rescue_a_record_whose_sha_is_not_one(self, tmp_path):
+        record = tmp_path / "quarantined"
+        record.write_text("not-a-sha\n" + "\n".join(["2026-09-19T04:44:23+07:00",
+                                                    self.GATE, *self.LINES]) + "\n",
+                          encoding="utf-8")
+        report = status.report(repo=str(tmp_path), runner="/nonexistent",
+                               snapshot_runner="/nonexistent",
+                               pause_file=str(tmp_path / "no-pause"),
+                               quarantine_file=str(record),
+                               request_dir=str(tmp_path / "requests"))
+        held = report["quarantine"]
+        assert held["reason_key"] == "malformed" and held["held"] is False
+        assert held["reasons"] == [], (
+            "a record that is not a record must not carry findings from it")
+
+    def test_the_page_names_how_far_off_the_measurement_was(self, app, tmp_path):
+        report = held_report_with_lines(tmp_path, self.LINES, gate=self.GATE)
+        html = render_status(app, report)
+        for line in self.LINES:
+            assert line in html, (
+                "the gate's own line is the evidence; the runner's summary alone "
+                "leaves an operator with a refusal they cannot adjudicate")
+        assert "1.69x" in html and "812" in html, "the numbers were dropped"
+        assert "wrote these lines itself, verbatim" in html, (
+            "the page shows the lines without saying they are the gate's own words, "
+            "so a reader cannot tell evidence from a paraphrase")
+
+    def test_a_record_with_nothing_quoted_shows_no_empty_block(self, app, tmp_path):
+        html = render_status(app, held_report(tmp_path))
+        assert "The gate wrote these itself" not in html, (
+            "a gate with nothing to quote must not render an empty quotation")
+
+
 class TestTheGateIsNamed:
     def test_every_gate_the_runner_records_is_one_the_page_can_name(self):
         """The relation that makes the card trustworthy.
@@ -1549,6 +1658,143 @@ class TestTheReleaseRoute:
         assert "log_activity(" in block, (
             "releasing a quarantined release is a consequential act on the box and "
             "leaves no trace otherwise")
+
+
+class TestThePerRowRelease:
+    """A row in the refusal history is releasable only while it is the commit held.
+
+    The runner deploys `origin/$BRANCH` and honours a quarantine only for the commit
+    it currently *holds*. A per-row button posting a bare request would therefore
+    release whatever is held — a different commit, silently, from a row that names
+    this one. The row's sha travels with the request, and a row the runner could not
+    honour is refused rather than clearing the wrong quarantine.
+    """
+
+    SHA = "c" * 40
+    OTHER = "a" * 40
+
+    def _record(self, tmp_path: Path, *, sha: str = SHA) -> Path:
+        record = tmp_path / "quarantined"
+        record.write_text(f"{sha}\n2026-09-19T04:44:23+07:00\nsmoke test (exit 1)\n",
+                          encoding="utf-8")
+        return record
+
+    def _request(self, tmp_path: Path) -> Path:
+        requests = tmp_path / "requests"
+        requests.mkdir()
+        return requests / "release"
+
+    def test_a_request_naming_the_held_commit_is_honoured(self, tmp_path):
+        result = status.request_release(
+            request_file=str(self._request(tmp_path)),
+            quarantine_file=str(self._record(tmp_path)), expect_sha=self.SHA)
+        assert result["key"] == status.RELEASE_WRITTEN
+        assert result["written"] is True
+
+    def test_a_request_naming_another_commit_is_refused_and_writes_nothing(self, tmp_path):
+        request = self._request(tmp_path)
+        result = status.request_release(
+            request_file=str(request), quarantine_file=str(self._record(tmp_path)),
+            expect_sha=self.OTHER)
+        assert result["key"] == status.RELEASE_NOT_HELD
+        assert result["written"] is False
+        assert not request.exists(), (
+            "a request naming a commit the runner cannot check out was written "
+            "anyway — it would release whatever is held instead")
+        assert result["held"] == self.SHA and result["expected"] == self.OTHER, (
+            "the answer has to carry both commits, or the operator cannot see which "
+            "row was the wrong one")
+
+    def test_the_comparison_is_case_insensitive(self, tmp_path):
+        """A sha is hex; the same commit in different case is the same commit."""
+        result = status.request_release(
+            request_file=str(self._request(tmp_path)),
+            quarantine_file=str(self._record(tmp_path)),
+            expect_sha=self.SHA.upper())
+        assert result["key"] == status.RELEASE_WRITTEN
+
+    def test_a_form_value_that_names_no_commit_is_refused(self, tmp_path):
+        """The hidden field is user-controlled, so it can carry anything; only the
+        exact held commit is cleared."""
+        request = self._request(tmp_path)
+        result = status.request_release(
+            request_file=str(request), quarantine_file=str(self._record(tmp_path)),
+            expect_sha="not-a-sha")
+        assert result["key"] == status.RELEASE_NOT_HELD
+        assert not request.exists(), (
+            "a form field that names no commit must not be able to ask for a release")
+
+    def test_a_row_for_an_absent_commit_is_still_nothing_held(self, tmp_path):
+        """A stale history row whose quarantine has been lifted: nothing to release
+        is the honest answer, not a second kind of refusal."""
+        request = self._request(tmp_path)
+        result = status.request_release(
+            request_file=str(request), quarantine_file=str(tmp_path / "no-record"),
+            expect_sha=self.SHA)
+        assert result["key"] == status.RELEASE_NOTHING_HELD
+        assert not request.exists()
+
+    # ── the row as the page renders it ──────────────────────────────────────
+
+    def _report(self, tmp_path: Path):
+        """A held commit that is also the newest refusal, with an older one below."""
+        refusals = tmp_path / "refusals"
+        refusals.mkdir()
+        (refusals / f"refused-100-{self.SHA[:7]}").write_text(
+            f"{self.SHA}\n2026-09-19T04:44:23+07:00\nsmoke test (exit 1)\n",
+            encoding="utf-8")
+        (refusals / f"refused-050-{self.OTHER[:7]}").write_text(
+            f"{self.OTHER}\n2026-09-19T03:00:00+07:00\n"
+            "perf gate (slower than the last release that passed)\n",
+            encoding="utf-8")
+        report = status.report(
+            repo=str(tmp_path), runner="/nonexistent", snapshot_runner="/nonexistent",
+            pause_file=str(tmp_path / "no-pause"),
+            quarantine_file=str(self._record(tmp_path)),
+            request_dir=str(tmp_path / "requests"),
+            release_request=str(tmp_path / "requests" / "release"),
+            refusals_dir=str(refusals))
+        assert report["refusals"]["key"] == status.REFUSALS_PRESENT
+        report["request_dir_writable"] = True
+        return report
+
+    def test_the_button_submits_the_sha_of_the_row_it_sits_in(self, app, tmp_path):
+        """Without the sha the server cannot tell the row's commit from the held one,
+        and the button would release the wrong commit."""
+        html = render_status(app, self._report(tmp_path))
+        assert re.search(rf'<input type="hidden" name="sha" value="{self.SHA}"', html), (
+            "the current row's release form does not carry the commit it names")
+
+    def test_only_the_row_under_judgement_offers_the_button(self, app, tmp_path):
+        """The older row names a commit the branch has moved past, so the runner
+        cannot check it out — the page says so instead of offering a control that
+        would release the held commit from the wrong row."""
+        report = self._report(tmp_path)
+        html = render_status(app, report)
+        assert html.count('name="sha"') == 1, (
+            "more than one row offered a release button")
+        current = next(r for r in report["refusals"]["records"] if r["is_current"])
+        older = next(r for r in report["refusals"]["records"] if not r["is_current"])
+        assert current["sha"] == self.SHA and older["sha"] == self.OTHER
+        assert f'value="{self.OTHER}"' not in html, (
+            "the row the branch has passed still submits its sha")
+        assert "Cannot be released" in html, (
+            "the un-releasable row shows no explanation for why it cannot be used")
+        assert "The branch has moved past this commit" in html
+
+    def test_the_row_says_why_only_the_current_commit_can_be_released(self, app, tmp_path):
+        html = render_status(app, self._report(tmp_path))
+        assert "only the commit under judgement can be released" in html, (
+            "the disabled button is offered without the reason, which reads as a bug")
+
+    def test_the_route_passes_the_row_s_sha_through(self):
+        """The hidden field is only worth rendering if the route reads it."""
+        source = (ROOT / "app" / "routes" / "super_admin.py").read_text(encoding="utf-8")
+        block = source.split("def deploy_status_release", 1)[1].split("\n@", 1)[0]
+        assert re.search(r"request\.form\.get\(\"sha\"\)", block), (
+            "the row's sha is never read, so the form field does nothing")
+        assert re.search(r"expect_sha=requested", block), (
+            "the sha is read but not handed to the service, so the check never runs")
 
 
 # ── the refusal that happens before the release moves ────────────────────────

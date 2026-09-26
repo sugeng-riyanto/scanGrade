@@ -33,6 +33,7 @@ from app.services.school_reset import (
     school_ids_for_npsns,
 )
 from app.utils.req_cache import invalidate, invalidate_school, ttl
+from app.utils import lock_health
 
 super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
 
@@ -310,6 +311,12 @@ def deploy_status():
     1 vCPU box that is also serving students, and nothing here changes faster than
     the two-minute deploy timer. The measurement's own timestamp travels with it,
     so a cached reading is never passed off as a live one.
+
+    The shared lock store is the one part read *freshly* on every load, for the same
+    reason the alert channel is: it is the answer to "is this box sharing state right
+    now", a cached "yes" from thirty seconds before a Redis restart is exactly the
+    wrong answer, and the read is one ping plus a counter. `lock_health.state()`
+    carries its own timestamp, so a reading is never passed off as live.
     """
     status = ttl("deploy_status:report", 30, deploy_status_report)
     # Where the staleness alert goes, when the last one left, and why not more.
@@ -318,7 +325,8 @@ def deploy_status():
     # it reads one small file and a setting.
     alerts = deploy_alert_summary()
     return render_template("super_admin/deploy_status.html", status=status,
-                           alerts=alerts, testalert=request.args.get("testalert"),
+                           alerts=alerts, locks=lock_health.state(),
+                           testalert=request.args.get("testalert"),
                            released=request.args.get("released"))
 
 
@@ -339,8 +347,15 @@ def deploy_status_release():
     in the template where the language toggle and the i18n sweep can reach it. The
     cached report is dropped first so the page the operator lands on shows the
     request it just made instead of the reading from before it.
+
+    A row in the refusal history submits the commit it names. It is passed through
+    rather than ignored so the request is checked against what the runner could
+    actually do: the runner deploys the branch head, so a commit the branch has
+    moved past cannot be retried, and the answer says so instead of quietly
+    releasing whatever is held.
     """
-    result = deploy_status_request_release()
+    requested = (request.form.get("sha") or "").strip() or None
+    result = deploy_status_request_release(expect_sha=requested)
     invalidate("deploy_status:report")
     if result.get("written"):
         log_activity("update", "deploy_quarantine",

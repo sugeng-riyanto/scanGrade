@@ -273,7 +273,7 @@ class TestTheRecommendationIsARow:
 class TestTheEvidenceIsInspectable:
 
     @pytest.mark.parametrize("name", ["rung-050.json", "rung-500-endurance.txt",
-                                      "locust-050.json", "README.md"])
+                                      "locust-050.json", "rescan-050.json", "README.md"])
     def test_a_listed_file_is_served_verbatim_as_text(self, client, name):
         response = client(MEASUREMENTS).get(f"/capacity/evidence/{name}")
         assert response.status_code == 200

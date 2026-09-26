@@ -31,12 +31,16 @@
 
     <!-- Filters -->
     <div class="flex flex-col sm:flex-row gap-3">
-        <div class="flex bg-slate-100 rounded-xl p-1">
-            <button @click="filter='all'" :class="filter==='all'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition" x-text="lang==='en'?'All':'Semua'"></button>
-            <button @click="filter='active'" :class="filter==='active'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition">Active</button>
-            <button @click="filter='draft'" :class="filter==='draft'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition">Draft</button>
-            <button @click="filter='closed'" :class="filter==='closed'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition" x-text="lang==='en'?'Closed':'Ditutup'"></button>
-            <button @click="filter='template'" :class="filter==='template'?'bg-white shadow text-brand-600':'text-slate-500'" class="px-4 py-2 rounded-lg text-sm font-semibold transition"><i class="fas fa-copy mr-1"></i>Template</button>
+        {# Five tabs need ~360px, which a 320px phone does not have, and the strip
+           had no scroller: the last one (Template) was pushed past the card's
+           clip with nothing to swipe, so the filter existed and could not be
+           reached. The strip scrolls and the tabs keep their size instead. #}
+        <div class="flex w-full sm:w-auto overflow-x-auto bg-slate-100 rounded-xl p-1">
+            <button @click="filter='all'" :class="filter==='all'?'bg-white shadow text-brand-600':'text-slate-500'" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition" x-text="lang==='en'?'All':'Semua'"></button>
+            <button @click="filter='active'" :class="filter==='active'?'bg-white shadow text-brand-600':'text-slate-500'" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition">Active</button>
+            <button @click="filter='draft'" :class="filter==='draft'?'bg-white shadow text-brand-600':'text-slate-500'" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition">Draft</button>
+            <button @click="filter='closed'" :class="filter==='closed'?'bg-white shadow text-brand-600':'text-slate-500'" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition" x-text="lang==='en'?'Closed':'Ditutup'"></button>
+            <button @click="filter='template'" :class="filter==='template'?'bg-white shadow text-brand-600':'text-slate-500'" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition"><i class="fas fa-copy mr-1"></i>Template</button>
         </div>
         <input type="text" x-model="search" :placeholder="lang==='en'?'Search exams...':'Cari ujian...'" class="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
     </div>

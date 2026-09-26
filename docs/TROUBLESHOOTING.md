@@ -8,7 +8,23 @@
 ## Redis Connection Error
 
 **Cause**: `REDIS_URL=redis://localhost:6379/0` in `.env` but Redis not running
-**Solution**: Safe to ignore. Flask-Limiter falls back to `memory://`. Remove `REDIS_URL` from `.env` to suppress warning.
+
+**On a development box**: safe to ignore. Flask-Limiter falls back to `memory://`.
+Remove `REDIS_URL` from `.env` to suppress the warning.
+
+**On a box the installer provisioned**: this is not a development convenience, so
+check the status page before ignoring it. `/super-admin/deploy-status` has a card
+named **The Shared Lock Store** that reads the store live and reports how many locks
+went to it versus how many fell back to a single worker; a fallback means three
+gunicorn workers are no longer serialising against each other during a sync. The
+card also names the marker file the fallback leaves on the appliance
+(`/tmp/scangrade-lock-fallback.json` by default, `SCANGRADE_LOCK_STATE_FILE` to move
+it) — one line there with a recent timestamp is an outage still running, not history.
+The same store also carries the rate limits and the sign-in pacing, and the page says
+so.
+
+**Fix**: `systemctl restart redis-server` (or `redis`), then reload the app. The card
+goes back to "answering", and the first successful shared lock deletes the marker.
 
 ## Rate Limited (429)
 

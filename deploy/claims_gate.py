@@ -103,7 +103,23 @@ LATENCY_SLACK = 2.0        # measured may be up to 2x the advertised bound
 ERROR_SLACK_PCT = 1.0      # advertised 0% may measure up to 1% before it counts
 MIN_LOGIN_SUCCESS = 0.80   # below this we have no measurement, only a login problem
 MIN_IDENTITY_CHECKS = 0.80 # sessions must be shown to be their own account
-BOX_QUIET_MS = 2000.0      # a /health slower than this means the box is not idle
+BOX_QUIET_MS = 2000.0      # a page render slower than this means the box is not idle
+#: The page the quiet probe asks to render.
+#:
+#: Not `/health`, and the distinction is the whole point of the probe. `/health`
+#: is a machine endpoint: it renders no template and touches no page code, so a
+#: box whose three workers are all busy rendering student pages can still answer
+#: it in a millisecond. Judging *that* says "idle", the gate loads a box it should
+#: have left alone, and what it then measures is the students' slow pages -- read
+#: as a divergence from the published numbers, which is a release rolled back for
+#: being busy. The probe has to ask the same kind of work the gate is about.
+#:
+#: The landing page is the right page for it: it is public (the probe carries no
+#: session), it renders through the same WSGI/worker path every measured
+#: (student|teacher) page does, and it is the page whose claim this gate defends.
+#: It is a template render and not a database read, so it is representative of
+#: the CPU-bound rendering this box saturates on -- which is what "busy" means.
+BOX_QUIET_PATH = "/"
 
 
 def env_default(name: str, fallback):
@@ -379,7 +395,7 @@ def verdict(first: list[str], second: list[str] | None,
 # ── running the harness ──────────────────────────────────────────────────────
 
 def box_is_quiet(base: str, quiet_ms: float, samples: int = 4,
-                 gap_s: float = 1.0) -> tuple[bool, str]:
+                 gap_s: float = 1.0, path: str = BOX_QUIET_PATH) -> tuple[bool, str]:
     """Is the box idle enough for a measurement to mean anything?
 
     The deploy runs every couple of minutes on the same 1 vCPU that serves real
@@ -387,6 +403,14 @@ def box_is_quiet(base: str, quiet_ms: float, samples: int = 4,
     produce a measurement that says nothing about the release. So a box that is
     already slow is left alone, and that is a "could not measure", never a
     rollback.
+
+    It asks a *page* to render (`BOX_QUIET_PATH`), not `/health`. That is not
+    incidental: `/health` renders no template and touches no page code, so a box
+    whose workers are saturated on the pages this gate measures can still answer
+    it instantly. Judging the machine endpoint says "idle", the gate loads the
+    box anyway, and the slow pages it then measures are the students' — read as
+    a divergence and rolled back. The question the probe asks has to be about
+    the same work the gate is about, or the answer is not about this box.
 
     It judges the *best* of several samples, not the first. One slow response
     means the app was still warming (a reload, a template cache, a cold worker)
@@ -400,7 +424,7 @@ def box_is_quiet(base: str, quiet_ms: float, samples: int = 4,
     except ImportError as e:  # pragma: no cover - the venv always has httpx
         return False, f"httpx is not importable: {e}"
 
-    url = base.rstrip("/") + "/health"
+    url = base.rstrip("/") + path
     taken: list[float] = []
     with httpx.Client(timeout=20.0, verify=False, follow_redirects=True) as c:
         for i in range(max(1, samples)):
@@ -411,7 +435,7 @@ def box_is_quiet(base: str, quiet_ms: float, samples: int = 4,
             except Exception as e:
                 return False, f"{url} is unreachable ({type(e).__name__}: {e})"
             if resp.status_code != 200:
-                return False, f"{url} answered {resp.status_code}"
+                return False, f"{url} did not render (HTTP {resp.status_code})"
             taken.append(ms)
             if ms <= quiet_ms:
                 break               # one good sample is enough to proceed
@@ -420,10 +444,10 @@ def box_is_quiet(base: str, quiet_ms: float, samples: int = 4,
 
     shown = "/".join(f"{m:.0f}" for m in taken)
     if min(taken) > quiet_ms:
-        return False, (f"{url} answered in {shown} ms (best {min(taken):.0f} ms, limit "
+        return False, (f"{url} rendered in {shown} ms (best {min(taken):.0f} ms, limit "
                        f"{quiet_ms:.0f} ms) — the box is already carrying traffic; a probe now "
                        "would measure that, not this release")
-    return True, f"{url} answered in {shown} ms (limit {quiet_ms:.0f} ms)"
+    return True, f"{url} rendered in {shown} ms (limit {quiet_ms:.0f} ms)"
 
 
 def run_probe(args, sessions: int) -> tuple[dict | None, str, int]:

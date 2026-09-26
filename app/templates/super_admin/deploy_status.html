@@ -35,6 +35,11 @@
         <i class="fas fa-circle-info text-surface-600 mt-0.5"></i>
         <p class="text-sm text-surface-600" x-text="t('Tidak ada commit yang ditahan, jadi tidak ada yang perlu dirilis.','No commit is being held, so there is nothing to release.')"></p>
     </div>
+    {% elif released == 'not_held' %}
+    <div class="card p-4 border bg-surface-100 border-surface-200 flex items-start gap-3">
+        <i class="fas fa-circle-info text-surface-600 mt-0.5"></i>
+        <p class="text-sm text-surface-600" x-text="t('Commit itu bukan yang sedang dinilai, jadi tidak bisa dirilis: runner hanya men-deploy kepala branch, dan branch sudah melewati commit ini.','That commit is not the one under judgement, so it cannot be released: the runner deploys the branch head, and the branch has moved past it.')"></p>
+    </div>
     {% elif released == 'dir_missing' %}
     <div class="card p-4 border bg-amber-50 border-amber-200 flex items-start gap-3">
         <i class="fas fa-triangle-exclamation text-amber-700 mt-0.5"></i>
@@ -455,6 +460,31 @@
                     </div>
                 </div>
 
+                {#
+                    The gate's own words, under the runner's summary. A refusal that
+                    was a measurement cannot be acted on without the number: "slower
+                    than the last release that passed" is the same sentence whether the
+                    release was 7% or 70% slower, and whether a second probe agreed.
+                    Written by the runner when it recorded the refusal, so it stays
+                    attached to this commit rather than being overwritten by the next
+                    release that passes.
+                #}
+                {% if q.reasons %}
+                <div class="mt-4 pt-4 border-t border-surface-200">
+                    <p class="text-xs text-surface-500 mb-2" x-text="t('Gerbang yang menolaknya menuliskan baris-baris ini sendiri, apa adanya — angkanya ada di dalamnya:','The gate that refused it wrote these lines itself, verbatim — the numbers are in them:')"></p>
+                    <ul class="space-y-1.5">
+                        {% for reason in q.reasons %}
+                        <li class="font-mono text-xs text-rose-800 break-words">{{ reason }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% if q.reasons_total > q.reasons|length %}
+                    <p class="mt-2 text-xs text-surface-500">
+                        <span x-text="t('Menampilkan','Showing')"></span> {{ q.reasons|length }} <span x-text="t('dari','of')"></span> {{ q.reasons_total }} <span x-text="t('baris output gerbang','lines the gate printed')"></span>
+                    </p>
+                    {% endif %}
+                </div>
+                {% endif %}
+
                 <div class="mt-4 pt-4 border-t border-surface-200">
                     {% if status.request_pending or status.release_file_present %}
                     <p class="text-xs text-emerald-700" x-text="t('Permintaan rilis sudah menunggu — runner akan menghormatinya pada tick berikutnya (tiap dua menit).','A release request is already waiting — the runner honours it on the next tick (every two minutes).')"></p>
@@ -477,6 +507,389 @@
                 <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
                     <span class="text-surface-500" x-text="t('Catatan karantina','Quarantine record')"></span>
                     <code class="font-mono text-surface-500 break-all">{{ status.quarantine_file }}</code>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── what the performance gate measured ───────────────────────────── -->
+    {#
+        The quarantine card above says *which* gate refused and quotes the runner's
+        one-line reason. That is a what-happened, not a how-much: "slower than the
+        last release that passed" cannot be told from two noisy probes on a 1-vCPU
+        box without the numbers, and those numbers were being written to
+        /var/lib/scangrade-deploy/perf/history.jsonl by the gate itself and read by
+        nobody but journalctl. This card is that file, on the page — the gate's own
+        `reasons` lines verbatim, because they carry the ratios, and the baseline it
+        measured against, so a reader can decide whether to act.
+    #}
+    {% set p = status.perf %}
+    {% set PGREY = {'box': 'bg-surface-50 border-surface-200', 'text': 'text-surface-700', 'icon': 'fa-gauge-high'} %}
+    {% set PRED = {'box': 'bg-rose-50 border-rose-200', 'text': 'text-rose-700', 'icon': 'fa-gauge-high'} %}
+    {% set PGREEN = {'box': 'bg-emerald-50 border-emerald-200', 'text': 'text-emerald-700', 'icon': 'fa-gauge-high'} %}
+    {% set PAMBER = {'box': 'bg-amber-50 border-amber-200', 'text': 'text-amber-700', 'icon': 'fa-gauge-high'} %}
+    {% if p.key == 'present' and p.verdict_key == 'regressed' %}{% set PL = PRED %}
+    {% elif p.key == 'present' and p.verdict_key == 'pass' %}{% set PL = PGREEN %}
+    {% elif p.key in ('unreadable', 'malformed') %}{% set PL = PAMBER %}
+    {% else %}{% set PL = PGREY %}{% endif %}
+    <div class="card p-5 border {{ PL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ PL.icon }} {{ PL.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ PL.text }}" x-text="t('Penilaian Terakhir Gerbang Kinerja','The Performance Gate’s Last Judgement')"></h2>
+
+                {% if p.key == 'present' %}
+                    {% if p.verdict_key == 'regressed' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Gerbang ini menolak rilis ini: angka di bawah adalah angka gerbang itu sendiri, dan rilis sebelumnya yang tetap melayani. Kalau menurut Anda ini cuma noise, jalankan gerbangnya sekali lagi dari shell dengan --rebaseline setelah Anda yakin; kalau ini nyata, inilah halaman yang melambat.','The gate refused this release: the figures below are the gate’s own, and the release before it is what is still serving. If this is noise, re-run the gate from a shell with --rebaseline once you are sure; if it is real, this is the page that got slower.')"></p>
+                    {% elif p.verdict_key == 'pass' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Rilis ini diukur dan tidak lebih buruk dari rilis yang dibandingkan dengannya. Angkanya disimpan, dan rilis ini menjadi pembanding untuk rilis berikutnya.','This release was measured and is not worse than the release it was compared against. The figures are kept, and this release becomes the comparison for the next one.')"></p>
+                    {% elif p.verdict_key == 'baseline' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Ini rilis pertama yang diukur di server ini, jadi tidak ada pembanding: angkanya menjadi pembanding untuk rilis berikutnya.','This was the first release measured on this box, so there was nothing to compare it with: its figures became the comparison for the next one.')"></p>
+                    {% elif p.verdict_key == 'unconfirmed' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Probe pertama lebih buruk dan probe kedua tidak mengonfirmasinya. Server sekecil ini berisik, jadi tidak ada yang ditolak, dan pembandingnya dibiarkan apa adanya.','The first probe was worse and the second did not confirm it. A box this small is noisy, so nothing was refused and the comparison was left as it was.')"></p>
+                    {% else %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Gerbang melaporkan hasil yang belum dikenal halaman ini. Kata gerbang itu sendiri ditampilkan apa adanya di bawah — jangan membacanya sebagai lulus.','The gate reported an outcome this page has no word for. The gate’s own word is shown as it stands below — do not read it as a pass.')"></p>
+                    {% endif %}
+                {% elif p.key == 'unreadable' %}
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Catatan gerbang kinerja ada tetapi tidak bisa dibaca, jadi halaman ini tidak bisa memastikan rilis terakhir lulus atau tidak.','The performance gate’s record exists but could not be read, so this page cannot say whether the last release passed.')"></p>
+                {% if p.reason %}<code class="block mt-2 font-mono text-xs text-amber-700 break-all">{{ p.reason }}</code>{% endif %}
+                {% elif p.key == 'malformed' %}
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Catatan gerbang kinerja ada, tetapi baris terakhirnya tidak dikenali — baca berkasnya sebelum menganggap rilis terakhir lulus.','The performance gate’s record exists but its last line is not recognised — read the file before assuming the last release passed.')"></p>
+                {% if p.reason %}<code class="block mt-2 font-mono text-xs text-amber-700 break-all">{{ p.reason }}</code>{% endif %}
+                {% else %}
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Belum ada penilaian di berkas ini. Gerbang menulis satu baris tiap kali ia menilai sebuah rilis; kalau server ini sudah pernah menolak satu rilis karena kinerja, berkasnya ada di tempat lain — setel SCANGRADE_PERF_HISTORY_FILE ke path itu.','No judgement has been recorded at this path yet. The gate writes one line each time it judges a release; if this box has refused a release for performance before, the file is somewhere else — set SCANGRADE_PERF_HISTORY_FILE to that path.')"></p>
+                {% endif %}
+
+                {% if p.key == 'present' %}
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Putusan','Verdict')"></span>
+                        <span class="text-right min-w-0">
+                            <code class="font-mono text-xs text-surface-800">{{ p.verdict }}</code>
+                            {% if p.verdict and p.verdict_key not in status.perf_verdicts %}<span class="ml-2 text-xs text-amber-700" x-text="t('belum dikenal halaman ini','no word for it on this page')"></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Rilis yang dinilai','Release under judgement')"></span>
+                        <span class="text-right min-w-0">
+                            {% if p.short %}<code class="font-mono text-xs text-surface-700">{{ p.short }}</code>
+                            {% else %}<span class="text-xs text-surface-500" x-text="t('commit tidak terbaca di catatan ini','no readable commit in this record')"></span>{% endif %}
+                            {% if p.subject %}<span class="block text-xs text-surface-500 break-words">{{ p.subject }}</span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Diukur','Measured')"></span>
+                        <span class="text-surface-700">
+                            <code class="font-mono text-xs">{{ p.measured_at or '—' }}</code>
+                            {% if p.age_seconds is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ p.age_seconds }}</strong> <span x-text="t('detik','seconds')"></span></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Halaman terlambat','Slowest page')"></span>
+                        <span class="text-right min-w-0">
+                            {% if p.p50_ms is not none %}<span class="text-surface-800 font-bold">p50 {{ p.p50_ms|round(0)|int }} ms</span>
+                            {% else %}<span class="text-xs text-surface-500" x-text="t('tidak terukur','not measured')"></span>{% endif %}
+                            {% if p.p95_ms is not none %}<span class="ml-2 text-surface-700">p95 {{ p.p95_ms|round(0)|int }} ms</span>{% endif %}
+                            {% if p.baseline.present and p.baseline.p50_ms is not none %}
+                            <span class="block text-xs text-surface-500">
+                                <span x-text="t('terhadap','against')"></span>
+                                <code class="font-mono">{{ p.baseline.short or '?' }}</code>
+                                p50 {{ p.baseline.p50_ms|round(0)|int }} ms{% if p.baseline.p95_ms is not none %}, p95 {{ p.baseline.p95_ms|round(0)|int }} ms{% endif %}
+                            </span>
+                            {% elif not p.baseline.present %}
+                            <span class="block text-xs text-surface-500" x-text="t('tidak ada pembanding yang terbaca','no readable baseline')"></span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Halaman terberat','Heaviest page')"></span>
+                        <span class="text-right min-w-0">
+                            {% if p.bytes is not none %}<span class="text-surface-700">{{ (p.bytes / 1024)|round(1) }} KB</span>{% endif %}
+                            {% if p.roundtrips is not none %}<span class="ml-2 text-surface-700">{{ p.roundtrips|round(0)|int }} <span x-text="t('query per render','queries per render')"></span></span>{% endif %}
+                            {% if p.bytes is none and p.roundtrips is none %}<span class="text-xs text-surface-500" x-text="t('tidak terukur','not measured')"></span>{% endif %}
+                            {% if p.bytes_endpoint or p.roundtrips_endpoint %}
+                            <span class="block text-xs text-surface-500 break-all">{{ p.bytes_endpoint or p.roundtrips_endpoint }}</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+
+                {% if p.reasons %}
+                <div class="mt-4 pt-4 border-t border-surface-200">
+                    <p class="text-xs text-surface-500 mb-2" x-text="t('Gerbang menolaknya karena baris-baris ini, apa adanya:','The gate refused it on these lines, verbatim:')"></p>
+                    <ul class="space-y-1.5">
+                        {% for reason in p.reasons %}
+                        <li class="font-mono text-xs text-rose-800 break-words">{{ reason }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% if p.reasons_total > p.shown %}
+                    <p class="mt-2 text-xs text-surface-500">
+                        <span x-text="t('Menampilkan','Showing')"></span> {{ p.shown }} <span x-text="t('dari','of')"></span> {{ p.reasons_total }}
+                    </p>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <p class="mt-3 text-xs text-surface-500 leading-relaxed" x-text="t('Rasio di atas ambang adalah hasil pengukuran, bukan putusan: dua jalur identik di server ini berbeda sekitar 1,3x, jadi ambangnya 1,5x untuk p50.','A ratio above the threshold is a measurement, not a verdict: two identical runs on this box differ by around 1.3x, which is why the threshold is 1.5x on p50.')"></p>
+                {% endif %}
+
+                <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                    <span class="text-surface-500" x-text="t('Riwayat gerbang','Gate history')"></span>
+                    <code class="font-mono text-surface-500 break-all">{{ status.perf_file }}</code>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the refused release's own numbers ────────────────────────────── -->
+    {#
+        The card above shows the gate's *last* judgement, and a held commit does not
+        have one any more: once it is refused it is quarantined and stops being
+        judged, so the next line in the history belongs to a later release that
+        passed — and the numbers the refusal was made from leave the page exactly
+        when somebody finally comes looking. The quarantine card quotes the gate's
+        prose; this one is the measurement that prose was made from, looked up by
+        the held sha, so a cordoned commit's evidence is not overwritten by the
+        release that followed it.
+    #}
+    {% set H = p.held %}
+    {% if H.key != 'none' and not (H.key == 'present' and H.same_as_latest) %}
+    <div class="card p-5 border border-rose-200 bg-rose-50">
+        <div class="flex items-start gap-4">
+            <i class="fas fa-file-shield text-rose-700 text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold text-rose-700" x-text="t('Angka Rilis yang Ditahan','The Refused Release’s Own Numbers')"></h2>
+
+                {% if H.key == 'present' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Ini pengukuran yang membuat rilis yang ditahan itu ditolak, diambil dari riwayat yang sama dan dicari lewat sha-nya. Rilis setelahnya bisa saja lulus, tetapi angka ini tidak berubah — supaya alasan penolakan tetap bisa diperiksa kapan saja.','This is the measurement the held release was refused on, taken from the same history and found by its sha. The releases after it may pass, but these figures do not change — so the reason for the refusal stays checkable whenever somebody looks.')"></p>
+                    <div class="mt-4 space-y-3 text-sm">
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                            <span class="text-surface-500 shrink-0" x-text="t('Rilis yang ditahan','Held release')"></span>
+                            <span class="text-right min-w-0">
+                                <code class="font-mono text-xs text-surface-700">{{ H.short }}</code>
+                                {% if H.subject %}<span class="block text-xs text-surface-500 break-words">{{ H.subject }}</span>{% endif %}
+                            </span>
+                        </div>
+                        {% if H.verdict %}
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                            <span class="text-surface-500 shrink-0" x-text="t('Putusan saat itu','The verdict then')"></span>
+                            <span class="text-right min-w-0"><code class="font-mono text-xs text-surface-800">{{ H.verdict }}</code></span>
+                        </div>
+                        {% endif %}
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                            <span class="text-surface-500 shrink-0" x-text="t('Halaman terlambat','Slowest page')"></span>
+                            <span class="text-right min-w-0">
+                                {% if H.p50_ms is not none %}<span class="text-surface-800 font-bold">p50 {{ H.p50_ms|round(0)|int }} ms</span>
+                                {% else %}<span class="text-xs text-surface-500" x-text="t('tidak terukur','not measured')"></span>{% endif %}
+                                {% if H.p95_ms is not none %}<span class="ml-2 text-surface-700">p95 {{ H.p95_ms|round(0)|int }} ms</span>{% endif %}
+                            </span>
+                        </div>
+                        {% if H.measured_at %}
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                            <span class="text-surface-500" x-text="t('Diukur','Measured')"></span>
+                            <code class="font-mono text-xs text-surface-700">{{ H.measured_at }}</code>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% if H.reasons %}
+                    <div class="mt-4 pt-4 border-t border-rose-200">
+                        <p class="text-xs text-surface-500 mb-2" x-text="t('Gerbang menolaknya karena baris-baris ini, apa adanya:','The gate refused it on these lines, verbatim:')"></p>
+                        <ul class="space-y-1.5">
+                            {% for reason in H.reasons %}
+                            <li class="font-mono text-xs text-rose-800 break-words">{{ reason }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                {% elif H.key == 'out_of_window' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                        <span x-text="t('Rilis ini ditahan oleh gerbang kinerja, tetapi penilaiannya lebih tua dari jendela riwayat yang dibaca halaman ini — jadi angkanya ada di berkas, hanya bukan di ekor yang dibaca.','This release was held by the performance gate, but its judgement is older than the history window this page reads — so the numbers are in the file, just not in the tail it reads.')"></span>
+                    </p>
+                    <p class="mt-2 text-xs text-surface-500">
+                        <span x-text="t('Buka berkasnya untuk melihat penilaian yang lebih tua.','Open the file to see the older judgement.')"></span>
+                    </p>
+                {% elif H.key == 'unreadable' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Rilis ini ditahan oleh gerbang kinerja, tetapi riwayat penilaiannya tidak bisa dibaca dari halaman ini.','This release was held by the performance gate, but its judgement history cannot be read from this page.')"></p>
+                {% else %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                        <span x-text="t('Rilis ini ditahan, tetapi tidak ada penilaian dari gerbang kinerja untuk commit ini — ia mungkin ditolak oleh gerbang lain (tema, skema, atau i18n), yang tidak mengukur kinerja.','This release is held, but there is no judgement from the performance gate for this commit — it may have been refused by another gate (theme, schema or i18n), which measures no performance.')"></span>
+                    </p>
+                {% endif %}
+
+                <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                    <span class="text-surface-500" x-text="t('Commit yang ditahan','Held commit')"></span>
+                    <code class="font-mono text-surface-500 break-all">{{ H.commit }}</code>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── the last few refusals, kept past the lift ─────────────────────── -->
+    {#
+        A quarantine is replaced by the next refusal and deleted by the release that
+        lifts it. Both are right for the tick, and both erase the evidence exactly
+        when a later release has passed and somebody comes looking. The runner keeps
+        the last few records for this card, so the run of refusals — which commit,
+        which gate, and the lines that gate refused on — outlives the release that
+        replaced it. This is the *history*, not the current state: the quarantine
+        card above still answers what is held right now.
+    #}
+    {% set R = status.refusals %}
+    {% set RHELD = {'box': 'bg-surface-50 border-surface-200'} %}
+    {% set RAMBER = {'box': 'bg-amber-50 border-amber-200'} %}
+    {% set RL = RAMBER if R.key == 'unreadable' else RHELD %}
+    <div class="card p-5 border {{ RL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas fa-clock-rotate-left text-surface-600 text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold text-surface-800" x-text="t('Beberapa Penolakan Terakhir','The Last Few Refusals')"></h2>
+
+                {% if R.key == 'present' %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Ini catatan penolakan yang disimpan runner, terbaru lebih dahulu. Karantina di atas hilang begitu rilis berikutnya lolos; salinan di sini tetap ada, jadi alasan dan angka sebuah penolakan masih bisa diperiksa setelah rilis yang menggantikannya berjalan.','These are the refusal records the runner kept, newest first. The quarantine above disappears the moment a later release passes; the copy here stays, so the reason and the numbers behind a refusal remain checkable after the release that replaced it is running.')"></p>
+                    <div class="mt-4">
+                        {% for r in R.records %}
+                        <div class="{% if not loop.first %}pt-4 mt-4 border-t border-surface-200{% else %}pt-2{% endif %} space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-sm">
+                                <span class="text-surface-500 shrink-0" x-text="t('Penolakan','Refusal')"></span>
+                                <span class="text-right min-w-0">
+                                    {% if r.short %}
+                                        <code class="font-mono text-xs text-surface-700">{{ r.short }}</code>
+                                        {% if r.subject %}<span class="block text-xs text-surface-500 break-words">{{ r.subject }}</span>{% endif %}
+                                    {% elif r.name %}
+                                        <code class="font-mono text-xs text-surface-500 break-all">{{ r.name }}</code>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% if r.held %}
+                                {% if r.gate %}
+                                <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-sm">
+                                    <span class="text-surface-500 shrink-0" x-text="t('Gerbang yang menolak','Gate that refused')"></span>
+                                    <code class="font-mono text-xs text-surface-800 break-words text-right min-w-0">{{ r.gate }}</code>
+                                </div>
+                                {% endif %}
+                                {% if r.refused_at %}
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-sm">
+                                    <span class="text-surface-500" x-text="t('Ditolak pada','Refused at')"></span>
+                                    <span class="text-right min-w-0">
+                                        <code class="font-mono text-xs text-surface-700">{{ r.refused_at }}</code>
+                                        {% if r.age_seconds is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ r.age_seconds }}</strong> <span x-text="t('detik','seconds')"></span></span>{% endif %}
+                                    </span>
+                                </div>
+                                {% endif %}
+                                {% if r.reasons %}
+                                <div class="pt-1">
+                                    <ul class="space-y-1.5">
+                                        {% for reason in r.reasons %}
+                                        <li class="font-mono text-xs text-surface-600 break-words">{{ reason }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                    {% if r.reasons_total > r.reasons|length %}
+                                    <p class="mt-1.5 text-xs text-surface-400"><span x-text="t('Menampilkan','Showing')"></span> {{ r.reasons|length }} <span x-text="t('dari','of')"></span> {{ r.reasons_total }} <span x-text="t('baris output gerbang','lines the gate printed')"></span></p>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {#
+                                    The gate's own measurement, for every quarantined
+                                    commit — not only the held one. The refusal
+                                    record's lines are the runner's prose; the
+                                    numbers they were made from live in the perf
+                                    history, and an older refusal lost them when its
+                                    release was replaced. The held commit's copy is
+                                    suppressed here because it is already on the
+                                    page (its own block above, or the latest
+                                    judgement when it is that too).
+                                #}
+                                {% set PF = r.perf %}
+                                {% if PF and not r.is_current %}
+                                    {% if PF.key == 'present' %}
+                                    <div class="pt-1">
+                                        <p class="text-xs text-surface-500 mb-1" x-text="t('Angka gerbang kinerja untuk commit ini, dari riwayat yang sama:','The performance gate’s own numbers for this commit, from the same history:')"></p>
+                                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-sm">
+                                            <span class="text-surface-500 shrink-0" x-text="t('Putusan gerbang','The gate’s verdict')"></span>
+                                            <span class="text-right min-w-0">
+                                                {% if PF.verdict %}<code class="font-mono text-xs text-surface-800">{{ PF.verdict }}</code>{% endif %}
+                                            </span>
+                                        </div>
+                                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-sm">
+                                            <span class="text-surface-500" x-text="t('Halaman terlambat','Slowest page')"></span>
+                                            <span class="text-right min-w-0">
+                                                {% if PF.p50_ms is not none %}<span class="text-surface-800 font-bold">p50 {{ PF.p50_ms|round(0)|int }} ms</span>
+                                                {% else %}<span class="text-xs text-surface-500" x-text="t('tidak terukur','not measured')"></span>{% endif %}
+                                                {% if PF.p95_ms is not none %}<span class="ml-2 text-surface-700">p95 {{ PF.p95_ms|round(0)|int }} ms</span>{% endif %}
+                                            </span>
+                                        </div>
+                                        {% if PF.measured_at %}
+                                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-sm">
+                                            <span class="text-surface-500" x-text="t('Diukur','Measured')"></span>
+                                            <code class="font-mono text-xs text-surface-700">{{ PF.measured_at }}</code>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% elif r.gate_key == 'perf_gate' and PF.key == 'out_of_window' %}
+                                    <p class="pt-1 text-xs text-surface-500" x-text="t('Gerbang kinerja menahan commit ini, tetapi penilaiannya lebih tua dari jendela riwayat yang dibaca halaman ini — angkanya ada di berkas, hanya bukan di ekor yang dibaca.','The performance gate held this commit, but its judgement is older than the history window this page reads — the numbers are in the file, just not in the tail it reads.')"></p>
+                                    {% elif r.gate_key == 'perf_gate' and PF.key == 'unreadable' %}
+                                    <p class="pt-1 text-xs text-surface-500" x-text="t('Gerbang kinerja menahan commit ini, tetapi riwayat penilaiannya tidak bisa dibaca dari halaman ini.','The performance gate held this commit, but its judgement history cannot be read from this page.')"></p>
+                                    {% elif r.gate_key == 'perf_gate' %}
+                                    <p class="pt-1 text-xs text-surface-500" x-text="t('Gerbang kinerja menahan commit ini, tetapi tidak ada penilaiannya di riwayat — hanya commit yang dinilai yang menulis satu baris.','The performance gate held this commit, but there is no judgement for it in the history — only a commit it judged writes a line.')"></p>
+                                    {% endif %}
+                                {% endif %}
+                                {#
+                                    One-click release, per row. Only the commit that is
+                                    *under judgement* can be retried: the runner deploys
+                                    `origin/$BRANCH`, so a commit the branch has moved
+                                    past cannot be checked out again, and the runner
+                                    would have no way to honour a request for it. The
+                                    button submits the sha so the server refuses that
+                                    row rather than silently releasing the held one.
+                                #}
+                                <div class="pt-2">
+                                    {% if q.held and r.is_current %}
+                                        {% if status.request_pending or status.release_file_present %}
+                                        <p class="text-xs text-emerald-700" x-text="t('Permintaan rilis sudah menunggu — runner akan menghormatinya pada tick berikutnya.','A release request is already waiting — the runner honours it on the next tick.')"></p>
+                                        {% elif status.request_dir_writable is none %}
+                                        <p class="text-xs text-amber-700" x-text="t('Belum bisa dirilis dari sini: direktori permintaan belum ada, yang berarti installer belum pernah dijalankan. Dari shell: touch /etc/scangrade-deploy.release','This cannot release from here yet: the request directory does not exist, which means the installer has never been run. From a shell: touch /etc/scangrade-deploy.release')"></p>
+                                        {% elif not status.request_dir_writable %}
+                                        <p class="text-xs text-rose-700" x-text="t('Belum bisa dirilis dari sini: direktori permintaan tidak boleh ditulis oleh proses aplikasi.','This cannot release from here: the request directory is not writable by the app process.')"></p>
+                                        {% else %}
+                                        <form method="POST" action="/super-admin/deploy-status/release">
+                                            <input type="hidden" name="sha" value="{{ r.sha }}">
+                                            <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs transition shadow">
+                                                <i class="fas fa-rotate-right mr-1"></i>
+                                                <span x-text="t('Rilis commit ini (satu percobaan)','Release this commit (one attempt)')"></span>
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                    {% elif q.held %}
+                                    <button type="button" disabled class="bg-surface-200 text-surface-500 px-3 py-1.5 rounded-lg font-bold text-xs cursor-not-allowed">
+                                        <i class="fas fa-rotate-right mr-1"></i>
+                                        <span x-text="t('Tidak bisa dirilis','Cannot be released')"></span>
+                                    </button>
+                                    <span class="block text-xs text-surface-500 mt-1" x-text="t('Branch sudah melewati commit ini, jadi runner tidak bisa mencobanya lagi — hanya commit yang sedang dinilai yang bisa dirilis.','The branch has moved past this commit, so the runner cannot try it again — only the commit under judgement can be released.')"></span>
+                                    {% else %}
+                                    <p class="text-xs text-surface-500" x-text="t('Tidak ada commit yang ditahan, jadi tidak ada yang bisa dirilis dari baris ini.','No commit is being held, so there is nothing to release from this row.')"></p>
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <p class="text-sm text-amber-800 leading-relaxed" x-text="t('Catatan penolakan ini ada, tetapi isinya tidak dikenali — jadi ia tidak dihitung sebagai penolakan yang jelas dan tidak boleh dibaca sebagai tidak ada apa-apa.','This refusal record exists, but its contents are not recognised — so it is not counted as a clear refusal and must not be read as nothing being wrong.')"></p>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="mt-4 pt-4 border-t border-surface-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                        <span class="text-surface-500"><span x-text="t('Menampilkan','Showing')"></span> {{ R.records|length }} <span x-text="t('dari','of')"></span> {{ R.total }}</span>
+                        <code class="font-mono text-surface-500 break-all">{{ R.path }}</code>
+                    </div>
+                {% elif R.key == 'unreadable' %}
+                    <p class="text-sm text-amber-800 mt-1 leading-relaxed" x-text="t('Ada direktori riwayat penolakan dan halaman ini tidak bisa membacanya, jadi belum bisa dipastikan apa yang pernah ditolak.','There is a refusal history directory and this page cannot read it, so what has been refused cannot be said.')"></p>
+                    {% if R.detail %}<code class="block mt-2 font-mono text-xs text-amber-700 break-all">{{ R.detail }}</code>{% endif %}
+                {% else %}
+                    <p class="text-sm text-surface-600 mt-1 leading-relaxed" x-text="t('Belum ada penolakan yang tersimpan. Ini bukan bukti tidak pernah ada: runner versi lebih lama tidak menyimpan riwayat, dan penolakan yang terjadi sebelum itu tidak meninggalkan salinan di sini.','No refusal is on record yet. That is not proof none ever happened: a runner from before the history keeps no copies, and a refusal from before then left none here.')"></p>
+                {% endif %}
+
+                <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                    <span class="text-surface-500" x-text="t('Direktori riwayat','History directory')"></span>
+                    <code class="font-mono text-surface-500 break-all">{{ R.path }}</code>
                 </div>
             </div>
         </div>
@@ -798,6 +1211,116 @@
                     </span>
                 </div>
                 {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the shared store the draft lock rides ────────────────────────── -->
+    {#
+        The draft lock (`/api/student/sync-draft`) and the rate limiter ride one
+        pooled Redis connection, and both fall back to this worker when it cannot be
+        reached. That fallback is right — refusing to store a paper is the one outcome
+        a cache outage must never cause — and it is also the state nothing used to
+        show: the site serves normally, the sync answers `saved: true`, and three
+        gevent workers quietly stop serialising against each other. `lock_health`
+        records both outcomes and this card reads them. Read freshly, not behind the
+        report's cache: "is this box sharing state right now" is not a thirty-second-
+        old question.
+    #}
+    {#
+        A missing reading is the 'unknown' state with empty fields, not a 500 — the
+        route always passes one, but a template rendered on its own (the suites that
+        read this page's copy) must not be the thing that decides that.
+    #}
+    {% set LKD = {'key': 'unknown', 'measured_at': None, 'reachable': None,
+                  'version': None, 'probe_error': None, 'marker': {},
+                  'worker_ok': None, 'worker_fallbacks': None,
+                  'worker_first_at': None, 'worker_last_at': None,
+                  'worker_reason': None, 'worker_cleared': None,
+                  'worker_cleared_at': None, 'state_file': None} %}
+    {% set LK = locks if locks is defined and locks else LKD %}
+    {% set LKC = {
+        'shared': {'box': 'bg-emerald-50 border-emerald-200', 'text': 'text-emerald-800', 'icon': 'text-emerald-500'},
+        'recorded': {'box': 'bg-amber-50 border-amber-200', 'text': 'text-amber-800', 'icon': 'text-amber-500'},
+        'unreachable': {'box': 'bg-rose-50 border-rose-200', 'text': 'text-rose-800', 'icon': 'text-rose-500'},
+        'unconfigured': {'box': 'bg-rose-50 border-rose-200', 'text': 'text-rose-800', 'icon': 'text-rose-500'},
+        'unknown': {'box': 'bg-surface-100 border-surface-200', 'text': 'text-surface-700', 'icon': 'text-surface-400'}
+    }.get(LK.key, {'box': 'bg-surface-100 border-surface-200', 'text': 'text-surface-700', 'icon': 'text-surface-400'}) %}
+    {% set M = LK.marker or {} %}
+    <div class="card p-5 border {{ LKC.box }}">
+        <div class="flex items-start gap-3">
+            <i class="fas fa-key {{ LKC.icon }} mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <h2 class="font-extrabold {{ LKC.text }}" x-text="t('Penyimpanan Kunci Bersama','The Shared Lock Store')"></h2>
+                    <span class="text-xs text-surface-500">{{ LK.measured_at }}</span>
+                </div>
+                <p class="text-sm mt-1 leading-relaxed {{ LKC.text }}">
+                    {% if LK.key == 'shared' %}<span x-text="t('Penyimpanan bersama menjawab dan tidak ada fallback yang tercatat: kunci draft dan pembatasan laju memang berlaku untuk semua worker.','The shared store answers and nothing is on record: the draft lock and the rate limits really are shared by every worker.')"></span>
+                    {% elif LK.key == 'recorded' %}<span x-text="t('Penyimpanan bersama menjawab sekarang, TETAPI pengambilan kunci pernah jatuh ke satu worker sejak proses ini hidup — selama itu jawaban murid diserialkan oleh satu worker saja, bukan tiga.','The shared store answers now, BUT a lock has fallen back to a single worker since this process started — for that stretch, a student’s answers were serialised by one worker instead of three.')"></span>
+                    {% elif LK.key == 'unreachable' %}<span x-text="t('Penyimpanan bersama tidak menjawab: SETIAP kunci dan pembatasan laju sekarang hanya berlaku di worker ini, jadi dua worker bisa memegang kunci yang sama. Halaman ini tidak bisa memperbaiki apa pun — yang perlu diperiksa adalah layanan penyimpanan di kotak itu.','The shared store does not answer: EVERY lock and rate limit is now this worker’s own, so two workers can hold the same lock. This page cannot fix anything — the store service on the box is what to check.')"></span>
+                    {% elif LK.key == 'unconfigured' %}<span x-text="t('Tidak ada penyimpanan bersama yang dikonfigurasi: setiap kunci dan pembatasan laju hanya berlaku di worker ini. Di kotak yang dipasang installer, ini kekurangan konfigurasi, bukan pilihan.','No shared store is configured: every lock and rate limit is this worker’s own. On a box the installer provisioned, that is a missing setting rather than a choice.')"></span>
+                    {% else %}<span x-text="t('Penyimpanan bersama tidak bisa ditanya dari halaman ini, jadi statusnya tidak diketahui. Ini BUKAN berarti sehat.','The shared store could not be asked from this page, so its state is unknown. This is NOT a clean bill.')"></span>{% endif %}
+                </p>
+
+                <div class="mt-3 space-y-1.5 text-xs">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Store bersama','Shared store')"></span>
+                        <span class="font-bold text-surface-800">
+                            {% if LK.reachable %}<span x-text="t('Menjawab','Answering')"></span>{% if LK.version %} <span class="font-mono">Redis {{ LK.version }}</span>{% endif %}
+                            {% elif LK.reachable is sameas false %}<span x-text="t('Tidak menjawab','Not answering')"></span>{% if LK.probe_error %} <code class="font-mono text-surface-500">{{ LK.probe_error }}</code>{% endif %}
+                            {% else %}<span x-text="t('Tidak bisa ditanya','Could not be asked')"></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Kunci yang dilayani store','Locks the store served')"></span>
+                        <span class="font-bold text-surface-800">{{ LK.worker_ok if LK.worker_ok is not none else '—' }}</span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Kunci yang jatuh ke worker ini','Locks held by this worker instead')"></span>
+                        <span class="font-bold {{ 'text-amber-700' if LK.worker_fallbacks else 'text-surface-800' }}">{{ LK.worker_fallbacks if LK.worker_fallbacks is not none else '—' }}</span>
+                    </div>
+                    {% if LK.worker_first_at %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Fallback pertama kali (worker ini)','First fallback (this worker)')"></span>
+                        <code class="font-mono text-surface-700">{{ LK.worker_first_at }}</code>
+                    </div>
+                    {% endif %}
+                    {% if LK.worker_last_at %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Fallback terakhir (worker ini)','Last fallback (this worker)')"></span>
+                        <code class="font-mono text-surface-700">{{ LK.worker_last_at }}</code>
+                    </div>
+                    {% endif %}
+                    {% if LK.worker_cleared %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Penanda yang dibersihkan worker ini','Markers this worker cleared')"></span>
+                        <span class="font-bold text-surface-800">{{ LK.worker_cleared }}{% if LK.worker_cleared_at %} <code class="font-mono text-xs text-surface-500">{{ LK.worker_cleared_at }}</code>{% endif %}</span>
+                    </div>
+                    {% endif %}
+                    {% if LK.worker_reason %}
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Alasan terakhir','Last reason')"></span>
+                        <code class="font-mono text-surface-700 break-all text-right">{{ LK.worker_reason }}</code>
+                    </div>
+                    {% endif %}
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                        <span class="text-surface-500 shrink-0" x-text="t('Penanda di perangkat','Marker on the appliance')"></span>
+                        <span class="text-surface-700 text-right">
+                            {% if M.key == 'ok' %}<span x-text="t('Ada — ditulis','Present, written')"></span> <code class="font-mono">{{ M.at }}</code>{% if M.worker %} <span x-text="t('oleh proses','by process')"></span> <code class="font-mono">{{ M.worker }}</code>{% endif %}{% if M.age_seconds is not none %} <span class="text-surface-500">({{ M.age_seconds }} <span x-text="t('detik lalu','seconds ago')"></span>)</span>{% endif %}{% if M.reason %} <span class="text-surface-500" x-text="t('sebab pertama:','first cause:')"></span> <code class="font-mono">{{ M.reason }}</code>{% endif %}
+                            {% elif M.key == 'absent' %}<span x-text="t('Tidak ada','None')"></span>
+                            {% elif M.key == 'unreadable' %}<span class="text-amber-700" x-text="t('Ada dan tidak bisa dibaca','Present and unreadable')"></span>{% if M.reason %} <code class="font-mono text-surface-500">{{ M.reason }}</code>{% endif %}
+                            {% elif M.key == 'malformed' %}<span class="text-amber-700" x-text="t('Ada dan isinya bukan rekaman','Present and not a record')"></span>{% if M.reason %} <code class="font-mono text-surface-500">{{ M.reason }}</code>{% endif %}
+                            {% else %}<span class="text-surface-500" x-text="t('Tidak terbaca','Unreadable')"></span>{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <span class="text-surface-500" x-text="t('Berkas penanda','Marker file')"></span>
+                        <code class="font-mono text-surface-500 break-all text-right">{{ LK.state_file }}</code>
+                    </div>
+                </div>
+
+                <p class="text-xs text-surface-500 mt-3 leading-relaxed" x-text="t('Penanda ditulis sekali tiap worker saat store tidak terjangkau, lalu dihapus lagi oleh kunci pertama yang berhasil — jadi satu baris berumur sepuluh menit berarti gangguan yang masih berjalan, bukan riwayat lama. Angka di kartu ini menghitung pengambilan kunci draft saja, sedangkan store yang sama juga membawa pembatasan laju; dan penanda hidup di perangkat ini, jadi worker di host lain tidak terlihat dari sini.','The marker is written once per worker while the store is unreachable and deleted again by the first lock that succeeds — so a line ten minutes old is an outage still running, not ancient history. The counts here cover the draft lock only, while the same store also carries the rate limits; and the marker lives on this appliance, so workers on another host are not visible here.')"></p>
             </div>
         </div>
     </div>

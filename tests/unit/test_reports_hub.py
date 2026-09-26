@@ -646,8 +646,31 @@ class TestItFitsASmallScreen:
             "four hundred papers push the class reports off the page")
 
     def test_the_exam_row_wraps_rather_than_squeezing(self):
-        assert "flex flex-col lg:flex-row lg:items-center" in PAGE, (
-            "the exam row keeps its columns on a phone")
+        """One column on a phone was not enough; `lg` squeezed instead.
+
+        Beside the title sat two `shrink-0` blocks — three statistics and six
+        buttons — and the title's `flex-1 min-w-0` let them take everything: at a
+        1024px viewport the exam title measured **37px**, an ellipsis with one
+        letter in it (measured in the browser, not inferred). The row wraps at
+        `lg`, so the title keeps the first line, and it carries a floor from `xl`
+        on so no arrangement can squeeze it back to nothing.
+        """
+        assert "flex flex-col lg:flex-row lg:flex-wrap lg:items-center" in PAGE, (
+            "the exam row does not wrap at lg, so the buttons squeeze the title")
+        assert "w-full min-w-0 xl:flex-1 xl:min-w-[16rem]" in PAGE, (
+            "the title has no width floor to keep it from being squeezed away")
+
+    def test_the_learner_row_wraps_so_the_name_keeps_a_line(self):
+        """76px is about ten characters of a child's name.
+
+        At 320px the name shared one row with the mark cell and the report link,
+        and the name — the one thing the row exists for — was the part that gave
+        way. It takes the line to itself on a phone now.
+        """
+        assert "flex flex-wrap items-center gap-3" in PAGE, (
+            "the learner row cannot wrap, so its neighbours squeeze the name")
+        assert "w-full min-w-0 sm:w-auto sm:flex-1" in PAGE, (
+            "the learner's name does not take the line on a phone")
 
     def test_the_kpi_grid_starts_at_two_columns(self):
         assert "grid-cols-2 lg:grid-cols-4" in PAGE

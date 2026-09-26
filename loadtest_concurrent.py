@@ -63,7 +63,17 @@ EXAM_RE = re.compile(r'/student/exams/([a-f0-9\-]{36})')
 #: against any base URL without importing the app (which would need its .env).
 #: `test_the_harness_reads_the_header_the_app_writes` asserts the two agree, so
 #: the copy cannot drift from `app/utils/query_meter.py`'s.
+#: The app reports three numbers per render, and they are three because one cannot
+#: be attributed on its own: round-trips are *attempts* (the box's retries move
+#: them), queries are what the render *issued* (only a release moves them), and rows
+#: are how much data it read (only the school's size moves them). All three are
+#: declared here as the harness's own copies so this file can run against any base
+#: URL without importing the app (which would need its .env).
+#: `test_the_harness_reads_the_header_the_app_writes` asserts the copies agree, so
+#: none of them can drift from `app/utils/query_meter.py`'s.
 ROUNDTRIP_HEADER = "X-Supabase-Roundtrips"
+QUERY_HEADER = "X-Supabase-Queries"
+ROW_HEADER = "X-Supabase-Rows"
 
 #: The pages the published capacity claim is about, and therefore the ones whose
 #: payload the gate watches. Same shape as claims_gate.CLAIM_ENDPOINT.
@@ -143,6 +153,21 @@ class Results:
         # read off the app's own header. Response time is the symptom of both.
         self.nbytes = defaultdict(list)
         self.trips = defaultdict(list)
+        self.asked = defaultdict(list)
+        self.rowsread = defaultdict(list)
+
+    @staticmethod
+    def _count(resp, header):
+        """A header's integer value, or None when the app did not send one.
+
+        `None` is "not measured" and is never read as zero: a page that reported
+        nothing must not look like a free one, and an app too old to send the
+        header is exactly that case.
+        """
+        value = resp.headers.get(header)
+        if value is None or not value.strip().isdigit():
+            return None
+        return int(value.strip())
 
     def rec(self, key, t0, resp):
         ms = (time.perf_counter() - t0) * 1000
@@ -154,9 +179,12 @@ class Results:
         # shape of measurement that hides the defect it was taken to find.
         if resp.status_code == 200:
             self.nbytes[key].append(len(resp.content or b""))
-            value = resp.headers.get(ROUNDTRIP_HEADER)
-            if value is not None and value.strip().isdigit():
-                self.trips[key].append(int(value.strip()))
+            for header, bucket in ((ROUNDTRIP_HEADER, self.trips),
+                                   (QUERY_HEADER, self.asked),
+                                   (ROW_HEADER, self.rowsread)):
+                count = self._count(resp, header)
+                if count is not None:
+                    bucket[key].append(count)
 
     def err(self, key, exc):
         self.lat[key].append(float("nan"))
@@ -361,6 +389,11 @@ def summary(r, wall, n_launched):
                 # which the gate reads as "not measured" rather than as zero.
                 "bytes_p50": pct(r.nbytes[k], 50) if r.nbytes[k] else None,
                 "roundtrips_p50": pct(r.trips[k], 50) if r.trips[k] else None,
+                # What the render issued and how much data it read. The gate needs
+                # both to say whether a page that grew did so because of the release
+                # or because the school did; `None` is not measured, never zero.
+                "queries_p50": pct(r.asked[k], 50) if r.asked[k] else None,
+                "rows_p50": pct(r.rowsread[k], 50) if r.rowsread[k] else None,
             }
             for k, v in r.lat.items()
         },
@@ -376,14 +409,17 @@ def report(r, accounts_used, roster_src, wall, n_launched):
     print("\n" + "=" * 82)
     print("PER-ENDPOINT RESULTS  (milliseconds)")
     print("=" * 82)
-    print(f"{'endpoint':<34}{'n':>5}{'p50':>8}{'p95':>8}{'p99':>8}{'KB':>8}{'queries':>9}   status")
+    print(f"{'endpoint':<34}{'n':>5}{'p50':>8}{'p95':>8}{'p99':>8}{'KB':>8}"
+          f"{'queries':>9}{'rows':>8}{'tries':>7}   status")
     for key in r.lat:
         st = dict(r.status[key])
         kb = pct(r.nbytes[key], 50) / 1024.0 if r.nbytes[key] else 0.0
         trips = pct(r.trips[key], 50) if r.trips[key] else 0.0
+        asked = pct(r.asked[key], 50) if r.asked[key] else 0.0
+        rows = pct(r.rowsread[key], 50) if r.rowsread[key] else 0.0
         print(f"{key:<34}{len(r.lat[key]):>5}{pct(r.lat[key], 50):>8.0f}"
               f"{pct(r.lat[key], 95):>8.0f}{pct(r.lat[key], 99):>8.0f}"
-              f"{kb:>8.1f}{trips:>9.0f}   {st}")
+              f"{kb:>8.1f}{asked:>9.0f}{rows:>8.0f}{trips:>7.0f}   {st}")
 
     print("\n" + "=" * 82)
     print(f"sessions launched  : {s['sessions_launched']}")
@@ -405,9 +441,15 @@ def report(r, accounts_used, roster_src, wall, n_launched):
     heaviest = heaviest_page(s)
     if heaviest:
         key, cost = heaviest
-        print(f"heaviest page      : {key} — {cost['bytes_p50'] / 1024.0:.1f} KB, "
-              f"{cost['roundtrips_p50']:.0f} Supabase queries per render "
-              f"(the two numbers the perf gate compares)")
+        # Each of the four may be None on a run whose app is too old to send that
+        # header. Printing it as 0 would invent a measurement, so it says so.
+        def num(value, places=0):
+            return "n/a" if value is None else f"{value:.{places}f}"
+
+        print(f"heaviest page      : {key} — {num(cost['bytes_p50'] / 1024.0, 1)} KB, "
+              f"{num(cost['queries_p50'])} queries issued, {num(cost['rows_p50'])} rows "
+              f"read, {num(cost['roundtrips_p50'])} round-trip(s) served "
+              f"(the numbers the perf gate compares)")
     print(f"identity verified  : {s['identity_ok']}/{s['identity_checked']} via /auth/me user_id")
     if r.identity_wrong:
         print(f"  !! WRONG IDENTITY : {dict(r.identity_wrong)}")
