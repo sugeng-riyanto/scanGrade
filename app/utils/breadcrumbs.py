@@ -93,6 +93,11 @@ ARTIFACT = frozenset({
     # archive: a second artifact with one name, dropped for the same reason
     # `download.xlsx` is — the crumb is the report page it was built from.
     "learners.zip",
+    # `/super-admin/deploy-status/perf/<which>` hands over the gate's own files
+    # (its judgement history and the baseline). `evidence` and `baseline` are the
+    # names behind one placeholder, so the only literal segment is the mount the
+    # downloads hang under — a file, not a page; the crumb is deploy-status.
+    "perf",
 })
 
 #: A *login door*. `/auth/login` and its siblings render a different chrome

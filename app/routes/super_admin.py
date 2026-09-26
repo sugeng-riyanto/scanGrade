@@ -3,7 +3,8 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, current_app, send_file
+from flask import (Blueprint, render_template, g, request, jsonify, redirect, flash,
+                   current_app, send_file, make_response, abort)
 from app.utils.auth import login_required, get_supabase
 from app.utils.helpers import read_with_retry, row_or_none
 from app.services.audit_service import log_activity, fetch_audit_logs
@@ -18,6 +19,8 @@ from app.services.demo_settings import (
     order_key,
 )
 from app.services.deploy_status_service import (
+    PERF_DOWNLOADS as DEPLOY_PERF_FILES,
+    perf_download as deploy_status_perf_download,
     report as deploy_status_report,
     request_release as deploy_status_request_release,
 )
@@ -328,6 +331,43 @@ def deploy_status():
                            alerts=alerts, locks=lock_health.state(),
                            testalert=request.args.get("testalert"),
                            released=request.args.get("released"))
+
+
+@super_bp.route("/deploy-status/perf/<which>")
+@_sa_required
+def deploy_status_perf_file(which):
+    """The performance gate's own evidence and baseline, as a download.
+
+    Why HTTP: a box a gate has quarantined has no symptom on any page — the previous
+    release serves and the site is healthy — and the numbers the refusal was made from
+    live in two files on the box. The status page renders the gate's *last* judgement
+    and a bounded tail of its history; past that window the only way to the numbers was
+    a shell, which is the trip this page exists to make unnecessary. So the files
+    themselves travel: the history (the gate's verdicts and the reasons behind them) and
+    the baseline (what it compared against).
+
+    Read-only, and one of exactly two names: the service's own table is the list, so a
+    URL cannot be pointed at another file by whoever holds it. A file that is missing or
+    unreadable answers with a reason *key* rather than an empty download, because an
+    operator acting on an empty history is the failure this avoids — "the gate judged
+    nothing" and "this page cannot read the file" have different remedies.
+    """
+    if which not in DEPLOY_PERF_FILES:
+        abort(404)
+    got = deploy_status_perf_download(which)
+    if got["key"] != "present":
+        return make_response(jsonify({"error": got["key"], "path": got["path"],
+                                      "reason": got["reason"]}), 404)
+    response = make_response(got["data"])
+    response.headers["Content-Type"] = got["content_type"]
+    response.headers["Content-Disposition"] = f'attachment; filename="{got["name"]}"'
+    # A diagnostic, never a cached one: the answer "what did the gate measure" is the
+    # wrong answer if it comes from before the refusal that made somebody open it.
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Perf-File-Bytes"] = str(got["size"])
+    if got["truncated"]:
+        response.headers["X-Perf-Truncated"] = "true"
+    return response
 
 
 @super_bp.route("/deploy-status/release", methods=["POST"])

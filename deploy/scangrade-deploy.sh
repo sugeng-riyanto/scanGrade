@@ -1240,6 +1240,25 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
   SMOKE_OUT=$(cat "$SMOKE_LOG" 2>/dev/null)
   rm -f "$SMOKE_LOG"
 
+  # What a refusal quotes, in one place because both refusal arms below quote it.
+  # The verdict and the per-role summary (one line per account that failed, with the
+  # checks it failed) when the run produced them; when it produced neither — it died
+  # before printing a check line — the traceback *is* the finding, and without it the
+  # record names the gate and nothing else. stderr is folded into the tee, so the
+  # traceback is in the copy. The last six lines, because the writer keeps the first
+  # six it is handed and the exception is the *end* of a traceback: keeping the head
+  # would file the boilerplate and drop the reason the process died.
+  smoke_detail() {
+    local detail
+    detail=$({ printf '%s\n' "$SMOKE_OUT" | grep -E '^RESULT: '
+               printf '%s\n' "$SMOKE_OUT" | grep -E '^   [a-z_]+ \([0-9]+\): '; })
+    if [ -z "$detail" ]; then
+      detail=$(printf '%s\n' "$SMOKE_OUT" | sed -n '/^Traceback /,$p' | tail -n 6)
+      [ -z "$detail" ] && detail=$(printf '%s\n' "$SMOKE_OUT" | tail -n 6)
+    fi
+    printf '%s\n' "$detail"
+  }
+
   case "$SMOKE_RC" in
     0)
       log "smoke test passed" ;;
@@ -1253,15 +1272,13 @@ elif [ "$HEALTHY" = "1" ] && [ -f "$SMOKE_CONF" ]; then
       log "    release: rolling back to $BEFORE"
       HEALTHY=0
       FAIL_REASON="smoke test (exit 2: nothing was testable)"
-      FAIL_DETAIL=$({ printf '%s\n' "$SMOKE_OUT" | grep -E '^RESULT: '
-                      printf '%s\n' "$SMOKE_OUT" | grep -E '^   FAIL '; }) ;;
+      FAIL_DETAIL=$(smoke_detail) ;;
     *)
       if [ "${SMOKE_ENFORCE:-false}" = "true" ]; then
         log "smoke test FAILED (exit $SMOKE_RC) — rolling back"
         HEALTHY=0
         FAIL_REASON="smoke test (exit $SMOKE_RC)"
-        FAIL_DETAIL=$({ printf '%s\n' "$SMOKE_OUT" | grep -E '^RESULT: '
-                        printf '%s\n' "$SMOKE_OUT" | grep -E '^   FAIL '; })
+        FAIL_DETAIL=$(smoke_detail)
       else
         log "smoke test FAILED (exit $SMOKE_RC) but SMOKE_ENFORCE is not 'true' — keeping the release"
       fi ;;
@@ -1411,7 +1428,8 @@ else
 
   PERF_ENV=()
   for v in PERF_BASE_URL PERF_ROSTER PERF_SESSIONS PERF_TEACHERS PERF_DURATION \
-           PERF_BASELINE PERF_EVIDENCE PERF_BYTES_SLACK PERF_ROUNDTRIPS_SLACK; do
+           PERF_BASELINE PERF_EVIDENCE PERF_BYTES_SLACK PERF_ROUNDTRIPS_SLACK \
+           PERF_BASELINE_MAX_AGE; do
     [ -n "${!v:-}" ] && PERF_ENV+=("$v=${!v}")
   done
 

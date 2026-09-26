@@ -127,6 +127,36 @@ def baseline_from(p50: float, p95: float, commit: str = "abc1234",
     return record
 
 
+def two_pages(slow_p50: float, slow_p95: float, slow_rows: float, *,
+              fast_p50: float = 80, fast_p95: float = 120,
+              fast_rows: float | None = None) -> dict:
+    """A run with two signed-in pages, so a floor below the worst one exists.
+
+    `latency_floor` reads the *smallest* measured page as the fixed cost a page
+    carries whatever the data — the same estimate the byte and query floors use — so
+    a test about the latency normalization needs at least two pages to have one.
+    """
+    out = summary(slow_p50, slow_p95)
+    rows = slow_rows if fast_rows is None else fast_rows
+    out["per_endpoint"] = {
+        "GET /student/dashboard": {"n": 100, "p50": fast_p50, "p95": fast_p95,
+                                    "rows_p50": rows},
+        "GET /teacher/results": {"n": 100, "p50": slow_p50, "p95": slow_p95,
+                                  "rows_p50": slow_rows},
+    }
+    return out
+
+
+def baseline_with_latency(*, p50: float, p95: float, floor_p50: float,
+                          floor_p95: float, p50_rows: float,
+                          commit: str = "abc1234") -> dict:
+    """A baseline whose latency block carries the floor and the slow page's rows."""
+    record = baseline_from(p50, p95, commit=commit)
+    record["latency"].update({"floor_p50_ms": floor_p50, "floor_p95_ms": floor_p95,
+                              "p50_rows": p50_rows})
+    return record
+
+
 # ── 1. the comparison is a ratio against the last passing release ────────────
 
 class TestTheComparison:
@@ -412,6 +442,93 @@ class TestWhatTheDataExplains:
             "bytes are explained by rows even when the run reported no query count")
 
 
+# ── 1c-bis. the same normalization for the clock ─────────────────────────────
+
+class TestLatencyAndTheData:
+    """Bytes and queries were normalized against the rows the pages read; latency was
+    not, so a school that had simply grown read as a release that had slowed down.
+
+    The reasoning is the same as the cost axes and so is the floor: a page is a fixed
+    cost plus the work it does with the data, and the smallest measured page is the
+    cheapest honest estimate of the fixed part. Holding that floor constant is what
+    keeps the layout from being blamed for the roster — scaling a page's *whole*
+    latency by the row growth would make a heavier release hide behind a bigger
+    school, which is the mistake the byte and query axes already avoid.
+    """
+
+    #: A slow page (~300 ms) beside a fast one (~100 ms): the fixed cost is ~100 ms
+    #: and the slow page's data section is ~200 ms at 10 rows.
+    BASE = dict(p50=300, p95=450, floor_p50=100, floor_p95=150, p50_rows=10)
+
+    def test_a_busier_school_is_not_read_as_a_slower_release(self):
+        """Four times the rows grows the data section fourfold, and the page is under it.
+
+        Without the normalization the same measurement is 700/300 = 2.33x and refused;
+        what the baseline page would cost on today's data is 100 + 200*4 = 900 ms, so
+        this is the release the gate exists to stop refusing.
+        """
+        base = baseline_with_latency(**self.BASE)
+        assert gate.regression(base, two_pages(700, 1000, slow_rows=40)) == [], (
+            "a page that reads four times the rows and answers inside what that data "
+            "explains is the school growing, not the release slowing")
+
+    def test_a_slower_page_at_the_same_row_count_is_still_a_regression(self):
+        base = baseline_with_latency(**self.BASE)
+        reasons = gate.regression(base, two_pages(700, 1000, slow_rows=10))
+        assert reasons and "p50 700 ms" in reasons[0] and "300 ms" in reasons[0], reasons
+
+    def test_growth_the_rows_cannot_explain_is_still_a_regression(self):
+        """Twice the rows, but the page slowed past what twice the data accounts for."""
+        base = baseline_with_latency(**self.BASE)
+        reasons = gate.regression(base, two_pages(1500, 2200, slow_rows=20))
+        assert reasons and any("p50" in r for r in reasons), reasons
+        assert any("the data accounts for" in r for r in reasons), (
+            "the message has to say what the data accounted for, or a reader cannot tell "
+            f"a slower release from a bigger school: {reasons}")
+
+    def test_the_floor_is_held_constant_so_the_layout_is_not_blamed_for_the_roster(self):
+        """With no spread between the floor and the worst page there is no data section
+        to grow, so the normalization adds nothing.
+
+        A page whose whole cost *is* its data section is exactly the case where scaling
+        the total would multiply the allowance by the roster; holding the floor constant
+        means four times the rows buys no allowance at all here.
+        """
+        base = baseline_with_latency(p50=300, p95=450, floor_p50=300, floor_p95=450,
+                                     p50_rows=10)
+        reasons = gate.regression(base, two_pages(700, 1000, slow_rows=40))
+        p50 = [r for r in reasons if "p50" in r]
+        assert p50, f"four times the rows bought an allowance where the floor equals the page: {reasons}"
+        assert "the data accounts for" not in p50[0], (
+            "there is no data section to grow when the floor is the page itself, so no "
+            f"milliseconds may be attributed to it: {p50[0]}")
+
+    def test_a_baseline_without_a_floor_falls_back_to_the_absolute_rule(self):
+        base = baseline_from(300, 450, commit="abc1234")
+        assert gate.regression(base, two_pages(700, 1000, slow_rows=40)), (
+            "without a floor there is nothing to explain the growth with")
+
+    def test_a_baseline_without_rows_falls_back_to_the_absolute_rule(self):
+        record = baseline_from(300, 450)
+        record["latency"].update({"floor_p50_ms": 100, "floor_p95_ms": 150})
+        assert gate.regression(record, two_pages(700, 1000, slow_rows=40))
+
+    def test_shrinking_rows_never_tighten_the_rule(self):
+        base = baseline_with_latency(**self.BASE)
+        assert gate.regression(base, two_pages(250, 400, slow_rows=2)) == [], (
+            "the data's share may explain growth; it may never make a page that did not "
+            "change look slower than the data says it should have been")
+
+    def test_the_baseline_records_the_latency_floor_and_the_slow_page_rows(self):
+        measured = two_pages(300, 450, slow_rows=10)
+        record = gate.baseline_record("deadbee", gate.shape_of(20, 2, 20.0, "https://x.test"),
+                                      measured, claims.claim_latency(measured))
+        assert record["latency"]["p50_ms"] == 300
+        assert record["latency"]["floor_p50_ms"] == 80
+        assert record["latency"]["floor_p95_ms"] == 120
+        assert record["latency"]["p50_rows"] == 10
+
+
 # ── 1d. retries are the box, not the release ─────────────────────────────────
 
 class TestRetriesAreTheBox:
@@ -460,6 +577,104 @@ class TestRetriesAreTheBox:
         now = summary(205, 420, payload=45_000, queries=3, asked=3, rows=50)
         assert gate.explanations(base, now) == [], (
             "the gate's output stays quiet on a release that changed nothing")
+
+
+# ── 1e. the box's baseline can go stale ──────────────────────────────────────
+#
+# A baseline is a description of *this box* on the day it was measured, and it is
+# rewritten on every release that passes — so it ages exactly when releases stop
+# passing. Leave a stalled box alone for a fortnight and the description can stop
+# being true without any release doing anything: the host gets busier, a neighbour
+# appears, a kernel or an nginx version moves. The comparison still runs and still
+# diverges, but it is weighing today's box against a description of a box that no
+# longer exists — and the release it refuses is charged for drift it did not cause.
+#
+# The remedy is to recognize the staleness and re-baseline on the box as it is now.
+# That is only safe to do without an operator when the release cannot be the cause:
+# a release that changed nothing the gate measures is serving the very same page
+# bytes the baseline measured, so the difference is necessarily the box. When the
+# release *did* change a measured page it stays the suspect and is compared as
+# before, however old the baseline is.
+
+class TestAStaleBaseline:
+    def _now(self):
+        return gate.datetime(2026, 9, 26, tzinfo=gate.timezone.utc)
+
+    def test_age_is_read_from_the_record(self):
+        base = baseline_from(200, 400, measured_at="2026-09-12T00:00:00+00:00")
+        assert gate.baseline_age_seconds(base, now=self._now()) == pytest.approx(14 * 86400)
+
+    def test_a_baseline_with_no_timestamp_is_not_called_stale(self):
+        """Not measuring the age is not evidence that it is old.
+
+        The same rule the gate follows everywhere: a part that could not be read says
+        so and takes the conservative branch. Treating a missing timestamp as stale
+        would hand every pre-timestamp baseline an exemption nobody measured.
+        """
+        base = baseline_from(200, 400)
+        assert gate.baseline_age_seconds(base, now=self._now()) is None
+        assert gate.baseline_stale_reason(base, gate.DEFAULT_BASELINE_MAX_AGE_S,
+                                          now=self._now()) is None
+
+    def test_a_baseline_that_cannot_be_parsed_is_not_called_stale(self):
+        base = baseline_from(200, 400, measured_at="not a date")
+        assert gate.baseline_age_seconds(base, now=self._now()) is None
+
+    def test_an_old_baseline_says_how_old_and_names_the_commit(self):
+        base = baseline_from(200, 400, commit="deadbeef",
+                             measured_at="2026-09-01T00:00:00+00:00")
+        why = gate.baseline_stale_reason(base, 14 * 86400, now=self._now())
+        assert why and "25" in why and "deadbeef" in why, why
+
+    def test_a_recent_baseline_is_not_stale(self):
+        base = baseline_from(200, 400, measured_at="2026-09-25T00:00:00+00:00")
+        assert gate.baseline_stale_reason(base, 14 * 86400, now=self._now()) is None
+
+    def test_the_window_can_be_disabled(self):
+        base = baseline_from(200, 400, measured_at="2020-01-01T00:00:00+00:00")
+        assert gate.baseline_stale_reason(base, 0, now=self._now()) is None, (
+            "a zero window must mean 'never stale', not 'always stale'")
+
+    def test_only_a_path_that_can_move_a_measured_page_counts(self):
+        moved = gate.measured_surface_changed(
+            ["docs/AUTO_DEPLOY.md", "tests/unit/test_x.py", "AGENTS.md",
+             "app/routes/teacher.py"])
+        assert moved == ["app/routes/teacher.py"], moved
+
+    def test_inert_when_every_changed_path_is_outside_the_surface(self, monkeypatch):
+        monkeypatch.setattr(gate, "changed_paths",
+                            lambda *a, **k: ["docs/AUTO_DEPLOY.md", "AGENTS.md"])
+        assert gate.release_is_inert(ROOT, "a" * 40, "b" * 40) is True
+
+    def test_not_inert_when_a_measured_page_changed(self, monkeypatch):
+        monkeypatch.setattr(gate, "changed_paths",
+                            lambda *a, **k: ["app/templates/teacher/results.html"])
+        assert gate.release_is_inert(ROOT, "a" * 40, "b" * 40) is False
+
+    def test_unknown_when_git_cannot_place_the_commits(self, monkeypatch):
+        monkeypatch.setattr(gate, "changed_paths", lambda *a, **k: None)
+        assert gate.release_is_inert(ROOT, "a" * 40, "b" * 40) is None
+
+    def test_unknown_without_both_commits(self, monkeypatch):
+        """An unnamed release is not an inert one — the same rule as a stale age."""
+        monkeypatch.setattr(gate, "changed_paths", lambda *a, **k: ["app/x.py"])
+        assert gate.release_is_inert(ROOT, "abc1234", "b" * 40) is None
+        assert gate.release_is_inert(ROOT, None, "b" * 40) is None
+        assert gate.release_is_inert(ROOT, "a" * 40, "") is None
+
+    def test_changed_paths_says_unknown_rather_than_nothing_changed(self):
+        """The real `git`, not a stub: a commit it cannot place is not a diff of []
+
+        An empty list means "these two commits are the same tree", which would make
+        every release look inert. Git failing to answer must be a different value, or
+        the exemption would fire on a repository the gate cannot read at all.
+        """
+        assert gate.changed_paths(ROOT, "0" * 40, "1" * 40) is None, (
+            "a commit git cannot resolve read as 'nothing changed between them'")
+
+    @pytest.mark.skipif(not (ROOT / ".git").exists(), reason="needs a git checkout")
+    def test_changed_paths_is_empty_for_the_same_commit(self):
+        assert gate.changed_paths(ROOT, "HEAD", "HEAD") == []
 
 
 # ── 2. the baseline survives a bad release ───────────────────────────────────
@@ -656,6 +871,39 @@ class TestTheGateEndToEnd:
         assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
         bench["summary"].write_text(json.dumps(summary(260, 500)), encoding="utf-8")
         assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+
+    def test_a_bigger_dataset_is_not_read_as_a_slower_release(self, workbench,
+                                                              health_server, monkeypatch,
+                                                              capsys):
+        """The whole path: the baseline records the floor, and the school grows.
+
+        Without the normalization this is 700/300 = 2.33x and a rollback; what the
+        baseline page would cost on four times the rows is 100 + 200*4 = 900 ms.
+        """
+        bench, base = workbench, health_server()
+        bench["summary"].write_text(json.dumps(two_pages(300, 450, slow_rows=10)),
+                                    encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        baseline = json.loads(bench["baseline"].read_text(encoding="utf-8"))
+        assert baseline["latency"]["floor_p50_ms"] == 80, (
+            "the baseline did not record the floor, so the next release has nothing to "
+            "explain a growth with")
+
+        bench["summary"].write_text(json.dumps(two_pages(700, 1000, slow_rows=40)),
+                                    encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        out = capsys.readouterr().out
+        assert "rows" in out.lower() or "data accounts" in out.lower(), out
+
+    def test_a_slower_page_on_the_same_dataset_is_still_refused(self, workbench,
+                                                                health_server, monkeypatch):
+        bench, base = workbench, health_server()
+        bench["summary"].write_text(json.dumps(two_pages(300, 450, slow_rows=10)),
+                                    encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        bench["summary"].write_text(json.dumps(two_pages(700, 1000, slow_rows=10)),
+                                    encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
 
     def test_a_faster_release_moves_the_baseline(self, workbench, health_server, monkeypatch):
         bench, base = workbench, health_server()
@@ -854,6 +1102,96 @@ class TestTheGateEndToEnd:
         assert "CANNOT MEASURE" in out and "round-trips" in out, out
         assert bench["baseline"].read_bytes() == before
 
+    def _stale_baseline(self, bench):
+        """Rewrite the baseline so it describes a box from years ago, not this one."""
+        record = json.loads(bench["baseline"].read_text(encoding="utf-8"))
+        record["measured_at"] = "2020-01-01T00:00:00+00:00"
+        bench["baseline"].write_text(json.dumps(record), encoding="utf-8")
+        return bench["baseline"].read_bytes()
+
+    def _verdicts(self, bench) -> list[str]:
+        return [json.loads(line)["verdict"]
+                for line in bench["evidence"].read_text(encoding="utf-8").splitlines()]
+
+    def test_a_stale_baseline_with_an_inert_release_is_not_quarantined(
+            self, workbench, health_server, monkeypatch, capsys):
+        """The whole point: a stalled box's old description must not refuse a release
+        that changed nothing the gate measures.
+
+        The baseline is rewritten on every passing release, so it ages exactly when
+        releases stop passing. This release touches nothing under `app/` — the pages
+        whose numbers diverged are the same bytes the baseline measured — so the
+        divergence is the box, and the honest remedy is to describe the box as it is
+        now rather than quarantine an innocent commit.
+        """
+        bench, base = workbench, health_server()
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        self._stale_baseline(bench)
+        monkeypatch.setattr(gate, "release_is_inert", lambda *a, **k: True)
+
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        out = capsys.readouterr().out
+        assert "stale" in out.lower() and "re-baselin" in out.lower(), out
+        moved = json.loads(bench["baseline"].read_text(encoding="utf-8"))
+        assert moved["latency"]["p50_ms"] == 700, (
+            "the box as it is now is what the next release must be compared against")
+        assert self._verdicts(bench)[-1] == "stale_baseline"
+
+    def test_a_stale_baseline_still_refuses_a_release_that_changed_the_pages(
+            self, workbench, health_server, monkeypatch, capsys):
+        """Staleness alone is not an exemption: the release stays the suspect when it
+        touched the code that renders the measured pages."""
+        bench, base = workbench, health_server()
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        before = self._stale_baseline(bench)
+        monkeypatch.setattr(gate, "release_is_inert", lambda *a, **k: False)
+
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
+        assert "REGRESSED" in capsys.readouterr().out
+        assert bench["baseline"].read_bytes() == before, (
+            "a refused release must not become the yardstick, stale baseline or not")
+
+    def test_a_stale_baseline_git_cannot_place_still_refuses(
+            self, workbench, health_server, monkeypatch):
+        """A release the gate cannot diff is not an inert one."""
+        bench, base = workbench, health_server()
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        before = self._stale_baseline(bench)
+        monkeypatch.setattr(gate, "release_is_inert", lambda *a, **k: None)
+
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
+        assert bench["baseline"].read_bytes() == before
+
+    def test_a_fresh_baseline_with_an_inert_release_is_still_refused(
+            self, workbench, health_server, monkeypatch):
+        """The exemption is licensed by staleness, and this is the limit that keeps it
+        small: a fresh baseline means the box was measured recently, so the divergence
+        is new information whose cause is worth an operator's eye."""
+        bench, base = workbench, health_server()
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        before = bench["baseline"].read_bytes()
+        monkeypatch.setattr(gate, "release_is_inert", lambda *a, **k: True)
+
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_REGRESSED
+        assert bench["baseline"].read_bytes() == before
+
+    def test_the_age_window_can_be_switched_off_from_the_command_line(
+            self, workbench, health_server, monkeypatch):
+        bench, base = workbench, health_server()
+        assert run_gate(bench, base, monkeypatch) == gate.EXIT_OK
+        before = self._stale_baseline(bench)
+        monkeypatch.setattr(gate, "release_is_inert", lambda *a, **k: True)
+
+        bench["summary"].write_text(json.dumps(summary(700, 1500)), encoding="utf-8")
+        assert run_gate(bench, base, monkeypatch,
+                        {"PERF_BASELINE_MAX_AGE": "0"}) == gate.EXIT_REGRESSED, (
+            "a zero window disables the staleness exemption entirely")
+        assert bench["baseline"].read_bytes() == before
+
 
 # ── 5. the deploy script reads the exit codes the way the gate means them ────
 
@@ -946,6 +1284,13 @@ class TestTheDeployWiring:
         assert 'env_default("PERF_BYTES_SLACK"' in source
         assert 'env_default("PERF_ROUNDTRIPS_SLACK"' in source
 
+    def test_the_gate_reads_the_baseline_age_window_from_the_environment(self):
+        """The remedy for a stale baseline is an operator changing this number, and an
+        operator changes it in the conf file — so the gate has to read it from there."""
+        source = GATE_PATH.read_text(encoding="utf-8")
+        assert 'env_default("PERF_BASELINE_MAX_AGE"' in source
+        assert "--baseline-max-age" in source
+
 
 class TestTheInstaller:
     installer = INSTALLER.read_text(encoding="utf-8")
@@ -976,6 +1321,15 @@ class TestTheInstaller:
         assert "PERF_ROUNDTRIPS_SLACK=" in block
         assert "X-Supabase-Roundtrips" in block, (
             "an operator reading the conf should be told where the query count comes from")
+
+    def test_the_conf_names_the_baseline_age_window(self):
+        """The remedy for a stale baseline is an operator changing one number, so the
+        installer has to write that number where the operator reads it."""
+        block = self.installer[self.installer.index("PERF_CONF=/etc"):]
+        block = block[:block.index("# ── 4.")]
+        assert 'PERF_BASELINE_MAX_AGE="' in block, (
+            "the setting exists but the installer never writes it, so the gate's default "
+            "is the only value the box can ever take")
 
     def test_the_installer_proves_the_gate_can_run_with_the_conf_settings(self):
         block = self.installer[self.installer.index("Checking the performance gate"):]

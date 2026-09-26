@@ -426,6 +426,52 @@ absolute rule stands: it may refuse a release the data would have excused, and i
 let a heavier one through. The guards are mutation-checked by
 `.freebuff/mutate_perf_attribution.py`.
 
+#### The clock is normalized the same way
+
+Response time was the one axis still compared absolutely, so a school that had simply
+grown read as a release that had slowed down: four times the rows makes the same page
+slower without the release changing a byte, and a 2.33x p50 was a rollback for the
+roster. Latency now carries the same floor the cost axes do — the baseline records the
+*smallest* signed-in page's p50 and p95 alongside the slow page's own, and the row count
+of the page the p50 came from — and is compared against `floor + (baseline − floor) ×
+row-growth`. Holding the floor constant is the entire point: scaling a page's *whole*
+latency by the growth would make the release with the heaviest layout the most forgiving
+exactly when a fixed slowdown is easiest to hide. As with the other two axes, the data's
+share is *added* as the absolute amount it is, growth is growth only, and a baseline
+written before this existed (no floor, no row count) falls back to the absolute rule —
+it may refuse a release the data would have excused, and it cannot let a slower one
+through. When the clock *is* refused with a growth in play the reason says so (`the data
+accounts for N ms of the rise`), and a `perf gate: note` says the slow page read more
+rows, on a pass as well as a refusal. Guards:
+`.freebuff/mutate_latency_attribution.py`.
+
+#### A stale baseline does not get to quarantine an innocent release
+
+The baseline is rewritten on every release that **passes**, so it ages exactly when
+releases stop passing — which is the state this gate leaves a box in when it keeps
+refusing. An old enough baseline can stop describing the box without any release doing
+anything: the host gets busier, a neighbour appears, a kernel or an nginx version moves.
+The comparison still runs and still diverges, but it weighs today's box against a
+description of a box that no longer exists, and the release it refuses is charged for
+drift no release caused.
+
+Two facts together license the gate to act on that, and **both** are required. The first
+is age: `PERF_BASELINE_MAX_AGE` (default 14 days) says how long a baseline is trusted.
+The second is scope: the gate diffs the baseline's commit against the release
+(`git diff --name-only`), and when no changed path lies in the measured surface —
+`app/`, `deploy/`, the harness, the runtime, a migration — the pages that diverged are
+the *same bytes* the baseline measured, so the difference cannot be the release. With
+both, the gate re-baselines on the box as it is now and passes, recording verdict
+`stale_baseline`, instead of quarantining a commit that provably changed nothing. With
+either alone it compares as it always did: a fresh baseline means the divergence is new
+information, and an old baseline with a release that did touch a measured page leaves the
+release the prime suspect. The window is in days and `0` turns the exemption off. The
+measured surface is deliberately wide — a shared layout or a service reaches every page —
+so the exemption may only fire when it is *certain* the measured pages are unchanged, and
+a release git cannot diff (an unnamed commit, a commit no longer in the object database)
+takes the conservative branch and is compared as before. Guards:
+`.freebuff/mutate_stale_baseline.py`.
+
 | Result | Outcome |
 |---|---|
 | no baseline yet | **deploy**, and this release becomes the baseline |
@@ -435,6 +481,7 @@ let a heavier one through. The guards are mutation-checked by
 | could not measure (exit 2) — a busy box, or a probe that did not complete | **warn only**, and the baseline is left alone |
 | not armed (exit 4) — no roster, no harness, no base URL, or a baseline from a different reference load | roll back: this release was never compared with the last one that passed |
 | the baseline knows a page's cost but this run reports none | **warn only** — a harness that stopped reporting must not retire the payload and query axes in silence |
+| a stale baseline (older than `PERF_BASELINE_MAX_AGE`) and a release that changed nothing the gate measures, confirmed twice | deploy, and the box as it is now becomes the baseline (verdict `stale_baseline`) — the divergence is the box, not a release that touched nothing measured |
 
 The baseline is written **only when a release passes**. If a refused release
 became the yardstick, the next release would be measured against it and the
@@ -454,7 +501,8 @@ is off.
 
 `/etc/scangrade-perf.conf` (root-only) holds the base URL, the roster path, the
 reference load, the baseline path, the payload and query slacks
-(`PERF_BYTES_SLACK`, `PERF_ROUNDTRIPS_SLACK`) and `PERF_ENFORCE`. Unlike the claims gate it
+(`PERF_BYTES_SLACK`, `PERF_ROUNDTRIPS_SLACK`), the baseline's age window
+(`PERF_BASELINE_MAX_AGE`, in days) and `PERF_ENFORCE`. Unlike the claims gate it
 is armed from the first release, and that difference is deliberate: with no
 baseline the gate writes one and passes, so arming it cannot reject anything.
 From the second release on, a confirmed regression rolls the release back.
@@ -492,11 +540,39 @@ through.
 Its output is streamed to the journal as it runs, so an operator watching the
 deploy sees each role being opened rather than a silence that ends in a verdict.
 A refusal keeps that stream *and* is recorded: the runner tees the transcript to a
-fresh file outside the checkout, and the quarantine record quotes the failing
-checks (`FAIL …`) and the verdict line from that copy, so "why did nothing
-deploy" names the check that failed without a shell. The exit status is read from
+fresh file outside the checkout, and the quarantine record quotes the verdict line
+and a **per-role summary** from that copy — one line per account that failed, with
+how many checks failed for it and which, so "why did nothing deploy" and *which
+account could not be served* are both answered without a shell.
+
+Grouping by role is deliberate rather than cosmetic: a flat list of `FAIL …` lines
+makes the reader re-group by each line's prefix, and the record's few lines fill with
+whatever the stream printed first. `deploy/smoke_test.py` records the role beside
+each failure (`Result.fail(msg, role=…)`), and `grouped_failures()` prints one line
+per role in a fixed order — `ROLES`, not first-seen — so two runs with the same
+failures file the same record. A role the message itself leads with is still grouped
+right if a call site ever misses the argument. The exit status is read from
 the pipe's first command rather than the pipeline, because a `tee` that succeeded
 must not report a smoke test that failed as a pass.
+
+The journal's stream and the recorded copy are **one document by construction, and
+that is pinned**: the smoke test's merged stdout+stderr goes through exactly one
+`tee`, its file is the only thing the record reads, and nothing consumes stdout after
+it. A guard runs the runner's own pipe (its text, with the producer swapped for a
+stub) and asserts the stream equals the copy byte-for-byte — so a filter added after
+the tee, a redirect instead of it, a dropped `2>&1`, or a record read from anywhere
+else fails a test rather than letting the journal show one thing and a refusal quote
+another.
+
+When the run dies **before it prints a single check line**, there is no verdict and
+no `FAIL` to quote — and a crash is as much a finding as a failed check. So the same
+copy is read for a traceback, and the record quotes its **last** six lines: the first
+six would file the `Traceback …` header and the early frames and cut off the
+exception, which is the one line that says why the process died. The fallback is the
+only thing standing between a crash and a record that names the gate and nothing
+else, so it lives in one function both refusal arms call (`smoke_detail`) rather than
+a copy per arm. stderr is folded into the tee on purpose — the traceback is on
+stderr, and this is where it is read back.
 
 It checks four things:
 
@@ -969,6 +1045,41 @@ are disabled for the other reason: there is nothing to release.
 The button is deliberately still a `POST` form rather than a fetch, so the CSRF
 injection in `base.html` reaches it, and the route is `POST`-only and super-admin
 gated like the one above.
+
+### The gate's own files, over HTTP
+
+The page renders the gate's *last* judgement and a **bounded tail** of its history.
+The tail is the same problem one layer down: the judgement that refused a held commit
+can be **older** than the window the page reads — that is exactly the commit somebody
+is looking for — and the numbers to check are all in the file. Past the window the
+only way in was a shell on the box.
+
+So the files travel. `/super-admin/deploy-status` now offers two downloads:
+
+* `/super-admin/deploy-status/perf/evidence` — the judgement history
+  (`/var/lib/scangrade-deploy/perf/history.jsonl`);
+* `/super-admin/deploy-status/perf/baseline` — what the gate compared against
+  (`/var/lib/scangrade-deploy/perf/baseline.json`).
+
+Both are super-admin only, `GET`-only, and read-only. The path is resolved through
+the *same* environment variables the page reads (`SCANGRADE_PERF_HISTORY_FILE`,
+`SCANGRADE_PERF_BASELINE_FILE`), so the download is the file that was judged rather
+than a second guess at where it lives. The body is the file **byte for byte** — the
+gate's own line is the evidence, and a re-serialised copy would be a different
+document.
+
+Two rules the route follows everywhere on the page, applied to the files:
+
+* **A part that cannot be read is reported, never served empty.** `absent` ("the gate
+  judged nothing") and `unreadable` ("this page cannot read the file") are different
+  states with different remedies, each answered as itself with a `404` and a reason
+  key — an empty `200` is a download an operator would read as an empty history.
+* **The download is bounded, and the cut is honest.** The history grows for the life
+  of the box, so past 4 MiB the *newest* bytes are served, cut back to a line boundary
+  (half a JSON line is not evidence), and the answer says so in `X-Perf-Truncated`
+  with the file's true size in `X-Perf-File-Bytes`. `Cache-Control: no-store`, because
+  a cached answer from before the refusal that made somebody open it is the wrong
+  answer.
 
 ### What is *not* quarantined
 

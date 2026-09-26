@@ -637,6 +637,26 @@
                     <span class="text-surface-500" x-text="t('Riwayat gerbang','Gate history')"></span>
                     <code class="font-mono text-surface-500 break-all">{{ status.perf_file }}</code>
                 </div>
+
+                {#
+                    This page reads a bounded tail of the history, and the judgement that
+                    refused a held commit can be *older* than that window — which is the one
+                    case somebody most needs, on a box they may not be able to SSH into. So
+                    both files are handed over exactly as the gate wrote them: the evidence
+                    (every verdict and the reasons behind it) and the baseline it was
+                    compared against, with no shell in the way.
+                #}
+                <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                    <span class="text-surface-500" x-text="t('Tanpa shell:','Without a shell:')"></span>
+                    <a href="/super-admin/deploy-status/perf/evidence"
+                       class="font-bold text-primary-700 hover:text-primary-800 underline">
+                        <i class="fas fa-download mr-1"></i><span x-text="t('Unduh riwayat penilaian','Download the judgement history')"></span>
+                    </a>
+                    <a href="/super-admin/deploy-status/perf/baseline"
+                       class="font-bold text-primary-700 hover:text-primary-800 underline">
+                        <i class="fas fa-download mr-1"></i><span x-text="t('Unduh pembanding','Download the baseline')"></span>
+                    </a>
+                </div>
             </div>
         </div>
     </div>
