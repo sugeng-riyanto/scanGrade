@@ -55,6 +55,12 @@ RELEASE_FILE="/etc/scangrade-deploy.release"
 #: cannot carry a command.
 REQUEST_DIR="$STATE_DIR/requests"
 RELEASE_REQUEST="$REQUEST_DIR/release"
+#: The same directory, a different ask. A release request retries a refused commit
+#: against the same yardstick; this one also rewrites the perf baseline from the box
+#: as it is now, because a release the box's own drift (not the code) held can never
+#: pass by retrying it. It is an explicit release too — a held commit is retried —
+#: since the reason an operator asks is almost always that held commit.
+REBASELINE_REQUEST="$REQUEST_DIR/rebaseline"
 #: Why the last run refused to deploy for a reason that is *not* about a commit:
 #: the box is not armed to check releases at all. Kept next to the quarantine
 #: record because it answers the same question from the operator's side ("why is
@@ -243,16 +249,19 @@ quarantine_write() {
 # is never a standing permission for a commit a gate keeps refusing.
 quarantine_honour_release() {
   local asked="" held="" path=""
-  for path in "$RELEASE_FILE" "$RELEASE_REQUEST"; do
+  for path in "$RELEASE_FILE" "$RELEASE_REQUEST" "$REBASELINE_REQUEST"; do
     [ -e "$path" ] || continue
     asked="${asked:+$asked, }$path"
+    [ "$path" = "$REBASELINE_REQUEST" ] && REBASELINE_REQUESTED=1
   done
   [ -n "$asked" ] || return 0
   held=$(quarantine_sha) || held=""
   if [ -n "$held" ]; then
     log "explicit release requested ($asked) — clearing the quarantine on ${held:0:7}"
   fi
-  rm -f "$QUARANTINE_FILE" "$RELEASE_FILE" "$RELEASE_REQUEST" 2>/dev/null || true
+  [ "${REBASELINE_REQUESTED:-0}" = "1" ] && log \
+    "the perf gate will re-measure the box (--rebaseline): the baseline is rewritten from the box as it is now"
+  rm -f "$QUARANTINE_FILE" "$RELEASE_FILE" "$RELEASE_REQUEST" "$REBASELINE_REQUEST" 2>/dev/null || true
   return 0
 }
 
@@ -834,6 +843,11 @@ FAIL_REASON=""
 # transcript, and cleared by `quarantine_write` once it has been written, so a second
 # refusal in the same tick can never inherit the first gate's numbers.
 FAIL_DETAIL=""
+
+#: Set by `quarantine_honour_release` when the operator asked for a re-measurement.
+#: Initialised here because the script runs under `set -u` and the perf step reads it
+#: whether or not a request was seen.
+REBASELINE_REQUESTED=0
 
 # An operator's explicit release is consumed even when there is nothing to
 # deploy, so a pending request cannot sit on the box and surprise a later tick.
@@ -1433,9 +1447,18 @@ else
     [ -n "${!v:-}" ] && PERF_ENV+=("$v=${!v}")
   done
 
+  # An operator asked this tick to re-measure the box: hand the gate `--rebaseline`
+  # so it rewrites the baseline from the box as it is now instead of comparing
+  # against one that predates the change. Unarmed by default, so an ordinary tick is
+  # byte-for-byte the command it always was.
+  PERF_REBASELINE_ARGS=()
+  if [ "${REBASELINE_REQUESTED:-0}" = "1" ]; then
+    PERF_REBASELINE_ARGS=(--rebaseline)
+  fi
+
   PERF_OUT=$(as_owner env "${PERF_ENV[@]}" "$REPO/.venv/bin/python" \
       "$REPO/deploy/perf_gate.py" --harness "$REPO/loadtest_concurrent.py" \
-      --commit "$AFTER" 2>&1)
+      --commit "$AFTER" "${PERF_REBASELINE_ARGS[@]}" 2>&1)
   PERF_RC=$?
 
   case "$PERF_RC" in

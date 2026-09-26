@@ -2085,3 +2085,54 @@ class TestThePageNamesThePreMergeRefusal:
             "the step travels with the verdict rather than being swallowed")
         html = render_status(app, report)
         assert "refused to move it into the checkout" in html
+
+
+class TestTheRebaselineRequest:
+    """One bit in the request directory, turned into a fresh baseline by the runner."""
+
+    def test_the_page_writes_where_the_runner_looks(self):
+        assert as_path(resolved_runner_path("REBASELINE_REQUEST") or "") == \
+            status.DEFAULT_REQUEST_DIR + "/rebaseline", (
+            "the runner's re-baseline request and the page's have drifted apart, so "
+            "the button would write a file nothing reads")
+
+    def test_nothing_is_written_when_nothing_is_held(self, tmp_path):
+        requests = tmp_path / "requests"
+        requests.mkdir()
+        request = requests / "rebaseline"
+        result = status.request_rebaseline(
+            request_file=str(request), quarantine_file=str(tmp_path / "no-record"))
+        assert result["key"] == status.REBASELINE_NOTHING_HELD
+        assert result["written"] is False
+        assert not request.exists(), (
+            "a re-baseline was left behind with nothing held — the runner would spend "
+            "it on a tick that measured nothing")
+
+    def test_a_held_commit_gets_its_rebaseline_written(self, tmp_path):
+        record = tmp_path / "quarantined"
+        sha = "e" * 40
+        record.write_text(f"{sha}\n2026-09-19T04:44:23+07:00\nperf gate (exit 1)\n",
+                          encoding="utf-8")
+        requests = tmp_path / "requests"
+        requests.mkdir()
+        result = status.request_rebaseline(
+            request_file=str(requests / "rebaseline"), quarantine_file=str(record))
+        assert result["key"] == status.REBASELINE_WRITTEN
+        assert result["written"] is True and result["held"] == sha
+        assert (requests / "rebaseline").exists()
+
+    def test_a_write_that_is_refused_is_its_own_answer(self, tmp_path, monkeypatch):
+        record = tmp_path / "quarantined"
+        record.write_text("e" * 40 + "\n2026-09-19T04:44:23+07:00\nperf gate (exit 1)\n",
+                          encoding="utf-8")
+        requests = tmp_path / "requests"
+        requests.mkdir()
+
+        def refuse(self, *args, **kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(type(requests), "write_text", refuse)
+        result = status.request_rebaseline(
+            request_file=str(requests / "rebaseline"), quarantine_file=str(record))
+        assert result["key"] == status.REBASELINE_NOT_WRITABLE
+        assert result["written"] is False and result["detail"]

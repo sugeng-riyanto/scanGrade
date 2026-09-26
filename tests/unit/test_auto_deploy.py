@@ -1213,6 +1213,8 @@ def _quarantine_harness(tmp_path: Path) -> str:
         f'RELEASE_FILE="{tmp_path}/scangrade-deploy.release"\n'
         f'REQUEST_DIR="{requests}"\n'
         f'RELEASE_REQUEST="{requests}/release"\n'
+        f'REBASELINE_REQUEST="{requests}/rebaseline"\n'
+        'REBASELINE_REQUESTED=0\n'
         'BRANCH="main"\n'
         'AFTER="abcdef1"\n'
         'log() { echo "$*"; }\n'
@@ -3146,3 +3148,40 @@ def test_a_merged_release_removes_the_record_and_a_missing_one_is_not_an_error(t
     )
     assert done.returncode == 0, done.stderr
     assert not (tmp_path / "state/refused-before-merge").exists()
+
+
+# ── the re-baseline request ─────────────────────────────────────────────────
+#
+# The release request retries a refused commit against the same yardstick. When the
+# *box* — not the code — is what got slow, that retry refuses again, and the box can
+# only be described anew from a shell. This request is the same one-shot release plus
+# the one flag it exists for: the perf gate is told to rewrite its baseline from the
+# box as it is now.
+
+@needs_a_bash
+def test_a_rebaseline_request_clears_the_hold_and_asks_the_gate_to_re_measure(tmp_path):
+    (tmp_path / "state/requests").mkdir(parents=True)
+    (tmp_path / "state/quarantined").write_text(
+        f"{SHA_A}\n2026-09-19T04:44:23+07:00\nperf gate (slower than the last release)\n",
+        encoding="utf-8")
+    (tmp_path / "state/requests/rebaseline").write_text("asked\n", encoding="utf-8")
+
+    run = _run_quarantine(
+        tmp_path, 'quarantine_honour_release; echo "RB=$REBASELINE_REQUESTED"')
+    assert run.returncode == 0, run.stderr
+    assert "RB=1" in run.stdout, run.stdout
+    assert not (tmp_path / "state/requests/rebaseline").exists(), (
+        "the request was not consumed, so it would re-open the next refusal too")
+    assert not (tmp_path / "state/quarantined").exists(), (
+        "the hold did not clear, so the runner would skip the tick before the gate ran")
+
+
+@needs_a_bash
+def test_an_ordinary_release_does_not_ask_for_a_rebaseline(tmp_path):
+    """The flag is for the re-baseline request only: a plain release still compares."""
+    (tmp_path / "state/requests").mkdir(parents=True)
+    (tmp_path / "state/requests/release").write_text("asked\n", encoding="utf-8")
+    run = _run_quarantine(
+        tmp_path, 'quarantine_honour_release; echo "RB=$REBASELINE_REQUESTED"')
+    assert run.returncode == 0, run.stderr
+    assert "RB=0" in run.stdout, run.stdout

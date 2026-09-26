@@ -1502,3 +1502,19 @@ class TestADeclaredMeasurementDrift:
         # part of the conditions that changed, so it re-baselines rather than stalling.
         intent.write_text("box-drift-1\n", encoding="utf-8")
         assert run_gate(bench, base, monkeypatch, {"PERF_SESSIONS": "24"}) == gate.EXIT_OK
+
+
+class TestThePageCanAskForAReMeasure:
+    """The flag reaches the gate only when the operator asked, and it is passed."""
+
+    def test_the_deploy_builds_the_flag_from_the_request(self):
+        text = DEPLOY.read_text(encoding="utf-8")
+        assert "PERF_REBASELINE_ARGS=()" in text, (
+            "the ordinary tick must run the gate with no flag at all")
+        assert "PERF_REBASELINE_ARGS=(--rebaseline)" in text
+        assert '"${PERF_REBASELINE_ARGS[@]}"' in text, (
+            "the args are built but never handed to the gate")
+        # Gated on the request, and read after the request was consumed.
+        guard = text.index('if [ "${REBASELINE_REQUESTED:-0}" = "1" ]')
+        assert text.index("PERF_REBASELINE_ARGS=(--rebaseline)") > guard
+        assert 'REBASELINE_REQUEST="$REQUEST_DIR/rebaseline"' in text
