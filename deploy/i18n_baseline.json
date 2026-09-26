@@ -236,7 +236,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 156,
+      "pairs": 157,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -391,6 +391,12 @@
       "coverage": 100.0,
       "frozen": false
     },
+    "super_admin/email_settings.html": {
+      "pairs": 29,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": true
+    },
     "super_admin/exams.html": {
       "pairs": 0,
       "leftovers": 4,
@@ -477,7 +483,7 @@
     },
     "super_admin/user_management.html": {
       "pairs": 0,
-      "leftovers": 7,
+      "leftovers": 9,
       "coverage": 0.0,
       "frozen": false
     },

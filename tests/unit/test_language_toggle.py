@@ -325,8 +325,8 @@ def test_the_navigation_translations_are_real():
     demonstrates nothing; `Pengaturan Demo` is the one label that is the same
     word in both, so it is allowed explicitly rather than by omission."""
     same_by_design = {"Super Admin", "Data", "Demo", "Tools", "AI", "Midtrans",
-                      "Audit Log", "Feature Flags", "WhatsApp", "Dashboard",
-                      "Import Excel", "Scan OMR", "Whiteboard"}
+                          "Audit Log", "Feature Flags", "WhatsApp", "Dashboard",
+                          "Import Excel", "Scan OMR", "Whiteboard", "Email (SMTP)"}
 
     calls = _t_calls(SOURCE)
     assert len(calls) >= 100, f"only {len(calls)} t() bindings in base.html"

@@ -17,21 +17,11 @@ def _smtp_settings():
     used to — silently produced "SMTP not configured" and no email was ever
     delivered.
     """
-    try:
-        from flask import current_app
-        cfg = current_app.config
-        host = cfg.get("SMTP_HOST") or os.getenv("SMTP_HOST") or "smtp.gmail.com"
-        port = int(cfg.get("SMTP_PORT") or os.getenv("SMTP_PORT") or 465)
-        user = cfg.get("SMTP_EMAIL") or os.getenv("SMTP_EMAIL") or ""
-        password = cfg.get("SMTP_PASSWORD") or os.getenv("SMTP_PASSWORD") or ""
-        sender = cfg.get("SMTP_FROM") or os.getenv("SMTP_FROM") or user
-    except Exception:
-        host = os.getenv("SMTP_HOST") or "smtp.gmail.com"
-        port = int(os.getenv("SMTP_PORT") or 465)
-        user = os.getenv("SMTP_EMAIL") or ""
-        password = os.getenv("SMTP_PASSWORD") or ""
-        sender = os.getenv("SMTP_FROM") or user
-    return host, port, user, password, sender
+    from app.services import smtp_settings
+
+    resolved = smtp_settings.resolve()
+    return (resolved["host"], resolved["port"], resolved["user"],
+            resolved["password"], resolved["sender"])
 
 
 def send_whatsapp(phone: str, message: str):
