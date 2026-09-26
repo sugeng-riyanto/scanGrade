@@ -167,6 +167,11 @@ ROLES = ("super_admin", "admin_sekolah", "guru", "murid")
 @dataclass
 class Result:
     failures: list[str] = field(default_factory=list)
+    #: The role each failure belongs to, parallel to `failures`. A failure is a
+    #: statement about one account, and the summary groups by it — so the record
+    #: answers "which account could not be served" instead of leaving a reader to
+    #: re-group a flat list by each line's prefix.
+    failure_roles: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     checked: int = 0
     # Whether *any* HTTP response came back. Distinguishes "the app is broken"
@@ -174,8 +179,9 @@ class Result:
     # problem and must not have the same answer.
     reachable: bool = False
 
-    def fail(self, msg: str) -> None:
+    def fail(self, msg: str, role: str = "") -> None:
         self.failures.append(msg)
+        self.failure_roles.append(role)
         print(f"   FAIL  {msg}")
 
     def warn(self, msg: str) -> None:
@@ -185,6 +191,37 @@ class Result:
     def ok(self, msg: str) -> None:
         self.checked += 1
         print(f"   ok    {msg}")
+
+
+def _role_of(msg: str) -> str:
+    """The role a failure names at its front, if it names one.
+
+    A call site passing `role=` is the contract; this is the belt to that braces,
+    so a message that leads with its role still groups right if one is missed.
+    """
+    head = msg.split(": ", 1)[0]
+    return head if head in ROLES else ""
+
+
+def grouped_failures(res: "Result") -> list[str]:
+    """One line per role: how many checks failed for it, and which.
+
+    The record's cap is a handful of lines, so a heading per role would spend the
+    budget on structure. One line per role keeps every failing account visible at
+    a glance even when several fail at once, and the order is `ROLES` rather than
+    first-seen so two runs with the same failures file the same record.
+    """
+    buckets: dict[str, list[str]] = {}
+    seen: list[str] = []
+    for role, msg in zip(res.failure_roles, res.failures):
+        key = role or _role_of(msg) or "other"
+        if key not in buckets:
+            buckets[key] = []
+            seen.append(key)
+        prefix = f"{key}: "
+        buckets[key].append(msg[len(prefix):] if msg.startswith(prefix) else msg)
+    ordered = [r for r in ROLES if r in buckets] + [r for r in seen if r not in ROLES]
+    return [f"   {r} ({len(buckets[r])}): " + "; ".join(buckets[r]) for r in ordered]
 
 
 @dataclass
@@ -221,12 +258,13 @@ def login(session: requests.Session, base: str, acct: Account, res: Result) -> s
 
     res.reachable = True
     if page.status_code != 200:
-        res.fail(f"{acct.role}: GET {path} -> {page.status_code} (expected 200)")
+        res.fail(f"{acct.role}: GET {path} -> {page.status_code} (expected 200)",
+                 role=acct.role)
         return "broken"
 
     match = CSRF_RE.search(page.text)
     if not match:
-        res.fail(f"{acct.role}: {path} carries no csrf-token meta tag")
+        res.fail(f"{acct.role}: {path} carries no csrf-token meta tag", role=acct.role)
         return "broken"
 
     try:
@@ -243,11 +281,12 @@ def login(session: requests.Session, base: str, acct: Account, res: Result) -> s
     except requests.RequestException as exc:
         # The page loaded, so the server is up: a failed POST here is the app
         # failing, not the network.
-        res.fail(f"{acct.role}: POST {path} failed — {type(exc).__name__}: {exc}")
+        res.fail(f"{acct.role}: POST {path} failed — {type(exc).__name__}: {exc}",
+                 role=acct.role)
         return "broken"
 
     if response.status_code >= 500:
-        res.fail(f"{acct.role}: POST {path} -> {response.status_code}")
+        res.fail(f"{acct.role}: POST {path} -> {response.status_code}", role=acct.role)
         return "broken"
 
     # A successful login redirects; the login page re-renders with an inline
@@ -266,7 +305,8 @@ def check_pages(session: requests.Session, base: str, acct: Account, res: Result
         try:
             response = session.get(f"{base}{path}", timeout=REQUEST_TIMEOUT)
         except requests.RequestException as exc:
-            res.fail(f"{acct.role}: GET {path} failed — {type(exc).__name__}: {exc}")
+            res.fail(f"{acct.role}: GET {path} failed — {type(exc).__name__}: {exc}",
+                     role=acct.role)
             continue
 
         if response.status_code == 200:
@@ -277,11 +317,11 @@ def check_pages(session: requests.Session, base: str, acct: Account, res: Result
             location = response.headers.get("Location", "")
             if "login" in location:
                 res.fail(f"{acct.role}: {path} -> {response.status_code} {location} "
-                         f"(session not accepted)")
+                         f"(session not accepted)", role=acct.role)
             else:
                 res.warn(f"{acct.role}: {path} -> {response.status_code} {location}")
         else:
-            res.fail(f"{acct.role}: {path} -> {response.status_code}")
+            res.fail(f"{acct.role}: {path} -> {response.status_code}", role=acct.role)
 
 
 def _fixture():
@@ -335,10 +375,11 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
     try:
         listing = session.get(f"{base}/student/exams", timeout=REQUEST_TIMEOUT)
     except requests.RequestException as exc:
-        res.fail(f"murid: GET /student/exams failed — {type(exc).__name__}: {exc}")
+        res.fail(f"murid: GET /student/exams failed — {type(exc).__name__}: {exc}",
+                 role="murid")
         return
     if listing.status_code != 200:
-        res.fail(f"murid: /student/exams -> {listing.status_code}")
+        res.fail(f"murid: /student/exams -> {listing.status_code}", role="murid")
         return
 
     fixture = _fixture()
@@ -357,18 +398,19 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
     try:
         page = session.get(f"{base}{path}", timeout=REQUEST_TIMEOUT, allow_redirects=False)
     except requests.RequestException as exc:
-        res.fail(f"murid: GET {path} failed — {type(exc).__name__}: {exc}")
+        res.fail(f"murid: GET {path} failed — {type(exc).__name__}: {exc}", role="murid")
         return
     if page.status_code != 200:
         where = page.headers.get("Location", "")
         res.fail(f"murid: {path} -> {page.status_code} {where}".rstrip() +
-                 " (the demo exam would not open, so nothing on it could be read)")
+                 " (the demo exam would not open, so nothing on it could be read)",
+                 role="murid")
         return
     res.ok(f"murid: {path}")
 
     html = page.text
     if f'data-exam-id="{exam_id}"' not in html or 'x-data="examApp(' not in html:
-        res.fail(f"murid: {path} is not the sitting page for that exam")
+        res.fail(f"murid: {path} is not the sitting page for that exam", role="murid")
         return
     res.ok("murid: it is a sitting page for the exam that was asked for")
 
@@ -376,7 +418,8 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
     settings = json.loads(found.group(1)) if found else {}
     if not settings.get("enabled") or not settings.get("fullscreen_required"):
         res.fail(f"murid: the exam page arms anti-cheat as {found.group(1) if found else 'nowhere'}"
-                 " — both panels are revealed only when the exam asks for them")
+                 " — both panels are revealed only when the exam asks for them",
+                 role="murid")
     else:
         res.ok("murid: the page asks for anti-cheat and fullscreen")
 
@@ -386,7 +429,8 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
     if AWAY_PANEL not in html or AWAY_WORDS not in html:
         missing.append("away blur")
     if missing:
-        res.fail(f"murid: the exam page is missing the {' and the '.join(missing)}")
+        res.fail(f"murid: the exam page is missing the {' and the '.join(missing)}",
+                 role="murid")
     else:
         res.ok("murid: the fullscreen blocker and the away blur are on the page, "
                "each with its words")
@@ -394,13 +438,13 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
     grace = GRACE_RE.search(html)
     if not grace or int(grace.group(1)) <= 0:
         res.fail("murid: the away blur has no countdown to show (graceSeconds="
-                 f"{grace.group(1) if grace else 'absent'})")
+                 f"{grace.group(1) if grace else 'absent'})", role="murid")
     else:
         res.ok(f"murid: the countdown reads {grace.group(1)}s — the service's own number")
 
     if FULLSCREEN_WATCH not in html or AWAY_WATCH not in html:
         res.fail("murid: the page does not watch fullscreenchange and "
-                 "visibilitychange, so nothing would set either panel")
+                 "visibilitychange, so nothing would set either panel", role="murid")
     else:
         res.ok("murid: the page watches fullscreenchange and visibilitychange")
 
@@ -413,11 +457,13 @@ def check_isolation(session: requests.Session, base: str, acct: Account, res: Re
             response = session.get(f"{base}{path}", timeout=REQUEST_TIMEOUT,
                                    allow_redirects=False)
         except requests.RequestException as exc:
-            res.fail(f"{acct.role}: GET {path} failed — {type(exc).__name__}: {exc}")
+            res.fail(f"{acct.role}: GET {path} failed — {type(exc).__name__}: {exc}",
+                     role=acct.role)
             continue
 
         if response.status_code == 200:
-            res.fail(f"RBAC LEAK: {acct.role} opened {path} belonging to {other}")
+            res.fail(f"RBAC LEAK: {acct.role} opened {path} belonging to {other}",
+                     role=acct.role)
         else:
             res.ok(f"{acct.role}: {path} correctly refused ({response.status_code})")
 
@@ -495,8 +541,8 @@ def main() -> int:
     print()
     if res.failures:
         print(f"RESULT: FAIL — {len(res.failures)} problem(s), {res.checked} check(s) passed")
-        for item in res.failures:
-            print(f"   - {item}")
+        for line in grouped_failures(res):
+            print(line)
         return 1
 
     suffix = f", {len(res.warnings)} warning(s)" if res.warnings else ""

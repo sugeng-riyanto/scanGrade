@@ -413,6 +413,15 @@ PERF_DURATION="20"
 PERF_BYTES_SLACK="1.25"
 PERF_ROUNDTRIPS_SLACK="1.25"
 
+# How many days a baseline is trusted before it stops describing this box. The
+# baseline is rewritten on every release that PASSES, so it ages exactly when
+# releases stop passing -- the state this gate leaves a box in. Once it is that old,
+# a release whose diff from the baseline touches nothing under app/, deploy/, the
+# harness or a migration is re-baselined on the box as it is now rather than
+# quarantined for drift no release caused. 0 disables the exemption. Read from the
+# environment by perf_gate.py.
+PERF_BASELINE_MAX_AGE="14"
+
 # The reference measurement. Written only when a release PASSES, so a slow
 # release cannot become the thing the next one is judged against. Delete it, or
 # run the gate with --rebaseline, when a slower release is a deliberate trade.

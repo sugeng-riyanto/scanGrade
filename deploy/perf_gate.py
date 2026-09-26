@@ -30,9 +30,13 @@ Every design choice below is a failure mode it avoids:
   that adds queries to the dashboard is refused by a number rather than inferred from
   a stopwatch. Bytes are the bandwidth a phone on a school connection pays for.
 
-* **Cost that can be attributed to *something*.** Bytes and queries are not a
-  signature of the code: both grow when the school grows, and the number of database
-  round-trips grows when the transport retries a query the render issued once.
+* **Cost that can be attributed to *something*.** Bytes, queries *and the clock*
+  are not a signature of the code: all three grow when the school grows, and the
+  number of database round-trips grows when the transport retries a query the render
+  issued once. Latency is normalized on the same principle as the other two — the
+  part of a page that does not scale with rows is held at the floor the baseline
+  recorded, and only the part that does is grown by the rows the page reads now —
+  because a page can be slower without the release having changed anything.
   Measured on production, same release a day apart, every page's bytes were identical
   to the byte while `/teacher/dashboard` went from 1 round-trip to 3 — so scoring
   attempts as a ratio refuses a release for the box's bad afternoon, and scoring raw
@@ -49,6 +53,23 @@ Every design choice below is a failure mode it avoids:
   the baseline, the next release would be measured against it and the regression
   would become permanent and invisible. On a regression the baseline is left
   exactly as it was, so the next release is still compared with the last good one.
+  A consequence worth naming: because it is only rewritten on a pass, the baseline
+  ages exactly when releases stop passing, so a box this gate has stalled ends up
+  judged against a description of itself from weeks ago.
+
+* **A stale baseline is recognized, and it does not get to quarantine a release
+  that changed nothing this gate measures.** Two facts license that, and both are
+  required: the baseline is older than a fortnight (its numbers describe a box that
+  may no longer exist), and the release's diff from the baseline touches nothing in
+  the measured surface — the app, the harness, the runtime, a migration (so the
+  pages that diverged are the same bytes the baseline measured and the difference
+  cannot be the release). With both, the gate re-baselines on the box as it is now
+  and passes, recording verdict `stale_baseline`, because quarantining a commit
+  that provably changed nothing is the false positive that stalls a box further.
+  With either alone it compares as always: a fresh baseline means the divergence is
+  new, and an old baseline with a release that did touch a measured page leaves the
+  release the prime suspect. The window is `--baseline-max-age` / `PERF_BASELINE_MAX_AGE`
+  in days, and 0 turns the exemption off.
 
 * **The first run becomes the baseline and passes.** You cannot regress against a
   measurement that does not exist. It says so out loud rather than passing
@@ -81,6 +102,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -147,6 +169,30 @@ DEFAULT_BYTES_GRACE = 8192.0    # ... plus 8 KiB, so ordinary list growth passes
 DEFAULT_ROUNDTRIPS_SLACK = 1.25  # a page may spend up to 1.25x the baseline queries
 DEFAULT_ROUNDTRIPS_GRACE = 1.0   # ... plus one query, so a new feature detail passes
 
+#: How old a baseline may be before the gate stops treating it as a description of
+#: *this* box. It is rewritten on every release that passes, so it ages exactly when
+#: releases stop passing — the state this gate can put a box in when it refuses
+#: everything. Fourteen days: long enough that a normal cadence never reaches it, and
+#: short enough that a box stalled for a fortnight is measured against the box it is.
+DEFAULT_BASELINE_MAX_AGE_S = 14 * 24 * 3600
+
+#: The paths whose change can move a number this gate compares: the app that renders
+#: the student and teacher pages, the harness that measures them, the checkout's
+#: dependencies, and a migration that changes what a page reads. Deliberately wide —
+#: a shared layout, a service or `app/__init__.py` reaches every page — so a release
+#: that touches anything under `app/` counts even when it only edited a page the
+#: harness never loads. The exemption below may only fire when it is *certain* the
+#: measured pages are the same bytes the baseline measured.
+MEASURED_SURFACE = (
+    "app/",                 # routes, services, templates, static css/js
+    "deploy/",              # the gate, the deploy script and the harness itself
+    "loadtest_concurrent.py",
+    "wsgi.py",
+    "requirements.txt",
+    "pyproject.toml",
+    "supabase/",            # a migration changes what the pages read
+)
+
 # The wording claims_gate.verdict() uses for *this* gate's question. Without it,
 # a refusal would read "both probes diverged from the published numbers" and send
 # whoever opens the journal looking for a claim to correct when the code is what
@@ -183,6 +229,109 @@ def load_baseline(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) and data.get("latency") else None
+
+
+# ── the baseline can go stale ────────────────────────────────────────────────
+#
+# The baseline is rewritten on every release that passes, so it ages exactly when
+# releases stop passing — the state a gate that refuses everything puts the box in.
+# Once it is old enough, its description of the box describes a box that no longer
+# exists: the host got busier, a neighbour appeared, a kernel or an nginx version
+# moved. The comparison still runs and still diverges, and the release it refuses is
+# charged for drift no release caused.
+#
+# Two facts together license the gate to act on that, and neither is enough alone:
+# the baseline is older than a window (its numbers are not this box's any more), and
+# the release changed nothing the gate measures (those pages are the same bytes the
+# baseline measured, so the difference cannot be the release). With both, the gate
+# does the thing a stale baseline calls for — re-baselines on the box as it is now —
+# instead of quarantining a commit that provably changed nothing. With only one it
+# compares as it always has: an old baseline and a release that touched the measured
+# pages is exactly the case where the release is still the prime suspect.
+
+def baseline_age_seconds(baseline: dict | None, *,
+                         now: datetime | None = None) -> float | None:
+    """How long ago the baseline was measured, or None when it did not say.
+
+    None is "not measured" and never zero: treating a missing timestamp as ancient
+    would hand every baseline written before this field an exemption nobody measured,
+    which is the one shape of this rule that could wave a real regression through.
+    """
+    stamp = (baseline or {}).get("measured_at")
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return max((now - when).total_seconds(), 0.0)
+
+
+def baseline_stale_reason(baseline: dict | None, max_age_s: float | None, *,
+                          now: datetime | None = None) -> str | None:
+    """Why the baseline no longer describes this box, or None if it still does.
+
+    A zero (or absent) window means "never stale", not "always stale": the setting
+    exists so an operator can turn this off, and a switch whose off position is its
+    most aggressive one is a switch nobody dares touch.
+    """
+    if not max_age_s:
+        return None
+    age = baseline_age_seconds(baseline, now=now)
+    if age is None or age <= max_age_s:
+        return None
+    commit = (baseline or {}).get("commit") or "an unnamed commit"
+    return (f"the baseline was measured {age / 86400.0:.1f} days ago ({commit}), longer "
+            f"than the {max_age_s / 86400.0:.0f}-day window it is trusted for — the "
+            f"numbers it holds may describe a box that no longer exists, so a "
+            f"divergence from them is not yet a verdict on this release")
+
+
+def changed_paths(repo, before: str, after: str) -> list[str] | None:
+    """The files that differ between two commits, or None when git cannot say.
+
+    None (git missing, a commit not in the object database, not a repository) is
+    deliberately different from `[]`: an empty diff means the two commits are the
+    same tree, which is what makes a release inert, and letting a failure to answer
+    read that way would exempt every release on a repository the gate cannot read.
+    """
+    try:
+        run = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--name-only", before, after],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if run.returncode != 0:
+        return None
+    return [line for line in run.stdout.splitlines() if line.strip()]
+
+
+def measured_surface_changed(paths: list[str]) -> list[str]:
+    """The changed paths that can move a number this gate compares."""
+    return [p for p in paths if p.startswith(MEASURED_SURFACE)]
+
+
+def release_is_inert(repo, baseline_commit: str | None,
+                     release_commit: str | None) -> bool | None:
+    """Did the release change nothing this gate measures?
+
+    True only when the diff between the baseline's commit and the release is known
+    and touches nothing in the measured surface; False when it touched one; None when
+    there is no answer to have — a commit unnamed, or git unable to place them. None
+    takes the conservative branch wherever it is used, so a release the gate cannot
+    diff is compared exactly as it was before this rule existed.
+    """
+    if not isinstance(baseline_commit, str) or not isinstance(release_commit, str):
+        return None
+    if not _SHA.fullmatch(baseline_commit) or not _SHA.fullmatch(release_commit):
+        return None
+    paths = changed_paths(repo, baseline_commit, release_commit)
+    if paths is None:
+        return None
+    return not measured_surface_changed(paths)
 
 
 def index_path(evidence: Path) -> Path:
@@ -320,6 +469,26 @@ def cost_floor(measured: dict) -> tuple[float | None, float | None]:
     return (min(sizes) if sizes else None, min(trips) if trips else None)
 
 
+def latency_floor(measured: dict) -> tuple[float | None, float | None, float | None]:
+    """(smallest page's p50, smallest page's p95, rows the slowest page read).
+
+    The same idea as `cost_floor`: a page is a fixed cost plus the work it does with
+    the data, and the smallest measured page is the cheapest honest estimate of the
+    fixed part. Holding that floor constant is what keeps the normalization from
+    scaling a page's *layout* by the roster — a release with a heavier layout must
+    not hide behind a school that grew. The third value is the row count of the page
+    the p50 came from: that is the page whose work the growth describes.
+    """
+    pages = {k: v for k, v in (measured.get("per_endpoint") or {}).items()
+             if cg.CLAIM_ENDPOINT.match(k) and v.get("n")}
+    if not pages:
+        return None, None, None
+    slowest = max(pages, key=lambda k: float(pages[k]["p50"]))
+    return (min(float(v["p50"]) for v in pages.values()),
+            min(float(v["p95"]) for v in pages.values()),
+            _number(pages[slowest], "rows_p50"))
+
+
 def data_growth(base_rows: float | None, rows_now: float | None) -> float:
     """How much more data the pages read, or 1.0 when either side did not say.
 
@@ -394,14 +563,26 @@ def baseline_record(commit: str, shape: dict, measured: dict, latency) -> dict:
             cost_record["floor_bytes"] = round(floor_bytes, 1)
         if floor_queries is not None:
             cost_record["floor_queries"] = round(floor_queries, 2)
+    # The floor and the slow page's row count travel with the latency the same way
+    # the cost floor travels with the byte and query maxima: they are what a later
+    # release needs to be told apart from a bigger school, and a baseline written
+    # without them simply falls back to the absolute rule.
+    floor_p50, floor_p95, slow_rows = latency_floor(measured)
+    latency_record = {"p50_ms": round(latency.p50_ms, 1),
+                      "p95_ms": round(latency.p95_ms, 1),
+                      "endpoints": latency.endpoints,
+                      "samples": latency.samples}
+    if floor_p50 is not None:
+        latency_record["floor_p50_ms"] = round(floor_p50, 1)
+    if floor_p95 is not None:
+        latency_record["floor_p95_ms"] = round(floor_p95, 1)
+    if slow_rows is not None:
+        latency_record["p50_rows"] = round(slow_rows, 1)
     return {
         "commit": commit,
         "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "shape": shape,
-        "latency": {"p50_ms": round(latency.p50_ms, 1),
-                    "p95_ms": round(latency.p95_ms, 1),
-                    "endpoints": latency.endpoints,
-                    "samples": latency.samples},
+        "latency": latency_record,
         # Always present, so a release measured after this field existed can be
         # compared even when the one before it predates it. `null` here means the
         # harness reported nothing, which `main` treats as a measurement gap when a
@@ -479,6 +660,54 @@ def _cost_reasons(baseline: dict, measured: dict,
     return reasons
 
 
+def _latency_reasons(baseline: dict, measured: dict,
+                     latency_slack: float, p95_slack: float) -> list[str]:
+    """Why this release is slower, once the data's share is taken out. [] means it is not.
+
+    The same shape as `_cost_reasons`, because it answers the same objection: a page
+    can be slower because the release got heavier or because the school got bigger,
+    and the clock alone cannot tell them apart. Each axis is compared against the
+    baseline **plus what the data accounts for** — the fixed part held at the floor
+    the baseline recorded, and the part that scales with rows grown by the rows the
+    page reads now. A missing floor or row count on either side means the absolute
+    rule stands: a baseline written before this existed may refuse a release the data
+    would have excused, and it cannot let a slower one through.
+    """
+    old = baseline.get("latency") or {}
+    new = cg.claim_latency(measured)
+    if not old or new is None:
+        return []
+
+    reasons: list[str] = []
+    commit = baseline.get("commit") or "the previous release"
+    _, _, rows_now = latency_floor(measured)
+    rows_then = old.get("p50_rows")
+
+    base_p50 = float(old.get("p50_ms") or 0.0)
+    if base_p50 > 0:
+        explained = max(data_expected(base_p50, rows_then, rows_now,
+                                      old.get("floor_p50_ms")) - base_p50, 0.0)
+        if over(new.p50_ms, base_p50, latency_slack, 0.0, explained):
+            reasons.append(
+                f"slowest page p50 {new.p50_ms:.0f} ms against {base_p50:.0f} ms on "
+                f"{commit} ({new.p50_ms / base_p50:.2f}x, allowed {latency_slack:.2f}x"
+                + (f"; the data accounts for {explained:.0f} ms of the rise"
+                   if explained else "")
+                + ") — worst endpoint(s): " + ", ".join(new.endpoints[:4]))
+
+    base_p95 = float(old.get("p95_ms") or 0.0)
+    if base_p95 > 0:
+        explained = max(data_expected(base_p95, rows_then, rows_now,
+                                      old.get("floor_p95_ms")) - base_p95, 0.0)
+        if over(new.p95_ms, base_p95, p95_slack, 0.0, explained):
+            reasons.append(
+                f"slowest page p95 {new.p95_ms:.0f} ms against {base_p95:.0f} ms on "
+                f"{commit} ({new.p95_ms / base_p95:.2f}x, allowed {p95_slack:.2f}x"
+                + (f"; the data accounts for {explained:.0f} ms of the rise"
+                   if explained else "") + ")")
+    return reasons
+
+
 def explanations(baseline: dict, measured: dict) -> list[str]:
     """What moved that the release did not: the school's data, and the box's retries.
 
@@ -490,30 +719,48 @@ def explanations(baseline: dict, measured: dict) -> list[str]:
     another axis must not bury, so `main` prints them and records them beside the
     verdict.
     """
+    notes: list[str] = []
     old = baseline.get("page_cost") or {}
     new = page_cost(measured)
-    if not old or new is None:
-        return []
-
-    notes: list[str] = []
-    growth = data_growth(old.get("bytes_rows"), new.rows_by_bytes)
-    if growth > 1.0:
-        notes.append(
-            f"the pages read {growth:.1f}x the rows the baseline measured "
-            f"({new.rows_by_bytes:.0f} against {float(old['bytes_rows']):.0f}), so the "
-            f"cost comparison is against what the data accounts for rather than "
-            f"against the release alone")
-
-    if old.get("roundtrips_queries") is not None and new.queries_by_roundtrips is not None:
-        retries_old = max(float(old.get("roundtrips") or 0.0)
-                          - float(old["roundtrips_queries"]), 0.0)
-        retries_now = max(new.roundtrips - new.queries_by_roundtrips, 0.0)
-        if retries_now > retries_old + RETRY_NOTE_GRACE:
+    # Each half is guarded on its own record: the cost notes need the cost axes, the
+    # latency note needs the latency floor, and a run that reported one and not the
+    # other still gets the sentence it can support rather than none at all.
+    if old and new is not None:
+        growth = data_growth(old.get("bytes_rows"), new.rows_by_bytes)
+        if growth > 1.0:
             notes.append(
-                f"the busiest page was served {retries_now:.0f} round-trip(s) beyond the "
-                f"{new.queries_by_roundtrips:.0f} queries it issued "
-                f"({retries_old:.0f} on {old.get('commit') or 'the baseline'}) — the "
-                f"transport retried, which is the box and not the release")
+                f"the pages read {growth:.1f}x the rows the baseline measured "
+                f"({new.rows_by_bytes:.0f} against {float(old['bytes_rows']):.0f}), so the "
+                f"cost comparison is against what the data accounts for rather than "
+                f"against the release alone")
+
+        if (old.get("roundtrips_queries") is not None
+                and new.queries_by_roundtrips is not None):
+            retries_old = max(float(old.get("roundtrips") or 0.0)
+                              - float(old["roundtrips_queries"]), 0.0)
+            retries_now = max(new.roundtrips - new.queries_by_roundtrips, 0.0)
+            if retries_now > retries_old + RETRY_NOTE_GRACE:
+                notes.append(
+                    f"the busiest page was served {retries_now:.0f} round-trip(s) beyond "
+                    f"the {new.queries_by_roundtrips:.0f} queries it issued "
+                    f"({retries_old:.0f} on {old.get('commit') or 'the baseline'}) — the "
+                    f"transport retried, which is the box and not the release")
+
+    # The clock's own version of the note above: the slow page can be slower because
+    # the rows it reads grew, and the same rule that forgives the byte axis has to say
+    # out loud when it is forgiving this one. It reads the latency block, not the cost
+    # block — the floor and the row count travel with the latency they normalize.
+    lat = baseline.get("latency") or {}
+    _, _, rows_now_p50 = latency_floor(measured)
+    rows_then_p50 = lat.get("p50_rows")
+    if (rows_then_p50 is not None and rows_now_p50 is not None
+            and lat.get("floor_p50_ms") is not None):
+        lat_growth = data_growth(rows_then_p50, rows_now_p50)
+        if lat_growth > 1.0:
+            notes.append(
+                f"the slowest page read {lat_growth:.1f}x the rows the baseline "
+                f"measured ({rows_now_p50:.0f} against {float(rows_then_p50):.0f}), so the "
+                f"latency comparison is against what the data accounts for too")
     return notes
 
 
@@ -531,34 +778,24 @@ def regression(baseline: dict, measured: dict,
     the numbers cancel and what is left is what the release changed. "Worse" covers
     three axes — response time, payload, and Supabase round-trips — because they fail
     independently: a release can be just as fast and send an extra 200 KB, or send
-    the same page and ask the database three more times.
+    the same page and ask the database three more times. All three are compared
+    against the baseline **plus the share the data accounts for**, so the same rule
+    that keeps a bigger roster from reading as heavier bytes keeps it from reading as
+    a slower page.
     """
     reasons: list[str] = []
     old = baseline.get("latency") or {}
     new = cg.claim_latency(measured)
+    commit = baseline.get("commit") or "the previous release"
     cost = _cost_reasons(baseline, measured, bytes_slack, bytes_grace, trips_slack, trips_grace)
+    # Latency first: the cost axes answer a page that stayed just as fast, so when
+    # both fire the reader should meet the clock before the bytes.
+    reasons.extend(_latency_reasons(baseline, measured, latency_slack, p95_slack))
     if new is None or not old:
         # No latency to compare — a baseline predating that field, or a run whose
         # pages never answered. The cost comparison does not depend on it.
         reasons.extend(cost)
         return reasons
-
-    base_p50, base_p95 = float(old.get("p50_ms") or 0.0), float(old.get("p95_ms") or 0.0)
-    commit = baseline.get("commit") or "the previous release"
-
-    if base_p50 > 0:
-        ratio = new.p50_ms / base_p50
-        if ratio > latency_slack:
-            reasons.append(
-                f"slowest page p50 {new.p50_ms:.0f} ms against {base_p50:.0f} ms on {commit} "
-                f"({ratio:.2f}x, allowed {latency_slack:.2f}x) — worst endpoint(s): "
-                + ", ".join(new.endpoints[:4]))
-    if base_p95 > 0:
-        ratio = new.p95_ms / base_p95
-        if ratio > p95_slack:
-            reasons.append(
-                f"slowest page p95 {new.p95_ms:.0f} ms against {base_p95:.0f} ms on {commit} "
-                f"({ratio:.2f}x, allowed {p95_slack:.2f}x)")
 
     # A release that answers 500s is worse than any latency number, whatever the
     # latency says: those requests produced no page at all.
@@ -647,6 +884,12 @@ def build_parser() -> argparse.ArgumentParser:
                     default=env_default("PERF_ROUNDTRIPS_SLACK", DEFAULT_ROUNDTRIPS_SLACK),
                     help="how many more Supabase queries a render may spend (plus one)")
     ap.add_argument("--quiet-ms", type=float, default=cg.BOX_QUIET_MS)
+    ap.add_argument("--baseline-max-age", type=float, metavar="DAYS",
+                    default=env_default("PERF_BASELINE_MAX_AGE",
+                                        DEFAULT_BASELINE_MAX_AGE_S / 86400.0),
+                    help="how old a baseline may be before a release that changed none "
+                         "of the measured pages is re-baselined instead of refused (0 "
+                         "disables the staleness exemption)")
     ap.add_argument("--commit", default="", help="the release being measured (for the record)")
     ap.add_argument("--rebaseline", action="store_true",
                     help="measure and replace the baseline without comparing (deliberate reset)")
@@ -758,6 +1001,11 @@ def main() -> int:
     notes = explanations(baseline, measured)
     for note in notes:
         print(f"perf gate: note — {note}")
+    # Printed before the verdict either way: how old the yardstick is belongs with the
+    # numbers, whether this release ends up refused, re-baselined or merely passed.
+    stale = baseline_stale_reason(baseline, args.baseline_max_age * 86400.0)
+    if stale:
+        print(f"perf gate: note — {stale}")
     confirmed = None
     if reasons:
         print("perf gate: first probe is worse than the baseline —")
@@ -774,6 +1022,29 @@ def main() -> int:
             print("perf gate: confirmation probe — " + describe(again, baseline))
 
     code, why_code = cg.verdict(reasons, confirmed, **VERDICT_WORDS)
+
+    # A stale baseline plus a release that changed nothing this gate measures is not
+    # a verdict on the release. Those pages are the very bytes the baseline measured,
+    # so whatever moved is the box — and the remedy for a stale baseline is to
+    # describe the box as it is now, which is what makes the next release comparable
+    # again. This is the only branch that re-baselines without an operator, and it is
+    # gated on both facts so it can never excuse a release that touched a page.
+    if code == EXIT_REGRESSED and stale:
+        inert = release_is_inert(REPO, baseline.get("commit"), args.commit)
+        if inert:
+            print("perf gate: OK — the baseline is stale and this release changed nothing "
+                  "the gate measures, so the pages that diverged are the same bytes the "
+                  "baseline measured and the difference is the box, not the release. "
+                  "Re-baselining on the box as it is now instead of quarantining it.")
+            print("perf gate: " + save_baseline(baseline_path, record))
+            print("perf gate: " + record_evidence(
+                Path(args.evidence_file),
+                dict(record, verdict="stale_baseline", reasons=reasons, notes=notes)))
+            return EXIT_OK
+        if inert is False:
+            print("perf gate: note — the baseline is stale, but this release changed the "
+                  "pages this gate measures, so it is still the suspect and is compared "
+                  "as it always was.")
 
     if code == EXIT_OK:
         print(f"perf gate: OK — {describe(measured, baseline)}")

@@ -1444,12 +1444,34 @@ def test_only_the_newest_few_refusals_are_kept(tmp_path):
     assert _sha(1) not in contents, "the oldest refusal survived the bound"
 
 
+def _shell_function(name: str) -> str:
+    """The source of a `name() { ... }` block, brace-balanced.
+
+    The smoke gate computes its detail in one function the two refusal arms share,
+    so the helper that lifts a `FAIL_DETAIL=` statement has to bring the function it
+    calls along with it.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    start = script.index(f"{name}() {{")
+    depth = 0
+    for end in range(start, len(script)):
+        if script[end] == "{":
+            depth += 1
+        elif script[end] == "}":
+            depth -= 1
+            if depth == 0:
+                return script[start:end + 1]
+    raise AssertionError(f"{name}() has no closing brace — the runner changed shape")
+
+
 def _detail_filter(reason: str) -> str:
     """The `FAIL_DETAIL=` statement the runner runs for one refusal, verbatim.
 
     Sliced out of the script by bracket balance rather than by a regex, because the
     statement spans two lines and a normalising regex is how the probe that first
-    checked this reported a working filter as `'^perf gate|^ - '`.
+    checked this reported a working filter as `'^perf gate|^ - '`. When the statement
+    calls a helper (the smoke gate's `smoke_detail`), the helper's own source is
+    prepended, so the snippet the test runs is the runner's real computation.
     """
     script = DEPLOY_SH.read_text(encoding="utf-8")
     window = script[script.index(f'FAIL_REASON="{reason}"'):][:1600]
@@ -1461,7 +1483,10 @@ def _detail_filter(reason: str) -> str:
         elif window[end] == ")":
             depth -= 1
             if depth == 0:
-                return window[start:end + 1]
+                statement = window[start:end + 1]
+                if "smoke_detail" in statement:
+                    return _shell_function("smoke_detail") + "\n" + statement
+                return statement
     raise AssertionError("the refusal sets no FAIL_DETAIL — the runner changed shape")
 
 
@@ -1549,9 +1574,59 @@ SMOKE_TRANSCRIPT = "\n".join([
     "   warn  murid: /student/results answered as a different account",
     "   FAIL  RBAC LEAK: murid opened /teacher/dashboard belonging to guru_sekolah",
     "RESULT: FAIL — 2 problem(s), 4 check(s) passed",
-    "   - murid: GET /student/exams -> 500 (expected 200)",
-    "   - RBAC LEAK: murid opened /teacher/dashboard belonging to guru_sekolah",
+    # The summary groups the failing checks by the account they belong to, so a
+    # reader sees *which role* could not be served without re-grouping a flat list.
+    "   murid (2): GET /student/exams -> 500 (expected 200); RBAC LEAK: murid "
+    "opened /teacher/dashboard belonging to guru_sekolah",
     "(12.4s)",
+])
+
+
+def test_the_smoke_summary_groups_failures_by_role():
+    """The record names the *accounts*, not a flat list a reader has to regroup.
+
+    "which account could not be served" is a per-role question, and the failures
+    already know the role they belong to. The summary prints one line per role — a
+    stable order, the role's own count, and the checks that failed for it — so the
+    answer does not depend on a reader scanning every line's prefix.
+    """
+    smoke = _smoke_module()
+    res = smoke.Result()
+    res.fail("guru: /teacher/dashboard -> 500", role="guru")
+    res.fail("murid: GET /student/exams -> 500", role="murid")
+    res.fail("RBAC LEAK: murid opened /teacher/dashboard", role="murid")
+    assert smoke.grouped_failures(res) == [
+        "   guru (1): /teacher/dashboard -> 500",
+        "   murid (2): GET /student/exams -> 500; RBAC LEAK: murid opened "
+        "/teacher/dashboard",
+    ]
+    # ROLES order, not first-seen: two runs with the same failures file the same
+    # record, so a diff between two quarantine records means a real difference.
+    res2 = smoke.Result()
+    res2.fail("murid: x", role="murid")
+    res2.fail("super_admin: y", role="super_admin")
+    assert [ln.split()[0] for ln in smoke.grouped_failures(res2)] == [
+        "super_admin", "murid"]
+    # A failure whose message leads with its role groups correctly even if the call
+    # site forgot to pass one — the role is in the message, not only beside it.
+    res3 = smoke.Result()
+    res3.fail("guru: forgot to pass the role")
+    assert smoke.grouped_failures(res3) == ["   guru (1): forgot to pass the role"]
+
+
+#: A smoke run that died before it printed a single check line — the shape that used
+#: to leave the quarantine record naming the gate and nothing else. The traceback is
+#: on stderr, which the runner folds into the tee, so it is in the copy a refusal has.
+SMOKE_CRASH_TRANSCRIPT = "\n".join([
+    "smoke test against https://scangrade.web.id — 4 role(s)",
+    "Traceback (most recent call last):",
+    '  File "/opt/scangrade/deploy/smoke_test.py", line 512, in <module>',
+    "    sys.exit(main())",
+    '  File "/opt/scangrade/deploy/smoke_test.py", line 470, in main',
+    "    signed_in = sign_in(account)",
+    '  File "/opt/scangrade/deploy/smoke_test.py", line 218, in sign_in',
+    "    raise RuntimeError('connection reset by peer')",
+    "RuntimeError: connection reset by peer",
 ])
 
 
@@ -1588,6 +1663,78 @@ def test_the_smoke_gate_streams_and_keeps_a_copy_to_quote():
         "tree, and a refusal must not be what makes one")
 
 
+def _smoke_pipe_tail() -> str:
+    """The smoke invocation's pipe, from `2>&1` to the `tee`, verbatim.
+
+    Taken from the runner rather than written by hand: the guard is about the
+    *runner's* shape, so a test that spelled the pipe itself would keep passing
+    while the runner diverged.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    at = script.index("SMOKE_LOG=$(mktemp")
+    block = script[at:script.index("SMOKE_RC=", at)]
+    return block[block.index("2>&1"):]
+
+
+def test_the_smoke_record_is_read_from_the_streamed_copy():
+    """The stream and the record must be one document, or the record lies.
+
+    The static half: the smoke test's merged output goes through exactly one
+    `tee`, its file is the only thing the record reads, and nothing consumes
+    stdout after it. A filter added after the `tee`, a second copy, or a record
+    read from anywhere else is how the journal could show one thing and a refusal
+    quote another — silently, on a box nobody is watching.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    at = script.index("SMOKE_LOG=$(mktemp")
+    block = script[at:script.index('case "$SMOKE_RC"', at)]
+    assert '| tee "$SMOKE_LOG"' in block, (
+        "the smoke stream is no longer teed, so the copy is not what the journal saw")
+    pipe = block[block.index('| tee "$SMOKE_LOG"') + len('| tee "$SMOKE_LOG"'):]
+    assert "|" not in pipe.split("\n", 1)[0], (
+        "something consumes the smoke stream after the tee, so the journal and the "
+        "copy can diverge")
+    assert 'SMOKE_OUT=$(cat "$SMOKE_LOG"' in block, (
+        "the record reads something other than the streamed copy")
+    assert block.count("SMOKE_OUT=") == 1, (
+        "the copy is read from more than one place, so two readers can disagree")
+    assert 'rm -f "$SMOKE_LOG"' in block, "the copy is never removed"
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the smoke pipe")
+def test_the_smoke_stream_and_the_recorded_copy_cannot_diverge(tmp_path):
+    """The runtime half: the journal's bytes and the copy's bytes are the same.
+
+    `tee` duplicates the smoke test's merged stdout+stderr — one to the journal,
+    one to the file the record quotes — and that is only true while the pipe is
+    exactly `<smoke test> 2>&1 | tee "$SMOKE_LOG"`. So this runs the runner's own
+    pipe (its own text, with the producer swapped for a stub that writes to both
+    streams) and asserts the stream equals the copy byte-for-byte. A filter after
+    the tee, a redirect instead of it, or a dropped `2>&1` splits the two.
+    """
+    log = tmp_path / "smoke.log"
+    out = tmp_path / "stream.out"
+    program = (
+        "set -uo pipefail\n"
+        f'SMOKE_LOG="{log}"\n'
+        "{ printf 'checked line\\n'; printf 'traceback line\\n' >&2; } "
+        + _smoke_pipe_tail()
+        + f'cp "$SMOKE_LOG" "{out}"\n'
+        + 'rm -f "$SMOKE_LOG"\n'
+    )
+    script = tmp_path / "pipe.sh"
+    script.write_text(program, encoding="utf-8")
+    run = subprocess.run([BASH, str(script)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    copied = out.read_text(encoding="utf-8")
+    assert run.stdout == copied, (
+        "the journal stream and the recorded copy differ, so a refusal would quote "
+        f"something the operator never saw: {run.stdout!r} vs {copied!r}")
+    assert "checked line" in run.stdout and "traceback line" in run.stdout, (
+        "stderr is not folded into the stream, so the record would miss the "
+        "traceback a crash is quoted from")
+
+
 @pytest.mark.skipif(BASH is None, reason="needs a bash to run the gate's filter")
 def test_the_smoke_filter_selects_the_failing_checks_and_not_the_pass_notes(tmp_path):
     """A smoke run prints more `ok` lines than failures; the record holds six lines.
@@ -1608,8 +1755,13 @@ def test_the_smoke_filter_selects_the_failing_checks_and_not_the_pass_notes(tmp_
 
     assert any("RESULT: FAIL" in ln for ln in kept), (
         f"the record would not say how many checks failed: {kept!r}")
-    assert sum("FAIL  " in ln for ln in kept) == 2, (
-        f"the failing checks are not quoted, or the passing ones are: {kept!r}")
+    grouped = [ln for ln in kept if ln.startswith("   ")]
+    assert len(grouped) == 1 and "murid (2)" in grouped[0], (
+        f"the record does not group the failures by the account they belong to: {kept!r}")
+    assert "GET /student/exams -> 500" in grouped[0] and "RBAC LEAK" in grouped[0], (
+        f"the checks that failed for that account are not quoted: {kept!r}")
+    assert not any(ln.strip().startswith("FAIL") for ln in kept), (
+        f"the flat check lines are quoted instead of the per-role grouping: {kept!r}")
     assert not any("   ok    " in ln for ln in kept), (
         f"passing checks filled the record's few lines: {kept!r}")
     assert not any("smoke test against" in ln for ln in kept), (
@@ -1630,8 +1782,77 @@ def test_the_record_carries_the_smoke_test_s_failing_checks(tmp_path):
     assert "GET /student/exams -> 500" in quoted, (
         "the failing check a reader came for is not in the record")
     assert "RBAC LEAK" in quoted
+    assert "murid (2)" in quoted, (
+        "the record lists checks but never says which account could not be served")
     assert "signed in as" not in quoted, (
         "passing checks are padded into a record that is meant to be the finding")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the gate's filter")
+def test_the_smoke_filter_quotes_a_traceback_when_it_never_reached_a_check(tmp_path):
+    """A crash is as readable as a failed check: the traceback is the finding.
+
+    The filter selects the verdict and the failing checks. When there are none — the
+    process died before it printed one — the selection is empty, and an empty detail
+    is a quarantine record that names the gate and no reason, which is exactly the
+    case somebody needs most. So the traceback stands in.
+    """
+    program = ("set -uo pipefail\n"
+               "SMOKE_OUT=$(cat <<'SMOKEOUT'\n" + SMOKE_CRASH_TRANSCRIPT + "\nSMOKEOUT\n)\n"
+               + _detail_filter("smoke test (exit $SMOKE_RC)")
+               + '\nprintf \'%s\\n\' "$FAIL_DETAIL"')
+    script = tmp_path / "filter.sh"
+    script.write_text(program, encoding="utf-8")
+    run = subprocess.run([BASH, str(script)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    kept = run.stdout.splitlines()
+
+    assert kept, "a crash before any check line left the record with no finding"
+    assert any("RuntimeError: connection reset by peer" in ln for ln in kept), (
+        f"the exception — the reason the process died — is not quoted: {kept!r}")
+    assert any("smoke_test.py" in ln for ln in kept), (
+        f"no frame of the traceback is quoted, so the crash has no location: {kept!r}")
+    assert not any("smoke test against" in ln for ln in kept), (
+        f"the gate's narration was quoted instead of the traceback: {kept!r}")
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")
+def test_the_record_of_a_smoke_crash_carries_the_traceback(tmp_path):
+    """The fallback and the writer, wired the way the runner wires them."""
+    body = ("SMOKE_OUT=$(cat <<'SMOKEOUT'\n" + SMOKE_CRASH_TRANSCRIPT + "\nSMOKEOUT\n)\n"
+            + _shell_function("smoke_detail") + "\nFAIL_DETAIL=$(smoke_detail)\n"
+            + "quarantine_write\n")
+    run = _run_quarantine(tmp_path, body, reason="smoke test (exit 1)")
+    assert run.returncode == 0, run.stderr
+    record = _record(tmp_path)
+    assert record[2] == "smoke test (exit 1)"
+    quoted = "\n".join(record[3:])
+    assert "RuntimeError: connection reset by peer" in quoted, (
+        "the crash is recorded as a gate name with no reason it died")
+    assert "smoke test against" not in quoted, (
+        "the narration is not the finding")
+
+
+def test_the_smoke_gate_quotes_a_traceback_without_either_arm_losing_it():
+    """The static half: one shared detail, reachable from both refusal arms.
+
+    Both smoke arms quote the same thing, so the computation lives in one function;
+    a copy per arm is how one arm quietly keeps the old empty record.
+    """
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert "smoke_detail()" in script, "the smoke detail is not computed in one place"
+    fn = _shell_function("smoke_detail")
+    assert "Traceback" in fn, (
+        "a run that died before a check line quotes nothing — the crash is the finding")
+    assert "tail -n 6" in fn, (
+        "the traceback is kept from the front, so the writer files the boilerplate "
+        "and drops the exception at the end")
+    for reason in ("smoke test (exit 2: nothing was testable)",
+                   "smoke test (exit $SMOKE_RC)"):
+        window = script[script.index(f'FAIL_REASON="{reason}"'):][:1600]
+        window = window[:window.index("quarantine_write")] if "quarantine_write" in window else window
+        assert "FAIL_DETAIL=$(smoke_detail)" in window, (
+            f"{reason!r} quotes something other than the shared detail")
 
 
 @pytest.mark.skipif(BASH is None, reason="needs a bash to run the quarantine block")

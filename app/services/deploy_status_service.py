@@ -1185,6 +1185,77 @@ def perf_judgements(path: pathlib.Path, shas, *,
     return out
 
 
+#: How much of the gate's evidence history one download may carry. The file grows by
+#: a line per deploy for the life of the box, and the bounded tail the page reads is
+#: exactly what this route exists to see past — but an unbounded diagnostic download is
+#: one nobody can open on a box that is already the thing under investigation. Past this
+#: the *newest* bytes are served, cut back to a line boundary, and the answer says so in
+#: a header so a truncated download cannot read as the whole history.
+PERF_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024
+
+#: What each downloadable file is: its default path, the environment variable the page
+#: resolves the same path through, the name the browser is handed, and the type. One
+#: table so the route, the resolver and the page's links cannot drift apart — the
+#: download must be the file that was judged, not a second guess at where it lives.
+PERF_DOWNLOADS = {
+    "evidence": (DEFAULT_PERF_HISTORY_FILE, "SCANGRADE_PERF_HISTORY_FILE",
+                 "history.jsonl", "application/x-ndjson"),
+    "baseline": (DEFAULT_PERF_BASELINE_FILE, "SCANGRADE_PERF_BASELINE_FILE",
+                 "baseline.json", "application/json"),
+}
+
+
+def perf_download(which: str, *, path=None, limit: int | None = None) -> dict:
+    """One of the gate's own files, for a browser rather than a shell.
+
+    The page reads both files already — a bounded tail of the history and the baseline
+    beside it — and the tail is the thing a quarantined box needs to see past: the
+    judgement that refused the held commit can be older than the window, and the numbers
+    an operator wants to check are all in the file. This hands the file over, resolved
+    through the same environment variables the page reads, so what is downloaded is what
+    was judged rather than a second guess at the path.
+
+    A part that cannot be read is *reported*, never served as empty: `absent` and
+    `unreadable` are different states with different remedies, the same rule the page
+    follows everywhere. Nothing here is parsed — the gate's own bytes are the evidence,
+    and a re-serialised copy would be a different document.
+    """
+    if which not in PERF_DOWNLOADS:
+        raise KeyError(which)
+    default, env, name, content_type = PERF_DOWNLOADS[which]
+    target = pathlib.Path(path or os.environ.get(env) or default)
+    result = {"which": which, "path": str(target), "name": name,
+              "content_type": content_type, "key": "absent", "reason": None,
+              "data": b"", "size": None, "truncated": False}
+    cap = PERF_DOWNLOAD_MAX_BYTES if limit is None else limit
+    try:
+        size = target.stat().st_size
+        with target.open("rb") as fh:
+            if cap and size > cap:
+                fh.seek(size - cap)
+                data = fh.read(cap)
+                # Cut back to a line boundary: half a JSON line is not evidence, and a
+                # reader who pastes it into `jq` deserves an error that is about the
+                # file rather than about the cut.
+                cut = data.find(b"\n")
+                if cut != -1:
+                    data = data[cut + 1:]
+                result["truncated"] = True
+            else:
+                data = fh.read()
+    except FileNotFoundError:
+        # "the gate judged nothing" and "this page cannot read the file" are different
+        # states with different remedies; a missing file is the first, and it is the
+        # default the result already carries.
+        return result
+    except OSError as exc:
+        result["key"] = "unreadable"
+        result["reason"] = f"{type(exc).__name__}: {exc}"
+        return result
+    result.update(key="present", data=data, size=size)
+    return result
+
+
 def _perf_baseline(path: pathlib.Path, *, repo: pathlib.Path | None = None) -> dict:
     """The release the gate compared against — named, not just implied.
 
