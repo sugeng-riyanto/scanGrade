@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from flask import (Blueprint, render_template, g, request, jsonify, redirect, flash,
                    current_app, send_file, make_response, abort)
-from app.utils.auth import login_required, get_supabase
+from app.utils.auth import login_required, get_supabase, list_all_auth_users
 from app.utils.helpers import read_with_retry, row_or_none
 from app.services.audit_service import log_activity, fetch_audit_logs
 # Aliased on purpose: the view below is itself named `trial_settings`, and a bare
@@ -1755,6 +1755,7 @@ USER_SORTS = {
     "email": lambda u: (u["email"] or "").lower(),
     "role": lambda u: (u["role"] or "").lower(),
     "status": lambda u: (u["status"] or "").lower(),
+    "school": lambda u: (u["school"] or "").lower(),
 }
 
 
@@ -1765,6 +1766,7 @@ def user_management():
     q = request.args.get("q", "").strip()
     role = request.args.get("role", "").strip()
     status = request.args.get("status", "").strip()
+    school = request.args.get("school", "").strip()
     sort = request.args.get("sort", "").strip()
     if sort not in USER_SORTS:
         sort = ""
@@ -1775,47 +1777,76 @@ def user_management():
     per_page = 50
     offset = (page - 1) * per_page
 
-    # Get auth users
-    all_users = []
+    # Every auth user, not the first page of them. `list_users()` answers with a
+    # page (50 by default) of a listing this project measures in hundreds, so
+    # reading it once showed whichever fifty addresses sorted first — every school
+    # admin, teacher and student past that page was invisible, and the page looked
+    # complete. See `list_all_auth_users`.
+    auth_by_id = {}
     try:
-        auth_users = supabase.auth.admin.list_users()
-        for u in auth_users:
-            if q and q.lower() not in (u.email or "").lower() and q.lower() not in (str(u.id)[:12]).lower():
-                continue
-            all_users.append({"id": u.id, "email": u.email, "created_at": str(u.created_at)[:19] if u.created_at else ""})
+        for u in list_all_auth_users():
+            auth_by_id[u.id] = {
+                "id": u.id, "email": u.email,
+                "created_at": str(u.created_at)[:19] if u.created_at else "",
+            }
     except Exception:
         pass
 
-    # Get profiles for these users
-    user_ids = [u["id"] for u in all_users]
-    profiles = []
-    if user_ids:
-        try:
-            profiles = supabase.table("profiles").select("id,full_name,role,phone,status,school_id").in_("id", user_ids).execute().data or []
-        except Exception:
-            pass
-    prof_map = {p["id"]: p for p in profiles}
+    # Profiles carry the role, status and school, and they travel with the whole
+    # auth listing rather than being fetched per page, because the filters and the
+    # sort run over the entire set: filtering a slice would filter a slice.
+    profile_rows = []
+    try:
+        start = 0
+        while True:
+            chunk = (supabase.table("profiles")
+                     .select("id,full_name,role,phone,status,school_id")
+                     .range(start, start + 999).execute().data or [])
+            profile_rows.extend(chunk)
+            if len(chunk) < 1000:
+                break
+            start += 1000
+    except Exception:
+        pass
+    prof_map = {p["id"]: p for p in profile_rows}
+
+    school_names = {}
+    try:
+        for s in (supabase.table("schools").select("id,name").execute().data or []):
+            school_names[s["id"]] = s.get("name") or "-"
+    except Exception:
+        pass
 
     results = []
-    for u in all_users:
-        p = prof_map.get(u["id"], {})
+    for uid, a in auth_by_id.items():
+        email = a["email"] or ""
+        if q and q.lower() not in email.lower() and q.lower() not in str(uid)[:12].lower():
+            continue
+        p = prof_map.get(uid, {})
+        sid = p.get("school_id")
         results.append({
-            "id": u["id"],
-            "email": u["email"],
+            "id": uid,
+            "email": a["email"],
             "full_name": p.get("full_name", "-"),
             "role": p.get("role", "-"),
             "phone": p.get("phone", ""),
             "status": p.get("status", "active"),
+            "school_id": sid or "",
+            "school": school_names.get(sid, "-"),
         })
 
-    # The dropdowns are filled from the *unfiltered* set, so picking a role cannot
-    # remove the other roles from the list you would use to undo it.
+    # The menus are filled from the *unfiltered* set, so picking a role or a school
+    # cannot remove the others from the list you would use to undo it.
     roles = sorted({u["role"] for u in results if u["role"] and u["role"] != "-"})
     statuses = sorted({u["status"] for u in results if u["status"]})
+    schools = sorted({(u["school_id"], u["school"]) for u in results if u["school_id"]},
+                     key=lambda pair: pair[1].lower())
     if role:
         results = [u for u in results if u["role"] == role]
     if status:
         results = [u for u in results if u["status"] == status]
+    if school:
+        results = [u for u in results if u["school_id"] == school]
     if sort:
         results.sort(key=USER_SORTS[sort], reverse=(direction == "desc"))
 
@@ -1823,8 +1854,9 @@ def user_management():
     page_results = results[offset:offset + per_page]
 
     return render_template("super_admin/user_management.html", users=page_results,
-                           q=q, role=role, status=status, sort=sort, dir=direction,
-                           roles=roles, statuses=statuses,
+                           q=q, role=role, status=status, school=school,
+                           sort=sort, dir=direction,
+                           roles=roles, statuses=statuses, schools=schools,
                            page=page, total=len(results), total_pages=total_pages)
 
 

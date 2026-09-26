@@ -174,6 +174,41 @@ def find_auth_user_by_email(email: str, *, per_page: int = 1000,
     return None
 
 
+def list_all_auth_users(*, per_page: int = 1000,
+                        max_pages: int = AUTH_USER_LOOKUP_MAX_PAGES):
+    """Every GoTrue user, walking the pages until one comes back empty.
+
+    `admin.list_users()` returns a **page** — 50 by default — of a listing this
+    project measures in hundreds. A screen that read it once therefore showed the
+    first fifty accounts and nothing else: no school admin, no teacher, no student
+    from any school but whichever addresses sorted first. That is the same defect
+    `find_auth_user_by_email` was fixed for, one layer up: a single call is not a
+    listing.
+
+    It stops on an **empty** page, never on a short one, because the page size is
+    the server's to decide — asking for 1000 is not a promise of 1000, and treating
+    a short page as the end is how the accounts past the first page were lost.
+
+    Bounded by `max_pages` so a server that keeps answering cannot spin forever; a
+    refusal is logged rather than swallowed, and whatever was collected is returned
+    so a partial listing says so by its count instead of looking complete.
+    """
+    admin = get_auth_admin()
+    users = []
+    for page in range(1, max_pages + 1):
+        try:
+            batch = admin.list_users(page=page, per_page=per_page)
+        except Exception:
+            logger.warning("auth user listing refused on page %s", page, exc_info=True)
+            break
+        if not batch:
+            break
+        users.extend(batch)
+    else:
+        logger.warning("auth user listing stopped at the %s-page bound", max_pages)
+    return users
+
+
 def _wants_json():
     accept = request.headers.get("Accept", "")
     return "application/json" in accept or request.path.startswith("/api/")

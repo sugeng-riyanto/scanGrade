@@ -26,17 +26,20 @@ from flask import g
 
 from tests.conftest import app_instance
 from app.routes import super_admin as mod
+from app.utils import auth as auth_utils
 
 ROUTE = "/super-admin/users/manage"
 
-#: (id, email, full_name, role, status) — deliberately unsorted, so every ordering
-#: assertion below is about the route and not about the fixture's own luck.
+#: (id, email, full_name, role, status, school) — deliberately unsorted, so every
+#: ordering assertion below is about the route and not about the fixture's own luck.
 PEOPLE = [
-    ("u-1", "zeta@scan-grade.app", "Zeta", "guru", "active"),
-    ("u-2", "alpha@scan-grade.app", "Alpha", "murid", "active"),
-    ("u-3", "mike@scan-grade.app", "Mike", "guru", "suspended"),
-    ("u-4", "beta@scan-grade.app", "Beta", "admin_sekolah", "active"),
+    ("u-1", "zeta@scan-grade.app", "Zeta", "guru", "active", "sch-1"),
+    ("u-2", "alpha@scan-grade.app", "Alpha", "murid", "active", "sch-1"),
+    ("u-3", "mike@scan-grade.app", "Mike", "guru", "suspended", "sch-2"),
+    ("u-4", "beta@scan-grade.app", "Beta", "admin_sekolah", "active", "sch-2"),
 ]
+
+SCHOOLS = [{"id": "sch-1", "name": "SMP Satu"}, {"id": "sch-2", "name": "SMP Dua"}]
 
 
 class _Resp:
@@ -44,45 +47,80 @@ class _Resp:
         self.data = data
 
 
-class _Profiles:
+class _Table:
+    """A PostgREST table read: ``select()``, an optional ``range()``, ``execute()``."""
+
     def __init__(self, rows):
-        self._rows = rows
-        self._ids = None
+        self._rows = list(rows)
+        self._start = 0
+        self._end = None
 
     def select(self, *_a, **_k):
         return self
 
-    def in_(self, _col, ids):
-        self._ids = list(ids)
+    def range(self, start, end):
+        self._start, self._end = start, end
         return self
 
     def execute(self):
-        want = set(self._ids or [])
-        return _Resp([dict(r) for r in self._rows if r["id"] in want])
+        if self._end is None:
+            return _Resp([dict(r) for r in self._rows])
+        return _Resp([dict(r) for r in self._rows[self._start:self._end + 1]])
+
+
+class _Admin:
+    """The GoTrue admin listing: **paged**, and the *server* sets the page size.
+
+    ``server_cap`` is the point. Asking for a thousand users does not promise a
+    thousand back — GoTrue answers 50 by default — so "call ``list_users()`` once
+    and call it the listing" is the defect this fixture is built to expose.
+    """
+
+    def __init__(self, users, *, server_cap=50):
+        self._users = list(users)
+        self._server_cap = server_cap
+        self.pages_asked = []
+
+    def list_users(self, page=1, per_page=None):
+        per = min(per_page or 50, self._server_cap)
+        self.pages_asked.append((page, per))
+        start = (page - 1) * per
+        return self._users[start:start + per]
 
 
 class _FakeSupabase:
-    def __init__(self):
-        self.auth = SimpleNamespace(admin=SimpleNamespace(list_users=self._users))
-        self._profiles = [
-            {"id": pid, "full_name": name, "role": role, "phone": "",
-             "status": status, "school_id": None}
-            for pid, _email, name, role, status in PEOPLE
-        ]
+    def __init__(self, *, server_cap=50, users=None, profiles=None):
+        self.admin = _Admin(users if users is not None else self._all_users(),
+                            server_cap=server_cap)
+        self._tables = {
+            "profiles": profiles if profiles is not None else [
+                {"id": pid, "full_name": name, "role": role, "phone": "",
+                 "status": status, "school_id": school}
+                for pid, _email, name, role, status, school in PEOPLE
+            ],
+            "schools": [dict(s) for s in SCHOOLS],
+        }
 
-    def _users(self):
+    @staticmethod
+    def _all_users():
         return [SimpleNamespace(id=pid, email=email,
                                 created_at="2026-01-01T00:00:00+00:00")
-                for pid, email, _n, _r, _s in PEOPLE]
+                for pid, email, _n, _r, _s, _sch in PEOPLE]
 
-    def table(self, _name):
-        return _Profiles(self._profiles)
+    @property
+    def auth(self):
+        return SimpleNamespace(admin=self.admin)
+
+    def table(self, name):
+        return _Table(self._tables.get(name, []))
 
 
 @pytest.fixture()
 def fake(monkeypatch):
     supabase = _FakeSupabase()
     monkeypatch.setattr(mod, "get_supabase", lambda: supabase)
+    # `list_all_auth_users` reads the admin interface off the shared client.
+    monkeypatch.setattr(auth_utils, "get_auth_admin", lambda: supabase.admin)
     return supabase
 
 
@@ -201,5 +239,112 @@ def test_the_page_offers_the_controls_and_keeps_the_filters_in_its_links(fake):
 
 def test_the_sortable_headers_link_to_a_real_ordering(fake):
     html = _render()
-    for field in ("name", "email", "role", "status"):
+    for field in ("name", "email", "role", "status", "school"):
         assert f"sort={field}" in html, f"the {field} column cannot be ordered"
+
+
+# ── the whole listing, not its first page ────────────────────────────────────
+
+def test_the_roster_walks_past_the_first_page(monkeypatch):
+    """The live page showed 50 of 806 users — every school but the first was missing.
+
+    ``admin.list_users()`` returns a *page* (50 by default), and the route read it
+    once as if it were the listing. With 120 accounts and a 50-wide page, the
+    last twenty can only appear if the route keeps asking until a page is empty.
+    """
+    users = [SimpleNamespace(id=f"u-{i}", email=f"user{i:03d}@scan-grade.app",
+                             created_at="2026-01-01T00:00:00+00:00")
+             for i in range(120)]
+    supabase = _FakeSupabase(users=users)
+    monkeypatch.setattr(mod, "get_supabase", lambda: supabase)
+    monkeypatch.setattr(auth_utils, "get_auth_admin", lambda: supabase.admin)
+
+    html = _render()
+
+    assert "user000@scan-grade.app" in html
+    assert "dari 120 user" in html, (
+        "the roster counted only one page of the auth listing")
+    assert [p for p, _ in supabase.admin.pages_asked] == [1, 2, 3, 4], (
+        "the route did not walk the listing; it read one page and treated it as "
+        "the whole set")
+    # The accounts the old page could never reach are on the later display pages.
+    assert "user119@scan-grade.app" in _render("?page=3"), (
+        "an account past the first page of 50 was invisible")
+
+
+def test_a_short_page_is_not_taken_for_the_end_of_the_listing(monkeypatch):
+    """The page size is the server's to decide, so a short page proves nothing."""
+    users = [SimpleNamespace(id=f"u-{i}", email=f"user{i:03d}@scan-grade.app",
+                             created_at="2026-01-01T00:00:00+00:00")
+             for i in range(60)]
+    # Page 1 comes back short (40) only because the *server* capped it there.
+    supabase = _FakeSupabase(users=users, server_cap=40)
+    monkeypatch.setattr(mod, "get_supabase", lambda: supabase)
+    monkeypatch.setattr(auth_utils, "get_auth_admin", lambda: supabase.admin)
+
+    html = _render()
+
+    assert "dari 60 user" in html and [p for p, _ in supabase.admin.pages_asked] == [1, 2, 3], (
+        "a page shorter than the requested size was mistaken for the end of "
+        "the listing")
+    assert "user059@scan-grade.app" in _render("?page=2")
+
+
+def test_the_profiles_are_read_past_their_first_chunk(monkeypatch):
+    """Profiles arrive in chunks too, so a listing past 1000 must not be truncated.
+
+    A roster that lists an account but cannot say its role or school is the same
+    defect one layer down: the account is visible and unusable. The 1100th profile
+    only exists if the read walks past its first chunk of 1000.
+    """
+    count = 1100
+    users = [SimpleNamespace(id=f"u-{i}", email=f"u{i:04d}@scan-grade.app",
+                             created_at="2026-01-01T00:00:00+00:00")
+             for i in range(count)]
+    profiles = [{"id": f"u-{i}", "full_name": f"P{i}", "role": "murid",
+                 "phone": "", "status": "active",
+                 "school_id": "sch-2" if i >= 1050 else "sch-1"}
+                for i in range(count)]
+    supabase = _FakeSupabase(users=users, profiles=profiles)
+    monkeypatch.setattr(mod, "get_supabase", lambda: supabase)
+    monkeypatch.setattr(auth_utils, "get_auth_admin", lambda: supabase.admin)
+
+    html = _render("?school=sch-2")
+
+    assert "dari 50 user" in html, (
+        "the profiles past the first chunk were lost, so the accounts beyond it "
+        "have no school to filter on")
+
+
+# ── school: a filter and a column ────────────────────────────────────────────
+
+def test_the_school_filter_keeps_only_that_school(fake):
+    html = _render("?school=sch-2")
+    assert "mike@scan-grade.app" in html
+    assert "beta@scan-grade.app" in html
+    assert "zeta@scan-grade.app" not in html
+    assert "alpha@scan-grade.app" not in html
+
+
+def test_the_school_menu_lists_every_school_even_while_one_is_selected(fake):
+    html = _render("?school=sch-1")
+    assert 'value="sch-1"' in html
+    assert 'value="sch-2"' in html, (
+        "filtering by a school removed the others from the list you would use "
+        "to undo it")
+
+
+def test_every_row_names_its_school(fake):
+    html = _render()
+    assert "SMP Satu" in html and "SMP Dua" in html, (
+        "a super admin could not see which school an account belongs to")
+
+
+def test_the_school_column_can_be_ordered(fake):
+    assert _emails(_render("?sort=school&dir=asc")) == [
+        "mike", "beta", "zeta", "alpha"]
+
+
+def test_the_school_filter_survives_a_header_click(fake):
+    html = _render("?school=sch-1&sort=name&dir=asc")
+    assert "school=sch-1" in html, "a header click silently dropped the school"
