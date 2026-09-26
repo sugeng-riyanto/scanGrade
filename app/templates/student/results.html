@@ -197,7 +197,7 @@
    cannot draw different pictures of the same marks. The switch that gates them is the
    `showScores` below — the one this page's own toggle drives. */
 function resultsApp() {
-    return Object.assign(sgVisualSummary(), {
+    const app = Object.assign(sgVisualSummary(), {
         filter: 'all', search: '', showScores: false, sortKey: '', sortDir: 'asc',
         submissions: JSON.parse(document.getElementById('submissions-data')?.textContent || '[]'),
         tzOffset: parseInt(document.cookie.split('; ').find(r => r.startsWith('tz_offset='))?.split('=')[1] || '7'),
@@ -215,19 +215,6 @@ function resultsApp() {
             return local.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
         },
 
-        get sortedSubmissions() {
-            let arr = [...this.submissions];
-            if (this.sortKey === 'exam') {
-                arr.sort((a, b) => {
-                    let va = (a.exam?.title || '').toLowerCase(), vb = (b.exam?.title || '').toLowerCase();
-                    return this.sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
-                });
-            }
-            return arr.filter(s => (this.filter === 'all' || s.status === this.filter || (this.filter === 'graded' && (s.status === 'graded' || s.status === 'published'))) && (!this.search || (s.exam?.title || '').toLowerCase().includes(this.search.toLowerCase())));
-        },
-
-        get shown() { return this.submissions.length; },
-
         //: A row's mark, or null when it has not been released — the route blanks
         //: those server-side, so this is the same value the table prints.
         mark(s) { const v = s.final_score ?? s.score; return v == null ? null : Number(v); },
@@ -239,13 +226,53 @@ function resultsApp() {
         statusLabel(s) {
             if (s.status === 'draft') return this.t('Draf (belum dikumpulkan)', 'Draft (not submitted)');
             if (s.status === 'submitted') return this.t('Menunggu', 'Waiting');
-            if (s.status === 'graded' && !s.is_published) return this.t('Sedang dinilai', 'Being marked');
+            // Asked the way the route asks it. `exam_access.result_released` is
+            // `is_published or status == 'published'`, and the route blanks a row's
+            // score when it is false — so the label and the number are the same
+            // question and must give the same answer. The two labels used to sit on
+            // each other's branch, and because the withheld one was tested first,
+            // the only row that could read as published was one whose status had
+            // also been moved on: a graded paper the teacher *had* returned said
+            // its marks were not released, right next to the mark itself.
+            if (s.is_published || s.status === 'published') return this.t('Dipublikasikan', 'Published');
             if (s.status === 'graded') return this.t('Nilai belum dibagikan', 'Marks not released');
-            if (s.status === 'published') return this.t('Dipublikasikan', 'Published');
+            // The last state with no pair of its own, so the one row this page can
+            // draw with an untranslated label was the withdrawn paper: the tab above
+            // said "Ditarik" while the row it filtered said `retracted`.
+            if (s.status === 'retracted') return this.t('Ditarik', 'Retracted');
             return s.status;
         },
 
     });
+
+    // `Object.assign` copies a property's *value*, so a getter written inside that
+    // literal is evaluated once at construction and flattened into a fixed array.
+    // That is exactly what happened to the filter tabs: `sortedSubmissions` was
+    // built while `filter` was still 'all' and never recomputed, so every tab —
+    // Waiting, Graded, Retracted — drew the same rows, and the sort header did
+    // nothing either. Defined as accessors *after* the merge, they read the live
+    // state, so a tab click and a header click both take effect.
+    Object.defineProperties(app, {
+        sortedSubmissions: {
+            enumerable: true,
+            get() {
+                let arr = [...this.submissions];
+                if (this.sortKey === 'exam') {
+                    arr.sort((a, b) => {
+                        let va = (a.exam?.title || '').toLowerCase(), vb = (b.exam?.title || '').toLowerCase();
+                        return this.sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+                    });
+                }
+                return arr.filter(s => (this.filter === 'all' || s.status === this.filter || (this.filter === 'graded' && (s.status === 'graded' || s.status === 'published'))) && (!this.search || (s.exam?.title || '').toLowerCase().includes(this.search.toLowerCase())));
+            },
+        },
+
+        //: What the tabs above the list are showing, not the total — a count that
+        //: ignores the filter is a second thing that looks broken next to it.
+        shown: { enumerable: true, get() { return this.sortedSubmissions.length; } },
+    });
+
+    return app;
 }
 </script>
 {% endblock %}

@@ -1726,11 +1726,31 @@ def toggle_feature_flag(flag_id):
 
 # ─── User Management ───
 
+#: The columns the user roster may be ordered by. A name, not an index: the sort
+#: arrives in the query string, so it is checked against this table rather than
+#: used as a field name — `key=user_supplied` would sort by anything at all, and a
+#: name that is not here (or an empty one) simply leaves the list in its own order.
+USER_SORTS = {
+    "name": lambda u: (u["full_name"] or "").lower(),
+    "email": lambda u: (u["email"] or "").lower(),
+    "role": lambda u: (u["role"] or "").lower(),
+    "status": lambda u: (u["status"] or "").lower(),
+}
+
+
 @super_bp.route("/users/manage")
 @_sa_required
 def user_management():
     supabase = get_supabase()
     q = request.args.get("q", "").strip()
+    role = request.args.get("role", "").strip()
+    status = request.args.get("status", "").strip()
+    sort = request.args.get("sort", "").strip()
+    if sort not in USER_SORTS:
+        sort = ""
+    direction = request.args.get("dir", "asc").strip().lower()
+    if direction not in ("asc", "desc"):
+        direction = "asc"
     page = int(request.args.get("page", 1))
     per_page = 50
     offset = (page - 1) * per_page
@@ -1768,11 +1788,24 @@ def user_management():
             "status": p.get("status", "active"),
         })
 
+    # The dropdowns are filled from the *unfiltered* set, so picking a role cannot
+    # remove the other roles from the list you would use to undo it.
+    roles = sorted({u["role"] for u in results if u["role"] and u["role"] != "-"})
+    statuses = sorted({u["status"] for u in results if u["status"]})
+    if role:
+        results = [u for u in results if u["role"] == role]
+    if status:
+        results = [u for u in results if u["status"] == status]
+    if sort:
+        results.sort(key=USER_SORTS[sort], reverse=(direction == "desc"))
+
     total_pages = max(1, -(-len(results) // per_page))
     page_results = results[offset:offset + per_page]
 
     return render_template("super_admin/user_management.html", users=page_results,
-                           q=q, page=page, total=len(results), total_pages=total_pages)
+                           q=q, role=role, status=status, sort=sort, dir=direction,
+                           roles=roles, statuses=statuses,
+                           page=page, total=len(results), total_pages=total_pages)
 
 
 @super_bp.route("/api/user/<user_id>/reset-password", methods=["POST"])

@@ -16,11 +16,19 @@ this easy to get away with most of the time. The rule these tests enforce is
 uniform instead: an interpolation into a JS-expression attribute must be quoted,
 unless the Jinja expression is itself a literal.
 """
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = sorted((ROOT / "app" / "templates").rglob("*.html"))
+
+NODE = shutil.which("node")
+needs_node = pytest.mark.skipif(NODE is None, reason="needs node to run the component")
 
 # Attributes whose value Alpine evaluates as JavaScript.
 EXPRESSION_ATTRS = (
@@ -246,3 +254,128 @@ def test_the_literal_interpolation_exemption_does_not_hide_data():
     assert _leading_interpolation("'{{ x }}'") is None       # already quoted
     assert _leading_interpolation("{{ x }} ? 'a' : 'b'") == "x"
     assert _leading_interpolation("t('a','b')") is None      # not an interpolation
+
+
+# ── the results filter tabs actually filter ────────────────────────────────
+
+def _results_app_source() -> str:
+    """The page's own component, lifted out of the template it ships in."""
+    raw = (ROOT / "app" / "templates" / "student" / "results.html") \
+        .read_text(encoding="utf-8")
+    start = raw.index("function resultsApp()")
+    end = raw.index("</script>", start)
+    return raw[start:end]
+
+
+@needs_node
+def test_the_results_tabs_filter_the_rows_they_name():
+    """A getter written inside the `Object.assign(...)` literal is evaluated once.
+
+    `sortedSubmissions` was declared *inside* the object merged into
+    `sgVisualSummary()`, and `Object.assign` copies a property's **value** — so the
+    getter ran while `filter` was still `'all'` and was flattened into a fixed
+    array. Every tab then drew the same rows and the sort header did nothing: the
+    filter that was reported broken was a getter that had already been read.
+
+    Run for real rather than asserted from the text, because the two spellings —
+    a getter in the literal and an accessor defined after the merge — look the
+    same to a regex and behave differently to Alpine.
+    """
+    subs = [
+        {"status": "submitted", "exam": {"title": "Beta"}},
+        {"status": "graded", "is_published": True, "exam": {"title": "Alpha"}},
+        {"status": "retracted", "exam": {"title": "Gamma"}},
+    ]
+    script = (
+        "globalThis.sgVisualSummary = () => ({ t: (id, en) => id, lang: 'id', initCharts() {} });\n"
+        f"const SUBS = {json.dumps(subs)};\n"
+        "globalThis.document = {\n"
+        "  getElementById: () => ({ textContent: JSON.stringify(SUBS) }),\n"
+        "  cookie: 'tz_offset=7',\n"
+        "};\n"
+        + _results_app_source()
+        + "\nconst app = resultsApp();\n"
+        "const counts = {};\n"
+        "for (const f of ['all', 'submitted', 'graded', 'retracted']) {\n"
+        "  app.filter = f;\n"
+        "  counts[f] = app.sortedSubmissions.length;\n"
+        "}\n"
+        "app.filter = 'all';\n"
+        "app.sortKey = 'exam'; app.sortDir = 'asc';\n"
+        "const asc = app.sortedSubmissions.map(s => s.exam.title);\n"
+        "app.sortDir = 'desc';\n"
+        "const desc = app.sortedSubmissions.map(s => s.exam.title);\n"
+        "console.log(JSON.stringify({ counts, asc, desc, shownAll: app.shown }));\n"
+    )
+    done = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout.strip())
+
+    assert got["counts"] == {"all": 3, "submitted": 1, "graded": 1, "retracted": 1}, (
+        "the tabs do not filter: every one draws the same rows, which is the "
+        "getter having been flattened at construction")
+    assert got["asc"] == ["Alpha", "Beta", "Gamma"]
+    assert got["desc"] == ["Gamma", "Beta", "Alpha"], (
+        "the sort direction is ignored, so the header is a button that does nothing")
+    assert got["shownAll"] == 3, "the count above the list ignores the filter"
+
+
+@needs_node
+def test_the_status_label_agrees_with_whether_the_marks_were_released():
+    """The label and the numbers answer one question, and the label answered it wrong.
+
+    Whether a student may be handed a mark is decided in exactly one place on the
+    server: ``exam_access.result_released`` is ``is_published or status ==
+    'published'``, and the results route asks it before it lets a row carry its
+    score at all. The label was bound to the two branches the other way round, so
+    a paper that was graded *and* published printed "Nilai belum dibagikan" /
+    "Marks not released" while its mark was being handed over — and, because the
+    withdrawn branch was tested first, the only way to read as published was to
+    have the status moved on as well. So the ladder is spelled in the route's own
+    terms, and this holds it to both languages.
+    """
+    subs = [
+        {"status": "draft", "exam": {"title": "A"}},
+        {"status": "submitted", "exam": {"title": "B"}},
+        {"status": "graded", "is_published": False, "exam": {"title": "C"}},
+        {"status": "graded", "is_published": True, "exam": {"title": "D"}},
+        # `published` with `is_published` left off is the other half of the
+        # route's rule, and the two columns are set independently — an old row
+        # can carry either on its own, so both are pinned.
+        {"status": "published", "is_published": False, "exam": {"title": "E"}},
+        {"status": "retracted", "exam": {"title": "F"}},
+    ]
+    script = (
+        "globalThis.sgVisualSummary = () => ({ t: (id, en) => id, lang: 'id', initCharts() {} });\n"
+        f"const SUBS = {json.dumps(subs)};\n"
+        "globalThis.document = {\n"
+        "  getElementById: () => ({ textContent: JSON.stringify(SUBS) }),\n"
+        "  cookie: 'tz_offset=7',\n"
+        "};\n"
+        + _results_app_source()
+        + "\nconst app = resultsApp();\n"
+        "const labels = {};\n"
+        "for (const row of app.submissions) {\n"
+        "  app.t = (id, _en) => id;\n"
+        "  const id = app.statusLabel(row);\n"
+        "  app.t = (_id, en) => en;\n"
+        "  labels[row.exam.title] = [id, app.statusLabel(row)];\n"
+        "}\n"
+        "console.log(JSON.stringify(labels));\n"
+    )
+    done = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout.strip())
+
+    released = ["Dipublikasikan", "Published"]
+    assert got["D"] == released, (
+        "a graded paper the teacher has published reads "
+        f"{got['D']!r} — the very row the route hands its mark to")
+    assert got["E"] == released, "a published paper must not read as withheld"
+    assert got["C"] == ["Nilai belum dibagikan", "Marks not released"], (
+        f"a graded paper the teacher is still holding reads {got['C']!r}")
+    assert got["B"] == ["Menunggu", "Waiting"]
+    assert got["A"] == ["Draf (belum dikumpulkan)", "Draft (not submitted)"]
+    assert got["F"] == ["Ditarik", "Retracted"], (
+        "a withdrawn paper falls through to the raw column value — the tab above "
+        "it is bilingual and says 'Ditarik'")

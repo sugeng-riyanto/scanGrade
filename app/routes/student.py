@@ -865,8 +865,10 @@ def results():
     # An unreleased result must not ship its marks to the browser. This list renders
     # every row's score and penalty, and the template hides them with `x-show` —
     # which still leaves the value in the DOM. So blank them server-side instead of
-    # trusting a display toggle. The status label ('On Progress') already tells the
-    # student the exam is being marked.
+    # trusting a display toggle. The status label ('Nilai belum dibagikan' / 'Marks
+    # not released') is the same question, and it is answered from the same rule: a
+    # graded paper the teacher has published reads and shows its mark; one still
+    # being held tells the student why there is no number beside it.
     for s in submissions:
         if not result_released(s):
             s["score"] = None
