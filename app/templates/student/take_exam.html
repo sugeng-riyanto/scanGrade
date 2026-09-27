@@ -7,6 +7,45 @@
 {% block body_class %}sg-exam{% endblock %}
 {% block head_extra %}
 <style>
+/* ── the exam page's layer scale ─────────────────────────────────────────────
+   One ordered list, and the only place on this page a layer height is written.
+   A panel takes the nearest *name* it must sit above — a new one cannot pick a
+   number by eye, and two cannot be handed the same height by accident, which is
+   how the terms agreement and the submit gate — the two panels the strip has to
+   sit *between* — both came to read `9999`, the anti-cheat watermark reading it
+   too.
+
+   Read it top-down: each line paints over the line before it. The sit strip's
+   two states are two lines of this same scale — `--sg-layer-strip` while a panel
+   covers the paper, `--sg-layer-strip-over` while the terms are being read — so
+   which one applies is a question about *what the strip has to outrank*, never a
+   second number kept in step by hand.
+
+   The `--sg-layer-canvas-*` entries are a stacking context of their own: they
+   live inside a `.full-canvas-wrap` and never compete with the layers below. */
+:root {
+    --sg-layer-canvas-tool: 5;      /* a measuring tool drawn over a canvas */
+    --sg-layer-canvas-grip: 6;      /* a tool's drag handles */
+    --sg-layer-canvas-item: 10;     /* an item placed on the canvas */
+    --sg-layer-canvas-item-ctl: 20; /* a control drawn on that item */
+    --sg-layer-paper: 10;           /* the sticky question rail */
+    --sg-layer-bar: 20;             /* the sticky exam bar */
+    --sg-layer-qstrip: 30;          /* the fixed question strip (phones) */
+    --sg-layer-float: 50;           /* the toast and the calculator */
+    --sg-layer-rail: 85;            /* the question column on a small screen */
+    --sg-layer-watermark: 88;       /* the anti-cheat name stamps on the paper */
+    --sg-layer-scrim: 90;           /* a panel that hides the paper */
+    --sg-layer-strip: 95;           /* the sit strip, pinned over that panel */
+    --sg-layer-modal: 9999;         /* a modal read before the paper opens */
+    --sg-layer-strip-over: 10000;   /* the sit strip over that modal */
+    --sg-layer-gate: 10001;         /* the confirmation that ends the paper */
+}
+/* The page-level layers, so a panel reads the scale by name and not by number. */
+.sg-layer-float { z-index: var(--sg-layer-float); }
+.sg-layer-scrim { z-index: var(--sg-layer-scrim); }
+.sg-layer-modal { z-index: var(--sg-layer-modal); }
+.sg-layer-gate { z-index: var(--sg-layer-gate); }
+
 /* ── the paper gets the width on a phone ──────────────────────────────────
    The question column is worth its 150px only when it is *beside* the paper.
    On a 320px screen it leaves about 155px for an A4 page — under a third of it,
@@ -124,7 +163,7 @@ body.sg-exam .sg-app-bottomnav,
 body.sg-exam .sidebar-overlay { display: none !important; }
 @media (max-width: 640px) {
     .exam-qcol, .exam-qcol--rail {
-        position: fixed; top: 0; bottom: 0; left: 0; z-index: 85;
+        position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--sg-layer-rail);
         width: 86vw; max-width: 320px;
         padding: 8px; background: #fff;
         box-shadow: 0 0 0 100vmax rgba(15, 23, 42, 0.5);
@@ -242,7 +281,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
         left: 4px;
         top: 50%;
         transform: translateY(-50%);
-        z-index: 30;
+        z-index: var(--sg-layer-qstrip);
         width: 26px;
         padding: 10px 0;
         gap: 4px;
@@ -265,14 +304,16 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 .opt-btn { transition: all 0.15s; border-radius: 0.75rem; font-weight: 700; }
 .opt-btn.selected { background: #f97316; color: white; border-color: #f97316; box-shadow: 0 4px 12px rgba(249,115,22,0.3); }
 .opt-btn:not(.selected):hover { background: #fff7ed; border-color: #fdba74; }
-.sticky-topbar { position: sticky; top: 0; z-index: 20; }
-.sticky-questions { position: sticky; top: 60px; z-index: 10; }
+.sticky-topbar { position: sticky; top: 0; z-index: var(--sg-layer-bar); }
+.sticky-questions { position: sticky; top: 60px; z-index: var(--sg-layer-paper); }
 /* While a panel stands between the student and the paper, the sit strip is the
-   only row they may still reach, so it has to outrank the scrim: both panels are
-   `fixed inset-0 z-[90]` and both cover the exam bar, which is where the theme
-   and language controls normally live. Deliberately under the modal layer
-   (`z-[9999]`): the terms agreement and the submit confirmation are states not to
-   be poked through, and being above the blockers must not mean above everything.
+   only row they may still reach, so it has to outrank the scrim: both blockers
+   carry `.sg-layer-scrim` and both cover the exam bar, which is where the theme
+   and language controls normally live. It takes `--sg-layer-strip` from the scale
+   above — over the scrim, and deliberately under `--sg-layer-gate`, because
+   ending the paper is a decision rather than a panel to reach past. It also has
+   to clear the terms agreement, because that one is read *before* the paper opens
+   and a student who needs the terms in English has to be able to say so first.
 
    `fixed` and not `sticky`, which is what this was first and why it failed: the
    strip's nearest scrolling ancestor is `main.flex-1.overflow-y-auto`, and that
@@ -283,12 +324,21 @@ body.sg-exam .sidebar-overlay { display: none !important; }
    the viewport whichever ancestor scrolls. The insets mirror the page's own
    `p-4 lg:p-6` gutter so it does not jump horizontally when it leaves the flow. */
 .sg-sit-strip.sg-sit-strip-pinned {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 95;
+    position: fixed; top: 0; left: 0; right: 0; z-index: var(--sg-layer-strip);
     margin-left: 1rem; margin-right: 1rem;
 }
 @media (min-width: 1024px) {
     .sg-sit-strip.sg-sit-strip-pinned { margin-left: 1.5rem; margin-right: 1.5rem; }
 }
+/* Over the agreement (`--sg-layer-modal`), under the submit gate
+   (`--sg-layer-gate`). The terms are the first thing a student reads on this page,
+   and the control that turns them into English lives on the strip, so the strip
+   has to be reachable while they are on screen — a language switch that only
+   arrives after agreeing is not a switch, it is a captcha. It is its own line of
+   the scale rather than the scrim's line: the blockers are a scrim *under* the
+   strip, while this is a layer *above* a modal, and the two must not be confused
+   the next time one of them moves. */
+.sg-sit-strip.sg-sit-strip-foremost { z-index: var(--sg-layer-strip-over); }
 .draw-toolbar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .draw-toolbar button { padding: 5px 10px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 12px; background: white; cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
 .draw-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
@@ -299,21 +349,21 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 .draw-canvas-wrap canvas { display: block; width: 100%; }
 .full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
-.text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: 10; touch-action: none; }
+.text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: var(--sg-layer-canvas-item); touch-action: none; }
 .text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); font-family: 'Nunito', sans-serif; -webkit-user-select: text; }
 .text-box textarea:focus { outline: none; border-color: #ea580c; background: #fff; box-shadow: 0 4px 20px rgba(249,115,22,0.3); }
 .text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
 .text-box .box-handle:active { cursor: grabbing; }
 .text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.text-box .box-font-controls { display: flex; align-items: center; gap: 3px; position: absolute; top: -40px; left: 0; background: #1e293b; border-radius: 8px; padding: 3px 6px; white-space: nowrap; z-index: 20; }
+.text-box .box-font-controls { display: flex; align-items: center; gap: 3px; position: absolute; top: -40px; left: 0; background: #1e293b; border-radius: 8px; padding: 3px 6px; white-space: nowrap; z-index: var(--sg-layer-canvas-item-ctl); }
 .text-box .box-font-controls select, .text-box .box-font-controls input { font-size: 10px; border-radius: 4px; border: 1px solid #475569; background: #334155; color: #f1f5f9; padding: 1px 3px; height: 20px; }
 .text-box .box-font-controls select { max-width: 90px; }
 .text-box .box-font-controls input { width: 40px; text-align: center; }
-.tool-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+.tool-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: var(--sg-layer-canvas-tool); }
 .tool-overlay svg { position: absolute; touch-action: none; }
 .tool-overlay svg * { pointer-events: none; }
 .tool-controlbar { pointer-events: none !important; }
-.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: 10; width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s, background 0.1s; }
+.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: var(--sg-layer-canvas-item); width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s, background 0.1s; }
 .tool-ctrl-btn:hover { transform: scale(1.15); background: rgba(30,41,59,0.95); }
 .tool-ctrl-btn.drag { cursor: grab; }
 .tool-ctrl-btn.drag:active { cursor: grabbing; }
@@ -349,7 +399,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
          paper: the theme, the language, the connection, the alert level, the
          microphone and the battery. -->
     <div class="sg-sit-strip bg-white rounded-2xl border border-surface-100 shadow-sm px-3 py-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-2"
-         :class="paperBlocked ? 'sg-sit-strip-pinned' : ''">
+         :class="(stripLifted ? 'sg-sit-strip-pinned' : '') + (stripForemost ? ' sg-sit-strip-foremost' : '')">
         <div class="sg-sit-who flex items-center gap-2 min-w-0">
             <span class="w-9 h-9 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-extrabold text-sm shrink-0">{{ (student_name or "?")[:1]|upper }}</span>
             <div class="min-w-0">
@@ -494,7 +544,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 
     <!-- Violation Banner -->
     <div x-show="showViolationBanner && !submitted" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 -translate-y-4" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-         class="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-lg w-[90%] rounded-2xl p-4 shadow-2xl border-2"
+         class="sg-layer-float fixed top-4 left-1/2 -translate-x-1/2 max-w-lg w-[90%] rounded-2xl p-4 shadow-2xl border-2"
          :class="{
              'bg-red-50 border-red-300': violationType === 'severe',
              'bg-amber-50 border-amber-300': violationType === 'penalty',
@@ -537,7 +587,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
          immediately that nothing is being answered, and gets one click to fix it.
          It hides itself when fullscreen comes back, or when the exam is submitted. -->
     <div x-show="fullscreenBlocked && !submitted" x-cloak
-         class="fixed inset-0 z-[90] bg-surface-900/45 backdrop-blur-xl flex items-center justify-center p-6"
+         class="fixed inset-0 sg-layer-scrim bg-surface-900/45 backdrop-blur-xl flex items-center justify-center p-6"
          @click.self="resumeFullscreen()">
         <div class="relative max-w-md w-full bg-white rounded-2xl p-6 text-center shadow-2xl border border-surface-200">
             <div class="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl">
@@ -566,7 +616,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
          returns and says so. One absence is one charge (the visibility handler),
          and one click both clears this and re-enters fullscreen if that was lost. -->
     <div x-show="awayBlurred && !submitted" x-cloak
-         class="fixed inset-0 z-[90] bg-surface-900/45 backdrop-blur-xl flex items-center justify-center p-6">
+         class="fixed inset-0 sg-layer-scrim bg-surface-900/45 backdrop-blur-xl flex items-center justify-center p-6">
         <div class="relative max-w-md w-full bg-white rounded-2xl p-6 text-center shadow-2xl border border-surface-200">
             <div class="w-14 h-14 mx-auto rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center text-2xl">
                 <i class="fas fa-eye-slash"></i>
@@ -615,7 +665,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 
     <!-- Scientific Calculator (standar matematika/fisika) -->
     <div x-show="showCalculator && !submitted && !showExamAgreement" x-transition x-cloak
-         class="sg-calc fixed bottom-20 right-4 z-50 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
+         class="sg-calc sg-layer-float fixed bottom-20 right-4 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
          @click.outside="showCalculator = false">
         <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
             <span class="text-[11px] font-extrabold text-slate-200 flex items-center gap-1.5"><i class="fas fa-calculator text-orange-400"></i> Scientific</span>
@@ -689,7 +739,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
     </div>
 
     <!-- Agreement Modal -->
-    <div x-show="showExamAgreement && !submitted" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div x-show="showExamAgreement && !submitted" class="sg-layer-modal fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="relative bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <!-- Same reason as the fullscreen overlay: this modal covers the exam
                  bar, and it is the *first* thing a student sees on this exam. A
@@ -770,7 +820,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
     </div>
 
     <!-- Submit Confirmation Modal -->
-    <div x-show="showSubmitConfirm && !submitted" x-cloak class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div x-show="showSubmitConfirm && !submitted" x-cloak class="sg-layer-gate fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6">
             <div class="text-center mb-4">
                 <div class="w-16 h-16 bg-gradient-to-br from-orange-500 to-orange-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg shadow-orange-500/20">
@@ -1068,12 +1118,12 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                            <text x="4" y="58" font-size="5" fill="rgba(180,80,0,0.55)">in</text>
                                       </svg>
                                       <!-- Drag handle on left overhang -->
-                                      <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*4/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                      <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*4/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
                                            @mousedown.stop="startToolDrag(i,'ruler',$event)" @touchstart.stop="startToolDrag(i,'ruler',$event)" :title="t('Seret','Drag')">
                                          <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
                                       <!-- Rotate handle on right overhang -->
-                                      <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*434/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                      <div :style="'position:absolute;left:'+((rulerX[i]||50)+(rulerWidth[i]||900)*434/436-10)+'px;top:'+((rulerY[i]||100)+((rulerWidth[i]||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
                                            @mousedown.stop="startToolRotate(i,'ruler',$event)" @touchstart.stop="startToolRotate(i,'ruler',$event)" :title="t('Putar','Rotate')">
                                          <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
@@ -1107,17 +1157,17 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                           <i class="tool-ctrl-btn close fas fa-times" style="position:static;width:14px;height:14px;font-size:7px;border-radius:3px;margin-left:2px" @click="showProtractor[i]=false" :title="t('Tutup','Close')"></i>
                                        </div>
                                         <!-- Protractor drag handle (center point) -->
-                                        <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                        <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
                                              @mousedown.stop="startToolDrag(i,'protractor',$event)" @touchstart.stop="startToolDrag(i,'protractor',$event)" :title="t('Seret','Drag')">
                                            <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                         </div>
                                         <!-- Protractor rotate handle (top of arc) -->
-                                        <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*155/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                        <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*200/400-10)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*155/400-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
                                             @mousedown.stop="startToolRotate(i,'protractor',$event)" @touchstart.stop="startToolRotate(i,'protractor',$event)" :title="t('Putar','Rotate')">
                                           <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                        </div>
                                        <!-- Protractor resize handle (right end of baseline) -->
-                                       <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*390/400-8)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-8)+'px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,120,0.7);border:2px solid rgba(255,255,255,0.3);z-index:6;pointer-events:auto;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;'"
+                                       <div :style="'position:absolute;left:'+((protractorX[i]||80)+(protractorSize[i]||350)*390/400-8)+'px;top:'+((protractorY[i]||50)+(protractorSize[i]||350)*350/400-8)+'px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,120,0.7);border:2px solid rgba(255,255,255,0.3);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;'"
                                             @mousedown.stop="startProtractorResize(i,$event)" @touchstart.stop="startProtractorResize(i,$event)" :title="t('Perbesar/perkecil','Resize')">
                                           <i class="fas fa-expand-alt text-white" style="font-size:6px;pointer-events:none"></i>
                                        </div>
@@ -1145,12 +1195,12 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                                           <text x="165" y="180" font-size="8" fill="rgba(0,0,120,0.4)" font-weight="bold" transform="rotate(-45,165,180)">45°</text>
                                       </svg>
                                        <!-- Drag handle at bottom-right corner -->
-                                       <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*322/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*322/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                       <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*322/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*322/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
                                            @mousedown.stop="startToolDrag(i,'triangle',$event)" @touchstart.stop="startToolDrag(i,'triangle',$event)" :title="t('Seret','Drag')">
                                          <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
                                       <!-- Rotate handle at right-angle corner -->
-                                      <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*27/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*24/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                      <div :style="'position:absolute;left:'+((triangleX[i]||160)+(triangleSize[i]||320)*27/332-10)+'px;top:'+((triangleY[i]||120)+(triangleSize[i]||320)*24/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
                                            @mousedown.stop="startToolRotate(i,'triangle',$event)" @touchstart.stop="startToolRotate(i,'triangle',$event)" :title="t('Putar','Rotate')">
                                          <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                       </div>
@@ -2616,7 +2666,7 @@ function examApp(duration, totalQ) {
             if (!name) return;
             const wm = document.createElement('div');
             wm.id = 'anti-cheat-watermark';
-            wm.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;';
+            wm.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:var(--sg-layer-watermark);overflow:hidden;';
             document.body.appendChild(wm);
             const addStamps = () => {
                 wm.innerHTML = '';
@@ -2830,6 +2880,19 @@ function examApp(duration, totalQ) {
         // say who they are, with no way to quiet the alerts.
         get paperBlocked() {
             return !this.submitted && (this.fullscreenBlocked || this.awayBlurred);
+        },
+        // The strip is lifted for the two blockers, and for the terms agreement:
+        // the agreement is the first screen of the sitting, and the language control
+        // it needs is on this row, so the strip has to be reachable through it too.
+        get stripLifted() {
+            return this.paperBlocked || this.stripForemost;
+        },
+        // Above the agreement, still under the submit gate. A level of its own
+        // because the two states ask for different layers: a blocker is a scrim the
+        // strip floats over, while the agreement is a modal it must outrank without
+        // reaching past the confirmation that ends the paper.
+        get stripForemost() {
+            return !this.submitted && this.showExamAgreement;
         },
         get chromeHidden() {
             return this.examLayout === 'rail' ? this.railCollapsed : this.navCollapsed;
