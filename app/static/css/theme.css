@@ -424,6 +424,9 @@ html { transition: background-color .3s, color .3s; }
         /* sky: the ordering question's chip bank hovers into it, the same way the
            drag & drop bank hovers into rose. */
         :where(.dark) :is(.hover\:border-sky-100,.hover\:border-sky-200,.hover\:border-sky-300):hover { border-color: #1c5a80; }
+        /* teal: the complex multiple choice judgements hover into it, the same way
+           the ordering bank hovers into sky. */
+        :where(.dark) :is(.hover\:border-teal-100,.hover\:border-teal-200,.hover\:border-teal-300):hover { border-color: #1a6b64; }
         :where(.dark) :is(.hover\:text-rose-200,.hover\:text-rose-300,.hover\:text-rose-400,.hover\:text-rose-500):hover { color: #fb7185; }
         :where(.dark) :is(.hover\:text-rose-600,.hover\:text-rose-700,.hover\:text-rose-800,.hover\:text-rose-900):hover { color: #fda4af; }
         :where(.dark) :is(.hover\:border-violet-100,.hover\:border-violet-200,.hover\:border-violet-300):hover { border-color: #45309f; }

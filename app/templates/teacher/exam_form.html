@@ -1112,6 +1112,113 @@
                                     </div>
                                 </div>
 
+                                <!-- Complex multiple choice: the statements are the question, the
+                                     categories are the judgements the student judges with, and each
+                                     statement carries its own key. The marking mode is fixed to the
+                                     AKM standard for now — the other two modes are deferred until
+                                     this one's boundary behaviour is proven — and the simulator
+                                     below scores the canonical patterns through the server's own
+                                     grader, so a teacher checks their rule against the number a
+                                     pupil actually gets rather than a second arithmetic here. -->
+                                <div x-show="kindOf(q) === 'pgk'" x-init="$nextTick(() => pgkSimulate(i))" class="space-y-3">
+                                    <div class="flex items-center justify-between flex-wrap gap-2">
+                                        <label class="text-xs font-extrabold text-slate-500" x-text="t('Pernyataan & kunci jawaban:','Statements &amp; answer key:')"></label>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-[10px] font-extrabold text-slate-400"
+                                                  x-text="(q.pgkStatements || []).length + '/' + PGK_MAX"></span>
+                                            <button type="button" @click="pgkAddStatement(i)"
+                                                    :disabled="(q.pgkStatements || []).length >= PGK_MAX"
+                                                    class="text-xs font-bold text-primary-600 hover:underline disabled:opacity-40">
+                                                <i class="fas fa-plus mr-0.5"></i><span x-text="t('Tambah pernyataan','Add statement')"></span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="space-y-1.5">
+                                        <div class="flex flex-wrap items-center gap-1.5">
+                                            <span class="text-[10px] font-extrabold text-slate-400" x-text="t('Kategori:','Categories:')"></span>
+                                            <template x-for="preset in PGK_PRESETS" :key="'pp-' + q._id + '-' + (preset[0] || []).join('/')">
+                                                <button type="button" @click="pgkSetPreset(i, pgkPresetNames(preset))"
+                                                        class="text-[11px] font-bold px-2 py-1 rounded-lg border-2 transition"
+                                                        :class="sgSameList(q.pgkCategories, pgkPresetNames(preset)) ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-600 hover:border-primary-200'">
+                                                    <span x-text="pgkPresetNames(preset).join(' / ')"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                        <input type="text" :value="(q.pgkCategories || []).join(', ')"
+                                               @change="pgkSetCustomCategories(i, $el.value)"
+                                               :placeholder="t('Kategori sendiri, dipisah koma — mis. Hewan, Tumbuhan, Mikroorganisme','Your own categories, comma separated — e.g. Animal, Plant, Microorganism')"
+                                               class="w-full text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
+                                    </div>
+
+                                    <p class="text-[11px] font-semibold text-slate-400"
+                                       x-text="t('Setiap pernyataan punya satu jawaban benar. Ketuk kategori di kanan sebagai kunci.','Every statement has one correct judgement. Tap the category on the right as the key.')"></p>
+
+                                    <template x-for="(s, si) in (q.pgkStatements || [])" :key="'pgk-' + q._id + '-' + si">
+                                        <div class="flex items-start gap-2">
+                                            <span class="w-5 text-[11px] font-extrabold text-slate-400 text-center shrink-0 pt-2" x-text="si + 1"></span>
+                                            <input type="text" x-model="q.pgkStatements[si]"
+                                                   :placeholder="t('pernyataan','statement')"
+                                                   class="flex-1 min-w-0 text-xs font-bold border-2 border-slate-200 rounded-xl px-3 py-2 focus:border-primary-500 transition">
+                                            <div class="flex flex-wrap gap-1 shrink-0 max-w-[45%] justify-end">
+                                                <template x-for="(cat, ci) in (q.pgkCategories || [])" :key="'pk-' + q._id + '-' + si + '-' + ci">
+                                                    <button type="button" @click="pgkPickKey(i, si, ci)"
+                                                            class="text-[10px] font-bold px-2 py-1 rounded-lg border-2 transition"
+                                                            :class="(q.pgkKey || [])[si] === ci ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-slate-200 text-slate-500'">
+                                                        <span x-text="cat"></span>
+                                                    </button>
+                                                </template>
+                                            </div>
+                                            <button type="button" @click="pgkRemoveStatement(i, si)"
+                                                    :disabled="(q.pgkStatements || []).length <= PGK_MIN"
+                                                    class="tap-44 w-9 h-9 rounded-lg text-slate-300 hover:text-red-500 disabled:opacity-25 transition shrink-0">
+                                                <i class="fas fa-times text-xs"></i>
+                                            </button>
+                                        </div>
+                                    </template>
+
+                                    <div class="rounded-xl border border-primary-100 bg-primary-50/60 px-3 py-2">
+                                        <p class="text-[11px] font-bold text-primary-700" x-text="t('Mode skor: Standar AKM','Scoring mode: AKM standard')"></p>
+                                        <p class="text-[10px] font-semibold text-primary-600/80"
+                                           x-text="t('3-5 pernyataan dengan 2 kategori dinilai 1/0; di luar itu 2/1/0. Mode lain menyusul setelah mode ini terbukti.','3-5 statements with 2 categories score 1/0; outside that, 2/1/0. Other modes follow once this one is proven.')"></p>
+                                    </div>
+
+                                    <div class="rounded-xl border border-slate-200 overflow-hidden">
+                                        <div class="flex items-center justify-between px-3 py-2 bg-slate-50">
+                                            <span class="text-[11px] font-extrabold text-slate-600" x-text="t('Simulasi skor','Score simulation')"></span>
+                                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                                  :class="pgkSimBand(i) === 'binary' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'"
+                                                  x-text="pgkSimBand(i) === 'binary' ? t('1/0','1/0') : t('2/1/0','2/1/0')"></span>
+                                        </div>
+                                        <div class="overflow-x-auto">
+                                            <table class="pgk-sim-table w-full text-[11px] min-w-[320px]">
+                                                <thead>
+                                                    <tr class="text-slate-400">
+                                                        <th class="text-left px-3 py-1.5 font-extrabold" x-text="t('Pola jawaban','Answer pattern')"></th>
+                                                        <th class="text-center px-2 py-1.5 font-extrabold" x-text="t('Benar','Right')"></th>
+                                                        <th class="text-center px-2 py-1.5 font-extrabold" x-text="t('Salah','Wrong')"></th>
+                                                        <th class="text-right px-3 py-1.5 font-extrabold" x-text="t('Skor soal','Question score')"></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <template x-for="row in pgkSimRows(i)" :key="'ps-' + q._id + '-' + row.pattern">
+                                                        <tr class="border-t border-slate-100">
+                                                            <td class="px-3 py-1.5 font-bold text-slate-600" x-text="pgkPatternLabel(row.pattern)"></td>
+                                                            <td class="text-center px-2 py-1.5 font-bold text-emerald-600" x-text="row.right"></td>
+                                                            <td class="text-center px-2 py-1.5 font-bold text-rose-500" x-text="row.wrong"></td>
+                                                            <td class="text-right px-3 py-1.5 font-extrabold text-slate-700" x-text="sgPct(row.score)"></td>
+                                                        </tr>
+                                                    </template>
+                                                    <tr x-show="!pgkSimRows(i).length">
+                                                        <td colspan="4" class="px-3 py-2 text-slate-400 font-semibold"
+                                                            x-text="t('Tambah pernyataan dan kunci untuk melihat simulasinya.','Add statements and a key to see the simulation.')"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div x-show="kindOf(q) === 'essay'" class="text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
                                     <i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Siswa mengetik jawaban (wajib) + menggambar di atas PDF (opsional)',
                                                                                             'Students type their answer (required) + draw on the PDF (optional)')"></span>
@@ -1287,6 +1394,32 @@ function sgLevelBand(lv) { return lv.band; }
 function sgKind(type) { return SG_QT.kinds[type || SG_QT.default] || SG_QT.kinds[SG_QT.default]; }
 function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.default) > -1; }
 
+// ── complex multiple choice, as the builder edits it ─────────────────────────
+//
+// Three to eight statements (the AKM guidance and a reading limit agree on the
+// ceiling), two-option presets or the teacher's own categories, and one correct
+// category per statement. The *scoring* is never computed here: the simulator
+// posts the question to `/api/pgk/simulate` and renders what the server's own
+// grader answered, because a second arithmetic in the page would agree with
+// itself and not with the engine that marks the paper.
+const PGK_MIN = 3;
+const PGK_MAX = 8;
+// Each category is an (id, en) pair, and the teacher's language decides which half
+// is *stored* — a category is content the student reads, not chrome, so it is
+// written in the language the paper is written in rather than translated at render
+// time. The presets are still pairs because the builder's own copy is chrome: an
+// English-speaking teacher has to be able to read the button they are choosing.
+const PGK_PRESETS = [
+    [['Benar', 'True'], ['Salah', 'False']],
+    [['Ya', 'Yes'], ['Tidak', 'No']],
+    [['Sesuai', 'Matches'], ['Tidak Sesuai', 'Does Not Match']],
+];
+function sgSameList(a, b) {
+    a = a || []; b = b || [];
+    return a.length === b.length && a.every(function (x, i) { return x === b[i]; });
+}
+function sgPct(score) { return Math.round((+score || 0) * 100) + '%'; }
+
 // ── the mark scheme, as a preview ─────────────────────────────────────────────
 //
 // The authority is `app/services/mark_scheme.py`; this is the same arithmetic in the
@@ -1299,9 +1432,10 @@ function sgIsObjective(type) { return SG_QT.objective.indexOf(type || SG_QT.defa
 // drag & drop, ordering and the essay each carry their own marks. The objective
 // pool this list replaced is what made a matching question share one weight with
 // the fifty choice questions beside it.
-const SG_SCHEME_ORDER = ['mcq', 'true_false', 'match', 'drag_drop', 'order', 'essay_canvas'];
+const SG_SCHEME_ORDER = ['mcq', 'true_false', 'complex_multiple_choice', 'match', 'drag_drop', 'order', 'essay_canvas'];
 const SG_MARK_STEP = 0.1;
-const SG_MARK_DEFAULTS = {mcq: 1, true_false: 1, match: 3, drag_drop: 3, order: 3,
+const SG_MARK_DEFAULTS = {mcq: 1, true_false: 1, complex_multiple_choice: 3, match: 3,
+                          drag_drop: 3, order: 3,
                           essay_canvas: 10, essay_text: 10, essay: 10};
 function sgMarksDefault(type) {
     var t = type || SG_QT.default;
@@ -1391,6 +1525,19 @@ function questionManager() {
                         q.order = ((k && k.order) || []).slice();
                         if (!q.order.length) q.order = [''];
                         q.extra = (k && k.extra) || [];
+                    } else if (kind === 'pgk') {
+                        q.pgkStatements = ((k && k.statements) || []).slice();
+                        q.pgkCategories = ((k && k.categories) || []).slice();
+                        q.pgkKey = ((k && k.key) || []).slice();
+                        // A question opened from storage must never be blanker than a
+                        // new one, or the editor shows an empty grid the teacher has
+                        // to work out from scratch.
+                        if (!q.pgkStatements.length || !q.pgkCategories.length ||
+                            q.pgkKey.length !== q.pgkStatements.length) {
+                            q.pgkStatements = ['', '', ''];
+                            q.pgkCategories = PGK_PRESETS[0].map(function (p) { return p[0]; });
+                            q.pgkKey = [0, 0, 0];
+                        }
                     }
                     q._extraInput = '';
                     return q;
@@ -1413,6 +1560,7 @@ function questionManager() {
             const look = {
                 choice:    {id:'Pilihan Ganda', en:'Multiple choice', icon:'fa-check-square',      btn:'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'},
                 truefalse: {id:'Benar / Salah', en:'True / False',    icon:'fa-toggle-on',         btn:'bg-primary-50 hover:bg-primary-100 text-primary-700 border-primary-200'},
+                pgk:       {id:'Pilihan Ganda Kompleks', en:'Complex multiple choice', icon:'fa-list-check', btn:'bg-teal-50 hover:bg-teal-100 text-teal-700 border-teal-200'},
                 match:     {id:'Menjodohkan',   en:'Matching',        icon:'fa-arrows-left-right', btn:'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'},
                 dragdrop:  {id:'Tarik & Letakkan', en:'Drag & drop',   icon:'fa-hand-pointer',      btn:'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'},
                 ordering:  {id:'Mengurutkan',   en:'Ordering',        icon:'fa-arrow-down-1-9',    btn:'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'},
@@ -1580,6 +1728,17 @@ function questionManager() {
         })(),
         dragFrom: null,
         dragOver: null,
+        // Exposed to the template's own expressions (the min/max counters and the
+        // preset row read them by name), so they are defined once in the script.
+        PGK_MIN: PGK_MIN,
+        PGK_MAX: PGK_MAX,
+        PGK_PRESETS: PGK_PRESETS,
+        // What the simulator answered, per question id. A map on the component and
+        // not on the question, because it is derived state the form must never post:
+        // `keyFor` decides what is saved, and a stale simulation saved as a key
+        // would be a marking rule nobody chose.
+        _pgkSim: {},
+        _pgkTimers: {},
         blankQuestion(type) {
             const q = {_id: 'n' + (++this._cid), type: type, pages: '', level: '', audio: '', youtube: '', _showMedia: false};
             const kind = this.kindOf(q);
@@ -1587,7 +1746,23 @@ function questionManager() {
             if (kind === 'truefalse') { q.tf = 'true'; }
             if (kind === 'match') { q.pairs = [{l:'', r:''}]; q.extra = []; q._extraInput = ''; }
             if (kind === 'dragdrop' || kind === 'ordering') { q.order = ['']; q.extra = []; q._extraInput = ''; }
+            if (kind === 'pgk') this.seedPgk(q);
             return q;
+        },
+        // The AKM minimum, two-option preset, and every statement keyed to the first
+        // category: a brand-new question a teacher can read and change rather than an
+        // empty grid whose shape they have to discover.
+        seedPgk(q) {
+            q.pgkStatements = ['', '', ''];
+            q.pgkCategories = this.pgkPresetNames(PGK_PRESETS[0]);
+            q.pgkKey = [0, 0, 0];
+        },
+        // A preset's category names in the reader's language. Reads `this.lang` so
+        // every label bound to it re-renders when the toggle moves, which a plain
+        // `sgT()` would not do (a string already assembled is frozen).
+        pgkPresetNames(preset) {
+            const en = this.lang === 'en';
+            return (preset || []).map(p => en ? p[1] : p[0]);
         },
         addQuestionOf(type) { this.questions.push(this.blankQuestion(type)); },
         addMcq() { this.addQuestionOf('mcq'); },
@@ -1617,6 +1792,89 @@ function questionManager() {
             if (!q.extra) q.extra = [];
             q.extra.push(text);
             q._extraInput = '';
+        },
+        // ── complex multiple choice ─────────────────────────────────────────
+        pgkAddStatement(i) {
+            const q = this.questions[i];
+            if (!q.pgkStatements) q.pgkStatements = [];
+            if (q.pgkStatements.length >= PGK_MAX) return;
+            q.pgkStatements.push('');
+            if (!q.pgkKey) q.pgkKey = [];
+            q.pgkKey.push(0);
+            this.pgkSimulate(i);
+        },
+        pgkRemoveStatement(i, si) {
+            const q = this.questions[i];
+            // The AKM binary band starts at three, and below it every statement would
+            // earn a 1/0 rule the guidance does not describe — so three is a floor
+            // the button enforces rather than a validation message after the fact.
+            if (!q.pgkStatements || q.pgkStatements.length <= PGK_MIN) return;
+            q.pgkStatements.splice(si, 1);
+            if (q.pgkKey) q.pgkKey.splice(si, 1);
+            this.pgkSimulate(i);
+        },
+        pgkSetPreset(i, list) {
+            const q = this.questions[i];
+            q.pgkCategories = list.slice();
+            const n = list.length;
+            // Clamp the existing key: a category the teacher removed must not stay
+            // selected by a stale index, or the saved key names a category that is
+            // no longer on the question.
+            q.pgkKey = (q.pgkStatements || []).map((_, si) => {
+                const cur = (q.pgkKey || [])[si];
+                return (typeof cur === 'number' && cur >= 0 && cur < n) ? cur : 0;
+            });
+            this.pgkSimulate(i);
+        },
+        pgkSetCustomCategories(i, text) {
+            // Comma separated, and two at minimum: one category is not a judgement.
+            const parts = String(text || '').split(',').map(s => s.trim()).filter(Boolean);
+            if (parts.length < 2) return;
+            this.pgkSetPreset(i, parts);
+        },
+        pgkPickKey(i, si, ci) {
+            const q = this.questions[i];
+            if (!q.pgkKey) q.pgkKey = [];
+            q.pgkKey[si] = ci;
+            this.pgkSimulate(i);
+        },
+        sgSameList(a, b) { return sgSameList(a, b); },
+        sgPct(v) { return sgPct(v); },
+        pgkSimRows(i) {
+            const q = this.questions[i];
+            return (this._pgkSim[q._id] || {}).rows || [];
+        },
+        pgkSimBand(i) {
+            const q = this.questions[i];
+            return (this._pgkSim[q._id] || {}).band || '';
+        },
+        pgkPatternLabel(pattern) {
+            if (pattern === 'all_right') return sgT('Semua benar', 'All right');
+            if (pattern === 'one_wrong') return sgT('1 salah', '1 wrong');
+            if (pattern === 'two_wrong') return sgT('2 salah', '2 wrong');
+            return sgT('Semua salah', 'All wrong');
+        },
+        pgkSimulate(i) {
+            const q = this.questions[i];
+            if (!q || this.kindOf(q) !== 'pgk') return;
+            const self = this;
+            // Debounced per question: the simulator is a preview and every keystroke
+            // does not need a round trip, but the last one always lands.
+            if (this._pgkTimers[q._id]) clearTimeout(this._pgkTimers[q._id]);
+            this._pgkTimers[q._id] = setTimeout(function () {
+                fetch('/api/pgk/simulate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        statements: q.pgkStatements || [],
+                        categories: q.pgkCategories || [],
+                        key: q.pgkKey || [],
+                    }),
+                }).then(r => r.json()).then(function (data) {
+                    if (!data || !data.ok) return;
+                    self._pgkSim[q._id] = {rows: data.patterns || [], band: data.band || ''};
+                }).catch(function () { /* offline: the last answer stays on screen */ });
+            }, 250);
         },
         // ── moving a question ───────────────────────────────────────────────
         // Buttons for every device (a drag handle is useless with a finger on a
@@ -1656,6 +1914,7 @@ function questionManager() {
             if (kind === 'truefalse' && !q.tf) q.tf = 'true';
             if (kind === 'match' && (!q.pairs || !q.pairs.length)) q.pairs = [{l:'', r:''}];
             if ((kind === 'dragdrop' || kind === 'ordering') && (!q.order || !q.order.length)) q.order = [''];
+            if (kind === 'pgk' && (!q.pgkStatements || !q.pgkStatements.length)) this.seedPgk(q);
             if (kind !== 'choice') q.answers = [];
             if (kind !== 'match' && kind !== 'dragdrop' && kind !== 'ordering') q.extra = [];
         },
@@ -1693,6 +1952,17 @@ function questionManager() {
                 const extra = (q.extra || []).map(x => String(x).trim()).filter(Boolean);
                 if (extra.length) out.extra = extra;
                 return out;
+            }
+            if (kind === 'pgk') {
+                // The shape `question_types.pgk_*` reads. Statement text is kept
+                // *unfiltered* so the array lengths stay aligned with the key: an
+                // unfilled statement then makes the whole key unreadable, which is
+                // what an unfinished question is, instead of shifting every later
+                // key onto the wrong statement.
+                const cats = (q.pgkCategories || []).map(c => String(c).trim()).filter(Boolean);
+                const stmts = (q.pgkStatements || []).map(s => String(s).trim());
+                const key = (q.pgkKey || []).map(v => (typeof v === 'number' ? v : 0));
+                return {categories: cats, statements: stmts, key: key.slice(0, stmts.length)};
             }
             return 'essay';
         },

@@ -231,7 +231,8 @@ def _recalculate_scores(exam_id):
                 except (json.JSONDecodeError, TypeError): sub[_sf] = {}
         answers = sub.get("answers") or {}
         earned, _graded = earned_points(question_types, answer_key, answers,
-                                       question_weights, total_q)
+                                       question_weights, total_q,
+                                       exam.get("question_scoring"))
         fb = sub.get("teacher_feedback") or {}
         fb_scores = fb.get("scores", {}) or {}
         for qi, sv in fb_scores.items():
@@ -3057,7 +3058,11 @@ def api_grading_queue(exam_id):
     school_id = g.get("user_school_id")
 
     # Verify access
-    exam = supabase.table("exams").select("id,teacher_id,school_id,question_types,question_weights,answer_key,total_questions").eq("id", exam_id).single().execute().data
+    # Carries the whole set of per-question facts this route may have to talk about —
+    # types, weights, key and marking modes together. The mode is not read here
+    # today; reading a paper's questions without it is how a route added later ends
+    # up grading a 2/1/0 question as 1/0 with nothing to show for it.
+    exam = supabase.table("exams").select("id,teacher_id,school_id,question_types,question_weights,question_scoring,answer_key,total_questions").eq("id", exam_id).single().execute().data
     if not exam:
         return jsonify({"error": "Not found"}), 404
     if user_role != "super_admin" and exam["teacher_id"] != g.user_id:

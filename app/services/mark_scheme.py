@@ -52,6 +52,7 @@ from typing import Any, Mapping
 from app.services.question_types import (
     DEFAULT_TYPE,
     DRAG_DROP,
+    COMPLEX_MULTIPLE_CHOICE,
     ESSAY,
     ESSAY_CANVAS,
     ESSAY_TEXT,
@@ -80,6 +81,10 @@ MARK_STEP = 0.1
 DEFAULT_MARKS: dict[str, float] = {
     MCQ: 1.0,
     TRUE_FALSE: 1.0,
+    # Priced with the multi-part types rather than at a single mark, because one
+    # question asks several judgements: a PGK beside a one-mark multiple choice
+    # question is the same asymmetry the per-type scheme exists to make visible.
+    COMPLEX_MULTIPLE_CHOICE: 3.0,
     MATCH: 3.0,
     DRAG_DROP: 3.0,
     ORDER: 3.0,
@@ -100,7 +105,7 @@ DEFAULT_MARKS: dict[str, float] = {
 #: between "drag these into the box" and "rank these" is choosing the question's
 #: presentation, which is theirs to choose.
 SCHEME_ORDER: tuple[str, ...] = (
-    MCQ, TRUE_FALSE, MATCH, DRAG_DROP, ORDER, ESSAY_CANVAS,
+    MCQ, TRUE_FALSE, COMPLEX_MULTIPLE_CHOICE, MATCH, DRAG_DROP, ORDER, ESSAY_CANVAS,
 )
 
 

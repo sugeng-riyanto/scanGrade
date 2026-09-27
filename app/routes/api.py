@@ -287,7 +287,7 @@ def force_submit():
         if sub.data:
             answers = sub.data[0].get("answers") or {}
             # Re-fetch submission for answer key
-            exam = supabase.table("exams").select("answer_key,question_types,question_weights,total_questions,penalty_per_violation").eq("id", exam_id).single().execute().data or {}
+            exam = supabase.table("exams").select("answer_key,question_types,question_weights,question_scoring,total_questions,penalty_per_violation").eq("id", exam_id).single().execute().data or {}
             # Parse JSON fields that may be strings
             for _fld in ("answer_key", "question_types", "question_weights"):
                 _v = exam.get(_fld)
@@ -300,7 +300,8 @@ def force_submit():
             total_q = exam.get("total_questions", 0)
             penalty = float(exam.get("penalty_per_violation", 5))
             # Calculate MCQ score
-            earned, _graded = earned_points(qtypes, key, answers, weights, total_q)
+            earned, _graded = earned_points(qtypes, key, answers, weights, total_q,
+                                            exam.get("question_scoring"))
             # The stored objective score is the app's one rule
             # (`question_types.objective_result`): a percentage of the paper's
             # objective questions, so a partly keyed paper cannot pay this pupil
@@ -728,7 +729,7 @@ def scan_bulk_save():
     # a window column left out of this select reads as *absent*, which is how a
     # missing field becomes "never late" rather than an error (see AGENTS.md).
     exam = supabase.table("exams").select(
-        "answer_key,question_types,total_questions,"
+        "answer_key,question_types,question_scoring,total_questions,"
         "start_at,end_at,duration_minutes,auto_submit_on_window_end"
     ).eq("id", exam_id).single().execute().data
     key = exam.get("answer_key", {}) if exam else {}
@@ -854,7 +855,7 @@ def _get_exam_cached(exam_id, supabase):
     if exam_id not in flask_g._exam_cache:
         flask_g._exam_cache[exam_id] = supabase.table("exams").select(
             "id,duration_minutes,total_questions,answer_key,question_types,"
-            "question_weights,max_attempts,publish_mode,is_published,status,"
+            "question_weights,question_scoring,max_attempts,publish_mode,is_published,status,"
             "start_at,end_at,auto_submit_on_window_end"
         ).eq("id", exam_id).single().execute().data
     return flask_g._exam_cache[exam_id]
@@ -1120,7 +1121,8 @@ def grade_batch():
                 except (json.JSONDecodeError, TypeError): sub[_sf] = {}
         answers = sub.get("answers") or {}
         earned, _graded = earned_points(
-            question_types, answer_key, answers, question_weights, total_q)
+            question_types, answer_key, answers, question_weights, total_q,
+            exam.get("question_scoring"))
         fb = sub.get("teacher_feedback") or {}
         fb_scores = fb.get("scores", {}) or {}
         for qi, sv in fb_scores.items():
@@ -2917,6 +2919,36 @@ def save_ui_preferences():
     else:
         merged = g.get("user_prefs") or {}
     return jsonify({"ok": True, "preferences": merged})
+
+
+@api_bp.route("/pgk/simulate", methods=["POST"])
+@login_required
+@require_role(*STAFF_ROLES)
+def pgk_simulate_preview():
+    """Score the PGK builder's canonical answer patterns, through the grader.
+
+    Exists so the builder can show a teacher what their marking rule does without
+    re-implementing that rule in JavaScript. A second arithmetic in the page would
+    agree with itself and not with the marking engine, and a teacher checking a
+    2/1/0 question against it would be reading a number their pupils never get —
+    the same "seven copies" defect `question_types.py` was written to end.
+
+    Pure and read-only: it takes the question's own key (statements, categories and
+    the correct category per statement) and returns a row per pattern. Nothing is
+    stored, so a half-written question is harmless here, and no exam id is needed.
+    """
+    from app.services.question_types import pgk_akm_band, pgk_simulate
+
+    body = request.get_json(silent=True) or {}
+    categories = body.get("categories") or []
+    key = body.get("key") or []
+    statements = body.get("statements") or []
+    shape = {"categories": categories, "key": key, "statements": statements}
+    return jsonify({
+        "ok": True,
+        "band": pgk_akm_band(shape),
+        "patterns": pgk_simulate(shape),
+    })
 
 
 @api_bp.route("/public/privacy-info")

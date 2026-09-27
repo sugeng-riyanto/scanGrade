@@ -1462,6 +1462,46 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                         </div>
                     </template>
 
+                    <!-- Complex multiple choice: one judgement per statement, tapped. The
+                         categories arrive in the key's own order — `public_options`
+                         sends them, and deliberately not the answers — so a tap is an
+                         index, and the ordering must not be shuffled the way a choice
+                         question's letters are: the key is *by index* here, so shuffling
+                         would move the correct answer. -->
+                    <template x-if="qKind(i) === 'pgk'">
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-sm font-extrabold text-stone-700" x-text="t('Soal ','Question ') + (i + 1) + ':'"></span>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200" x-text="t('Pilihan Ganda Kompleks','Complex multiple choice')"></span>
+                                <span x-show="answered[i]" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                    <i class="fas fa-check text-emerald-500"></i><span x-text="t('Terjawab','Answered')"></span>
+                                </span>
+                            </div>
+                            <p class="text-[11px] font-semibold text-stone-400" x-text="t('Tentukan satu jawaban untuk tiap pernyataan.','Choose one judgement for each statement.')"></p>
+                            <template x-for="(s, si) in pgkStatements(i)" :key="'pgk-' + i + '-' + si">
+                                <div class="rounded-2xl border-2 p-3 transition"
+                                     :class="pgkAnswer(i)[si] != null ? 'border-emerald-300 bg-emerald-50/40' : 'border-stone-200 bg-white'">
+                                    <p class="text-xs font-bold text-stone-700 mb-2 break-words">
+                                        <span class="text-stone-400" x-text="(si + 1) + '. '"></span><span x-text="s"></span>
+                                    </p>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        <template x-for="(cat, ci) in pgkCategories(i)" :key="'pc-' + i + '-' + si + '-' + ci">
+                                            <button type="button" @click="pgkPick(i, si, ci)"
+                                                    class="tap-44 pgk-opt text-xs font-bold px-3 py-2 rounded-xl border-2 transition"
+                                                    :class="pgkAnswer(i)[si] === ci ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-white border-stone-200 text-stone-600 hover:border-teal-300'">
+                                                <span x-text="cat"></span>
+                                            </button>
+                                        </template>
+                                        <button type="button" @click="pgkClear(i, si)" x-show="pgkAnswer(i)[si] != null"
+                                                class="text-xs font-bold px-3 py-2 rounded-xl border-2 border-dashed border-stone-200 text-stone-400 hover:text-rose-500 hover:border-rose-200 transition">
+                                            <i class="fas fa-eraser mr-1"></i><span x-text="t('Hapus','Clear')"></span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
                     <template x-if="qKind(i) === 'essay' && !isCanvasEssay(i)">
                         <div class="">
                             <div class="flex items-center gap-2 mb-2 flex-wrap">
@@ -2838,6 +2878,9 @@ function examApp(duration, totalQ) {
             const kind = sgKind((this.questions[this.currentQ] || {}).type);
             if (kind === 'essay') return 'answer-wide';
             if (kind === 'match' || kind === 'dragdrop' || kind === 'ordering') return 'answer-medium';
+            // A PGK question asks several judgements, so it wants the medium column
+            // rather than the narrow one a single choice question fits in.
+            if (kind === 'pgk') return 'answer-medium';
             return 'answer-bubbles';
         },
         toggleChrome() {
@@ -2968,6 +3011,7 @@ function examApp(duration, totalQ) {
             if (kind === 'match') return {cls: 'text-violet-500', icon: 'fas fa-arrows-left-right'};
             if (kind === 'dragdrop') return {cls: 'text-rose-500', icon: 'fas fa-hand-pointer'};
             if (kind === 'ordering') return {cls: 'text-sky-500', icon: 'fas fa-arrow-down-1-9'};
+            if (kind === 'pgk') return {cls: 'text-teal-500', icon: 'fas fa-list-check'};
             if (type === 'essay_text') return {cls: 'text-amber-500', icon: 'fas fa-font'};
             return {cls: 'text-orange-400', icon: 'fas fa-paint-brush'};
         },
@@ -3555,6 +3599,37 @@ function examApp(duration, totalQ) {
             const moved = arr.splice(wi, 1)[0];
             arr.splice(to, 0, moved);
             this._setStructured(i, arr, arr.length > 0);
+        },
+        // ── complex multiple choice ─────────────────────────────────────────
+        // The statements and categories come from `public_options`, which is the
+        // one place that decides what a student may see — and pointedly not `key`,
+        // which sits in the same object one field away.
+        pgkStatements(i) { const o = this._opts(i); return (o && o.statements) || []; },
+        pgkCategories(i) { const o = this._opts(i); return (o && o.categories) || []; },
+        pgkAnswer(i) {
+            // A list of category indexes, `null` where a statement is untouched.
+            // The length always matches the statements: `pgk_score` reads an answer
+            // of the wrong width as *no answer at all*, so a half-filled grid must
+            // still be sent with its blanks in place rather than compressed.
+            const raw = (this.questions[i] || {}).answer;
+            return Array.isArray(raw) ? raw.slice() : [];
+        },
+        pgkPick(i, si, ci) {
+            const arr = this.pgkAnswer(i);
+            const width = this.pgkStatements(i).length;
+            while (arr.length < width) arr.push(null);
+            // Tapping the chosen judgement again clears it: a mis-tap on a phone must
+            // be undoable, and there is no "no answer" button to reach for.
+            arr[si] = (arr[si] === ci) ? null : ci;
+            const filled = arr.some(v => v != null);
+            this._setStructured(i, filled ? arr : null, filled);
+        },
+        pgkClear(i, si) {
+            const arr = this.pgkAnswer(i);
+            while (arr.length <= si) arr.push(null);
+            arr[si] = null;
+            const filled = arr.some(v => v != null);
+            this._setStructured(i, filled ? arr : null, filled);
         },
         chipStart(e, i, chip) {
             this.chipDrag = { i: i, w: chip };

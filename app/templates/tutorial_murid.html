@@ -48,10 +48,11 @@
                        this card cannot go on advertising a type the builder has
                        stopped offering, or too few of them. #}
                     {% set _types = q_vocabulary()['picker'] %}
-                    {% set _type_icons = {'mcq':'fa-check-circle','true_false':'fa-check-double','match':'fa-arrows-left-right','drag_drop':'fa-hand-pointer','order':'fa-arrow-down-1-9','essay_canvas':'fa-paint-brush'} %}
+                    {% set _type_icons = {'mcq':'fa-check-circle','true_false':'fa-check-double','complex_multiple_choice':'fa-list-check','match':'fa-arrows-left-right','drag_drop':'fa-hand-pointer','order':'fa-arrow-down-1-9','essay_canvas':'fa-paint-brush'} %}
                     {% set _type_how = {
                         'mcq': ('Klik A, B, C, D, atau E. Jawaban terpilih menyala oranye.', 'Click A, B, C, D or E. The chosen answer turns orange.'),
                         'true_false': ('Pilih Benar atau Salah untuk setiap pernyataan.', 'Choose True or False for each statement.'),
+                        'complex_multiple_choice': ('Tentukan satu jawaban untuk tiap pernyataan dalam soal — nilainya bisa sebagian.', 'Choose one judgement for each statement in the question — it can earn part-marks.'),
                         'match': ('Pasangkan tiap item di kiri dengan pasangannya di kanan.', 'Pair each item on the left with its match on the right.'),
                         'drag_drop': ('Tarik kata atau frasa ke kotak kosong pada kalimat.', 'Drag the words or phrases into the empty boxes in the sentence.'),
                         'order': ('Susun kalimat atau kata sampai urutannya benar, pakai tombol naik dan turun.', 'Arrange the sentence or the words until the order is right, using the up and down controls.'),

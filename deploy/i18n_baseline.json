@@ -395,7 +395,7 @@
       "pairs": 29,
       "leftovers": 0,
       "coverage": 100.0,
-      "frozen": true
+      "frozen": false
     },
     "super_admin/exams.html": {
       "pairs": 0,
@@ -483,7 +483,7 @@
     },
     "super_admin/user_management.html": {
       "pairs": 0,
-      "leftovers": 9,
+      "leftovers": 10,
       "coverage": 0.0,
       "frozen": false
     },
@@ -560,7 +560,7 @@
       "frozen": false
     },
     "teacher/exam_form.html": {
-      "pairs": 174,
+      "pairs": 202,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
