@@ -492,12 +492,19 @@ def test_the_markers_the_tests_read_are_the_markers_the_template_writes():
 
 # ── 7. reachable while the paper is blocked ──────────────────────────────────
 #
-# The blocker and the away-blur are `fixed inset-0 z-[90]`, so they cover the
-# strip with the rest of the page — and the exam bar they also cover is where the
+# The blocker and the away-blur are `fixed inset-0`, both on the scale's `scrim`
+# line, so they cover the strip with the rest of the page — and the exam bar they
+# also cover is where the
 # theme and language controls normally live. A student who has lost fullscreen is
 # then asked to fix it in a language they may not read, with a page that will not
 # say who they are, and no way to quiet the alerts. The strip is the one row that
 # has to survive that, which is what these four assertions pin down.
+#
+# The terms agreement is the same problem one screen earlier: it is the first thing
+# shown, it covers the exam bar too, and its own copy starts out in Indonesian — so
+# the language control has to be reachable *before* the student agrees, not only
+# after. The strip therefore has a second layer, above that modal and still below
+# the submit gate.
 
 PINNED_CLASS = "sg-sit-strip-pinned"
 
@@ -518,36 +525,78 @@ def _pinned_rule() -> str:
     return match.group(1)
 
 
-def _z_index(rule: str) -> int:
-    match = re.search(r"z-index:\s*(\d+)", rule)
-    assert match, f"the rule sets no z-index: {rule!r}"
-    return int(match.group(1))
+def _scale() -> dict[str, int]:
+    """The one ordered list of layer heights, read from the page's `:root`.
+
+    This is the single place a height is written on this page — the map returns in
+    declaration order, so a caller can ask not only what a layer is but whether the
+    list is still a list. A rule naming a raw number, or a panel choosing one by
+    eye, is the drift the scale exists to make impossible.
+    """
+    root = re.search(r":root\s*\{([^}]*)\}", _style_block())
+    assert root, "the page has no `:root` block, so there is no layer scale"
+    pairs = re.findall(r"--sg-layer-([a-z0-9-]+):\s*(\d+)\s*;", root.group(1))
+    assert pairs, "the `:root` block declares no `--sg-layer-*` heights"
+    return {name: int(value) for name, value in pairs}
 
 
-#: A full-screen panel: what turns it on, and how high it sits. Every panel on
-#: this page is written `x-show="…"` then a class carrying `fixed inset-0 z-[n]`,
-#: which is what makes them comparable without naming any of them.
-PANEL_RE = re.compile(r'x-show="([^"]*)"[^>]*?fixed inset-0 z-\[(\d+)\]', re.S)
+def _layer(rule: str) -> int:
+    """A rule's height, resolved through the scale by the *name* it takes.
+
+    A rule that hardcodes a number, or names a layer that is not a line of the
+    scale, fails here — which is the point: a height is chosen by name, never by
+    eye.
+    """
+    scale = _scale()
+    match = re.search(r"z-index:\s*var\(--sg-layer-([a-z0-9-]+)\)", rule)
+    assert match, (
+        f"the rule does not take its height from a named layer: {rule!r}")
+    name = match.group(1)
+    assert name in scale, (
+        f"the rule takes layer `{name}`, which is not a line of the scale "
+        f"({', '.join(scale)})")
+    return scale[name]
 
 
-def _panels() -> list[tuple[str, int]]:
-    panels = PANEL_RE.findall(source(EXAM_PAGE))
+def _layer_named(name: str) -> int:
+    scale = _scale()
+    assert name in scale, f"`{name}` is not a line of the layer scale"
+    return scale[name]
+
+
+#: A full-screen panel: the tag that carries `x-show="…"`, the state that raises
+#: it, and one `sg-layer-*` name from the scale — never a number picked inline.
+PANEL_TAG_RE = re.compile(r'x-show="([^"]*)"([^>]*)>', re.S)
+
+
+def _panel_matches():
+    out = []
+    for match in PANEL_TAG_RE.finditer(source(EXAM_PAGE)):
+        show, attrs = match.group(1), match.group(2)
+        if "fixed inset-0" not in attrs:
+            continue
+        named = re.search(r"sg-layer-([a-z0-9-]+)", attrs)
+        if named:
+            out.append((match, show, named.group(1)))
+    return out
+
+
+def _panels() -> list[tuple[str, str]]:
+    panels = [(show, name) for _m, show, name in _panel_matches()]
     assert len(panels) >= 4, (
         "the page's full-screen panels are not recognisable any more, so this test "
         "would be comparing against nothing")
-    return [(show, int(z)) for show, z in panels]
+    return panels
 
 
-def _blocker_z_indexes() -> list[int]:
-    """The z-index of every panel that stands *between the student and the paper*.
+def _blocker_layers() -> list[str]:
+    """Every panel that stands *between the student and the paper*.
 
     Separated from the modals by the state that raises it rather than by a number:
     a modal covers the paper for a reason and is meant to be on top, while the
-    blocker and the away-blur are the two the strip has to outrank. Read rather
-    than assumed, because a rule quietly changed to 80 would still look like a
-    rule and would put the strip back behind the scrim.
+    blocker and the away-blur are the two the strip has to outrank.
     """
-    found = [z for show, z in _panels()
+    found = [name for show, name in _panels()
              if "fullscreenBlocked" in show or "awayBlurred" in show]
     assert len(found) >= 2, (
         "the two blocking panels are not recognisable any more, so this test would "
@@ -556,11 +605,67 @@ def _blocker_z_indexes() -> list[int]:
 
 
 def test_the_strip_outranks_both_panels_that_cover_the_paper():
-    pinned = _z_index(_pinned_rule())
-    blockers = _blocker_z_indexes()
+    pinned = _layer(_pinned_rule())
+    blockers = [_layer_named(name) for name in _blocker_layers()]
     assert pinned > max(blockers), (
         f"the strip sits at {pinned}, under a blocker at {max(blockers)}: it stays "
         "covered, which is the defect this exists to remove")
+
+
+def test_the_scale_is_one_ordered_list_with_no_shared_heights():
+    """The scale is the only place a height is written, so it has to behave like a
+    list: strictly increasing in the order it is declared — read top-down, each
+    line paints over the one before it — and no two layers handed the same number
+    by accident, which is how the terms agreement and the anti-cheat watermark both
+    came to read `9999`.
+
+    The canvas entries are a stacking context of their own inside a
+    `.full-canvas-wrap`, so they are held to the same rule separately rather than
+    compared with the page-level layers they never compete with.
+    """
+    scale = _scale()
+    groups = {
+        "canvas": {k: v for k, v in scale.items() if k.startswith("canvas-")},
+        "page": {k: v for k, v in scale.items() if not k.startswith("canvas-")},
+    }
+    for label, group in groups.items():
+        assert group, f"the {label} scale is empty"
+        values = list(group.values())
+        assert len(set(values)) == len(values), (
+            f"two {label} layers share a height, so one silently paints over the "
+            f"other: {group}")
+        assert values == sorted(values), (
+            f"the {label} scale is declared out of order, so 'the line above' no "
+            f"longer means 'paints over': {group}")
+
+
+def test_no_rule_on_this_page_chooses_a_height_by_eye():
+    """Every height on the page is a `var(--sg-layer-*)` name — never a number. A
+    raw `9999`, or a Tailwind `z-[90]`, is a height kept in step by hand, which is
+    the drift the scale was built to remove."""
+    raw = re.findall(r"z-index:\s*(\d+)", _style_block())
+    assert not raw, (
+        f"a rule hardcodes a z-index instead of naming a layer: {raw}")
+    tailwind = re.findall(r"\bz-\[(\d+)\]", source(EXAM_PAGE))
+    assert not tailwind, (
+        f"a panel picks a height by eye with a Tailwind arbitrary value: {tailwind}")
+
+
+def test_every_panel_layer_has_a_rule_that_takes_its_own_name():
+    """A panel names a layer in its markup, and that name has to have a rule that
+    takes the *same* line of the scale. A class pointing at another line, or at a
+    name the scale never declares, is a panel stacked by a typo — a height that
+    reads correct in the markup and does nothing in the browser."""
+    block = _style_block()
+    for name in sorted({name for _show, name in _panels()}):
+        match = re.search(r"\.sg-layer-" + re.escape(name) + r"\s*\{([^}]*)\}",
+                          block)
+        assert match, (
+            f"no `.sg-layer-{name}` rule, so its panels carry a class with no "
+            "height at all")
+        assert f"var(--sg-layer-{name})" in match.group(1), (
+            f"`.sg-layer-{name}` does not take its own line of the scale: "
+            f"{match.group(1)!r}")
 
 
 def _panel_blocks():
@@ -569,14 +674,14 @@ def _panel_blocks():
     Bounded by the next panel rather than by a closing tag because the panels nest
     divs: a block read to the wrong `</div>` would silently span two of them and
     find a control that belongs to the other one. A nested `x-show` is not a panel
-    — PANEL_RE only matches a tag that also carries `fixed inset-0 z-[n]` — so the
-    split lands on the real ones.
+    — `_panel_matches` only yields a tag that also carries `fixed inset-0` and a
+    named layer — so the split lands on the real ones.
     """
     text = source(EXAM_PAGE)
-    matches = list(PANEL_RE.finditer(text))
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        yield match.group(1), text[match.start():end]
+    matches = _panel_matches()
+    for i, (match, show, _name) in enumerate(matches):
+        end = matches[i + 1][0].start() if i + 1 < len(matches) else len(text)
+        yield show, text[match.start():end]
 
 
 def test_the_blocking_panels_leave_the_language_to_the_strip():
@@ -596,18 +701,61 @@ def test_the_blocking_panels_leave_the_language_to_the_strip():
             "same choice has two controls instead of the strip above it")
 
 
-def test_the_strip_stays_under_the_modals_that_are_meant_to_cover_it():
-    """The terms agreement and the submit confirmation are deliberately on top:
-    one is read before the paper opens and the other while the student is ending
-    it, and neither is a state to be poked through. Being above the blockers must
-    not mean being above everything."""
-    pinned = _z_index(_pinned_rule())
-    modals = [z for show, z in _panels()
-              if "fullscreenBlocked" not in show and "awayBlurred" not in show]
-    assert modals, "the modal layer is not recognisable any more"
-    assert pinned < min(modals), (
-        f"the strip at {pinned} would sit above a modal at {min(modals)}, so a "
-        "student could reach the paper while confirming submit")
+FOREMOST_CLASS = "sg-sit-strip-foremost"
+
+
+def _foremost_rule() -> str:
+    match = re.search(r"\.sg-sit-strip\." + FOREMOST_CLASS + r"\s*\{([^}]*)\}",
+                      _style_block())
+    assert match, (
+        f"no `.{FOREMOST_CLASS}` rule, so nothing lifts the strip above the "
+        "agreement a student has to read before the paper opens")
+    return match.group(1)
+
+
+def _modals_by_state():
+    """The two modals, split by the state that raises them.
+
+    They were one layer and are not any more. The strip has to be reachable
+    *through* the agreement — its language control is how the terms get read — and
+    has to stop short of the submit gate, which ends the paper rather than being a
+    panel to reach past. Separated by the state and not by a number: a layer moved
+    by hand should fail here rather than still look like a layer.
+    """
+    panels = _panels()
+    agreement = [name for show, name in panels if "showExamAgreement" in show]
+    submit = [name for show, name in panels if "showSubmitConfirm" in show]
+    assert agreement and submit, (
+        "the agreement and the submit gate are not recognisable any more, so this "
+        "test would be comparing against nothing")
+    return agreement, submit
+
+
+def test_the_strip_is_reachable_through_the_terms_agreement():
+    """The terms are the first screen of the sitting and they start out in
+    Indonesian, so a student who reads English has to be able to switch them
+    before agreeing."""
+    agreement, _submit = _modals_by_state()
+    foremost = _layer(_foremost_rule())
+    agreement_z = max(_layer_named(name) for name in agreement)
+    assert foremost > agreement_z, (
+        f"the strip sits at {foremost}, under the agreement at {agreement_z}: "
+        "the terms cannot be read in a language the strip could have switched to")
+    assert _layer(_pinned_rule()) < min(_layer_named(name) for name in agreement), (
+        "the ordinary pinned strip outranks the agreement, so it comes up there "
+        "without having been asked to")
+
+
+def test_the_strip_still_stops_short_of_the_submit_gate():
+    """Ending the paper is a decision, not a moment to be reaching over: whichever
+    layer lifts the strip, it must not come up through the confirmation."""
+    _agreement, submit = _modals_by_state()
+    gate = min(_layer_named(name) for name in submit)
+    for name, rule in (("pinned", _pinned_rule()), ("foremost", _foremost_rule())):
+        z = _layer(rule)
+        assert z < gate, (
+            f"the {name} strip at {z} would sit above the submit gate at "
+            f"{gate}, so a student could poke the strip while confirming")
 
 
 def test_the_strip_is_pinned_to_the_viewport_rather_than_merely_raised():
@@ -650,13 +798,19 @@ def test_the_pinned_strip_keeps_the_page_gutter_so_it_does_not_jump():
         "the lg breakpoint")
 
 
-def test_the_pinning_follows_the_blocked_state_and_not_the_layout():
+def test_the_pinning_follows_the_panels_and_not_the_layout():
     block = strip()
     assert ":class=" in block and PINNED_CLASS in block, (
         "the strip never takes the pinned class, so the rule above is dead CSS")
-    assert "paperBlocked" in block, (
-        "the pinning is bound to something other than the blocked state, so the "
-        "strip could stay lifted over a paper that is being answered")
+    assert "stripLifted" in block, (
+        "the pinning is bound to something other than the state that raises a "
+        "panel, so the strip could stay lifted over a paper that is being answered")
+    assert FOREMOST_CLASS in block and "stripForemost" in block, (
+        "the strip never takes the foremost class, so the rule that lifts it over "
+        "the terms agreement is dead CSS and its language control is unreachable")
+    assert "paperBlocked" not in block, (
+        "the strip binds to `paperBlocked`, which has no foremost layer, so the "
+        "terms agreement would leave it covered")
 
 
 def test_the_strip_is_not_lifted_while_the_paper_is_answerable():
@@ -674,7 +828,7 @@ def test_the_blockers_cover_the_exam_bar_these_controls_normally_live_in():
     """Why the strip has to carry them at all. If a blocker ever stopped covering
     the whole page, the honest answer would be to drop the workaround rather than
     keep a second copy of every control."""
-    assert _blocker_z_indexes(), "a blocker no longer covers the page"
+    assert _blocker_layers(), "a blocker no longer covers the page"
     assert all("!submitted" in show for show, _ in _panels()
                if "fullscreenBlocked" in show or "awayBlurred" in show), (
         "a blocker stopped standing down once the paper is submitted")
@@ -711,3 +865,47 @@ def test_either_panel_blocks_and_submitting_stops_blocking():
     assert _paper_blocked() is False, "an answerable paper lifts the strip"
     assert _paper_blocked(submitted=True, blocked=True) is False, (
         "a submitted paper keeps a lifted strip over the result")
+
+
+LIFTED_STATE = """
+const obj = {{
+  submitted: {submitted},
+  fullscreenBlocked: {blocked},
+  awayBlurred: {away},
+  showExamAgreement: {agreement},
+{blocked_getter},
+{lifted},
+{foremost},
+}};
+console.log(JSON.stringify({{ lifted: obj.stripLifted, foremost: obj.stripForemost }}));
+"""
+
+
+def _strip_lifted(*, submitted=False, blocked=False, away=False, agreement=False):
+    for name in ("get stripLifted()", "get stripForemost()"):
+        assert "        " + name in source(EXAM_PAGE), f"the page has no `{name}`"
+    # `stripLifted` is `paperBlocked || stripForemost`, so the object needs the
+    # blocker getter as well — otherwise `this.paperBlocked` is `undefined` and a
+    # blocker would appear to lift nothing at all.
+    return _node(LIFTED_STATE.format(
+        submitted=str(bool(submitted)).lower(),
+        blocked=str(bool(blocked)).lower(),
+        away=str(bool(away)).lower(),
+        agreement=str(bool(agreement)).lower(),
+        blocked_getter=_method("get paperBlocked"),
+        lifted=_method("get stripLifted"),
+        foremost=_method("get stripForemost"),
+    ))
+
+
+@needs_node
+def test_the_agreement_lifts_the_strip_at_its_own_layer():
+    assert _strip_lifted(agreement=True) == {"lifted": True, "foremost": True}, (
+        "the strip stays under the terms agreement, so its language control cannot "
+        "be reached while the terms are being read")
+    assert _strip_lifted() == {"lifted": False, "foremost": False}, (
+        "an answerable paper lifts the strip")
+    assert _strip_lifted(submitted=True, agreement=True) == {"lifted": False, "foremost": False}, (
+        "a submitted paper keeps a lifted strip over the result")
+    assert _strip_lifted(blocked=True) == {"lifted": True, "foremost": False}, (
+        "a blocker lifts the strip at its own layer, not at the agreement's")
