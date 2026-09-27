@@ -108,6 +108,16 @@ def save(supabase, user_id, patch) -> dict:
     Read-modify-write rather than a blind overwrite: the toggles arrive one key at
     a time (the theme from one button, the language from another), so a write that
     replaced the whole object would erase the choice made a moment earlier.
+
+    The write is confirmed by the **row**, not by the reply. This box raises
+    `RemoteProtocolError: Server disconnected` often enough that the repo documents
+    it as normal, and it is raised on the reply: the `UPDATE` has already
+    committed. Believing that error would answer 500 for a preference the profile
+    already holds — a choice the next device can see, reported to the device that
+    made it as a failure. So a failed update is followed by one read: if the row now holds
+    the patch, the write landed and its value is returned; if it does not, the
+    failure is real and is raised, because a write that never landed must not be
+    reported as a successful one either.
     """
     clean = normalize(patch)
     if not clean:
@@ -115,5 +125,11 @@ def save(supabase, user_id, patch) -> dict:
 
     merged = load(supabase, user_id)
     merged.update(clean)
-    supabase.table("profiles").update({"preferences": merged}).eq("id", user_id).execute()
-    return merged
+    try:
+        supabase.table("profiles").update({"preferences": merged}).eq("id", user_id).execute()
+        return merged
+    except Exception:
+        confirmed = load(supabase, user_id)
+        if all(confirmed.get(key) == value for key, value in clean.items()):
+            return confirmed
+        raise

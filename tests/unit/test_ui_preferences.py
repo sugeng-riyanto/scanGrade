@@ -58,10 +58,16 @@ class _FakeTable:
     ``row`` is one ``profiles`` row, so a select hands back the row and a read of
     ``row["preferences"]`` is what the service actually sees — modelling the
     column, not the preferences object directly.
+
+    ``outcome`` models the transport rather than the database. ``"lost_reply"``
+    commits the UPDATE and *then* raises, which is what this box's
+    `RemoteProtocolError: Server disconnected` does (the repo documents it as normal
+    here); ``"failed"`` raises without writing anything.
     """
 
-    def __init__(self, row):
+    def __init__(self, row, outcome="ok"):
         self.row = row
+        self.outcome = outcome
         self.mode = None
         self.payload = None
 
@@ -82,16 +88,21 @@ class _FakeTable:
 
     def execute(self):
         if self.mode == "update":
+            if self.outcome == "failed":
+                raise RuntimeError("Server disconnected")
             self.row.update(self.payload)
+            if self.outcome == "lost_reply":
+                raise RuntimeError("Server disconnected")
         return type("R", (), {"data": dict(self.row)})()
 
 
 class _FakeSupabase:
-    def __init__(self, row=None):
+    def __init__(self, row=None, update_outcome="ok"):
         self.row = dict(row or {})
+        self.update_outcome = update_outcome
 
     def table(self, _name):
-        return _FakeTable(self.row)
+        return _FakeTable(self.row, self.update_outcome)
 
 
 def test_only_the_keys_the_app_defines_survive_a_client_write():
@@ -134,6 +145,28 @@ def test_a_write_merges_into_what_is_already_stored():
 def test_an_empty_patch_does_not_touch_the_row():
     db = _FakeSupabase({"preferences": {"theme": "dark"}})
     assert user_preferences.save(db, "u1", {"role": "x"}) == {"theme": "dark"}
+
+
+def test_a_dropped_connection_does_not_report_a_write_that_landed_as_failed():
+    """This box raises `RemoteProtocolError: Server disconnected` often enough that
+    the repo documents it as normal, and it is raised on *the reply*: the UPDATE has
+    already committed. Treating that as a failed write answers 500 for a choice the
+    profile already holds — the exact shape the two-session probe caught."""
+    db = _FakeSupabase({"preferences": {"theme": "dark"}}, update_outcome="lost_reply")
+    merged = user_preferences.save(db, "u1", {"lang": "en"})
+    assert merged == {"theme": "dark", "lang": "en"}, (
+        "a lost reply was reported as a failed write even though the row holds it")
+    assert db.row["preferences"] == {"theme": "dark", "lang": "en"}
+
+
+def test_a_write_that_did_not_land_is_not_reported_as_a_success():
+    """The other half, and the reason the fix asks the row rather than swallowing
+    the error: a write that genuinely failed must still be a failure."""
+    db = _FakeSupabase({"preferences": {"theme": "dark"}}, update_outcome="failed")
+    with pytest.raises(Exception):
+        user_preferences.save(db, "u1", {"lang": "en"})
+    assert db.row["preferences"] == {"theme": "dark"}, (
+        "a failed write must leave the row untouched")
 
 
 # ── 2. the read rides the session's own profile read ─────────────────────────
