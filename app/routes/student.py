@@ -18,8 +18,8 @@ from app.services.question_types import (
 )
 from app.services.submission_service import finish_sitting, open_sitting
 from app.utils.rate_limiter import limiter
-from app.utils.req_cache import (active_whiteboards_for, class_row, school_features,
-                                 school_subject_count)
+from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
+                                 school_features, school_subject_count)
 
 student_bp = Blueprint("student", __name__)
 
@@ -531,7 +531,44 @@ def take_exam(exam_id):
     # The way back in when the phone dies or the WiFi does. Issued with the
     # session and shown in the exam topbar; never a precondition for opening.
     recovery_code = issue_code(supabase, g.user_id, exam_id)
-    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES))
+    # ── Who is sitting this paper ─────────────────────────────────────────────
+    # The strip above the paper prints the student's own name and class, because
+    # the chrome that normally carries them is hidden for the sitting (and is
+    # covered by the terms modal and the fullscreen blocker besides).
+    #
+    # The name comes from the session — `_fetch_session` already read the account
+    # for this request — so the common path costs *nothing*: an unconditional
+    # second read of the same row would land on `/student/exams/<id>`, which is one
+    # of the pages `loadtest_concurrent.py` drives, and a round-trip added to the
+    # heaviest measured page is a capacity change rather than a detail. Only a
+    # blank name pays, and it pays once per request through the memo.
+    student_name = (g.get("user_name") or "").strip()
+    if not student_name:
+        def _profile_name():
+            try:
+                row = row_or_none(
+                    supabase.table("profiles").select("full_name")
+                    .eq("id", g.user_id).maybe_single().execute()
+                )
+                return ((row or {}).get("full_name") or "").strip()
+            except Exception:
+                return ""
+
+        student_name = memo(f"student-name:{g.user_id}", _profile_name) or g.user_email or ""
+    # The class rides on the shared class row (one query per class per TTL, not per
+    # student). `grade_level` repeats the number `name` already carries in every
+    # class this database holds ("7A" with grade "7"), so it is only shown when it
+    # says something the name does not.
+    student_class_label = ""
+    try:
+        _class = class_row(g.get("user_class_id")) or {}
+        _name = (_class.get("name") or "").strip()
+        _grade = (_class.get("grade_level") or "").strip()
+        if _name:
+            student_class_label = _name if (not _grade or _grade in _name) else f"{_name} \u00b7 {_grade}"
+    except Exception:
+        student_class_label = ""
+    resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES, student_name=student_name, student_class_label=student_class_label))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
 
@@ -639,6 +676,7 @@ def submit_exam(exam_id):
     exam = supabase.table("exams").select(
         "id,is_published,status,class_ids,max_attempts,publish_mode,"
         "total_questions,answer_key,question_types,question_weights,question_pages,"
+        "question_scoring,"
         "start_at,end_at,auto_submit_on_window_end,duration_minutes"
     ).eq("id", exam_id).single().execute().data
     if not exam:
@@ -712,7 +750,8 @@ def submit_exam(exam_id):
     # objective type, so a true/false or a matching question is marked here exactly
     # as it is marked by the sync route and the scan task.
     earned, _graded = earned_points(
-        question_types, exam.get("answer_key"), answers, question_weights, total_q)
+        question_types, exam.get("answer_key"), answers, question_weights, total_q,
+        exam.get("question_scoring"))
     # The stored objective score is one rule for the whole app now
     # (`question_types.objective_result`), and it is a percentage **of the paper's
     # objective questions**. This route used to store the weighted marks here — a

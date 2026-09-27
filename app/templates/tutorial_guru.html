@@ -36,7 +36,7 @@
                        builder has offered six, because a restatement of the app is
                        a second copy of it and a second copy drifts. #}
                     {% set _types = q_vocabulary()['picker'] %}
-                    {% set _type_icons = {'mcq':'fa-list-ol','true_false':'fa-check-double','match':'fa-arrows-left-right','drag_drop':'fa-hand-pointer','order':'fa-arrow-down-1-9','essay_canvas':'fa-paint-brush'} %}
+                    {% set _type_icons = {'mcq':'fa-list-ol','true_false':'fa-check-double','complex_multiple_choice':'fa-list-check','match':'fa-arrows-left-right','drag_drop':'fa-hand-pointer','order':'fa-arrow-down-1-9','essay_canvas':'fa-paint-brush'} %}
                     <h3 class="text-xl font-extrabold text-surface-800" x-text="t('Buat Ujian — {{ _types|length }} Tipe Soal','Create an Exam — {{ _types|length }} Question Types')"></h3>
                     <p class="mt-2 text-surface-500" x-text="t('Klik Buat Ujian dan isi detail. Tersedia {{ _types|length }} tipe soal, dan setiap tipe berdiri sendiri — soal menjodohkan tidak lagi dihargai sama dengan satu soal pilihan ganda. Atur durasi, kelas tujuan, jadwal mulai, dan bobot per tipe.','Click Create Exam and fill in the details. There are {{ _types|length }} question types, and each one stands on its own — a matching question is no longer worth the same as a single multiple-choice item. Set the duration, target classes, start schedule and the weight per type.')"></p>
                     <div class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">

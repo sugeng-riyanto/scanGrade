@@ -79,7 +79,7 @@ SWEEP_INTERVAL_SECONDS = 60
 #: route reads, because the mark has to be the same mark.
 EXAM_COLUMNS = (
     "id,duration_minutes,start_at,end_at,auto_submit_on_window_end,publish_mode,"
-    "total_questions,answer_key,question_types,question_weights"
+    "total_questions,answer_key,question_types,question_weights,question_scoring"
 )
 
 SUBMISSION_COLUMNS = (
@@ -152,7 +152,9 @@ def _closed_payload(supabase, row, exam, ended_at) -> dict:
     if not weights and total > 0:
         weights = default_weights(question_types, total)
 
-    earned, _graded = earned_points(question_types, answer_key, answers, weights, total)
+    scoring = _as_json(exam.get("question_scoring"))
+    earned, _graded = earned_points(question_types, answer_key, answers, weights, total,
+                                   scoring)
     score = objective_result(question_types, answer_key, answers, total).score
     violations = count_penalized_violations(
         supabase, row.get("student_id"), row.get("exam_id"))

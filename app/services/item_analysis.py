@@ -417,7 +417,7 @@ def _responses(exam: Mapping[str, Any],
     key = exam.get("answer_key") or {}
     weights = exam.get("question_weights") or {}
     total = int(exam.get("total_questions") or 0)
-    part = qt.partial_credit(weights)
+    scoring = exam.get("question_scoring") or {}
 
     out: list[_Response] = []
     for sub in submissions:
@@ -451,8 +451,9 @@ def _responses(exam: Mapping[str, Any],
                 row.shares[i] = None
                 row.raw[i] = answer
                 continue
-            if part:
-                row.shares[i] = qt.part_factor(qtype, key.get(qi), answer)
+            if qt.partial_applies(qtype, weights):
+                row.shares[i] = qt.part_factor(qtype, key.get(qi), answer,
+                                               qt.scoring_mode(scoring, i))
             else:
                 row.shares[i] = 1.0 if qt.grade_answer(qtype, key.get(qi), answer) else 0.0
             row.raw[i] = answer

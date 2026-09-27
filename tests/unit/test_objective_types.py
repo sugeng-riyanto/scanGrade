@@ -299,8 +299,8 @@ class TestEveryTypeStandsOnItsOwn:
     def test_every_kind_has_its_own_scheme_row(self):
         from app.services import mark_scheme as ms
         kinds = {qt.question_kind(t) for t in ms.SCHEME_ORDER}
-        assert kinds == {qt.KIND_CHOICE, qt.KIND_TRUE_FALSE, qt.KIND_MATCH,
-                         qt.KIND_DRAG, qt.KIND_ORDER, qt.KIND_ESSAY}
+        assert kinds == {qt.KIND_CHOICE, qt.KIND_TRUE_FALSE, qt.KIND_PGK,
+                         qt.KIND_MATCH, qt.KIND_DRAG, qt.KIND_ORDER, qt.KIND_ESSAY}
 
     def test_every_type_has_its_own_marks(self):
         from app.services import mark_scheme as ms
@@ -752,8 +752,11 @@ class TestTheBuildersTypeList:
 
     def test_the_picker_is_the_types_a_teacher_can_create(self):
         picker = [c["v"] for c in qt.vocabulary()["picker"]]
-        assert picker == [qt.MCQ, qt.TRUE_FALSE, qt.MATCH, qt.DRAG_DROP, qt.ORDER,
-                          qt.ESSAY_CANVAS]
+        # `complex_multiple_choice` sits between true/false and matching because it
+        # joined the picker with its editor — the type and the form that draws it are
+        # added in the same change, which is what this list stands for.
+        assert picker == [qt.MCQ, qt.TRUE_FALSE, qt.COMPLEX_MULTIPLE_CHOICE, qt.MATCH,
+                          qt.DRAG_DROP, qt.ORDER, qt.ESSAY_CANVAS]
 
     def test_every_pickable_type_is_one_the_grader_knows(self):
         for entry in qt.vocabulary()["picker"]:
