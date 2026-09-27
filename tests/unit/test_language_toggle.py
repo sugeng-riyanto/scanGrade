@@ -21,7 +21,8 @@ TEMPLATES = sorted((ROOT / "app" / "templates").rglob("*.html"))
 BASE = ROOT / "app" / "templates" / "base.html"
 SOURCE = BASE.read_text(encoding="utf-8")
 
-# A page builds its own language from one of exactly two places: localStorage
+# A page builds its own language from one of a few known places: the profile's
+# stored preference (read with the session, `window.__sgPrefs`), localStorage
 # (the original copy-pasted form) or `document.documentElement.lang`. Matching on
 # the *source* rather than on one literal spelling is what closes the hole this
 # guard had: `/tools/device-preview` declared
@@ -31,7 +32,8 @@ SOURCE = BASE.read_text(encoding="utf-8")
 # A `lang:` whose value comes from another object (`lang: d.lang || lang`) is data
 # being carried through a form, not a component property shadowing the scope, so
 # it is deliberately not matched.
-DECLARATION = re.compile(r"\blang:\s*(?:localStorage|document)\b")
+DECLARATION = re.compile(
+    r"\blang:\s*(?:localStorage|document|window\.__sgPrefs)\b")
 # Either comparison counts as consuming the scope: a binding that reads
 # `lang === 'id'` is just as broken by a shadow as one that reads `lang === 'en'`.
 CONSUMES = re.compile(r"\blang\s*===?\s*'(?:en|id)'")
@@ -136,16 +138,22 @@ def test_the_toggle_starts_from_the_stored_choice():
     so a page that says nothing gets `en` rather than an empty string, which
     `t()` would read as "not English" by accident.
     """
+    # The stored preference now lives on the profile and is read with the session
+    # (so it follows the reader to another device); this device's localStorage is
+    # the fallback for anonymous pages, and the page default is last.
     assert re.search(
-        r"lang:\s*localStorage\.getItem\('sg_lang'\)\s*\|\|\s*"
-        r"'\{\{\s*default_lang\|default\('en', true\)\s*\}\}'", SOURCE), \
-        "the initial value must come from localStorage, then the page default"
+        r"lang:\s*window\.__sgPrefs\.lang\s*\|\|\s*localStorage\.getItem\('sg_lang'\)\s*\|\|\s*"
+        r"'\{\{\s*default_lang\|default\('en', true\)\s*\}\}'", SOURCE), (
+        "the initial value must come from the stored preference, then this device's "
+        "cache, then the page default")
 
     # The element the browser reads must be right *before* Alpine runs, or a
     # stored-Indonesian session flashes English and reports the wrong language to
     # a screen reader on the first pass.
-    assert "<html lang=\"{{ _content_lang or default_lang|default('en', true) }}\"" in SOURCE, \
-        "the document language must come from the same default as the scope"
+    assert re.search(
+        r"<html lang=\"\{\{\s*_content_lang or _ui_prefs\.get\('lang'\) or "
+        r"default_lang\|default\('en', true\)\s*\}\}\"", SOURCE), \
+        "the document language must come from the same stored preference as the scope"
 
 
 def test_the_page_language_attribute_is_restored_on_load():
@@ -240,7 +248,7 @@ def test_the_declaration_wins_over_the_toggle():
     """
     assert 'data-content-lang="{{ _content_lang }}"' in SOURCE, \
         "the declaration has to reach the element the browser reads"
-    assert "if(sgStoredLang&&!document.documentElement.dataset.contentLang)" in SOURCE, \
+    assert "if(lang&&!document.documentElement.dataset.contentLang)" in SOURCE, \
         "the pre-paint script must not overwrite an Indonesian declaration"
 
     set_lang = re.search(r"setLang\(next\)\s*\{(.*?)\n        \}", SOURCE, re.S)
@@ -910,7 +918,7 @@ def test_messages_built_outside_a_template_can_be_translated():
     # The attribute must be right before Alpine starts, or sgT reads the
     # hardcoded <html lang=\"id\"> on the first interaction of a stored-EN session.
     head = SOURCE.split("<head>", 1)[0]
-    assert "document.documentElement.lang=sgStoredLang" in head, \
+    assert "document.documentElement.lang=lang" in head, \
         "the stored language must be applied before Alpine, like the dark class is"
     # `docLang()` is the one place that resolves choice vs. declared copy, so the
     # attribute, the pre-paint script and sgT() all read the same answer.

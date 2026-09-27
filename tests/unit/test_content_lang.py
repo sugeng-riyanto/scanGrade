@@ -120,13 +120,49 @@ def templates():
     return [p for p in sorted(TEMPLATES.rglob("*.html")) if p.suffix == ".html"]
 
 
+#: The `<html>` tag's own `lang` expression, as written.
+HTML_LANG = re.compile(r'<html\b[^>]*?lang="([^"]*)"', re.S)
+
+
+def _html_lang_sources() -> list[str]:
+    """The `<html>` tag's language sources, in the order they are resolved."""
+    raw = HTML_LANG.search(BASE.read_text(encoding="utf-8")).group(1)
+    inner = raw.replace("{{", "").replace("}}", "").strip()
+    return [p.strip() for p in inner.split(" or ")]
+
+
 class TestTheDeclarationComesFromOnePlace:
     def test_the_html_element_resolves_the_pin_and_the_default(self):
-        tag = re.search(r"<html\b[^>]*>", BASE.read_text(encoding="utf-8")).group(0)
-        assert "_content_lang or default_lang" in tag, (
-            "the <html> tag no longer resolves a pinned page against the app "
-            "default — the declaration now has two sources"
-        )
+        """The declaration resolves in one order, and the order is the point.
+
+        A page's own pin wins over everything — a toggle cannot translate copy
+        that does not exist — and the app default is still the last resort. Read
+        as the sequence rather than as one literal substring, because a second
+        source was added *between* those two ends: the reader's stored choice,
+        read with the session, so a language chosen on another device is in force
+        here. A literal check would have called that a second source of truth when
+        it is a second *preference*, and would have gone on passing if someone had
+        moved the pin after it.
+        """
+        parts = _html_lang_sources()
+        assert parts[0] == "_content_lang", (
+            f"the pin is not the first source, so a page of untranslated copy can "
+            f"be announced in the reader's language: {parts!r}")
+        assert parts[-1].startswith("default_lang"), (
+            f"the app default is no longer the last resort, so something can "
+            f"outrank it: {parts!r}")
+
+    def test_the_reader_s_own_choice_sits_between_the_pin_and_the_default(self):
+        """Where the stored choice belongs, and nowhere else: it may not become the
+        first source (that is the pin's place) and it may not displace the default.
+        """
+        parts = _html_lang_sources()
+        assert any("_ui_prefs" in p for p in parts), (
+            "the stored choice is no longer read server-side, so a choice made on "
+            "another device cannot apply before the first paint")
+        assert len(parts) == 3, (
+            f"the declaration has {len(parts)} sources, not the three this test "
+            f"knows how to order: {parts!r}")
 
     def test_the_pin_rides_on_the_element_both_scripts_read(self):
         """The scripts and both Alpine helpers read `data-content-lang`.
@@ -140,9 +176,22 @@ class TestTheDeclarationComesFromOnePlace:
         assert "document.documentElement.dataset.contentLang" in src
 
     def test_a_stored_choice_never_overrides_a_pin(self):
+        """The head script resolves the theme and the language before the first
+        paint, and it must consult the pin before it applies anything stored.
+
+        The script is found by what it *does* — it is the one that sets
+        `documentElement.lang` — rather than by its opening characters, which is
+        how this test was first written and what a refactor of the expression is
+        free to change without touching the guarantee.
+        """
         src = BASE.read_text(encoding="utf-8")
-        early = re.search(r"<script>(if\(localStorage.*?)</script>", src).group(1)
-        assert "!document.documentElement.dataset.contentLang" in early, (
+        early = re.search(
+            r"<script>((?:(?!</script>).)*?document\.documentElement\.lang[^<]*)</script>",
+            src, re.S)
+        assert early, (
+            "no head script sets documentElement.lang any more, so nothing applies "
+            "the reader's stored choice before the first paint")
+        assert "!document.documentElement.dataset.contentLang" in early.group(1), (
             "the early script applies the stored choice unconditionally, so a "
             "page of Indonesian copy would announce itself as English"
         )

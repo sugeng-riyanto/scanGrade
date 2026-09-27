@@ -15,9 +15,37 @@
    carries the declaration so the script below and the Alpine scope resolve the
    language the same way without either one re-deriving it. #}
 {% set _content_lang = content_lang|default('') %}
-<html lang="{{ _content_lang or default_lang|default('en', true) }}"
+{# The user's stored choice — read with the session, so it follows them from
+   another device — is the first source for the document's theme and language. It
+   has to apply *before* the first paint, or a dark-on-one-device choice flashes
+   light on the next and then corrects itself. localStorage stays as the per-device
+   cache for anonymous pages, which have no profile to read. #}
+{% set _ui_prefs = ui_prefs|default({}) %}
+<html lang="{{ _content_lang or _ui_prefs.get('lang') or default_lang|default('en', true) }}"
       {% if _content_lang %}data-content-lang="{{ _content_lang }}"{% endif %} class="h-full">
-<script>if(localStorage.getItem('theme')==='dark'||(!localStorage.getItem('theme')&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');var sgStoredLang=localStorage.getItem('sg_lang');if(sgStoredLang&&!document.documentElement.dataset.contentLang)document.documentElement.lang=sgStoredLang</script>
+<script>window.__sgPrefs={{ _ui_prefs|tojson }};(function(p){var theme=p.theme||localStorage.getItem('theme');if(theme==='dark'||(!theme&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');var lang=p.lang||localStorage.getItem('sg_lang');if(lang&&!document.documentElement.dataset.contentLang)document.documentElement.lang=lang})(window.__sgPrefs)</script>
+<script>
+// One writer for the preferences that follow a user across devices (theme,
+// language, alert level). Fire-and-forget on purpose: a toggle must flip the
+// instant it is pressed, and a write that fails — offline, a private window —
+// should cost the persistence and nothing else, because the local cache still
+// holds the choice for this device. The profile is the source of truth across
+// devices; see app/services/user_preferences.py.
+window.sgSavePrefs = function (patch) {
+    try {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        fetch('/api/ui-preferences', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': meta ? meta.getAttribute('content') : '',
+            },
+            body: JSON.stringify(patch),
+            keepalive: true,
+        }).catch(function () {});
+    } catch (e) { /* no fetch, private mode */ }
+};
+</script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -109,7 +137,10 @@
         // own copy, so English only appeared after a manual reload. Components
         // now inherit this scope instead of redeclaring it — see
         // tests/unit/test_language_toggle.py, which fails if one comes back.
-        lang: localStorage.getItem('sg_lang') || '{{ default_lang|default('en', true) }}',
+        // The stored choice — the profile's, read with the session, then the
+        // per-device cache, then the page default. The server value wins so a
+        // choice made on another device is in force here without a round-trip.
+        lang: window.__sgPrefs.lang || localStorage.getItem('sg_lang') || '{{ default_lang|default('en', true) }}',
         setLang(next) {
             this.lang = next;
             localStorage.setItem('sg_lang', next);
@@ -118,6 +149,8 @@
             // declaring it English is what makes a screen reader mispronounce it.
             document.documentElement.lang =
                 document.documentElement.dataset.contentLang || next;
+            // Follow the reader to their next device.
+            if (window.sgSavePrefs) window.sgSavePrefs({ lang: next });
         },
         // The public-page headers carry their own toggle, so the two have to
         // agree about what the document declares. One helper, one rule.
@@ -170,11 +203,16 @@
             clearTimeout(this.shareTimer);
             this.shareTimer = setTimeout(() => { this.shareNote = ''; }, 3200);
         },
-        darkMode: localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme:dark)').matches),
+        // Seeded from the class the head script already applied, which was
+        // resolved from the profile first — so this reads the same value the
+        // document painted with rather than re-deriving it from localStorage.
+        darkMode: document.documentElement.classList.contains('dark'),
         toggleDark() {
             this.darkMode = !this.darkMode;
             document.documentElement.classList.toggle('dark', this.darkMode);
             localStorage.setItem('theme', this.darkMode ? 'dark' : 'light');
+            // Follow the reader to their next device.
+            if (window.sgSavePrefs) window.sgSavePrefs({ theme: this.darkMode ? 'dark' : 'light' });
         },
         loading: false,
         toasts: [],

@@ -770,7 +770,14 @@ def _register_request_logging(app):
 
     @app.context_processor
     def inject_globals():
-        return {"tz_offset": g.get("tz_offset", DEFAULT_TZ_OFFSET)}
+        # `ui_prefs` is the theme/language/alert choice the user made on any device,
+        # read with the session (see app/utils/auth.py::_fetch_session) so every page
+        # can seed itself from it before it paints. Empty for anonymous pages and for
+        # a database that has not run migration 036 yet.
+        return {
+            "tz_offset": g.get("tz_offset", DEFAULT_TZ_OFFSET),
+            "ui_prefs": g.get("user_prefs") or {},
+        }
 
     @app.after_request
     def log_request(response):
