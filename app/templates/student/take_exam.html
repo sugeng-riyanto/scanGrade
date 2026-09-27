@@ -267,6 +267,28 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 .opt-btn:not(.selected):hover { background: #fff7ed; border-color: #fdba74; }
 .sticky-topbar { position: sticky; top: 0; z-index: 20; }
 .sticky-questions { position: sticky; top: 60px; z-index: 10; }
+/* While a panel stands between the student and the paper, the sit strip is the
+   only row they may still reach, so it has to outrank the scrim: both panels are
+   `fixed inset-0 z-[90]` and both cover the exam bar, which is where the theme
+   and language controls normally live. Deliberately under the modal layer
+   (`z-[9999]`): the terms agreement and the submit confirmation are states not to
+   be poked through, and being above the blockers must not mean above everything.
+
+   `fixed` and not `sticky`, which is what this was first and why it failed: the
+   strip's nearest scrolling ancestor is `main.flex-1.overflow-y-auto`, and that
+   element is sized to the viewport (measured 1048/1048) while the overflow the
+   page actually scrolls lives on the document. A sticky box is offset inside its
+   own scroll container, so scrolling the document carried the strip off the top
+   (-41px, measured) while a sticky rule sat there looking correct. `fixed` pins to
+   the viewport whichever ancestor scrolls. The insets mirror the page's own
+   `p-4 lg:p-6` gutter so it does not jump horizontally when it leaves the flow. */
+.sg-sit-strip.sg-sit-strip-pinned {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 95;
+    margin-left: 1rem; margin-right: 1rem;
+}
+@media (min-width: 1024px) {
+    .sg-sit-strip.sg-sit-strip-pinned { margin-left: 1.5rem; margin-right: 1.5rem; }
+}
 .draw-toolbar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .draw-toolbar button { padding: 5px 10px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 12px; background: white; cursor: pointer; line-height: 1; font-weight: 600; transition: all 0.15s; }
 .draw-toolbar button:hover { background: #f3f4f6; border-color: #d1d5db; }
@@ -319,6 +341,91 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 {% endblock %}
 {% block content %}
 <div x-data="examApp({{ exam.duration_minutes * 60 }}, {{ exam.total_questions }}, '{{ started_at }}')" data-exam-id="{{ exam.id }}">
+    <!-- sit strip -->
+    <!-- Who is sitting this paper, and the controls a sitting needs. The chrome
+         that normally carries a name is hidden for the exam, and the terms modal
+         and the fullscreen blocker cover what is left, so the paper carries its
+         own identity — and the switches a student reaches for during a two-hour
+         paper: the theme, the language, the connection, the alert level, the
+         microphone and the battery. -->
+    <div class="sg-sit-strip bg-white rounded-2xl border border-surface-100 shadow-sm px-3 py-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-2"
+         :class="paperBlocked ? 'sg-sit-strip-pinned' : ''">
+        <div class="sg-sit-who flex items-center gap-2 min-w-0">
+            <span class="w-9 h-9 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-extrabold text-sm shrink-0">{{ (student_name or "?")[:1]|upper }}</span>
+            <div class="min-w-0">
+                <p class="font-extrabold text-xs text-surface-800 truncate max-w-[46vw] sm:max-w-[22rem]">{{ student_name }}</p>
+                <p class="text-[10px] font-semibold text-surface-400 truncate">
+                    {% if student_class_label %}{{ student_class_label }}{% else %}<span x-text="t('Kelas belum terdaftar','No class on file')"></span>{% endif %}
+                </p>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 ml-auto text-[10px] font-bold text-surface-500">
+            <!-- The theme. The chrome hides its own button for the sitting, so this
+                 is the only one a student can reach while the paper is open. -->
+            <button type="button" @click="toggleDark()"
+                    class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-surface-200 hover:bg-surface-50 transition"
+                    :title="darkMode ? t('Mode Terang','Light mode') : t('Mode Gelap','Dark mode')"
+                    :aria-label="darkMode ? t('Mode Terang','Light mode') : t('Mode Gelap','Dark mode')">
+                <i class="fas" :class="darkMode ? 'fa-sun text-amber-500' : 'fa-moon text-surface-500'"></i>
+                <span class="hidden sm:inline" x-text="darkMode ? t('Terang','Light') : t('Gelap','Dark')"></span>
+            </button>
+
+            <!-- The language. The exam bar carries the same control; this one is
+                 drawn during the terms modal as well, which is exactly when a
+                 reader who needs English needs it. -->
+            <button type="button" @click="setLang(lang === 'id' ? 'en' : 'id')"
+                    class="px-2.5 py-1 rounded-full border border-surface-200 hover:bg-surface-50 transition"
+                    :title="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                    :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'"
+                    x-text="lang === 'id' ? 'EN' : 'ID'"></button>
+
+            <!-- The connection, read from state and never from navigator.onLine in
+                 the markup: the property is not reactive, so a pill bound to it
+                 directly was drawn once and kept its first reading all paper. -->
+            <span class="sg-sit-net flex items-center gap-1.5 px-2.5 py-1 rounded-full border"
+                  :class="isOnline ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-red-50 text-red-500 border-red-200'"
+                  :title="isOnline ? t('Jaringan','Network') : t('Internet terputus. Jawaban tetap tersimpan di perangkat ini.','No connection. Answers are still saved on this device.')">
+                <i class="fas" :class="isOnline ? 'fa-wifi' : 'fa-plug-circle-xmark'"></i>
+                <span x-text="isOnline ? (connectionLabel || t('Tersambung','Online')) : t('Terputus','Offline')"></span>
+            </span>
+
+            <!-- The page's alert level. A web page cannot set the system volume, so
+                 the label says what this governs rather than implying more. -->
+            <div class="sg-sit-vol flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-surface-200"
+                 :title="t('Volume suara peringatan di halaman ini','Volume of this page warning sounds')">
+                <button type="button" @click="toggleAlertMute()"
+                        :title="alertMuted ? t('Nyalakan suara peringatan','Unmute warning sounds') : t('Bisukan suara peringatan','Mute warning sounds')"
+                        :aria-label="alertMuted ? t('Nyalakan suara peringatan','Unmute warning sounds') : t('Bisukan suara peringatan','Mute warning sounds')">
+                    <i class="fas" :class="(alertMuted || alertVolume === 0) ? 'fa-volume-xmark text-surface-400' : alertVolume > 0.66 ? 'fa-volume-high text-primary-500' : alertVolume > 0.33 ? 'fa-volume-low text-primary-500' : 'fa-volume-off text-primary-500'"></i>
+                </button>
+                <input type="range" min="0" max="100" step="5" class="w-16 h-1 cursor-pointer accent-primary-600"
+                       :value="alertVolume * 100" @input="setAlertVolume($event.target.value)"
+                       :aria-label="t('Volume suara peringatan','Warning sound volume')"
+                       :title="t('Volume suara peringatan','Warning sound volume')">
+                <span class="tabular-nums text-right w-8" x-text="(alertMuted || alertVolume === 0) ? t('Bisu','Muted') : Math.round(alertVolume * 100) + '%'"></span>
+            </div>
+
+            <!-- The microphone, as a status and not a switch: this paper never
+                 opens one, so a button could only ask for permission in the middle
+                 of the exam and then hold a stream nothing uses. -->
+            <span class="sg-sit-mic flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-surface-200"
+                  :title="t('Ujian ini tidak memakai mikrofon, jadi tidak ada yang perlu dibisukan.','This paper does not use the microphone, so there is nothing to mute.')">
+                <i class="fas fa-microphone-slash text-surface-400"></i>
+                <span x-text="audioInputs > 0 ? t('Mikrofon tidak dipakai','Microphone unused') : t('Tidak terdeteksi','Not detected')"></span>
+            </span>
+
+            <!-- The battery, in the one place a two-hour paper on a school laptop
+                 actually needs it. -->
+            <span class="sg-sit-bat flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-surface-200"
+                  :title="t('Baterai','Battery')">
+                <i class="fas" :class="deviceCharging ? 'fa-bolt text-amber-500' : deviceBattery > 50 ? 'fa-battery-three-quarters text-emerald-500' : deviceBattery > 20 ? 'fa-battery-half text-amber-500' : 'fa-battery-quarter text-red-500'"></i>
+                <span x-text="deviceBattery + '%'" :class="deviceBattery < 20 ? 'text-red-500' : ''"></span>
+            </span>
+        </div>
+    </div>
+    <!-- /sit strip -->
+
     <!-- Top Bar -->
     <div class="bg-white rounded-2xl shadow-lg shadow-surface-200/40 p-3 mb-3 sticky-topbar flex flex-wrap items-center justify-between gap-y-2 border border-surface-100">
         <div class="flex items-center gap-3 min-w-0">
@@ -384,30 +491,6 @@ body.sg-exam .sidebar-overlay { display: none !important; }
         </div>
     </div>
 
-    <!-- Device Status Bar -->
-    <div x-show="!submitted && !showExamAgreement"
-         class="bg-white/90 backdrop-blur-sm rounded-xl px-3 py-1.5 mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold text-surface-500 border border-surface-100 shadow-sm pointer-events-none select-none">
-        <div class="flex items-center gap-1.5" :title="t('Baterai','Battery')">
-            <i class="fas" :class="deviceCharging ? 'fa-bolt text-amber-500' : deviceBattery > 50 ? 'fa-battery-three-quarters text-emerald-500' : deviceBattery > 20 ? 'fa-battery-half text-amber-500' : 'fa-battery-quarter text-red-500'"></i>
-            <span x-text="deviceBattery + '%'" :class="deviceBattery < 20 ? 'text-red-500' : ''"></span>
-        </div>
-        <span class="text-surface-200">|</span>
-        <div class="flex items-center gap-1.5" :title="t('Jaringan','Network')">
-            <i class="fas" :class="connectionType === 'wifi' ? 'fa-wifi text-primary-500' : connectionType === 'ethernet' ? 'fa-network-wired text-primary-500' : connectionType === 'unknown' || !connectionType ? 'fa-question-circle text-surface-300' : 'fa-signal text-primary-500'"></i>
-            <span x-text="connectionLabel"></span>
-        </div>
-        <span class="text-surface-200">|</span>
-        <div class="flex items-center gap-1.5" :title="t('Keluaran audio','Audio output')">
-            <i class="fas fa-volume-up text-surface-400"></i>
-            <span x-text="audioOutputs > 0 ? audioOutputLabel || audioOutputs+' output' : t('Tidak terdeteksi','Not detected')"></span>
-        </div>
-        <span class="text-surface-200">|</span>
-        <div class="flex items-center gap-1.5" :title="t('Mikrofon','Microphone')">
-            <i class="fas fa-microphone text-surface-400"></i>
-            <span x-text="audioInputs > 0 ? audioInputLabel || audioInputs+' input' : t('Tidak terdeteksi','Not detected')"></span>
-        </div>
-        <span class="ml-auto text-surface-300 text-[8px]" x-text="t('Status perangkat','Device status')"></span>
-    </div>
 
     <!-- Violation Banner -->
     <div x-show="showViolationBanner && !submitted" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 -translate-y-4" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
@@ -1694,6 +1777,40 @@ function examApp(duration, totalQ) {
                 return v !== null ? v === '1' : window.matchMedia('(max-width: 640px)').matches;
             } catch (e) { return false; }
         })(),
+        // ─── The strip above the paper ───────────────────────────────────────
+        // The connection lives in state rather than being read from
+        // `navigator.onLine` at render time: the property is not reactive, so a
+        // pill bound straight to it was read once when Alpine walked the tree and
+        // then kept saying Online long after the connection had gone.
+        isOnline: navigator.onLine,
+        // The page's own alert level, remembered per device. A web page cannot
+        // change the system volume and this one does not claim to: the slider
+        // governs the sounds *this page makes* — the deadline warnings and the
+        // connection changes — through a single gain node.
+        // The stored choice wins, and the profile's copy wins over this device's:
+        // it is what follows the student to the next machine. localStorage stays as
+        // the fallback for a page rendered without the server value — an anonymous
+        // or pre-migration session, where the per-device cache is all there is.
+        alertVolume: (function () {
+            const stored = (typeof window !== 'undefined' && window.__sgPrefs) || {};
+            const level = stored.alert_volume;
+            if (typeof level === 'number' && isFinite(level)) {
+                return Math.max(0, Math.min(1, level));
+            }
+            try {
+                const v = parseFloat(localStorage.getItem('sg_exam_alert_volume'));
+                return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5;
+            } catch (e) { return 0.5; }
+        })(),
+        alertMuted: (function () {
+            const stored = (typeof window !== 'undefined' && window.__sgPrefs) || {};
+            if (typeof stored.alert_muted === 'boolean') return stored.alert_muted;
+            try { return localStorage.getItem('sg_exam_alert_muted') === '1'; } catch (e) { return false; }
+        })(),
+        _audioCtx: null,
+        // One flag per warning, so each mark is announced once even though the
+        // clock ticks a thousand times through it.
+        _alerted: { five: false, one: false },
         syncStatus: navigator.onLine ? 'synced' : 'offline',
         // Every label below goes through window.sgT() rather than t(): these are
         // assembled inside component methods, where `this` is the component and the
@@ -1844,7 +1961,7 @@ function examApp(duration, totalQ) {
         init() {
             this.timer = setInterval(() => {
                 if (this.timeLeft <= 0) this.submitExam(true);
-                else this.timeLeft--;
+                else { this.timeLeft--; this._deadlineAlert(); }
             }, 1000);
             this.autoSaveTimer = setInterval(() => this.periodicSync(), 60000);
             this.canvasSyncTimer = setInterval(() => this.periodicCanvasSync(), 15000);
@@ -1871,6 +1988,13 @@ function examApp(duration, totalQ) {
             this.$watch('lang', () => this.relabelLocale());
             window.addEventListener('online', () => this.onGoOnline());
             window.addEventListener('offline', () => this.onGoOffline());
+            // A page may not open an AudioContext without a gesture, so the first
+            // real interaction of the sitting is what creates it. Until then a
+            // warning is skipped rather than queued: a beep that arrives after the
+            // exam has moved on is a warning about nothing.
+            const unlockAudio = () => this._unlockAudio();
+            window.addEventListener('pointerdown', unlockAudio, { once: true });
+            window.addEventListener('keydown', unlockAudio, { once: true });
             // Turning a phone, opening a keyboard, hiding the column: the paper is
             // laid out again and the drawing layer has to follow it. Debounced,
             // because a rotate fires a burst of these and re-measuring the DOM on
@@ -1939,16 +2063,24 @@ function examApp(duration, totalQ) {
             });
         },
         onGoOnline() {
+            this.isOnline = true;
             this.syncStatus = 'saving';
             this.setSyncLabel('syncing');
             this.saveToLocal();
+            // Two rising tones: the connection is back, and the queued answers are
+            // about to go.
+            this.beep(2, 660);
             this.$nextTick(() => this.syncToServer());
             if (Object.keys(this.canvasDirty).length > 0) this.syncCanvasToServer();
         },
         onGoOffline() {
+            this.isOnline = false;
             this.syncStatus = 'offline';
             this.setSyncLabel('offline');
             this.saveToLocal();
+            // Two falling tones. Written to localStorage first, so the answers are
+            // safe before anything is played at the student.
+            this.beep(2, 330);
         },
         markDirty() {
             this.dirty = true;
@@ -2536,6 +2668,106 @@ function examApp(duration, totalQ) {
                 navigator.mediaDevices.addEventListener('devicechange', updateAudio);
             }
         },
+        // ─── The page's own alerts ──────────────────────────────────────────
+        // A web page cannot change the system volume, so this slider does not
+        // pretend to. What it governs is the sound *this page* makes: the two
+        // deadline warnings and the connection changes. It is one gain node, so
+        // the level on screen and the level in the speakers are the same number.
+        //
+        // The microphone is deliberately absent from all of it. This page never
+        // opens one, and a mute button would have to ask for microphone
+        // permission in the middle of a paper in order to end up holding a stream
+        // nothing uses — so the strip reports the device instead of switching it.
+        _alertGain() {
+            if (!this._audioCtx) return 0;
+            return this.alertMuted ? 0 : this.alertVolume;
+        },
+        _unlockAudio() {
+            if (this._audioCtx) return;
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            try { this._audioCtx = new Ctx(); } catch (e) { this._audioCtx = null; }
+        },
+        // A short tone, or a short run of them. `count` tones step 220ms apart,
+        // which is what makes a warning read as urgent rather than as a click.
+        beep(count = 1, freq = 880) {
+            const gain = this._alertGain();
+            if (!gain || !this._audioCtx) return;
+            try {
+                const ctx = this._audioCtx;
+                if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
+                for (let i = 0; i < count; i++) {
+                    const t0 = ctx.currentTime + i * 0.22;
+                    const osc = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    g.gain.setValueAtTime(0, t0);
+                    g.gain.linearRampToValueAtTime(0.28 * gain, t0 + 0.02);
+                    g.gain.linearRampToValueAtTime(0, t0 + 0.18);
+                    osc.connect(g);
+                    g.connect(ctx.destination);
+                    osc.start(t0);
+                    osc.stop(t0 + 0.2);
+                }
+            } catch (e) { /* sound is a courtesy, never a requirement */ }
+        },
+        setAlertVolume(percent) {
+            const v = Math.max(0, Math.min(100, parseInt(percent, 10) || 0)) / 100;
+            this.alertVolume = v;
+            // A slider moved off zero is an unmute: the student just asked to hear
+            // something.
+            if (v > 0) this.alertMuted = false;
+            this._remember('sg_exam_alert_volume', String(v));
+            // The flag is stored as the flag, not as "is the page silent": silence
+            // at a level of zero comes from the level, and a stored flag that
+            // disagreed with the live one would land a reload somewhere the
+            // student did not leave it.
+            this._remember('sg_exam_alert_muted', this.alertMuted ? '1' : '0');
+            // Follow the student to their next device. Fire-and-forget: a failed
+            // write must not cost the slider its responsiveness.
+            try {
+                if (typeof window !== 'undefined' && window.sgSavePrefs) {
+                    window.sgSavePrefs({ alert_volume: v, alert_muted: this.alertMuted });
+                }
+            } catch (e) { /* offline or private mode */ }
+        },
+        toggleAlertMute() {
+            this.alertMuted = !this.alertMuted;
+            // Unmuting a page whose level is zero would restore a silence, so the
+            // button presses twice to see nothing happen. Give it a level back.
+            if (!this.alertMuted && this.alertVolume === 0) this.alertVolume = 0.5;
+            this._remember('sg_exam_alert_muted', this.alertMuted ? '1' : '0');
+            this._remember('sg_exam_alert_volume', String(this.alertVolume));
+            try {
+                if (typeof window !== 'undefined' && window.sgSavePrefs) {
+                    window.sgSavePrefs({ alert_muted: this.alertMuted, alert_volume: this.alertVolume });
+                }
+            } catch (e) { /* offline or private mode */ }
+            if (!this.alertMuted) this.beep(1, 660);
+        },
+        // The clock ticks a thousand times through each mark, and the server may
+        // reconcile it in a leap, so this is written as "say each warning once"
+        // rather than "say it when the number is exactly this".
+        _deadlineAlert() {
+            if (this.submitted || this.showExamAgreement) return;
+            // A beep from a tab nobody is watching tells nobody anything — and the
+            // anti-cheat is already counting that tab change as something else.
+            if (document.hidden) return;
+            // The one-minute mark is tested first and *returns*, so the
+            // five-minute warning cannot fire on the way past it: written as an
+            // `else if`, a reconciliation that jumped straight to thirty seconds
+            // announced the one-minute mark and then, on the next tick, the
+            // five-minute one that was already behind.
+            if (this.timeLeft <= 60) {
+                if (!this._alerted.one) { this._alerted.one = true; this.beep(3, 990); }
+                return;
+            }
+            if (this.timeLeft <= 300 && !this._alerted.five) {
+                this._alerted.five = true;
+                this.beep(2, 880);
+            }
+        },
         // ─── Following a language switch made mid-exam ───────────────────────
         // A template expression re-renders when `lang` changes. A string already
         // stored in component state does not, and sgT() picked its language at the
@@ -2571,6 +2803,14 @@ function examApp(duration, totalQ) {
         // A getter, not a method: it is used bare in the template (`x-show="!chromeHidden"`),
         // and a bare method name is a truthy function object — `!chromeHidden` then reads
         // as false for ever, which hid the whole column instead of showing it.
+        // True while a panel stands between the student and the paper: the
+        // fullscreen blocker or the away-blur. Both cover the exam bar, so the
+        // strip is lifted above them — otherwise a student who lost fullscreen is
+        // asked to fix it in a language they may not read, on a page that will not
+        // say who they are, with no way to quiet the alerts.
+        get paperBlocked() {
+            return !this.submitted && (this.fullscreenBlocked || this.awayBlurred);
+        },
         get chromeHidden() {
             return this.examLayout === 'rail' ? this.railCollapsed : this.navCollapsed;
         },
