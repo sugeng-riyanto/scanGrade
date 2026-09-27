@@ -563,6 +563,39 @@ def test_the_strip_outranks_both_panels_that_cover_the_paper():
         "covered, which is the defect this exists to remove")
 
 
+def _panel_blocks():
+    """Each full-screen panel's markup, from its opening tag to the next panel.
+
+    Bounded by the next panel rather than by a closing tag because the panels nest
+    divs: a block read to the wrong `</div>` would silently span two of them and
+    find a control that belongs to the other one. A nested `x-show` is not a panel
+    — PANEL_RE only matches a tag that also carries `fixed inset-0 z-[n]` — so the
+    split lands on the real ones.
+    """
+    text = source(EXAM_PAGE)
+    matches = list(PANEL_RE.finditer(text))
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        yield match.group(1), text[match.start():end]
+
+
+def test_the_blocking_panels_leave_the_language_to_the_strip():
+    """Both blockers are `fixed inset-0`, so each used to draw its own EN/ID
+    button to keep a control inside the panel that covers the exam bar. Once the
+    strip outranks them (see the test above) that button is a second control for
+    one choice, and each one needed a comment to explain why it was there — the
+    strip is now the one place the language lives while the paper is blocked."""
+    blockers = [(show, block) for show, block in _panel_blocks()
+                if "fullscreenBlocked" in show or "awayBlurred" in show]
+    assert len(blockers) >= 2, (
+        "the two blocking panels are not recognisable any more, so this test would "
+        "be checking nothing")
+    for show, block in blockers:
+        assert "setLang(lang === 'id' ? 'en' : 'id')" not in block, (
+            f"the panel raised by `{show}` draws its own language button, so the "
+            "same choice has two controls instead of the strip above it")
+
+
 def test_the_strip_stays_under_the_modals_that_are_meant_to_cover_it():
     """The terms agreement and the submit confirmation are deliberately on top:
     one is read before the paper opens and the other while the student is ending
