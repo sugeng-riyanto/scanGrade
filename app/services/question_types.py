@@ -707,6 +707,18 @@ def vocabulary() -> dict[str, Any]:
             {"v": t, "kind": _KIND_BY_TYPE[t], "id": _TYPE_LABELS[t][0], "en": _TYPE_LABELS[t][1]}
             for t in PICKER_TYPES
         ],
+        #: The subset of the picker that can earn *part* of its marks, named the
+        #: same way. A page saying which types are marked in stages has to read
+        #: that from here rather than write its own sentence, because a written
+        #: sentence is a second copy of `PARTIAL_TYPES` and a second copy drifts:
+        #: the landing page's mark-scheme card named matching and ordering for as
+        #: long as drag & drop, and then complex multiple choice, had earned
+        #: part-marks too. Built by filtering the picker, so a type the builder
+        #: cannot create is never advertised as one of them.
+        "partial": [
+            {"v": t, "kind": _KIND_BY_TYPE[t], "id": _TYPE_LABELS[t][0], "en": _TYPE_LABELS[t][1]}
+            for t in PICKER_TYPES if t in PARTIAL_TYPES
+        ],
     }
 
 

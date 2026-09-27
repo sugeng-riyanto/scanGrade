@@ -100,6 +100,15 @@
            it drifted. The list below is `question_types.PICKER_TYPES`, the same
            tuple the teacher's builder buttons come from. #}
         {% set _qtypes = q_vocabulary()['picker'] %}
+        {# Two more lists, both read from the registry for the same reason: the
+           staged-mark sentence has to name every type the grader pays part-marks
+           for (`partial`), and the complex multiple choice card has to use the
+           type's own name rather than a second copy of it. A hand-written list
+           was how this block came to say part-marks were for matching and
+           ordering only, while drag & drop and complex multiple choice had been
+           earning them for months. #}
+        {% set _partial = q_vocabulary()['partial'] %}
+        {% set _pgk = (_qtypes | selectattr('v', 'equalto', 'complex_multiple_choice') | list | first) %}
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 max-w-6xl mx-auto">
             <div data-facility="question-types" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 transform hover:scale-110 transition-transform duration-300">
@@ -107,6 +116,18 @@
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('{{ _qtypes|length }} Tipe Soal','{{ _qtypes|length }} Question Types')"></h3>
                 <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('{{ _qtypes|map(attribute='id')|join(', ') }}, lengkap dengan upload PDF soal.','{{ _qtypes|map(attribute='en')|join(', ') }}, complete with PDF question upload.')"></p>
+            </div>
+            {# The one question type with machinery of its own: a judgement per
+               statement, a marking rule chosen for the question, and a simulator
+               in the builder that scores the canonical answer patterns with the
+               grader itself. It used to be a name in the comma list above and
+               nothing more, which is why it now has a card. #}
+            <div data-facility="complex-multiple-choice" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 transform hover:scale-110 transition-transform duration-300">
+                    <i class="fas fa-list-check text-white text-xl"></i>
+                </div>
+                <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('{{ _pgk.id }}','{{ _pgk.en }}')"></h3>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Satu soal, banyak pernyataan, dan tiap pernyataan dinilai sendiri. Skornya mengikuti aturan AKM: tiga sampai lima pernyataan dengan dua kategori bernilai 1/0, di luar itu 2/1/0 — semua benar penuh, satu atau dua salah separuh — dan builder mensimulasikan setiap pola jawaban sebelum soal dipakai.','One question, many statements, each judged on its own. The score follows the AKM rule: three to five statements over two categories score 1/0, beyond that 2/1/0 — all right is full marks, one or two wrong is half — and the builder simulates every answer pattern before the question is used.')"></p>
             </div>
             <div data-facility="ai-grading" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
@@ -182,7 +203,7 @@
                     <i class="fas fa-scale-balanced text-white text-xl"></i>
                 </div>
                 <h3 class="mt-4 font-extrabold text-surface-800 text-sm" x-text="t('Skema Nilai per Tipe','Per-type Mark Scheme')"></h3>
-                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Bobot ditentukan per tipe soal, total selalu tepat 100, dan jawaban menjodohkan atau mengurutkan yang belum lengkap tetap dapat nilai sebagian.','A weight per question type, a paper that always totals exactly 100, and part-marks for a matching or ordering answer that is not yet complete.')"></p>
+                <p class="mt-1.5 text-xs text-surface-500 font-medium leading-relaxed" x-text="t('Bobot ditentukan per tipe soal, total selalu tepat 100, dan jawaban yang belum lengkap tetap dapat nilai sebagian pada tipe bertahap: {{ _partial|map(attribute='id')|join(', ') }}.','A weight per question type, a paper that always totals exactly 100, and part-marks for an answer that is not yet complete on the staged types: {{ _partial|map(attribute='en')|join(', ') }}.')"></p>
             </div>
             <div data-facility="bilingual-dark" class="bg-white rounded-2xl p-6 shadow-lg shadow-surface-200/40 border border-surface-100 text-center hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-sky-500 to-sky-600 flex items-center justify-center shadow-lg shadow-sky-500/20">

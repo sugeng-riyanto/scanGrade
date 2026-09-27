@@ -130,6 +130,20 @@ EVIDENCE: dict[str, list[tuple[str, list[str]]]] = {
         ("app/services/analysis_report.py",
          [r"\bif public:", r"\bappendix and public\b"]),
     ],
+    # Complex multiple choice is the type with the most machinery behind it — one
+    # judgement per statement, a marking mode chosen per question, and a simulator
+    # that scores the canonical answer patterns with the grader itself — so it is
+    # the one type worth a card of its own rather than a name in a comma list.
+    "complex-multiple-choice": [
+        ("app/services/question_types.py",
+         [r"\bdef pgk_akm_band\b", r"\bdef pgk_score\b", r"\bdef pgk_simulate\b"]),
+        # The builder half: add/remove a statement, pick the key per statement, and
+        # the simulator whose numbers come from `pgk_score` rather than from a
+        # second arithmetic in JavaScript.
+        ("app/templates/teacher/exam_form.html",
+         [r"\bpgkAddStatement\b", r"\bpgkPickKey\b", r"\bpgkSimulate\b"]),
+        ("app/routes/api.py", [r"/pgk/simulate"]),
+    ],
     "bilingual-dark": [
         ("app/templates/base.html", [r"\bsetLang\b", r"\btoggleDark\b"]),
         # "a release is refused if any text fails a contrast check" is a deploy
@@ -356,4 +370,91 @@ class TestTheGridPointsAtWhereToCheck:
         assert not leaked, (
             f"the facilities block points readers at files they cannot open: "
             f"{sorted(set(leaked))}. Link the demo instead."
+        )
+
+
+# ── 7. the mark scheme names every type that can earn part-marks ────────────
+
+class TestTheMarkSchemeNamesEveryPartCreditType:
+    """The card that drifted the way the type list did, in the same direction.
+
+    "Part-marks for a matching or ordering answer" was true when it was written
+    and stopped being the whole truth twice over: drag & drop earns them too, and
+    a complex multiple choice question is marked by a *chosen rule over how many
+    statements are right* — full, half or nothing — on every paper, scheme or no
+    scheme, because its mode is the rule. A card naming a subset of
+    ``PARTIAL_TYPES`` undersells the product exactly where a teacher looks to find
+    out what is marked, and how.
+    """
+
+    @staticmethod
+    def _card(rendered: str, key: str) -> str:
+        """One card's own body, not the whole page."""
+        return rendered.split(f'data-facility="{key}"')[1].split("data-facility=")[0]
+
+    @staticmethod
+    def _labels() -> dict[str, tuple[str, str]]:
+        from app.services import question_types as qt
+
+        return {t["v"]: (t["id"], t["en"]) for t in qt.vocabulary()["picker"]}
+
+    def test_every_part_credit_type_is_named_on_the_card(self, rendered):
+        from app.services import question_types as qt
+
+        block = self._card(rendered, "mark-scheme")
+        labels = self._labels()
+        for kind in qt.PARTIAL_TYPES:
+            assert kind in labels, (
+                f"{kind} can earn part of its marks and the builder cannot create "
+                "it, so this test cannot check the card's copy."
+            )
+            for label in labels[kind]:
+                assert label in block, (
+                    f"'{label}' can earn part of its marks ({kind}) and the "
+                    "mark-scheme card does not name it — so the card tells a teacher "
+                    "part-marks do not exist for a type they do."
+                )
+
+    def test_the_card_still_names_the_pair_it_always_named(self, rendered):
+        """The two names the card has carried since it was written.
+
+        Held separately from the registry-driven loop so a rewrite of the copy
+        cannot satisfy that loop while dropping the sentence a reader came for.
+        """
+        block = self._card(rendered, "mark-scheme")
+        for label in ("Menjodohkan", "Mengurutkan"):
+            assert label in block, f"the mark-scheme card no longer names {label}"
+
+    def test_the_registry_exposes_the_list_that_card_reads(self):
+        """The card generates its sentence from ``q_vocabulary()['partial']``.
+
+        That list has to be the grader's own tuple, or the sentence is built from
+        the wrong set of types — and generated copy is only as trustworthy as the
+        thing it is generated from. Filtering the picker is what keeps it honest
+        in the other direction too: a staged type the builder cannot create is
+        never advertised as one.
+        """
+        from app.services import question_types as qt
+
+        got = {t["v"] for t in qt.vocabulary()["partial"]}
+        assert got == set(qt.PARTIAL_TYPES), (
+            f"the vocabulary names {sorted(got)} as the staged types while the "
+            f"grader pays part-marks for {sorted(qt.PARTIAL_TYPES)}"
+        )
+
+    def test_the_complex_multiple_choice_card_names_the_registrys_type(self, rendered):
+        """The new card's heading is the registry's name for that type.
+
+        Held because the heading is a Jinja lookup: a renamed or removed slug
+        makes it render empty rather than raise, and a blank heading is exactly
+        the kind of quiet breakage a card is supposed to end.
+        """
+        from app.services import question_types as qt
+
+        id_label, en_label = self._labels()[qt.COMPLEX_MULTIPLE_CHOICE]
+        block = self._card(rendered, "complex-multiple-choice")
+        assert id_label in block and en_label in block, (
+            f"the complex multiple choice card does not carry the registry's name "
+            f"for that type ('{id_label}' / '{en_label}'), so a reader is shown a "
+            "heading the builder does not use."
         )
