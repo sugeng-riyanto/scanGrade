@@ -2892,6 +2892,33 @@ def api_admin_process_deletion():
     return jsonify(result), status
 
 
+@api_bp.route("/ui-preferences", methods=["POST"])
+@login_required
+def save_ui_preferences():
+    """One endpoint for every UI toggle that should follow the user across devices.
+
+    The exam strip's theme, language and alert level, and the navbar's theme and
+    language buttons, all write here. The value is normalised by the one store
+    (`app/services/user_preferences.py`), so a client cannot set a key the app does
+    not define, and the write is mirrored into the cached session so the next page
+    on this device does not render the choice back to its old value.
+
+    CSRF is enforced by the app's own `before_request` hook, as it is for every
+    non-GET request; this route therefore only has to be login-guarded.
+    """
+    from app.services import user_preferences
+    from app.utils.auth import set_session_prefs
+
+    patch = user_preferences.normalize(request.get_json(silent=True) or {})
+    if patch:
+        merged = user_preferences.save(get_supabase(), g.user_id, patch)
+        g.user_prefs = merged
+        set_session_prefs(g.get("user_token"), merged)
+    else:
+        merged = g.get("user_prefs") or {}
+    return jsonify({"ok": True, "preferences": merged})
+
+
 @api_bp.route("/public/privacy-info")
 def api_public_privacy_info():
     """Public endpoint: returns DPO contact and PSE registration number."""

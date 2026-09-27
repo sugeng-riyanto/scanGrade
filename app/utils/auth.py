@@ -288,6 +288,21 @@ def _jwt_expired(token):
         return False
 
 
+#: The profile columns a session has always read. Kept as one string so the
+#: fallback below is the same read minus one column.
+_PROFILE_COLUMNS = "role, school_id, status, class_id"
+
+#: Set once per process when the database has no `preferences` column yet. The
+#: column arrives with migration 036, and PostgREST refuses a select that names a
+#: column it cannot find (42703) **in full** — so asking for it unconditionally
+#: during the window between a deploy and the migration being applied would blank
+#: the session's whole identity (role, school, class), not only the preferences.
+#: The first refusal is remembered, and every later request trusts the legacy
+#: columns until the process restarts (which a deploy does), so the window costs
+#: one wasted read per worker rather than one per request.
+_preferences_unavailable = False
+
+
 def _fetch_session(token):
     """The two Supabase round-trips: validate the token, then read the profile.
 
@@ -295,22 +310,43 @@ def _fetch_session(token):
     dashboard, the exam list, the whiteboard) and each of them was fetching the
     same profile row again to get it — three or four extra round-trips per page
     for a column this query already had in hand.
+
+    ``preferences`` rides along for the same reason: theme, language and the alert
+    level follow a user across devices because they live on the profile, and this
+    row is already being read, so carrying them costs nothing. See
+    app/services/user_preferences.py.
     """
+    global _preferences_unavailable
     user = get_auth_client().auth.get_user(token)
     meta = user.user.user_metadata or {}
-    try:
-        pd = (
+    columns = _PROFILE_COLUMNS if _preferences_unavailable else _PROFILE_COLUMNS + ", preferences"
+
+    def _read(cols):
+        return (
             get_supabase()
             .table("profiles")
-            .select("role, school_id, status, class_id")
+            .select(cols)
             .eq("id", user.user.id)
             .single()
             .execute()
             .data
             or {}
         )
+
+    try:
+        pd = _read(columns)
     except Exception:
-        pd = {}
+        # A database that predates migration 036 refuses the select that names the
+        # new column; fall back to the columns that have always existed rather than
+        # losing the identity with it.
+        if _preferences_unavailable:
+            pd = {}
+        else:
+            _preferences_unavailable = True
+            try:
+                pd = _read(_PROFILE_COLUMNS)
+            except Exception:
+                pd = {}
 
     school_id = pd.get("school_id") or meta.get("school_id")
     if school_id == "None":
@@ -318,6 +354,8 @@ def _fetch_session(token):
     class_id = pd.get("class_id") or meta.get("class_id")
     if class_id in ("None", ""):
         class_id = None
+    from app.services.user_preferences import normalize as _normalize_prefs
+
     return {
         "user_id": user.user.id,
         "email": user.user.email,
@@ -326,6 +364,7 @@ def _fetch_session(token):
         "school_id": school_id,
         "class_id": class_id,
         "status": pd.get("status", "active"),
+        "prefs": _normalize_prefs(pd.get("preferences") or {}),
     }
 
 
@@ -355,6 +394,27 @@ def _apply_session(data, token):
     g.user_school_id = data.get("school_id")
     g.user_class_id = data.get("class_id")
     g.user_status = data.get("status", "active")
+    # The UI preferences (theme, language, alert level) the user set on any device.
+    # Empty for a database that has not run migration 036 yet.
+    g.user_prefs = data.get("prefs") or {}
+
+
+def set_session_prefs(token, prefs):
+    """Keep the cached session in step with a preference just written.
+
+    Without this the session cache serves the *old* choice for the rest of its
+    TTL, so the very next page on the device that just changed the theme renders
+    it back — the toggle appears to undo itself. Best-effort: a cache miss simply
+    means the next request re-reads the profile.
+    """
+    if not token:
+        return
+    from app.utils.kv_cache import cache_get, cache_set
+    cached = cache_get(_session_key(token))
+    if not cached:
+        return
+    cached["prefs"] = prefs
+    cache_set(_session_key(token), cached, _session_ttl())
 
 
 def peek_identity():
