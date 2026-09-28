@@ -119,7 +119,49 @@ html { transition: background-color .3s, color .3s; }
         .toast-enter { animation: slideUp .25s ease-out forwards; }
         .toast-leave { animation: fadeIn .2s ease-in reverse forwards; }
         @media (max-width: 1023px) { .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 40; backdrop-filter: blur(4px); } }
-        ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; } ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        /* ── The scrollbar ────────────────────────────────────────────────────
+           The control a reader touches most, and the only one nobody had
+           measured: 5px wide, a `transparent` track, a slate thumb (#cbd5e1,
+           #94a3b8 on hover) and no drag state. A stripe you cannot aim at, on
+           a track you cannot see, that never answers the pointer.
+
+           Three decisions, each measured rather than picked by eye:
+
+           * **12px, and 16px for a finger.** 12 is the comfortable end of the
+             platform range and 2.4x what shipped. The `pointer: coarse` rule
+             asks the same question `.tap-44` asks — a 768px tablet is just as
+             much a finger as a 375px phone — and it has to come *after* the
+             base rule: at equal specificity an earlier media block loses, so
+             a phone would silently keep the narrow bar while the CSS reads as
+             if it did not. (iOS Safari draws its own overlay bar and ignores
+             all of this; nothing here can reach it, and nothing needs to.)
+           * **A groove, and a pill inside it.** The track is painted rather
+             than transparent, and the thumb is inset 2px with
+             `background-clip: padding-box`, so it reads as a handle sitting in
+             a channel instead of a filled strip.
+           * **The app's own blue, not the neutral slate.** A scrollbar is a
+             control, so it is drawn in the accent the buttons use: #6f819c
+             with #586a86 on hover, #2563eb while you are dragging it — and on
+             a dark page #5f6e91 / #7285ad / #3b82f6. Every state clears 3:1
+             against its own track in both themes, the same WCAG 1.4.11 bar
+             `--input-border` answers to: light 3.38 / 4.68 / 4.40, dark
+             3.21 / 4.42 / 4.45. Those numbers are held by
+             tests/unit/test_scrollbar_usability.py, which is also what stops
+             the two themes being handed the same bar.
+
+           Firefox has no ::-webkit-scrollbar, so it gets the standard pair —
+           but *inside a Firefox-only @supports*, deliberately: a browser that
+           honours `scrollbar-color` stops honouring ::-webkit-scrollbar
+           (Chrome 121+), so an ungated pair would drop Chrome to the
+           platform's own width and undo the sizing above in silence. */
+        ::-webkit-scrollbar { width: 12px; height: 12px; }
+        ::-webkit-scrollbar-track { background: #e8edf6; }
+        ::-webkit-scrollbar-thumb { background: #6f819c; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+        ::-webkit-scrollbar-thumb:hover { background: #586a86; }
+        ::-webkit-scrollbar-thumb:active { background: #2563eb; }
+        ::-webkit-scrollbar-corner { background: #e8edf6; }
+        @media (pointer: coarse) { ::-webkit-scrollbar { width: 16px; height: 16px; } }
+        @supports (-moz-appearance: none) { html { scrollbar-width: auto; scrollbar-color: #6f819c #e8edf6; } }
         dialog { max-height: 90vh; } dialog::backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
         @supports (height: 100dvh) { .h-full { height: 100dvh; } }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -463,8 +505,27 @@ html { transition: background-color .3s, color .3s; }
         /* #475569 was 2.36:1 on the sidebar gradient, in light mode too. The
            sidebar is always dark, so one value serves both themes. */
         .nav-section-title { color: #8892b0; }
-        .dark ::-webkit-scrollbar-thumb { background: #3a4056; }
-        .dark ::-webkit-scrollbar-thumb:hover { background: #4a5470; }
+        /* The scrollbar's dark half — same shape, its own values, and inside
+           this `@media screen` block like every other dark rule so a printed
+           page keeps the light one. See "The scrollbar" above; the light
+           values are #6f819c / #586a86 / #2563eb on an #e8edf6 groove.
+
+           Each selector is written **twice**, and the first one is load-bearing:
+           `.dark ` with a space is a *descendant* selector, so it paints the
+           scrollbars of elements inside the dark page and never the scrollbar of
+           the element that carries `.dark` — which is `<html>`, and the viewport
+           bar is the one the reader drags. Measured in a live browser with `.dark`
+           on the document before this pair existed: an inner scroller came out
+           #5f6e91 on #1a1f31 while the page bar stayed the light #6f819c on an
+           #e8edf6 groove — a pale channel down the side of a dark page. The
+           combinator-less form names the carrier itself; both are kept so the
+           two can never be handed different values. */
+        .dark::-webkit-scrollbar-track, .dark ::-webkit-scrollbar-track { background: #1a1f31; }
+        .dark::-webkit-scrollbar-thumb, .dark ::-webkit-scrollbar-thumb { background: #5f6e91; }
+        .dark::-webkit-scrollbar-thumb:hover, .dark ::-webkit-scrollbar-thumb:hover { background: #7285ad; }
+        .dark::-webkit-scrollbar-thumb:active, .dark ::-webkit-scrollbar-thumb:active { background: #3b82f6; }
+        .dark::-webkit-scrollbar-corner, .dark ::-webkit-scrollbar-corner { background: #1a1f31; }
+        @supports (-moz-appearance: none) { .dark { scrollbar-color: #5f6e91 #1a1f31; } }
         }
 
         /* ── The bottom tab bar on a 320px phone ──────────────────────────────
