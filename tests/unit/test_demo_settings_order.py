@@ -42,6 +42,11 @@ TUTORIAL_HREF = {
 CARD_EMAIL = {
     "demo_super_admin": "superadmin@scan-grade.app",
     "demo_admin_sekolah": "admin_smp@scan-grade.app",
+    # The two oversight accounts. Their markers are the seeded addresses, which is
+    # also what the settings page hints at — the card, the seed and the hint have
+    # to name one account, or the demo hands out an address nobody created.
+    "demo_principal": "principal_smp@scan-grade.app",
+    "demo_vice_principal": "vice_principal_smp@scan-grade.app",
     "demo_guru": "guru_mtk_smp@scan-grade.app",
     "demo_murid": "siswa1_smp@scan-grade.app",
 }
@@ -49,6 +54,8 @@ CARD_EMAIL = {
 SETTINGS_LABEL = {
     "demo_super_admin": "Super Admin",
     "demo_admin_sekolah": "Admin Sekolah",
+    "demo_principal": "Kepala Sekolah",
+    "demo_vice_principal": "Wakil Kepsek",
     "demo_guru": "Guru",
     "demo_murid": "Murid",
     "demo_tutorial_guru": "Tutorial Guru",
@@ -147,7 +154,8 @@ class TestTheStoredOrder:
         """A row for a key no page can draw renders an empty card; a repeat renders twice."""
         blob = {"role_order": ["demo_guru", "demo_guru", "demo_murid", "demo_ghost"]}
         assert ds.demo_order(blob, "roles") == [
-            "demo_guru", "demo_murid", "demo_super_admin", "demo_admin_sekolah"]
+            "demo_guru", "demo_murid", "demo_super_admin", "demo_admin_sekolah",
+            "demo_principal", "demo_vice_principal"]
 
     def test_a_comma_string_order_is_read(self):
         """A form field is ``"a,b,c"``; stored as a list by the route, read as either."""
@@ -290,6 +298,7 @@ class TestTheDemoPageDrawsWhatIsOffered:
         """`elif`, not four `if`s — a hand-edited blob may repeat a key."""
         blob = {"demo_guru": True, "demo_murid": True, "demo_admin_sekolah": True,
                 "demo_super_admin": True,
+                "demo_principal": True, "demo_vice_principal": True,
                 "role_order": ["demo_guru", "demo_guru", "demo_murid"]}
         html = _render(app, "demo.html", blob)
         cards = re.findall(r'data-demo-card="([^"]+)"', html)

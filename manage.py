@@ -62,6 +62,16 @@ DEMO_SCHOOLS = [
             {"name": "VIII-A", "grade_level": "8"}, {"name": "VIII-B", "grade_level": "8"}, {"name": "IX-A", "grade_level": "9"},
         ],
         "subjects": [{"name": "Matematika", "code": "MTK"}, {"name": "IPA", "code": "IPA"}, {"name": "Bahasa Indonesia", "code": "BIN"}, {"name": "Bahasa Inggris", "code": "BIG"}, {"name": "IPS", "code": "IPS"}],
+        # The two officials. They are seeded like every other account so the
+        # /demo cards have something behind them, and the addresses match what
+        # that page prints — a card for an account the seed never made is a demo
+        # of a login that cannot work.
+        "officials": [
+            {"email": "principal_smp@scan-grade.app", "password": "demo123",
+             "full_name": "Sri Wahyuni", "role": "principal", "phone": "081555555551"},
+            {"email": "vice_principal_smp@scan-grade.app", "password": "demo123",
+             "full_name": "Bambang Setiono", "role": "vice_principal", "phone": "081555555552"},
+        ],
         "teachers": [
             {"email": "guru_mtk_smp@scan-grade.app", "password": "demo123", "full_name": "Budi Matematika", "phone": "081333333331", "subject": "Matematika"},
             {"email": "guru_ipa_smp@scan-grade.app", "password": "demo123", "full_name": "Siti IPA", "phone": "081333333332", "subject": "IPA"},
@@ -83,6 +93,12 @@ DEMO_SCHOOLS = [
             {"name": "XI-A", "grade_level": "11"}, {"name": "XI-B", "grade_level": "11"}, {"name": "XII-A", "grade_level": "12"},
         ],
         "subjects": [{"name": "Matematika", "code": "MTK"}, {"name": "Fisika", "code": "FIS"}, {"name": "Kimia", "code": "KIM"}, {"name": "Biologi", "code": "BIO"}, {"name": "Bahasa Indonesia", "code": "BIN"}, {"name": "Sejarah", "code": "SJH"}],
+        "officials": [
+            {"email": "principal_sma@scan-grade.app", "password": "demo123",
+             "full_name": "Ratna Kusuma", "role": "principal", "phone": "081555555553"},
+            {"email": "vice_principal_sma@scan-grade.app", "password": "demo123",
+             "full_name": "Yusuf Ramadhan", "role": "vice_principal", "phone": "081555555554"},
+        ],
         "teachers": [
             {"email": "guru_mtk_sma@scan-grade.app", "password": "demo123", "full_name": "Dewi Matematika", "phone": "081333333333", "subject": "Matematika"},
             {"email": "guru_fisika_sma@scan-grade.app", "password": "demo123", "full_name": "Eko Fisika", "phone": "081333333334", "subject": "Fisika"},
@@ -104,6 +120,12 @@ DEMO_SCHOOLS = [
             {"name": "X-TKJ", "grade_level": "10"}, {"name": "XI-TKJ", "grade_level": "11"},
         ],
         "subjects": [{"name": "Pemrograman Dasar", "code": "PRO"}, {"name": "Komputer Jaringan", "code": "KOM"}, {"name": "Basis Data", "code": "BAS"}, {"name": "Matematika", "code": "MTK"}, {"name": "Bahasa Inggris", "code": "BIG"}],
+        "officials": [
+            {"email": "principal_smk@scan-grade.app", "password": "demo123",
+             "full_name": "Agus Purnomo", "role": "principal", "phone": "081555555555"},
+            {"email": "vice_principal_smk@scan-grade.app", "password": "demo123",
+             "full_name": "Lestari Handayani", "role": "vice_principal", "phone": "081555555556"},
+        ],
         "teachers": [
             {"email": "guru_prog_smk@scan-grade.app", "password": "demo123", "full_name": "Hendra Putra", "phone": "081333333337", "subject": "Pemrograman Dasar"},
             {"email": "guru_jaring_smk@scan-grade.app", "password": "demo123", "full_name": "Indah Sari", "phone": "081333333338", "subject": "Komputer Jaringan"},
@@ -282,6 +304,14 @@ def _seed_school(supabase, school_conf):
         print(f"   👤 Admin: {school_conf['admin']['email']} / {school_conf['admin']['password']}")
     else:
         print(f"   ❌ Admin GAGAL dibuat: {school_conf['admin']['email']}")
+
+    for o in school_conf.get("officials", []):
+        uid = _create_user(supabase, {**o, "school_id": sid})
+        label = "Kepsek" if o["role"] == "principal" else "Wakasek"
+        if uid:
+            print(f"   🧑‍💼 {label}: {o['email']} / {o['password']}")
+        else:
+            print(f"   ❌ {label} GAGAL dibuat: {o['email']}")
 
     teacher_ids = []
     for t in school_conf.get("teachers", []):

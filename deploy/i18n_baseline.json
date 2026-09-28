@@ -97,6 +97,12 @@
       "coverage": 16.7,
       "frozen": true
     },
+    "admin_sekolah/officials.html": {
+      "pairs": 28,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "admin_sekolah/payment.html": {
       "pairs": 2,
       "leftovers": 10,
@@ -236,7 +242,7 @@
       "frozen": false
     },
     "base.html": {
-      "pairs": 157,
+      "pairs": 164,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -254,7 +260,7 @@
       "frozen": false
     },
     "demo.html": {
-      "pairs": 23,
+      "pairs": 27,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -293,6 +299,12 @@
       "pairs": 0,
       "leftovers": 22,
       "coverage": 0.0,
+      "frozen": false
+    },
+    "principal/dashboard.html": {
+      "pairs": 5,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "public/capacity.html": {

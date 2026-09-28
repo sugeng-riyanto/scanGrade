@@ -16,6 +16,7 @@ from app.services import trial_settings as trial_cfg
 from app.services.student_import import create_student_account
 from app.utils.req_cache import invalidate_class, invalidate_school
 from app.services.teacher_import import create_teacher_account
+from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
                                           usage_message)
 
@@ -1250,6 +1251,113 @@ def reset_teacher_password(teacher_id):
     try:
         supabase.auth.admin.update_user_by_id(teacher_id, {"password": password})
         log_activity("reset_password", "teacher", teacher_id, user_id=g.user_id)
+        return jsonify({"success": True, "password": password})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ─── PEJABAT SEKOLAH (kepala sekolah & wakil kepala sekolah) ──────
+#
+# Dua akun yang *membaca* sekolah dan tidak mengubahnya. Sekolah yang membuatnya
+# sendiri — sama seperti guru dan murid — karena yang tahu siapa kepala sekolahnya
+# adalah sekolahnya, bukan super admin.
+
+@admin_sekolah_bp.route("/officials")
+@admin_sekolah_required
+def officials():
+    """The two official accounts, as a page the school admin owns."""
+    sid = _school_id()
+    supabase = get_supabase()
+    rows = officials_service.list_officials(supabase, sid)
+    try:
+        email_map = _get_email_map(supabase)
+    except Exception:
+        email_map = {}
+    listed = [{**row, "email": email_map.get(row["id"], "")} for row in rows]
+    school = {}
+    try:
+        school = (supabase.table("schools").select("name, npsn")
+                  .eq("id", sid).single().execute().data) or {}
+    except Exception:
+        pass
+    return render_template("admin_sekolah/officials.html", officials=listed,
+                           school=school)
+
+
+@admin_sekolah_bp.route("/officials/create", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+def create_official():
+    """Create one official from the school admin's form.
+
+    The role is read from a *closed* list, not from free text: `validate_role`
+    refuses anything but the two official roles, so a form that posted
+    `admin_sekolah` (or a school admin's own role) cannot mint a second admin.
+    """
+    sid = _school_id()
+    role = request.form.get("role", "").strip()
+    nama = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    hp = request.form.get("phone", "").strip()
+    password = request.form.get("password", "").strip() or _gen_password()
+    try:
+        officials_service.validate_role(role)
+        user_email = email or _generate_email(nama, _get_email_domain(sid))
+        uid = officials_service.create_official(
+            get_supabase(), school_id=sid, role=role, full_name=nama,
+            email=user_email, password=password, phone=hp)
+        log_activity("create", role, uid,
+                     new_data={"full_name": nama, "email": user_email},
+                     user_id=g.user_id)
+        # The password is flashed once, because the school admin is the only one
+        # who can see it: nothing else in the app can hand it out afterwards.
+        flash(f"Akun berhasil dibuat. Email: {user_email}, Password: {password}",
+              "success")
+    except Exception as e:
+        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
+    return redirect("/admin-sekolah/officials")
+
+
+@admin_sekolah_bp.route("/officials/<official_id>/edit", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+@require_school_access("profiles", "official_id")
+def edit_official(official_id):
+    """Rename one of this school's officials (never their role)."""
+    try:
+        officials_service.update_official(
+            get_supabase(), official_id, _school_id(),
+            full_name=request.form.get("name"), phone=request.form.get("phone"))
+        log_activity("update", "official", official_id, user_id=g.user_id)
+        flash("Akun pejabat sekolah berhasil diperbarui", "success")
+    except Exception as e:
+        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
+    return redirect("/admin-sekolah/officials")
+
+
+@admin_sekolah_bp.route("/officials/<official_id>/delete", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+@require_school_access("profiles", "official_id")
+def delete_official(official_id):
+    """Remove the account — the profile first, then the auth user."""
+    try:
+        officials_service.delete_official(get_supabase(), official_id, _school_id())
+        log_activity("delete", "official", official_id, user_id=g.user_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": getattr(e, "user_message", str(e))}), 400
+
+
+@admin_sekolah_bp.route("/officials/<official_id>/reset-password", methods=["POST"])
+@admin_sekolah_required
+@require_school_access("profiles", "official_id")
+def reset_official_password(official_id):
+    supabase = get_supabase()
+    password = request.form.get("password", "").strip() or _gen_password()
+    try:
+        supabase.auth.admin.update_user_by_id(official_id, {"password": password})
+        log_activity("reset_password", "official", official_id, user_id=g.user_id)
         return jsonify({"success": True, "password": password})
     except Exception as e:
         return jsonify({"error": str(e)}), 400

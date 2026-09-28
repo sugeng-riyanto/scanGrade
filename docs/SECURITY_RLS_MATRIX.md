@@ -25,6 +25,17 @@
 | ai_grading_logs | Guru/Admin | via submission_id | ✅ self/admin | ❌ | ❌ | ❌ | FIXED |
 | audit_logs | System | via user_id | ✅ SA | ❌ | ❌ | ❌ | FIXED |
 
+## Two Roles Without A Policy Yet
+
+`principal` and `vice_principal` (migration `038_school_officials_roles.sql`) read their own
+school's data through the same service-role backend as every other role. Their access is
+enforced today by **Flask decorators plus `require_school_access`**, not by a policy of their
+own — the same ordering the table above describes: RLS is layer 2, the route is layer 1. A
+school-scoped policy for the two of them is a deliberate follow-up migration so that one
+release does not change the role `CHECK` and a set of policies at once. Until it lands,
+`tests/unit/test_school_officials.py` is what holds the cross-school refusal: both dashboards
+and every `/admin-sekolah/officials/*` write are tested to reject a caller from another school.
+
 ## Validation Pattern
 
 All NPSN/school_id checks follow this pattern:

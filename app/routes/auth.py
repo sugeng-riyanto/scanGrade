@@ -6,7 +6,8 @@ import time
 from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
 from app.utils.auth import (login_required, get_supabase, get_auth_client, get_auth_admin,
                             find_auth_user_by_email, invalidate_session, set_auth_cookie,
-                            login_door_for, session_role, _extract_token)
+                            login_door_for, session_role, _extract_token,
+                            USER_ROLES, dashboard_for)
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
@@ -420,7 +421,7 @@ def login():
             "guru": "/teacher/dashboard",
             "murid": "/student/dashboard",
         }
-        redirect_url = redirect_map.get(role, "/admin-sekolah/dashboard")
+        redirect_url = dashboard_for(role, default=redirect_map["admin_sekolah"])
         resp = make_response(redirect(redirect_url))
         # A flash left over from a session that has just ended describes a state
         # the user is no longer in. The login page is where it belongs, and it is
@@ -522,18 +523,16 @@ def login_user():
             if status == "pending":
                 return redirect(f"/auth/activate?email={email}&pending=1")
 
-            if role not in ("guru", "murid"):
+            if role not in USER_ROLES:
                 return render_template("auth/login_user.html",
                                        error=auth_error("login_user_wrong_page"))
 
         except Exception:
             role = res.user.user_metadata.get("role", "murid")
 
-        redirect_map = {
-            "guru": "/teacher/dashboard",
-            "murid": "/student/dashboard",
-        }
-        redirect_url = redirect_map.get(role, "/student/dashboard")
+        # Their own home. `principal` and `vice_principal` come through this door
+        # like guru and murid (see USER_ROLES) and land on their own dashboard.
+        redirect_url = dashboard_for(role, default="/student/dashboard")
         resp = make_response(redirect(redirect_url))
         # A flash left over from a session that has just ended describes a state
         # the user is no longer in. The login page is where it belongs, and it is

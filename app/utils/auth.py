@@ -17,9 +17,42 @@ logger = logging.getLogger(__name__)
 SESSION_TIMEOUTS = {
     "super_admin":    {"idle_minutes": 15,  "absolute_hours": 4},
     "admin_sekolah":  {"idle_minutes": 30,  "absolute_hours": 8},
+    #: The two officials read reports rather than edit records, so their window
+    #: sits between the admin's and a teacher's: a principal leaves the page open
+    #: through a meeting and comes back to it.
+    "principal":      {"idle_minutes": 45,  "absolute_hours": 10},
+    "vice_principal": {"idle_minutes": 45,  "absolute_hours": 10},
     "guru":           {"idle_minutes": 60,  "absolute_hours": 12},
     "murid":          {"idle_minutes": 120, "absolute_hours": 24},
 }
+
+#: The two school-official roles, as one vocabulary. They share every door — one
+#: decorator, one dashboard template, one demo card shape — and differ only in
+#: who they are, so a tuple is the right shape for the question "is this reader
+#: an official?" and the wrong place to ask "which one?".
+OFFICIAL_ROLES = ("principal", "vice_principal")
+
+#: role -> the page that role lands on after signing in. The single mapping.
+#: It used to be written out three times — in `login`, in `login_user`, and
+#: inside `role_required`'s refusal branch — which is three chances for a role to
+#: land somewhere different depending on how it arrived.
+DASHBOARD_FOR_ROLE = {
+    "super_admin": "/super-admin/dashboard",
+    "admin_sekolah": "/admin-sekolah/dashboard",
+    "principal": "/principal/dashboard",
+    "vice_principal": "/vice-principal/dashboard",
+    "guru": "/teacher/dashboard",
+    "murid": "/student/dashboard",
+}
+
+
+def dashboard_for(role=None, default: str | None = None) -> str:
+    """Where ``role`` goes after signing in, or after being turned away.
+
+    An unknown role gets ``default`` (a caller that knows a safer page may pass
+    one); with no default the admin door is the answer every role can reach.
+    """
+    return DASHBOARD_FOR_ROLE.get(_normalize_role(role or ""), default or LOGIN_URL_ADMIN)
 DEFAULT_SESSION_TIMEOUT = {"idle_minutes": 30, "absolute_hours": 8}
 
 # Role name mapping: old -> new (both accepted in decorators)
@@ -43,7 +76,7 @@ def _normalize_role(role: str) -> str:
 # had to spot the small "Guru/Murid?" link to get anywhere.
 LOGIN_URL_ADMIN = "/auth/login"
 LOGIN_URL_USER = "/auth/login-user"
-USER_ROLES = ("guru", "murid")
+USER_ROLES = ("guru", "murid", "principal", "vice_principal")
 
 # When the role is not known, the URL being opened decides. The space is already
 # partitioned by role, and this only chooses which page to *show*: both doors can
@@ -51,6 +84,10 @@ USER_ROLES = ("guru", "murid")
 _PATH_ROLES = (
     ("/student", "murid"),
     ("/teacher", "guru"),
+    # Ahead of nothing and after nothing that could shadow it: "/principal" is not
+    # a prefix of "/vice-principal", so the order of these two cannot matter.
+    ("/principal", "principal"),
+    ("/vice-principal", "vice_principal"),
     ("/admin-sekolah", "admin_sekolah"),
     ("/super-admin", "super_admin"),
 )
@@ -570,15 +607,9 @@ def role_required(*roles):
             if not _check_roles(g.get("user_role", ""), normalized_allowed):
                 if _wants_json():
                     return jsonify({"error": "Forbidden"}), 403
-                role_redirect = {
-                    "super_admin": "/super-admin/dashboard",
-                    "admin_sekolah": "/admin-sekolah/dashboard",
-                    "guru": "/teacher/dashboard",
-                    "murid": "/student/dashboard",
-                }
-                return redirect(
-                    role_redirect.get(g.get("user_role"), "/auth/login")
-                )
+                # Their own home, not the login page: a reader who is signed in
+                # and simply not allowed here should land somewhere useful.
+                return redirect(dashboard_for(g.get("user_role")))
             return f(*args, **kwargs)
 
         return wrapper
@@ -601,6 +632,19 @@ def guru_required(f):
 
 def murid_required(f):
     return role_required("murid")(f)
+
+
+def school_official_required(f):
+    """Either school official — kepala sekolah or wakil kepala sekolah."""
+    return role_required(*OFFICIAL_ROLES)(f)
+
+
+def principal_required(f):
+    return role_required("principal")(f)
+
+
+def vice_principal_required(f):
+    return role_required("vice_principal")(f)
 
 
 # ── Shortcuts (backward-compatible with old names) ──

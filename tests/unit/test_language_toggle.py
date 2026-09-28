@@ -467,6 +467,14 @@ TRANSLATED = [
     "teacher/analysis_student.html",
     "admin_sekolah/dashboard.html",
     "admin_sekolah/import.html",
+    # The officials roster: where a school admin creates and manages its kepala
+    # sekolah (principal) and wakil kepala sekolah (vice principal). Every string
+    # on it is a pair — measured at 100% coverage, 0 leftovers — so it belongs
+    # beside the other admin_sekolah pages rather than declaring itself Indonesian.
+    "admin_sekolah/officials.html",
+    # The landing page of both new oversight roles. One template serves principal
+    # and vice principal, so one page of pairs answers two doors.
+    "principal/dashboard.html",
     # The exam builder. It is where a teacher spends the most time in the app —
     # title, classes, weightings, media, anti-cheat and the AI upload path are all
     # on this one page, so it was also the largest block of Indonesian left.
@@ -896,7 +904,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 44, (
+    assert len(TRANSLATED) == 46, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

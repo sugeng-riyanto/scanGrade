@@ -272,7 +272,12 @@ class TestTheRoleVocabulary:
 
     def test_this_repository_only_compares_against_roles_the_database_has(self):
         vocab = sc.role_vocabulary()
-        assert vocab == {"super_admin", "admin_sekolah", "guru", "murid"}, vocab
+        # Six roles now: the school's two oversight accounts (`principal`,
+        # `vice_principal`) joined the platform owner, the school admin and the two
+        # people who do the work. A code comparison against any other name is a
+        # comparison against a role the database cannot hold.
+        assert vocab == {"super_admin", "admin_sekolah", "principal",
+                         "vice_principal", "guru", "murid"}, vocab
         assert sc.role_mismatches(vocab) == []
 
     def test_without_a_constraint_there_is_nothing_to_judge(self, tmp_path):

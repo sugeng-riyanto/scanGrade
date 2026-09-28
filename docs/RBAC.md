@@ -5,17 +5,27 @@
 ```
 super_admin        (Super Admin — akses semua sekolah)
     │
-    └── admin_sekolah    (Admin Sekolah — 1 sekolah spesifik)
+    └── admin_sekolah    (Admin Sekolah — 1 sekolah spesifik; pemegang akun & data)
             │
+            ├── principal       (Kepala Sekolah — baca saja: pengawasan & laporan)
+            │       │
+            │       └── vice_principal (Wakil Kepala Sekolah — baca saja, sama)
             ├── guru          (Guru — mengajar)
             │
             └── murid         (Siswa — mengerjakan ujian)
 ```
 
+Dua peran pengawas (`principal`, `vice_principal`) **tidak mengelola apa pun**. Mereka
+membaca angka, ujian dan laporan sekolahnya sendiri — tanpa satu pun route tulis. Wewenang
+membuat dan menghapus akun tetap di `admin_sekolah`: yang tahu siapa kepala sekolahnya
+adalah sekolahnya, jadi sekolah yang membuat akunnya lewat `/admin-sekolah/officials`.
+
 | Role | Tujuan | Dibuat oleh | Dashboard | Login di |
 |------|--------|-------------|-----------|----------|
 | `super_admin` | Mengelola SEMUA sekolah + pengguna + data lintas sekolah | Via Supabase Console | `/super-admin/dashboard` | `/auth/login` |
 | `admin_sekolah` | Mengelola 1 sekolah (guru, siswa, kelas, mapel) | Register mandiri (perlu approval) | `/admin/dashboard` | `/auth/login` |
+| `principal` | Mengawasi sekolahnya sendiri (baca saja) | Dibuat admin_sekolah | `/principal/dashboard` | `/auth/login_user` |
+| `vice_principal` | Mengawasi sekolahnya sendiri (baca saja) | Dibuat admin_sekolah | `/vice-principal/dashboard` | `/auth/login_user` |
 | `guru` | Membuat ujian, mengoreksi, melihat hasil | Di-import oleh admin_sekolah | `/teacher/dashboard` | `/auth/login_user` |
 | `murid` | Mengerjakan ujian, melihat nilai | Di-import oleh admin_sekolah | `/student/dashboard` | `/auth/login_user` |
 
@@ -33,14 +43,17 @@ Browser → /auth/login → POST (email + password)
   → Redirect ke /admin/dashboard
 ```
 
-### 2.2. Login Guru/Murid
+### 2.2. Login Guru/Murid/Kepala Sekolah/Wakil Kepala Sekolah
 ```
 Browser → /auth/login_user → POST (email + password)
   → Supabase Auth sign_in_with_password()
   → Cek profile.status (pending → redirect /auth/activate)
-  → Cek role (guru/murid saja)
+  → Cek role (guru/murid/principal/vice_principal — `USER_ROLES`)
   → Set cookies + redirect ke dashboard masing-masing
 ```
+Empat peran masuk lewat pintu yang sama. Satu akun dengan peran di luar keempatnya
+(super_admin, admin_sekolah) ditolak dengan pesan bahwa ia salah pintu — mereka memakai
+`/auth/login`.
 
 ### 2.3. Register Admin Sekolah
 ```
@@ -105,6 +118,18 @@ tombol bernama sama di seksi Admin Sekolah.
 | `/publish/*` | ❌ | ❌ | ✅ | ❌ |
 | `/tools/*` | ✅ | ✅ | ✅ | ❌ |
 
+### Dua peran pengawas (route sendiri, hanya-baca)
+
+| Route | `principal` | `vice_principal` | role lain |
+|-------|:-----------:|:----------------:|:---------:|
+| `/principal/dashboard` | ✅ | ❌ | ❌ |
+| `/vice-principal/dashboard` | ❌ | ✅ | ❌ |
+| `/admin-sekolah/officials` (+ `/create`, `/<id>/edit`, `/<id>/delete`, `/<id>/reset-password`) | ❌ | ❌ | hanya `admin_sekolah` |
+
+Satu view melayani dua alamat; yang berbeda hanya peran pembacanya, dan judul halaman
+menyebut peran itu. **Tidak ada satu pun route tulis di `/principal/*` dan
+`/vice-principal/*`** — sifat hanya-baca di sini struktural, bukan janji di dokumen.
+
 ### Decorators (digunakan di routes)
 
 | Decorator | Roles yang diizinkan |
@@ -116,6 +141,9 @@ tombol bernama sama di seksi Admin Sekolah.
 | `@admin_required` | `super_admin`, `admin` |
 | `@teacher_required` | `guru`, `teacher` |
 | `@teacher_or_admin_required` | `guru`, `admin_sekolah`, `admin`, `teacher` |
+| `@school_official_required` | `principal`, `vice_principal` |
+| `@principal_required` | `principal` |
+| `@vice_principal_required` | `vice_principal` |
 | `@login_required` | Semua role yang sudah login |
 
 ---
@@ -135,6 +163,14 @@ tombol bernama sama di seksi Admin Sekolah.
 | `teacher_assignments` | ALL | ALL own_school | INSERT own + SELECT own | ❌ |
 | `violation_logs` | ❌ | ❌ | SELECT own_exam | ❌ |
 | `audit_logs` | ALL | ❌ | ❌ | ❌ |
+
+**`principal` dan `vice_principal` belum punya policy RLS sendiri, dan itu disadari.**
+Backend memakai service-role key yang menembus RLS, jadi RLS adalah lapisan pertahanan
+kedua, bukan yang menegakkan akses — yang menegakkannya adalah dekorator route plus
+`require_school_access`. Migrasi `038_school_officials_roles.sql` karena itu hanya membuka
+*nama* perannya di `profiles_role_check`; policy berlingkup sekolah untuk kedua peran
+menyusul sebagai migrasi tersendiri (lihat `docs/SECURITY_RLS_MATRIX.md`). Sampai itu
+mendarat, setiap route pengawas tetap diuji lintas sekolah di `tests/unit/test_school_officials.py`.
 
 ---
 
