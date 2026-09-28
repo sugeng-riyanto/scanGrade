@@ -24,7 +24,12 @@ import json
 # The items of each group, in the order they appear when nothing is stored. This
 # is the *canonical* order: the one a missing, partial or hand-edited blob falls
 # back to, and the one that decides where a newly added item lands.
-ROLE_ITEMS = ("demo_super_admin", "demo_admin_sekolah", "demo_guru", "demo_murid")
+# The canonical order follows the hierarchy the RBAC docs describe: the platform
+# owner, then the school's own admin, then the two officials who read the school,
+# then the people who do the work inside it.
+ROLE_ITEMS = ("demo_super_admin", "demo_admin_sekolah",
+              "demo_principal", "demo_vice_principal",
+              "demo_guru", "demo_murid")
 TUTORIAL_ITEMS = ("demo_tutorial_guru", "demo_tutorial_siswa", "demo_tutorial_admin")
 
 # group -> (json key holding its order, its canonical items, the form field the

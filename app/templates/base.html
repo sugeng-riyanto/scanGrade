@@ -321,6 +321,9 @@ window.sgSavePrefs = function (patch) {
             <div class="nav-section-title pt-2"><span x-text="t('Pengguna','Users')"></span></div>
             <a href="/admin-sekolah/teachers" class="nav-item {% if request.path == '/admin-sekolah/teachers' %}active{% endif %}"><i class="fas fa-chalkboard-teacher"></i><span x-text="t('Guru','Teachers')"></span></a>
             <a href="/admin-sekolah/students" class="nav-item {% if request.path == '/admin-sekolah/students' %}active{% endif %}"><i class="fas fa-user-graduate"></i><span x-text="t('Murid','Students')"></span></a>
+            {# Kepala sekolah dan wakilnya: akun yang membaca sekolah, bukan
+               mengelolanya. Dibuat oleh sekolah sendiri, seperti guru dan murid. #}
+            <a href="/admin-sekolah/officials" class="nav-item {% if request.path == '/admin-sekolah/officials' %}active{% endif %}"><i class="fas fa-user-tie"></i><span x-text="t('Pejabat Sekolah','School Officials')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Data','Data')"></span></div>
             <a href="/admin-sekolah/import" class="nav-item {% if request.path == '/admin-sekolah/import' %}active{% endif %}"><i class="fas fa-upload"></i><span x-text="t('Import Excel','Import Excel')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Akademik','Academic')"></span></div>
@@ -341,6 +344,18 @@ window.sgSavePrefs = function (patch) {
             <div class="nav-section-title pt-2"><span x-text="t('Tools','Tools')"></span></div>
             <a href="/tools/generate-answer-sheet" class="nav-item {% if request.path == '/tools/generate-answer-sheet' %}active{% endif %}"><i class="fas fa-print"></i><span x-text="t('Lembar Jawaban','Answer Sheets')"></span></a>
             <a href="/tools/device-preview" class="nav-item {% if request.path == '/tools/device-preview' %}active{% endif %}"><i class="fas fa-mobile-alt"></i><span x-text="t('Pratinjau Perangkat','Device Preview')"></span></a>
+
+{% elif g.user_role in ('principal', 'vice_principal') %}
+            {# The two school officials. The menu is short on purpose: it lists only
+               pages these roles can actually open, because a door that refuses is
+               worse than no door. Everything they read lives on their own
+               dashboard, and both officials share this branch — the page names the
+               reader. #}
+            {% set _official_home = '/principal/dashboard' if g.user_role == 'principal' else '/vice-principal/dashboard' %}
+            <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
+            <a href="{{ _official_home }}" class="nav-item {% if request.path == _official_home %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
+            <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
+            <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
 
 {% elif g.user_role == 'guru' %}
             <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
@@ -450,12 +465,15 @@ window.sgSavePrefs = function (patch) {
                    quietly arrive without a name. #}
                 {% set _crumb_areas = {
                     'admin_sekolah': ('Admin Sekolah', 'School Admin'),
+                    'principal': ('Kepala Sekolah', 'Principal'),
+                    'vice_principal': ('Wakil Kepala Sekolah', 'Vice Principal'),
                     'guru': ('Guru', 'Teacher'),
                     'murid': ('Murid', 'Student'),
                     'super_admin': ('Super Admin', 'Super Admin')
                 } %}
                 {% set _crumb_labels = {
                     'account': ('Akun', 'Account'),
+                    'officials': ('Pejabat Sekolah', 'School Officials'),
                     'accreditation-report': ('Laporan Akreditasi', 'Accreditation Report'),
                     'activation-codes': ('Kode Aktivasi', 'Activation Codes'),
                     'ai-settings': ('Koreksi AI', 'AI Grading'),
@@ -767,6 +785,12 @@ function linkify(text) {
     <a href="/teacher/results" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.startswith('/teacher/results') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-bar text-lg mb-0.5"></i><span x-text="t('Nilai','Scores')"></span></a>
     <a href="/teacher/settings" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/settings' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-cog text-lg mb-0.5"></i><span x-text="t('Akun','Account')"></span></a>
     <a href="/teacher/comms" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/teacher/comms' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-comments text-lg mb-0.5"></i><span x-text="t('Komunikasi','Messages')"></span></a>
+    {# The two oversight roles share one bar: their whole menu is their dashboard
+       and the scoring guide, so a second branch would only repeat it. #}
+    {% elif role in ('principal', 'vice_principal') %}
+    {% set _official_home = '/principal/dashboard' if role == 'principal' else '/vice-principal/dashboard' %}
+    <a href="{{ _official_home }}" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == _official_home %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
+    <a href="/guide/skor" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/guide/skor' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-book-open text-lg mb-0.5"></i><span x-text="t('Panduan','Guide')"></span></a>
     {% elif role == 'murid' %}
     <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-home text-lg mb-0.5"></i><span x-text="t('Beranda','Home')"></span></a>
     <a href="/student/exams" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/exams' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-file-alt text-lg mb-0.5"></i><span x-text="t('Ujian','Exams')"></span></a>

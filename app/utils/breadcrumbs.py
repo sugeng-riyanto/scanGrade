@@ -51,6 +51,11 @@ from typing import Any, Iterable
 AREAS: dict[str, tuple[str, str]] = {
     "super_admin": ("super_admin", "/super-admin/dashboard"),
     "admin_sekolah": ("admin_sekolah", "/admin-sekolah/dashboard"),
+    # The two school officials each have their own page and their own word: the
+    # trail names the reader, and calling a vice principal "Kepala Sekolah" is
+    # the same class of mistake as calling a school admin "Teacher".
+    "principal": ("principal", "/principal/dashboard"),
+    "vice_principal": ("vice_principal", "/vice-principal/dashboard"),
     "guru": ("guru", "/teacher/dashboard"),
     "murid": ("murid", "/student/dashboard"),
 }
@@ -62,7 +67,8 @@ AREAS: dict[str, tuple[str, str]] = {
 #: (`/tutorial/murid`). `admin` is the legacy prefix, which 308s into the two
 #: canonical ones.
 PREFIXES = frozenset({"super-admin", "admin-sekolah", "admin", "teacher",
-                      "student", "guru", "murid"})
+                      "student", "guru", "murid",
+                      "principal", "vice-principal"})
 
 #: Segments that are never a place in a trail, in four groups. Each group *is* a
 #: reason, and a segment belongs to exactly one of them (a test asserts the groups

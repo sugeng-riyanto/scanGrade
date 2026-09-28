@@ -18,6 +18,8 @@
 {% set ROLE_ROWS = {
     'demo_super_admin':    ('fas fa-crown',             'bg-purple-100',  'text-purple-600',  'text-purple-600 focus:ring-purple-500',    'Super Admin',    'superadmin@scan-grade.app'),
     'demo_admin_sekolah':  ('fas fa-school',            'bg-blue-100',    'text-blue-600',    'text-blue-600 focus:ring-blue-500',         'Admin Sekolah',  'admin_smp@scan-grade.app, admin_sma@scan-grade.app'),
+    'demo_principal':      ('fas fa-user-tie',          'bg-indigo-100',  'text-indigo-600',  'text-indigo-600 focus:ring-indigo-500',     'Kepala Sekolah', 'principal_smp@scan-grade.app, dll'),
+    'demo_vice_principal': ('fas fa-user-tie',          'bg-cyan-100',    'text-cyan-700',    'text-cyan-700 focus:ring-cyan-500',         'Wakil Kepsek',   'vice_principal_smp@scan-grade.app, dll'),
     'demo_guru':           ('fas fa-chalkboard-teacher','bg-emerald-100', 'text-emerald-600', 'text-emerald-600 focus:ring-emerald-500',   'Guru',           'guru_mtk_smp@scan-grade.app, dll'),
     'demo_murid':          ('fas fa-user-graduate',     'bg-amber-100',   'text-amber-600',   'text-amber-600 focus:ring-amber-500',       'Murid',          'siswa1_smp@scan-grade.app, dll'),
 } %}
@@ -115,7 +117,11 @@
 <script>
 function demoForm(initial) {
     return {
-        settings: Object.assign({demo_enabled:true, demo_super_admin:true, demo_admin_sekolah:true, demo_guru:true, demo_murid:true, demo_tutorial:true, demo_tutorial_guru:true, demo_tutorial_siswa:true, demo_tutorial_admin:true}, initial || {}),
+        // Every role card the page can draw has to be named here: the blob read
+        // back below is applied with `if (k in this.settings)`, so a key missing
+        // from this object is silently dropped and the toggle would show a switch
+        // that is off no matter what the page is actually rendering.
+        settings: Object.assign({demo_enabled:true, demo_super_admin:true, demo_admin_sekolah:true, demo_principal:true, demo_vice_principal:true, demo_guru:true, demo_murid:true, demo_tutorial:true, demo_tutorial_guru:true, demo_tutorial_siswa:true, demo_tutorial_admin:true}, initial || {}),
         allOn: false, saving: false, saved: false,
         init() {
             this.allOn = this.settings.demo_enabled;

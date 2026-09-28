@@ -621,6 +621,7 @@ def _register_blueprints(app):
     from app.routes.publish import publish_bp
     from app.routes.webhook import webhook_bp
     from app.routes.admin_sekolah import admin_sekolah_bp
+    from app.routes.principal import principal_bp
     from app.routes.tools import tools_bp
     from app.routes.super_admin import super_bp
     from app.routes.public import public_bp
@@ -640,6 +641,10 @@ def _register_blueprints(app):
     app.register_blueprint(publish_bp, url_prefix="/publish")
     app.register_blueprint(webhook_bp, url_prefix="/webhook")
     app.register_blueprint(admin_sekolah_bp, url_prefix="/admin-sekolah")
+    # The two school officials mount at their own prefixes, each its own page —
+    # the sidebar, the breadcrumb area and the login redirect all name one of
+    # them, so a single shared prefix would put two readers on one address.
+    app.register_blueprint(principal_bp)
     app.register_blueprint(tools_bp, url_prefix="/tools")
 
     # Whiteboard blueprints (registered but heavy imports deferred)

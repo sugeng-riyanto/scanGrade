@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{# Satu halaman untuk dua pembaca. Yang berbeda hanya namanya: wakil kepala
+   sekolah yang membaca judul "Kepala Sekolah" akan mengira ia memakai akun orang
+   lain, jadi judulnya mengikuti `role` — nilai yang route teruskan, bukan peran
+   yang ditebak template. #}
+{% set is_vice = role == 'vice_principal' %}
+{% block title %}{{ 'Wakil Kepala Sekolah' if is_vice else 'Kepala Sekolah' }} - ScanGrade{% endblock %}
+{% block page_title %}{{ 'Wakil Kepala Sekolah' if is_vice else 'Kepala Sekolah' }}{% endblock %}
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Sambutan / sapaan sekolah -->
+    <div class="rounded-2xl p-6 bg-gradient-to-r from-primary-600 to-primary-700 text-white relative overflow-hidden shadow-lg shadow-primary-500/30">
+        <div class="absolute -top-10 -right-10 w-48 h-48 bg-white/5 rounded-full"></div>
+        <div class="relative z-10">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-xs font-bold px-2.5 py-1 bg-white/15 rounded-full"
+                      x-text="t('{{ 'Wakil Kepala Sekolah' if is_vice else 'Kepala Sekolah' }}','{{ 'Vice Principal' if is_vice else 'Principal' }}')"></span>
+                <span class="text-xs font-semibold px-2.5 py-1 bg-white/10 rounded-full"
+                      x-text="t('Hanya baca','Read-only')"></span>
+            </div>
+            <h2 class="text-2xl font-extrabold mt-3">{{ school.name or "Sekolah" }}</h2>
+            <p class="text-primary-200 font-medium mt-1">NPSN: {{ school.npsn or "-" }}</p>
+        </div>
+    </div>
+
+    <!-- Catatan wewenang: apa yang boleh dan tidak boleh dilakukan di sini -->
+    <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800 flex items-start gap-2">
+        <i class="fas fa-circle-info mt-0.5 text-blue-500"></i>
+        <span x-text="t('Halaman ini untuk pengawasan. Angka dan daftar di bawah dibaca langsung dari data sekolah Anda; tidak ada satu pun tombol di sini yang mengubah data. Wewenang mengelola data dan akun tetap pada Admin Sekolah.','This page is for oversight. The figures and lists below are read straight from the data of your school, and nothing here changes any of it. Managing data and accounts stays with the School Admin.')"></span>
+    </div>
+
+    <!-- Ringkasan sekolah -->
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {% set _stats = [
+            ('teachers', 'Guru', 'Teachers', 'fa-chalkboard-teacher'),
+            ('students', 'Murid', 'Students', 'fa-user-graduate'),
+            ('classes', 'Kelas', 'Classes', 'fa-school'),
+            ('subjects', 'Mata Pelajaran', 'Subjects', 'fa-book'),
+            ('exams', 'Ujian', 'Exams', 'fa-file-alt')
+        ] %}
+        {% for key, label_id, label_en, icon in _stats %}
+        <div class="card p-4">
+            <div class="flex items-center gap-2 text-surface-400">
+                <i class="fas {{ icon }} text-xs"></i>
+                <span class="text-xs font-bold" x-text="t('{{ label_id }}','{{ label_en }}')"></span>
+            </div>
+            <p class="text-2xl font-extrabold text-surface-800 mt-2">{{ stats.get(key, 0) }}</p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Ujian terbaru sekolah -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-200">
+            <h3 class="font-extrabold text-surface-800" x-text="t('Ujian Terbaru Sekolah','Latest Exams at the School')"></h3>
+        </div>
+        {% if exams %}
+        <ul class="divide-y divide-surface-200">
+            {% for exam in exams %}
+            <li class="px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="min-w-0">
+                    <p class="font-bold text-sm text-surface-800 truncate">{{ exam.title or '-' }}</p>
+                    <p class="text-xs text-surface-500">
+                        {{ exam.subject or '-' }}
+                        {% if exam.created_at %} &middot; {{ exam.created_at[:10] }}{% endif %}
+                    </p>
+                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-100 text-surface-500">
+                    {{ exam.status or '-' }}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="px-5 py-6 text-sm text-surface-500" x-text="t('Belum ada ujian di sekolah ini.','No exams at this school yet.')"></p>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

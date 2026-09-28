@@ -20,7 +20,8 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASE = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
 
-ROLES = {"super_admin", "admin_sekolah", "guru", "murid"}
+ROLES = {"super_admin", "admin_sekolah", "principal", "vice_principal",
+         "guru", "murid"}
 
 #: Every nav in base.html, as (name, first-line-of-the-block pattern).
 NAV_OPEN = re.compile(r"<nav\b[^>]*>")
@@ -36,6 +37,30 @@ def _nav_blocks():
     return blocks
 
 
+def _branches(body):
+    """`(role, chunk)` for every role branch in a nav body.
+
+    Two shapes, and both have to be understood. The original splitter only knew
+    `{% if x.user_role == 'guru' %}`, so the shared header that lists two roles at
+    once — `{% elif x.user_role in ('principal', 'vice_principal') %}` — was not a
+    boundary at all: it folded into the branch above it, and a link repeated in the
+    shared branch was counted as a duplicate of its *neighbour's*. Reading the role
+    names out of the header instead makes a shared branch two blocks that happen to
+    hold the same chunk, which is exactly what it is.
+    """
+    parts = re.split(
+        r"\{%\s*(?:el)?if\s+(?:g\.user_role|role)\s*"
+        r"(?:==\s*'(\w+)'|in\s*\(([^)]*)\))\s*%\}", body)
+    # parts = [prelude, eq_role, in_roles, chunk, eq_role, in_roles, chunk, …]
+    blocks = []
+    for index in range(1, len(parts), 3):
+        single, group, chunk = parts[index], parts[index + 1], parts[index + 2]
+        names = [single] if single else re.findall(r"'(\w+)'", group)
+        for name in names:
+            blocks.append((name, chunk))
+    return blocks
+
+
 def _sidebar_blocks():
     """The sidebar split by role, so each branch is judged on its own.
 
@@ -44,10 +69,7 @@ def _sidebar_blocks():
     student each get their own menu), so the branches are what has to be unique.
     """
     opening, body = _nav_blocks()[0]
-    parts = re.split(r"\{%\s*(?:el)?if\s+g\.user_role\s*==\s*'(\w+)'\s*%\}",
-                     body)
-    # parts = [prelude, role, chunk, role, chunk, …]
-    return [(role, chunk) for role, chunk in zip(parts[1::2], parts[2::2])]
+    return _branches(body)
 
 
 def _hrefs(chunk: str):
@@ -80,8 +102,7 @@ def test_the_bottom_bar_lists_no_destination_twice():
     the same way the sidebar did."""
     opening, body = _nav_blocks()[-1]
     assert "bottomnav" in opening, "the last nav is no longer the mobile bar"
-    parts = re.split(r"\{%\s*(?:el)?if\s+role\s*==\s*'(\w+)'\s*%\}", body)
-    for role, chunk in zip(parts[1::2], parts[2::2]):
+    for role, chunk in _branches(body):
         hrefs = _hrefs(chunk)
         assert len(hrefs) == len(set(hrefs)), (
             f"the {role} bottom bar lists a page twice: {hrefs}")
