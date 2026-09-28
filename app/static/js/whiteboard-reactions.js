@@ -36,7 +36,7 @@ class WhiteboardReactions {
     _showBubble(emoji, userName) {
         const bubble = document.createElement("div");
         bubble.style.cssText = `
-            position: fixed; bottom: 100px; right: 20px; z-index: 9999;
+            position: fixed; bottom: 100px; right: 20px; z-index: var(--sg-layer-notice);
             display: flex; align-items: center; gap: 8px; padding: 8px 16px;
             background: var(--bg-card, #fff); border-radius: 20px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);

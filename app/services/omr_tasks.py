@@ -36,7 +36,7 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "",
             # absent rather than as an error (see AGENTS.md). `total_questions` is
             # here for the same reason — it is the grader's denominator, and a
             # missing column would silently score against zero.
-            exam = supabase.table("exams").select("answer_key,question_types,total_questions").eq("id", exam_id).single().execute().data
+            exam = supabase.table("exams").select("answer_key,question_types,question_scoring,total_questions").eq("id", exam_id).single().execute().data
             if exam and exam.get("answer_key"):
                 key = exam["answer_key"]
                 if isinstance(key, str):
@@ -44,6 +44,12 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "",
                 qtypes = exam.get("question_types") or {}
                 if isinstance(qtypes, str):
                     qtypes = json.loads(qtypes)
+                # The marking mode reaches the grader the same way the types do: a
+                # PGK's share is read through it, and a column left out of this select
+                # reads as *absent* — the AKM default for every question.
+                scoring = exam.get("question_scoring") or {}
+                if isinstance(scoring, str):
+                    scoring = json.loads(scoring)
                 detected = result.get("answers", {})
                 # One rule for the whole app. This loop divided by the number of
                 # answers the *key* had, so a teacher who had keyed 2 of 10
@@ -52,7 +58,7 @@ def _run_omr(image_data: bytes, total_questions: int = 50, exam_id: str = "",
                 # count is the denominator, falling back to the sheet's geometry if
                 # the exam row carries none.
                 paper = int((exam or {}).get("total_questions") or 0) or total_questions
-                objective = objective_result(qtypes, key, detected, paper)
+                objective = objective_result(qtypes, key, detected, paper, scoring)
                 result["score"] = objective.score
                 result["correct"] = objective.correct
                 result["graded"] = objective.keyed

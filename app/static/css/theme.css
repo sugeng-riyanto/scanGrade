@@ -28,7 +28,57 @@
            3.43:1 on a card) — the dark theme's own border is held to 3:1 too.
            Dark: every value below is measured against every surface in
            tests/unit/test_dark_theme_contrast.py, not chosen by eye. */
-        :root { color-scheme: light; --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-subtle: #f8fafc; --bg-hover: #f1f5f9; --bg-card-translucent: rgba(255,255,255,0.92); --text: #1e293b; --text-dim: #5d6a7d; --text-muted: #606c80; --text-nav: #94a3b8; --border: #e2e8f0; --border-strong: #cbd5e1; --input: #ffffff; --input-border: #7c8ca2; --shadow: 0 1px 2px rgba(0,0,0,0.03); }
+        /* ── the layer scale ───────────────────────────────────────────────────
+           One ordered list, and the only place in the whole app a stacking height
+           is written. Every panel, drawer, modal and toast takes the nearest
+           *name* it must sit above; a new one cannot pick a number by eye, and
+           two cannot be handed the same height by accident — which is how the
+           terms agreement, the submit gate and the anti-cheat watermark all came
+           to read `9999`, leaving no height to place the exam's sit strip between
+           the first two.
+
+           Read each group top-down: each line paints over the line before it.
+           The three groups are separate stacks that never compete —
+             · `app`    the shell every page shares;
+             · `paper`  a sitting, where the paper has its own overlays;
+             · `canvas` inside a `.full-canvas-wrap`, a context of its own.
+           The rules that paint read the token; the classes below let a template
+           take a line by name. The values are re-declared identically in `.dark`
+           so a theme cannot move a layer, and tests/unit/test_layer_scale.py
+           holds the grouping, the order and that equality. */
+        :root { color-scheme: light; --bg-body: #f1f5f9; --bg-card: #ffffff; --bg-subtle: #f8fafc; --bg-hover: #f1f5f9; --bg-card-translucent: rgba(255,255,255,0.92); --text: #1e293b; --text-dim: #5d6a7d; --text-muted: #606c80; --text-nav: #94a3b8; --border: #e2e8f0; --border-strong: #cbd5e1; --input: #ffffff; --input-border: #7c8ca2; --sb-size: 12px; --sb-track: #e8edf6; --sb-thumb: #6f819c; --sb-thumb-hover: #586a86; --sb-thumb-active: #2563eb; --shadow: 0 1px 2px rgba(0,0,0,0.03); --sg-layer-local: 1; --sg-layer-sticky: 20; --sg-layer-header: 30; --sg-layer-over: 40; --sg-layer-drawer: 50; --sg-layer-badge: 60; --sg-layer-dialog: 100; --sg-layer-notice: 200; --sg-layer-paper: 10; --sg-layer-bar: 20; --sg-layer-qstrip: 30; --sg-layer-float: 50; --sg-layer-rail: 85; --sg-layer-watermark: 88; --sg-layer-scrim: 90; --sg-layer-strip: 95; --sg-layer-modal: 9999; --sg-layer-strip-over: 10000; --sg-layer-gate: 10001; --sg-layer-canvas-tool: 5; --sg-layer-canvas-grip: 6; --sg-layer-canvas-item: 10; --sg-layer-canvas-item-ctl: 20; --sg-layer-out: auto; }
+        /* Every layer, so a template takes a line by name and never a number. */
+        .sg-layer-local { z-index: var(--sg-layer-local); }
+        .sg-layer-sticky { z-index: var(--sg-layer-sticky); }
+        .sg-layer-header { z-index: var(--sg-layer-header); }
+        .sg-layer-over { z-index: var(--sg-layer-over); }
+        .sg-layer-drawer { z-index: var(--sg-layer-drawer); }
+        .sg-layer-badge { z-index: var(--sg-layer-badge); }
+        .sg-layer-dialog { z-index: var(--sg-layer-dialog); }
+        .sg-layer-notice { z-index: var(--sg-layer-notice); }
+        .sg-layer-paper { z-index: var(--sg-layer-paper); }
+        .sg-layer-bar { z-index: var(--sg-layer-bar); }
+        .sg-layer-qstrip { z-index: var(--sg-layer-qstrip); }
+        .sg-layer-float { z-index: var(--sg-layer-float); }
+        .sg-layer-rail { z-index: var(--sg-layer-rail); }
+        .sg-layer-watermark { z-index: var(--sg-layer-watermark); }
+        .sg-layer-scrim { z-index: var(--sg-layer-scrim); }
+        .sg-layer-strip { z-index: var(--sg-layer-strip); }
+        .sg-layer-modal { z-index: var(--sg-layer-modal); }
+        .sg-layer-strip-over { z-index: var(--sg-layer-strip-over); }
+        .sg-layer-gate { z-index: var(--sg-layer-gate); }
+        .sg-layer-canvas-tool { z-index: var(--sg-layer-canvas-tool); }
+        .sg-layer-canvas-grip { z-index: var(--sg-layer-canvas-grip); }
+        .sg-layer-canvas-item { z-index: var(--sg-layer-canvas-item); }
+        .sg-layer-canvas-item-ctl { z-index: var(--sg-layer-canvas-item-ctl); }
+        /* The one state that is not a height. `z-index` does not apply to a
+           `position: static` element, so a region the shell lays out as a column
+           is in no stack at all — and giving it a height would be a lie. It takes
+           `out` by name instead of resetting `z-index` by hand, keyed to the same
+           1024px breakpoint as the layout that needs it (the shell's drawer is
+           `lg:static`, and Tailwind's `lg` is this width). */
+        @media (min-width: 1024px) { .sg-layer-out-lg { z-index: var(--sg-layer-out); } }
+
         /* The dark tokens and every dark remap live in the `@media screen` block
            below — see "Dark theme — screen only" for why print is excluded. */
 * { font-family: 'Inter', system-ui, sans-serif; }
@@ -118,7 +168,7 @@ html { transition: background-color .3s, color .3s; }
         .input:focus { outline: none; border-color: #3b82f6; }
         .toast-enter { animation: slideUp .25s ease-out forwards; }
         .toast-leave { animation: fadeIn .2s ease-in reverse forwards; }
-        @media (max-width: 1023px) { .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 40; backdrop-filter: blur(4px); } }
+        @media (max-width: 1023px) { .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: var(--sg-layer-over); backdrop-filter: blur(4px); } }
         /* ── The scrollbar ────────────────────────────────────────────────────
            The control a reader touches most, and the only one nobody had
            measured: 5px wide, a `transparent` track, a slate thumb (#cbd5e1,
@@ -127,14 +177,36 @@ html { transition: background-color .3s, color .3s; }
 
            Three decisions, each measured rather than picked by eye:
 
+           * **One scale, read by every bar in the app.** The size, the groove
+             and the three thumb states are `--sb-*` tokens — declared here and
+             remapped in `.dark` — and the rules below only read them. That is
+             what makes a pane's bar the page's bar by construction rather than
+             by two copies happening to agree: the 33 scrollable panes in the
+             templates inherit an `overflow` and nothing else.
+             The finger's raise is written as `:root:not(.dark), :root:is(.dark)`,
+             and that is load-bearing rather than symmetrical-looking. `.dark` sits
+             on the same element as `:root`, so both declare the size at the same
+             specificity — and the `.dark` block is written *later* in this file,
+             inside `@media screen` — which means a `pointer: coarse` rule named
+             `:root, .dark` ties and **loses**, silently, leaving every dark touch
+             device with the mouse-sized bar. One extra pseudo-class per carrier
+             binds the raise above both, so it wins wherever it sits. Measured in a
+             browser with that cascade shape: 16px with the stronger raise, 12px
+             with an equal-specificity `.dark` size after a raise that only ties.
+             tests/unit/test_scrollbar_usability.py asks the general form of it —
+             the raise must bind more strongly than every rule that declares the
+             size, whatever those rules are called.
            * **12px, and 16px for a finger.** 12 is the comfortable end of the
-             platform range and 2.4x what shipped. The `pointer: coarse` rule
+             platform range and 2.4x what shipped. The `pointer: coarse` block
              asks the same question `.tap-44` asks — a 768px tablet is just as
-             much a finger as a 375px phone — and it has to come *after* the
-             base rule: at equal specificity an earlier media block loses, so
-             a phone would silently keep the narrow bar while the CSS reads as
-             if it did not. (iOS Safari draws its own overlay bar and ignores
-             all of this; nothing here can reach it, and nothing needs to.)
+             much a finger as a 375px phone — and it raises `--sb-size` rather
+             than writing a second `::-webkit-scrollbar` rule. The earlier shape
+             (a resized rule inside the media block) depended on that block
+             coming *after* the base rule, because at equal specificity an
+             earlier one loses; a token on `:root` cannot lose to the rule that
+             reads it, whatever the order. (iOS Safari draws its own overlay bar
+             and ignores all of this; nothing here can reach it, and nothing
+             needs to.)
            * **A groove, and a pill inside it.** The track is painted rather
              than transparent, and the thumb is inset 2px with
              `background-clip: padding-box`, so it reads as a handle sitting in
@@ -147,21 +219,36 @@ html { transition: background-color .3s, color .3s; }
              `--input-border` answers to: light 3.38 / 4.68 / 4.40, dark
              3.21 / 4.42 / 4.45. Those numbers are held by
              tests/unit/test_scrollbar_usability.py, which is also what stops
-             the two themes being handed the same bar.
+             the two themes being handed the same bar — and by
+             tests/unit/test_scrollbar_panes.py, which fails if any rule in the
+             app or any template paints a bar without them.
+
+           Not one selector here names `.dark`, and that is load-bearing. An
+           earlier shape painted the dark bar with `.dark::-webkit-scrollbar-thumb,
+           .dark ::-webkit-scrollbar-thumb` pairs, because `.dark ` with a space is
+           a *descendant* selector and cannot paint the element that carries the
+           class — `<html>`, whose bar is the viewport one the reader drags. It
+           came to be written twice, by hand, in five states, so the page bar and
+           an inner pane could not be given different values. A token has neither
+           problem: an element resolves its own inheritance, and there is one rule
+           to get right.
 
            Firefox has no ::-webkit-scrollbar, so it gets the standard pair —
            but *inside a Firefox-only @supports*, deliberately: a browser that
            honours `scrollbar-color` stops honouring ::-webkit-scrollbar
            (Chrome 121+), so an ungated pair would drop Chrome to the
-           platform's own width and undo the sizing above in silence. */
-        ::-webkit-scrollbar { width: 12px; height: 12px; }
-        ::-webkit-scrollbar-track { background: #e8edf6; }
-        ::-webkit-scrollbar-thumb { background: #6f819c; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
-        ::-webkit-scrollbar-thumb:hover { background: #586a86; }
-        ::-webkit-scrollbar-thumb:active { background: #2563eb; }
-        ::-webkit-scrollbar-corner { background: #e8edf6; }
-        @media (pointer: coarse) { ::-webkit-scrollbar { width: 16px; height: 16px; } }
-        @supports (-moz-appearance: none) { html { scrollbar-width: auto; scrollbar-color: #6f819c #e8edf6; } }
+           platform's own width and undo the sizing above in silence. It reads the
+           same tokens (`var()` resolves in `scrollbar-color`), so the two engines
+           cannot drift; nothing in a pane may set `scrollbar-width: thin` or
+           `none`, which is how one pane used to narrow or hide its own bar. */
+        ::-webkit-scrollbar { width: var(--sb-size); height: var(--sb-size); }
+        ::-webkit-scrollbar-track { background: var(--sb-track); }
+        ::-webkit-scrollbar-thumb { background: var(--sb-thumb); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); }
+        ::-webkit-scrollbar-thumb:active { background: var(--sb-thumb-active); }
+        ::-webkit-scrollbar-corner { background: var(--sb-track); }
+        @media (pointer: coarse) { :root:not(.dark), :root:is(.dark) { --sb-size: 16px; } }
+        @supports (-moz-appearance: none) { html { scrollbar-width: auto; scrollbar-color: var(--sb-thumb) var(--sb-track); } }
         dialog { max-height: 90vh; } dialog::backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
         @supports (height: 100dvh) { .h-full { height: 100dvh; } }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -239,7 +326,7 @@ html { transition: background-color .3s, color .3s; }
            on its own, with no second set of values to keep in step.
            ═════════════════════════════════════════════════════════════════════ */
         @media screen {
-        .dark { color-scheme: dark; --bg-body: #0f1117; --bg-card: #191c2b; --bg-subtle: #202436; --bg-hover: #262b41; --bg-card-translucent: rgba(25,28,43,0.92); --text: #e6e9f0; --text-dim: #a8b0c8; --text-muted: #949db5; --text-nav: #8892b0; --border: #2f3448; --border-strong: #3d4460; --input: #1e2233; --input-border: #66738f; --shadow: 0 1px 3px rgba(0,0,0,0.35); }
+        .dark { color-scheme: dark; --bg-body: #0f1117; --bg-card: #191c2b; --bg-subtle: #202436; --bg-hover: #262b41; --bg-card-translucent: rgba(25,28,43,0.92); --text: #e6e9f0; --text-dim: #a8b0c8; --text-muted: #949db5; --text-nav: #8892b0; --border: #2f3448; --border-strong: #3d4460; --input: #1e2233; --input-border: #66738f; --sb-size: 12px; --sb-track: #1a1f31; --sb-thumb: #5f6e91; --sb-thumb-hover: #7285ad; --sb-thumb-active: #3b82f6; --shadow: 0 1px 3px rgba(0,0,0,0.35); --sg-layer-local: 1; --sg-layer-sticky: 20; --sg-layer-header: 30; --sg-layer-over: 40; --sg-layer-drawer: 50; --sg-layer-badge: 60; --sg-layer-dialog: 100; --sg-layer-notice: 200; --sg-layer-paper: 10; --sg-layer-bar: 20; --sg-layer-qstrip: 30; --sg-layer-float: 50; --sg-layer-rail: 85; --sg-layer-watermark: 88; --sg-layer-scrim: 90; --sg-layer-strip: 95; --sg-layer-modal: 9999; --sg-layer-strip-over: 10000; --sg-layer-gate: 10001; --sg-layer-canvas-tool: 5; --sg-layer-canvas-grip: 6; --sg-layer-canvas-item: 10; --sg-layer-canvas-item-ctl: 20; --sg-layer-out: auto; }
 
         /* ══ Dark theme ════════════════════════════════════════════════════════
            Templates carry light utilities (bg-white, text-slate-600,
@@ -505,27 +592,13 @@ html { transition: background-color .3s, color .3s; }
         /* #475569 was 2.36:1 on the sidebar gradient, in light mode too. The
            sidebar is always dark, so one value serves both themes. */
         .nav-section-title { color: #8892b0; }
-        /* The scrollbar's dark half — same shape, its own values, and inside
-           this `@media screen` block like every other dark rule so a printed
-           page keeps the light one. See "The scrollbar" above; the light
-           values are #6f819c / #586a86 / #2563eb on an #e8edf6 groove.
-
-           Each selector is written **twice**, and the first one is load-bearing:
-           `.dark ` with a space is a *descendant* selector, so it paints the
-           scrollbars of elements inside the dark page and never the scrollbar of
-           the element that carries `.dark` — which is `<html>`, and the viewport
-           bar is the one the reader drags. Measured in a live browser with `.dark`
-           on the document before this pair existed: an inner scroller came out
-           #5f6e91 on #1a1f31 while the page bar stayed the light #6f819c on an
-           #e8edf6 groove — a pale channel down the side of a dark page. The
-           combinator-less form names the carrier itself; both are kept so the
-           two can never be handed different values. */
-        .dark::-webkit-scrollbar-track, .dark ::-webkit-scrollbar-track { background: #1a1f31; }
-        .dark::-webkit-scrollbar-thumb, .dark ::-webkit-scrollbar-thumb { background: #5f6e91; }
-        .dark::-webkit-scrollbar-thumb:hover, .dark ::-webkit-scrollbar-thumb:hover { background: #7285ad; }
-        .dark::-webkit-scrollbar-thumb:active, .dark ::-webkit-scrollbar-thumb:active { background: #3b82f6; }
-        .dark::-webkit-scrollbar-corner, .dark ::-webkit-scrollbar-corner { background: #1a1f31; }
-        @supports (-moz-appearance: none) { .dark { scrollbar-color: #5f6e91 #1a1f31; } }
+        /* The scrollbar's dark half is the `.dark` token block's `--sb-*` values
+           (see "The scrollbar" above), which is why nothing here draws a bar:
+           the five `.dark::-webkit-scrollbar-*` rules this replaced were the
+           page-bar/inner-pane defect written out twice by hand. What is left is
+           the one thing a token cannot do — the Firefox pair, which must stay
+           inside the Firefox gate or Chrome 121+ drops ::-webkit-scrollbar. */
+        @supports (-moz-appearance: none) { .dark { scrollbar-color: var(--sb-thumb) var(--sb-track); } }
         }
 
         /* ── The bottom tab bar on a 320px phone ──────────────────────────────

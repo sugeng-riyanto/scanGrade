@@ -6,7 +6,7 @@ other roles that reach the page. An admin of a school could open it and see an
 empty page about somebody else's exams; a super admin could not open it at all.
 
 The rule for who may analyse an exam is not new, and this module does not restate
-it: `exam_access.can_manage_exam` already decides who may act on an exam, and the
+it: `exam_access.can_read_exam` already decides who may read an exam's report, and the
 scope is built by asking it. That is the difference between a page that agrees
 with the routes by construction and one that agrees with them until somebody
 edits one of the two queries.
@@ -27,7 +27,7 @@ from typing import Any, Mapping, Sequence
 
 from app.services import item_analysis
 from app.services import analysis_report as report_style
-from app.utils.exam_access import can_manage_exam
+from app.utils.exam_access import can_read_exam
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +67,20 @@ SCOPE_LABELS: dict[str, dict[str, str]] = {
     "guru": {"id": "Ujian Anda sendiri", "en": "Your own exams"},
     "admin_sekolah": {"id": "Seluruh ujian di sekolah Anda",
                       "en": "Every exam in your school"},
+    # The two oversight roles read exactly the admin's scope and change none of
+    # it. Both carry the same words on purpose: what differs between a head and a
+    # deputy is who is reading, and the page's own heading is where that is said.
+    "principal": {"id": "Seluruh ujian di sekolah Anda",
+                  "en": "Every exam in your school"},
+    "vice_principal": {"id": "Seluruh ujian di sekolah Anda",
+                       "en": "Every exam in your school"},
     "super_admin": {"id": "Seluruh ujian di semua sekolah",
                     "en": "Every exam, across all schools"},
 }
+
+#: The roles whose scope is one school. Named once, so the narrowing query, the
+#: predicate and the labels cannot disagree about who is school-scoped.
+SCHOOL_SCOPED_ROLES = ("admin_sekolah", "principal", "vice_principal")
 
 LABELS: dict[str, dict[str, str]] = {
     "id": {
@@ -219,10 +230,15 @@ def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
 
     The query narrows to what the role can reach — a teacher's own rows, a
     school's rows, or everything — and then every row is put through
-    `can_manage_exam`, which is the authority. The narrowing is a cost decision;
-    the predicate is the permission. A role with no scope gets nothing, and an
-    admin with no school on file gets nothing, because that is what
-    `can_manage_exam` says about both.
+    `can_read_exam`, which is the authority. The narrowing is a cost decision;
+    the predicate is the permission. A role with no scope gets nothing, and a
+    school-scoped reader with no school on file gets nothing, because that is
+    what `can_read_exam` says about both.
+
+    `can_read_exam` rather than `can_manage_exam` because two of the roles that
+    read this report — the head and the deputy — may never act on an exam at all,
+    and asking the acting predicate about them is how an oversight page renders as
+    an empty report with nothing anywhere going red.
 
     *date_from* and *date_to* are ISO date strings (``YYYY-MM-DD``). When
     provided the query adds ``created_at >= date_from`` and
@@ -240,7 +256,7 @@ def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
     query = supabase.table("exams").select(EXAM_COLUMNS)
     if role == "guru":
         query = query.eq("teacher_id", user_id)
-    elif role == "admin_sekolah":
+    elif role in SCHOOL_SCOPED_ROLES:
         if not school_id:
             return []
         query = query.eq("school_id", school_id)
@@ -259,7 +275,7 @@ def exams_in_scope(supabase, role: str, user_id: str, school_id: str | None,
     rows = (query.order("created_at", desc=True).limit(int(limit)).execute().data
             or [])
     allowed = [row for row in rows
-               if can_manage_exam(user_id, role, school_id, row)]
+               if can_read_exam(user_id, role, school_id, row)]
     return _narrow(allowed, school_filter=school_filter,
                    teacher_filter=teacher_filter)
 
@@ -276,7 +292,7 @@ def _narrow(rows: Sequence[Mapping[str, Any]], *, school_filter: str | None = No
     the whole scope rather than an empty page. An empty page would say "you have
     no exams there", which this function cannot know; and dropping the rows would
     make a wrong parameter a way to change what a reader sees. It cannot widen
-    anything either: these rows have already been through `can_manage_exam`.
+    anything either: these rows have already been through `can_read_exam`.
 
     The two choices are applied in order, so choosing a teacher inside a school
     narrows by both rather than by whichever was applied last.

@@ -148,24 +148,77 @@ NOT_A_VIEWPORT = {
     "teacher/print_exam_report.html",
 }
 
+# The printed copy of a screen page carries its own tables, and a phone is not
+# their target — so a table *inside* a print-only block is exempt. Membership is
+# the whole question, and asking it any other way is how this check quietly
+# stopped working: the first version asked whether a print-only marker appeared
+# anywhere *before* the table, which stays true for every table below one to the
+# end of the file. Measured on `student/result_detail.html`: it opens a
+# `print-only` block at line 267 to hold the printed answer summary, and that
+# marker then exempted the PGK review table at line 439 — outside the block, on
+# screen on a phone, in a card that clipped its answer columns off the side. The
+# one table the rule existed to catch was the one it excused.
+PRINT_ONLY_OPEN = re.compile(
+    r'<([a-zA-Z][\w-]*)\b[^>]*\bclass="[^"]*\bprint-only\b[^"]*"[^>]*>')
+
+#: Any tag, split into (is a close tag, name, attributes). An attribute value
+#: holding a `>` truncates the match, which is harmless here: this counts a
+#: print-only element's own name, and a truncated `<div` is still a `<div`.
+ANY_TAG = re.compile(r"<(/?)\s*([a-zA-Z][\w-]*)\b([^>]*)>", re.S)
+
+
+def print_only_spans(text):
+    """``(start, end)`` for each print-only element; ``end`` is past its close tag.
+
+    Depth-counted on the opening tag's own name, because a print-only block holds
+    tables, divs and Jinja branches and only its own close ends it — any inner
+    element closing is not the block closing. An element the file never closes
+    yields ``end=None`` and exempts **nothing**: a malformed block must not switch
+    the check off for everything below it, which is the failure being undone here.
+    A class built at render time by Jinja is not matched either, so the table is
+    *checked* rather than excused — the safe side of that error.
+    """
+    spans = []
+    for m in PRINT_ONLY_OPEN.finditer(text):
+        if m.group(0).rstrip().endswith("/>"):  # an element that closes itself
+            spans.append((m.start(), m.end()))
+            continue
+        name, depth, end = m.group(1).lower(), 1, None
+        for tag in ANY_TAG.finditer(text, m.end()):
+            if tag.group(2).lower() != name:
+                continue
+            if tag.group(1):
+                depth -= 1
+                if depth == 0:
+                    end = tag.end()
+                    break
+            elif not tag.group(3).rstrip().endswith("/"):
+                depth += 1
+        spans.append((m.start(), end))
+    return spans
+
+
+def table_spans(text):
+    """``(offset, is_print_only)`` for each real ``<table>`` in markup.
+
+    A ``<table`` inside a JavaScript string is not markup — scan.html builds its
+    bulk table that way, into a container that already scrolls.
+    """
+    spans = print_only_spans(text)
+    for m in re.finditer(r"<table", text):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        line = text[line_start:text.find("\n", m.start())]
+        if line.lstrip().startswith(("let ", "const ", "var ", "+", '"', "'")):
+            continue
+        # print-only blocks are for the printed copy of a screen page
+        yield m.start(), any(end is not None and start <= m.start() < end
+                             for start, end in spans)
+
 
 class TestWideTablesCanBeScrolled:
     def _tables(self, path):
-        """(offset, is_print_only) for each real <table> in a template.
-
-        A `<table` inside a JavaScript string is not markup — scan.html builds
-        its bulk table that way, into a container that already scrolls.
-        """
-        text = rendered(path)
-        for m in re.finditer(r"<table", text):
-            line_start = text.rfind("\n", 0, m.start()) + 1
-            line = text[line_start:text.find("\n", m.start())]
-            js = line.lstrip().startswith(("let ", "const ", "var ", "+", '"', "'"))
-            if js:
-                continue
-            # print-only blocks are for the printed copy of a screen page
-            before = text[:m.start()]
-            yield m.start(), before.rfind('class="print-only"') > before.rfind("{% endblock %}")
+        """(offset, is_print_only) for each real <table> in a template."""
+        return table_spans(rendered(path))
 
     def test_every_app_table_is_inside_a_scroll_container(self):
         offenders = []
@@ -218,6 +271,64 @@ class TestWideTablesCanBeScrolled:
             "into ~40px columns instead of scrolling:\n  " + "\n  ".join(offenders[:12])
             + "\n\nAdd `min-w-[<cols * ~110>px]` to the table."
         )
+
+    def test_the_exemption_is_containment_not_position(self):
+        """A table *below* a print-only block is on screen and has to be checked.
+
+        Written against markup rather than a page, because the real page hides the
+        difference: the table the old rule leaked over sat far enough below the
+        marker that "inside the block" and "after the block" read the same.
+        """
+        text = (
+            '<div class="print-only" style="display:none;">\n'
+            '  <table id="printed"><tr><td>a</td></tr></table>\n'
+            '</div>\n'
+            '<div class="card">\n'
+            '  <table id="on-screen"><tr><td>a</td><td>b</td><td>c</td><td>d</td></tr></table>\n'
+            '</div>\n'
+        )
+        assert [flag for _, flag in table_spans(text)] == [True, False], (
+            "a print-only block exempts the tables inside it and nothing after it")
+
+    def test_an_unclosed_print_only_block_exempts_nothing(self):
+        """A missing `</div>` must not switch the check off to the end of the file."""
+        text = ('<div class="print-only">\n'
+                '<table class="w"><tr><td>a</td><td>b</td><td>c</td><td>d</td></tr></table>\n')
+        assert [flag for _, flag in table_spans(text)] == [False]
+
+    def test_a_print_only_block_ends_at_its_own_close_tag_not_an_inner_one(self):
+        """An inner `</div>` is not the block closing.
+
+        The middle table is the point of this test: it sits *after* the inner div
+        closes and *inside* the print-only block, so a scan that stops at the first
+        `</div>` it meets exempts it wrongly. Without a table in that gap the test
+        passes either way and proves nothing.
+        """
+        text = ('<div class="print-only">\n'
+                '  <div class="inner"><table id="a"><tr><td>x</td></tr></table></div>\n'
+                '  <table id="b"><tr><td>a</td><td>b</td><td>c</td><td>d</td></tr></table>\n'
+                '</div>\n'
+                '<table id="c"><tr><td>a</td><td>b</td><td>c</td><td>d</td></tr></table>\n')
+        assert [flag for _, flag in table_spans(text)] == [True, True, False], (
+            "the block ends at its own close tag, so the table between them is "
+            "printed and the one after the block is on screen")
+
+    def test_the_review_table_is_not_excused_by_the_print_block_above_it(self):
+        """The measured defect, on the page that had it.
+
+        `student/result_detail.html` opens a `print-only` block to hold its printed
+        answer summary; the PGK review table sits below it, outside it and on
+        screen. While the rule was positional this table was never checked, which
+        is how it shipped into a clipping card.
+        """
+        page = TEMPLATES / "student" / "result_detail.html"
+        flags = [flag for _, flag in table_spans(rendered(page))]
+        assert len(flags) == 2, (
+            "this page has two tables — the printed summary and the PGK review. "
+            "If that changed, say what the new one is and which copy it is for.")
+        assert flags == [True, False], (
+            "the printed summary is exempt; the review table below it is on screen "
+            "and must be checked")
 
 
 # ── 3. widths are mobile-first ───────────────────────────────────────────────

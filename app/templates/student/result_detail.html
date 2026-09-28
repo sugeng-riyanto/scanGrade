@@ -7,7 +7,7 @@
 .essay-page-wrap { position: relative; border-radius: 12px; border: 2px solid #e5e7eb; overflow: hidden; background: #fff; }
 .essay-page-wrap .pdf-bg { width: 100%; display: block; }
 .essay-page-wrap .overlay-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; object-fit: fill; }
-.text-box-overlay { position: absolute; min-width: 40px; z-index: 10; }
+.text-box-overlay { position: absolute; min-width: 40px; z-index: var(--sg-layer-canvas-item); }
 .text-box-overlay .box-content { font-size: 10px; padding: 2px 5px; border-radius: 4px; word-break: break-word; white-space: pre-wrap; }
 .text-box-overlay.student .box-content { border: 2px solid #f97316; background: rgba(255,255,255,0.92); }
 .text-box-overlay.teacher .box-content { border: 2px dashed #059669; background: rgba(236,253,245,0.92); }
@@ -390,6 +390,94 @@
                                 {% else %}<i class="fas fa-times-circle text-red-500 ml-auto"></i>{% endif %}
                                 {% endif %}
                             </div>
+                            {# sg-pgk-review — the judgement-by-judgement breakdown.
+
+                               A PGK question is one mark made of several judgements, and
+                               the single answer string above is exactly what hides that: a
+                               pupil who lost the question cannot see which statement did it,
+                               nor that at five statements one slip costs everything while at
+                               six it costs half. Every number here comes from
+                               `q_pgk_review`, which scores through the grader itself, so this
+                               table can never disagree with the mark beside it.
+
+                               Drawn only for PGK, and only once the marks are released:
+                               per-statement marks are marks. #}
+                            {% if q_kind(qtype) == 'pgk' and submission.status in ('graded', 'published') %}
+                            {# The mode is the question's own, read from the exam: the
+                               breakdown explains the rule this paper was marked with,
+                               and a paper marked proportionally must not be told AKM's
+                               ladder. `result_detail` selects the column for this. #}
+                            {% set pgk = q_pgk_review((exam.get('question_scoring') or {}).get(i|string),
+                                                      correct, student_ans) %}
+                            {% if pgk.available %}
+                            <div class="mt-3 rounded-xl border border-slate-200 overflow-hidden">
+                                <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-50">
+                                    <span class="text-[11px] font-extrabold text-slate-600"
+                                          x-text="lang==='en' ? 'Judgement by judgement' : 'Penilaian per pernyataan'"></span>
+                                    <span class="flex flex-wrap items-center gap-2">
+                                        <span class="text-[10px] font-bold text-slate-500">
+                                            <span x-text="lang==='en' ? 'Right' : 'Benar'"></span>
+                                            {{ pgk.right }} <span x-text="lang==='en' ? 'of' : 'dari'"></span> {{ pgk.statements | length }}
+                                        </span>
+                                        {% if pgk.band == 'binary' %}
+                                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                                              x-text="lang==='en' ? 'Every statement must be right' : 'Semua pernyataan harus benar'"></span>
+                                        {% else %}
+                                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700"
+                                              x-text="lang==='en' ? 'One or two may miss' : 'Satu atau dua boleh salah'"></span>
+                                        {% endif %}
+                                    </span>
+                                </div>
+                                {% if pgk.unreadable %}
+                                <p class="px-3 py-2 text-[10px] font-bold text-rose-600 bg-rose-50 border-t border-rose-100"
+                                   x-text="lang==='en' ? 'This answer could not be read judgement by judgement' : 'Jawaban ini tidak bisa dibaca per pernyataan'"></p>
+                                {% endif %}
+                                {# Four columns on a phone: the card clips, so the scroller
+                                   is what keeps the key and the answer reachable, and the
+                                   minimum is what stops the scroller squeezing them. #}
+                                <div class="overflow-x-auto">
+                                <table class="w-full min-w-[440px] text-[11px]">
+                                    <thead>
+                                        <tr class="text-left text-[10px] font-extrabold text-slate-400 border-t border-slate-100">
+                                            <th class="px-3 py-1.5" x-text="lang==='en' ? 'Statement' : 'Pernyataan'"></th>
+                                            <th class="px-2 py-1.5" x-text="lang==='en' ? 'You said' : 'Jawabanmu'"></th>
+                                            <th class="px-2 py-1.5" x-text="lang==='en' ? 'Key' : 'Kunci'"></th>
+                                            <th class="px-3 py-1.5 text-right" x-text="lang==='en' ? 'If fixed' : 'Bila diperbaiki'"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        {% for row in pgk.statements %}
+                                        <tr>
+                                            <td class="px-3 py-1.5 font-semibold text-slate-700 break-words">{{ row.number }}. {{ row.text }}</td>
+                                            <td class="px-2 py-1.5 font-bold whitespace-nowrap {% if row.blank %}text-slate-400{% elif row.right %}text-emerald-600{% else %}text-rose-600{% endif %}">
+                                                {% if row.blank %}
+                                                <span x-text="lang==='en' ? 'blank' : 'kosong'"></span>
+                                                {% else %}{{ row.chosen_label }}{% endif %}
+                                            </td>
+                                            <td class="px-2 py-1.5 font-bold text-emerald-700 whitespace-nowrap">{{ row.correct_label }}</td>
+                                            <td class="px-3 py-1.5 text-right font-extrabold whitespace-nowrap {% if row.right %}text-emerald-600{% elif row.gain > 0 %}text-amber-600{% else %}text-slate-400{% endif %}">
+                                                {{ (((pgk.share if row.right else row.would_share) * 100) | round | int) }}%
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-t border-slate-100">
+                                    <span class="text-[10px] font-extrabold text-slate-500"
+                                          x-text="lang==='en' ? 'How this is marked' : 'Cara soal ini dinilai'"></span>
+                                    {% for step in pgk.rungs %}
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border {% if loop.index0 == pgk.rung %}border-primary-300 bg-primary-50 text-primary-700{% else %}border-slate-200 bg-white text-slate-500{% endif %}">
+                                        {% if step.wrong_min == step.wrong_max %}{{ step.wrong_min }}{% else %}{{ step.wrong_min }}&ndash;{{ step.wrong_max }}{% endif %}
+                                        <span x-text="lang==='en' ? 'wrong' : 'salah'"></span>
+                                        &rarr; {{ (step.share * 100) | round | int }}%
+                                    </span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% endif %}
+                            {# /sg-pgk-review #}
                             {% if teacher_score is defined and teacher_score != '' %}
                             <div class="mt-2 text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl px-3 py-1.5 border border-emerald-100">
                                 <i class="fas fa-check-circle mr-1"></i>Guru: skor {{ teacher_score }}{% if teacher_comment %} — {{ teacher_comment }}{% endif %}

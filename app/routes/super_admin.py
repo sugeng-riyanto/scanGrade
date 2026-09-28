@@ -5,7 +5,8 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from flask import (Blueprint, render_template, g, request, jsonify, redirect, flash,
                    current_app, send_file, make_response, abort)
-from app.utils.auth import login_required, get_supabase, list_all_auth_users
+from app.utils.auth import (login_required, get_supabase, list_all_auth_users,
+                            role_required)
 from app.utils.helpers import read_with_retry, row_or_none
 from app.services.audit_service import log_activity, fetch_audit_logs
 # Aliased on purpose: the view below is itself named `trial_settings`, and a bare
@@ -37,6 +38,7 @@ from app.services.school_reset import (
     clear_schools,
     school_ids_for_npsns,
 )
+from app.services import subscription_plans as plan_cfg
 from app.utils.req_cache import invalidate, invalidate_school, ttl
 from app.utils import lock_health
 
@@ -44,15 +46,21 @@ super_bp = Blueprint("super_admin", __name__, url_prefix="/super-admin")
 
 
 def _sa_required(f):
-    """Super admin only — can access ALL data across all schools."""
-    from functools import wraps
-    @wraps(f)
-    @login_required
-    def wrapper(*args, **kwargs):
-        if g.get("user_role") != "super_admin":
-            return redirect("/auth/login")
-        return f(*args, **kwargs)
-    return wrapper
+    """Super admin only — can access ALL data across all schools.
+
+    Delegates to the app's shared role door rather than hand-rolling one. The
+    hand-rolled version redirected **every** refusal to ``/auth/login``, which is a
+    dead end for the reader it actually catches: someone who is signed in and simply
+    not a super admin is sent to a login page they are already past. Measured on the
+    running box, five other roles answered ``302 -> /auth/login`` on all twenty pages
+    while every other role's door answers ``->dashboard``.
+
+    ``role_required`` also answers a JSON caller with a 403 body instead of an HTML
+    redirect — which matters here because the pages' own buttons do
+    ``.then(r => r.json())`` and a redirect makes that throw, so a refused button
+    looked like a dead one.
+    """
+    return role_required("super_admin")(f)
 
 
 def _safe_count(supabase, table, column="id", **filters):
@@ -688,7 +696,13 @@ def subscription_plans():
         plans = supabase.table("subscription_plans").select("*").order("sort_order").execute().data or []
     except Exception:
         pass
-    return render_template("super_admin/subscription_plans.html", plans=plans)
+    # What each plan would take with it, so the trash icon can say so *before* it is
+    # pressed instead of answering with a foreign-key violation — and so an operator
+    # whose plan is held sees the way out (deactivate) rather than a dead end. Two
+    # queries for the whole page, not two per plan.
+    usage = plan_cfg.plan_usage_map(supabase, [p.get("id") for p in plans])
+    return render_template("super_admin/subscription_plans.html", plans=plans,
+                           usage=usage)
 
 
 @super_bp.route("/plans/new", methods=["GET", "POST"])
@@ -750,11 +764,57 @@ def plan_edit(plan_id):
 @super_bp.route("/plans/<int:plan_id>/delete", methods=["POST"])
 @_sa_required
 def plan_delete(plan_id):
+    """Delete a plan, or say what deleting it would detach — and offer to deactivate.
+
+    ``subscription_plans`` is named by two tables (see ``app/services/
+    subscription_plans.py``), so the database refuses a plain delete. This route used
+    to hand the operator that refusal verbatim:
+    ``Gagal: {'code': '23503', 'details': 'Key (id)=(7) is still referenced...'}`` —
+    measured on the running box, where plan 7 is held by two pending payment
+    transactions. A number is actionable; a foreign-key code is not.
+
+    Three answers, in the order an operator wants them: **deactivate** (stop offering
+    it, ledger untouched), **refuse with the counts** (the default for a held plan),
+    and **delete after confirming** (which detaches the references first). A plan
+    nothing holds is still deleted in one press, with no ceremony.
+    """
     supabase = get_supabase()
+    action = (request.form.get("action") or "").strip().lower()
+
+    if action == "deactivate":
+        try:
+            supabase.table("subscription_plans").update({"is_active": False}) \
+                .eq("id", plan_id).execute()
+            log_activity("update", "subscription_plan", str(plan_id),
+                         new_data={"is_active": False}, user_id=g.user_id)
+            flash("Paket dinonaktifkan — riwayat langganan dan pembayarannya tidak "
+                  "tersentuh", "success")
+        except Exception as e:
+            flash(f"Gagal menonaktifkan: {str(e)[:60]}", "error")
+        return redirect("/super-admin/plans")
+
+    usage = plan_cfg.plan_usage(supabase, plan_id)
+    detached = plan_cfg.used_total(usage)
+    if plan_cfg.usage_confirmation_needed(usage) and request.form.get("confirm") != "1":
+        flash(plan_cfg.usage_message(usage), "warning")
+        return redirect("/super-admin/plans")
+
     try:
+        if detached:
+            # The FK has no ON DELETE, so the pointers have to go first. The rows
+            # stay — a plan that no longer exists is not a reason to erase which
+            # plan a payment was for beyond the pointer itself.
+            for table, _key in plan_cfg.PLAN_HOLDERS:
+                supabase.table(table).update({"plan_id": None}) \
+                    .eq("plan_id", plan_id).execute()
         supabase.table("subscription_plans").delete().eq("id", plan_id).execute()
-        log_activity("delete", "subscription_plan", str(plan_id), user_id=g.user_id)
-        flash("Plan berhasil dihapus", "success")
+        log_activity("delete", "subscription_plan", str(plan_id),
+                     new_data={"detached_rows": detached}, user_id=g.user_id)
+        if detached:
+            flash(f"Paket dihapus; {detached} baris dilepas dari paket ini dan tetap "
+                  f"ada", "success")
+        else:
+            flash("Plan berhasil dihapus", "success")
     except Exception as e:
         flash(f"Gagal: {str(e)[:60]}", "error")
     return redirect("/super-admin/plans")
@@ -1612,7 +1672,7 @@ def omr_test_batch():
                 # this bench divided by the number of answers the *key* had, so a
                 # half-keyed exam scored 100 while the pupil's own result page — and
                 # the scanner that feeds it — scored the same sheet out of the paper.
-                exam = get_supabase().table("exams").select("answer_key,question_types,total_questions").eq("id", exam_id).single().execute().data
+                exam = get_supabase().table("exams").select("answer_key,question_types,question_scoring,total_questions").eq("id", exam_id).single().execute().data
                 if exam and exam.get("answer_key"):
                     key = exam["answer_key"]
                     if isinstance(key, str):
@@ -1620,9 +1680,12 @@ def omr_test_batch():
                     qtypes = exam.get("question_types") or {}
                     if isinstance(qtypes, str):
                         qtypes = json.loads(qtypes)
+                    scoring = exam.get("question_scoring") or {}
+                    if isinstance(scoring, str):
+                        scoring = json.loads(scoring)
                     detected = result.get("answers", {})
                     paper = int(exam.get("total_questions") or 0) or total_questions
-                    objective = objective_result(qtypes, key, detected, paper)
+                    objective = objective_result(qtypes, key, detected, paper, scoring)
                     correct = objective.correct
                     score = objective.score
                     unkeyed = len(objective.unkeyed)
@@ -1884,7 +1947,11 @@ def user_management():
 @_sa_required
 def api_user_reset_password(user_id):
     supabase = get_supabase()
-    data = request.get_json() or {}
+    # `silent=True` matters here: the page's reset button sends the JSON content
+    # type with no body, and `get_json()` raises on that — a 400 before this line,
+    # so the button's promise never resolved and nothing happened. An absent body
+    # and an empty object are the same request: "generate a password for me".
+    data = request.get_json(silent=True) or {}
     new_pw = data.get("password") or secrets.token_hex(8)
     supabase.auth.admin.update_user_by_id(user_id, {"password": new_pw})
     return jsonify({"success": True, "password": new_pw})
@@ -1893,7 +1960,7 @@ def api_user_reset_password(user_id):
 @super_bp.route("/api/user/<user_id>/update-email", methods=["POST"])
 @_sa_required
 def api_user_update_email(user_id):
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     new_email = data.get("email", "").strip().lower()
     if not new_email or "@" not in new_email:
         return jsonify({"error": "Email tidak valid"}), 400

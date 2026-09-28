@@ -11,7 +11,7 @@
             <span class="text-[9px] text-gray-400 hidden sm:inline" x-text="onlineCount>0?onlineCount+' online':''"></span>
             <div x-data="{showPos:false}" class="relative hidden md:block">
                 <button @click="showPos=!showPos" class="text-[9px] text-gray-400 hover:text-gray-600 px-1" title="Posisi Toolbar">&#9881;</button>
-                <div x-show="showPos" @click.outside="showPos=false" class="absolute top-4 left-0 z-30 bg-white rounded-xl shadow-xl border p-1.5 w-28" style="display:none">
+                <div x-show="showPos" @click.outside="showPos=false" class="absolute top-4 left-0 sg-layer-over bg-white rounded-xl shadow-xl border p-1.5 w-28" style="display:none">
                     <button @click="setToolbarPos('left');showPos=false" :class="toolbarPos==='left'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9664; Kiri</button>
                     <button @click="setToolbarPos('top');showPos=false" :class="toolbarPos==='top'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9650; Atas</button>
                     <button @click="setToolbarPos('bottom');showPos=false" :class="toolbarPos==='bottom'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9660; Bawah</button>
@@ -51,7 +51,7 @@
             <div id="wb-stage" style="width:2000px;height:2000px;position:relative">
                 <canvas id="wb-canvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
                     <!-- Tool overlays -->
-                    <div x-show="rulerOn" class="absolute" :style="{left:rulerX+'px',top:rulerY+'px',transform:'rotate('+rulerAngle+'deg)',transformOrigin:'20px 35px',zIndex:10}"
+                    <div x-show="rulerOn" class="absolute" :style="{left:rulerX+'px',top:rulerY+'px',transform:'rotate('+rulerAngle+'deg)',transformOrigin:'20px 35px',zIndex:'var(--sg-layer-canvas-tool)'}"
                          @touchstart.prevent="drg('ruler',$event)">
                         <svg width="500" height="70" viewBox="0 0 500 70" style="overflow:visible;pointer-events:none">
                             <rect x="0" y="0" width="500" height="70" rx="6" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>
@@ -62,7 +62,7 @@
                             <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
                         </svg>
                     </div>
-                    <div x-show="protOn" class="absolute" :style="{left:protX+'px',top:protY+'px',transform:'rotate('+protAngle+'deg)',transformOrigin:protCX+'px '+protCY+'px',zIndex:10}"
+                    <div x-show="protOn" class="absolute" :style="{left:protX+'px',top:protY+'px',transform:'rotate('+protAngle+'deg)',transformOrigin:protCX+'px '+protCY+'px',zIndex:'var(--sg-layer-canvas-tool)'}"
                          @touchstart.prevent="drg('prot',$event)">
                         <svg width="300" height="300" viewBox="0 0 300 300" style="overflow:visible;pointer-events:none">
                             <rect x="0" y="0" width="300" height="300" rx="4" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.4)" stroke-width="1"/>
@@ -73,7 +73,7 @@
                             <text x="6" y="15" font-size="12" fill="white" font-weight="bold" style="pointer-events:none">&times;</text>
                         </svg>
                     </div>
-                    <div x-show="triOn" class="absolute" :style="{left:triX+'px',top:triY+'px',transform:'rotate('+triAngle+'deg)',transformOrigin:triRX+'px '+triRY+'px',zIndex:10}"
+                    <div x-show="triOn" class="absolute" :style="{left:triX+'px',top:triY+'px',transform:'rotate('+triAngle+'deg)',transformOrigin:triRX+'px '+triRY+'px',zIndex:'var(--sg-layer-canvas-tool)'}"
                          @touchstart.prevent="drg('tri',$event)">
                         <svg :width="triS" :height="triS" :viewBox="'0 0 '+triS+' '+triS" style="overflow:visible;pointer-events:none">
                             <polygon :points="'10,'+triS+' 10,10 '+triS+','+triS" fill="rgba(235,242,255,0.4)" stroke="rgba(0,80,200,0.5)" stroke-width="1.5"/>

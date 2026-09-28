@@ -33,7 +33,10 @@ import sys
 
 BASH = shutil.which("bash")
 
-DEPLOY_SH = DEPLOY / "scangrade-deploy.sh"
+#: Overridable so `.freebuff/mutate_schema_gate.py` — like the arm-auto-deploy
+#: mutator — can run the schema gate's own tests against a mutated copy instead of
+#: editing the real runner in place (a crash would leave it mutated).
+DEPLOY_SH = Path(os.environ.get("DEPLOY_SCRIPT") or (DEPLOY / "scangrade-deploy.sh"))
 INSTALL_SH = DEPLOY / "install-auto-deploy.sh"
 ENTRYPOINT_SH = DEPLOY / "entrypoint.sh"
 SMOKE_PY = DEPLOY / "smoke_test.py"
@@ -444,6 +447,13 @@ def test_every_smoke_page_is_a_real_route():
     missing = [p for p in smoke.ROLE_AREAS.values() if p not in registered]
     assert not missing, f"isolation check targets routes that do not exist: {missing}"
 
+    # The write probe's own routes, for the same reason and one worse: a 404 on
+    # the create reads exactly like a school that refused the write.
+    probe = [smoke.SUBJECTS_PATH, smoke.SUBJECT_CREATE_PATH,
+             smoke.SUBJECT_DELETE_PATH.format(subject_id="<subject_id>")]
+    missing = [p for p in probe if p not in registered]
+    assert not missing, f"the write probe posts to routes that do not exist: {missing}"
+
 
 def test_smoke_pages_are_namespaced_under_their_role():
     smoke = _smoke_module()
@@ -473,15 +483,51 @@ def test_smoke_roles_and_isolation_matrix_are_complete():
         )
 
 
-def test_smoke_test_only_reads():
-    """It runs against production on every release: it must not change state."""
+def test_smoke_test_writes_to_exactly_two_documented_places():
+    """It runs against production on every release, so what it may change is a
+    list rather than a habit.
+
+    There are two writes, and both are deliberate. The login POST, once per role.
+    And the school-admin probe's create/delete pair — because every other check in
+    this file is a GET, and a school whose database role lost INSERT answers all of
+    them (see `tests/unit/test_smoke_admin_write.py`, which drives the probe itself).
+
+    So the count is pinned and the pair is pinned to the one function allowed to
+    make it: a third `session.post` anywhere else is a write nobody declared.
+    """
     src = SMOKE_PY.read_text(encoding="utf-8")
 
-    for verb in (".put(", ".delete(", ".patch(", ".post("):
-        if verb == ".post(":
-            continue        # exactly one login POST, asserted below
-        assert verb not in src, f"smoke test performs {verb.strip('.(')} — it must be read-only"
-    assert src.count("session.post(") == 1, "the only write may be the login POST"
+    for verb in (".put(", ".patch(", ".delete("):
+        assert verb not in src, (
+            f"smoke test performs {verb.strip('.(')} — the writes it may make are "
+            "the login and the probe's own create/delete pair, nothing else")
+    assert src.count("session.post(") == 3, (
+        f"{src.count('session.post(')} POST call site(s): the login, and the probe's "
+        "create and delete. A fourth is a write nobody declared, and it would run "
+        "against a real school on every release.")
+
+    # One helper per write, and the guard reads their bodies rather than trusting
+    # their names: a `session.post` anywhere else in the file is a third write the
+    # count above cannot name, and it would run against a real school.
+    for helper, path_constant in (("def _probe_create(", "SUBJECT_CREATE_PATH"),
+                                  ("def _probe_delete(", "SUBJECT_DELETE_PATH")):
+        assert helper in src, f"the write probe lost {helper}"
+        body = src.split(helper, 1)[1].split("\ndef ", 1)[0]
+        assert body.count("session.post(") == 1, (
+            f"{helper} no longer posts in exactly one place")
+        assert path_constant in body, (
+            f"{helper} posts to a path it does not declare")
+    assert "def check_admin_write(" in src, "the write probe is not a function of its own"
+    assert "_probe_create(" in src.split("def check_admin_write(", 1)[1], (
+        "the probe no longer creates anything")
+
+    # And the probe is not the credential-only run's problem: arming a gate is not
+    # a release, so it must not write to a school either.
+    main_body = src.split("def main() -> int:", 1)[1]
+    assert main_body.index("if not check_credentials:") < main_body.index(
+        "check_admin_write(session, base, acct, res)"), (
+        "the write probe runs even in --check-credentials, which is used before a "
+        "box is armed and is not a release")
 
 
 @pytest.mark.parametrize("env,expected", [
@@ -1108,12 +1154,12 @@ def test_the_quarantine_lives_between_its_delimiters():
 def test_a_gate_that_refuses_a_release_records_it():
     script = DEPLOY_SH.read_text(encoding="utf-8")
     calls = QUARANTINE_CALL.findall(script)
-    assert len(calls) == 5, (
+    assert len(calls) == 6, (
         f"{len(calls)} quarantine_write call(s). Every gate that rolls a release "
         "back has to record it — the check that Gate 0 survives the release, "
-        "compileall, app construction, the theme gate and the shared post-reload "
-        "verification — or that gate goes on re-pulling the same commit every two "
-        "minutes")
+        "compileall, app construction, the theme gate, the schema gate and the "
+        "shared post-reload verification — or that gate goes on re-pulling the same "
+        "commit every two minutes")
 
 
 def test_every_refusal_names_its_gate_and_records_the_commit():
@@ -1130,6 +1176,7 @@ def test_every_refusal_names_its_gate_and_records_the_commit():
         "app did not construct (exit 9)",
         "runner not armed (the app refused to be deployed by it)",
         "theme gate (exit $THEME_RC)",
+        "schema gate (the release names objects no migration applied)",
     ):
         assert reason in script, f"no FAIL_REASON for {reason!r} — the runner changed shape"
         at = script.index(reason)
@@ -3047,6 +3094,28 @@ def test_an_unreadable_checkout_is_not_read_as_clean():
 SHA_C = "c" * 40
 
 
+def _record_consts(state: Path, repo: Path) -> str:
+    """The runner's own `STATE_DIR`/`PREFLIGHT_*` literals, retargeted.
+
+    Read out of the file rather than retyped. Spelling them out here is a second
+    copy of the block's own configuration, and it drifts in exactly the direction
+    nobody notices: the diff file, its two limits and its marker were added to the
+    runner, this harness kept the old two names, and `set -u` turned every record
+    test into a crash rather than a failure about the record.
+    """
+    text = DEPLOY_SH.read_text(encoding="utf-8")
+    lines = [line for line in text.splitlines()
+             if re.match(r"^(?:STATE_DIR|PREFLIGHT_[A-Z_]+)=", line)]
+    home = 'STATE_DIR="/var/lib/scangrade-deploy"'
+    assert home in lines, (
+        "the runner's state directory moved, so this harness would write into the "
+        "real one — or the reader is looking at the wrong lines")
+    consts = "\n".join(line.replace(home, f'STATE_DIR="{state}"') for line in lines)
+    # `preflight_diff` reads both of these; a harness that lifts the block without
+    # them is an incomplete extraction, not a smaller one.
+    return (f'REPO="{repo}"\n' 'as_owner() { "$@"; }\n' + consts)
+
+
 def _record_harness(tmp_path: Path) -> str:
     """The real block, lifted out and given the paths it reads.
 
@@ -3058,8 +3127,7 @@ def _record_harness(tmp_path: Path) -> str:
     state.mkdir(exist_ok=True)
     return (
         "set -uo pipefail\n"
-        f'STATE_DIR="{state}"\n'
-        f'PREFLIGHT_FILE="{state}/refused-before-merge"\n'
+        + _record_consts(state, tmp_path / "repo") + "\n"
         + _record_block()
     )
 
@@ -3185,3 +3253,156 @@ def test_an_ordinary_release_does_not_ask_for_a_rebaseline(tmp_path):
         tmp_path, 'quarantine_honour_release; echo "RB=$REBASELINE_REQUESTED"')
     assert run.returncode == 0, run.stderr
     assert "RB=0" in run.stdout, run.stdout
+
+
+# ── the schema gate: production must have what the release names ─────────────
+#
+# A release can name a table or a column that no migration has put in the
+# database — a migration written and merged but never applied, or applied to the
+# wrong project. Every other gate reads the code or the box; this one reads the
+# live catalogue (`apply_migration.py --verify`), and it is the only one that can
+# see a release whose *database* is behind its code. A gap is a property of the
+# release, so it quarantines; a box that cannot reach the catalogue is not the
+# release's fault and does not roll it back.
+
+SCHEMA_START = "# schema_gate:start"
+SCHEMA_END = "# schema_gate:end"
+
+
+def _schema_block() -> str:
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    return script[script.index(SCHEMA_START):script.index(SCHEMA_END) + len(SCHEMA_END)]
+
+
+def _schema_program(tmp_path: Path, rc: int, out: str) -> str:
+    """The schema gate lifted out, with the verifier replaced by a stub.
+
+    The stub answers the way `apply_migration.py --verify` does — 0 all present,
+    6 a gap, anything else "the box could not measure" — so what is asserted is
+    the runner's decision, not the verifier's arithmetic.
+    """
+    repo = tmp_path / "repo"
+    (repo / "deploy").mkdir(parents=True, exist_ok=True)
+    (repo / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
+    (repo / "deploy" / "apply_migration.py").write_text("# replaced by the stub\n")
+    stub = repo / ".venv" / "bin" / "python"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    f"cat <<'GATEOUT'\n{out}\nGATEOUT\n"
+                    f"exit {rc}\n", encoding="utf-8")
+    stub.chmod(0o755)
+    return (
+        "set -uo pipefail\n"
+        f'REPO="{repo}"\n'
+        "BEFORE=deadbeef\n"
+        'FAIL_REASON=""\n'
+        'FAIL_DETAIL=""\n'
+        'log() { echo "$*"; }\n'
+        'as_owner() { "$@"; }\n'
+        'quarantine_write() { echo QUARANTINE; }\n'
+        "trap 'echo \"DETAIL=$FAIL_DETAIL\"; echo \"REASON=$FAIL_REASON\"' EXIT\n"
+        + _schema_block() + "\necho REACHED\n")
+
+
+GAP_OUTPUT = (
+    "1 in, 1 partial, 1 out, 0 superseded, 0 with no objects to check\n"
+    "\n"
+    "=== declared objects that exist nowhere and nothing drops ===\n"
+    "\n"
+    "037_ui_preferences.sql\n"
+    "    MISSING  column profiles.preferences\n"
+    "\n"
+    "1 file(s) declare objects the schema does not have.\n"
+    "A file that was applied by hand still shows its objects, so this is a\n"
+    "statement about the schema, not about how the file got there.\n")
+
+OK_OUTPUT = "45 in, 0 partial, 0 out, 0 superseded, 0 with no objects to check\n\nEvery declared object is present, replaced, or transient.\n"
+
+NO_CREDENTIAL = ("no DIRECT_URL / DATABASE_URL in the environment or "
+                 "/opt/scangrade/.env — nothing to connect to\n")
+
+
+def test_the_schema_gate_runs_after_the_merge_and_before_the_reload():
+    """A quarantine is a record about a commit, so it may only be written once a
+    commit has moved; and a release whose database is behind its code must be
+    stopped before anything reloads to serve it."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    gate = script.index(SCHEMA_START)
+    assert script.index('RUN_STEP=\"merge\"') < gate, (
+        "the schema gate judges before a commit has moved, so it cannot name the "
+        "release it refuses")
+    assert gate < script.index("# ── Reload"), (
+        "the schema gate runs after the app is reloaded, so a release whose "
+        "database is behind its code is served before it is judged")
+
+
+@needs_a_bash
+def test_a_release_whose_objects_are_missing_is_refused_and_quarantined(tmp_path):
+    run = subprocess.run([BASH, "-c", _schema_program(tmp_path, 6, GAP_OUTPUT)],
+                         capture_output=True, text=True)
+    assert run.returncode == 18, run.stdout + run.stderr
+    assert "REACHED" not in run.stdout, "it refused the release and deployed anyway"
+    assert "QUARANTINE" in run.stdout, (
+        "the refusal is not recorded, so the next tick re-pulls the same commit")
+    assert "REASON=schema gate" in run.stdout, run.stdout
+
+
+@needs_a_bash
+def test_the_refusal_quotes_the_missing_objects_and_not_the_narration(tmp_path):
+    run = subprocess.run([BASH, "-c", _schema_program(tmp_path, 6, GAP_OUTPUT)],
+                         capture_output=True, text=True)
+    lines = run.stdout.splitlines()
+    at = next(n for n, ln in enumerate(lines) if ln.startswith("DETAIL="))
+    # The record is multi-line, so the assertion reads the whole quote rather than
+    # its first line — which is exactly the mistake a one-line read would make.
+    detail = "|".join(lines[at:])
+    assert "profiles.preferences" in detail, (
+        "the record names the gate and not the object the release was refused on, "
+        f"so it cannot be acted on: {detail!r}")
+    assert "objects the schema does not have" in detail, (
+        "the record lost the gate's own verdict line")
+    assert "applied by hand still shows" not in detail, (
+        f"the gate's narration filled the record instead of the finding: {detail!r}")
+
+
+@needs_a_bash
+def test_a_schema_that_has_everything_lets_the_release_through(tmp_path):
+    run = subprocess.run([BASH, "-c", _schema_program(tmp_path, 0, OK_OUTPUT)],
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "REACHED" in run.stdout
+    assert "QUARANTINE" not in run.stdout
+
+
+@needs_a_bash
+def test_a_box_that_cannot_verify_does_not_roll_the_release_back(tmp_path):
+    """An unreachable catalogue is a property of the box, not of the commit. The
+    armament check refuses a box with no DIRECT_URL before anything is fetched, so
+    by the time this gate runs a failure to connect is a transient the release
+    must not pay for."""
+    run = subprocess.run([BASH, "-c", _schema_program(tmp_path, 1, NO_CREDENTIAL)],
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "REACHED" in run.stdout, "a box that could not measure rolled the release back"
+    assert "QUARANTINE" not in run.stdout, (
+        "a release nobody judged is quarantined for a box problem")
+    assert "COULD NOT RUN" in run.stdout, run.stdout
+
+
+def test_the_gate_asks_the_verifier_to_verify_this_checkout():
+    """The stub in the harness ignores its arguments, so what the gate actually
+    invokes is pinned here: the read-only mode, and this checkout rather than the
+    tool's default."""
+    block = _schema_block()
+    assert "--verify" in block, (
+        "the gate runs apply_migration.py without asking it to verify the schema")
+    assert '--repo "$REPO"' in block, (
+        "the verifier is pointed at a checkout that may not be the one serving")
+
+
+def test_the_gate_is_marked_so_a_stale_copy_is_seen_to_lack_it():
+    """The copy-detection reads `GATE_BLOCKS`; a copy that predates this gate must
+    be named as unable to check a release rather than read as armed."""
+    marker = SCHEMA_START.lstrip("# ").split(":")[0]
+    assert marker == "schema_gate"
+    arm = (DEPLOY / "arm-auto-deploy.sh").read_text(encoding="utf-8")
+    assert marker in arm, "the schema gate is absent from the copy-detection list"

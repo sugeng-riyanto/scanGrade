@@ -120,6 +120,15 @@ DEFAULT_UNARMED_FILE = DEFAULT_STATE_DIR + "/unarmed"
 #: half of "why is nothing deploying?" that had no record at all. A quarantine is
 #: about a commit; this is about the step that stopped the run getting to one.
 DEFAULT_PREFLIGHT_FILE = DEFAULT_STATE_DIR + "/refused-before-merge"
+#: The diff of whatever blocked that run, beside the refusal it describes. The
+#: record names the file and never the change, and "keep or discard" is not a
+#: question a filename answers: an unintended leftover and a hotfix that never
+#: reached the repo look identical from outside and have opposite right answers.
+#: The runner's first line is the refusal's own timestamp, which is what ties the
+#: two together — `preflight_forget` removes both, but a run that died between the
+#: two writes, or a runner older than this file, must not have an old diff served
+#: as this refusal's evidence.
+DEFAULT_PREFLIGHT_DIFF_FILE = DEFAULT_STATE_DIR + "/refused-before-merge.diff"
 #: The runner's record of the last run that ended non-zero, whatever stopped it.
 #: Written by its `EXIT` trap and deleted by the next run that finishes, so its
 #: presence means the last tick stopped. The named refusals already had records;
@@ -229,6 +238,7 @@ GATE_KEYS = frozenset({
     "smoke_test",
     "claims_gate",
     "perf_gate",
+    "schema_gate",
 })
 
 #: Why the quarantine record itself could not be read. `held` carries no key of
@@ -583,6 +593,33 @@ PREFLIGHT_TRANSIENT = frozenset({"fetch_failed"})
 #: shown as it stands; the key only exists so the card has one sentence to give.
 PREFLIGHT_UNKNOWN_GATE = "unknown_gate"
 
+# ── the diff beside the refusal ──────────────────────────────────────────────
+# `none` is deliberately *not* "the file was unchanged": an older runner records
+# the filename and no diff, and "nothing changed" and "nothing was recorded" send
+# an operator to opposite actions. `stale` is the other distinction that matters —
+# a diff that cannot be proven to belong to *this* refusal is the wrong answer to
+# the right question, which is worse than saying nothing at all.
+PREFLIGHT_DIFF_NONE = "none"
+PREFLIGHT_DIFF_PRESENT = "present"
+PREFLIGHT_DIFF_UNREADABLE = "unreadable"
+PREFLIGHT_DIFF_MALFORMED = "malformed"
+PREFLIGHT_DIFF_STALE = "stale"
+PREFLIGHT_DIFF_KEYS = frozenset({PREFLIGHT_DIFF_NONE, PREFLIGHT_DIFF_PRESENT,
+                                 PREFLIGHT_DIFF_UNREADABLE, PREFLIGHT_DIFF_MALFORMED,
+                                 PREFLIGHT_DIFF_STALE})
+#: Prefix of the runner's own line where it cut a diff short. The card searches for
+#: this literal so it can say the *record* is truncated rather than let a shortened
+#: diff read as a smaller change than it is; a test holds the two files to it.
+PREFLIGHT_DIFF_MARK = "[sg: diff truncated at"
+#: How much of the diff the page is handed. The runner bounds what it writes; this
+#: bounds what is rendered, because a page is not the place to read four thousand
+#: lines and the count of the rest is more useful than the rest.
+PREFLIGHT_DIFF_SHOWN = 60
+#: A timestamp as `date -Is` writes it — the diff's first line, and the refusal's
+#: own `at`. Matched in full: a header that is not one is not this file.
+_DIFF_HEADER_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
+
 # ── what the runner can end with ─────────────────────────────────────────────
 # `systemctl status scangrade-deploy` reports one number and no words, so a reader
 # with no shell had a journal they could not read. Every code the runner can leave
@@ -620,6 +657,7 @@ EXIT_CODES: dict[int, str] = {
     15: "blocked",      # the box is not armed to check a release
     16: "rolled_back",  # the release removed Gate 0
     17: "refused",      # the checkout's index is locked and will not be forced
+    18: "rolled_back",  # the release names objects the database does not have
 }
 
 #: The phases a run passes through, as the runner names them in its record. A step
@@ -628,7 +666,7 @@ EXIT_CODES: dict[int, str] = {
 #: here shows as itself rather than as a guess.
 RUN_STEPS = frozenset({
     "start", "lock", "identity", "armament", "checkout", "fetch", "snapshot",
-    "merge", "dependencies", "compile", "construct", "theme", "reload",
+    "merge", "dependencies", "compile", "construct", "theme", "schema", "reload",
     "verify", "done",
 })
 
@@ -684,7 +722,57 @@ PERF_HELD_KEYS = frozenset({PERF_HELD_NONE, PERF_HELD_PRESENT,
                             PERF_HELD_UNREADABLE})
 
 
-def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
+def _attach_diff(state: dict, diff: dict) -> None:
+    """Fold a diff reading into the refusal's own state, under `diff_` names."""
+    state["diff_key"] = diff["key"]
+    state["diff_path"] = diff["path"]
+    state["diff_reason"] = diff["reason"]
+    state["diff_lines"] = diff["lines"]
+    state["diff_total"] = diff["total"]
+    state["diff_more"] = diff["more"]
+    state["diff_truncated"] = diff["truncated"]
+
+
+def preflight_diff_state(path: pathlib.Path, *, at: str | None) -> dict:
+    """The diff the runner recorded for the refusal it recorded, or why not.
+
+    `at` is the refusal's own timestamp, and it is not a formality: a diff is
+    evidence about *one* refusal, so anything that cannot be proven to belong to
+    this one is reported `stale` and never shown. A missing diff is `none` rather
+    than an empty change, for the same reason a failed `git status` is not a clean
+    tree.
+    """
+    state: dict = {"path": str(path), "key": PREFLIGHT_DIFF_NONE, "reason": None,
+                   "lines": [], "total": 0, "more": 0, "truncated": False}
+    text, why = _read(path)
+    if text is None:
+        if why != "absent":
+            state["key"] = PREFLIGHT_DIFF_UNREADABLE
+            state["reason"] = why
+        return state
+
+    lines = text.splitlines()
+    header = lines[0].strip() if lines else ""
+    if not _DIFF_HEADER_RE.fullmatch(header):
+        state["key"] = PREFLIGHT_DIFF_MALFORMED
+        state["reason"] = header or None
+        return state
+    if not at or header != at:
+        state["key"] = PREFLIGHT_DIFF_STALE
+        state["reason"] = header
+        return state
+
+    body = lines[1:]
+    state["key"] = PREFLIGHT_DIFF_PRESENT
+    state["total"] = len(body)
+    state["truncated"] = any(line.startswith(PREFLIGHT_DIFF_MARK) for line in body)
+    state["lines"] = body[:PREFLIGHT_DIFF_SHOWN]
+    state["more"] = max(0, len(body) - PREFLIGHT_DIFF_SHOWN)
+    return state
+
+
+def preflight_state(path: pathlib.Path, *, now: _dt.datetime,
+                    diff_path: pathlib.Path | None = None) -> dict:
     """The last refusal to get a release merged, as the runner recorded it.
 
     Five positional lines, the first four being the record's header: the step, the
@@ -702,12 +790,20 @@ def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
         "gate": None, "gate_key": None, "at": None, "age_seconds": None,
         "exit_code": None, "commit": None, "short": None, "detail": None,
         "reason": None,
+        "diff_key": PREFLIGHT_DIFF_NONE, "diff_path": str(diff_path) if diff_path else None,
+        "diff_reason": None, "diff_lines": [], "diff_total": 0, "diff_more": 0,
+        "diff_truncated": False,
     }
     text, why = _read(path)
     if text is None:
         if why != "absent":
             state["key"] = PREFLIGHT_UNREADABLE
             state["reason"] = why
+        # A diff with no refusal beside it describes a tick that is already over.
+        # Read rather than ignored: it is the one way a leftover diff could be
+        # taken for this refusal's, and `at=None` makes that impossibility explicit.
+        if diff_path is not None:
+            _attach_diff(state, preflight_diff_state(diff_path, at=None))
         return state
 
     lines = text.splitlines()
@@ -719,6 +815,8 @@ def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     if not re.fullmatch(r"[a-z0-9_]{1,40}", gate):
         state["key"] = PREFLIGHT_MALFORMED
         state["reason"] = gate or None
+        if diff_path is not None:
+            _attach_diff(state, preflight_diff_state(diff_path, at=None))
         return state
 
     state["present"] = True
@@ -734,6 +832,11 @@ def preflight_state(path: pathlib.Path, *, now: _dt.datetime) -> dict:
     # A header with nothing after it is still a refusal on record: the silence is
     # the command's, not this page's licence to say nothing was refused.
     state["detail"] = body or None
+    # The diff must name *this* refusal's timestamp. `state["at"]` is the value the
+    # runner wrote two lines above, so a diff from an earlier tick fails the match
+    # and is reported stale instead of being shown beside it.
+    if diff_path is not None:
+        _attach_diff(state, preflight_diff_state(diff_path, at=state["at"]))
     return state
 
 
@@ -2040,6 +2143,7 @@ REASON_KEYS = frozenset({
 
 def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            quarantine_file=None, unarmed_file=None, preflight_file=None,
+           preflight_diff_file=None,
            last_stop_file=None, request_dir=None, release_request=None,
            perf_history_file=None, perf_baseline_file=None, refusals_dir=None,
            now: _dt.datetime | None = None) -> dict:
@@ -2062,7 +2166,10 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
     preflight_file = pathlib.Path(
         preflight_file or os.environ.get("SCANGRADE_PREFLIGHT_FILE")
         or DEFAULT_PREFLIGHT_FILE)
-    preflight = preflight_state(preflight_file, now=now)
+    preflight_diff_file = pathlib.Path(
+        preflight_diff_file or os.environ.get("SCANGRADE_PREFLIGHT_DIFF_FILE")
+        or DEFAULT_PREFLIGHT_DIFF_FILE)
+    preflight = preflight_state(preflight_file, now=now, diff_path=preflight_diff_file)
     last_stop_file = pathlib.Path(
         last_stop_file or os.environ.get("SCANGRADE_LAST_STOP_FILE")
         or DEFAULT_LAST_STOP_FILE)

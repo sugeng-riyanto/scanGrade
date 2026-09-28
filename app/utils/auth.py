@@ -247,8 +247,19 @@ def list_all_auth_users(*, per_page: int = 1000,
 
 
 def _wants_json():
+    """Does the caller read a JSON body, rather than a page it will render?
+
+    Any path segment named ``api``, not only a route that *starts* with one. This app
+    nests its API endpoints under a role prefix — ``/super-admin/api/...``,
+    ``/teacher/api/...``, ``/wb/teacher/api/...`` — and those were exactly the ones
+    where a refusal answered an HTML redirect to code that does
+    ``.then(r => r.json())``, so the promise threw and the button looked dead. Every
+    route whose path names an ``api`` segment without *starting* with ``/api/``
+    serves JSON (checked against the app's own rule set), so the wider test is the
+    honest one.
+    """
     accept = request.headers.get("Accept", "")
-    return "application/json" in accept or request.path.startswith("/api/")
+    return "application/json" in accept or "/api/" in request.path
 
 
 def set_auth_cookie(response, key, value, max_age=86400, httponly=True):

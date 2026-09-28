@@ -582,7 +582,7 @@
     </div>
 
     <!-- CREATE PENGUMUMAN MODAL -->
-    <div x-show="showCreatePengumuman" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showCreatePengumuman=false">
+    <div x-show="showCreatePengumuman" x-cloak class="fixed inset-0 sg-layer-dialog flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showCreatePengumuman=false">
         <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-5">
                 <h2 class="font-extrabold text-surface-800"><i class="fas fa-bullhorn text-primary-500 mr-2"></i><span x-text="t('Buat Pengumuman','New Announcement')"></span></h2>
@@ -668,7 +668,7 @@
     </div>
 
     <!-- PENGUMUMAN DETAIL MODAL -->
-    <div x-ref="pengumumanDetailModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="$refs.pengumumanDetailModal.classList.add('hidden')">
+    <div x-ref="pengumumanDetailModal" class="hidden fixed inset-0 sg-layer-dialog flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="$refs.pengumumanDetailModal.classList.add('hidden')">
         <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="font-extrabold text-surface-800 text-lg" x-text="selectedPengumuman?.title"></h3>
@@ -751,7 +751,7 @@
     </div>
 
     <!-- EDIT PENGUMUMAN MODAL -->
-    <div x-show="showEditPengumuman" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showEditPengumuman=false">
+    <div x-show="showEditPengumuman" x-cloak class="fixed inset-0 sg-layer-dialog flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" @click.self="showEditPengumuman=false">
         <div class="bg-white rounded-2xl p-6 shadow-2xl w-full max-w-lg">
             <div class="flex items-center justify-between mb-5">
                 <h2 class="font-extrabold text-surface-800"><i class="fas fa-pen text-primary-500 mr-2"></i><span x-text="t('Edit Pengumuman','Edit Announcement')"></span></h2>

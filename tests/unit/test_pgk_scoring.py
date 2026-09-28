@@ -533,7 +533,14 @@ class TestTheModeReachesEveryGrader:
     functional test that would have to cover every route and every future one.
     """
 
-    SCORING_FILES = ("api.py", "student.py", "teacher.py", "deadline_service.py")
+    #: Every file that marks a paper. `super_admin.py` (the OMR bench) and
+    #: `omr_tasks.py` (the Celery worker) were added when the percentage a pupil is
+    #: shown began to move with the share: those two write the same `score` column,
+    #: so they must read the mode too, or a PGK is graded by the AKM default there
+    #: whatever the teacher chose. Neither carries a `question_weights` select, so
+    #: the column guard below stays satisfied by the two columns they already read.
+    SCORING_FILES = ("api.py", "student.py", "teacher.py", "deadline_service.py",
+                     "super_admin.py", "omr_tasks.py")
 
     def _sources(self):
         for name in self.SCORING_FILES:
@@ -551,6 +558,33 @@ class TestTheModeReachesEveryGrader:
             "a scoring site calls earned_points without the question's marking "
             "mode, so a teacher's 2/1/0 choice is graded all-or-nothing:\n  "
             + "\n  ".join(offenders))
+
+    def test_every_objective_result_call_hands_it_the_mode(self):
+        """The same rule for the *other* grader.
+
+        `objective_result` now awards a part-rule question its share, and a share is
+        read through the mode — so this call has the identical silent failure: a
+        caller that omits it grades a PGK by the default whatever the teacher chose,
+        and the pupil's "MCQ Score" card moves to the wrong number.
+        """
+        offenders = []
+        for path in self._sources():
+            text = path.read_text(encoding="utf-8")
+            for args in _call_arguments(text, "objective_result"):
+                if "scoring" not in args:
+                    offenders.append(f"{path.relative_to(ROOT)}: {args.strip()[:110]}")
+        assert not offenders, (
+            "an objective_result call omits the marking mode, so a PGK scores by "
+            "the default whatever the teacher chose:\n  " + "\n  ".join(offenders))
+
+    def test_the_objective_result_scan_finds_the_calls(self):
+        """A guard that reads nothing passes for ever."""
+        calls = [args for path in self._sources()
+                 for args in _call_arguments(path.read_text(encoding="utf-8"),
+                                             "objective_result")]
+        assert len(calls) >= 8, (
+            f"the scan found {len(calls)} objective_result calls, expected at least "
+            "eight — the files or the call shape have changed")
 
     def test_the_exam_rows_those_sites_read_carry_the_column(self):
         """The other half. A select that reads the weights but not the modes reads
@@ -574,6 +608,119 @@ class TestTheModeReachesEveryGrader:
         assert len(calls) >= 4, (
             f"the scan found {len(calls)} scoring calls, expected at least four — "
             "the files or the call shape have changed")
+
+
+# ── 12b. the percentage the pupil is shown moves with the share ──────────────
+#
+# `score` is the number behind the pupil's "MCQ Score" card and `final_score`
+# behind "Final". A PGK used to be all-or-nothing in `score` — one statement short
+# and the question counted as wrong — while the weighted total paid the AKM share,
+# so a pupil read **Final 75 beside MCQ Score 50** for one sitting. Two numbers on
+# one paper that disagree is a defect a parent will find, so the share the pupil
+# earned in the weighted total has to be the share in this percentage too.
+#
+# The two facts that make this safe, and both are asserted here: a paper with no
+# part-rule type is scored exactly as before (so no published mark moves), and the
+# mode is what decides the share (a PGK in `proportional` mode earns its own
+# fraction, not the AKM ladder's).
+
+class TestTheShareReachesThePercentage:
+    """`objective_result` awards a part-rule question its share, not a 0/1."""
+
+    MODES = {"0": "akm_standard", "1": "akm_standard"}
+
+    def _pgk_paper(self, wrong_on_q0, mode="akm_standard"):
+        """Two six-statement ladder-band questions; the first is `wrong_on_q0`
+        statements short."""
+        key = {"0": bool_key([True] * 6), "1": bool_key([True] * 6)}
+        q0 = [True] * (6 - wrong_on_q0) + [False] * wrong_on_q0
+        answers = {"0": answer_from(q0), "1": answer_from([True] * 6)}
+        modes = {"0": mode, "1": mode}
+        types = {str(i): PGK for i in range(2)}
+        return types, key, answers, modes
+
+    def test_a_partly_right_pgk_earns_its_share_in_the_percentage(self):
+        types, key, answers, modes = self._pgk_paper(wrong_on_q0=1)
+        result = qt.objective_result(types, key, answers, 2, modes)
+        assert result.correct == 1, "only one of the two questions is wholly right"
+        assert result.out_of == 2 and result.credit == pytest.approx(1.5), (
+            "the numerator has to carry the half the pupil actually earned")
+        assert result.score == pytest.approx(75.0), (
+            "a pupil one statement short on one of two questions was paid 50% while "
+            "the weighted total paid 75 — the two cards must agree on one paper")
+
+    def test_a_paper_without_a_part_rule_is_scored_exactly_as_before(self):
+        """The marks already in students' hands must not move.
+
+        No PGK, so `credit` is the count of correct questions and `score` is the
+        expression that has marked every paper so far.
+        """
+        types = {str(i): qt.MCQ for i in range(10)}
+        key = {str(i): "A" for i in range(10)}
+        seven = {str(i): "A" for i in range(7)}
+        result = qt.objective_result(types, key, seven, 10)
+        assert result.score == 70.0 and result.correct == 7
+        assert result.credit == 7.0, (
+            "an all-or-nothing answer is worth one whole question in the numerator")
+
+    def test_the_binary_band_still_costs_the_whole_question(self):
+        """Five statements, two categories: one mistake is the AKM cliff, not a share."""
+        key = {"0": bool_key([True] * 5)}
+        answers = {"0": answer_from([True] * 4 + [False])}
+        result = qt.objective_result({"0": PGK}, key, answers, 1,
+                                      {"0": "akm_standard"})
+        assert result.score == 0.0, (
+            "the binary band earns nothing for one mistake — the cliff the builder's "
+            "simulator shows has to be the cliff the pupil gets")
+
+    def test_one_mistake_at_six_statements_earns_half_in_the_percentage(self):
+        key = {"0": bool_key([True] * 6)}
+        answers = {"0": answer_from([True] * 5 + [False])}
+        result = qt.objective_result({"0": PGK}, key, answers, 1,
+                                      {"0": "akm_standard"})
+        assert result.score == 50.0
+
+    def test_the_mode_is_consulted_rather_than_the_akm_default(self):
+        """A mode the percentage ignores is a mode the teacher did not pick."""
+        key = {"0": bool_key([True] * 6)}
+        answers = {"0": answer_from([True] * 5 + [False])}  # 5 right, 1 wrong
+        got = {
+            mode: qt.objective_result({"0": PGK}, key, answers, 1, {"0": mode}).score
+            for mode in ("akm_standard", "proportional", "all_or_nothing")
+        }
+        assert got["akm_standard"] == 50.0
+        # `score` is rounded to two places, so the reference is rounded too.
+        assert got["proportional"] == pytest.approx(round((5 - 1) / 6 * 100, 2))
+        assert got["all_or_nothing"] == 0.0
+
+    def test_a_matching_question_earns_no_share_without_a_scheme(self):
+        """The freeze, kept beside the PGK tests because it is the other half.
+
+        A matching (or drag & drop, or ordering) question earns a share only when the
+        *paper* carries a scheme. No paper here does, so it stays all-or-nothing in
+        this percentage — letting it earn its half would silently move every mark
+        already returned to a pupil, which is the one thing this change must not do.
+        """
+        result = qt.objective_result(
+            {"0": "match"}, {"0": {"1": "b", "2": "a"}},
+            {"0": {"1": "b", "2": "c"}}, 1)
+        assert result.score == 0.0, (
+            "one of two pairs right earned a share with no scheme on the paper")
+
+    def test_the_two_cards_agree_on_a_pgk_paper_with_equal_weights(self):
+        """The statement of the whole request, as one equation.
+
+        `score` (the "MCQ Score" card) and the weighted total behind `final_score`
+        (the "Final" card) are the same fraction of one paper, so a 50/50 paper puts
+        the same number on both.
+        """
+        types, key, answers, modes = self._pgk_paper(wrong_on_q0=1)
+        percent = qt.objective_result(types, key, answers, 2, modes).score
+        weights = {"0": 50.0, "1": 50.0, qt.SCHEME_KEY: {"partial": False}}
+        earned, _graded = qt.earned_points(types, key, answers, weights, 2, modes)
+        assert percent == pytest.approx(earned) == pytest.approx(75.0), (
+            "the 'MCQ Score' percentage and the weighted 'Final' disagree on one "
+            "paper — the defect this change exists to end")
 
 
 # ── 13. mode 1 at its boundary, stated as the rule and swept ─────────────────
@@ -785,3 +932,248 @@ class TestTheEditorAndTheAnswerControl:
         around = around[:around.index("}") + 1]
         assert "pgk" not in around, (
             "PGK categories are being shuffled, which moves the correct answer")
+
+
+# ── 16. the review a pupil and a teacher read, statement by statement ────────
+
+def review_of(key, answer, mode="akm_standard"):
+    """The one call both review surfaces make, in the grader's argument order."""
+    return qt.pgk_review(mode, key, answer)
+
+
+class TestThePerStatementReview:
+    """`pgk_review` explains one marked answer judgement by judgement.
+
+    Every number it prints is one the grader produced — including the
+    counterfactual ("what would this answer earn if only this one judgement were
+    right"), which is how a pupil sees that the same single slip costs the whole
+    question at five statements and half of it at six. The counterfactual is a
+    call to `pgk_score`, not a rule written a second time: a review that agreed
+    with itself instead of with the marking engine would tell a pupil the wrong
+    thing about the paper in front of them.
+    """
+
+    def test_one_row_per_judgement_with_the_labels_the_pupil_saw(self):
+        key = pgk_key(["Benar", "Salah"], [0, 1, 0], ["A", "B", "C"])
+        review = review_of(key, [0, 0, 0])
+        rows = review["statements"]
+        assert [r["number"] for r in rows] == [1, 2, 3]
+        assert [r["text"] for r in rows] == ["A", "B", "C"]
+        assert [r["right"] for r in rows] == [True, False, True]
+        assert [r["chosen_label"] for r in rows] == ["Benar", "Benar", "Benar"]
+        assert [r["correct_label"] for r in rows] == ["Benar", "Salah", "Benar"]
+        assert (review["right"], review["misses"]) == (2, 1)
+
+    def test_the_share_it_prints_is_the_grader_s_share(self):
+        for n, wrong in ((3, 1), (5, 1), (6, 2), (6, 3), (8, 4)):
+            key = pgk_key(["Benar", "Salah"], [0] * n)
+            ans = _answer_with(n, wrong)
+            review = review_of(key, ans)
+            assert review["share"] == qt.pgk_score("akm_standard", key, ans)
+            assert review["misses"] == wrong
+
+    def test_at_five_statements_one_slip_is_the_whole_question(self):
+        key = pgk_key(["Benar", "Salah"], [0] * 5)
+        review = review_of(key, _answer_with(5, 1))
+        assert review["band"] == "binary" and review["share"] == 0.0
+        wrong_rows = [r for r in review["statements"] if not r["right"]]
+        assert [r["would_share"] for r in wrong_rows] == [1.0]
+        assert [r["gain"] for r in wrong_rows] == [1.0], (
+            "repairing the only wrong judgement is exactly what the 1/0 band pays for")
+
+    def test_at_five_with_two_slips_no_single_repair_is_enough(self):
+        """The honest half of the cliff: with two wrong, fixing either one alone
+        still scores nothing — the band pays only for a clean paper."""
+        key = pgk_key(["Benar", "Salah"], [0] * 5)
+        review = review_of(key, _answer_with(5, 2))
+        assert review["share"] == 0.0
+        assert [r["gain"] for r in review["statements"] if not r["right"]] == [0.0, 0.0]
+        assert review["wrong_before_fall"] == 0
+
+    def test_at_six_a_single_repair_reaches_the_middle_rung(self):
+        key = pgk_key(["Benar", "Salah"], [0] * 6)
+        review = review_of(key, _answer_with(6, 3))
+        assert review["band"] == "ladder" and review["share"] == 0.0
+        missed = [r for r in review["statements"] if not r["right"]]
+        assert [r["would_share"] for r in missed] == [0.5] * 3
+        assert [r["gain"] for r in missed] == [0.5] * 3, (
+            "three wrong at six is zero, and repairing any one of them reaches the middle rung")
+
+    def test_the_rungs_are_probed_through_the_grader(self):
+        six = pgk_key(["Benar", "Salah"], [0] * 6)
+        review = review_of(six, _answer_with(6, 0))
+        assert [(r["wrong_max"], r["share"]) for r in review["rungs"]] == [
+            (0, 1.0), (2, 0.5), (6, 0.0)]
+        assert review["rung"] == 0 and review["wrong_before_fall"] == 0, (
+            "a clean paper is already on the top rung")
+
+        middle = review_of(six, _answer_with(6, 1))
+        assert (middle["rung"], middle["wrong_before_fall"]) == (1, 1), (
+            "one wrong at six may take one more before the share falls to zero")
+
+        five = pgk_key(["Benar", "Salah"], [0] * 5)
+        r5 = review_of(five, _answer_with(5, 1))
+        assert [(x["wrong_max"], x["share"]) for x in r5["rungs"]] == [(0, 1.0), (5, 0.0)]
+        assert r5["rung"] == 1 and r5["wrong_before_fall"] == 0
+
+    def test_a_mode_other_than_akm_takes_its_own_rungs(self):
+        """The ladder is read from the grader, so the day a second mode is
+        selectable the review describes *that* mode rather than AKM's."""
+        key = pgk_key(["Benar", "Salah"], [0] * 3)
+        ans = _answer_with(3, 1)
+        assert review_of(key, ans, "akm_standard")["share"] == 0.0
+        prop = review_of(key, ans, "proportional")
+        # (right - wrong) / total: two right, one wrong, three statements.
+        assert prop["share"] == round(1 / 3, 4) == round(qt.pgk_score("proportional", key, ans), 4)
+        assert [r["share"] for r in prop["rungs"]] == [1.0, round(1 / 3, 4), 0.0]
+        assert [r["wrong_max"] for r in prop["rungs"]] == [0, 1, 3], (
+            "the floor run starts at two wrong, where the correction has eaten the marks")
+
+    def test_a_blank_row_is_not_a_wrong_judgement_but_still_costs_a_miss(self):
+        """The page keeps them visually apart; the ladder does not — the grader
+        cannot award a row nobody answered, and the review may not pretend it can."""
+        key = pgk_key(["Benar", "Salah"], [0, 1, 0])
+        answer = [0, None, 1]
+        review = review_of(key, answer)
+        rows = review["statements"]
+        assert [r["blank"] for r in rows] == [False, True, False]
+        assert [r["right"] for r in rows] == [True, False, False]
+        assert (review["right"], review["wrong"], review["blank"]) == (1, 1, 1)
+        assert review["misses"] == 2
+        assert review["share"] == qt.pgk_score("akm_standard", key, answer)
+
+    def test_an_unanswered_question_reviews_as_every_row_blank(self):
+        key = pgk_key(["Benar", "Salah"], [0] * 5)
+        review = review_of(key, "")
+        assert review["available"] is True
+        assert review["answered"] is False and review["unreadable"] is False
+        assert all(r["blank"] for r in review["statements"])
+        assert review["share"] == 0.0
+        assert [r["gain"] for r in review["statements"]] == [0.0] * 5, (
+            "on a 1/0 band one repaired row is still not a clean paper")
+
+    @pytest.mark.parametrize("n", [3, 5, 6, 8])
+    def test_the_share_agrees_with_the_grader_at_every_length(self, n):
+        """The one invariant the review may never break, swept rather than sampled:
+        an untouched question, a half-answered one and a wrong one all report the
+        share the marking engine would award."""
+        key = pgk_key(["Benar", "Salah"], [0] * n)
+        for answer in ("", [None] * n, _answer_with(n, n // 2), _answer_with(n, n)):
+            assert review_of(key, answer)["share"] == round(qt.pgk_score("akm_standard", key, answer), 4)
+
+    def test_an_answer_that_is_not_one_judgement_per_statement_is_flagged(self):
+        """A stored answer of the wrong width is a fact about the data, not a
+        pupil's opinion — so it is named rather than quietly drawn as blanks."""
+        key = pgk_key(["Benar", "Salah"], [0, 1, 0])
+        review = review_of(key, [0, 1])
+        assert review["available"] is True and review["unreadable"] is True
+        assert all(r["blank"] for r in review["statements"])
+
+    def test_a_key_that_cannot_be_read_reviews_as_nothing_rather_than_as_zero(self):
+        assert review_of({}, [0, 1])["available"] is False
+        assert review_of(pgk_key([], [0, 1]), [0, 1])["available"] is False
+        assert review_of(pgk_key(["Benar", "Salah"], [0, 1], []), [0, 1])["available"] is False
+        assert review_of(pgk_key(["Benar", "Salah"], [0, 1]) , [0, 1])["available"] is True
+
+    @staticmethod
+    def function_body(source: str, name: str) -> str:
+        start = source.index(f"def {name}")
+        end = source.find("\ndef ", start + 10)
+        return source[start:end if end != -1 else len(source)]
+
+    def test_the_review_is_not_a_second_grader(self):
+        """Read from the functions' own bodies: a rule restated there is a rule that
+        will disagree with the marks it is explaining."""
+        source = (ROOT / "app" / "services" / "question_types.py").read_text(encoding="utf-8")
+        assert "def pgk_review" in source, "the review surface has no builder"
+        bodies = [self.function_body(source, name)
+                  for name in ("pgk_band_rungs", "pgk_review")]
+        assert sum(body.count("pgk_score(") for body in bodies) >= 3, (
+            "the review must score through the grader — the rungs and each row's "
+            "counterfactual are its calls")
+        for body in bodies:
+            assert "0.5" not in body, "the AKM rungs are being restated in the review"
+            assert "/ total" not in body and "AKM_PARTIAL_WRONG" not in body, (
+                "a marking rule has been copied out of `pgk_score`")
+
+
+class TestTheReviewScreens:
+    """Both surfaces read one builder, and each respects its own language rule."""
+
+    STUDENT = ROOT / "app" / "templates" / "student" / "result_detail.html"
+    TEACHER = ROOT / "app" / "templates" / "teacher" / "grade_detail.html"
+    OPEN = "{# sg-pgk-review"
+    CLOSE = "{# /sg-pgk-review #}"
+
+    def block(self, page: Path) -> str:
+        text = page.read_text(encoding="utf-8")
+        assert text.count(self.OPEN) == 1 and text.count(self.CLOSE) == 1, (
+            "the review block is not delimited exactly once")
+        return text[text.index(self.OPEN):text.index(self.CLOSE)]
+
+    @pytest.mark.parametrize("page", [STUDENT, TEACHER])
+    def test_both_surfaces_ask_the_grader_for_the_breakdown(self, page):
+        block = self.block(page)
+        assert "q_pgk_review(" in block, f"{page.name} draws no per-statement review"
+        assert "pgk.statements" in block, f"{page.name} does not draw the rows"
+        # Both guards, in order: the breakdown is for a PGK question, and only for
+        # a key the grader could read. Without the second, an unreadable key draws
+        # an empty table next to a mark instead of saying nothing.
+        assert "q_kind(qtype) == 'pgk'" in block[:block.index("q_pgk_review(")], (
+            f"{page.name} would draw the breakdown for any question with a key")
+        assert "pgk.available" in block[:block.index("pgk.statements")], (
+            f"{page.name} would draw an empty table where the review has no answer")
+
+    def test_the_pupil_sees_it_only_once_the_marks_are_released(self):
+        """The key, statement by statement, is *the key*: drawn before the teacher
+        releases the marks it hands over every correct judgement on the paper. The
+        guard has to be the block's own — the row above it is a different branch,
+        and the answer/key line beside it closes before this block begins."""
+        block = self.block(self.STUDENT)
+        guard = block[:block.index("q_pgk_review(")]
+        assert "graded" in guard and "published" in guard, (
+            "the breakdown would reveal per-statement marks before release")
+
+    @pytest.mark.parametrize("page", [STUDENT, TEACHER])
+    def test_the_breakdown_table_scrolls_on_a_phone(self, page):
+        """Four columns in a card that clips hides the key off-screen on a phone.
+
+        This is how the defect was found: the table was placed in a card that
+        clipped, and the suite-wide rule in `test_mobile_layout.py` could not see
+        it — that rule asked whether a `print-only` marker appeared anywhere before
+        a table, and this page opens one 170 lines higher for the printed answer
+        summary. The general rule now measures containment instead (see
+        `test_the_review_table_is_not_excused_by_the_print_block_above_it` there),
+        so this table *is* covered twice. The local copy stays because it is the
+        feature's own contract, reading the block between its own markers on both
+        surfaces, and it does not move if the general rule's exemption list ever
+        grows to include this page.
+        """
+        block = self.block(page)
+        at = block.index("<table")
+        assert "overflow-x-auto" in block[max(0, at - 900):at], (
+            f"{page.name}'s breakdown clips its answer columns instead of scrolling")
+        opening = block[at:block.index(">", at) + 1]
+        assert "min-w-[" in opening, (
+            f"{page.name}'s breakdown scrolls but has no minimum width, so a phone "
+            "squeezes the four columns instead of scrolling them")
+
+    def test_the_pupil_copy_is_bilingual_because_that_page_toggles(self):
+        block = self.block(self.STUDENT)
+        assert "lang==='en'" in block, (
+            "new copy on a toggling page must be a pair, or the coverage floor drops")
+
+    def test_the_teacher_copy_is_not_paired_because_that_page_is_pinned(self):
+        """`grade_detail.html` declares `content_lang = 'id'` — a `t()` pair there
+        is copy that can never switch, which the language gate refuses.
+
+        Matched as a *call*, not as the substring `t('`: every `…get('key')` in the
+        block carries those three characters, so the crude form fails on the review
+        even when it is written in one language, which is the shape of a guard that
+        gets deleted rather than obeyed."""
+        text = self.TEACHER.read_text(encoding="utf-8")
+        assert "content_lang = 'id'" in text
+        block = self.block(self.TEACHER)
+        assert "lang==='en'" not in block, "a toggle ternary on a page with no toggle"
+        pair_call = re.compile(r"(?<![\w.])s?g?t\(\s*'[^']*'\s*,\s*'[^']*'\s*\)", re.I)
+        assert not pair_call.search(block), "dead bilingual copy on a page with no toggle"

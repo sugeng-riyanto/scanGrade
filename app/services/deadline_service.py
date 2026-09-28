@@ -155,7 +155,7 @@ def _closed_payload(supabase, row, exam, ended_at) -> dict:
     scoring = _as_json(exam.get("question_scoring"))
     earned, _graded = earned_points(question_types, answer_key, answers, weights, total,
                                    scoring)
-    score = objective_result(question_types, answer_key, answers, total).score
+    score = objective_result(question_types, answer_key, answers, total, scoring).score
     violations = count_penalized_violations(
         supabase, row.get("student_id"), row.get("exam_id"))
     penalty = calculate_graduated_penalty(violations, exam).get("penalty", 0)

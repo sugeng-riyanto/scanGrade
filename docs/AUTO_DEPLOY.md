@@ -51,14 +51,15 @@ bash /opt/scangrade/deploy/arm-auto-deploy.sh --check   # what is armed; changes
 bash /opt/scangrade/deploy/arm-auto-deploy.sh           # arm it — asks for your password once
 ```
 
-`--check` exits 0 only when all four gates have what they need, and names every
-missing piece otherwise, so a missing launcher, conf or roster is never reported
-as armed. It reads the installed file the way `/super-admin/deploy-status` does:
+`--check` exits 0 only when every gate has what it needs — the launcher, the three
+confs, the snapshot launcher, the roster, and the `DIRECT_URL` the schema gate reads
+the catalogue with — and names every missing piece otherwise, so a missing launcher,
+conf, credential or roster is never reported as armed. It reads the installed file the way `/super-admin/deploy-status` does:
 a launcher that execs the checkout is the arrangement, `@REPO@` still in the file
 means it was installed but never rendered, and anything else is a **copy** — whose
 missing gate blocks are printed by name, so "no theme gate, no claims gate, no
-performance gate, no quarantine" is a sentence an operator reads rather than a
-conclusion they have to reach. A password is never requested for a roster that
+performance gate, no quarantine, no schema gate" is a sentence an operator reads
+rather than a conclusion they have to reach. A password is never requested for a roster that
 cannot be parsed, and nothing is written at all in `--check`.
 
 ## The runner is never a copy
@@ -263,6 +264,52 @@ having no gate. The armament preflight below refuses the whole run, before anyth
 is fetched, when the box cannot run this gate at all — so reaching here with exit 2
 means the box changed between the two checks, and the rollback is the safe half of
 that race.
+
+## The gate on the live schema
+
+Every gate above reads the code or the box. None of them can see the failure this
+one exists for: a release whose **database is behind its code**. A migration is
+written, merged and deployed but never applied — or applied to the wrong project —
+and the app now names a table or a column production does not have. The box is
+green, the release deploys, and the first teacher to open the page that reads it
+gets a 500. Two migrations in this repository were found in exactly that state
+(`--verify` reported them `OUT`), which is why it is now a gate rather than a check
+somebody remembers to run.
+
+Before the app is reloaded — the same place the readability gate runs, where rolling
+back still costs nothing — the runner runs `apply_migration.py --verify`:
+
+```bash
+python deploy/apply_migration.py --verify --repo /opt/scangrade
+```
+
+read-only, and reads its exit code:
+
+| Result | Outcome |
+|---|---|
+| every declared object is present | deploy |
+| exit 6 — a file declares objects the schema does not have | roll back and **quarantine** (exit 18) |
+| exit 1 — the box could not measure (no `DIRECT_URL`, or a database it cannot reach) | deploy, logged loudly |
+
+A gap is a property of the commit, so it quarantines: the next tick must not re-pull
+it. The refusal quotes the objects themselves — `MISSING  column
+profiles.preferences` — so the deploy-status page names *what* is missing rather
+than only the gate.
+
+Exit 1 is deliberately **not** a rollback. An unreachable database is a property of
+the box, not of the release, and a transient disconnect must not take a good release
+down. The one box problem that must not be waved through — no `DIRECT_URL` at all —
+is caught earlier and harder: `--check` reports it as part of what arms the box, so
+the preflight refuses the whole run (exit 15) before any release is fetched. It is
+the only gate that needs a database credential.
+
+Because a release that ships a migration is refused until the migration is applied,
+the order is: apply it, then release the quarantined commit —
+
+```bash
+python deploy/apply_migration.py supabase/migrations/038_x.sql --commit
+# then release that exact commit from /super-admin/deploy-status (or push a fix)
+```
 
 ## The gate on the published numbers
 
@@ -699,9 +746,9 @@ because a quarantine is a record about a commit.
 
 That check now also counts the smoke test's conf, because `SMOKE_ENFORCE` and
 `/etc/scangrade-smoke.conf` are what make "every role still works" a gate rather than
-a log line. `arm-auto-deploy.sh` itself is the definition of "armed" for all four
-gates; the deploy prints its report verbatim rather than keeping a second copy of
-the judgement.
+a log line, and the `DIRECT_URL` the schema gate reads the live catalogue with.
+`arm-auto-deploy.sh` itself is the definition of "armed" for all five gates; the
+deploy prints its report verbatim rather than keeping a second copy of the judgement.
 
 ### Seeing it without a shell
 
@@ -1301,6 +1348,11 @@ This is what showed that `20260608_fix_rls_policies.sql` never took effect and
 `20260608_usage_tracking.sql` was never applied: the first declares policies on
 `activation_codes`, a table no migration creates, so the SQL editor rolled the
 whole file back — taking its own `ADD COLUMN` statements with it.
+
+`--verify` is also run by the deploy runner itself, as the schema gate (see above):
+a release whose declared objects are not in the database is refused and quarantined,
+so a migration written but never applied can no longer reach production behind a
+green box.
 
 ### A migration pasted in by hand is invisible to that check
 

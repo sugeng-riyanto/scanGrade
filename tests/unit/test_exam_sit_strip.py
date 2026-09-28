@@ -47,6 +47,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 EXAM_PAGE = ROOT / "app" / "templates" / "student" / "take_exam.html"
 STUDENT_ROUTE = ROOT / "app" / "routes" / "student.py"
+#: The scale is app-wide, so it lives in the shared stylesheet — see
+#: tests/unit/test_layer_scale.py for the scale's own structure. This suite only
+#: resolves the page's rules against it.
+THEME_CSS = ROOT / "app" / "static" / "css" / "theme.css"
 
 NODE = shutil.which("node")
 needs_node = pytest.mark.skipif(NODE is None, reason="needs node to run the component")
@@ -526,17 +530,19 @@ def _pinned_rule() -> str:
 
 
 def _scale() -> dict[str, int]:
-    """The one ordered list of layer heights, read from the page's `:root`.
+    """The layer scale, read from the shared stylesheet it now lives in.
 
-    This is the single place a height is written on this page — the map returns in
-    declaration order, so a caller can ask not only what a layer is but whether the
-    list is still a list. A rule naming a raw number, or a panel choosing one by
-    eye, is the drift the scale exists to make impossible.
+    It used to be declared in this page's own `:root`, which is exactly what the
+    app-wide move removed: a page holding its own copy is a second source of truth
+    for a stack the rest of the app also has to agree with. The page still *reads*
+    it (its rules take `var(--sg-layer-*)`), so this resolves the page's rules
+    against the one list rather than parsing a local copy.
     """
-    root = re.search(r":root\s*\{([^}]*)\}", _style_block())
-    assert root, "the page has no `:root` block, so there is no layer scale"
-    pairs = re.findall(r"--sg-layer-([a-z0-9-]+):\s*(\d+)\s*;", root.group(1))
-    assert pairs, "the `:root` block declares no `--sg-layer-*` heights"
+    root = re.search(r":root\s*\{([^}]*)\}",
+                     THEME_CSS.read_text(encoding="utf-8"))
+    assert root, "the shared stylesheet has no `:root` block to hold the scale"
+    pairs = re.findall(r"--sg-layer-([a-z0-9-]+)\s*:\s*(\d+)\s*;", root.group(1))
+    assert pairs, "the shared `:root` block declares no `--sg-layer-*` heights"
     return {name: int(value) for name, value in pairs}
 
 
@@ -562,6 +568,41 @@ def _layer_named(name: str) -> int:
     scale = _scale()
     assert name in scale, f"`{name}` is not a line of the layer scale"
     return scale[name]
+
+
+#: The anti-cheat watermark is the one overlay on this page built in JavaScript,
+#: so its height is written in a JS string — neither in a rule (which
+#: `test_no_rule_on_this_page_chooses_a_height_by_eye` sweeps) nor in a `class=`
+#: attribute (which `test_every_full_screen_overlay_names_its_layer` sweeps).
+#: Both sweeps pass over it; this is the reader that does not.
+WATERMARK_ID = "anti-cheat-watermark"
+WATERMARK_Z_RE = re.compile(
+    r"id\s*=\s*['\"]" + re.escape(WATERMARK_ID) + r"['\"]"
+    r"[\s\S]{0,600}?z-index:\s*(var\(--sg-layer-([a-z0-9-]+)\)|\d+)")
+
+
+def _watermark_layer() -> str:
+    """The watermark's own height, exactly as written — a `var(...)` or a number."""
+    match = WATERMARK_Z_RE.search(source(EXAM_PAGE))
+    assert match, (
+        f"the watermark (`{WATERMARK_ID}`) writes no `z-index` of its own, so it "
+        "stacks by document order and can land anywhere")
+    return match.group(1)
+
+
+def _watermark_layer_name() -> str:
+    """The watermark's line of the scale, or a failure saying why it has none."""
+    raw = _watermark_layer()
+    match = re.match(r"var\(--sg-layer-([a-z0-9-]+)\)", raw)
+    assert match, (
+        f"the watermark picks its own height (`{raw}`) instead of naming a line of "
+        "the scale — and this is the one overlay the sweeping guards cannot see, "
+        "because it is written in JavaScript rather than in a rule or a class")
+    name = match.group(1)
+    assert name in _scale(), (
+        f"the watermark names `{name}`, which is not a line of the scale "
+        f"({', '.join(_scale())})")
+    return name
 
 
 #: A full-screen panel: the tag that carries `x-show="…"`, the state that raises
@@ -612,31 +653,71 @@ def test_the_strip_outranks_both_panels_that_cover_the_paper():
         "covered, which is the defect this exists to remove")
 
 
-def test_the_scale_is_one_ordered_list_with_no_shared_heights():
-    """The scale is the only place a height is written, so it has to behave like a
-    list: strictly increasing in the order it is declared — read top-down, each
-    line paints over the one before it — and no two layers handed the same number
-    by accident, which is how the terms agreement and the anti-cheat watermark both
-    came to read `9999`.
+def test_this_page_reads_the_shared_scale_instead_of_declaring_one():
+    """The page used to carry the scale itself. Now the scale is app-wide and lives
+    in `theme.css`, so what this page must not do is keep a second copy: a page
+    holding its own list is a stack the rest of the app cannot see, which is how
+    the app's panels came to be stacked by hand in the first place.
 
-    The canvas entries are a stacking context of their own inside a
-    `.full-canvas-wrap`, so they are held to the same rule separately rather than
-    compared with the page-level layers they never compete with.
+    The scale's own structure — the groups, the order, the uniqueness, the two
+    themes — is `tests/unit/test_layer_scale.py`'s subject now, so this asserts the
+    one thing that is about *this* page: it reads the shared list and declares
+    none of its own.
     """
-    scale = _scale()
-    groups = {
-        "canvas": {k: v for k, v in scale.items() if k.startswith("canvas-")},
-        "page": {k: v for k, v in scale.items() if not k.startswith("canvas-")},
+    page = _style_block()
+    declared = re.findall(r"--sg-layer-[a-z0-9-]+\s*:", page)
+    assert not declared, (
+        f"the exam page declares its own layer heights again ({declared}); the "
+        "scale is one list in app/static/css/theme.css")
+    whole_page = source(EXAM_PAGE)
+    for name in ("strip", "scrim", "modal", "gate", "watermark"):
+        assert name in _scale(), f"the shared scale no longer declares `{name}`"
+        # Read from the whole page, not the `<style>` block: the watermark takes
+        # its height in the JavaScript that draws it.
+        assert f"--sg-layer-{name}" in whole_page, (
+            f"the page never reads --sg-layer-{name}, so its rules are not on the "
+            "shared scale any more")
+
+
+def test_the_watermark_takes_its_height_from_the_scale():
+    """The anti-cheat watermark is built in JavaScript and appended to
+    `document.body`, so it is in neither of the two things the page-wide sweeps
+    read — the stylesheet's rules and each tag's `class=`. Every other overlay is
+    held to a line of the scale by those sweeps; this is the guard for the one
+    they pass over, and it fails if the stamps ever borrow another overlay's
+    height instead of having their own."""
+    name = _watermark_layer_name()
+    assert name == "watermark", (
+        f"the watermark takes `{name}`; the name stamps on the paper have their "
+        "own line of the scale, so one borrowed from another overlay is a height "
+        "kept in step by hand")
+
+
+def test_the_watermark_paints_under_every_layer_that_covers_the_paper():
+    """The stamps belong to the *paper*, and this pins the decision the move from
+    `9999` to `88` made rather than the number it moved to. At the old height the
+    watermark tied with the terms agreement and, being appended last, painted over
+    it — printing the student's own name across the dialog they were being asked
+    to read, and across the submit gate that ends the paper. So the watermark is
+    below every layer that covers the paper: the blockers that hide it behind a
+    blur, the strip pinned over those blockers (that row carries the student's
+    identity itself), the terms agreement read before the paper opens, and the
+    gate that ends it. Written as a relation, so the scale may be renumbered
+    without the suite losing the decision."""
+    watermark = _layer_named(_watermark_layer_name())
+    covering = {
+        "scrim": "the blockers that hide the paper behind a blur",
+        "strip": "the sit strip pinned over those blockers",
+        "modal": "the terms agreement read before the paper opens",
+        "gate": "the submit confirmation that ends the paper",
     }
-    for label, group in groups.items():
-        assert group, f"the {label} scale is empty"
-        values = list(group.values())
-        assert len(set(values)) == len(values), (
-            f"two {label} layers share a height, so one silently paints over the "
-            f"other: {group}")
-        assert values == sorted(values), (
-            f"the {label} scale is declared out of order, so 'the line above' no "
-            f"longer means 'paints over': {group}")
+    over = [name for name in covering if _layer_named(name) <= watermark]
+    assert not over, (
+        f"the watermark sits at {watermark} but these layers do not paint over "
+        "it: "
+        + ", ".join(f"{n} at {_layer_named(n)} ({covering[n]})" for n in over)
+        + " — a stamp over a panel prints the student's name across a dialog they "
+          "are reading")
 
 
 def test_no_rule_on_this_page_chooses_a_height_by_eye():
@@ -649,6 +730,74 @@ def test_no_rule_on_this_page_chooses_a_height_by_eye():
     tailwind = re.findall(r"\bz-\[(\d+)\]", source(EXAM_PAGE))
     assert not tailwind, (
         f"a panel picks a height by eye with a Tailwind arbitrary value: {tailwind}")
+    # The same rule over a tag's own attribute: a `style="…z-index:200…"` chooses a
+    # height outside the scale exactly as a raw rule does, and the canvas tools
+    # prove that attribute path is one this page really uses.
+    inline = re.findall(r"z-index:\s*(\d+)", source(EXAM_PAGE))
+    assert not inline, (
+        f"an overlay picks a height by eye in its own attribute: {inline}")
+
+
+FIXED_OVERLAY_RE = re.compile(r'class="([^"]*\bfixed inset-0\b[^"]*)"')
+
+
+def _viewport_overlays():
+    """Every full-screen overlay, with the layer it names — or ``None``.
+
+    Read raw from the markup and *not* filtered by whether a layer is present,
+    because the panel that hides the strip is exactly the one written without a
+    layer: `z-index: auto` stacks in document order, so a `fixed inset-0` placed
+    after the strip covers it with no number anywhere to notice.
+    """
+    out = []
+    for match in FIXED_OVERLAY_RE.finditer(source(EXAM_PAGE)):
+        attrs = match.group(1)
+        named = re.search(r"\bsg-layer-([a-z0-9-]+)", attrs)
+        out.append((named.group(1) if named else None, attrs))
+    return out
+
+
+#: Every layer allowed to paint over the sit strip, and why it is allowed. The
+#: strip carries the student's name and the language switch *while a panel covers
+#: the paper*, so a layer over it is a decision that has to be written down — a
+#: panel that arrives after the strip would otherwise cover it silently.
+STRIP_COVERING_LAYERS = {
+    "modal": "the terms agreement: the strip takes `strip-over` above it while the "
+             "terms are read, so only the pinned row is covered",
+    "gate": "the submit confirmation: ending the paper is a decision, and the strip "
+            "deliberately stops short of it",
+}
+
+
+def test_every_full_screen_overlay_names_its_layer():
+    """A `fixed inset-0` with no `sg-layer-*` sits at `z-index: auto`, so it paints
+    in document order — and every one of these is written *after* the strip, so it
+    covers it, and the identity and language controls with it, with nothing to
+    fail. This is the silent way a new panel hides the strip, which is the whole
+    reason the scale exists: a panel added without a line has to fail here until
+    it is given one."""
+    overlays = _viewport_overlays()
+    assert len(overlays) >= 4, (
+        "the page's full-screen overlays are not recognisable any more, so this "
+        "test would be checking nothing")
+    unnamed = [attrs for name, attrs in overlays if name is None]
+    assert not unnamed, (
+        "a full-screen overlay names no layer, so it stacks by document order and "
+        f"can cover the strip silently: {unnamed}")
+
+
+def test_only_the_registered_layers_may_paint_over_the_strip():
+    """The strip is the one row a student must still reach while a panel covers the
+    paper, so the set of layers that can paint over it is a written-down decision:
+    a new panel that outranks it fails here rather than quietly removing the
+    identity and language controls at the worst possible moment."""
+    pinned = _layer(_pinned_rule())
+    covering = {name for name, _attrs in _viewport_overlays()
+                if name and _layer_named(name) >= pinned}
+    assert covering == set(STRIP_COVERING_LAYERS), (
+        f"the layers that can paint over the strip are {sorted(covering)}, but the "
+        f"page registers {sorted(STRIP_COVERING_LAYERS)} — a new panel outranks the "
+        f"identity and language row without anyone having decided it should")
 
 
 def test_every_panel_layer_has_a_rule_that_takes_its_own_name():
@@ -656,10 +805,14 @@ def test_every_panel_layer_has_a_rule_that_takes_its_own_name():
     takes the *same* line of the scale. A class pointing at another line, or at a
     name the scale never declares, is a panel stacked by a typo — a height that
     reads correct in the markup and does nothing in the browser."""
+    # The classes moved to the shared stylesheet with the scale, so a rule found
+    # there is the normal case; the page's own block is still searched, because a
+    # page may scope a class of its own and that would be a rule all the same.
     block = _style_block()
+    shared = THEME_CSS.read_text(encoding="utf-8")
     for name in sorted({name for _show, name in _panels()}):
-        match = re.search(r"\.sg-layer-" + re.escape(name) + r"\s*\{([^}]*)\}",
-                          block)
+        pattern = r"\.sg-layer-" + re.escape(name) + r"\s*\{([^}]*)\}"
+        match = re.search(pattern, shared) or re.search(pattern, block)
         assert match, (
             f"no `.sg-layer-{name}` rule, so its panels carry a class with no "
             "height at all")

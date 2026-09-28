@@ -40,6 +40,10 @@ SNAPSHOT_BIN="${SG_SNAPSHOT_BIN:-/usr/local/bin/scangrade-db-snapshot}"
 CLAIMS_CONF="${SG_CLAIMS_CONF:-/etc/scangrade-claims.conf}"
 PERF_CONF="${SG_PERF_CONF:-/etc/scangrade-perf.conf}"
 SMOKE_CONF="${SG_SMOKE_CONF:-/etc/scangrade-smoke.conf}"
+#: The box's own .env, where DIRECT_URL lives. The schema gate is the one gate that
+#: needs a database credential, so this is read to judge whether the box can run it
+#: at all — the key's *presence* is the whole question, never its value.
+ENV_FILE="${SG_ENV_FILE:-$REPO/.env}"
 ROSTER_SRC="${SG_ROSTER_SRC:-/tmp/lt_roster.json}"
 ROSTER_DST="$REPO/.freebuff/lt_roster.json"
 LOG="${SG_LOG:-/tmp/installer.log}"
@@ -55,7 +59,7 @@ UNRENDERED='^[[:space:]]*REPO="@REPO@"'
 # The blocks a deploy script written after this one carries. A copy that predates
 # them runs every release without checking any of them, which is the thing worth
 # saying out loud; the names match the fail reasons the status page reports.
-GATE_BLOCKS="theme_gate claims_gate perf_gate quarantine"
+GATE_BLOCKS="theme_gate claims_gate perf_gate quarantine schema_gate"
 
 CHECK=0
 for arg in "$@"; do
@@ -134,6 +138,24 @@ report_state() {
     echo "   snapshot   : present ($SNAPSHOT_BIN)"
   else
     echo "   snapshot   : missing ($SNAPSHOT_BIN)"
+    armed=0
+  fi
+
+  # The schema gate holds a release against the live catalogue through DIRECT_URL,
+  # a credential no other gate needs — so a box without it can run every other check
+  # and none of this one, and would ship a release whose database is behind its code
+  # with nothing having looked. Presence is the whole question; --check must not open
+  # a connection to answer it, and it never prints the value.
+  if grep -qE '^(DIRECT_URL|DATABASE_URL)=' "$ENV_FILE" 2>/dev/null &&
+     ! grep -qE '^(DIRECT_URL|DATABASE_URL)=.*\[YOUR-PASSWORD\]' "$ENV_FILE" 2>/dev/null; then
+    printf '   %-10s : present — the schema gate can hold a release against the catalogue\n' \
+      "schema"
+  else
+    printf '   %-10s : MISSING — no DIRECT_URL in %s, so the schema gate cannot\n' \
+      "schema" "$ENV_FILE"
+    echo  "                verify a release, and a box that cannot check a release"
+    echo  "                deploys none. Put the session-mode pooler URL there"
+    echo  "                (Project Settings → Database) and re-run --check."
     armed=0
   fi
 
@@ -288,7 +310,7 @@ elif [ "$state" != "0" ]; then
   echo "INSTALLER OK, BUT THE BOX IS NOT FULLY ARMED — read the lines above."
   echo "A gate that says 'cannot measure' printed its own reason in $LOG."
 else
-  echo "ARMED — the runner renders from the checkout and all four gates have what"
+  echo "ARMED — the runner renders from the checkout and all five gates have what"
   echo "they need. Prove it bites with the drill in docs/AUTO_DEPLOY.md."
 fi
 exit "$rc"

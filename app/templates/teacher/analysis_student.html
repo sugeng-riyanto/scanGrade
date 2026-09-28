@@ -428,7 +428,7 @@
                no overlay — and `no-print` so it never reaches the filed document. #}
             <div x-show="zoom" x-cloak @click="zoom = ''"
                  @keydown.escape.window="zoom = ''"
-                 class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-2 sm:p-6 no-print">
+                 class="fixed inset-0 sg-layer-dialog flex items-center justify-center bg-slate-900/80 p-2 sm:p-6 no-print">
                 <img :src="zoom" alt=""
                      class="sg-paper max-h-[88vh] max-w-full rounded-lg object-contain">
             </div>

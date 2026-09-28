@@ -21,7 +21,7 @@
 .full-canvas-wrap { border: 2.5px solid #fdba74; border-radius: 14px; overflow: visible; touch-action: none; background: #fff; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .full-canvas-wrap canvas { display: block; width: 100%; }
 .full-canvas-wrap img { display: block; width: 100%; pointer-events: none; }
-.text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: 10; }
+.text-box { position: absolute; min-width: 120px; max-width: 90%; z-index: var(--sg-layer-canvas-item); }
 .text-box textarea { width: 100%; min-height: 38px; font-size: 14px; padding: 6px 10px; border: 2.5px solid #f97316; border-radius: 10px; background: rgba(255,255,255,0.95); resize: both; box-shadow: 0 4px 16px rgba(249,115,22,0.2); }
 .text-box .box-handle { cursor: grab; position: absolute; top: -20px; left: 0; right: 24px; height: 18px; background: #f97316; border-radius: 8px 8px 0 0; display: flex; align-items: center; padding: 0 8px; }
 .text-box .box-del { position: absolute; top: -20px; right: 0; width: 22px; height: 18px; background: #ef4444; border: none; border-radius: 0 8px 0 0; color: white; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -64,11 +64,11 @@
 }
 [x-cloak] { display: none !important; }
 .tool-controlbar { pointer-events: none !important; }
-.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: 10; width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
+.tool-ctrl-btn { pointer-events: auto !important; cursor: pointer; position: absolute; z-index: var(--sg-layer-canvas-item); width: 22px; height: 22px; border-radius: 50%; background: rgba(30,41,59,0.9); color: white; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid rgba(255,255,255,0.15); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
 .tool-ctrl-btn:hover { transform: scale(1.15); }
 .tool-ctrl-btn.drag { cursor: grab; }
 .tool-ctrl-btn.close { background: rgba(220,38,38,0.85); }
-.sticky-topbar { position: sticky; top: 0; z-index: 20; }
+.sticky-topbar { position: sticky; top: 0; z-index: var(--sg-layer-header); }
 /* ── The question rail is a column only where there is room for one ─────────
    Measured at 375 px before this: the rail was `shrink-0` at a fixed width and
    the answer pane got **205 px** of the 343 available — a student's handwritten
@@ -82,7 +82,7 @@
    it could not be answered per-width. `overflow-y: auto` is what makes the cap
    mean "scroll" rather than "paint out of the box" — without it a 40-question
    rail drew its buttons past the card's own background. */
-.sticky-questions { position: sticky; top: 60px; z-index: 10; }
+.sticky-questions { position: sticky; top: 60px; z-index: var(--sg-layer-sticky); }
 @media (min-width: 1024px) {
     .sticky-questions { max-height: calc(100vh - 170px); overflow-y: auto; }
 }
@@ -284,6 +284,86 @@
                                         <p class="font-extrabold break-words {% if q_kind(qtype) == 'choice' %}text-2xl{% else %}text-sm leading-relaxed{% endif %} text-emerald-700">{{ q_answer_text(qtype, correct) or '-' }}</p>
                                     </div>
                                 </div>
+                                {# sg-pgk-review — satu markah yang tersusun dari beberapa penilaian.
+
+                                   "Jawaban siswa" di atas adalah satu string untuk soal yang
+                                   sebenarnya punya satu keputusan per pernyataan: guru tidak bisa
+                                   melihat pernyataan mana yang menelan nilai, atau bahwa pada lima
+                                   pernyataan satu salah menghabiskan seluruh markah sementara pada
+                                   enam pernyataan hanya separuhnya. Angka di sini berasal dari
+                                   `q_pgk_review` yang menilai lewat mesin penilai, jadi tabel ini
+                                   tidak bisa berbeda dari markah di sebelahnya.
+
+                                   Halaman ini memaku bahasa Indonesia (`content_lang = 'id'`), jadi
+                                   salinannya ditulis satu bahasa — pasangan `t()` di sini adalah
+                                   salinan yang tidak akan pernah bisa berpindah bahasa. #}
+                                {% if q_kind(qtype) == 'pgk' %}
+                                {# The question's own mode: a paper marked on a rule this
+                                   page did not name would be explained by a rule it
+                                   was not marked with. #}
+                                {% set pgk = q_pgk_review((exam.get('question_scoring') or {}).get(i|string),
+                                                          correct, student_ans) %}
+                                {% if pgk.available %}
+                                <div class="rounded-xl border border-stone-200 overflow-hidden">
+                                    <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-stone-50">
+                                        <span class="text-[11px] font-extrabold text-stone-600">Penilaian per pernyataan</span>
+                                        <span class="flex flex-wrap items-center gap-2">
+                                            <span class="text-[10px] font-bold text-stone-500">Benar {{ pgk.right }} dari {{ pgk.statements | length }}{% if pgk.blank %} · {{ pgk.blank }} kosong{% endif %}</span>
+                                            {% if pgk.band == 'binary' %}
+                                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">1/0 — semua pernyataan harus benar</span>
+                                            {% else %}
+                                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">2/1/0 — boleh salah 1 sampai 2</span>
+                                            {% endif %}
+                                        </span>
+                                    </div>
+                                    {% if pgk.unreadable %}
+                                    <p class="px-3 py-2 text-[10px] font-bold text-rose-600 bg-rose-50 border-t border-rose-100">Jawaban tidak bisa dibaca per pernyataan — tidak ada penilaian yang bisa ditampilkan.</p>
+                                    {% endif %}
+                                    {# Four columns on a phone: the card clips, so the
+                                       scroller is what keeps the two answer columns
+                                       reachable, and the minimum is what stops the
+                                       scroller squeezing them instead of scrolling. #}
+                                    <div class="overflow-x-auto">
+                                    <table class="w-full min-w-[440px] text-[11px]">
+                                        <thead>
+                                            <tr class="text-left text-[10px] font-extrabold text-stone-400 border-t border-stone-100">
+                                                <th class="px-3 py-1.5">Pernyataan</th>
+                                                <th class="px-2 py-1.5">Jawaban siswa</th>
+                                                <th class="px-2 py-1.5">Kunci</th>
+                                                <th class="px-3 py-1.5 text-right">Bila diperbaiki</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-stone-100">
+                                            {% for row in pgk.statements %}
+                                            <tr>
+                                                <td class="px-3 py-1.5 font-semibold text-stone-700 break-words">{{ row.number }}. {{ row.text }}</td>
+                                                <td class="px-2 py-1.5 font-bold whitespace-nowrap {% if row.blank %}text-stone-400{% elif row.right %}text-emerald-600{% else %}text-rose-600{% endif %}">
+                                                    {% if row.blank %}kosong{% else %}{{ row.chosen_label }}{% endif %}
+                                                </td>
+                                                <td class="px-2 py-1.5 font-bold text-emerald-700 whitespace-nowrap">{{ row.correct_label }}</td>
+                                                <td class="px-3 py-1.5 text-right font-extrabold whitespace-nowrap {% if row.right %}text-emerald-600{% elif row.gain > 0 %}text-amber-600{% else %}text-stone-400{% endif %}">
+                                                    {{ (((pgk.share if row.right else row.would_share) * 100) | round | int) }}%
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-2 px-3 py-2 bg-stone-50 border-t border-stone-100">
+                                        <span class="text-[10px] font-extrabold text-stone-500">Tangga penilaian</span>
+                                        {% for step in pgk.rungs %}
+                                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border {% if loop.index0 == pgk.rung %}border-primary-300 bg-primary-50 text-primary-700{% else %}border-stone-200 bg-white text-stone-500{% endif %}">
+                                            {% if step.wrong_min == step.wrong_max %}{{ step.wrong_min }}{% else %}{{ step.wrong_min }} sampai {{ step.wrong_max }}{% endif %} salah → {{ (step.share * 100) | round | int }}%
+                                        </span>
+                                        {% endfor %}
+                                        {% if pgk.wrong and pgk.wrong_before_fall %}
+                                        <span class="text-[10px] font-bold text-stone-500">sisa {{ pgk.wrong_before_fall }} salah lagi sebelum markah turun</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                                {% endif %}
+                                {# /sg-pgk-review #}
                                 {% set s = fb_scores.get(i|string, '') %}{% set c = fb_comments.get(i|string, '') %}
                                 {% if s or c %}
                                 <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs font-bold text-emerald-700">
@@ -375,12 +455,12 @@
                                         <text x="4" y="58" font-size="5" fill="rgba(180,80,0,0.55)">in</text>
                                     </svg>
                                     <!-- Drag handle on left overhang -->
-                                    <div :style="'position:absolute;left:'+(rulerX+(rulerWidth||900)*4/436-10)+'px;top:'+(rulerY+((rulerWidth||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                    <div :style="'position:absolute;left:'+(rulerX+(rulerWidth||900)*4/436-10)+'px;top:'+(rulerY+((rulerWidth||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
                                          @mousedown.stop="startToolDrag('ruler',$event)" @touchstart.stop="startToolDrag('ruler',$event)" title="Seret">
                                         <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                     </div>
                                     <!-- Rotate handle on right overhang -->
-                                    <div :style="'position:absolute;left:'+(rulerX+(rulerWidth||900)*434/436-10)+'px;top:'+(rulerY+((rulerWidth||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                    <div :style="'position:absolute;left:'+(rulerX+(rulerWidth||900)*434/436-10)+'px;top:'+(rulerY+((rulerWidth||900)*70/436)/2-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
                                          @mousedown.stop="startToolRotate('ruler',$event)" @touchstart.stop="startToolRotate('ruler',$event)" title="Putar">
                                         <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                     </div>
@@ -408,17 +488,17 @@
                                         <i class="tool-ctrl-btn close fas fa-times" style="position:static;width:14px;height:14px;font-size:7px;border-radius:3px;margin-left:2px" @click="showProtractor=false" title="Tutup"></i>
                                     </div>
                                     <!-- Protractor drag handle (center point) -->
-                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*130/260-10)+'px;top:'+(protractorY+protractorSize*130/260-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*130/260-10)+'px;top:'+(protractorY+protractorSize*130/260-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
                                          @mousedown.stop="startToolDrag('protractor',$event)" @touchstart.stop="startToolDrag('protractor',$event)" title="Seret">
                                         <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                     </div>
                                     <!-- Protractor rotate handle (top of arc) -->
-                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*250/260-10)+'px;top:'+(protractorY+protractorSize*10/260-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*250/260-10)+'px;top:'+(protractorY+protractorSize*10/260-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
                                          @mousedown.stop="startToolRotate('protractor',$event)" @touchstart.stop="startToolRotate('protractor',$event)" title="Putar">
                                         <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                     </div>
                                     <!-- Protractor resize handle (right end) -->
-                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*250/260-8)+'px;top:'+(protractorY+protractorSize*130/260-8)+'px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,120,0.7);border:2px solid rgba(255,255,255,0.3);z-index:6;pointer-events:auto;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;'"
+                                    <div :style="'position:absolute;left:'+(protractorX+protractorSize*250/260-8)+'px;top:'+(protractorY+protractorSize*130/260-8)+'px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,120,0.7);border:2px solid rgba(255,255,255,0.3);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;'"
                                          @mousedown.stop="startProtractorResize($event)" @touchstart.stop="startProtractorResize($event)" title="Perbesar/perkecil">
                                         <i class="fas fa-expand-alt text-white" style="font-size:6px;pointer-events:none"></i>
                                     </div>
@@ -454,12 +534,12 @@
                                          <text x="165" y="180" font-size="8" fill="rgba(0,0,120,0.4)" font-weight="bold" transform="rotate(-45,165,180)">45°</text>
                                      </svg>
                                      <!-- Drag handle at bottom-right corner -->
-                                     <div :style="'position:absolute;left:'+(triangleX+(triangleSize||320)*322/332-10)+'px;top:'+(triangleY+(triangleSize||320)*322/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
+                                     <div :style="'position:absolute;left:'+(triangleX+(triangleSize||320)*322/332-10)+'px;top:'+(triangleY+(triangleSize||320)*322/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(0,80,200,0.8);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:grab;display:flex;align-items:center;justify-content:center;'"
                                           @mousedown.stop="startToolDrag('triangle',$event)" @touchstart.stop="startToolDrag('triangle',$event)" title="Seret">
                                          <i class="fas fa-arrows-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                      </div>
                                      <!-- Rotate handle at right-angle corner -->
-                                     <div :style="'position:absolute;left:'+(triangleX+(triangleSize||320)*27/332-10)+'px;top:'+(triangleY+(triangleSize||320)*24/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:6;pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
+                                     <div :style="'position:absolute;left:'+(triangleX+(triangleSize||320)*27/332-10)+'px;top:'+(triangleY+(triangleSize||320)*24/332-10)+'px;width:20px;height:20px;border-radius:50%;background:rgba(200,50,0,0.85);border:2px solid rgba(255,255,255,0.4);z-index:var(--sg-layer-canvas-grip);pointer-events:auto;cursor:alias;display:flex;align-items:center;justify-content:center;'"
                                           @mousedown.stop="startToolRotate('triangle',$event)" @touchstart.stop="startToolRotate('triangle',$event)" title="Putar">
                                          <i class="fas fa-sync-alt text-white" style="font-size:8px;pointer-events:none"></i>
                                      </div>
@@ -580,7 +660,7 @@
     <!-- Scientific Calculator — draggable + resizable -->
     <div x-show="showCalculator" x-transition
          x-data="{ calcBig: false, cx2: 0, cy2: 0, dragging2: false, sx2: 0, sy2: 0 }"
-         :style="calcBig ? 'position:fixed;bottom:0;right:0;margin:0 ' + (-cx2) + 'px ' + (-cy2) + 'px 0;z-index:50;transform:scale(1.35);transform-origin:bottom right' : 'position:fixed;bottom:0;right:0;margin:0 ' + (-cx2) + 'px ' + (-cy2) + 'px 0;z-index:50'"
+         :style="calcBig ? 'position:fixed;bottom:0;right:0;margin:0 ' + (-cx2) + 'px ' + (-cy2) + 'px 0;z-index:var(--sg-layer-float);transform:scale(1.35);transform-origin:bottom right' : 'position:fixed;bottom:0;right:0;margin:0 ' + (-cx2) + 'px ' + (-cy2) + 'px 0;z-index:var(--sg-layer-float)'"
          class="w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden select-none"
          @click.outside="showCalculator = false">
         <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700 cursor-grab active:cursor-grabbing select-none"

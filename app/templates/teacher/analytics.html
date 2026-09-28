@@ -9,6 +9,13 @@
    than from sentences. The page used to pin `content_lang = 'id'` and write its
    copy as inline ternaries, which is the same information in a shape the audit
    cannot count and the toggle cannot reach. #}
+{# The page's own address, and the three exports beside it. A variable rather
+   than three literals because two roles read this page through two different
+   routes: the head and the deputy open `/principal/analytics` and
+   `/vice-principal/analytics`, and a hardcoded `/teacher/analytics` in the form
+   action would send every button they touch to a page their guard refuses. The
+   default is the teacher's own path, so the page they see is unchanged. #}
+{% set analysis_base = analysis_base|default('/teacher/analytics', true) %}
 {% block content %}
 <div class="space-y-6"
      x-effect="document.title = t('Analitik','Analytics') + ' - ScanGrade'">
@@ -28,15 +35,15 @@
                the language the reader has chosen. #}
             {# Date range params are appended via JS so the current filter travels
                with every export.  The server uses them identically. #}
-            <a :href="exportUrl('/teacher/analytics/download.csv')" data-download="csv"
+            <a :href="exportUrl('{{ analysis_base }}/download.csv')" data-download="csv"
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-csv mr-1 text-emerald-600"></i>CSV
             </a>
-            <a :href="exportUrl('/teacher/analytics/download.pdf')" data-download="pdf"
+            <a :href="exportUrl('{{ analysis_base }}/download.pdf')" data-download="pdf"
                class="border-2 border-surface-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-surface-50 text-[11px] sm:text-sm font-bold text-surface-600 transition whitespace-nowrap">
                 <i class="fas fa-file-pdf mr-1 text-red-600"></i>PDF
             </a>
-            <a :href="exportUrl('/teacher/analytics/print')" target="_blank" rel="noopener"
+            <a :href="exportUrl('{{ analysis_base }}/print')" target="_blank" rel="noopener"
                class="border-2 border-primary-200 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl hover:bg-primary-50 text-[11px] sm:text-sm font-bold text-primary-700 transition whitespace-nowrap">
                 <i class="fas fa-print mr-1"></i><span x-text="t('Cetak','Print')"></span>
             </a>
@@ -46,7 +53,7 @@
     <!-- Date range filter -->
     <div class="card p-4 sm:p-5 no-print"
          x-data="{ dateFrom: '{{ report.date_from or '' }}', dateTo: '{{ report.date_to or '' }}' }">
-        <form method="GET" action="/teacher/analytics" class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+        <form method="GET" action="{{ analysis_base }}" class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
             <div class="flex-1 min-w-0">
                 <label class="block text-xs font-semibold text-slate-500 mb-1">
                     <span x-text="t('Rentang waktu','Date range')"></span>
@@ -66,7 +73,7 @@
                     <i class="fas fa-filter mr-1"></i><span x-text="t('Terapkan','Apply')"></span>
                 </button>
                 {% if report.date_from or report.date_to %}
-                <a href="/teacher/analytics?lang={{ report.lang }}"
+                <a href="{{ analysis_base }}?lang={{ report.lang }}"
                    class="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-50 transition">
                     <i class="fas fa-times mr-1"></i><span x-text="t('Reset','Clear')"></span>
                 </a>

@@ -4,6 +4,14 @@
 {% block page_title %}Feature Flags{% endblock %}
 {% block content %}
 <div class="max-w-3xl mx-auto">
+    {# The route flashes when the table is missing, and this page never showed it —
+       so the one warning that explains an empty list was invisible. #}
+    {% for msg in get_flashed_messages(with_categories=true) %}
+    <div class="p-3 rounded-xl text-sm font-bold mb-4 {% if msg[0]=='success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-600 border border-red-200{% endif %}">
+        {{ msg[1] }}
+    </div>
+    {% endfor %}
+
     <div class="card p-6">
         <p class="text-sm text-surface-500 mb-6">Toggle fitur di seluruh platform. Perubahan berlaku langsung tanpa deploy ulang.</p>
         <div class="space-y-3">

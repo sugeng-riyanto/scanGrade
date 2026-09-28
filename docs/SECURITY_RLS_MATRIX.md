@@ -4,15 +4,15 @@
 
 | Table | Owner Type | School_id Check | SELECT | INSERT | UPDATE | DELETE | Status |
 |-------|-----------|----------------|--------|--------|--------|--------|--------|
-| schools | System | ✅ (id) | ✅ SA/admin/guru/murid | ✅ SA | ✅ SA | ✅ SA | FIXED |
-| profiles | Self/School | ✅ | ✅ SA/admin/self | ✅ self | ✅ self/admin | ❌ | FIXED |
-| exams | Guru/Admin | ✅ | ✅ SA/guru/admin | ✅ guru/admin | ✅ guru/admin | ✅ guru/admin | FIXED |
-| submissions | Guru/Admin/Student | via exam_id | ✅ SA/guru/admin/student | ✅ student | ✅ guru/admin | ❌ | FIXED |
-| classes | Admin/School | ✅ | ✅ SA/admin/guru/murid | ✅ SA/admin | ✅ SA/admin | ✅ SA/admin | FIXED |
-| subjects | Admin/School | ✅ | ✅ SA/admin/guru/murid | ✅ SA/admin | ✅ SA/admin | ✅ SA/admin | FIXED |
-| teachers | System | ✅ | via profiles | via trigger | via profiles | via profiles | FIXED |
-| students | System | ✅ | via profiles | via trigger | via profiles | via profiles | FIXED |
-| teacher_assignments | Guru/Admin | ✅ | ✅ self/admin | ✅ self/admin | ✅ admin | ✅ admin | FIXED |
+| schools | System | ✅ (id) | ✅ SA/admin/guru/murid + officials | ✅ SA | ✅ SA | ✅ SA | FIXED |
+| profiles | Self/School | ✅ | ✅ SA/admin/self + officials (same school) | ✅ self | ✅ self/admin | ❌ | FIXED |
+| exams | Guru/Admin | ✅ | ✅ SA/guru/admin + officials | ✅ guru/admin | ✅ guru/admin | ✅ guru/admin | FIXED |
+| submissions | Guru/Admin/Student | via exam_id | ✅ SA/guru/admin/student + officials | ✅ student | ✅ guru/admin | ❌ | FIXED |
+| classes | Admin/School | ✅ | ✅ SA/admin/guru/murid + officials | ✅ SA/admin | ✅ SA/admin | ✅ SA/admin | FIXED |
+| subjects | Admin/School | ✅ | ✅ SA/admin/guru/murid + officials | ✅ SA/admin | ✅ SA/admin | ✅ SA/admin | FIXED |
+| teachers | System | ✅ | via profiles + officials | via trigger | via profiles | via profiles | FIXED |
+| students | System | ✅ | via profiles + officials | via trigger | via profiles | via profiles | FIXED |
+| teacher_assignments | Guru/Admin | ✅ | ✅ self/admin + officials | ✅ self/admin | ✅ admin | ✅ admin | FIXED |
 | school_years | System | ✅ | via profiles | via trigger | via trigger | via trigger | FIXED |
 | violation_logs | System | via exam_id | ✅ guru/admin/SA | ✅ service | ❌ | ❌ | FIXED |
 | exam_access_codes | System | via exam_id | ✅ guru/admin/student | ✅ guru | ❌ | ❌ | FIXED |
@@ -25,16 +25,39 @@
 | ai_grading_logs | Guru/Admin | via submission_id | ✅ self/admin | ❌ | ❌ | ❌ | FIXED |
 | audit_logs | System | via user_id | ✅ SA | ❌ | ❌ | ❌ | FIXED |
 
-## Two Roles Without A Policy Yet
+## The Two School Officials (`officials`)
 
-`principal` and `vice_principal` (migration `038_school_officials_roles.sql`) read their own
-school's data through the same service-role backend as every other role. Their access is
-enforced today by **Flask decorators plus `require_school_access`**, not by a policy of their
-own — the same ordering the table above describes: RLS is layer 2, the route is layer 1. A
-school-scoped policy for the two of them is a deliberate follow-up migration so that one
-release does not change the role `CHECK` and a set of policies at once. Until it lands,
-`tests/unit/test_school_officials.py` is what holds the cross-school refusal: both dashboards
-and every `/admin-sekolah/officials/*` write are tested to reject a caller from another school.
+`principal` and `vice_principal` were added by migration `038_school_officials_roles.sql`,
+which deliberately opened only the *name*: the role `CHECK` in one release, the policies in
+another. Migration `039_school_official_rls.sql` is that second release, and it gives them a
+`FOR SELECT` policy on each table below — `schools` (by `id`), `profiles`, `teachers`,
+`students`, `classes`, `subjects`, `teacher_assignments`, `exams`, and `submissions` (through
+`exam_id`). In the table above they are the `officials` shorthand.
+
+Four properties are the point of it:
+
+* **Read-only, at the database layer too.** Not one policy in `039` is anything but `FOR
+  SELECT`. `principal` exists to watch; a write policy would hand that away through the API
+  rather than through a route.
+* **Scoped by NPSN, not by trust.** Every predicate compares the row's school with
+  `public._user_school_id()`. `submissions` carries no `school_id`, so the predicate walks
+  `exam_id` into `exams` — the same shape as `submissions_select_admin_sekolah`.
+* **The same two roles the decorator admits.** Each policy names both, mirroring
+  `role_required(*OFFICIAL_ROLES)` in `app/utils/auth.py`. Narrowing one of them here would
+  make the two differ in the database while they are one door in the app.
+* **`audit_logs` and `pengumuman` are not in the list.** A raw log answers "who did what"
+  and belongs to the super admin; the vice principal's authority over announcements is a
+  *write* path (draft and approve) that needs its own migration, not an addition to a
+  read-only file.
+
+This does not change who enforces access: the backend uses the service key and bypasses RLS
+entirely, so the route decorators remain layer 1. What `039` adds is the answer to a
+question the routes cannot answer — *what does a caller with the public key and no session
+reach?* Before it, that answer was "nothing", but only because neither role was named in any
+policy, which left the Flask code as the sole thing keeping one school's principal out of
+another school's roster. `tests/unit/test_school_official_rls.py` evaluates that isolation
+row by row across two synthetic schools, and `tests/unit/test_school_officials.py` holds the
+route-level refusal (both dashboards, and every `/admin-sekolah/officials/*` write).
 
 ## Validation Pattern
 
@@ -42,7 +65,12 @@ All NPSN/school_id checks follow this pattern:
 ```sql
 school_id = public._user_school_id()
 ```
-where `_user_school_id()` queries the profiles table for the authenticated user.
+where `_user_school_id()` queries the profiles table for the authenticated user. A table that
+has no `school_id` of its own reaches it through the row it belongs to:
+```sql
+EXISTS (SELECT 1 FROM exams e WHERE e.id = exam_id
+        AND e.school_id = public._user_school_id())
+```
 
 ## Defense in Depth
 

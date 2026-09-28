@@ -181,8 +181,8 @@ def test_the_newest_exam_is_first():
 
 
 def test_an_admin_with_no_school_on_file_sees_nothing_rather_than_everything():
-    """`can_manage_exam` fails closed on an admin with no school, and a scope that
-    narrows first and asks afterwards would hand that admin the whole box."""
+    """`can_read_exam` fails closed on a school-scoped reader with no school, and a
+    scope that narrows first and asks afterwards would hand them the whole box."""
     data = analysis_scope.report(FakeSupabase(_tables()), "admin_sekolah", "user-admin", None)
     assert data["rows"] == []
 
@@ -194,18 +194,24 @@ def test_a_role_with_no_scope_gets_no_rows(role):
 
 
 def test_the_permission_is_the_same_predicate_the_routes_ask(monkeypatch):
-    """A row that `can_manage_exam` refuses must not appear, whatever the query
-    returned — the query narrows for cost, the predicate is the permission."""
+    """A row that `can_read_exam` refuses must not appear, whatever the query
+    returned — the query narrows for cost, the predicate is the permission.
+
+    Repointed from `can_manage_exam` when the two oversight roles joined the
+    scope (they may read and not act, so the acting predicate would refuse every
+    row they are entitled to) — the assertion is unchanged, only the predicate the
+    suite watches.
+    """
     tables = _tables()
     seen = []
-    real = analysis_scope.can_manage_exam
+    real = analysis_scope.can_read_exam
 
     def watch(user_id, role, school_id, exam):
         allowed = real(user_id, role, school_id, exam)
         seen.append((exam["id"], allowed))
         return allowed
 
-    monkeypatch.setattr(analysis_scope, "can_manage_exam", watch)
+    monkeypatch.setattr(analysis_scope, "can_read_exam", watch)
     data = analysis_scope.report(FakeSupabase(tables), "admin_sekolah", "user-admin",
                                  SCHOOL_A)
     assert seen, "the scope never asked the permission predicate"

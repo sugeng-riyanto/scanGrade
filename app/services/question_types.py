@@ -589,6 +589,147 @@ def pgk_simulate(key: Any, mode: Any = None) -> list[dict[str, Any]]:
     return out
 
 
+def _pgk_label(categories: Sequence[str], index: Any) -> str:
+    """The category a judgement names, or `""` when there is no judgement."""
+    if isinstance(index, bool) or not isinstance(index, int):
+        return ""
+    return categories[index] if 0 <= index < len(categories) else ""
+
+
+def pgk_band_rungs(key: Any, mode: Any = None) -> list[dict[str, Any]]:
+    """What a band pays for each wrong-count, as `{wrong_min, wrong_max, share}` steps.
+
+    Probed by *scoring* a paper at every wrong-count through `pgk_score`, never by
+    restating the rule — the ladder a pupil is shown then moves the day the marking
+    rule moves, and a second arithmetic here would be one more copy of the rule this
+    module exists to keep in one place. Runs of equal shares are folded, so AKM's
+    2/1/0 reads as three steps and its 1/0 band as two.
+    """
+    wanted = pgk_key(key)
+    names = pgk_categories(key)
+    if not wanted or not names:
+        return []
+    probe = _pgk_probe_key(key)
+    out: list[dict[str, Any]] = []
+    for wrong in range(len(wanted) + 1):
+        share = round(pgk_score(mode, probe, _pgk_answer_wrong(wanted, wrong, len(names))), 4)
+        if out and out[-1]["share"] == share:
+            out[-1]["wrong_max"] = wrong
+        else:
+            out.append({"wrong_min": wrong, "wrong_max": wrong, "share": share})
+    return out
+
+
+def _pgk_probe_key(key: Any) -> dict[str, Any]:
+    """A key the grader will score, with statement *text* filled in if it is blank.
+
+    The text never enters the arithmetic — only how many statements there are — so a
+    review of a half-written question still answers instead of reporting nothing.
+    """
+    wanted = list(pgk_key(key))
+    statements = list(pgk_statements(key))
+    if len(statements) != len(wanted):
+        statements = [f"statement {i + 1}" for i in range(len(wanted))]
+    return {PGK_STATEMENTS: statements,
+            PGK_CATEGORIES: list(pgk_categories(key)),
+            PGK_KEY: wanted}
+
+
+def pgk_review(mode: Any, key: Any, answer: Any) -> dict[str, Any]:
+    """One complex multiple choice answer, judgement by judgement.
+
+    What a pupil and a teacher need in order to read past a single mark: which
+    statement was judged how, which judgements were right, and what each wrong one
+    *cost* — which at five statements is the whole question and at six is half of it.
+
+    Every number here is one the grader produced, and the counterfactual is the
+    point: `would_share` is the same answer re-scored with that one judgement
+    corrected, so "fixing this earns you this much" is a fact about the marking
+    engine rather than a promise the page makes up. That is also why the rungs come
+    from `pgk_band_rungs` and the share from `pgk_score` — a review that agreed with
+    itself instead of with the marks it explains would mislead the pupil in front of
+    it, silently, on a paper they are about to take home.
+
+    A blank row is *not* a wrong judgement — the page draws them differently — but
+    it is still a miss, because the grader cannot award a statement nobody answered.
+    `misses` is that count, and it is what the rung is read from, so the step marked
+    on screen is the step the share was really computed on.
+    """
+    statements = pgk_statements(key)
+    wanted = pgk_key(key)
+    categories = pgk_categories(key)
+    if not statements or len(statements) != len(wanted) or not categories:
+        # An unreadable key reviews as nothing rather than as zero: a page that says
+        # "you scored nothing" about a question it could not read is worse than one
+        # that says nothing at all.
+        return {"available": False, "mode": canonical_scoring_mode(mode), "band": "",
+                "statements": [], "rungs": [], "rung": -1, "wrong_before_fall": 0,
+                "share": 0.0, "right": 0, "wrong": 0, "blank": 0, "misses": 0,
+                "answered": False, "unreadable": False}
+
+    total = len(wanted)
+    probe = _pgk_probe_key(key)
+    # An untouched question is not a broken one: a paper nobody wrote on must read
+    # as every row blank, while a value that *does* carry judgements it cannot be
+    # read as is a fact about the data and gets said rather than drawn as blanks.
+    blank_answer = unwrap(answer) in (None, "", [], ())
+    chosen = (None,) * total if blank_answer else _as_pgk_answer(answer, total)
+    unreadable = chosen is None
+    if unreadable:
+        chosen = (None,) * total
+    judgements: tuple[int | None, ...] = chosen
+    share = round(pgk_score(mode, probe, list(judgements)), 4)
+
+    rows: list[dict[str, Any]] = []
+    for i, want in enumerate(wanted):
+        got = judgements[i]
+        right = got is not None and got == want
+        if right:
+            would = share
+        else:
+            repaired = list(judgements)
+            repaired[i] = want
+            would = round(pgk_score(mode, probe, repaired), 4)
+        rows.append({
+            "number": i + 1,
+            "text": statements[i],
+            "chosen": got,
+            "correct": want,
+            "chosen_label": _pgk_label(categories, got),
+            "correct_label": _pgk_label(categories, want),
+            "right": right,
+            "blank": got is None,
+            "would_share": would,
+            "gain": round(would - share, 4),
+        })
+
+    right_count = sum(1 for row in rows if row["right"])
+    blank = sum(1 for row in rows if row["blank"])
+    rungs = pgk_band_rungs(probe, mode)
+    misses = total - right_count
+    rung = next((i for i, step in enumerate(rungs)
+                 if step["wrong_min"] <= misses <= step["wrong_max"]), -1)
+    # How many more judgements may miss before the share falls a step. On the floor
+    # step there is nothing left to lose, which is zero and not a negative number.
+    room = rungs[rung]["wrong_max"] - misses if 0 <= rung < len(rungs) - 1 else 0
+    return {
+        "available": True,
+        "mode": canonical_scoring_mode(mode),
+        "band": pgk_akm_band(probe),
+        "statements": rows,
+        "rungs": rungs,
+        "rung": rung,
+        "wrong_before_fall": room,
+        "share": share,
+        "right": right_count,
+        "wrong": total - right_count - blank,
+        "blank": blank,
+        "misses": misses,
+        "answered": not blank_answer,
+        "unreadable": unreadable,
+    }
+
+
 def public_options(qtype: Any, key: Any) -> dict[str, list[str]] | None:
     """The part of a keyed question a *student* may receive, and nothing more.
 
@@ -1242,12 +1383,22 @@ class ObjectiveResult:
     `score` is a percentage of the **paper's** objective questions, so it cannot
     reach 100 while any of them has no key. `unkeyed` names the ones that do not,
     which is what lets a caller say *why* the ceiling is where it is.
+
+    `correct` and `credit` answer two different questions and both are needed.
+    `correct` is how many questions are *wholly* right — what "x / y benar" puts on
+    a screen. `credit` is the numerator behind `score`: one whole question for an
+    all-or-nothing answer, the question's *share* for the types whose marking mode
+    is a part rule. For every paper the app has marked until now the two are equal
+    (a wrong MCQ is worth zero either way), and they part only where a question can
+    be partly right — which is why a page must show `score` rather than doing its
+    own `correct / out_of`.
     """
     score: float
     correct: int
     out_of: int
     keyed: int
     unkeyed: list[int] = field(default_factory=list)
+    credit: float = 0.0
 
     @property
     def ceiling(self) -> float:
@@ -1260,6 +1411,7 @@ def objective_result(
     answer_key: Mapping[str, Any] | None,
     answers: Mapping[str, Any] | None,
     total_questions: int,
+    question_scoring: Mapping[str, Any] | None = None,
 ) -> ObjectiveResult:
     """The auto-graded score of one submission, by the one rule the app uses.
 
@@ -1297,6 +1449,7 @@ def objective_result(
     out_of = 0
     keyed = 0
     correct = 0
+    credit = 0.0
     unkeyed: list[int] = []
     for i in range(total_questions or 0):
         qi = str(i)
@@ -1309,15 +1462,29 @@ def objective_result(
             unkeyed.append(i)
             continue
         keyed += 1
-        if grade_answer(qtype, value, given.get(qi)):
+        right = grade_answer(qtype, value, given.get(qi))
+        if right:
             correct += 1
+        # A question whose marking mode *is* a part rule earns its share in this
+        # percentage too, so the pupil's "MCQ Score" card cannot disagree with the
+        # weighted "Final" card about one sitting. Scoped deliberately to the type
+        # that carries its own rule: a matching or drag-and-drop question still
+        # needs a paper-level scheme to earn a share, and `partial_applies(qtype,
+        # None)` answers False for it — which is what keeps every already-published
+        # mark exactly where it was, since no existing paper carries a PGK.
+        if partial_applies(qtype, None):
+            credit += part_factor(qtype, value, given.get(qi),
+                                  scoring_mode(question_scoring, i))
+        elif right:
+            credit += 1.0
 
     return ObjectiveResult(
-        score=round((correct / out_of) * 100, 2) if out_of else 0.0,
+        score=round((credit / out_of) * 100, 2) if out_of else 0.0,
         correct=correct,
         out_of=out_of,
         keyed=keyed,
         unkeyed=unkeyed,
+        credit=round(credit, 4),
     )
 
 

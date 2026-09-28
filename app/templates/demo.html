@@ -74,7 +74,7 @@
 .cred-cell:hover { background: #f8fafc; }
 </style>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50" x-data="{ copyText(t) { try{navigator.clipboard.writeText(t)}catch(e){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}clearTimeout(this._ct);var o=document.getElementById('ctoast');if(o)o.remove();var d=document.createElement('div');d.id='ctoast';d.className='fixed top-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg z-50';d.textContent=window.sgT('Tersalin!','Copied!');document.body.appendChild(d);this._ct=setTimeout(function(){d.remove()},1500)} }">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50" x-data="{ copyText(t) { try{navigator.clipboard.writeText(t)}catch(e){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}clearTimeout(this._ct);var o=document.getElementById('ctoast');if(o)o.remove();var d=document.createElement('div');d.id='ctoast';d.className='fixed top-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg sg-layer-notice';d.textContent=window.sgT('Tersalin!','Copied!');document.body.appendChild(d);this._ct=setTimeout(function(){d.remove()},1500)} }">
     <header class="px-4 sm:px-6 py-4 flex items-center justify-between gap-3 max-w-6xl mx-auto">
         <a href="/" class="flex items-center gap-2 group min-w-0">
             <div class="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:shadow-purple-500/40 transition">
@@ -179,7 +179,7 @@
                     </div>
                     <div class="flex-1">
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Kepala Sekolah','Principal')"></h3>
-                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Mengawasi sekolahnya sendiri: angka, ujian dan laporan seluruh sekolah — hanya baca, tanpa wewenang mengubah data.','Oversee their own school: the figures, the exams and every report — read-only, with no authority to change data.')"></p>
+                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Mengawasi sekolahnya sendiri: angka, ujian dan laporan seluruh sekolah — hanya baca, tanpa wewenang mengubah data. Akunnya dibuat dan dicabut oleh Admin Sekolah, seperti akun guru dan murid.','Oversight of their own school: the figures, the exams and every report — read-only, with no authority to change data. The school admin creates the account, and can revoke it, like a teacher or student account.')"></p>
                     </div>
                     {{ login_link('/auth/login-user?role=principal', 'Login Kepala Sekolah', 'Log in as Principal', 'indigo') }}
                 </div>
@@ -208,7 +208,7 @@
                     </div>
                     <div class="flex-1">
                         <h3 class="text-lg sm:text-xl font-extrabold text-surface-800" x-text="t('Wakil Kepala Sekolah','Vice Principal')"></h3>
-                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Halaman pengawasan yang sama dengan kepala sekolah, untuk hal-hal yang didelegasikan kepadanya.','The same oversight page the principal reads, for whatever is delegated to them.')"></p>
+                        <p class="text-sm text-surface-500 mt-1 leading-relaxed" x-text="t('Halaman pengawasan yang sama dengan kepala sekolah, untuk hal-hal yang didelegasikan kepadanya. Yang berbeda hanya siapa yang membaca — wewenang menulisnya sama-sama tidak ada.','The same oversight page the principal reads, for whatever is delegated to them. Only the reader differs — neither of them can write.')"></p>
                     </div>
                     {{ login_link('/auth/login-user?role=vice_principal', 'Login Wakil Kepsek', 'Log in as Vice Principal', 'cyan') }}
                 </div>
@@ -296,6 +296,18 @@
             {% endif %}
             {% endfor %}
         </div>
+
+        {# The two oversight accounts are the only demo logins a school makes for
+           itself, so the page has to name the menu that makes them instead of
+           letting a visitor read the card as something we provision. Guarded on
+           the cards being visible: an operator who hides both must not leave a
+           note pointing at a role the page no longer shows. #}
+        {% if 'demo_principal' in demo_items(ds, 'roles') or 'demo_vice_principal' in demo_items(ds, 'roles') %}
+        <div data-demo-note="school-officials" class="mt-6 flex items-start gap-3 px-4 py-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl text-xs sm:text-sm text-indigo-800 leading-relaxed">
+            <i class="fas fa-user-tie mt-0.5"></i>
+            <span x-text="t('Akun Kepala Sekolah dan Wakil Kepala Sekolah tidak dibuat oleh kami: Admin Sekolah sendiri yang membuat, mengganti dan mencabutnya dari menu Pejabat Sekolah, sama seperti akun guru dan murid. Keduanya hanya membaca — tidak ada satu pun data sekolahnya yang bisa mereka ubah.','The principal and vice principal accounts are not made by us: each school admin creates, edits and revokes them from the School Officials menu, exactly as a teacher or student account is revoked. Both are read-only — there is no school data either of them can change.')"></span>
+        </div>
+        {% endif %}
 
         <!-- Footer -->
         <div class="mt-10 sm:mt-12 text-center">

@@ -256,6 +256,41 @@ class TestTheDemo:
             assert f"/auth/login-user?role={role}" in DEMO_TEMPLATE, (
                 f"the {role} card does not offer the door that role belongs on")
 
+    def test_the_demo_page_says_who_makes_and_revokes_them(self):
+        """A card for an account nobody can create is a demo of a dead end.
+
+        Every other demo card here is an account the platform makes. These two are
+        not: the school's own admin creates, renames and revokes them from its
+        `Pejabat Sekolah` menu, and a visitor who is shown a Kepala Sekolah login
+        with no word about that is being shown the one account type they cannot
+        order from us. Both languages have to say it, and both have to name the
+        menu it happens in.
+        """
+        for phrase in ("Pejabat Sekolah", "School Officials"):
+            assert phrase in DEMO_TEMPLATE, (
+                f"/demo never names {phrase!r}, the menu the school admin manages "
+                "these accounts from — so the card reads as if we made them")
+        for phrase in ("dicabut", "revoked"):
+            assert phrase in DEMO_TEMPLATE, (
+                f"/demo never says the accounts can be {phrase!r} again: it shows a "
+                "capability without its off switch")
+
+    def test_the_demo_pages_landing_card_states_the_limit(self):
+        """The landing card must claim reading, not authority.
+
+        Anchored on the sentence a reader gets, in both languages, so a later
+        rewrite that turns "oversight" into "management" fails here instead of on
+        a school that bought the wrong thing.
+        """
+        landing = (ROOT / "app" / "templates" / "landing.html").read_text(
+            encoding="utf-8")
+        assert 'data-facility="school-officials"' in landing, (
+            "the landing page advertises no oversight role while the app has two")
+        assert "tanpa satu pun wewenang mengubah data" in landing, (
+            "the Indonesian card does not say the roles cannot write")
+        assert "no authority to change any of it" in landing, (
+            "the English card does not say the roles cannot write")
+
     def test_the_credentials_on_the_page_are_the_seeded_ones(self):
         """The card is only a demo if the account behind it exists."""
         for role in OFFICIAL_ROLES:

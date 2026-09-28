@@ -351,7 +351,7 @@ class WhiteboardCanvas {
         input.style.position = "fixed"; input.style.left = e.clientX + "px"; input.style.top = e.clientY + "px";
         input.style.fontSize = this.fontSize + "px"; input.style.fontFamily = "Inter, sans-serif";
         input.style.border = "2px solid " + this.color; input.style.padding = "4px 8px";
-        input.style.borderRadius = "6px"; input.style.background = "#fff"; input.style.zIndex = "99999";
+        input.style.borderRadius = "6px"; input.style.background = "#fff"; input.style.zIndex = "var(--sg-layer-canvas-item-ctl)";
         document.body.appendChild(input); input.focus();
         const done = () => {
             const text = input.value.trim();

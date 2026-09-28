@@ -8,19 +8,32 @@ and the RBAC guards on every role's area.
 
 What it is not
 --------------
-It is not a test suite: apart from the exam page below it asserts nothing about
-what a page *says*, only that it answers and that the right role can open it.
+It is not a test suite: apart from the exam page and the write probe below it
+asserts nothing about what a page *says*, only that it answers and that the right
+role can open it.
 
-It is also not quite read-only, and that is worth knowing before changing it.
-Every request is a GET apart from the four logins — but in this app a GET of a
-student's exam page is not a read: opening an exam opens the sitting that belongs
-to it (one row per student and exam, reused by every later open). So the student
-check below leaves one draft sitting behind, for the demo account, on the demo
-fixture that `manage.py demo-exam` keeps sittable for exactly this purpose. No
-other page in the lists writes anything.
+Its writes, and why there are two
+---------------------------------
+Neither is decoration, and both are worth knowing about before changing this file.
 
-It runs only when there is a release to verify, so it does not fill the audit log
-on quiet days.
+*The student's exam page* is not a read even though it is a GET: opening an exam
+opens the sitting that belongs to it (one row per student and exam, reused by every
+later open). So the student check leaves one draft sitting behind, for the demo
+account, on the demo fixture that `manage.py demo-exam` keeps sittable for exactly
+this purpose.
+
+*The school admin's subject probe* is the one deliberate write. A page list cannot
+see a school that has quietly gone read-only — a database role without INSERT
+answers every GET above perfectly — and a write route in this app reports its own
+failure as a flash *and* a redirect, so a POST that stored nothing and one that
+worked are the same two bytes. So one probe subject is created, read back off
+`/admin-sekolah/subjects`, and deleted again in the same run, and the row it is
+named by carries the UTC instant it was made so two runs cannot collide. Deleting a
+subject created two seconds ago releases nothing: no teacher assignment and no exam
+can name it. This is the smoke test's only audit noise — two rows, and only when
+there is a release to verify — and a run removes any earlier run's leftovers first,
+so a crash between the two writes heals on the next deploy instead of leaving a fake
+subject in a real school.
 
 Options
 -------
@@ -28,6 +41,7 @@ Options
                         signs in. Used by install-auto-deploy.sh to decide
                         whether it is safe to arm the rollback gate, because a
                         half-valid config must not be able to reject a release.
+                        It runs neither write: arming a gate is not a release.
 
 Exit codes
 ----------
@@ -59,6 +73,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path
 
@@ -94,6 +109,105 @@ AWAY_PANEL = 'x-show="awayBlurred && !submitted"'
 AWAY_WORDS = "soal diburamkan sampai Anda kembali"
 FULLSCREEN_WATCH = "addEventListener('fullscreenchange'"
 AWAY_WATCH = "addEventListener('visibilitychange'"
+
+
+# ── the one page list that cannot see a broken write path ────────────────────
+# Every GET below is a read, and a school whose database role lost INSERT answers
+# all of them. `admin_subject_create` makes that worse rather than better: it
+# catches its own error, flashes it, and redirects — so the POST that stored
+# nothing replies exactly like the one that stored the row, and a probe that read
+# the reply would be green on a read-only school.
+#
+# What can tell them apart is the page the school admin reads next, so the probe is
+# a round trip: create, read the list, delete, read the list again. A subject is the
+# smallest row a school admin owns with a create and a delete of its own, and a
+# subject that existed for two seconds cannot be named by any teacher assignment or
+# exam, so removing it releases nothing.
+PROBE_PREFIX = "__smoke"
+SUBJECTS_PATH = "/admin-sekolah/subjects"
+SUBJECT_CREATE_PATH = "/admin-sekolah/subjects/create"
+SUBJECT_DELETE_PATH = "/admin-sekolah/subjects/{subject_id}/delete"
+
+#: `(id, name)` per subject card on the subjects page. The delete form is drawn
+#: above the name in the card, so the id that belongs to a name is the last one
+#: before it — pairing them any other way would let the probe delete a subject it
+#: never created. `[^<]*` because the template escapes the name.
+SUBJECT_ROW_RE = re.compile(
+    r'action="/admin-sekolah/subjects/([0-9a-fA-F-]{36})/delete".*?'
+    r'<p class="[^"]*font-extrabold[^"]*"[^>]*>([^<]*)</p>', re.S)
+
+
+def probe_subject_name(now: datetime | None = None) -> str:
+    """The name this run's probe subject is created under.
+
+    Dated because it lands in the school's own list and in the audit log, where it
+    has to be recognisable as not-a-subject — and unique because the create route
+    refuses a duplicate name, which a second run in the same minute must not look
+    like a broken route.
+    """
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return f"{PROBE_PREFIX}_{stamp}"
+
+
+def probe_subject_rows(html: str) -> list[tuple[str, str]]:
+    """`(id, name)` for every subject card on the page, in the order drawn."""
+    return [(m.group(1), unescape(m.group(2)).strip())
+            for m in SUBJECT_ROW_RE.finditer(html)]
+
+
+#: Every write route in `admin_sekolah` catches its own exception and flashes it as
+#: `Gagal: …`, then redirects — which is exactly why the redirect is not evidence.
+#: Quoted into a failure so the message names the cause rather than only the
+#: symptom: a failed insert and a stored row answer the same `302`, but only one of
+#: them has the exception's own words rendered on the page. Searched rather than
+#: parsed, because the flash markup is the template's business, not this file's.
+FAILED_FLASH_RE = re.compile(r"Gagal:\s*([^<]{1,300})")
+
+#: How many times one probe write is attempted before the answer is called. Two,
+#: because this app's link to Supabase drops replies — measured on this box, the
+#: delete hit `Gagal: Server disconnected` in 3 of 3 live runs and the create in 1 of
+#: 3 — so one failed attempt is a property of one connection and two in a row is a
+#: property of the write path. Failing on the first would quarantine healthy
+#: releases; passing on the first failure would call a write path green that stores
+#: nothing. Both attempts use the same subject name, which is what makes the retry
+#: safe: a duplicate cannot be inserted twice, the create refuses it by name.
+PROBE_ATTEMPTS = 2
+
+#: The route's own words for a write that never got an answer *out of the
+#: connection*, as opposed to one the database refused.
+#:
+#: This distinction is load-bearing, and it comes from the app's own contract:
+#: `app/utils/supabase_retry.py` retries every read and deliberately does not retry a
+#: write — "a dropped connection does not say whether the server ran the statement, so
+#: re-sending a write can apply it twice" — so on a lossy link writes keep failing
+#: while reads quietly succeed. Holding a release for that would turn the app's
+#: accepted asymmetry into "this box may never release", and rolling back cannot fix
+#: a lost TCP reply.
+#:
+#: Everything else does hold the release, and those are the two failures this check
+#: was asked for: a school whose database role was narrowed, or a page that drops what
+#: it was sent, both come back with the database's own refusal (or with nothing said
+#: at all) and neither heals on its own.
+CONNECTION_LOST_RE = re.compile(
+    r"(Server disconnected|Connection reset|Connection aborted|Connection refused|"
+    r"ConnectionError|ConnectError|NewConnectionError|RemoteProtocolError|"
+    r"Read timed out|timed out)", re.I)
+
+
+def is_connection_loss(said: str) -> bool:
+    """Did the route's own words describe a lost link rather than a refusal?"""
+    return bool(CONNECTION_LOST_RE.search(said or ""))
+
+
+def route_said(response) -> str:
+    """The route's own error sentence, when the page it rendered carries one."""
+    match = FAILED_FLASH_RE.search(getattr(response, "text", "") or "")
+    return match.group(0).strip() if match else ""
+
+
+def _quote(said: str) -> str:
+    """The route's words, framed for a failure message, or nothing."""
+    return f" The route said: {said!r}." if said else ""
 
 
 # ── what each role should be able to open ────────────────────────────────────
@@ -449,6 +563,198 @@ def check_exam_sitting(session: requests.Session, base: str, res: Result) -> Non
         res.ok("murid: the page watches fullscreenchange and visibilitychange")
 
 
+def _list_read(session, base, acct, res):
+    """The subjects page and its csrf token, or `None` after reporting why not.
+
+    Reading this page is not a formality: it is the only thing in the whole check
+    that can distinguish a write which landed from one the route swallowed.
+    """
+    try:
+        page = session.get(f"{base}{SUBJECTS_PATH}", timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as exc:
+        res.fail(f"{acct.role}: GET {SUBJECTS_PATH} failed — {type(exc).__name__}: {exc}",
+                 role=acct.role)
+        return None
+    if page.status_code != 200:
+        res.fail(f"{acct.role}: GET {SUBJECTS_PATH} -> {page.status_code} "
+                 "(without the list, a write cannot be checked at all)", role=acct.role)
+        return None
+    token = CSRF_RE.search(page.text)
+    if not token:
+        res.fail(f"{acct.role}: {SUBJECTS_PATH} carries no csrf-token meta tag, so "
+                 "the write cannot be armed", role=acct.role)
+        return None
+    return page, token.group(1)
+
+
+@dataclass
+class Probe:
+    """One create attempt: what the page served afterwards, and what the route said.
+
+    `rows` is carried out of the attempt because that read is also the only one
+    needed to spot an earlier run's leftovers — asking for the same page twice would
+    cost a request per release for nothing.
+    """
+
+    row_id: str | None = None
+    rows: list[tuple[str, str]] = field(default_factory=list)
+    said: str = ""
+    #: The check must stop: an app that cannot be reached, or a reply that is not a
+    #: redirect, is not a write that failed — it is a run that never asked.
+    fatal: bool = False
+
+
+def _probe_create(session, base, token, name, acct, res) -> Probe:
+    """One create attempt, judged by the list rather than by the reply."""
+    try:
+        created = session.post(f"{base}{SUBJECT_CREATE_PATH}",
+                               data={"_csrf_token": token, "name": name},
+                               timeout=REQUEST_TIMEOUT, allow_redirects=False)
+    except requests.RequestException as exc:
+        res.fail(f"{acct.role}: POST {SUBJECT_CREATE_PATH} failed — "
+                 f"{type(exc).__name__}: {exc}", role=acct.role)
+        return Probe(fatal=True)
+    # The route redirects whether it stored the row or caught an exception, so a
+    # reply that is not a redirect is the write never being reached at all — a 403
+    # from the app's CSRF hook, a 404 from a renamed route.
+    if not 300 <= created.status_code < 400:
+        res.fail(f"{acct.role}: POST {SUBJECT_CREATE_PATH} -> {created.status_code} "
+                 f"{created.headers.get('Location', '')}".rstrip() +
+                 " (expected a redirect; the write was never reached)", role=acct.role)
+        return Probe(fatal=True)
+
+    opened = _list_read(session, base, acct, res)
+    if opened is None:
+        return Probe(fatal=True)
+    page, _ = opened
+    rows = probe_subject_rows(page.text)
+    for subject_id, row_name in rows:
+        if row_name == name:
+            return Probe(subject_id, rows, route_said(page))
+    return Probe(None, rows, route_said(page) or "the list did not serve it")
+
+
+def _probe_delete(session, base, token, subject_id, acct, res) -> str:
+    """Delete one probe row and read the list to see whether it went.
+
+    The answer is not evidence either. A dropped reply can happen *after* the row
+    is already gone (`Server disconnected` is thrown while reading the response),
+    and the route redirects after a flash exactly as it does after a delete — so
+    this reads the page and returns what is left, or `""` when the row is gone.
+    """
+    why = ""
+    for attempt in range(PROBE_ATTEMPTS):
+        try:
+            removed = session.post(
+                f"{base}{SUBJECT_DELETE_PATH.format(subject_id=subject_id)}",
+                data={"_csrf_token": token, "confirm": "1"},
+                timeout=REQUEST_TIMEOUT, allow_redirects=False)
+            why = "" if 300 <= removed.status_code < 400 else (
+                f"DELETE -> {removed.status_code}")
+        except requests.RequestException as exc:
+            why = f"{type(exc).__name__}: {exc}"
+
+        opened = _list_read(session, base, acct, res)
+        if opened is None:
+            return "the list could not be read to check"
+        page, _ = opened
+        if not any(sid == subject_id for sid, _ in probe_subject_rows(page.text)):
+            return ""
+        why = why or route_said(page) or "the list still serves it"
+        if attempt + 1 < PROBE_ATTEMPTS:
+            res.warn(f"{acct.role}: deleting probe subject {subject_id} did not take "
+                     f"({why}) — retrying once")
+    return why
+
+
+def check_admin_write(session: requests.Session, base: str, acct: Account, res: Result) -> None:
+    """Create one subject, prove the *page* serves it, delete it, prove it is gone.
+
+    The POST's reply is never the evidence: `admin_subject_create` answers `302`
+    whether it inserted a row or caught an exception and flashed it, so the only
+    reader that distinguishes a working school from a read-only one is
+    `/admin-sekolah/subjects` itself. A run that cannot read that page fails rather
+    than skipping, because staying silent about the write path is how a read-only
+    school reaches a user.
+
+    Each write gets `PROBE_ATTEMPTS` goes, so one dropped reply cannot quarantine a
+    release while two in a row still can.
+
+    A write that fails and names a lost connection is reported without holding the
+    release (`CONNECTION_LOST_RE`), because the app accepts that asymmetry on
+    purpose and no release fixes it; anything else — a permission the database
+    refused, a page that serves no row and says nothing — does hold it.
+
+    It deletes exactly what it created — plus any probe row an earlier run left
+    behind, which it reports, because a leftover that keeps coming back is a
+    symptom worth reading.
+    """
+    opened = _list_read(session, base, acct, res)
+    if opened is None:
+        return
+    _, token = opened
+
+    name = probe_subject_name()
+    probe, refusals = Probe(), []
+    for attempt in range(PROBE_ATTEMPTS):
+        probe = _probe_create(session, base, token, name, acct, res)
+        if probe.fatal:
+            return
+        if probe.row_id is not None:
+            break
+        refusals.append(probe.said)
+        if attempt + 1 < PROBE_ATTEMPTS:
+            res.warn(f"{acct.role}: the create did not land ({probe.said}) — retrying once")
+
+    row_id = probe.row_id
+    if row_id is None:
+        quote = "".join(_quote(s) for s in refusals)
+        if refusals and all(is_connection_loss(s) for s in refusals):
+            res.warn(f"{acct.role}: the probe subject could not be created in "
+                     f"{PROBE_ATTEMPTS} attempts and the route named a lost "
+                     "connection — the app retries reads and deliberately not "
+                     f"writes, so this is the link, not the release ({name!r} was "
+                     "not stored)." + quote)
+        else:
+            res.fail(f"{acct.role}: the subject {name!r} is not on {SUBJECTS_PATH} "
+                     f"after {PROBE_ATTEMPTS} attempts — a read-only school answers "
+                     "every POST and stores nothing. If a row with that name is in "
+                     "the school's list, delete it." + quote, role=acct.role)
+    else:
+        res.ok(f"{acct.role}: created {name!r} and the page serves it")
+
+    # One row is this run's; the rest are an earlier run's leftovers, and the prefix
+    # is the only licence this check has to delete either.
+    stale = [(sid, row_name) for sid, row_name in probe.rows
+             if row_name.startswith(PROBE_PREFIX) and sid != row_id]
+    if stale:
+        res.warn(f"{acct.role}: {len(stale)} probe subject(s) left by an earlier run "
+                 f"({', '.join(row_name for _, row_name in stale)}) — removing them")
+
+    stubborn: list[tuple[str, str]] = []
+    for subject_id in ([row_id] if row_id else []) + [sid for sid, _ in stale]:
+        why = _probe_delete(session, base, token, subject_id, acct, res)
+        if why:
+            stubborn.append((subject_id, why))
+
+    if stubborn:
+        ids = ", ".join(sid for sid, _ in stubborn)
+        quote = "".join(_quote(why) for _, why in stubborn)
+        if all(is_connection_loss(why) for _, why in stubborn):
+            res.warn(f"{acct.role}: {len(stubborn)} probe subject(s) could not be "
+                     f"deleted in {PROBE_ATTEMPTS} attempts ({ids}) and the route "
+                     "named a lost connection — the app retries reads and "
+                     "deliberately not writes, so this is the link, not the "
+                     "release. The next run clears them." + quote)
+        else:
+            res.fail(f"{acct.role}: {len(stubborn)} probe subject(s) are still in "
+                     f"the school after being deleted ({ids}) — the delete path did "
+                     f"not take. Remove them from {SUBJECTS_PATH}." + quote,
+                     role=acct.role)
+    elif row_id:
+        res.ok(f"{acct.role}: deleted {name!r} and the page no longer serves it")
+
+
 def check_isolation(session: requests.Session, base: str, acct: Account, res: Result) -> None:
     """A role must not be able to open another role's landing page."""
     for other in FORBIDDEN[acct.role]:
@@ -537,6 +843,11 @@ def main() -> int:
             # discovery — and it is the only page whose *content* this asserts.
             if acct.role == "murid":
                 check_exam_sitting(session, base, res)
+            # And the school admin's list is the only page this file writes to. A
+            # read-only school answers every check above, so the write path needs a
+            # check of its own — see the probe's own note above.
+            elif acct.role == "admin_sekolah":
+                check_admin_write(session, base, acct, res)
 
     print()
     if res.failures:

@@ -475,6 +475,13 @@ TRANSLATED = [
     # The landing page of both new oversight roles. One template serves principal
     # and vice principal, so one page of pairs answers two doors.
     "principal/dashboard.html",
+    # Their progress calendar, for the same reason: it is the page a head of
+    # school reads month by month, and every label on it — the weekday headings,
+    # the six counters, both tables, the notes under the grid — is a pair. The
+    # dates and month names inside them arrive from `official_insight` as
+    # `(id, en)` pairs for the same reason `analysis_scope` does it: a string baked
+    # server-side is the one line that ignores the toggle.
+    "principal/progress.html",
     # The exam builder. It is where a teacher spends the most time in the app —
     # title, classes, weightings, media, anti-cheat and the AI upload path are all
     # on this one page, so it was also the largest block of Indonesian left.
@@ -904,7 +911,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 46, (
+    assert len(TRANSLATED) == 47, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")
