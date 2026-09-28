@@ -10,6 +10,9 @@ Usage:
     python manage.py seed-anticheat            # Plan the five synthetic classes
     python manage.py seed-anticheat --write    # Write them into every demo school
     python manage.py seed-anticheat --clear    # Remove them again, by marker
+    python manage.py demo-subscription         # Make sure the demo schools can
+                                               # still write (their trial used to
+                                               # expire and silently lock CRUD)
 """
 import sys, os, json, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -335,6 +338,56 @@ def _seed_school(supabase, school_conf):
     return sid
 
 
+def _ensure_demo_subscription(supabase, school_id, now=None):
+    """Make sure a *demo* school can write — today, and in a year's time.
+
+    Returns ``"kept"`` when the school's newest subscription row is already
+    ``active``, and ``"repaired"`` when one had to be written.
+
+    Why this is not a trial. Every write route for a school admin sits behind
+    ``subscription_write_required``, and the seeding used to hand each demo school a
+    **14-day trial** — written only when the school had no subscription row at all.
+    So the demo school silently became read-only a fortnight after seeding, and the
+    pages still rendered (GET is always allowed), which is why it looked like broken
+    buttons rather than a lapsed subscription: measured on this box, `99887733`
+    (SMK Teknologi ScanGrade, one of the three cards on `/demo`) carried a single
+    `trial_expired` row and `admin_smk@scan-grade.app` could not create, edit or
+    delete anything.
+
+    So the demo fixture is ``active`` with **no end date**, which is also the shape
+    the two demo schools that did keep working carry here. There is no date to pass,
+    because a fixture that expires is a fixture that breaks a demo on a schedule.
+    A real school's paywall is untouched: this only runs for the schools in
+    ``DEMO_SCHOOLS``.
+
+    Idempotent in both directions: an active school is left exactly as it is (no new
+    row, no `updated_at` churn), and an expired or absent one is repaired. That is
+    what makes it usable as a repair command on a box that has already rotted.
+    """
+    now = now or datetime.now(timezone.utc)
+    try:
+        newest = (supabase.table("school_subscriptions")
+                  .select("*")
+                  .eq("school_id", school_id)
+                  .order("created_at", desc=True)
+                  .limit(1)
+                  .execute().data or [])
+    except Exception:
+        newest = []
+    if newest and newest[0].get("status") == "active":
+        return "kept"
+    supabase.table("school_subscriptions").insert({
+        "school_id": school_id,
+        "status": "active",
+        "trial_days": 14,
+        "trial_start": now.isoformat(),
+        "trial_end": (now + timedelta(days=14)).isoformat(),
+        "subscription_start": now.isoformat(),
+        "subscription_end": None,
+    }).execute()
+    return "repaired"
+
+
 def _seed_school_relations(supabase, sid, school_conf, class_ids, subj_map, teacher_ids):
     now = datetime.now(timezone.utc)
 
@@ -351,14 +404,7 @@ def _seed_school_relations(supabase, sid, school_conf, class_ids, subj_map, teac
     except: pass
 
     try:
-        existing = supabase.table("school_subscriptions").select("id").eq("school_id", sid).execute()
-        if not existing.data:
-            supabase.table("school_subscriptions").insert({
-                "school_id": sid, "status": "trial",
-                "trial_days": 14,
-                "trial_start": now.isoformat(),
-                "trial_end": (now + timedelta(days=14)).isoformat(),
-            }).execute()
+        _ensure_demo_subscription(supabase, sid, now)
     except: pass
 
     class_list = list(class_ids.values())
@@ -610,6 +656,38 @@ def cmd_seed(args):
         _print_credentials()
 
 
+def cmd_demo_subscription(args):
+    """Repair the demo schools' subscriptions on a box that has already rotted.
+
+    The command exists beside `seed` rather than inside it on purpose: re-seeding a
+    school to fix a lapsed subscription recreates its users, exams and invoices, and
+    the repair here is meant to be the small, safe thing an operator runs when the
+    demo's buttons stopped working. Idempotent, so running it when nothing is wrong
+    is a no-op that says so.
+    """
+    with app.app_context():
+        supabase = get_supabase()
+        print("=" * 50)
+        print("🔓 DEMO SUBSCRIPTIONS")
+        print("=" * 50)
+        repaired = 0
+        skipped = 0
+        for school in DEMO_SCHOOLS:
+            rows = (supabase.table("schools")
+                    .select("id, name, npsn")
+                    .eq("npsn", school["npsn"]).limit(1).execute().data or [])
+            if not rows:
+                print(f"   {school['npsn']} {school['name']}: not seeded here — skipped")
+                skipped += 1
+                continue
+            outcome = _ensure_demo_subscription(supabase, rows[0]["id"])
+            repaired += outcome == "repaired"
+            print(f"   {school['npsn']} {rows[0]['name']}: {outcome}")
+        print()
+        print(f"   {repaired} repaired, {skipped} not on this box")
+        return 0
+
+
 def cmd_reset_data(args):
     with app.app_context():
         supabase = get_supabase()
@@ -671,7 +749,8 @@ def _print_credentials():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ScanGrade Data Management")
     parser.add_argument("command", choices=["seed", "reset", "reset-data", "list", "migrate",
-                                           "generate-csv", "demo-exam", "seed-anticheat"])
+                                           "generate-csv", "demo-exam", "seed-anticheat",
+                                           "demo-subscription"])
     parser.add_argument("--exam", action="store_true", help="Also create sample exams (with seed)")
     parser.add_argument("--demo", action="store_true", help="Use .env.demo")
     parser.add_argument("--write", action="store_true",
@@ -694,6 +773,8 @@ if __name__ == "__main__":
         sys.exit(cmd_demo_exam(args))
     elif args.command == "seed-anticheat":
         sys.exit(cmd_seed_anticheat(args))
+    elif args.command == "demo-subscription":
+        sys.exit(cmd_demo_subscription(args))
     elif args.command == "migrate":
         print("Migrate not available without DATABASE_URL")
     elif args.command == "generate-csv":
