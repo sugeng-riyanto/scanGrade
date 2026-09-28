@@ -111,6 +111,19 @@
             <span class="font-bold text-amber-800" x-text="selected.length + ' ' + t('dipilih','selected')"></span>
             <button @click="if(confirm(t('Reset password ' + selected.length + ' murid?', 'Reset the password for ' + selected.length + ' students?'))){fetch('/admin-sekolah/students/bulk-reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_ids:selected})}).then(r=>r.json()).then(d=>{alert(d.total + ' ' + t('password direset','passwords reset'));selected=[]})}"
                     class="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg font-bold hover:bg-blue-200 transition text-xs">Reset PW</button>
+            {# The sheet, not a count. `Reset PW` above already creates a new password
+               for every selected pupil and its reply already carries them — the page
+               printed "N passwords reset" and dropped the rest, so a school could
+               create two hundred accounts and not be able to hand one to a pupil.
+               A form POST on purpose: the reply *is* the file, so the browser
+               downloads it and stays here, with no blob plumbing. #}
+            <form method="POST" action="/admin-sekolah/students/login-cards" class="inline"
+                  @submit="document.getElementById('student-login-ids').value = JSON.stringify(selected); if(!confirm(t('Buat password baru untuk ' + selected.length + ' murid, pasang ke akunnya, lalu unduh kartu loginnya?', 'Create a new password for ' + selected.length + ' students, set it on their accounts, and download the login cards?'))) $event.preventDefault()">
+                <input type="hidden" name="user_ids" id="student-login-ids" value="[]">
+                <input type="hidden" name="fmt" value="xlsx">
+                <button type="submit" class="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-bold hover:bg-emerald-200 transition text-xs"
+                        x-text="t('Unduh kartu login','Download login cards')"></button>
+            </form>
             <button @click="if(confirm(t('Hapus ' + selected.length + ' murid?', 'Delete ' + selected.length + ' students?'))){fetch('/admin-sekolah/students/bulk-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_ids:selected})}).then(r=>r.json()).then(d=>{alert(d.total + ' ' + t('dihapus','deleted'));location.reload()})}"
                     class="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition text-xs" x-text="t('Hapus','Delete')"></button>
             <button @click="selected=[]" class="px-3 py-1.5 bg-white text-stone-600 rounded-lg font-bold hover:bg-stone-100 transition text-xs" x-text="t('Batal','Cancel')"></button>

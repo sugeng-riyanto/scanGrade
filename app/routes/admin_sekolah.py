@@ -19,6 +19,7 @@ from app.services.teacher_import import create_teacher_account
 from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
                                           usage_message)
+from app.services import login_cards
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -1553,6 +1554,98 @@ def bulk_reset_students_password():
         except Exception as e:
             results.append({"id": uid, "error": str(e)})
     return jsonify({"results": results, "total": len(results)})
+
+
+# ─── LOGIN CARDS ─────────────────────────────────────
+#
+# The download half of "reset the password": the two bulk-reset routes below do
+# return a new password per account, and their pages print a count and drop the rest,
+# so the one thing a school needs — a sheet it can hand out — was the one thing it
+# could not get. See `app/services/login_cards.py` for why a card has to be issued
+# rather than exported.
+#
+# A plain form POST, not `fetch`: the reply *is* the file, so the browser downloads
+# it and stays on the page without any blob plumbing, and `base.html` already injects
+# the CSRF field into every `form[method="POST"]`.
+
+def _login_cards(kind: str):
+    """Issue cards for the posted ids and answer with the file. Shared by both pages."""
+    sid = _school_id()
+    supabase = get_supabase()
+
+    raw = request.form.get("user_ids")
+    if raw is None and request.is_json:
+        raw = (request.get_json(silent=True) or {}).get("user_ids")
+    if isinstance(raw, str):
+        try:
+            user_ids = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            user_ids = []
+    elif isinstance(raw, list):
+        user_ids = raw
+    else:
+        user_ids = []
+
+    back = "/admin-sekolah/teachers" if kind == "teacher" else "/admin-sekolah/students"
+    if not user_ids:
+        flash("Pilih dulu akun yang kartu loginnya ingin diunduh.", "warning")
+        return redirect(back)
+
+    emails = {}
+    try:
+        emails = _get_email_map(supabase)
+    except Exception:
+        pass
+
+    # Scope first, write second — in that order, and in two calls rather than one,
+    # because a password that is set and then not handed over does not exist anywhere
+    # (the sheet was never produced, and the account's old one is gone). A request
+    # naming an account from another school is refused before anything is written.
+    found = login_cards.collect(supabase, sid, user_ids, kind, emails=emails)
+    if found["missing"]:
+        # Refused, not skipped: a sheet quietly short of three pupils is one the
+        # school hands out and then has to answer for.
+        flash(f"{len(found['missing'])} akun bukan milik sekolah ini — tidak ada yang "
+              f"diunduh, dan belum ada password yang diubah.", "error")
+        return redirect(back)
+    result = {"rows": login_cards.set_passwords(supabase, found["rows"]),
+              "missing": []}
+
+    issued = sum(1 for row in result["rows"] if row["password"])
+    failed = sum(1 for row in result["rows"] if row["error"])
+    school_name = ""
+    try:
+        row = row_or_none(supabase.table("schools").select("name").eq("id", sid)
+                          .maybe_single().execute())
+        school_name = (row or {}).get("name", "") or ""
+    except Exception:
+        pass
+
+    meta = login_cards.meta_for(school_name, len(result["rows"]), issued, failed)
+    payload, mimetype, name = login_cards.render(
+        result["rows"], kind, meta, request.form.get("fmt", "xlsx"))
+    # An export of credentials is exactly the kind of access the retention policy
+    # wants a record of — and the per-account reset is recorded by the same reason.
+    log_activity("export", "login_cards", kind,
+                 new_data={"requested": len(result["rows"]), "issued": issued,
+                           "failed": failed},
+                 user_id=g.user_id)
+    return send_file(io.BytesIO(payload), as_attachment=True,
+                     download_name=name, mimetype=mimetype)
+
+
+@admin_sekolah_bp.route("/students/login-cards", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+def student_login_cards():
+    return _login_cards("student")
+
+
+@admin_sekolah_bp.route("/teachers/login-cards", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+def teacher_login_cards():
+    return _login_cards("teacher")
 
 
 @admin_sekolah_bp.route("/students/bulk-delete", methods=["POST"])

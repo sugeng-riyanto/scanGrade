@@ -193,12 +193,33 @@ def school():
     return jsonify({"success": True})
 
 
+# ── who an export covers ─────────────────────────────────────────────────────
+#
+# Both exports below read `profiles` with no school filter at all, while living
+# behind `@admin_required` — which admits **admin_sekolah**. Measured on the running
+# box: a school admin on the SMP demo account downloaded 723 pupils and 73 teachers
+# from every school on the platform, from a link the admin area itself renders. The
+# role decides the scope, the way every other school-scoped query decides it: a super
+# admin sees the platform (that is the job), everyone else sees their own school.
+#
+# `g.user_school_id` is the server's own reading of the session and is never taken
+# from the request, so it cannot be pointed at another school.
+
+def _export_query(supabase, table, columns, role):
+    q = supabase.table(table).select(columns).eq("role", role)
+    if g.get("user_role") != "super_admin" and g.get("user_school_id"):
+        q = q.eq("school_id", g.user_school_id)
+    return q
+
+
 @admin_bp.route("/students/export")
 @admin_required
 def export_students():
     from openpyxl import Workbook
     supabase = get_supabase()
-    rows = supabase.table("profiles").select("id, full_name, nisn, nis, phone, class_id, role").eq("role", "murid").execute().data or []
+    rows = _export_query(
+        supabase, "profiles",
+        "id, full_name, nisn, nis, phone, class_id, role", "murid").execute().data or []
     classes = supabase.table("classes").select("id, name").execute().data or []
     class_map = {c["id"]: c["name"] for c in classes}
     wb = Workbook()
@@ -218,7 +239,8 @@ def export_students():
 def export_teachers():
     from openpyxl import Workbook
     supabase = get_supabase()
-    rows = supabase.table("profiles").select("id, full_name, phone, role").eq("role", "guru").execute().data or []
+    rows = _export_query(supabase, "profiles", "id, full_name, phone, role",
+                         "guru").execute().data or []
     wb = Workbook()
     ws = wb.active
     ws.title = "Guru"
