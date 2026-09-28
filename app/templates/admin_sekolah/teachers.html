@@ -113,11 +113,31 @@
         </form>
     </div>
 
-    <div class="card overflow-hidden">
+    {# A selection, because the download below needs one — and because the teacher
+       bulk-reset route has existed without any way to reach it: the page offered a
+       per-row reset and "Hapus Semua", and nothing in between. #}
+    <div class="card overflow-hidden" x-data="{ selected: [], selectAll: false }">
+        <div x-show="selected.length > 0" class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center gap-3 text-sm flex-wrap">
+            {# No `t()` here, unlike the pupils' page: this page pins its language
+               (`{% set content_lang = 'id' %}` above), and `base.html`'s `lang` getter
+               returns the pin before the reader's choice — so an English half on this
+               page is copy no one can reach. The new labels stay Indonesian, like the
+               rest of the page, until the pin is lifted. #}
+            <span class="font-bold text-amber-800" x-text="selected.length + ' dipilih'"></span>
+            <form method="POST" action="/admin-sekolah/teachers/login-cards" class="inline"
+                  @submit="document.getElementById('teacher-login-ids').value = JSON.stringify(selected); if(!confirm(t('Buat password baru untuk ' + selected.length + ' guru, pasang ke akunnya, lalu unduh kartu loginnya?', 'Create a new password for ' + selected.length + ' teachers, set it on their accounts, and download the login cards?'))) $event.preventDefault()">
+                <input type="hidden" name="user_ids" id="teacher-login-ids" value="[]">
+                <input type="hidden" name="fmt" value="xlsx">
+                <button type="submit" class="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-bold hover:bg-emerald-200 transition text-xs"
+                        >Unduh kartu login</button>
+            </form>
+            <button type="button" @click="selected=[]" class="px-3 py-1.5 bg-white text-stone-600 rounded-lg font-bold hover:bg-stone-100 transition text-xs">Batal</button>
+        </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm min-w-[560px]">
+            <table class="w-full text-sm min-w-[620px]">
                 <thead class="bg-stone-50 text-xs font-bold text-stone-500 uppercase">
                     <tr>
+                        <th class="w-10 px-2 py-3"><input type="checkbox" @click='selectAll = !selectAll; selected = selectAll ? {{ teacher_ids|tojson }} : []' class="w-4 h-4"></th>
                         <th class="text-left px-4 py-3">Nama</th>
                         <th class="text-left px-4 py-3">No. Pegawai</th>
                         <th class="text-left px-4 py-3">Email</th>
@@ -127,7 +147,8 @@
                 </thead>
                 <tbody class="divide-y divide-stone-50">
                     {% for t in teachers %}
-                    <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }">
+                    <tr class="hover:bg-stone-50 transition" x-data="{ editing: false }" :class="selected.includes('{{ t.id }}') ? 'bg-amber-50/50' : ''">
+                        <td class="px-2 py-3"><input type="checkbox" :checked="selected.includes('{{ t.id }}')" @click="selected.includes('{{ t.id }}') ? selected = selected.filter(x => x !== '{{ t.id }}') : selected.push('{{ t.id }}')" class="w-4 h-4"></td>
                         <td class="px-4 py-3 font-bold text-stone-700">{{ t.name }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.employee_number or '-' }}</td>
                         <td class="px-4 py-3 text-stone-500">{{ t.email }}</td>
