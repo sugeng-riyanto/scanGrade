@@ -14,6 +14,7 @@ from app.services.audit_service import log_activity, fetch_audit_logs
 from app.services import trial_settings as trial_cfg
 from app.services.demo_settings import (
     GROUPS as DEMO_GROUPS,
+    TUTORIAL_MASTER as DEMO_TUTORIAL_MASTER,
     effective_flags as demo_effective_flags,
     order_from_form,
     order_key,
@@ -555,6 +556,35 @@ def _demo_settings_row(supabase):
         return {}
 
 
+def _demo_flag_from_form(value):
+    """A checkbox's answer, from the strings a form actually carries."""
+    return str(value).strip().lower() in ("true", "1", "on", "yes")
+
+
+def _demo_flags_from_form(form):
+    """The flags a save carries, read from the service's own item lists.
+
+    This was a hand-written dict of nine names, and the two oversight roles were
+    added to the *page* without being added to it. A flag the page posts and the
+    route does not read is dropped from the blob on save — and a role key missing
+    from a non-empty blob reads as **off** — so the operator ticked
+    `demo_principal`, the page answered "Tersimpan", the tick reverted on the next
+    load, and ``/demo`` never drew the card. The same defect was one new item away
+    from happening again, so the items are read from `GROUPS` rather than listed:
+    whatever the service can show, the form can switch.
+
+    Only the fields the form carries are written, so a save is an instruction about
+    the toggles it posts and never about the ones it does not mention. The page
+    posts the whole set, which is why this is invisible to a real save and only
+    protective for a partial one — a script, a test, or a page that draws a subset.
+    """
+    keys = [key for _group, (_order, items, _field) in DEMO_GROUPS.items()
+            for key in items]
+    keys += [DEMO_TUTORIAL_MASTER, "demo_enabled"]
+    return {key: _demo_flag_from_form(form[key])
+            for key in keys if form.get(key) is not None}
+
+
 @super_bp.route("/demo-settings/data")
 @_sa_required
 def demo_settings_data():
@@ -569,17 +599,7 @@ def demo_settings():
     if request.method == "POST":
         # The whole demo surface is driven by this one blob, so treat a failed
         # write as a failure instead of reporting success for a no-op.
-        settings = {
-            "demo_enabled": request.form.get("demo_enabled", "false") == "true",
-            "demo_super_admin": request.form.get("demo_super_admin", "false") == "true",
-            "demo_admin_sekolah": request.form.get("demo_admin_sekolah", "false") == "true",
-            "demo_guru": request.form.get("demo_guru", "false") == "true",
-            "demo_murid": request.form.get("demo_murid", "false") == "true",
-            "demo_tutorial": request.form.get("demo_tutorial", "false") == "true",
-            "demo_tutorial_guru": request.form.get("demo_tutorial_guru", "false") == "true",
-            "demo_tutorial_siswa": request.form.get("demo_tutorial_siswa", "false") == "true",
-            "demo_tutorial_admin": request.form.get("demo_tutorial_admin", "false") == "true",
-        }
+        settings = _demo_flags_from_form(request.form)
         # The order the operator arranged the rows into. Stored beside the flags
         # in the same blob, so the two cannot be saved separately and end up
         # describing different lists; the field is sanitised on the way in

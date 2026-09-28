@@ -19,6 +19,8 @@ fails this one.
 """
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -431,3 +433,186 @@ class TestTheOrderSurvivesASave:
 
         assert order_from_form(Form({"role_order": "demo_guru,<script>,demo_ghost"}), "roles") \
             == ["demo_guru"]
+
+
+# ── the save path: every toggle the page can post, and no others ──
+#
+# Reported: "checklist unchecklist belum proper ketika disave". The form posts every
+# flag the page draws, but the route rebuilt the blob from a hand-written list of
+# nine names — one that predates the two oversight roles. So a ticked
+# `demo_principal` was written by nobody:
+#
+#   * the response echoed a blob without the key;
+#   * the page kept its local tick, because `Object.assign(this.settings, d.settings)`
+#     has nothing to overwrite it with, and said "Tersimpan";
+#   * the next load paints its checkboxes from the **effective** flags, where a role
+#     key missing from a non-empty blob reads as off — so the tick was gone, and
+#     `/demo` had never drawn the card at all.
+#
+# The key set therefore has to come from the service's own item lists. A behaviour
+# test cannot notice a *new* item the route forgets; a test driven by
+# `effective_flags` can, and does.
+
+class _CapturingSettings:
+    """Just enough of PostgREST to catch the blob the route writes."""
+
+    def __init__(self, written):
+        self.written = written
+
+    def select(self, *a, **k): return self
+    def eq(self, *a, **k): return self
+    def maybe_single(self): return self
+    def update(self, d): self.written.update(d); return self
+    def insert(self, d): self.written.update(d); return self
+    def execute(self): return SimpleNamespace(data=[{"id": 1}])
+
+
+def _save(app, monkeypatch, **flags):
+    """POST the settings form and return the blob that was written."""
+    from flask import g
+    from app.routes import super_admin as supermod
+
+    written = {}
+    monkeypatch.setattr(supermod, "log_activity", lambda *a, **k: None)
+    app.extensions["supabase"] = SimpleNamespace(
+        table=lambda name: _CapturingSettings(written))
+    form = {k: ("true" if v else "false") for k, v in flags.items()}
+    with app.test_request_context("/super-admin/demo-settings", method="POST", data=form):
+        g.user_id, g.user_role = "sa-1", "super_admin"
+        supermod.demo_settings.__wrapped__()
+    return written["demo_settings"]
+
+
+class TestWhatASaveKeeps:
+    def test_a_ticked_official_is_written(self, app, monkeypatch):
+        blob = _save(app, monkeypatch, demo_enabled=True, demo_principal=True,
+                     demo_vice_principal=True)
+        assert blob["demo_principal"] is True, blob
+        assert blob["demo_vice_principal"] is True, blob
+
+    def test_an_unticked_official_is_written_too(self, app, monkeypatch):
+        """The other direction, so the fix cannot be "always write True"."""
+        blob = _save(app, monkeypatch, demo_enabled=True, demo_principal=False,
+                     demo_vice_principal=False)
+        assert blob["demo_principal"] is False, blob
+        assert blob["demo_vice_principal"] is False, blob
+
+    # The master is not one of `effective_flags`' keys — it answers *for* the
+    # tutorial items rather than describing one — so the set is built from both. A
+    # mutation that drops it from the write set survives a sweep driven by
+    # `effective_flags` alone, which is how this line came to be written.
+    @pytest.mark.parametrize("key", sorted(set(ds.effective_flags({})) | {ds.TUTORIAL_MASTER}))
+    def test_every_toggle_the_page_can_post_lands_in_the_blob(self, app, monkeypatch, key):
+        blob = _save(app, monkeypatch, **{key: True})
+        assert blob.get(key) is True, blob
+
+    def test_a_toggle_the_form_did_not_mention_is_left_alone(self, app, monkeypatch):
+        """A save is an instruction about what it carries, not about everything else."""
+        blob = _save(app, monkeypatch, demo_enabled=True, demo_guru=True)
+        assert blob["demo_guru"] is True
+        assert "demo_murid" not in blob, (
+            "a save wrote an answer for a toggle it was never given")
+
+    def test_the_saved_official_is_the_card_the_demo_draws(self, app, monkeypatch):
+        """The round trip the operator actually performs: tick, save, look at /demo."""
+        blob = _save(app, monkeypatch, demo_enabled=True, demo_principal=True,
+                     demo_vice_principal=True)
+        assert "demo_principal" in ds.demo_items(blob, "roles")
+        assert "demo_vice_principal" in ds.demo_items(blob, "roles")
+
+    def test_the_effective_flags_a_page_paints_are_the_ones_it_just_saved(self, app, monkeypatch):
+        """Reload parity: what the checkboxes show must be what was stored."""
+        sent = {k: (i % 2 == 0) for i, k in enumerate(sorted(ds.effective_flags({})))}
+        blob = _save(app, monkeypatch, **sent)
+        painted = ds.effective_flags(blob)
+        for key, value in sent.items():
+            assert painted[key] is value, (key, painted[key], value)
+
+
+# ── the page's own save path, run rather than read ───────────────
+#
+# The server half is pinned above; this half is what the operator actually sees.
+# A tick that survives a save the server never answered for is the reported
+# symptom, and it cannot be caught by a text assertion: the page kept the tick
+# because `Object.assign` had no key to overwrite it with, and it said
+# "Tersimpan" while it did so. So `demoForm` is read out of the template and run.
+
+NODE = shutil.which("node")
+needs_node = pytest.mark.skipif(NODE is None, reason="needs node to run the component")
+SETTINGS_TEMPLATE = (Path(__file__).resolve().parents[2]
+                     / "app" / "templates" / "super_admin" / "demo_settings.html")
+
+
+def _demo_form_script() -> str:
+    """The page's ``demoForm`` factory, exactly as the template writes it."""
+    text = SETTINGS_TEMPLATE.read_text(encoding="utf-8")
+    start = text.index("function demoForm(initial) {")
+    end = text.index("\n}\n</script>", start) + len("\n}")
+    return text[start:end]
+
+
+SAVE_RUN = """
+{demo_form}
+// `save()` reads the row order out of the DOM; there is no DOM here, and the order
+// is the other class's subject. An empty document is the honest stand-in.
+globalThis.document = {{ querySelector: () => null, querySelectorAll: () => [] }};
+globalThis.FormData = class {{ constructor() {{ this.m = new Map(); }}
+                               set(k, v) {{ this.m.set(k, v); }}
+                               append(k, v) {{ this.m.set(k, v); }} }};
+globalThis.fetch = () => Promise.resolve({{ ok: true,
+    json: async () => ({{ success: true, settings: {answer} }}) }});
+globalThis.alert = () => {{}};
+(async () => {{
+    const obj = demoForm({seed});
+    const posted = Object.keys(obj.settings);
+    await obj.save();
+    console.log(JSON.stringify({{ posted, unanswered: obj.unanswered,
+                                 settings: obj.settings, saved: obj.saved }}));
+    process.exit(0);
+}})();
+"""
+
+
+def _run_save(seed: dict, answer: dict):
+    done = subprocess.run(
+        [NODE, "-e", SAVE_RUN.format(demo_form=_demo_form_script(),
+                                      seed=json.dumps(seed), answer=json.dumps(answer))],
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout.strip())
+
+
+def _posted_keys() -> set:
+    """Every flag the page can post: the group items, the master, and the link.
+
+    `effective_flags` answers for the items and the Demo link; the tutorial *master*
+    is its own flag, which the page also carries — so the set the form posts is the
+    two together, and that is exactly what the server has to read back.
+    """
+    return set(ds.effective_flags({})) | {ds.TUTORIAL_MASTER}
+
+
+def _seed_from():
+    return {k: True for k in _posted_keys()}
+
+
+@needs_node
+class TestThePageReportsAAnswerItDidNotGet:
+    def test_a_switch_the_server_did_not_answer_for_is_named(self):
+        seed = _seed_from()
+        answer = {k: v for k, v in seed.items() if k != "demo_principal"}
+        out = _run_save(seed, answer)
+        assert out["unanswered"] == ["demo_principal"], out
+
+    def test_a_complete_answer_leaves_nothing_to_report(self):
+        seed = _seed_from()
+        out = _run_save(seed, seed)
+        assert out["unanswered"] == [], out
+        assert out["saved"] is True
+
+    def test_the_page_posts_every_toggle_the_service_knows(self):
+        """The posting half of the contract the server-side tests pin."""
+        seed = _seed_from()
+        out = _run_save(seed, seed)
+        assert set(out["posted"]) == _posted_keys(), (
+            "the form stopped posting a flag the service can store")

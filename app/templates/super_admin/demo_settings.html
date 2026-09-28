@@ -107,7 +107,14 @@
                     <i class="fas fa-spinner fa-spin" x-show="saving" x-cloak></i>
                     <span x-text="saving ? 'Menyimpan...' : 'Simpan Pengaturan'"></span>
                 </button>
-                <span x-show="saved" x-transition class="text-sm font-bold text-emerald-600 flex items-center gap-1"><i class="fas fa-check-circle"></i> Tersimpan</span>
+                <span x-show="saved && !unanswered.length" x-transition class="text-sm font-bold text-emerald-600 flex items-center gap-1"><i class="fas fa-check-circle"></i> Tersimpan</span>
+                {# A switch the server did not answer for is said out loud. Silently keeping
+                   the tick is the whole defect this page had: `demo_principal` was posted,
+                   dropped from the blob, and the box stayed ticked under the word
+                   "Tersimpan" — so the reader was told a switch was saved that was not. #}
+                <span x-show="unanswered.length" x-cloak class="text-sm font-bold text-amber-600 flex items-center gap-1"><i class="fas fa-triangle-exclamation"></i>
+                    <span x-text="'Tersimpan, tetapi ' + unanswered.length + ' tombol tidak dijawab server: ' + unanswered.join(', ')"></span>
+                </span>
             </div>
         </form>
     </div>
@@ -122,7 +129,7 @@ function demoForm(initial) {
         // from this object is silently dropped and the toggle would show a switch
         // that is off no matter what the page is actually rendering.
         settings: Object.assign({demo_enabled:true, demo_super_admin:true, demo_admin_sekolah:true, demo_principal:true, demo_vice_principal:true, demo_guru:true, demo_murid:true, demo_tutorial:true, demo_tutorial_guru:true, demo_tutorial_siswa:true, demo_tutorial_admin:true}, initial || {}),
-        allOn: false, saving: false, saved: false,
+        allOn: false, saving: false, saved: false, unanswered: [],
         init() {
             this.allOn = this.settings.demo_enabled;
             fetch('/super-admin/demo-settings/data').then(r=>r.json()).then(d => {
@@ -176,18 +183,30 @@ function demoForm(initial) {
             return Array.from(el.querySelectorAll(':scope > [data-demo-key]'))
                 .map(row => row.dataset.demoKey).join(',');
         },
+        /* What the server says it stored, applied to the switches — and any switch
+           it did not answer for is reported instead of left showing a tick nobody
+           wrote. `demo_principal` used to be exactly that: posted, dropped, and the
+           tick survived because an absent key has nothing to overwrite it with. */
+        applySaved(saved) {
+            const answer = saved || {};
+            Object.assign(this.settings, answer);
+            this.unanswered = Object.keys(this.settings).filter(k => !(k in answer));
+            return this.unanswered;
+        },
         save() {
-            this.saving = true; this.saved = false;
+            this.saving = true; this.saved = false; this.unanswered = [];
             const fd = new FormData();
             this.settings.demo_enabled = this.allOn;
             Object.entries(this.settings).forEach(([k,v]) => fd.append(k, v ? 'true' : 'false'));
             fd.set('role_order', this.orderOf('roles'));
             fd.set('tutorial_order', this.orderOf('tutorials'));
-            fetch('/super-admin/demo-settings', {method:'POST', body: fd})
+            // Returned, so the caller can await a save that has actually landed —
+            // "saved" is not true until the server has answered for the switches.
+            return fetch('/super-admin/demo-settings', {method:'POST', body: fd})
                 .then(async r => {
                     const d = await r.json().catch(() => ({}));
                     if (!r.ok || d.success === false) throw new Error(d.error || 'Gagal menyimpan');
-                    if (d.settings) Object.assign(this.settings, d.settings);
+                    this.applySaved(d.settings);
                     this.saved = true; setTimeout(()=>this.saved=false, 2000);
                 })
                 .catch(e => alert(e.message || 'Gagal menyimpan'))

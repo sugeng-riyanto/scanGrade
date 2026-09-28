@@ -352,6 +352,12 @@ class TestEveryQuarantinedCommitHasItsNumbers:
 
 class TestThePageShowsEveryRefusalsNumbers:
     def report(self, tmp_path, directory, *, quarantine=None, history_path=None):
+        # Every path the page reads is pinned here, including the ones this class
+        # does not assert on. `report()` falls back to the real box's state files
+        # (`/var/lib/scangrade-deploy/...`, or whatever `SCANGRADE_*` names), and a
+        # page that renders another box's leftovers is a page whose text depends on
+        # the machine rather than on the fixture — which is how a count over the
+        # whole document goes red on one run and green on the next.
         return status.report(
             repo=str(tmp_path), runner="/nonexistent",
             snapshot_runner="/nonexistent",
@@ -359,7 +365,12 @@ class TestThePageShowsEveryRefusalsNumbers:
             quarantine_file=str(quarantine or tmp_path / "no-quarantine"),
             refusals_dir=str(directory),
             perf_history_file=str(history_path or tmp_path / "no-perf.jsonl"),
-            perf_baseline_file=str(tmp_path / "no-baseline"))
+            perf_baseline_file=str(tmp_path / "no-baseline"),
+            unarmed_file=str(tmp_path / "no-unarmed"),
+            preflight_file=str(tmp_path / "no-preflight"),
+            last_stop_file=str(tmp_path / "no-last-stop"),
+            request_dir=str(tmp_path / "no-requests"),
+            release_request=str(tmp_path / "no-release"))
 
     def _two_refusals(self, tmp_path):
         directory = history_dir(tmp_path, [
@@ -385,10 +396,15 @@ class TestThePageShowsEveryRefusalsNumbers:
         html = render_status(app, self.report(
             tmp_path, directory, history_path=history,
             quarantine=quarantine_file(tmp_path, SHA_A)))
-        assert html.count("812") == 1, (
+        # Counted as the sentence the card prints, not as the three digits alone.
+        # `812` appears anywhere the browser sees it, and the page carries values
+        # this test does not own — a stylesheet URL carries an eight-hex-digit
+        # content hash, for one — so a bare-digit count can go red over the chrome
+        # while the defect it exists for is absent. The phrase cannot.
+        assert html.count("p50 812 ms") == 1, (
             "the held commit's numbers appear in both its own block and the history "
             "card — the page prints the same measurement twice")
-        assert "640" in html
+        assert "p50 640 ms" in html
 
     def test_a_refusal_with_no_judgement_shows_no_numbers(self, app, tmp_path):
         directory = history_dir(tmp_path, [
