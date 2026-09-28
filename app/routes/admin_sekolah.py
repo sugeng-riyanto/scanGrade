@@ -1547,6 +1547,16 @@ def bulk_reset_students_password():
     results = []
     for uid in user_ids:
         try:
+            # Whose row is it? The page only ever offers this school's pupils, and a
+            # list drawn by a page is not a guard: these ids arrive in the request
+            # body. The single-id twin is safe because it carries
+            # `@require_school_access("students", "student_id")`; a bulk route has no
+            # id in the path for that decorator to read, so the check is per id,
+            # here — the same one the teacher reset already makes.
+            prof = supabase.table("profiles").select("school_id").eq("id", uid).single().execute().data or {}
+            if prof.get("school_id") != sid:
+                results.append({"id": uid, "error": "Not in school"})
+                continue
             new_pw = _gen_password()
             supabase.auth.admin.update_user_by_id(uid, {"password": new_pw})
             log_activity("reset_password", "user", uid, user_id=g.user_id)
@@ -1663,6 +1673,13 @@ def bulk_delete_students():
     results = []
     for uid in user_ids:
         try:
+            # The same per-id check the teacher delete makes, and for the same
+            # reason: without it the list in the request body decides whose
+            # students row, profiles row and auth user are destroyed. Skipped ids
+            # are left out of `results`, exactly as the teacher route leaves them.
+            prof = supabase.table("profiles").select("school_id").eq("id", uid).single().execute().data or {}
+            if prof.get("school_id") != sid:
+                continue
             supabase.table("students").delete().eq("id", uid).execute()
             supabase.table("profiles").delete().eq("id", uid).execute()
             supabase.auth.admin.delete_user(uid)

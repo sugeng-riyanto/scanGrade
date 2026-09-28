@@ -759,7 +759,8 @@ def submit_exam(exam_id):
     # scores" wrote to the same column, so a pupil's own "MCQ:" figure moved the
     # moment a teacher recalculated.
     score = objective_result(
-        question_types, exam.get("answer_key"), answers, total_q).score
+        question_types, exam.get("answer_key"), answers, total_q,
+        exam.get("question_scoring")).score
 
     # Device mismatch detection: bandingkan IP/UA dengan first sync
     flags = []
@@ -969,7 +970,7 @@ def result_detail(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, total_questions, pdf_page_urls)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \
@@ -992,8 +993,11 @@ def result_detail(submission_id):
                 submission[field] = {} if field != "answers" else {}
         if not isinstance(submission.get(field), dict):
             submission[field] = {} if field != "answers" else {}
-    # Parse exam JSON fields
-    for _field in ("question_types", "answer_key", "question_weights", "question_pages", "pdf_page_urls"):
+    # Parse exam JSON fields. `question_scoring` is here because the review reads it:
+    # the per-statement breakdown has to explain the rule the paper was marked with,
+    # and a mode left as a JSON string would be read as "no mode" — the default.
+    for _field in ("question_types", "answer_key", "question_weights", "question_scoring",
+                   "question_pages", "pdf_page_urls"):
         _val = submission.get("exam", {}).get(_field)
         if isinstance(_val, str):
             try:
@@ -1052,7 +1056,7 @@ def download_result_pdf(submission_id):
     supabase = get_supabase()
     try:
         res = supabase.table("submissions") \
-            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, total_questions, pdf_page_urls)") \
+            .select("id, exam_id, student_id, answers, score, max_score, violations, penalty, final_score, status, is_published, started_at, submitted_at, graded_at, teacher_feedback, exams(id, title, subject, answer_key, question_types, question_scoring, total_questions, pdf_page_urls)") \
             .eq("id", submission_id) \
             .eq("student_id", g.user_id) \
             .single() \

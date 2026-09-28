@@ -144,6 +144,30 @@ EVIDENCE: dict[str, list[tuple[str, list[str]]]] = {
          [r"\bpgkAddStatement\b", r"\bpgkPickKey\b", r"\bpgkSimulate\b"]),
         ("app/routes/api.py", [r"/pgk/simulate"]),
     ],
+    # The oversight roles. Three claims, and each is anchored on the artifact
+    # that *is* the claim rather than on the word appearing somewhere: the two
+    # roles exist as one vocabulary with a create and a delete; the decorator
+    # that admits them is the shared one, not an admin one; their one page says
+    # so to the reader's face; and the migration is what makes the name legal in
+    # `profiles` at all. A card that advertised a "Kepala Sekolah" login without
+    # these would be advertising an account the database refuses to hold.
+    "school-officials": [
+        ("app/services/school_officials.py",
+         [r"\bOFFICIAL_ROLES\b", r"\bdef create_official\b",
+          r"\bdef delete_official\b", r"\bdef _assert_own\b"]),
+        ("app/utils/auth.py",
+         [r"\bdef school_official_required\b", r"\bDASHBOARD_FOR_ROLE\b"]),
+        # The read-only half is shown to the reader, so the artifact is the badge
+        # the page prints, not a comment claiming it.
+        ("app/templates/principal/dashboard.html", [r"Hanya baca"]),
+        ("app/routes/principal.py",
+         [r'"/principal/dashboard"', r'"/vice-principal/dashboard"']),
+        # "the school admin creates and revokes them, not us" — the page and the
+        # route that do it, in the school admin's own blueprint.
+        ("app/templates/admin_sekolah/officials.html", [r"/officials/create"]),
+        ("supabase/migrations/038_school_officials_roles.sql",
+         [r"\bprofiles_role_check\b"]),
+    ],
     "bilingual-dark": [
         ("app/templates/base.html", [r"\bsetLang\b", r"\btoggleDark\b"]),
         # "a release is refused if any text fails a contrast check" is a deploy

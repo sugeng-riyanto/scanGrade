@@ -2,7 +2,7 @@
 {% block title %}Murid - ScanGrade{% endblock %}
 {% block page_title %}Data Murid{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ showForm: {{ 'true' if students|length == 0 else 'false' }}, showPassword: false, generatedPassword: '', formName: '', formEmail: '', formPassword: '', generateEmail() { if(!this.formName.trim()) return; fetch('/admin-sekolah/generate-email?name='+encodeURIComponent(this.formName)).then(r=>r.json()).then(d=>{ this.formEmail = d.email; this.formPassword = d.password; this.generatedPassword = d.password; }).catch(()=>{}); } }">
+<div class="space-y-6" x-data="{ showForm: {{ 'true' if students|length == 0 else 'false' }}, showPassword: false, generatedPassword: '', pwTitle: '', pwNote: '', formName: '', formEmail: '', formPassword: '', generateEmail() { if(!this.formName.trim()) return; fetch('/admin-sekolah/generate-email?name='+encodeURIComponent(this.formName)).then(r=>r.json()).then(d=>{ this.formEmail = d.email; this.formPassword = d.password; this.generatedPassword = d.password; }).catch(()=>{}); } }">
     <div class="bg-blue-50 rounded-xl p-3 flex items-start gap-3 border border-blue-200">
         <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
         <div class="text-xs text-blue-800">
@@ -22,12 +22,12 @@
     {% endif %}
     {% endwith %}
 
-    <div x-show="showPassword" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showPassword=false">
+    <div x-show="showPassword" x-cloak class="fixed inset-0 sg-layer-dialog flex items-center justify-center bg-black/40" @click.self="showPassword=false">
         <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border-t-4 border-emerald-500">
             <div class="text-center">
                 <div class="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3"><i class="fas fa-check-circle text-2xl"></i></div>
-                <h3 class="font-extrabold text-stone-800 mb-2" x-text="t('Murid Berhasil Dibuat!','Student Created!')"></h3>
-                <p class="text-sm text-stone-500 mb-4" x-text="t('Password default untuk login:','Default password for login:')"></p>
+                <h3 class="font-extrabold text-stone-800 mb-2" x-text="pwTitle || t('Murid Berhasil Dibuat!','Student Created!')"></h3>
+                <p class="text-sm text-stone-500 mb-4" x-text="pwNote || t('Password default untuk login:','Default password for login:')"></p>
                 <div class="bg-stone-50 rounded-xl p-4 mb-4">
                     <code class="text-lg font-bold text-stone-800 select-all" x-text="generatedPassword"></code>
                 </div>
@@ -151,11 +151,17 @@
                         <td class="px-4 py-3 text-right">
                             <div class="flex items-center justify-end gap-1">
                                 <button @click="editing=!editing" class="px-2.5 py-1.5 text-xs font-bold bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition border border-amber-200"><i class="fas fa-edit"></i></button>
-                                <button hx-post="/admin-sekolah/students/{{ s.id }}/reset-password" hx-target="this"
-                                        class="px-2.5 py-1.5 text-xs font-bold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition border border-blue-200"
-                                        hx-swap="outerHTML">Reset PW</button>
-                                <button hx-post="/admin-sekolah/students/{{ s.id }}/delete" hx-target="body" hx-confirm="Hapus murid {{ s.name }}?"
-                                        :hx-confirm="t('Hapus murid {{ s.name }}?','Delete student {{ s.name }}?')"
+                                {# Both actions go through `fetch`, not htmx. The route answers
+                                   JSON, and a JSON body swapped into a button (or into `body`,
+                                   for the delete) is a button-shaped error message — while
+                                   `fetch` is already wrapped in base.html to carry the CSRF
+                                   header the app's global hook requires. The reset shows the
+                                   new password in the modal this page already has. #}
+                                <button type="button"
+                                        @click="fetch('/admin-sekolah/students/{{ s.id }}/reset-password',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.password){ generatedPassword=d.password; pwTitle=t('Password baru','New password'); pwNote=t('Berikan password ini ke murid.','Give this password to the student.'); showPassword=true } else { alert(d.error || t('Gagal mereset password','Could not reset the password')) } }).catch(()=>alert(t('Gagal mereset password','Could not reset the password')))"
+                                        class="px-2.5 py-1.5 text-xs font-bold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition border border-blue-200">Reset PW</button>
+                                <button type="button"
+                                        @click="if(confirm(t('Hapus murid {{ s.name }}?','Delete student {{ s.name }}?'))) fetch('/admin-sekolah/students/{{ s.id }}/delete',{method:'POST'}).then(r=>{ if(r.ok) location.reload(); else alert(t('Gagal menghapus','Could not delete')) }).catch(()=>alert(t('Gagal menghapus','Could not delete')))"
                                         class="px-2.5 py-1.5 text-xs font-bold bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition border border-red-200" x-text="t('Hapus','Delete')"></button>
                             </div>
                             <div x-show="editing" x-collapse x-cloak class="mt-3 text-left">

@@ -75,6 +75,22 @@ UNARMED_FILE="$STATE_DIR/unarmed"
 #: from outside the box looks like one with no new commits. Read by
 #: /super-admin/deploy-status; see preflight-logic below.
 PREFLIGHT_FILE="$STATE_DIR/refused-before-merge"
+#: The diff of whatever blocked that run, beside the refusal it belongs to. The
+#: record names the file; a filename cannot answer "is this an unintended leftover
+#: or a hotfix nobody committed?" — and those two have opposite right answers. The
+#: first line is the refusal's own timestamp, which is how the page proves which
+#: refusal it describes, and the same call that writes the record writes (or
+#: clears) this: a diff left beside a *different* refusal reads as its cause.
+PREFLIGHT_DIFF_FILE="$STATE_DIR/refused-before-merge.diff"
+#: Bounded on both axes. Lines, because a diff is proportional to the change; bytes,
+#: because a rebuilt minified stylesheet is one enormous line and the state
+#: directory must not grow with it on every tick.
+PREFLIGHT_DIFF_LINES=200
+PREFLIGHT_DIFF_BYTES=24000
+#: Prefix of the line the runner leaves where it cut a diff. The page searches for
+#: this literal so it can say the *record* is short instead of implying the change
+#: is; a test holds the two files to the same string.
+PREFLIGHT_DIFF_MARK="[sg: diff truncated at"
 #: (The gate configs themselves are named beside the gate that reads them, not
 #: here: `test_the_deploy_passes_every_generated_setting` in the perf-gate guards
 #: anchors on each conf assignment and checks the environment-list right after it,
@@ -324,16 +340,35 @@ quarantine_gate() {
 PREFLIGHT_GATE=""
 PREFLIGHT_EXIT=""
 PREFLIGHT_DETAIL=""
+PREFLIGHT_DIFF=""
 
 preflight_write() {
   mkdir -p "$STATE_DIR" 2>/dev/null || true
+  # One timestamp for both files: the diff's header is what ties it to the refusal
+  # it belongs to, so two `date` calls would be two clocks and the page would read
+  # its own diff as stale.
+  local at
+  at=$(date -Is)
   {
-    printf '%s\n%s\n%s\n%s\n' "${PREFLIGHT_GATE:-unknown}" "$(date -Is)" \
+    printf '%s\n%s\n%s\n%s\n' "${PREFLIGHT_GATE:-unknown}" "$at" \
       "${PREFLIGHT_EXIT:-?}" "${AFTER_FULL:-}"
     printf '%s\n' "${PREFLIGHT_DETAIL:-}"
   } > "$PREFLIGHT_FILE" 2>/dev/null || true
   # Readable by the app (the status page shows this) and owned by root.
   chmod 0644 "$PREFLIGHT_FILE" 2>/dev/null || true
+
+  # The diff of whatever blocked the run, when the refusal is *about* the
+  # checkout's contents. Removed on every other refusal: a diff is evidence about
+  # one refusal, and one left beside a fetch failure would be read as its reason.
+  if [ -n "${PREFLIGHT_DIFF:-}" ]; then
+    {
+      printf '%s\n' "$at"
+      printf '%s\n' "$PREFLIGHT_DIFF"
+    } > "$PREFLIGHT_DIFF_FILE" 2>/dev/null || true
+    chmod 0644 "$PREFLIGHT_DIFF_FILE" 2>/dev/null || true
+  else
+    rm -f "$PREFLIGHT_DIFF_FILE" 2>/dev/null || true
+  fi
 }
 
 # A merge is the moment this stage stopped refusing, so a record about failing to
@@ -341,6 +376,35 @@ preflight_write() {
 # that merges and is then rolled back is the *quarantine's* record, not this one's.
 preflight_forget() {
   rm -f "$PREFLIGHT_FILE" 2>/dev/null || true
+  rm -f "$PREFLIGHT_DIFF_FILE" 2>/dev/null || true
+}
+
+# The checkout's tracked changes as a diff, bounded, with a line saying so when a
+# cap bit — a silently shortened diff would read as a smaller change than it is.
+# `HEAD` rather than the index, so a staged edit cannot hide from it; untracked
+# paths have no diff at all and stay visible in the record's own `git status`
+# lines. The external diff and textconv drivers are off because this runs as root
+# over a tree somebody else may have edited: a diff is data here, never a command.
+preflight_diff() {
+  local tmp lines bytes
+  tmp=$(mktemp 2>/dev/null) || return 0
+  if ! as_owner git -C "$REPO" diff --no-color --no-ext-diff --no-textconv HEAD -- \
+      > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 0
+  fi
+  lines=$(wc -l < "$tmp" 2>/dev/null || echo 0)
+  bytes=$(wc -c < "$tmp" 2>/dev/null || echo 0)
+  if [ "${bytes:-0}" -gt "$PREFLIGHT_DIFF_BYTES" ]; then
+    head -c "$PREFLIGHT_DIFF_BYTES" "$tmp"
+    printf '\n%s %s bytes of %s]\n' "$PREFLIGHT_DIFF_MARK" "$PREFLIGHT_DIFF_BYTES" "$bytes"
+  elif [ "${lines:-0}" -gt "$PREFLIGHT_DIFF_LINES" ]; then
+    head -n "$PREFLIGHT_DIFF_LINES" "$tmp"
+    printf '%s %s lines of %s]\n' "$PREFLIGHT_DIFF_MARK" "$PREFLIGHT_DIFF_LINES" "$lines"
+  else
+    cat "$tmp"
+  fi
+  rm -f "$tmp"
 }
 # preflight-logic:end
 
@@ -801,6 +865,7 @@ if [ -n "$DIRTY" ]; then
   log "checkout has local changes — NOT deploying:"
   echo "$DIRTY" | sed 's/^/    /'
   PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 \
+    PREFLIGHT_DIFF="$(preflight_diff)" \
     PREFLIGHT_DETAIL="$DIRTY" preflight_write
   exit 4
 fi
@@ -1104,6 +1169,57 @@ else
   as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
   exit 13
 fi
+
+# ── The schema gate: does production have what this release names? ───────────
+# Every gate above reads the code or the box. None of them can see the failure
+# this one exists for: a release whose *database* is behind its code — a table or
+# column the app now names that no migration has put in production, because the
+# migration was written and merged but never applied, or was applied to the wrong
+# project. That release is perfect on the box and 500s the first time a teacher
+# opens the page that reads it.
+#
+# `apply_migration.py --verify` is the one reader that can answer it: read-only,
+# it holds the migration files against the live catalogue and exits 6 when a
+# declared object exists nowhere. It runs before the reload, so a gap is caught
+# while rolling back is still free, and it quarantines — a gap is a property of
+# the commit, and the next tick must not re-pull it.
+#
+# Exit 1 is "the box could not measure": no DIRECT_URL, or a database it cannot
+# reach. That is a property of the *box*, not of the release, and it must not roll
+# a good release back — the armament check refuses a box with no DIRECT_URL before
+# any release is fetched, so reaching here with exit 1 is a transient. It is
+# logged loudly rather than swallowed, which is the difference between a gap and a
+# box problem that no longer read the same.
+# schema_gate:start
+RUN_STEP="schema"
+SCHEMA_OUT=$(as_owner env "$REPO/.venv/bin/python" "$REPO/deploy/apply_migration.py" \
+    --verify --repo "$REPO" 2>&1)
+SCHEMA_RC=$?
+case "$SCHEMA_RC" in
+  0)
+    log "$(printf '%s\n' "$SCHEMA_OUT" | grep -m1 'Every declared object is present' \
+        || echo 'schema gate: every declared object is present')" ;;
+  6)
+    log "schema gate FAILED — this release names objects the database does not have:"
+    printf '%s\n' "$SCHEMA_OUT" | grep -E '^    MISSING  ' | sed 's/^/    /'
+    log "    apply the migration first, then release this exact commit:"
+    log "        $REPO/.venv/bin/python $REPO/deploy/apply_migration.py <file>.sql --commit"
+    FAIL_REASON="schema gate (the release names objects no migration applied)"
+    # The verdict first, then the objects themselves: the record is capped, and the
+    # gate's own conclusion is the line that must never be the one that got cut.
+    FAIL_DETAIL=$({ printf '%s\n' "$SCHEMA_OUT" | grep -E '^[0-9]+ file\(s\) declare objects the schema'
+                    printf '%s\n' "$SCHEMA_OUT" | grep -E '^    MISSING  '; })
+    quarantine_write
+    as_owner git -C "$REPO" reset --hard --quiet "$BEFORE"
+    exit 18 ;;
+  *)
+    log "schema gate COULD NOT RUN (exit $SCHEMA_RC) — this release was NOT held"
+    log "    against the live schema. Not rolling back: an unreachable database is a"
+    log "    property of the box, not of the commit, and the armament check refuses a"
+    log "    box with no DIRECT_URL before any release is fetched."
+    printf '%s\n' "$SCHEMA_OUT" | tail -n 3 | sed 's/^/    /' ;;
+esac
+# schema_gate:end
 
 # ── Reload ───────────────────────────────────────────────────────────────────
 # reload sends SIGHUP: gunicorn finishes in-flight requests (graceful_timeout=30)

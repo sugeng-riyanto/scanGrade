@@ -497,7 +497,7 @@ const ScanGradeTools = (function() {
   const style = document.createElement('style');
   style.id = 'sg-calc-style';
   style.textContent = `
-.sg-calculator { position:fixed; bottom:80px; right:16px; z-index:9999; width:280px; background:#1e293b; border-radius:16px; box-shadow:0 8px 32px rgba(0,0,0,0.5); border:1px solid #334155; overflow:hidden; user-select:none; }
+.sg-calculator { position:fixed; bottom:80px; right:16px; z-index:var(--sg-layer-float); width:280px; background:#1e293b; border-radius:16px; box-shadow:0 8px 32px rgba(0,0,0,0.5); border:1px solid #334155; overflow:hidden; user-select:none; }
 .sg-calculator .calc-header { display:flex; align-items:center; justify-content:space-between; padding:6px 12px; background:#0f172a; border-bottom:1px solid #334155; }
 .sg-calculator .calc-title { font-size:11px; font-weight:800; color:#e2e8f0; }
 .sg-calculator .calc-angle-btn { font-size:9px; font-weight:800; padding:2px 8px; border-radius:4px; border:none; cursor:pointer; background:#334155; color:#94a3b8; }

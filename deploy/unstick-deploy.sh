@@ -191,7 +191,7 @@ fi
 step "5/6  is this box armed?"
 if [ -f "$REPO/deploy/arm-auto-deploy.sh" ]; then
     if bash "$REPO/deploy/arm-auto-deploy.sh" --check >/tmp/unstick-armament.log 2>&1; then
-        note "armed — the four gates have what they need"
+        note "armed — the gates have what they need"
     else
         note "NOT armed. This release is fine, but the NEXT one will be refused"
         note "until this is fixed:"

@@ -319,7 +319,7 @@
                                 <i class="fas fa-file-alt text-primary-500 mr-0.5"></i>Convert
                                 <i class="fas fa-chevron-down text-[8px] ml-0.5"></i>
                             </button>
-                            <div x-show="open" class="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-lg border border-surface-200 overflow-hidden z-20">
+                            <div x-show="open" class="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-lg border border-surface-200 overflow-hidden sg-layer-over">
                                 <button @click="open = false; downloadMarkdown('md')" class="flex items-center gap-2 w-full px-3 py-2 text-[10px] font-bold text-surface-700 hover:bg-primary-50 transition">
                                     <i class="fas fa-file-alt text-surface-400"></i>.md
                                 </button>
@@ -342,7 +342,7 @@
                                 <i class="fas fa-key text-amber-600 mr-0.5"></i><span x-text="t('Kunci','Key')"></span>
                                 <i class="fas fa-chevron-down text-[8px] ml-0.5"></i>
                             </button>
-                            <div x-show="open" class="absolute right-0 top-full mt-1 w-36 bg-white rounded-xl shadow-lg border border-surface-200 overflow-hidden z-20">
+                            <div x-show="open" class="absolute right-0 top-full mt-1 w-36 bg-white rounded-xl shadow-lg border border-surface-200 overflow-hidden sg-layer-over">
                                 <button @click="open = false; downloadAnswerKey('md')" class="flex items-center gap-2 w-full px-3 py-2 text-[10px] font-bold text-surface-700 hover:bg-amber-50 transition">
                                     <i class="fas fa-file-alt text-surface-400"></i>.md
                                 </button>
@@ -704,6 +704,8 @@
                                                               'For YouTube: open the video → copy the URL from the browser → paste it into the YouTube field')"></span></li>
                                 <li>&#8226; <span x-text="t('Pastikan Google Drive di-set “Anyone with the link” dan videonya tidak bersifat private/blocked',
                                                               'Make sure the Drive file is set to “Anyone with the link” and the video is not private or blocked')"></span></li>
+                                <li>&#8226; <span x-text="t('Tempel link berkasnya (…/file/d/ID/view), bukan link folder Drive atau dokumen Google Docs — keduanya tidak bisa diputar',
+                                                              'Paste the file link (…/file/d/ID/view), not a Drive folder link or a Google Docs document — neither can be played')"></span></li>
                                 <li>&#8226; <span x-text="t('Siswa tidak bisa membuka YouTube di tab baru — video diputar di dalam halaman ujian',
                                                               'Students cannot open YouTube in a new tab — the video plays inside the exam page')"></span></li>
                             </ul>
@@ -949,16 +951,28 @@
                                             <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
                                                 <i class="fas fa-music text-rose-500"></i>Audio (Google Drive link)
                                             </label>
-                                            <input type="url" :name="'audio_' + i" x-model="q.audio" placeholder="https://drive.google.com/file/d/..."
+                                            <input type="url" :name="'audio_' + i" x-model="q.audio" @input="q._mediaFailed = false" placeholder="https://drive.google.com/file/d/..."
                                                    class="w-full text-xs border-2 border-slate-200 rounded-xl px-3 py-1.5 focus:border-rose-400 transition mt-1">
                                             <p class="text-xs text-slate-400 mt-0.5">
                                                 &#8226; <span x-text="t('Unggah berkas audio (mp3, ogg, wav) ke Google Drive → Share → General access: Anyone with the link → Copy link',
                                                               'Upload the audio file (mp3, ogg, wav) to Google Drive → Share → General access: Anyone with the link → Copy link')"></span>
                                             </p>
                                             <div x-show="q.audio" class="mt-1 flex items-center gap-2">
-                                                <audio :src="gdriveDirect(q.audio)" controls class="h-8 w-full max-w-xs"></audio>
+                                                <audio controls class="h-8 w-full max-w-xs"
+                                                       @error="q._mediaFailed = true">
+                                                    <!-- One <source> per candidate endpoint, in
+                                                         the order the exam page offers them: what
+                                                         the teacher checks here is the list a
+                                                         pupil's browser will walk. -->
+                                                    <template x-for="src in sgExamMedia.audioSources(q.audio)" :key="src">
+                                                        <source :src="src">
+                                                    </template>
+                                                </audio>
                                                 <a :href="q.audio" target="_blank" class="text-xs text-rose-600 hover:underline" x-text="t('Buka link','Open link')"></a>
                                             </div>
+                                            <p data-media-unplayable x-show="q.audio && (!sgExamMedia.audioSources(q.audio).length || q._mediaFailed)"
+                                               class="mt-1 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1"
+                                               x-text="t('Link ini tidak bisa diputar. Tempel link berkas Drive (…/file/d/ID/view), bukan link folder atau dokumen.','This link cannot be played. Paste a Drive file link (…/file/d/ID/view), not a folder or a document link.')"></p>
                                         </div>
                                         <div>
                                             <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
@@ -971,11 +985,14 @@
                                                               'Copy the URL from the browser while the YouTube video is open (no login needed)')"></span>
                                                 <br>&#8226; <span x-text="t('Pastikan video tidak bersifat private','Make sure the video is not private')"></span>
                                             </p>
-                                            <div x-show="q.youtube" class="mt-1">
+                                            <div x-show="q.youtube && sgExamMedia.youtubeEmbed(q.youtube)" class="mt-1">
                                                 <div class="relative" style="padding-bottom:56.25%">
-                                                    <iframe :src="youtubeEmbedUrl(q.youtube)" class="absolute inset-0 w-full h-full rounded-xl" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
+                                                    <iframe :src="sgExamMedia.youtubeEmbed(q.youtube)" class="absolute inset-0 w-full h-full rounded-xl" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
                                                 </div>
                                             </div>
+                                            <p data-media-unplayable x-show="q.youtube && !sgExamMedia.youtubeEmbed(q.youtube)"
+                                               class="mt-1 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1"
+                                               x-text="t('Link ini bukan video YouTube yang bisa dibaca. Tempel URL dari browser saat videonya terbuka (youtu.be/ID atau watch?v=ID).','This is not a YouTube video link we can read. Paste the URL from the browser with the video open (youtu.be/ID or watch?v=ID).')"></p>
                                         </div>
                                     </div>
                                 </div>
@@ -1379,6 +1396,11 @@
     </div>
 </div>
 
+<!-- Loaded here, ahead of the component below, so the preview bound in the markup
+     resolves links through the same file the student's exam page uses. It is the
+     one implementation of "a pasted link" in the app: see
+     app/static/js/exam-media.js. -->
+<script src="/static/js/exam-media.js"></script>
 <script>
 // The question-type vocabulary, handed over by the server. Writing the names out
 // again here is how a page and the grader stop agreeing about what a true/false
@@ -2008,20 +2030,10 @@ function questionManager() {
                 return [i, Object.keys(m).length > 0 ? m : null];
             }).filter(([k,v]) => v !== null)));
         },
-        youtubeEmbedUrl(url) {
-            if (!url) return '';
-            var match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/)
-                     || url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/)
-                     || url.match(/youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/);
-            if (match) return 'https://www.youtube.com/embed/' + match[1] + '?rel=0&modestbranding=1';
-            return '';
-        },
-        gdriveDirect(url) {
-            if (!url) return '';
-            var match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-            if (match) return 'https://docs.google.com/uc?export=download&id=' + match[1];
-            return url;
-        },
+        // Link rewriting is not done here any more: `sgExamMedia`, loaded above, is
+        // the single implementation shared with the student's exam page, so the
+        // preview a teacher checks and the player a pupil gets read a pasted link
+        // the same way. See app/static/js/exam-media.js.
     };
 }
 

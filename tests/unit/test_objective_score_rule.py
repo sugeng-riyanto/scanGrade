@@ -160,10 +160,14 @@ class TestEveryWriterUsesIt:
         assert "objective_result(" in OMR_TASKS
         assert "key_has_answer" not in OMR_TASKS, (
             "the worker is still counting keyed answers to build its own divisor")
-        # The denominator is the paper's count, so it has to be selected: a column
-        # left out of a select list reads as absent, which here means "no questions".
-        assert re.search(r'select\("answer_key,question_types,total_questions"\)', OMR_TASKS), (
-            "the worker does not fetch total_questions, so its denominator is zero")
+        # The denominator is the paper's count and the mode rides with it: a column
+        # left out of a select list reads as absent, which here means "no questions"
+        # and (for the mode) "the AKM default for every question".
+        assert re.search(
+            r'select\("answer_key,question_types,question_scoring,total_questions"\)',
+            OMR_TASKS), (
+            "the worker does not fetch total_questions and the marking mode together, "
+            "so its denominator is zero and a PGK's share is read through the default")
 
     def test_the_scanner_save_route_uses_it(self):
         assert "objective_result(" in SCAN_SAVE_BLOCK

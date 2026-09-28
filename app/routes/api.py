@@ -308,7 +308,8 @@ def force_submit():
             # 100. `earned` above still carries the weighted total that the final
             # score is built from — they are two different numbers on purpose, and
             # this route used to write the wrong one to this column.
-            score = objective_result(qtypes, key, answers, total_q).score
+            score = objective_result(qtypes, key, answers, total_q,
+                                     exam.get("question_scoring")).score
             # Get actual penalty from violation logs
             from app.services.anti_cheat_service import (
                 calculate_graduated_penalty, count_penalized_violations,
@@ -738,6 +739,16 @@ def scan_bulk_save():
     qtypes = exam.get("question_types") or {} if exam else {}
     if isinstance(qtypes, str):
         qtypes = json.loads(qtypes)
+    # The marking mode rides with the types for the same reason they ride with the
+    # key: a PGK's share is read *through* the mode, and a column left out of this
+    # select (or left as a JSON string) reads as *absent* — which is the AKM default
+    # for every question, silently ignoring the teacher's choice.
+    scoring = exam.get("question_scoring") or {} if exam else {}
+    if isinstance(scoring, str):
+        try:
+            scoring = json.loads(scoring)
+        except (json.JSONDecodeError, TypeError):
+            scoring = {}
     total_q = int((exam or {}).get("total_questions") or 0)
     arrived_at = datetime.now(timezone.utc)
 
@@ -759,7 +770,7 @@ def scan_bulk_save():
         # 100% for a pupil who answered those two — and `mcq_count` below was
         # referenced without ever being assigned, so this route raised NameError on
         # the first sheet it saved.
-        objective = objective_result(qtypes, key, answers, total_q)
+        objective = objective_result(qtypes, key, answers, total_q, scoring)
         score = objective.score
         correct = objective.correct
         mcq_count = objective.out_of
@@ -1089,7 +1100,8 @@ def grade_batch():
     if g.user_role == "admin_sekolah" and str(exam.get("school_id")) != str(g.get("user_school_id")):
         return jsonify({"error": "Forbidden"}), 403
     # Parse JSON fields that may be strings
-    for _fld in ("answer_key", "question_types", "question_weights", "question_pages"):
+    for _fld in ("answer_key", "question_types", "question_weights", "question_scoring",
+                 "question_pages"):
         _v = exam.get(_fld)
         if isinstance(_v, str):
             try: exam[_fld] = json.loads(_v)
@@ -1137,7 +1149,8 @@ def grade_batch():
         # already the paper's objective count; it is now the shared function, so
         # the numerator needs a key to be right against and an unkeyed question
         # cannot be counted correct).
-        objective = objective_result(question_types, answer_key, answers, total_q)
+        objective = objective_result(question_types, answer_key, answers, total_q,
+                                     exam.get("question_scoring"))
         mcq_score = objective.score
         supabase.table("submissions").update({
             "score": mcq_score,
@@ -1345,6 +1358,12 @@ def scan_save():
             qtypes = json.loads(qtypes)
         except (json.JSONDecodeError, TypeError):
             qtypes = {}
+    scoring = exam.get("question_scoring") or {}
+    if isinstance(scoring, str):
+        try:
+            scoring = json.loads(scoring)
+        except (json.JSONDecodeError, TypeError):
+            scoring = {}
     # One rule for the whole app. This route divided by the number of answers the
     # *key* had, so a teacher who had keyed 2 of 10 questions got a perfect 100 for a
     # pupil who answered those two — a mark out of a paper that was two-tenths
@@ -1352,7 +1371,7 @@ def scan_save():
     # the sheet was printed with, so `score` and `total` below now name the same
     # denominator and cannot disagree with the pupil's own result page.
     total_q = int(exam.get("total_questions") or 0)
-    objective = objective_result(qtypes, key, detected, total_q)
+    objective = objective_result(qtypes, key, detected, total_q, scoring)
     correct = objective.correct
     score = objective.score
     mcq_count = objective.out_of

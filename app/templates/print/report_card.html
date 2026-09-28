@@ -33,7 +33,7 @@
 
     /* ── the only part of this document that is not paper ── */
     .toolbar {
-        position: sticky; top: 0; z-index: 50; background: #0f172a; color: #fff;
+        position: sticky; top: 0; z-index: var(--sg-layer-header); background: #0f172a; color: #fff;
         padding: 8px 14px; display: flex; align-items: center; gap: 10px;
         font-size: 9pt; justify-content: space-between;
     }
@@ -119,7 +119,7 @@
         object-fit: fill; pointer-events: none;
     }
     .page-cap { font-size: 7.5pt; color: #64748b; margin: -4pt 0 10pt; }
-    .tb { position: absolute; z-index: 10; max-width: 60%; }
+    .tb { position: absolute; z-index: var(--sg-layer-canvas-item); max-width: 60%; }
     .tb .box {
         font-size: 7pt; padding: 1pt 4pt; border-radius: 3pt;
         white-space: pre-wrap; word-break: break-word;

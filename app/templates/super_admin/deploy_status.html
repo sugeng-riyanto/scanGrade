@@ -296,6 +296,54 @@
                         <span class="text-surface-500 shrink-0" x-text="t('Berkas','File')"></span>
                         <code class="font-mono text-xs text-surface-700 break-all text-right">{{ pf.path }}</code>
                     </div>
+
+                    {#
+                        The decision this card exists for. The record above names the
+                        file and never the change, and the two answers it is between
+                        are opposites: a leftover edit should go, and a hotfix that
+                        never reached the repo must not — `restore` would delete the
+                        second. So the diff the runner read is shown as it stands,
+                        with what it does and does not cover, and the choice named
+                        rather than made: this page only reads.
+
+                        Rendered for a dirty checkout, and for anything else that
+                        somehow has a diff on record — never for a refusal the diff
+                        cannot belong to, which is what the `stale` branch is for.
+                    #}
+                    {% if pf.gate_key == 'dirty_checkout' or pf.diff_key != 'none' %}
+                    <div class="mt-4 rounded-xl border border-surface-200 bg-surface-50 p-3">
+                        <div class="flex items-start justify-between gap-2">
+                            <span class="text-surface-500 text-xs" x-text="t('Perubahan pada berkas yang menahan rilis','What changed in the file holding the release')"></span>
+                            <code class="font-mono text-[11px] text-surface-500 break-all text-right">{{ pf.diff_path }}</code>
+                        </div>
+                        {% if pf.diff_key == 'present' %}
+                        <pre class="mt-2 text-[11px] leading-relaxed font-mono text-surface-700 overflow-x-auto">{{ pf.diff_lines | join('\n') }}</pre>
+                        <p class="mt-2 text-[11px] text-surface-500" x-text="t('Ini keluaran git diff yang dibaca runner, apa adanya — bukan ringkasan. Berkas yang belum dilacak tidak punya diff dan hanya tampil di daftar di atas.','This is the git diff the runner read, as it stands — not a summary. Untracked files have no diff and appear only in the list above.')"></p>
+                        {% if pf.diff_more %}
+                        <p class="mt-1 text-[11px] text-surface-500"><span x-text="t('Menampilkan','Showing')"></span> {{ pf.diff_lines|length }} <span x-text="t('dari','of')"></span> {{ pf.diff_total }} <span x-text="t('baris.','lines.')"></span></p>
+                        {% endif %}
+                        {% if pf.diff_truncated %}
+                        <p class="mt-1 text-[11px] text-amber-700" x-text="t('Runner memotong catatan ini di sumbernya; diff lengkapnya ada di kotak.','The runner cut this record short at the source; the full diff is on the box.')"></p>
+                        {% endif %}
+                        <div class="mt-2 space-y-1 text-[11px] text-surface-700">
+                            <p><i class="fas fa-rotate-left text-surface-400 mr-1"></i><span x-text="t('Kalau ini sisa yang tidak disengaja, buang dengan:','If this is an unintended leftover, discard it with:')"></span> <code class="font-mono break-all">git -C /opt/scangrade restore -- &lt;berkas&gt;</code></p>
+                            <p><i class="fas fa-code-branch text-surface-400 mr-1"></i><span x-text="t('Kalau ini perbaikan yang belum pernah masuk repo, commit dulu — restore akan menghapusnya.','If it is a fix that never reached the repo, commit it first — restore would delete it.')"></span></p>
+                        </div>
+                        <p class="mt-2 text-[11px] text-surface-500" x-text="t('Halaman ini hanya membaca. Ia tidak bisa mengubah checkout, dan keputusan keep-or-discard tetap milik operator.','This page only reads. It cannot change the checkout, and the keep-or-discard decision stays with the operator.')"></p>
+                        {% elif pf.diff_key == 'none' %}
+                        <p class="mt-2 text-[11px] text-amber-700" x-text="t('Tidak ada diff yang tercatat untuk penolakan ini — runner yang lebih lama hanya mencatat nama berkasnya. Itu bukan berarti berkasnya tidak berubah.','No diff was recorded for this refusal — an older runner records only the filename. That is not the same as the file being unchanged.')"></p>
+                        {% elif pf.diff_key == 'stale' %}
+                        <p class="mt-2 text-[11px] text-amber-700" x-text="t('Ada diff di catatan, tetapi milik penolakan lain, jadi tidak ditampilkan.','A diff is on record, but it belongs to a different refusal, so it is not shown.')"></p>
+                        {% if pf.diff_reason %}<code class="block mt-1 font-mono text-[11px] break-all text-amber-800">{{ pf.diff_reason }}</code>{% endif %}
+                        {% elif pf.diff_key == 'unreadable' %}
+                        <p class="mt-2 text-[11px] text-amber-700" x-text="t('Diff tercatat tetapi tidak bisa dibaca halaman ini.','A diff is on record but this page cannot read it.')"></p>
+                        {% if pf.diff_reason %}<code class="block mt-1 font-mono text-[11px] break-all text-amber-800">{{ pf.diff_reason }}</code>{% endif %}
+                        {% elif pf.diff_key == 'malformed' %}
+                        <p class="mt-2 text-[11px] text-amber-700" x-text="t('Berkas diff ada tetapi tidak dikenali sebagai catatan runner.','A diff file exists but is not recognised as one of the runner records.')"></p>
+                        {% if pf.diff_reason %}<code class="block mt-1 font-mono text-[11px] break-all text-amber-800">{{ pf.diff_reason }}</code>{% endif %}
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>
@@ -365,6 +413,7 @@
                                 {% elif ls.step_key == 'compile' %}<span x-text="t('mengompilasi kode (Gate 1)','compiling the code (Gate 1)')"></span>
                                 {% elif ls.step_key == 'construct' %}<span x-text="t('membangun aplikasi dengan konfigurasi aslinya (Gate 2)','constructing the app under its real configuration (Gate 2)')"></span>
                                 {% elif ls.step_key == 'theme' %}<span x-text="t('memeriksa keterbacaan tema (Gate 3)','checking theme readability (Gate 3)')"></span>
+                                {% elif ls.step_key == 'schema' %}<span x-text="t('memegang rilis terhadap katalog basis data hidup','holding the release against the live database catalogue')"></span>
                                 {% elif ls.step_key == 'reload' %}<span x-text="t('me-reload gunicorn dan worker','reloading gunicorn and the worker')"></span>
                                 {% elif ls.step_key == 'verify' %}<span x-text="t('masuk sebagai tiap peran dan membuka halaman penting (Gate 4–6)','signing in as each role and opening the pages that matter (Gates 4–6)')"></span>
                                 {% elif ls.step_key == 'done' %}<span x-text="t('selesai — rilis terverifikasi dan melayani','finished — the release is verified and serving')"></span>
@@ -473,6 +522,7 @@
                                 {% elif q.gate_key == 'smoke_test' %}<span x-text="t('uji asap setelah deploy','the post-deploy smoke test')"></span>
                                 {% elif q.gate_key == 'claims_gate' %}<span x-text="t('gerbang klaim','the claims gate')"></span>
                                 {% elif q.gate_key == 'perf_gate' %}<span x-text="t('gerbang kinerja','the performance gate')"></span>
+                                {% elif q.gate_key == 'schema_gate' %}<span x-text="t('gerbang skema basis data','the database schema gate')"></span>
                                 {% else %}<span x-text="t('tidak diketahui','unknown')"></span>
                                 {% endif %}
                             </span>
@@ -1262,6 +1312,7 @@
                         {% elif code == 15 %}<span x-text="t('kotak ini tidak siap menilai rilis','the box is not armed to check a release')"></span>
                         {% elif code == 16 %}<span x-text="t('rilis ini menghapus Gate 0','the release removed Gate 0')"></span>
                         {% elif code == 17 %}<span x-text="t('index checkout terkunci dan tidak akan dipaksa','the checkout’s index is locked and will not be forced')"></span>
+                        {% elif code == 18 %}<span x-text="t('rilis menyebut objek yang belum ada di basis data produksi','the release names objects production does not have')"></span>
                         {% else %}<span x-text="t('kode dari runner yang lebih baru — tidak ada baris untuk ini di sini','a code from a newer runner — there is no row for it here')"></span>{% endif %}
                     </span>
                 </div>

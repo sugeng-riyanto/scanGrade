@@ -28,6 +28,7 @@ import re
 import pytest
 
 from app.services import analysis_scope
+from app.utils.exam_access import OFFICIAL_READ_ROLES
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TEMPLATES = ROOT / "app" / "templates"
@@ -265,14 +266,24 @@ class TestTheDoorIsGatedToTheRolesThatHaveAScope:
     def test_the_hub_is_guarded_by_exactly_the_scoped_roles(self):
         """One list, two jobs: the guard and `analysis_scope` must name the same
         roles. A role the page admits but the scope does not know renders an empty
-        report and no error — and the sidebar would happily offer it."""
+        report and no error — and the sidebar would happily offer it.
+
+        The two school officials are the one exception, and it is a *named* one:
+        they have a scope (they read every exam in their school) and their reports
+        live behind their own door, `/principal/analytics` and
+        `/vice-principal/analytics`. Admitting them to this hub would hand them a
+        teacher URL — the exact thing their blueprint exists to avoid. So the
+        assertion is a set difference plus a deliberate absence, not a relaxation.
+        """
         match = re.search(r'@teacher_bp\.route\("/reports"\)\s*\n'
                           r'@role_required\(([^)]*)\)\s*\n'
                           r'def reports_hub\(', TEACHER)
         assert match, "the reports hub is gone, or is reachable by any role"
-        assert set(re.findall(r'"(\w+)"', match.group(1))) == \
-            set(analysis_scope.SCOPE_LABELS), (
-                "the roles the hub admits are not the roles that have a scope")
+        admitted = set(re.findall(r'"(\w+)"', match.group(1)))
+        assert admitted == set(analysis_scope.SCOPE_LABELS) - set(OFFICIAL_READ_ROLES), (
+            "the roles the hub admits are not the roles that have a scope")
+        assert not (admitted & set(OFFICIAL_READ_ROLES)), (
+            "a school official must read their reports at their own address")
 
     def test_a_student_has_no_scope_at_all(self):
         assert "murid" not in analysis_scope.SCOPE_LABELS

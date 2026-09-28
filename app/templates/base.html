@@ -249,7 +249,7 @@ window.sgSavePrefs = function (patch) {
        only do that by naming the regions it is hiding. The first version matched
        the DOM shape instead (`body > div > aside`), which one extra wrapper
        would have turned off silently. #}
-    <aside :lang="lang" class="sg-app-sidebar fixed inset-y-0 left-0 z-50 w-64 bg-gradient-to-b from-surface-900 via-surface-800 to-surface-900 transform transition-transform duration-250 ease-out lg:translate-x-0 lg:static lg:z-auto shadow-xl"
+    <aside :lang="lang" class="sg-app-sidebar fixed inset-y-0 left-0 sg-layer-drawer w-64 bg-gradient-to-b from-surface-900 via-surface-800 to-surface-900 transform transition-transform duration-250 ease-out lg:translate-x-0 lg:static sg-layer-out-lg shadow-xl"
            :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
            @keydown.escape.window="sidebarOpen=false">
 
@@ -354,6 +354,11 @@ window.sgSavePrefs = function (patch) {
             {% set _official_home = '/principal/dashboard' if g.user_role == 'principal' else '/vice-principal/dashboard' %}
             <div class="nav-section-title"><span x-text="t('Utama','Main')"></span></div>
             <a href="{{ _official_home }}" class="nav-item {% if request.path == _official_home %}active{% endif %}"><i class="fas fa-chart-pie"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
+            {# The two pages these roles read the school through. Both addresses are
+               the reader's own, because each official has their own door and a
+               shared path would send one of them through the other's guard. #}
+            <a href="{{ _official_home.replace('/dashboard', '/analytics') }}" class="nav-item {% if request.path.endswith('/analytics') %}active{% endif %}"><i class="fas fa-chart-line"></i><span x-text="t('Analitik','Analytics')"></span></a>
+            <a href="{{ _official_home.replace('/dashboard', '/progress') }}" class="nav-item {% if request.path.endswith('/progress') %}active{% endif %}"><i class="fas fa-calendar-days"></i><span x-text="t('Progres Sekolah','School Progress')"></span></a>
             <div class="nav-section-title pt-2"><span x-text="t('Panduan','Guide')"></span></div>
             <a href="/guide/skor" class="nav-item {% if request.path == '/guide/skor' %}active{% endif %}"><i class="fas fa-book-open"></i><span x-text="t('Panduan Skor','Scoring Guide')"></span></a>
 
@@ -438,7 +443,7 @@ window.sgSavePrefs = function (patch) {
     <div class="flex-1 flex flex-col min-w-0 max-w-full pb-safe lg:pb-0">
 
         <!-- Topbar -->
-        <header :lang="lang" class="sg-app-topbar h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-sm">
+        <header :lang="lang" class="sg-app-topbar h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 sg-layer-header shadow-sm">
             <div class="flex items-center gap-3 min-w-0">
                 <button @click="sidebarOpen = !sidebarOpen" class="tap-44 text-surface-400 hover:text-surface-700 -ml-2 rounded-lg hover:bg-surface-100 transition">
                     <i class="fas fa-bars text-lg"></i>
@@ -479,6 +484,7 @@ window.sgSavePrefs = function (patch) {
                     'ai-settings': ('Koreksi AI', 'AI Grading'),
                     'analysis': ('Analisis Butir', 'Item Analysis'),
                     'analytics': ('Analitik', 'Analytics'),
+                    'progress': ('Progres Sekolah', 'School Progress'),
                     'answer-keys': ('Kunci Jawaban', 'Answer Keys'),
                     'assignments': ('Penugasan', 'Assignments'),
                     'capacity': ('Kapasitas', 'Capacity'),
@@ -636,7 +642,7 @@ window.sgSavePrefs = function (patch) {
                     </button>
                     <div x-show="userMenuOpen" x-cloak x-transition:enter="animate-fade-in"
                          @click="userMenuOpen = false"
-                         class="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-surface-200 py-1.5 z-50">
+                         class="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-surface-200 py-1.5 sg-layer-over">
                         <div class="px-4 py-2 border-b border-surface-100">
                             <p class="text-sm font-bold text-surface-800 truncate">{{ g.user_name or g.user_email }}</p>
                             <p class="text-[10px] font-medium text-surface-400 uppercase tracking-wider"><span x-text="'{{ g.user_role|replace('_', ' ') }}'"></span></p>
@@ -659,7 +665,7 @@ window.sgSavePrefs = function (patch) {
     </div>
 
     <!-- Toast Container -->
-    <div class="fixed top-4 right-4 z-[100] space-y-2 w-full max-w-sm pointer-events-none" aria-live="polite">
+    <div class="fixed top-4 right-4 sg-layer-notice space-y-2 w-full max-w-sm pointer-events-none" aria-live="polite">
         <template x-for="toast in toasts" :key="toast.id">
             <div class="pointer-events-auto toast-enter flex items-start gap-3 p-4 rounded-xl shadow-xl border backdrop-blur-sm"
                  :class="{
@@ -684,7 +690,7 @@ window.sgSavePrefs = function (patch) {
 <!-- Not logged in -->
 <!-- Dark mode toggle for mobile -->
 <button @click="toggleDark()" :lang="lang"
-        class="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-full shadow-lg text-sm font-bold transition border lg:hidden"
+        class="fixed bottom-6 right-6 sg-layer-notice flex items-center gap-2 px-4 py-3 rounded-full shadow-lg text-sm font-bold transition border lg:hidden"
         :class="darkMode ? 'bg-slate-800 text-amber-400 border-slate-600' : 'bg-primary-600 text-white border-primary-500'"
         :title="darkMode ? t('Mode Terang','Light mode') : t('Mode Gelap','Dark mode')">
     <i :class="darkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
@@ -692,7 +698,7 @@ window.sgSavePrefs = function (patch) {
 </button>
 <!-- Dark mode toggle for desktop -->
 <button @click="toggleDark()" :lang="lang"
-        class="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-sm font-bold transition border-2 hidden lg:flex"
+        class="fixed bottom-6 right-6 sg-layer-notice flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-sm font-bold transition border-2 hidden lg:flex"
         :class="darkMode ? 'bg-slate-800 text-amber-400 border-slate-600 hover:bg-slate-700' : 'bg-primary-600 text-white border-primary-500 hover:bg-primary-700 hover:shadow-lg'"
         :title="darkMode ? t('Mode Terang','Light mode') : t('Mode Gelap','Dark mode')">
     <i :class="darkMode ? 'fas fa-sun text-amber-400' : 'fas fa-moon text-white'"></i>
@@ -751,6 +757,21 @@ document.addEventListener('DOMContentLoaded', function() {
         return origFetch.call(this, url, opts);
     };
 });
+
+// htmx drives its own XHR, so the fetch wrapper above never reaches it. The app
+// enforces CSRF in a global `before_request`, which means every `hx-post`,
+// `hx-delete` and `htmx.ajax` on the site was refused with a 403 before its
+// handler ran — the button looked dead, and a handler that swapped the reply
+// showed the error JSON instead. One listener fixes every page at once, because
+// `htmx:configRequest` fires for each request htmx is about to make.
+//
+// Registered here, in the first script that can see the meta tag, rather than in
+// a DOMContentLoaded listener: the event is on `document`, so a listener added
+// now is in place before any button exists to be clicked.
+document.addEventListener('htmx:configRequest', function (e) {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta) e.detail.headers['X-CSRF-Token'] = meta.getAttribute('content');
+});
 </script>
 <script>
 function linkify(text) {
@@ -763,7 +784,7 @@ function linkify(text) {
 {% block scripts %}{% endblock %}
 {% if g.user_role %}
 <!-- Mobile bottom nav -->
-<nav :lang="lang" class="sg-app-bottomnav fixed bottom-0 inset-x-0 z-50 bg-white border-t border-surface-200 pb-safe lg:hidden shadow-2xl flex">
+<nav :lang="lang" class="sg-app-bottomnav fixed bottom-0 inset-x-0 sg-layer-drawer bg-white border-t border-surface-200 pb-safe lg:hidden shadow-2xl flex">
     {% set role = g.user_role %}
     {% if role == 'super_admin' %}
     <a href="/super-admin/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/super-admin/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-crown text-lg mb-0.5"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
@@ -790,6 +811,7 @@ function linkify(text) {
     {% elif role in ('principal', 'vice_principal') %}
     {% set _official_home = '/principal/dashboard' if role == 'principal' else '/vice-principal/dashboard' %}
     <a href="{{ _official_home }}" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == _official_home %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-chart-pie text-lg mb-0.5"></i><span x-text="t('Dashboard','Dashboard')"></span></a>
+    <a href="{{ _official_home.replace('/dashboard', '/progress') }}" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path.endswith('/progress') %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-calendar-days text-lg mb-0.5"></i><span x-text="t('Progres','Progress')"></span></a>
     <a href="/guide/skor" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/guide/skor' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-book-open text-lg mb-0.5"></i><span x-text="t('Panduan','Guide')"></span></a>
     {% elif role == 'murid' %}
     <a href="/student/dashboard" class="flex-1 flex flex-col items-center py-2 text-[10px] font-bold {% if request.path == '/student/dashboard' %}text-primary-600{% else %}text-surface-400{% endif %}"><i class="fas fa-home text-lg mb-0.5"></i><span x-text="t('Beranda','Home')"></span></a>

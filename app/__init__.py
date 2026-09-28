@@ -332,7 +332,7 @@ def create_app(env=None):
     # module docstring).
     from app.services.question_types import (
         describe_answer, grade_answer, is_essay, is_objective, part_factor,
-        partial_credit, public_options, question_kind, vocabulary,
+        partial_credit, pgk_review, public_options, question_kind, vocabulary,
     )
     # A report used to decide "is this answer right" with its own comparison of
     # letters, which cannot express a matching answer at all and marks every one
@@ -343,6 +343,10 @@ def create_app(env=None):
     app.jinja_env.globals["q_kind"] = question_kind
     app.jinja_env.globals["q_answer_text"] = describe_answer
     app.jinja_env.globals["q_public_options"] = public_options
+    # A complex multiple choice answer judged statement by statement, for the pupil
+    # reviewing a released paper and the teacher reviewing the same paper. One
+    # builder for both, so the two screens cannot describe one answer differently.
+    app.jinja_env.globals["q_pgk_review"] = pgk_review
     # The mark scheme, for a page that shows what a question earned. These are the
     # same functions the score is computed with, so a report cannot show a
     # different number from the one it was added up from — which is exactly what a

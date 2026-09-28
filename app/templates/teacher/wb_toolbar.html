@@ -30,7 +30,7 @@
         <span x-text="pw.toFixed(1)"></span>
         <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Ukuran</span>
     </button>
-    <div x-show="o" @click.outside="o=false" class="absolute z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-2 w-36" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0'" style="display:none">
+    <div x-show="o" @click.outside="o=false" class="absolute sg-layer-over bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-2 w-36" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0'" style="display:none">
         <input type="range" x-model="pw" @input="c.setWidth(pw)" min="0.1" max="20" step="0.1" class="w-full">
         <div class="flex flex-wrap gap-0.5 mt-1">
             <button @click="pw=0.1;c.setWidth(0.1);o=false" class="px-1.5 py-0.5 text-[9px] rounded bg-gray-100 hover:bg-gray-200 font-semibold">0.1</button>
@@ -84,7 +84,7 @@
         <i class="fas fa-border-all"></i>
         <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[7px] text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">Grid</span>
     </button>
-    <div x-show="gOpen" @click.outside="gOpen=false" class="absolute z-30 bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-1.5 w-24" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0'" style="display:none">
+    <div x-show="gOpen" @click.outside="gOpen=false" class="absolute sg-layer-over bg-white dark:bg-gray-800 rounded-xl shadow-xl border p-1.5 w-24" :class="toolbarPos==='top'?'top-8 left-0':'left-10 bottom-0'" style="display:none">
         <button @click="gridMode='off';g=0;c.gridEnabled=false;c.gridRowOnly=false;c._render();gOpen=false" :class="gridMode==='off'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#10060; Off</button>
         <button @click="gridMode='grid';g=1;c.gridEnabled=true;c.gridRowOnly=false;c.gridLogarithmic=false;c._render();sendDisplay();gOpen=false" :class="gridMode==='grid'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9638; Grid</button>
         <button @click="gridMode='row';g=2;c.gridEnabled=true;c.gridRowOnly=true;c.gridLogarithmic=false;c._render();sendDisplay();gOpen=false" :class="gridMode==='row'?'bg-primary-100 text-primary-700':'text-gray-600'" class="block w-full text-left text-[10px] font-semibold px-2 py-1 rounded hover:bg-gray-50">&#9474; Row</button>

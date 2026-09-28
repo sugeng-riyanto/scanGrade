@@ -578,6 +578,19 @@ class TestThePageIsARealSettingsPage:
 
 # ── the role guard, executed ───────────────────────────────────────────────
 
+def _stub_login_required(monkeypatch):
+    """Take the session check out of the way so a test measures the role check.
+
+    `_sa_required` is `role_required("super_admin")`, and `role_required` applies
+    `@login_required` from the *auth* module's namespace when the wrapper is built.
+    Patching the name in a route module therefore stubs nothing — it just leaves a
+    test that passes on a redirect it never meant to measure.
+    """
+    from app.utils import auth as auth_mod
+    monkeypatch.setattr(sa_mod, "login_required", lambda f: f)
+    monkeypatch.setattr(auth_mod, "login_required", lambda f: f)
+
+
 class TestOnlyTheSuperAdminReachesIt:
     def test_the_route_carries_the_guard(self):
         source = SUPER_SRC.read_text(encoding="utf-8")
@@ -590,8 +603,15 @@ class TestOnlyTheSuperAdminReachesIt:
     def test_another_role_is_sent_away_without_the_body_running(
             self, monkeypatch, role):
         """The guard's own code, run: a wrapper built now, with login_required
-        stubbed out, so this measures the role check and nothing else."""
-        monkeypatch.setattr(sa_mod, "login_required", lambda f: f)
+        stubbed out, so this measures the role check and nothing else.
+
+        The stub lands on ``app.utils.auth``, not on this route's namespace:
+        `_sa_required` delegates to the shared `role_required`, whose inner wrapper
+        resolves `login_required` in *its own* module at decoration time — so a
+        patch on `sa_mod` would leave the real session check in place and the test
+        would pass for the wrong reason (an unauthenticated redirect).
+        """
+        _stub_login_required(monkeypatch)
         reached = []
         probe = sa_mod._sa_required(lambda *a, **k: reached.append(role) or "body")
         app = app_instance()
@@ -602,7 +622,7 @@ class TestOnlyTheSuperAdminReachesIt:
         assert result != "body"
 
     def test_the_super_admin_does_reach_it(self, monkeypatch):
-        monkeypatch.setattr(sa_mod, "login_required", lambda f: f)
+        _stub_login_required(monkeypatch)
         probe = sa_mod._sa_required(lambda *a, **k: "body")
         app = app_instance()
         with app.test_request_context("/super-admin/trial-settings"):

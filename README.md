@@ -119,7 +119,7 @@ Setelah mengubah template, jalankan `npm run css:build` lagi; tanpa itu kelas ba
 | `SUPABASE_ANON_KEY` | Ya | Kunci publik (auth & operasi pengguna) |
 | `SUPABASE_SERVICE_KEY` | Ya | Service role key (backend saja, menembus RLS) |
 | `FLASK_SECRET_KEY` | Ya | Acak, min. 32 karakter |
-| `DIRECT_URL` | Untuk migrasi | URL pooler mode-session; hanya dipakai `deploy/apply_migration.py` |
+| `DIRECT_URL` | Untuk migrasi & gerbang deploy | URL pooler mode-session; dipakai `deploy/apply_migration.py` dan gerbang schema auto-deploy |
 | `FLASK_ENV` | Tidak | `production` di `.env`; paksa `development` untuk HTTP lokal |
 | `APP_URL` | Tidak | URL publik, dipakai gerbang & email |
 | `REDIS_URL` | Tidak | `redis://localhost:6379/0`; limiter jatuh ke `memory://` bila kosong |

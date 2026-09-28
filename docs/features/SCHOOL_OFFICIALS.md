@@ -95,8 +95,48 @@ dibaca oleh `/demo` **dan** landing page. Kunci yang dipakai: `demo_principal`,
 yang tidak ada di `demo_items(...)` tidak akan digambar — halaman tidak bisa
 "lupa" menyembunyikan sesuatu yang dimatikan.
 
-## 6. Yang belum ada (jujur)
+## 6. Halaman yang dibaca kedua peran
 
+Tiga halaman, semuanya GET, semuanya berlingkup `g.user_school_id`:
+
+| Halaman | Isi |
+|---|---|
+| `/<peran>/dashboard` | Cacah guru/murid/kelas/mapel/ujian, daftar ujian terbaru |
+| `/<peran>/analytics` | Statistik seluruh ujian sekolah (`analysis_scope`), CSV/PDF/cetak |
+| `/<peran>/progress` | Kalender bulan, tren 8 minggu, tren 6 bulan, tabel per guru |
+
+`<peran>` adalah `principal` atau `vice-principal`. Halaman analitik adalah
+**template guru yang sama** (`teacher/analytics.html`), dirender dengan
+`analysis_base` menunjuk ke pintu pembacanya — satu laporan, satu implementasi,
+tetapi setiap tombol (form tanggal, CSV, PDF, cetak) tetap di dalam blueprint
+pejabat. Cakupan datanya dari `analysis_scope` dengan peran `principal` /
+`vice_principal`, dan predikatnya `exam_access.can_read_exam` — predikat baca,
+bukan `can_manage_exam`: kedua peran ini **tidak boleh** menyentuh kertas siapa pun.
+
+Halaman progres menjawab pertanyaan yang laporan per ujian tidak jawab: *bulan ini
+seperti apa?* Sumbernya `app/services/official_insight.py`, dan tiga aturannya:
+
+1. **Jamnya jam sekolah.** Setiap ember dihitung dari stempel waktu yang dikonversi
+   dengan offset sesi (`g.tz_offset`). Sesi yang dikumpulkan 17:30 UTC adalah **hari
+   berikutnya** di WIB — hari yang dicetak kalender sekolah.
+2. **Ember kosong tetap digambar.** Kalender menggambar setiap hari di bulan itu,
+tabel mingguan menggambar setiap minggu di jendela, tabel bulanan setiap bulan.
+   Periode kosong harus terbaca sebagai periode kosong, bukan sebagai halaman gagal.
+3. **Tidak ada penilaian.** Halaman ini menghitung dan menampilkan: tidak ada skor,
+   tidak ada peringkat murid, dan pengurutan tabel guru adalah *besarnya antrean
+   koreksi*, bukan urutan kecurigaan. Rata-rata hanya dari kertas yang sudah bernilai;
+   kertas yang menunggu koreksi bukan nol.
+
+Rencana berikutnya (belum ada): CRUD jadwal & pengawas ujian oleh `vice_principal`,
+beserta tugas yang muncul di dashboard guru. Lihat bagian 7.
+
+## 7. Yang belum ada (jujur)
+
+- **Jadwal ujian, pengawas, dan tugas untuk guru.** Belum ada tabel maupun route.
+  Rancangan yang disepakati arahnya: `vice_principal` membuat jadwal per ujian/kelas
+  lalu menugaskan pengawas; guru melihat tugasnya di dashboard-nya. Ini menambah
+  wewenang tulis **pertama** bagi pejabat sekolah, jadi ia harus berupa tabel baru
+  dengan policy sendiri — bukan pembukaan route tulis yang sudah ada.
 - **Policy RLS sendiri untuk kedua peran.** Hari ini akses ditegakkan decorator route
   (backend memakai service-role key yang menembus RLS). Migrasi policy-nya menyusul
   sebagai migrasi tersendiri, agar satu rilis tidak sekaligus mengubah role `CHECK`

@@ -18,12 +18,13 @@ page reports: a launcher that renders from the checkout (armed), one that was
 never rendered, and a *copy* of the deploy script — which deploys every release
 while running no gate at all, the state this whole wrapper exists to make loud.
 
-Mutation-checked, **10/10 injected defects caught**
+Mutation-checked, **11/11 injected defects caught**
 (`.freebuff/mutate_arm_auto_deploy.py`): the copy state read as armed, the
-unrendered state read as armed, a missing snapshot a missing conf and a missing
-roster each read as armed, the no-terminal refusal removed, the elevation loop
-guard removed, the roster validated only after the password prompt, the installer
-run without keeping its log, and the roster counted by entries instead of by role.
+unrendered state read as armed, a missing snapshot a missing conf a missing roster
+and a missing `DIRECT_URL` each read as armed, the no-terminal refusal removed, the
+elevation loop guard removed, the roster validated only after the password prompt,
+the installer run without keeping its log, and the roster counted by entries
+instead of by role.
 """
 import json
 import os
@@ -86,17 +87,26 @@ def _python_shim(repo: Path) -> Path:
 
 
 def scratch(tmp_path, *, runner=COPY, gates=True, snapshot=True, claims=True,
-            perf=True, smoke=True, roster=ROSTER):
+            perf=True, smoke=True, roster=ROSTER, env=True):
     """A tree shaped like the box, with only the paths under test populated."""
     repo = tmp_path / "repo"
     (repo / "deploy").mkdir(parents=True, exist_ok=True)
+
+    # The schema gate reads the live catalogue through DIRECT_URL, a credential no
+    # other gate needs, so `--check` reads the .env the box would connect with —
+    # presence, never the value.
+    if env:
+        (repo / ".env").write_text(
+            "SUPABASE_URL=https://abc.supabase.co\n"
+            "DIRECT_URL=postgresql://postgres.abcdefghijklmnopqrst:secret@"
+            "aws-0.pooler.supabase.com:5432/postgres\n", encoding="utf-8")
 
     ran = tmp_path / "installer-ran"
     body = f'#!/usr/bin/env bash\necho "fake installer"\ntouch "{ran}"\nexit 0\n'
     (repo / "deploy" / "install-auto-deploy.sh").write_text(body, encoding="utf-8")
 
     blocks = "".join(f"# {g}\n" for g in ("theme_gate", "claims_gate", "perf_gate",
-                                           "quarantine")) if gates else ""
+                                           "quarantine", "schema_gate")) if gates else ""
     (repo / "deploy" / "scangrade-deploy.sh").write_text(
         "#!/usr/bin/env bash\n" + blocks, encoding="utf-8")
 
@@ -165,7 +175,8 @@ class TestItTellsTheThreeStatesApart:
         r = run(env, "--check")
         assert r.returncode == 1, r.stdout + r.stderr
         assert "a COPY of the deploy script" in r.stdout
-        assert "no theme_gate, no claims_gate, no perf_gate, no quarantine" in r.stdout, \
+        assert "no theme_gate, no claims_gate, no perf_gate, no quarantine, no schema_gate" \
+            in r.stdout, \
             "the copy's blind spots are not named, so nothing points at what it cannot see"
         assert "NOT ARMED" in r.stdout
 
@@ -196,6 +207,7 @@ class TestEveryMissingPieceIsNamed:
         ("claims", "claims     : MISSING"),
         ("perf", "perf       : MISSING"),
         ("roster", "cannot measure"),
+        ("env", "schema     : MISSING"),
     ])
     def test_one_missing_piece_is_enough_to_say_not_armed(self, tmp_path, broken, expected):
         kwargs = {"roster": None} if broken == "roster" else {broken: False}
@@ -204,6 +216,24 @@ class TestEveryMissingPieceIsNamed:
         assert r.returncode == 1, f"{broken} missing and --check still said armed"
         assert expected in r.stdout, r.stdout
         assert "NOT ARMED" in r.stdout
+
+    def test_the_schema_line_names_direct_url_as_the_thing_that_arms_it(self, tmp_path):
+        """A box with a .env that names a database is armed for the schema gate; the
+        line says so, so "armed" and "the schema gate can run" are the same claim."""
+        _, _, _, env = scratch(tmp_path, runner=LAUNCHER)
+        r = run(env, "--check")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "schema     : present" in r.stdout, r.stdout
+
+    def test_a_box_without_direct_url_says_what_is_missing_and_where_to_put_it(self, tmp_path):
+        """The gate cannot verify a release without the credential, and a box that
+        cannot check a release deploys none — so the refusal must name the file and
+        the fix rather than leave an operator to read the runner."""
+        repo, _, _, env = scratch(tmp_path, runner=LAUNCHER, env=False)
+        r = run(env, "--check")
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "schema     : MISSING" in r.stdout, r.stdout
+        assert ".env" in r.stdout and "DIRECT_URL" in r.stdout, r.stdout
 
     def test_the_roster_is_counted_by_the_roles_the_gates_draw_from(self, tmp_path):
         """`roster_supply` in claims_gate.py is the authority on what the roster

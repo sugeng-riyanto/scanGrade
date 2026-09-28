@@ -124,11 +124,27 @@ tombol bernama sama di seksi Admin Sekolah.
 |-------|:-----------:|:----------------:|:---------:|
 | `/principal/dashboard` | ✅ | ❌ | ❌ |
 | `/vice-principal/dashboard` | ❌ | ✅ | ❌ |
+| `/principal/analytics` (`/download.csv`, `/download.pdf`, `/print`) | ✅ | ❌ | ❌ |
+| `/vice-principal/analytics` (idem) | ❌ | ✅ | ❌ |
+| `/principal/progress` — kalender bulan, tren mingguan & bulanan, per guru | ✅ | ❌ | ❌ |
+| `/vice-principal/progress` | ❌ | ✅ | ❌ |
 | `/admin-sekolah/officials` (+ `/create`, `/<id>/edit`, `/<id>/delete`, `/<id>/reset-password`) | ❌ | ❌ | hanya `admin_sekolah` |
 
 Satu view melayani dua alamat; yang berbeda hanya peran pembacanya, dan judul halaman
 menyebut peran itu. **Tidak ada satu pun route tulis di `/principal/*` dan
 `/vice-principal/*`** — sifat hanya-baca di sini struktural, bukan janji di dokumen.
+(`tests/unit/test_official_insight.py` gagal begitu satu route di blueprint itu
+mendaftarkan metode POST/PUT/PATCH/DELETE.)
+
+Dua halaman laporan dibagi dengan guru, **bukan disalin**: `/principal/analytics`
+dan `/vice-principal/analytics` merender `teacher/analytics.html` dengan
+`analysis_base` menunjuk ke pintu pembacanya, sehingga form, CSV, PDF, dan tampilan
+cetak semuanya tetap di dalam blueprint pejabat. Cakupan datanya berasal dari
+`analysis_scope` dengan peran `principal`/`vice_principal`, yang memakai predikat
+baca (`exam_access.can_read_exam`: pemilik, admin sekolah, **atau** pejabat sekolah
+yang sama) — bukan predikat tulis. Kedua peran **tidak** diizinkan masuk
+`/teacher/reports` dan `/teacher/analytics`: laporan mereka ada di pintunya sendiri,
+dan `tests/unit/test_reports_hub.py` menahan daftar itu dalam dua arah.
 
 ### Decorators (digunakan di routes)
 

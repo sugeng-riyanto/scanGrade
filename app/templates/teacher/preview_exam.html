@@ -4,13 +4,13 @@
 {% block page_title %}Preview{% endblock %}
 {% block head_extra %}
 <style>
-.text-box { position: absolute; min-width: 120px; z-index: 5; }
+.text-box { position: absolute; min-width: 120px; z-index: var(--sg-layer-canvas-item); }
 .text-box .box-content { width: 100%; min-height: 36px; font-size: 14px; padding: 4px 8px; border: 2px solid #f97316; border-radius: 8px; background: rgba(255,255,255,0.9); }
 </style>
 {% endblock %}
 {% block content %}
 <div x-data="previewApp()">
-    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky top-0 z-30 flex items-center justify-between border border-stone-100">
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 p-3 mb-3 sticky top-0 sg-layer-header flex items-center justify-between border border-stone-100">
         <div class="flex items-center gap-3">
             <a href="/teacher/exams/{{ exam.id }}" class="text-stone-500 hover:text-stone-700 p-2 hover:bg-stone-100 rounded-xl transition">
                 <i class="fas fa-arrow-left"></i>
@@ -36,7 +36,7 @@
         </div>
     </div>
 
-    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 mb-3 p-3 sticky top-[60px] z-10 border border-stone-100">
+    <div class="bg-white rounded-2xl shadow-lg shadow-stone-200/60 mb-3 p-3 sticky top-[60px] sg-layer-sticky border border-stone-100">
         <div class="flex items-center gap-2 mb-2">
             <span class="text-xs font-extrabold text-stone-500 shrink-0">Soal:</span>
             <div class="flex gap-1 flex-wrap pb-1">

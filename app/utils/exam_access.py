@@ -61,6 +61,34 @@ def can_manage_exam(user_id, user_role, user_school_id, exam) -> bool:
     return False
 
 
+#: The roles whose job is oversight of a whole school and whose door is read-only.
+#: Named rather than inferred so a fourth role cannot inherit the school's data by
+#: being added to some list elsewhere.
+OFFICIAL_READ_ROLES = ("principal", "vice_principal")
+
+
+def can_read_exam(user_id, user_role, user_school_id, exam) -> bool:
+    """May this caller *read* this exam's report?
+
+    Everything `can_manage_exam` allows, plus the two school officials — who see
+    the whole school and change none of it. The split is the point: an oversight
+    role must not become able to unpublish, recalculate or overwrite a paper
+    because a shared predicate was widened for the convenience of a report page.
+
+    Read-only is enforced by the blueprint (the official routes are GETs behind
+    `school_official_required`), which is why this predicate is safe to hand to
+    them and why `analysis_scope` — a reader — asks this one and never the other.
+
+    Fails closed on a row with no `school_id`, and on an official with none on
+    file: both would otherwise match each other.
+    """
+    if can_manage_exam(user_id, user_role, user_school_id, exam):
+        return True
+    if user_role in OFFICIAL_READ_ROLES:
+        return bool(user_school_id) and str((exam or {}).get("school_id") or "") == str(user_school_id)
+    return False
+
+
 def exam_class_ids(exam) -> list[str]:
     """The classes an exam is assigned to, however Supabase handed them over.
 

@@ -250,7 +250,8 @@ def _recalculate_scores(exam_id):
         # (`correct / objective questions`); what changed is that the routes which
         # divided by the *keyed* count now agree with it instead of paying a pupil
         # 100 for a two-tenths-marked paper.
-        objective = objective_result(question_types, answer_key, answers, total_q)
+        objective = objective_result(question_types, answer_key, answers, total_q,
+                                     exam.get("question_scoring"))
         updates.append((sub["id"], objective.score, final))
     # Parallel DB updates — 300 subs / 20 threads ≈ 3s instead of 60s serial
     def _update_one(item):
@@ -377,7 +378,7 @@ def _answer_key_gap(exam: dict) -> dict | None:
     # those questions would look short.
     named = [int(i) for i in qtypes if str(i).lstrip("-").isdigit() and int(i) >= 0]
     span = max([int(exam.get("total_questions") or 0)] + [i + 1 for i in named])
-    result = objective_result(qtypes, key, {}, span)
+    result = objective_result(qtypes, key, {}, span, exam.get("question_scoring"))
     if not result.out_of or not result.unkeyed:
         return None
     return {"objective": result.out_of, "keyed": result.keyed,

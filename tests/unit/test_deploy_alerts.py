@@ -94,11 +94,18 @@ def report_of(runner: dict | None = None, checkout: dict | None = None,
         "unarmed": {"path": "/var/lib/scangrade-deploy/unarmed", "present": False,
                     "key": "none", "at": None, "age_seconds": None, "detail": None,
                     "reason": None},
-        "preflight": {"path": "/var/lib/scangrade-deploy/refused-before-merge",
-                      "present": False, "key": "none", "gate": None, "gate_key": None,
-                      "at": None, "age_seconds": None, "exit_code": None,
-                      "commit": None, "short": None, "detail": None,
-                      "reason": None},
+        # Built by the service, for the same reason `perf` and `refusals` are: the
+        # refusal card reads this attribute by attribute (`pf.diff_key`,
+        # `pf.diff_lines`, ...), so a hand-written copy silently falls behind the
+        # reader and 500s the one page an operator opens to find out why nothing is
+        # deploying. The two paths are overwritten back to the box's own, because
+        # the cards print them and `/nonexistent` would read as a real state dir.
+        "preflight": {
+            **status.preflight_state(
+                Path("/nonexistent/refused-before-merge"), now=NOW,
+                diff_path=Path("/nonexistent/refused-before-merge.diff")),
+            "path": "/var/lib/scangrade-deploy/refused-before-merge",
+            "diff_path": "/var/lib/scangrade-deploy/refused-before-merge.diff"},
         "verdict": {"level": "fresh", "key": verdict, "detail": None, "behind": None,
                     "runner_behind": None, "runner_from": None},
         # The last-stop card reads attribute by attribute too, so this carries the

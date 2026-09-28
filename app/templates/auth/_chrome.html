@@ -19,7 +19,7 @@
    language, which is the language the reader already has. #}
 {% macro lang_button() %}
 <button @click="setLang(lang === 'id' ? 'en' : 'id')" type="button"
-        class="fixed top-4 right-4 lg:top-6 lg:right-6 h-10 px-3 rounded-xl bg-white/80 backdrop-blur-sm shadow-md border border-slate-200 flex items-center justify-center gap-1.5 text-slate-500 hover:text-primary-600 hover:border-primary-200 hover:shadow-lg transition-all z-50 text-xs font-bold"
+        class="fixed top-4 right-4 lg:top-6 lg:right-6 h-10 px-3 rounded-xl bg-white/80 backdrop-blur-sm shadow-md border border-slate-200 flex items-center justify-center gap-1.5 text-slate-500 hover:text-primary-600 hover:border-primary-200 hover:shadow-lg transition-all sg-layer-badge text-xs font-bold"
         :title="t('Ganti bahasa','Switch language')"
         :aria-label="lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'">
     <i class="fas fa-globe text-sm"></i><span x-text="lang === 'id' ? 'EN' : 'ID'"></span>

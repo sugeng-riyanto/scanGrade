@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{# Satu halaman untuk dua pembaca: kepala sekolah dan wakilnya. Yang berbeda hanya
+   siapa yang membaca, jadi judulnya mengikuti `role` yang route teruskan — bukan
+   peran yang ditebak template. Semua tombol di halaman ini hanya berpindah bulan;
+   tidak ada satu pun yang mengubah data. #}
+{% set is_vice = role == 'vice_principal' %}
+{% set LEVELS = ['bg-surface-200', 'bg-primary-200', 'bg-primary-400', 'bg-primary-500', 'bg-primary-600'] %}
+{% set WEEKDAYS = [('Sen', 'Mon'), ('Sel', 'Tue'), ('Rab', 'Wed'), ('Kam', 'Thu'), ('Jum', 'Fri'), ('Sab', 'Sat'), ('Min', 'Sun')] %}
+{% block title %}{{ 'Wakil Kepala Sekolah' if is_vice else 'Kepala Sekolah' }} - ScanGrade{% endblock %}
+{% block page_title %}<span x-text="t('Progres Sekolah','School Progress')"></span>{% endblock %}
+{% block content %}
+<div class="space-y-6"
+     x-effect="document.title = t('Progres Sekolah','School Progress') + ' - ScanGrade'">
+
+    <!-- Kepala halaman: bulan yang ditampilkan, dan tombol berpindah bulan -->
+    <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+            <h2 class="text-2xl font-extrabold text-surface-800" x-text="t('Progres Sekolah','School Progress')"></h2>
+            <p class="text-sm text-surface-500 font-medium mt-0.5">
+                <span x-text="t('Kegiatan asesmen sekolah Anda bulan ini, dibandingkan dengan bulan-bulan sebelumnya.','Assessment activity at your school this month, set beside the months before it.')"></span>
+            </p>
+            <div class="flex flex-wrap items-center gap-2 mt-2">
+                <span class="text-xs font-bold px-2.5 py-1 bg-surface-100 text-surface-600 rounded-full"
+                      x-text="t('Hanya baca','Read-only')"></span>
+                <span class="text-xs font-semibold px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full">
+                    {{ school.name or "-" }}
+                </span>
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+            <a href="{{ base }}/progress?month={{ progress.month.prev }}"
+               class="border-2 border-surface-200 px-3 py-1.5 rounded-xl hover:bg-surface-50 text-xs font-bold text-surface-600 transition">
+                <i class="fas fa-chevron-left mr-1"></i><span x-text="t('Sebelumnya','Previous')"></span>
+            </a>
+            <span class="px-3 py-1.5 rounded-xl bg-primary-50 text-primary-700 text-xs font-extrabold"
+                  x-text="t('{{ progress.month.label.id }}','{{ progress.month.label.en }}')"></span>
+            <a href="{{ base }}/progress?month={{ progress.month.next }}"
+               class="border-2 border-surface-200 px-3 py-1.5 rounded-xl hover:bg-surface-50 text-xs font-bold text-surface-600 transition">
+                <span x-text="t('Berikutnya','Next')"></span><i class="fas fa-chevron-right ml-1"></i>
+            </a>
+            {# Always drawn, and deliberately not conditional on the month being
+               elsewhere: the link is the way *back* to this month, and a control
+               that disappears when it is not needed is one a reader has to
+               rediscover. It is also the only way out of a month the arrows
+               walked into. #}
+            <a href="{{ base }}/progress"
+               class="border-2 border-primary-200 px-3 py-1.5 rounded-xl hover:bg-primary-50 text-xs font-bold text-primary-700 transition">
+                <i class="fas fa-calendar-day mr-1"></i><span x-text="t('Bulan ini','This month')"></span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Catatan wewenang dan cara membaca -->
+    <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800 flex items-start gap-2">
+        <i class="fas fa-circle-info mt-0.5 text-blue-500"></i>
+        <span x-text="t('Halaman ini menghitung dan menampilkan, bukan menilai. Satu sesi dihitung pada hari sesi itu dimulai menurut jam sekolah Anda; rata-rata hanya dari kertas yang sudah punya nilai.','This page counts and shows; it does not judge. A sitting is counted on the day it began in the clock your school runs on, and a mean is taken over the papers that have a mark.')"></span>
+    </div>
+
+    {% if progress.no_data %}
+    <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
+        <i class="fas fa-hourglass-half mt-0.5 text-amber-500"></i>
+        <span x-text="t('Belum ada sesi ujian pada bulan ini. Kalender, tabel mingguan dan tabel bulanan tetap ditampilkan supaya periode kosong terbaca sebagai periode kosong, bukan sebagai halaman yang gagal dimuat.','No exam sitting falls in this month. The calendar, the weekly table and the monthly table are still drawn, so an empty period reads as an empty period rather than as a page that failed to load.')"></span>
+    </div>
+    {% endif %}
+
+    <!-- Angka utama bulan ini -->
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        {% set _kpis = [
+            ('exams', 'Ujian dibuat', 'Papers created', 'fa-file-alt'),
+            ('sittings', 'Sesi dimulai', 'Sittings started', 'fa-play'),
+            ('submitted', 'Sudah dikumpulkan', 'Submitted', 'fa-paper-plane'),
+            ('mean', 'Rata-rata nilai', 'Mean mark', 'fa-chart-simple'),
+            ('late', 'Dikumpulkan terlambat', 'Handed in late', 'fa-clock'),
+            ('waiting', 'Menunggu koreksi', 'Awaiting marking', 'fa-pen-ruler')
+        ] %}
+        {% for key, label_id, label_en, icon in _kpis %}
+        <div class="card p-4">
+            <div class="flex items-center gap-2 text-surface-400">
+                <i class="fas {{ icon }} text-xs"></i>
+                <span class="text-xs font-bold" x-text="t('{{ label_id }}','{{ label_en }}')"></span>
+            </div>
+            <p class="text-2xl font-extrabold text-surface-800 mt-2">
+                {{ progress.totals.get(key) if progress.totals.get(key) is not none else '—' }}
+            </p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Kalender bulan -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-200 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-extrabold text-surface-800"
+                x-text="t('Kalender {{ progress.calendar.label.id }}','{{ progress.calendar.label.en }} calendar')"></h3>
+            <p class="text-xs font-medium text-surface-500">
+                <span x-text="t('Hari tersibuk:','Busiest day:')"></span>
+                <strong class="text-surface-700">{{ progress.calendar.busiest }}</strong>
+                <span x-text="t('sesi','sittings')"></span>
+            </p>
+        </div>
+        <div class="p-4 sm:p-5">
+            <div class="grid grid-cols-7 gap-1.5 mb-2">
+                {% for label_id, label_en in WEEKDAYS %}
+                <div class="text-center text-xs font-bold text-surface-500"
+                     x-text="t('{{ label_id }}','{{ label_en }}')"></div>
+                {% endfor %}
+            </div>
+            <div class="grid grid-cols-7 gap-1.5">
+                {% for week in progress.calendar.weeks %}
+                    {% for cell in week %}
+                        {% if cell %}
+                        <div data-calendar-day="{{ cell.day }}"
+                             class="rounded-lg border border-surface-200 bg-surface-50 p-1.5 min-h-[56px] flex flex-col gap-1">
+                            <span class="text-xs font-bold text-surface-600">{{ cell.day }}</span>
+                            {% if cell.sittings %}
+                            <span class="h-1.5 w-full rounded-full {{ LEVELS[cell.level] }}"></span>
+                            <span class="text-xs font-extrabold text-surface-800">{{ cell.sittings }}</span>
+                            {% endif %}
+                            {% if cell.exams %}
+                            <span class="text-xs font-semibold text-primary-700">{{ cell.exams }}
+                                <span x-text="t('ujian','papers')"></span>
+                            </span>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <div class="rounded-lg border border-dashed border-surface-100 min-h-[56px]"></div>
+                        {% endif %}
+                    {% endfor %}
+                {% endfor %}
+            </div>
+            <p class="mt-3 text-xs font-medium text-surface-500 flex items-center gap-2">
+                <span class="inline-block h-1.5 w-8 rounded-full bg-surface-200"></span>
+                <span x-text="t('Makin gelap, makin banyak sesi pada hari itu.','The darker the bar, the busier that day was.')"></span>
+            </p>
+        </div>
+    </div>
+
+    <!-- Delapan minggu terakhir -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-200">
+            <h3 class="font-extrabold text-surface-800" x-text="t('Delapan minggu terakhir','The last eight weeks')"></h3>
+            <p class="text-xs font-medium text-surface-500 mt-0.5"
+               x-text="t('Minggu dihitung Senin sampai Minggu, mengikuti kalender sekolah Anda.','Weeks run Monday to Sunday, following the calendar of the school and its own time zone.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[640px] text-sm">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="px-4 py-2.5 text-left text-xs font-bold uppercase" x-text="t('Minggu','Week')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Ujian','Papers')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Dimulai','Started')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Dikumpulkan','Submitted')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Terlambat','Late')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Rata-rata','Mean')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-200">
+                    {% for week in progress.weeks %}
+                    <tr>
+                        <td class="px-4 py-2.5 font-semibold text-surface-700"
+                            x-text="t('{{ week.label.id }}','{{ week.label.en }}')"></td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ week.exams }}</td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ week.sittings }}</td>
+                        <td class="px-4 py-2.5 text-right font-bold text-surface-800">{{ week.submitted }}</td>
+                        <td class="px-4 py-2.5 text-right {% if week.late %}text-amber-700 font-bold{% else %}text-surface-400{% endif %}">{{ week.late }}</td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ week.mean if week.mean is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Enam bulan terakhir -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-200">
+            <h3 class="font-extrabold text-surface-800" x-text="t('Enam bulan terakhir','The last six months')"></h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[640px] text-sm">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="px-4 py-2.5 text-left text-xs font-bold uppercase" x-text="t('Bulan','Month')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Ujian','Papers')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Dimulai','Started')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Dikumpulkan','Submitted')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Terlambat','Late')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Rata-rata','Mean')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-200">
+                    {% for month in progress.months %}
+                    <tr class="{% if month.key == progress.month.key %}bg-primary-50{% endif %}">
+                        <td class="px-4 py-2.5 font-semibold text-surface-700">
+                            <a href="{{ base }}/progress?month={{ month.key }}" class="hover:underline"
+                               x-text="t('{{ month.label.id }}','{{ month.label.en }}')"></a>
+                        </td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ month.exams }}</td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ month.sittings }}</td>
+                        <td class="px-4 py-2.5 text-right font-bold text-surface-800">{{ month.submitted }}</td>
+                        <td class="px-4 py-2.5 text-right {% if month.late %}text-amber-700 font-bold{% else %}text-surface-400{% endif %}">{{ month.late }}</td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ month.mean if month.mean is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Per guru pada bulan ini -->
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-200">
+            <h3 class="font-extrabold text-surface-800"
+                x-text="t('Per guru bulan ini','By teacher this month')"></h3>
+            <p class="text-xs font-medium text-surface-500 mt-0.5"
+               x-text="t('Yang paling banyak menunggu koreksi di urutan atas. Kolom ini menjumlah, tidak memeringkat.','The largest marking backlog is first. This column adds up; it does not rank.')"></p>
+        </div>
+        {% if progress.teachers %}
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[640px] text-sm">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="px-4 py-2.5 text-left text-xs font-bold uppercase" x-text="t('Guru','Teacher')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Ujian','Papers')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Dimulai','Started')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Dikumpulkan','Submitted')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Menunggu koreksi','Awaiting')"></th>
+                        <th class="px-4 py-2.5 text-right text-xs font-bold uppercase" x-text="t('Rata-rata','Mean')"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-200">
+                    {% for teacher in progress.teachers %}
+                    <tr>
+                        <td class="px-4 py-2.5 font-semibold text-surface-700">{{ teacher.name or '—' }}</td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ teacher.exams }}</td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ teacher.sittings }}</td>
+                        <td class="px-4 py-2.5 text-right font-bold text-surface-800">{{ teacher.submitted }}</td>
+                        <td class="px-4 py-2.5 text-right {% if teacher.waiting %}text-amber-700 font-bold{% else %}text-surface-400{% endif %}">{{ teacher.waiting }}</td>
+                        <td class="px-4 py-2.5 text-right text-surface-600">{{ teacher.mean if teacher.mean is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="px-5 py-6 text-sm text-surface-500"
+           x-text="t('Belum ada ujian yang dibuat pada bulan ini.','No paper was created in this month.')"></p>
+        {% endif %}
+    </div>
+
+    <!-- Batas bacaan -->
+    <div class="card p-4 sm:p-5">
+        <h3 class="font-extrabold text-surface-800 text-sm" x-text="t('Cara membaca angka di halaman ini','How to read the figures here')"></h3>
+        <ul class="mt-2 space-y-1.5 text-xs text-surface-500 font-medium list-disc pl-5">
+            <li x-text="t('Sesi dihitung pada hari sesi dimulai, dan pengumpulan pada hari kertas itu masuk — dua hari yang biasanya sama, tetapi tidak selalu.','A sitting is counted on the day it began and its arrival on the day it came in — usually the same day, and not always.')"></li>
+            <li x-text="t('Rata-rata dihitung hanya dari kertas yang sudah punya nilai; kertas yang belum dikoreksi tidak dihitung sebagai nol.','A mean is taken over the papers that have a mark; a paper nobody has marked yet is not counted as a zero.')"></li>
+            <li x-text="t('Menunggu koreksi berarti kertas sudah masuk dan belum punya nilai akhir — bukan bagian yang belum dikoreksi.','Awaiting marking means the paper has arrived and has no final mark yet — not the share of it a teacher has still to read.')"></li>
+            <li x-text="t('Paling banyak 120 ujian terbaru sekolah Anda dihitung, dan sumbangan terbanyak 6000 kertas.','At most the newest 120 papers at your school are counted, and at most 6000 submitted sheets.')"></li>
+        </ul>
+    </div>
+
+</div>
+{% endblock %}

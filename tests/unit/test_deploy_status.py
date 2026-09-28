@@ -1837,6 +1837,10 @@ def preflight_report(tmp_path: Path, *, text: str | None = PREFLIGHT_TEXT,
                          snapshot_runner="/nonexistent",
                          pause_file=str(tmp_path / "no-pause"),
                          preflight_file=str(record),
+                         # Pinned even though this class asserts nothing about the
+                         # diff: a reader that falls back to the box's real state
+                         # directory would show another machine's leftovers.
+                         preflight_diff_file=str(tmp_path / "no-diff"),
                          request_dir=str(tmp_path / "requests"))
 
 
@@ -1915,6 +1919,316 @@ class TestThePreMergeRefusal:
         assert gates == status.PREFLIGHT_GATES, (
             f"the runner records steps this service has no sentence for: "
             f"{sorted(gates - status.PREFLIGHT_GATES)}")
+
+
+#: A diff as the runner records it: the refusal's own timestamp on the first line,
+#: then `git diff HEAD`'s output. The timestamp is the whole reason the header is
+#: there — it is what ties the diff to the tick it came from, so two refusals a
+#: minute apart cannot be shown as one.
+DIFF_TEXT = (
+    "2026-09-22T16:39:16+00:00\n"
+    "diff --git a/app/routes/admin_sekolah.py b/app/routes/admin_sekolah.py\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/app/routes/admin_sekolah.py\n"
+    "+++ b/app/routes/admin_sekolah.py\n"
+    "@@ -1,3 +1,4 @@\n"
+    " from flask import Blueprint\n"
+    "+HAND_EDIT = True\n"
+    " \n"
+)
+
+#: The refusal that diff belongs to — the same timestamp, and the file named.
+DIRTY_RECORD = (
+    "dirty_checkout\n2026-09-22T16:39:16+00:00\n4\n\n"
+    " M app/routes/admin_sekolah.py\n"
+)
+
+
+def refusal_with_diff(tmp_path: Path, *, record: str | None = DIRTY_RECORD,
+                      diff: str | None = DIFF_TEXT,
+                      diff_path: Path | None = None) -> dict:
+    """A box stopped by a dirty checkout, with the runner's diff beside it."""
+    record_file = tmp_path / "refused-before-merge"
+    if record is not None:
+        record_file.write_text(record, encoding="utf-8")
+    diff_file = diff_path if diff_path is not None else (tmp_path / "refused-before-merge.diff")
+    if diff_path is None and diff is not None:
+        diff_file.write_text(diff, encoding="utf-8")
+    return status.report(repo=str(tmp_path), runner="/nonexistent",
+                         snapshot_runner="/nonexistent",
+                         pause_file=str(tmp_path / "no-pause"),
+                         preflight_file=str(record_file),
+                         preflight_diff_file=str(diff_file),
+                         request_dir=str(tmp_path / "requests"))
+
+
+def template_diff_keys() -> set[str]:
+    """The diff states the pre-merge card can say in either language."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    return set(re.findall(r"pf\.diff_key == '([a-z_0-9]+)'", text))
+
+
+class TestWhatChangedInTheBlockingFile:
+    """The dirty-checkout refusal names the file and never the change, and "keep or
+    discard" is not a question a filename can answer: an unintended leftover and a
+    hotfix that never reached the repo look identical from outside, and only one of
+    them may be thrown away. The runner has the diff, and this page is where an
+    operator without a shell reads it."""
+
+    def test_the_diff_comes_back_whole(self, tmp_path):
+        state = refusal_with_diff(tmp_path)["preflight"]
+        assert state["diff_key"] == status.PREFLIGHT_DIFF_PRESENT
+        assert any("HAND_EDIT" in line for line in state["diff_lines"]), (
+            "the page exists to show the change, so the change has to travel")
+        assert state["diff_truncated"] is False
+        assert state["diff_more"] == 0
+
+    def test_a_diff_from_another_tick_is_not_shown_as_this_refusal_s(self, tmp_path):
+        """Two refusals a minute apart: the diff describes the older one, and
+        showing it beside this one would answer the question with the wrong
+        evidence — which is worse than saying nothing."""
+        state = refusal_with_diff(
+            tmp_path, record=DIRTY_RECORD.replace("16:39:16", "16:40:48"),
+        )["preflight"]
+        assert state["diff_key"] == status.PREFLIGHT_DIFF_STALE
+        assert state["diff_lines"] == []
+
+    def test_a_diff_with_no_refusal_beside_it_is_not_shown(self, tmp_path):
+        state = refusal_with_diff(tmp_path, record=None)["preflight"]
+        assert state["diff_key"] == status.PREFLIGHT_DIFF_STALE
+
+    def test_no_diff_on_record_is_not_read_as_no_change(self, tmp_path):
+        """A runner older than this feature records the file and no diff. The page
+        has to say that, because \"nothing changed\" and \"nothing was recorded\"
+        lead an operator to opposite actions."""
+        state = refusal_with_diff(tmp_path, diff=None)["preflight"]
+        assert state["present"] is True
+        assert state["diff_key"] == status.PREFLIGHT_DIFF_NONE
+
+    def test_a_diff_that_cannot_be_read_is_reported(self, tmp_path):
+        path = tmp_path / "a-directory"
+        path.mkdir()
+        state = refusal_with_diff(tmp_path, diff_path=path)["preflight"]
+        assert state["diff_key"] == status.PREFLIGHT_DIFF_UNREADABLE
+        assert state["diff_reason"]
+
+    def test_a_file_without_the_timestamp_header_is_not_read_as_this_refusal_s(self, tmp_path):
+        state = refusal_with_diff(tmp_path, diff="just some text\n")["preflight"]
+        assert state["diff_key"] == status.PREFLIGHT_DIFF_MALFORMED
+        assert state["diff_reason"]
+
+    def test_the_page_is_handed_a_bounded_slice_and_told_there_is_more(self, tmp_path):
+        many = DIFF_TEXT + "".join(f"+line {i}\n" for i in range(300))
+        state = refusal_with_diff(tmp_path, diff=many)["preflight"]
+        total = many.count("\n") - 1        # the timestamp header is not a line of the diff
+        assert len(state["diff_lines"]) == status.PREFLIGHT_DIFF_SHOWN
+        assert state["diff_more"] == total - status.PREFLIGHT_DIFF_SHOWN
+
+    def test_a_record_the_runner_shortened_says_so(self, tmp_path):
+        state = refusal_with_diff(
+            tmp_path,
+            diff=DIFF_TEXT + f"{status.PREFLIGHT_DIFF_MARK} 200 lines of 4812]\n",
+        )["preflight"]
+        assert state["diff_truncated"] is True
+
+    def test_the_marker_the_page_looks_for_is_one_the_runner_writes(self):
+        """Two files, one literal: a marker the runner stops writing would turn the
+        page's \"the record itself is short\" into a silent lie."""
+        runner = RUNNER.read_text(encoding="utf-8")
+        assert f'PREFLIGHT_DIFF_MARK="{status.PREFLIGHT_DIFF_MARK}"' in runner, (
+            "the runner's truncation marker and the one the page searches for have "
+            "drifted apart")
+
+    def test_the_runner_records_the_diff_and_clears_it_with_the_record(self):
+        """Asserted on the runner's own text, because the refusal path only runs on
+        a box. The third property is the one that keeps a stale diff from being read
+        as the reason for a later, different refusal."""
+        runner = RUNNER.read_text(encoding="utf-8")
+        write = runner.split("preflight_write() {", 1)[1].split("\n}", 1)[0]
+        forget = runner.split("preflight_forget() {", 1)[1].split("\n}", 1)[0]
+        dirty = runner.split("PREFLIGHT_GATE=dirty_checkout", 1)[1].split("exit 4", 1)[0]
+        assert "PREFLIGHT_DIFF_FILE" in write, "nothing writes the diff beside the record"
+        assert 'rm -f "$PREFLIGHT_DIFF_FILE"' in write, (
+            "a diff is evidence about one refusal; left beside another it is read as "
+            "the reason for it")
+        assert 'rm -f "$PREFLIGHT_DIFF_FILE"' in forget, (
+            "a merged release must forget the diff with the refusal")
+        assert "PREFLIGHT_DIFF=" in dirty, "a dirty checkout records no diff"
+        assert "PREFLIGHT_DIFF_LINES" in runner and "head -n" in runner, (
+            "an unbounded diff would grow the state file with the size of the change")
+
+    def test_every_diff_state_the_service_can_report_has_a_sentence(self):
+        assert template_diff_keys() == set(status.PREFLIGHT_DIFF_KEYS), (
+            f"states with no sentence on the page: "
+            f"{sorted(set(status.PREFLIGHT_DIFF_KEYS) - template_diff_keys())}")
+
+    def test_the_page_shows_the_diff_and_what_to_do_about_it(self, app, tmp_path):
+        html = render_status(app, refusal_with_diff(tmp_path))
+        assert "HAND_EDIT" in html, "the diff is not on the page"
+        assert "restore --" in html, (
+            "the operator came to decide keep-or-discard; the command that discards "
+            "has to be on the page")
+        assert "commit it first" in html, (
+            "the other half of the decision is not stated, and it is the half that "
+            "must not be acted on blindly")
+
+    def test_the_page_does_not_show_a_diff_from_another_refusal(self, app, tmp_path):
+        """The failure this card is most likely to have: an older tick's diff drawn
+        under a newer refusal's heading, which reads as this refusal's cause."""
+        report = refusal_with_diff(
+            tmp_path, record=DIRTY_RECORD.replace("16:39:16", "16:40:48"),
+        )
+        html = render_status(app, report)
+        assert "HAND_EDIT" not in html, "a stale diff was rendered as this refusal's"
+        assert "belongs to a different refusal" in html, (
+            "silence about a diff on record reads as no diff at all")
+
+    def test_a_refusal_about_something_else_grows_no_diff_block(self, app, tmp_path):
+        """A fetch that could not reach GitHub has nothing to do with the tree, and
+        a diff box under it would invite a file hunt for a network fault."""
+        report = refusal_with_diff(
+            tmp_path,
+            record="fetch_failed\n2026-09-22T16:39:16+00:00\n5\n\nfatal: could not read Username\n",
+            diff=None,
+        )
+        html = render_status(app, report)
+        assert "What changed in the file holding the release" not in html
+        assert "could not read Username" in html, (
+            "the record's own words are still the evidence")
+
+    def test_a_diff_cannot_inject_markup_into_the_page(self, app, tmp_path):
+        """The diff is the contents of a file on a box: data, not markup."""
+        report = refusal_with_diff(
+            tmp_path, diff=DIFF_TEXT + "+<script>alert(1)</script>\n",
+        )
+        html = render_status(app, report)
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+PREFLIGHT_START = "# preflight-logic:start"
+PREFLIGHT_END = "# preflight-logic:end"
+
+
+def _split_record(stdout: str) -> tuple[str, str]:
+    """(the record, the diff) as files — the newline `echo` printed is not a line
+    of either, and counting it would put every assertion off by one."""
+    record = stdout.split("===RECORD===", 1)[1].split("===DIFF===", 1)[0]
+    diff = stdout.split("===DIFF===", 1)[1].split("===END===", 1)[0]
+    return record.lstrip("\n"), diff.lstrip("\n")
+
+
+def preflight_harness(repo: Path, state: Path) -> str:
+    """The runner's own preflight block, its own constants, against a scratch repo.
+
+    The refusal path only ever runs on a box, and the two properties the page leans
+    on cannot be seen from the source: that the bytes recorded are bounded, and that
+    the diff's first line is the instant the record carries. So the block is
+    executed for real, with the runner's own literal values for every `PREFLIGHT_*`
+    constant — a drifted limit is then a failed assertion rather than a number two
+    files happen to agree about.
+    """
+    text = RUNNER.read_text(encoding="utf-8")
+    block = text.split(PREFLIGHT_START, 1)[1].split(PREFLIGHT_END, 1)[0]
+    consts = "\n".join(line for line in text.splitlines()
+                       if re.match(r"^(?:STATE_DIR|PREFLIGHT_[A-Z_]+)=", line))
+    home = 'STATE_DIR="/var/lib/scangrade-deploy"'
+    assert home in consts, (
+        "the runner's state directory moved, so this harness would write into the "
+        "real one — or the reader is looking at the wrong lines")
+    consts = consts.replace(home, f'STATE_DIR="{state}"')
+    return ("set -uo pipefail\n"
+            f'REPO="{repo}"\n'
+            'AFTER_FULL=""\n'
+            'log() { echo "$*"; }\n'
+            # No runuser here: the owner wrapper is about who owns /opt, and the
+            # diff it produces is the same bytes either way.
+            'as_owner() { "$@"; }\n'
+            f"{consts}\n{block}\n")
+
+
+def run_preflight(repo: Path, state: Path, *, diff_expr: str = "$(preflight_diff)",
+                  verb: str = "write") -> subprocess.CompletedProcess:
+    """Record a refusal through the runner's own writer, then show both files."""
+    call = ("preflight_forget" if verb == "forget" else
+            "PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 "
+            f'PREFLIGHT_DIFF="{diff_expr}" '
+            'PREFLIGHT_DETAIL="$(git -C "$REPO" status --porcelain)" preflight_write')
+    script = (preflight_harness(repo, state) + call + "\n"
+              'echo "===RECORD==="\n'
+              'cat "$PREFLIGHT_FILE" 2>/dev/null || echo ABSENT\n'
+              'echo "===DIFF==="\n'
+              'cat "$PREFLIGHT_DIFF_FILE" 2>/dev/null || echo ABSENT\n'
+              'echo "===END==="\n')
+    return subprocess.run([BASH, "-c", script], capture_output=True, text=True)
+
+
+class TestTheDiffTheRunnerWrites:
+    """The writer, executed rather than read: the page's two assumptions about it
+    are that the bytes are bounded and that its header is the record's own
+    instant."""
+
+    @needs_bash
+    @needs_git
+    def test_the_record_and_its_diff_carry_one_instant(self, tmp_path):
+        repo = checkout(tmp_path)
+        (repo / "app.py").write_text("print('hi')\nHAND_EDIT = True\n", encoding="utf-8")
+        out = run_preflight(repo, tmp_path / "state")
+        record, diff = _split_record(out.stdout)
+        assert "HAND_EDIT" in diff, out.stdout
+        assert record.splitlines()[1] == diff.splitlines()[0], (
+            "the page ties a diff to its refusal by this timestamp, so two clocks "
+            "would make every diff read as some other tick's")
+
+    @needs_bash
+    @needs_git
+    def test_the_diff_the_runner_keeps_is_bounded_and_says_so(self, tmp_path):
+        repo = checkout(tmp_path)
+        (repo / "app.py").write_text(
+            "".join(f"line {i}\n" for i in range(600)), encoding="utf-8")
+        out = run_preflight(repo, tmp_path / "state")
+        _record, diff = _split_record(out.stdout)
+        body = diff.splitlines()[1:]        # after the refusal's own timestamp
+        assert any(line.startswith(status.PREFLIGHT_DIFF_MARK) for line in body), (
+            "a shortened diff with no marker reads as a smaller change than it is")
+        limit = int(re.search(r"PREFLIGHT_DIFF_LINES=(\d+)",
+                              RUNNER.read_text(encoding="utf-8")).group(1))
+        assert len(body) <= limit + 1, (
+            f"the record grew with the change: {len(body)} lines for a limit of {limit}")
+
+    @needs_bash
+    @needs_git
+    def test_an_unrelated_refusal_does_not_inherit_the_last_diff(self, tmp_path):
+        repo = checkout(tmp_path)
+        (repo / "app.py").write_text("print('hi')\nHAND_EDIT = True\n", encoding="utf-8")
+        run_preflight(repo, tmp_path / "state")
+        out = run_preflight(repo, tmp_path / "state", diff_expr="")
+        record, diff = _split_record(out.stdout)
+        assert record.strip(), "the refusal itself must still be recorded"
+        assert diff.strip() == "ABSENT", (
+            "a diff left beside a different refusal is read as the reason for it")
+
+    @needs_bash
+    @needs_git
+    def test_the_diff_goes_when_the_refusal_does(self, tmp_path):
+        repo = checkout(tmp_path)
+        (repo / "app.py").write_text("print('hi')\nHAND_EDIT = True\n", encoding="utf-8")
+        run_preflight(repo, tmp_path / "state")
+        out = run_preflight(repo, tmp_path / "state", verb="forget")
+        record, diff = _split_record(out.stdout)
+        assert record.strip() == "ABSENT" and diff.strip() == "ABSENT"
+
+    @needs_bash
+    @needs_git
+    def test_an_untracked_file_is_named_by_the_record_and_not_invented_in_the_diff(self, tmp_path):
+        """`git diff` has nothing to say about an untracked path, and the page says
+        so — a box that showed an empty diff would read as \"nothing changed\"."""
+        repo = checkout(tmp_path)
+        (repo / "leftover.bak").write_text("scratch\n", encoding="utf-8")
+        out = run_preflight(repo, tmp_path / "state")
+        record, diff = _split_record(out.stdout)
+        assert "leftover.bak" in record
+        assert "leftover.bak" not in diff
 
 
 class TestWhatAPreMergeRefusalAddsUpTo:

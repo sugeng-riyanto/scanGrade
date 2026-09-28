@@ -7,44 +7,15 @@
 {% block body_class %}sg-exam{% endblock %}
 {% block head_extra %}
 <style>
-/* ── the exam page's layer scale ─────────────────────────────────────────────
-   One ordered list, and the only place on this page a layer height is written.
-   A panel takes the nearest *name* it must sit above — a new one cannot pick a
-   number by eye, and two cannot be handed the same height by accident, which is
-   how the terms agreement and the submit gate — the two panels the strip has to
-   sit *between* — both came to read `9999`, the anti-cheat watermark reading it
-   too.
-
-   Read it top-down: each line paints over the line before it. The sit strip's
-   two states are two lines of this same scale — `--sg-layer-strip` while a panel
-   covers the paper, `--sg-layer-strip-over` while the terms are being read — so
-   which one applies is a question about *what the strip has to outrank*, never a
-   second number kept in step by hand.
-
-   The `--sg-layer-canvas-*` entries are a stacking context of their own: they
-   live inside a `.full-canvas-wrap` and never compete with the layers below. */
-:root {
-    --sg-layer-canvas-tool: 5;      /* a measuring tool drawn over a canvas */
-    --sg-layer-canvas-grip: 6;      /* a tool's drag handles */
-    --sg-layer-canvas-item: 10;     /* an item placed on the canvas */
-    --sg-layer-canvas-item-ctl: 20; /* a control drawn on that item */
-    --sg-layer-paper: 10;           /* the sticky question rail */
-    --sg-layer-bar: 20;             /* the sticky exam bar */
-    --sg-layer-qstrip: 30;          /* the fixed question strip (phones) */
-    --sg-layer-float: 50;           /* the toast and the calculator */
-    --sg-layer-rail: 85;            /* the question column on a small screen */
-    --sg-layer-watermark: 88;       /* the anti-cheat name stamps on the paper */
-    --sg-layer-scrim: 90;           /* a panel that hides the paper */
-    --sg-layer-strip: 95;           /* the sit strip, pinned over that panel */
-    --sg-layer-modal: 9999;         /* a modal read before the paper opens */
-    --sg-layer-strip-over: 10000;   /* the sit strip over that modal */
-    --sg-layer-gate: 10001;         /* the confirmation that ends the paper */
-}
-/* The page-level layers, so a panel reads the scale by name and not by number. */
-.sg-layer-float { z-index: var(--sg-layer-float); }
-.sg-layer-scrim { z-index: var(--sg-layer-scrim); }
-.sg-layer-modal { z-index: var(--sg-layer-modal); }
-.sg-layer-gate { z-index: var(--sg-layer-gate); }
+/* ── the layers this page reads ──────────────────────────────────────────────
+   The scale is app-wide now and lives in `css/theme.css`: a page that kept its
+   own copy would drift from every other page's panels, which is exactly how this
+   page's four overlays came to be the only named ones in the app. This page only
+   *reads* it — the sit strip takes `--sg-layer-strip`/`--sg-layer-strip-over`,
+   the two blockers `--sg-layer-scrim`, the terms agreement `--sg-layer-modal`,
+   the submit gate `--sg-layer-gate`, the toast and calculator
+   `--sg-layer-float`, and the canvas tools their own stacking context — so a
+   panel here can never pick a height by eye. */
 
 /* ── the paper gets the width on a phone ──────────────────────────────────
    The question column is worth its 150px only when it is *beside* the paper.
@@ -196,19 +167,21 @@ body.sg-exam .sidebar-overlay { display: none !important; }
        toolbar element still names `flex-wrap` in its class list at equal
        specificity, and source order then decides — which is how this stayed
        four rows while the rule said otherwise. */
+    /* The row is swiped on a finger, and its bar is the app's own — 12px, 16px on
+       touch, the accent colours, in both themes. It used to draw its own: 3px with
+       a hard-coded #d6d3d1 thumb, which measured 1.27:1 on the groove it inherited
+       (#e8edf6) and, being later in the document at equal specificity, beat the
+       dark rule outright — a pale light thumb inside a dark bar. The extra
+       `padding-bottom: 4px` that made room for the 3px stripe is gone with it: a
+       real bar occupies its own band, and the paper keeps the height. */
     .draw-toolbar {
         flex-wrap: nowrap !important;
         overflow-x: auto !important;
         overflow-y: hidden;
         -webkit-overflow-scrolling: touch;
-        scrollbar-width: thin;
         gap: 6px;
-        padding-bottom: 4px;
     }
     .draw-toolbar > * { flex: 0 0 auto; }
-    /* a horizontal scroller must not become the *page's* horizontal scroll */
-    .draw-toolbar::-webkit-scrollbar { height: 3px; }
-    .draw-toolbar::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
     /* 44px is the smallest control a finger hits reliably; the drawing tools
        were 24px tall, and the option bubbles 30px. */
     /* Both axes, for the same reason as the calculator's keys above: an icon-only
@@ -243,9 +216,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
         overflow-x: auto !important;
         overflow-y: hidden;
         -webkit-overflow-scrolling: touch;
-        scrollbar-width: thin;
         gap: 6px;
-        padding-bottom: 4px;
     }
     .draw-toolbar > * { flex: 0 0 auto; }
     .draw-toolbar button { min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 13px; }
@@ -874,6 +845,34 @@ body.sg-exam .sidebar-overlay { display: none !important; }
         </div>
     </div>
 
+    <!-- The countdown is the exam's clock, not this page's, so it kept running
+         while the student was gone: coming back to a lower number is correct and
+         unexplained, which reads as a fault in the page. This states the gap that
+         was measured, once. It is a card *in* the paper rather than an overlay, so
+         it can be neither covered by nor covering the blockers — and it carries no
+         verdict and no number of violations: an absence is explained here, and the
+         panel that charges for one has its own, deliberate wording. -->
+    <div x-show="awayNoticeMinutes > 0 && !submitted && !showExamAgreement" x-cloak role="status"
+         class="bg-white rounded-2xl border border-surface-200 shadow-sm px-4 py-3 mb-2">
+        <div class="flex items-start gap-3">
+            <div class="w-9 h-9 shrink-0 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center">
+                <i class="fas fa-clock-rotate-left"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-extrabold text-surface-800"
+                   x-text="t('Jam ujian terus berjalan selama Anda tidak berada di halaman ini.','The exam clock kept running while you were away from this page.')"></p>
+                <p class="mt-1 text-xs font-bold text-surface-500">
+                    <span x-text="t('Anda tidak berada di halaman ini sekitar','You were away for about')"></span>
+                    <strong class="tabular-nums" x-text="awayNoticeMinutes + ' ' + t('menit','min')"></strong>
+                    <span x-text="t('. Sisa waktu dihitung dari jam ujian, bukan diulang dari awal.','. The remaining time is counted from the exam clock — it is not restarted.')"></span>
+                </p>
+            </div>
+            <button type="button" @click="dismissAwayNotice()"
+                    class="shrink-0 text-surface-400 hover:text-surface-600 text-lg leading-none"
+                    :aria-label="t('Tutup pemberitahuan','Dismiss notice')">&times;</button>
+        </div>
+    </div>
+
     <!-- How to move around the paper, and what stays on screen. Two layouts:
          'classic' keeps the questions as the axis and gives each question its own
          page strip; 'rail' makes the pages the axis, the way a paper booklet is
@@ -1274,7 +1273,14 @@ body.sg-exam .sidebar-overlay { display: none !important; }
             <template x-for="(q, i) in questions" :key="i">
                 <div x-show="currentQ === i" class="">
                     <!-- Media players -->
-                    <template x-if="(questions[i]||{}).youtube">
+                    <!-- Media players.
+                         Both are gated on what the link *resolved to*, not on the link
+                         itself. The video block used to test the pasted URL, which is
+                         truthy for a playlist link too — so it drew an empty black
+                         frame and said nothing. When a link was pasted but resolves to
+                         nothing, the page now says so: a pupil cannot act on a
+                         rectangle, and the proctor is who they have to tell. -->
+                    <template x-if="(questions[i]||{}).youtubeEmbed">
                         <div class="mb-3 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl px-4 py-3 border border-red-200/50">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="flex items-center gap-2">
@@ -1285,7 +1291,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                             </div>
                             <div class="relative w-full rounded-lg overflow-hidden bg-black/5" style="padding-bottom:56.25%">
                                 <iframe class="absolute inset-0 w-full h-full"
-                                    :src="youtubeEmbedUrl((questions[i]||{}).youtube)"
+                                    :src="(questions[i]||{}).youtubeEmbed"
                                     frameborder="0"
                                     loading="lazy"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -1294,15 +1300,43 @@ body.sg-exam .sidebar-overlay { display: none !important; }
                             </div>
                         </div>
                     </template>
-                    <template x-if="(questions[i]||{}).audio">
+                    <template x-if="(questions[i]||{}).youtube && !(questions[i]||{}).youtubeEmbed">
+                        <div data-media-refused class="mb-3 bg-amber-50 rounded-xl px-4 py-3 border border-amber-200/50 flex items-center gap-3">
+                            <i class="fas fa-triangle-exclamation text-amber-500"></i>
+                            <p class="text-xs font-semibold text-amber-800" x-text="t('Video soal tidak bisa dimuat — beri tahu pengawas.','The question video cannot be loaded — tell your proctor.')"></p>
+                        </div>
+                    </template>
+                    <template x-if="(questions[i]||{}).audioSources.length">
                         <div class="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 border border-amber-200/50">
                             <div class="flex items-center gap-3">
                                 <div class="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
                                     <i class="fas fa-headphones text-orange-500 text-sm"></i>
                                 </div>
-                                <audio :src="gdriveDirect((questions[i]||{}).audio)" controls class="h-9 w-full max-w-md" preload="none"></audio>
+                                <!-- One <source> per candidate endpoint, best first. A
+                                     media element walks the list and plays the first
+                                     one that loads, so a Drive account whose first
+                                     endpoint is refused still hears the question —
+                                     which is the whole point of carrying two. -->
+                                <audio controls class="h-9 w-full max-w-md" preload="none"
+                                       @error="mediaFailed[i] = true">
+                                    <template x-for="src in (questions[i]||{}).audioSources" :key="src">
+                                        <source :src="src">
+                                    </template>
+                                </audio>
                             </div>
                             <p class="text-[11px] text-stone-400 mt-1.5 ml-12" x-text="t('Putar audio soal','Play question audio')"></p>
+                        </div>
+                    </template>
+                    <!-- Two ways a question's audio ends up silent, and the pupil is
+                         told about both: the link could not be read at all, or it
+                         read fine and the file then refused to load — moved, made
+                         private again, or deleted after the paper was built. The
+                         second one is invisible without this handler: `<audio>`
+                         prints nothing of its own when every source fails. -->
+                    <template x-if="(questions[i]||{}).audio && (!(questions[i]||{}).audioSources.length || mediaFailed[i])">
+                        <div data-media-refused class="mb-3 bg-amber-50 rounded-xl px-4 py-3 border border-amber-200/50 flex items-center gap-3">
+                            <i class="fas fa-triangle-exclamation text-amber-500"></i>
+                            <p class="text-xs font-semibold text-amber-800" x-text="t('Audio soal tidak bisa dimuat — beri tahu pengawas.','The question audio cannot be loaded — tell your proctor.')"></p>
                         </div>
                     </template>
 
@@ -1666,6 +1700,7 @@ body.sg-exam .sidebar-overlay { display: none !important; }
 </div>
 {% endblock %}
 {% block scripts %}
+<script defer src="/static/js/exam-media.js"></script>
 <script defer src="/static/js/tools.js"></script>
 <script>
 const QUESTION_AUDIO = {{ (exam.question_audio or {}) | tojson | safe }};
@@ -1700,6 +1735,15 @@ const EXAM_STARTED_AT = {{ (exam_started_at or '') | tojson }};
 const EXAM_DEADLINE = {{ (deadline or '') | tojson }};
 const EXAM_DEADLINE_REASON = {{ (deadline_reason or '') | tojson }};
 const EXAM_SECONDS_LEFT = {{ seconds_left if seconds_left is not none else 'null' }};
+// How long an absence has to last before coming back to the paper is worth a
+// sentence. A minute: below it the clock barely moved, and a notice on every tab
+// switch would be noise on the very thing it exists to explain.
+const SG_AWAY_NOTICE_SECONDS = 60;
+// How often the instant the page was last attended is written to the device. The
+// stamp is what a *reload* has to measure from — every variable goes with the
+// document — and a write per second is a write per second on a phone, so it goes
+// out on a cadence and at each departure rather than on every tick.
+const SG_AWAY_STAMP_MS = 15000;
 
 function examApp(duration, totalQ) {
     // The countdown is the server's own number, or there is no countdown at all.
@@ -1741,15 +1785,28 @@ function examApp(duration, totalQ) {
         dragOverChips: {},    // { i: true } while a chip hovers the answer box
         _qOrder: null,
         _shuffledOpts: {},
+        // Questions whose media every candidate endpoint refused to serve. Keyed
+        // by question, so one broken file does not make the page claim the whole
+        // paper's audio is broken.
+        mediaFailed: {},
         _shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
         questions: Array.from({length: totalQ}, (_, i) => {
             const rawMedia = QUESTION_AUDIO[i] || {};
+            const audioUrl = typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null);
+            const videoUrl = typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null;
             return {
                 type: ({{ exam.question_types|tojson if exam.question_types else '{}' }})[i] || 'mcq',
                 origIdx: i,
                 answer: null,
-                audio: typeof rawMedia === 'string' ? rawMedia : (rawMedia.audio || null),
-                youtube: typeof rawMedia === 'object' ? (rawMedia.youtube || null) : null,
+                // The pasted link and what it resolves to are kept apart on purpose:
+                // the element binds the *resolved* value, and the raw one is what
+                // lets the page tell "this question has no media" from "this media
+                // cannot be loaded" — two different sentences for the pupil, and
+                // only the second one has an action in it.
+                audio: audioUrl,
+                audioSources: audioUrl ? sgExamMedia.audioSources(audioUrl) : [],
+                youtube: videoUrl,
+                youtubeEmbed: videoUrl ? sgExamMedia.youtubeEmbed(videoUrl) : '',
                 canvas: QUESTION_CANVAS[i] || sgKind(({{ exam.question_types|tojson if exam.question_types else '{}' }})[i]) === 'essay' || false,
             };
         }),
@@ -1972,6 +2029,19 @@ function examApp(duration, totalQ) {
         // costs one violation however many of the three detectors saw it.
         awaySince: 0,
         awayCharged: false,
+        // ─── "You were away for N minutes" ────────────────────────────────────
+        // The countdown is the exam's clock, so it kept running while this page
+        // was gone and the student comes back to a number that is simply lower.
+        // This is the one thing that says why. `_seenAt` is the last instant the
+        // page was attended, `_awayBeganAt` is a departure this document
+        // *witnessed* (exact — the event is the instant), and `_stampedAt` is
+        // when `_seenAt` was last written to the device, which is the only part a
+        // reload can still see. 0 minutes means there is nothing to explain.
+        awayNoticeMinutes: 0,
+        _seenAt: 0,
+        _awayBeganAt: 0,
+        _stampedAt: 0,
+        stampTimer: null,
         lastSyncAt: Date.now(),
         pendingSync: false,
         dirty: false,
@@ -2044,6 +2114,9 @@ function examApp(duration, totalQ) {
         audioInputLabel: '',
         audioOutputLabel: '',
         init() {
+            // The clock belongs to the exam, so this page has to be able to say how
+            // long it was not the one being looked at — see _startAwayWatch().
+            this._startAwayWatch();
             this.timer = setInterval(() => {
                 // No deadline, no clock: nothing to count down, and nothing this
                 // page may end. Only the server closes a paper.
@@ -2467,6 +2540,68 @@ function examApp(duration, totalQ) {
             const away = this.awaySince ? Math.max(0, Math.round((Date.now() - this.awaySince) / 1000)) : null;
             this.handleViolation(kind || 'tab_switch', trigger, away);
         },
+        // ─── "You were away for N minutes" ─────────────────────────────────────
+        //
+        // Separate from the anti-cheat on purpose. The ladder decides whether an
+        // absence is *charged* — it has its own debounce, its own vocabulary and
+        // its own second chance — and it is armed on agreement and silenced when
+        // the exam has anti-cheat off. This only explains the clock: the paper's
+        // countdown is `started_at` plus `duration_minutes`, computed by the
+        // server, so closing the tab does not pause it (5006f5d). A student who
+        // comes back to a lower number deserves the sentence, whether or not
+        // anything was recorded about their absence.
+        _awayStampKey() {
+            return 'exam_seen_' + '{{ exam.id }}';
+        },
+        // Whether a gap is worth a sentence, and in what it is measured. The two
+        // refusals are the two ways this could be a lie: a paper with no deadline
+        // ("Tak terbatas") had no clock that could keep moving, and a paper that
+        // is not running has no clock to explain yet.
+        _noteAwayGap(seconds) {
+            if (this.submitted || this.showExamAgreement) return;
+            if (this.timeLeft === null) return;
+            if (!(seconds >= SG_AWAY_NOTICE_SECONDS)) return;
+            this.awayNoticeMinutes = Math.max(1, Math.round(seconds / 60));
+        },
+        _persistSeen() {
+            this._stampedAt = this._seenAt;
+            try { localStorage.setItem(this._awayStampKey(), String(this._seenAt)); } catch (e) {}
+        },
+        // The page is being looked at again. Written to the device only on the
+        // cadence, because this runs on a timer.
+        _markSeen() {
+            this._seenAt = Date.now();
+            if (Date.now() - this._stampedAt >= SG_AWAY_STAMP_MS) this._persistSeen();
+        },
+        // The student has gone: a hidden tab, a window that is no longer the one
+        // in front, or a reload. The instant is the event, so it is exact — and it
+        // goes to the device at once, because the reload that follows may be a
+        // second later and would otherwise measure from a cadence-old instant.
+        // Two ways out firing for one absence keep the earliest, so the absence is
+        // one span and not two.
+        _markAway() {
+            if (this.submitted) return;
+            if (!this._awayBeganAt) this._awayBeganAt = Date.now();
+            this._seenAt = this._awayBeganAt;
+            this._persistSeen();
+        },
+        // Back at the paper. A departure this document witnessed is preferred to
+        // the stored heartbeat: the heartbeat is at most a cadence behind it, and
+        // under-reporting the absence the panel just charged for is the one number
+        // on this screen a student would notice as wrong. Measuring here also
+        // closes the span, so the next absence starts from zero rather than
+        // continuing this one.
+        _noteReturn() {
+            var began = this._awayBeganAt || this._seenAt;
+            var gap = began ? Math.max(0, (Date.now() - began) / 1000) : 0;
+            this._awayBeganAt = 0;
+            this._stampedAt = 0;
+            this._markSeen();
+            this._noteAwayGap(gap);
+        },
+        dismissAwayNotice() {
+            this.awayNoticeMinutes = 0;
+        },
         setupAntiCheat() {
             this._blurTimer = null;
             this._awayTimer = null;
@@ -2576,6 +2711,32 @@ function examApp(duration, totalQ) {
                     this._blurTimer = null;
                 }
             });
+        },
+        // What a reload has to measure from, plus the four events that date an
+        // absence exactly. A first visit has no stamp and is not an absence.
+        //
+        // This is a watch of its own, not a second pair of listeners inside the
+        // anti-cheat ladder above: it is defined after `setupAntiCheat()` so the
+        // ladder's handlers stay the page's first registration for these events,
+        // and it never consults the ladder's state — a paper with the ladder off
+        // still owes its student an explanation for a lower clock.
+        _startAwayWatch() {
+            var persisted = 0;
+            try { persisted = parseInt(localStorage.getItem(this._awayStampKey())) || 0; } catch (e) {}
+            var gap = persisted ? Math.max(0, (Date.now() - persisted) / 1000) : 0;
+            this._seenAt = Date.now();
+            this._persistSeen();
+            this._noteAwayGap(gap);
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) this._markAway();
+                else this._noteReturn();
+            });
+            window.addEventListener('blur', () => { this._markAway(); });
+            window.addEventListener('focus', () => { this._noteReturn(); });
+            // A reload leaves through the door, not through a blur: `pagehide` is
+            // the last chance to write down the instant being left behind.
+            window.addEventListener('pagehide', () => { this._markAway(); });
+            this.stampTimer = setInterval(() => { if (!document.hidden) this._markSeen(); }, SG_AWAY_STAMP_MS);
         },
         // `vtype` is the kind the server records and charges; `trigger` is what
         // the page actually saw (`visibilitychange`, `window_blur`);
@@ -3539,27 +3700,10 @@ function examApp(duration, totalQ) {
                 this.essayCanvasMode[idx] = 'pen';
             }
         },
-          youtubeEmbedUrl(url) {
-              if (!url) return '';
-              let videoId = '';
-              const patterns = [
-                  /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
-                  /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
-                  /youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/,
-              ];
-              for (const p of patterns) {
-                  const m = url.match(p);
-                  if (m) { videoId = m[1]; break; }
-              }
-              if (!videoId) return '';
-              return 'https://www.youtube.com/embed/' + videoId + '?rel=0&modestbranding=1';
-          },
-          gdriveDirect(url) {
-              if (!url) return '';
-              const match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-              if (match) return 'https://docs.google.com/uc?export=download&id=' + match[1];
-              return url;
-          },
+        // No link rewriting lives here any more. `sgExamMedia` — loaded above,
+        // one file shared with the teacher's builder — turns a pasted link into
+        // the sources this page binds. See app/static/js/exam-media.js for why a
+        // Drive link needs two candidate endpoints and a folder link needs none.
         markAnswered(i, val, overwrite) {
             this.answered[i] = true;
             // For MCQ: don't overwrite letter answer (A/B/C/D) with boolean true from canvas drawing
