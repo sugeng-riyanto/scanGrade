@@ -37,6 +37,7 @@ REPO="${SG_REPO:-/opt/scangrade}"
 INSTALLER="$REPO/deploy/install-auto-deploy.sh"
 DEPLOY_BIN="${SG_DEPLOY_BIN:-/usr/local/bin/scangrade-deploy}"
 SNAPSHOT_BIN="${SG_SNAPSHOT_BIN:-/usr/local/bin/scangrade-db-snapshot}"
+RECOVER_BIN="${SG_RECOVER_BIN:-/usr/local/bin/sgfix}"
 CLAIMS_CONF="${SG_CLAIMS_CONF:-/etc/scangrade-claims.conf}"
 PERF_CONF="${SG_PERF_CONF:-/etc/scangrade-perf.conf}"
 SMOKE_CONF="${SG_SMOKE_CONF:-/etc/scangrade-smoke.conf}"
@@ -139,6 +140,19 @@ report_state() {
   else
     echo "   snapshot   : missing ($SNAPSHOT_BIN)"
     armed=0
+  fi
+
+  # The recovery lever is reported and deliberately NOT part of `armed`. Being armed
+  # means "this box can run the gates a release has to pass"; the lever is what gets a
+  # box back to the console-free state, not a gate. Folding it into `armed` would
+  # refuse every release on every box installed before the lever existed — including
+  # the release that installs it — which is the same trap this check was written to
+  # avoid, one level down.
+  if [ -f "$RECOVER_BIN" ]; then
+    echo "   recover    : present ($RECOVER_BIN) — one word, no console ritual"
+  else
+    echo "   recover    : missing ($RECOVER_BIN) — the next stuck box needs a shell"
+    echo "                install it: bash $INSTALLER"
   fi
 
   # The schema gate holds a release against the live catalogue through DIRECT_URL,

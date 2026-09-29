@@ -626,7 +626,19 @@ def test_smoke_config_is_not_in_the_repo():
     assert tracked.returncode != 0
     for line in subprocess.run(["git", "ls-files"], cwd=ROOT,
                                capture_output=True, text=True).stdout.splitlines():
-        assert "smoke" not in line or line.endswith("smoke_test.py") or line.endswith("test_auto_deploy.py"), (
+        # The two files that legitimately carry the word in their names: the gate's
+        # own script, and the suite that reads these paths.
+        if line.endswith("smoke_test.py") or line.endswith("test_auto_deploy.py"):
+            continue
+        # A *test module about* the smoke test is not the smoke test's credentials:
+        # `tests/unit/test_smoke_admin_write.py` is named after the probe it guards,
+        # the way this file is. The file being defended is a `.conf` holding
+        # passwords, and it lives outside git on purpose. Matching the bare word
+        # "smoke" instead flagged the module and turned this guard red on its own
+        # subject — which is how a guard teaches people to ignore it.
+        if line.startswith("tests/") and line.endswith(".py"):
+            continue
+        assert "smoke" not in line, (
             f"{line} looks like a tracked smoke credential file"
         )
 
@@ -2077,6 +2089,7 @@ def _refresh_harness(tmp_path: Path, repo: str) -> str:
         f'INSTALLED_BIN_DIR="{bins}"\n'
         f'INSTALLED_RUNNER="{bins}/scangrade-deploy"\n'
         f'INSTALLED_SNAPSHOT="{bins}/scangrade-db-snapshot"\n'
+        f'INSTALLED_RECOVER="{bins}/sgfix"\n'
         'log() { echo "$*"; }\n'
         + _refresh_block()
     )
@@ -2180,6 +2193,7 @@ def test_the_refresh_rewrites_exactly_what_the_installer_installs():
     installer = INSTALL_SH.read_text(encoding="utf-8")
     installed = re.search(r'^DEPLOY_BIN="([^"]+)"', installer, re.M).group(1)
     snapshot = re.search(r'^SNAPSHOT_BIN="([^"]+)"', installer, re.M).group(1)
+    recover = re.search(r'^RECOVER_BIN="([^"]+)"', installer, re.M).group(1)
     runner = DEPLOY_SH.read_text(encoding="utf-8")
     # Compared as POSIX strings: the paths describe a Linux box, and a test on
     # Windows must not fail on the separator the local `pathlib` renders.
@@ -2192,6 +2206,12 @@ def test_the_refresh_rewrites_exactly_what_the_installer_installs():
     assert re.search(
         rf'^INSTALLED_SNAPSHOT="\$INSTALLED_BIN_DIR/{re.escape(snapshot.rsplit("/", 1)[1])}"',
         runner, re.M), "the runner refreshes a different snapshot path than the installer installs"
+    assert re.search(
+        rf'^INSTALLED_RECOVER="\$INSTALLED_BIN_DIR/{re.escape(recover.rsplit("/", 1)[1])}"',
+        runner, re.M), (
+        "the runner refreshes a different recovery path than the installer installs — so "
+        "the one word an operator types on a stuck box would point at a file nothing "
+        "keeps current")
 
 
 def test_the_refresh_runs_on_the_success_path_only():

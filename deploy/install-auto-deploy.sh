@@ -19,6 +19,10 @@ SERVICE="scangrade"
 BRANCH="main"
 DEPLOY_BIN="/usr/local/bin/scangrade-deploy"
 SNAPSHOT_BIN="/usr/local/bin/scangrade-db-snapshot"
+#: The recovery lever, and the only installed name that is short on purpose: it is
+#: typed by hand on a provider console where nothing can be pasted. See
+#: deploy/scangrade-recover.sh for what it will and will not do.
+RECOVER_BIN="/usr/local/bin/sgfix"
 BACKUP_DIR="/var/backups/scangrade"
 BACKUP_KEEP=5
 STAMP=$(date +%Y%m%d_%H%M%S)
@@ -157,11 +161,14 @@ install_launcher() {
   bash -n "$bin"
 }
 
-say "Installing $DEPLOY_BIN and $SNAPSHOT_BIN (launchers, not copies)"
+say "Installing $DEPLOY_BIN, $SNAPSHOT_BIN and $RECOVER_BIN (launchers, not copies)"
 install_launcher "$DEPLOY_BIN"
 install_launcher "$SNAPSHOT_BIN"
-echo "   both exec $REPO/deploy/*.sh, so the runner cannot lag behind the repo"
+install_launcher "$RECOVER_BIN"
+echo "   each execs $REPO/deploy/*.sh, so none of them can lag behind the repo"
 echo "   (a copy that differs from the checkout now refuses to run: exit 14)"
+echo "   $RECOVER_BIN is the recovery lever: one word on a console with no clipboard"
+echo "   and the only thing installed here whose name is short on purpose"
 
 # ── 2b. Where the snapshots go.
 #       The deploy captures a release that changes supabase/migrations — but
@@ -597,6 +604,9 @@ echo "   watch deploys : journalctl -u scangrade-deploy.service -f"
 echo "   next tick     : systemctl list-timers scangrade-deploy.timer"
 echo "   test it live  : push a commit to main, then watch the journal above"
 echo "   deploy now    : systemctl start scangrade-deploy.service"
+echo "   stuck box     : sgfix        (setting a box-local edit aside, applying the"
+echo "                                 migrations its schema is missing, one release,"
+echo "                                 and a record of why — see docs/AUTO_DEPLOY.md)"
 echo "   freeze/resume : touch /etc/scangrade-deploy.pause   (rm to resume)"
 echo "   quarantine    : a commit a gate refuses is NOT retried on later ticks,"
 echo "                   so a bad release cannot be re-pulled every two minutes."
