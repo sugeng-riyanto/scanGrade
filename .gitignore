@@ -42,6 +42,7 @@ logs/
 
 # Temp files
 temp_*
+tmp_*
 scripts/
 
 # Testing
@@ -64,6 +65,11 @@ references/
 docs/ref/
 .opencode/
 .aider*
+# Other agents' state directories, ignored for the same reason as the two above: a
+# checkout that carries their scratch is a checkout where `git add -A` ships somebody
+# else's session.
+.chatgpt/
+.commandcode/
 
 /static/
 !/static/.gitkeep
