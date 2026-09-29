@@ -103,9 +103,15 @@ INSTALLED_BIN_DIR="/usr/local/bin"
 INSTALLED_RUNNER="$INSTALLED_BIN_DIR/scangrade-deploy"
 INSTALLED_SNAPSHOT="$INSTALLED_BIN_DIR/scangrade-db-snapshot"
 #: The recovery lever. Short on purpose — it is typed by hand on a provider console
-#: where nothing can be pasted — and refreshed like the other two, so a box that has
-#: released once since this file landed carries it whether or not the installer ran.
+#: where nothing can be pasted. It is the one installed name whose *root* is not the
+#: checkout (see fetch-lever-logic): the box that needs it is the box whose checkout
+#: cannot move, so it is rendered against `$LEVER_DIR` below and comes out of the
+#: fetched branch rather than out of a release.
 INSTALLED_RECOVER="$INSTALLED_BIN_DIR/sgfix"
+#: Where the lever read out of `origin/$BRANCH` is kept, and the tree the installed
+#: name is rendered against. Deliberately not the checkout: a lever pointing at a
+#: checkout that cannot be updated is the stale tool the fetch has just beaten.
+LEVER_DIR="${SG_LEVER_DIR:-$STATE_DIR/lever}"
 BACKUP_DIR="/var/backups/scangrade"
 BACKUP_KEEP=5
 SNAPSHOT_CMD="$REPO/deploy/db_snapshot.py"
@@ -595,7 +601,137 @@ lock_heal() {
 }
 # lock-heal-logic:end
 
-# ── A box-local edit the release also touches is set aside, not refused ──────
+# ── A refusal the runner has already made is not made again ─────────────────
+# refusal-streak-logic:start
+# The box this was being fixed for had been refused for a day: `M
+# app/routes/admin_sekolah.py`, `check out has local changes - NOT deploying`, exit
+# 4, every two minutes. A runner from this commit heals that on the *first* tick —
+# the path overlaps the release, so it is set aside and the merge proceeds. What
+# stayed is the shape the heal itself cannot complete: the state directory cannot be
+# created, the disk holding it is full, or `git diff` cannot write. Then the same
+# refusal repeats, tick after tick, about the same paths, and every tick it repeats is
+# a tick the box does not release. A refusal that has become a loop, wearing the
+# clothes of patience.
+#
+# So the runner keeps count, in two files rather than one, because they answer
+# different questions: **how many** ticks running this refusal has been made (the
+# threshold reads that) and **what it was about** — its paths, not its prose, since
+# the same sentence about different files is a different problem. Past
+# `$REFUSAL_STREAK_MAX` the box-local-edit heal stops re-attempting the shape that has
+# already failed and uses the degraded one instead (see `box_edits_choose_home`), and
+# the release proceeds.
+#
+# Three properties, and each one is a way this could do harm instead of good:
+#
+#   * **The count is per path set.** An unrelated edit must not inherit a count from a
+#     refusal it has nothing to do with, so a different set of paths starts again at
+#     one. Compared byte for byte against the list this run would record.
+#   * **A count that cannot be read is zero, never a crash.** These are files written
+#     by an earlier run of a script that may since have changed its format, and this
+#     is the process that must not fail to start because of them. A missing file, an
+#     empty one, a word where a number belongs: all zero.
+#   * **Recording it is bookkeeping and can never fail a run.** If `$STATE_DIR` is the
+#     very thing that is broken, the refusal still happens for its real reason; it is
+#     simply not remembered, and the next tick starts the count again.
+#
+# Cleared whenever the tree no longer holds the edit the refusal was about, and after
+# every heal that completed — a stale count would make the next, unrelated stall look
+# like a loop on its first tick.
+#
+#: How many ticks running the same refusal may be made before the runner stops making
+#: it. Three: the timer ticks every two minutes and a box that is stuck is stuck for
+#: hours, so one would degrade on the first attempt — before anything has been shown to
+#: repeat — and a larger number is patience pretending to be policy.
+REFUSAL_STREAK_MAX=3
+#: What a refusal was about, and how many ticks running it has been made.
+REFUSAL_STREAK_FILE="$STATE_DIR/refusal-streak"
+REFUSAL_STREAK_PATHS="$STATE_DIR/refusal-streak.paths"
+#: Where the evidence goes when its preferred home cannot take it. `/run` on purpose:
+#: tmpfs, and therefore a different filesystem from `/var/lib/scangrade-deploy` — the
+#: failure this exists for is a `/var` that is full or read-only, and a fallback inside
+#: it would share its fate and be worth nothing.
+REFUSAL_FALLBACK_DIR="${SG_REFUSAL_FALLBACK_DIR:-/run/scangrade-set-aside}"
+#: How many ticks running the refusal being recorded has now been made. Set by
+#: `refusal_streak_record`, and read by the refused run itself for the sentence it
+#: leaves behind and the line it prints.
+REFUSAL_STREAK_COUNT=0
+#: The paths a refusal is about. Set by the caller before it records, and read by
+#: `refusal_streak_list`; a global because no helper in this script takes an argument.
+REFUSAL_PATHS=""
+
+#: The paths this refusal is about, one per line, in the order they will be written.
+#: Sorted and de-duplicated so that the same paths in a different order are the same
+#: refusal — the tree does not order its own status output for us — and stripped of
+#: carriage returns, because the comparison below is byte for byte and these files can
+#: be looked at (or edited) on a machine that writes them: a stray `\r` would make
+#: every refusal a first refusal, and the memory would be a no-op that looks fine.
+refusal_streak_list() {
+  printf '%s\n' "${REFUSAL_PATHS:-}" | tr -d '\r' | sed '/^$/d' | LC_ALL=C sort -u
+}
+
+#: The recorded count, or zero when it is missing, empty, or not a number. A `\r` is
+#: stripped for the same reason `refusal_streak_list` strips it: these files can be
+#: looked at on a machine that writes them, and a count that reads back as zero turns
+#: a loop into a first attempt — a memory that is a no-op while looking like it works.
+refusal_streak_recorded() {
+  local previous
+  previous=$(head -n 1 "$REFUSAL_STREAK_FILE" 2>/dev/null | tr -d '\r')
+  case "$previous" in ''|*[!0-9]*) previous=0 ;; esac
+  printf '%s' "$previous"
+}
+
+#: Is the refusal this run is about the same one the file already holds? Compared as
+#: normalised text rather than raw bytes, because a `\r` in the stored file would make
+#: every refusal a first refusal — the memory would be a no-op while looking fine.
+refusal_streak_same() {
+  [ -f "$REFUSAL_STREAK_PATHS" ] || return 1
+  printf '%s\n' "$(refusal_streak_list)" | cmp -s - \
+    <(tr -d '\r' < "$REFUSAL_STREAK_PATHS") 2>/dev/null
+}
+
+#: Count this refusal, and remember what it was about. A different path set starts
+#: again at one; the same one inherits the count it had.
+refusal_streak_record() {
+  local list previous="" count=1
+  list=$(refusal_streak_list)
+  if refusal_streak_same; then
+    previous=$(refusal_streak_recorded)
+    count=$((previous + 1))
+  fi
+  # Best effort, and deliberately not a reason to fail: this is the record of a
+  # refusal that is about to happen anyway, and a box whose state directory is the
+  # broken thing still has to refuse for the real reason.
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  printf '%s\n' "$count" > "$REFUSAL_STREAK_FILE" 2>/dev/null || true
+  printf '%s\n' "$list" > "$REFUSAL_STREAK_PATHS" 2>/dev/null || true
+  REFUSAL_STREAK_COUNT="$count"
+}
+
+#: How many ticks running the refusal this run is about has already been made. Zero
+#: when the box has not refused, or refused about something else, or the files cannot
+#: be read — every one of which means "not a loop".
+refusal_streak_count() {
+  REFUSAL_STREAK_COUNT=0
+  if refusal_streak_same; then
+    REFUSAL_STREAK_COUNT="$(refusal_streak_recorded)"
+  fi
+}
+
+#: True when this refusal has already been made `$REFUSAL_STREAK_MAX` ticks running —
+#: which is the definition of a loop rather than patience.
+refusal_streak_exhausted() {
+  refusal_streak_count
+  [ "$REFUSAL_STREAK_COUNT" -ge "$REFUSAL_STREAK_MAX" ]
+}
+
+#: The condition the refusal was about is gone, or the heal completed.
+refusal_streak_clear() {
+  rm -f "$REFUSAL_STREAK_FILE" "$REFUSAL_STREAK_PATHS" 2>/dev/null || true
+  REFUSAL_STREAK_COUNT=0
+}
+# refusal-streak-logic:end
+
+# ── A box-local edit is set aside, not refused: the release's, and a stale one ─
 # box-edits-logic:start
 # The guard below used to refuse on *any* local change, before the fetch — so one
 # hand edit was a permanent stop. The box could not deploy, and could not receive
@@ -606,27 +742,53 @@ lock_heal() {
 # Refusing was the right instinct and the wrong rule. A fast-forward merge fails
 # only where the incoming commits write a path that is also changed here, so the
 # question is not "is the tree dirty" but "would this merge clobber something".
-# Three answers, and each is acted on rather than guessed at:
+# Four answers, and each is acted on rather than guessed at:
 #
 #   * a path this release also writes: the box's version is set aside first — its
 #     diff against HEAD written to `$BOX_EDITS_DIR`, and a path HEAD does not have
 #     copied out whole rather than diffed, because there is no blob to apply a diff
 #     to — then the path is restored so the merge can proceed;
-#   * a path this release does not write: left exactly as it is. Nothing can
-#     clobber it, so it is reported and the release proceeds. This is what ends the
+#   * a path this release does not write, but that is **stale**: older than
+#     `$BOX_EDITS_STALE_SECONDS`, so nobody is coming back for it. The merge would
+#     not fail on it, and that is exactly why it has to be handled: left alone it is
+#     carried for as long as the box lives — dirty on every tick, set aside by
+#     nothing, named nowhere. It is preserved and restored the same way an
+#     overlapping path is, and the record says it was age rather than a merge;
+#   * a path this release does not write and that is not stale: left exactly as it
+#     is, and reported. Nothing can clobber it and it may well be somebody's morning's
+#     work, so it must not stop a release and must not be moved. This is what ends the
 #     "dirty box fetches every two minutes and deploys nothing, forever" state;
 #   * the set-aside cannot be written: refused. A heal that cannot say what it moved
 #     is a silent loss, and that is the one failure this block exists to prevent.
 #     `dirty_checkout` is that refusal's gate, so the page keeps its sentence.
 #
+# Staleness is the one rule here that acts on a path the release never asked about,
+# so it is deliberately the conservative one: a day, and only the path's own mtime can
+# say it (see `box_edit_is_stale`). A path that cannot be dated is not stale.
+#
 # Every heal leaves a record naming the commit, the paths, the action taken on each
 # and where the preserved bytes are — written *before* the paths are restored, so a
 # checkout that fails afterwards fails with the evidence already on disk. Nothing
 # here is deleted: a reverted path is in its patch, a moved path is in its own file.
+# The record is also the memory: a dirty set that has not changed since the newest
+# record names it is not written down again, because a note every two minutes would
+# push the record of anything actually preserved off the page that reads the newest
+# few.
 BOX_EDITS_DIR="$STATE_DIR/set-aside"
 #: How many heals keep their record. Small, because each record is evidence about
 #: one release and the page shows the newest — the same reasoning as `REFUSALS_KEEP`.
 BOX_EDITS_KEEP=5
+#: How long the box's own edit to a path has to have stood before the runner stops
+#: waiting for a release to write it. The overlap rule answers "would this merge
+#: clobber it"; this one answers a question the merge never asks — is anybody still
+#: working on it. Without it a path no release writes is carried for as long as the
+#: box lives, dirty on every tick, and nothing ever sets it aside or names it.
+#:
+#: A day: longer than any single sitting at a checkout, so no one is mid-edit, and
+#: short enough that a box is not left carrying an abandoned change indefinitely. It
+#: is measured from the path's own mtime and nothing else, because that is the only
+#: clock that answers the question — see `box_edit_is_stale`.
+BOX_EDITS_STALE_SECONDS=86400
 #: Set by `local_edits_heal`. Empty means the tree was clean, or nothing overlapped.
 BOX_EDITS_SET_ASIDE=""
 BOX_EDITS_KEPT=""
@@ -634,6 +796,35 @@ BOX_EDITS_RECORD=""
 BOX_EDITS_PATCH=""
 BOX_EDITS_MOVED=""
 BOX_EDITS_BASE=""
+#: The paths in this run's dirty set that are stale — older than the threshold, as a
+#: newline list. Set beside `$BOX_EDITS_OVERLAP`, and recorded separately from it so
+#: the page can say *why* the box's version of a path was preserved.
+BOX_EDITS_STALE=""
+#: What the refusal sentences call the reason these paths are being preserved. A
+#: global for the same reason `$BOX_EDITS_OVERLAP` is: no helper in this block takes a
+#: positional parameter — `test_deploy_script_takes_no_arguments` forbids the script
+#: from reading its invocation arguments at any level.
+BOX_EDITS_CAUSE=""
+#: The path `box_edit_is_stale` is being asked about. A global rather than an argument
+#: for the reason above, and read by no one else.
+BOX_EDITS_STALE_PATH=""
+#: Where this run's set-aside goes, and in what shape. The preferred directory, unless
+#: the refusal-streak block says this very refusal has already been made
+#: `$REFUSAL_STREAK_MAX` ticks running — in which case the shape that failed is not
+#: attempted once more; see `box_edits_choose_home`.
+BOX_EDITS_DIR_EFFECTIVE=""
+#: 1 = keep the files themselves rather than a diff of them. The degraded shape, for
+#: when the git in the pipe is what could not write: a whole file is a superset of its
+#: diff, so nothing is lost, only the size.
+BOX_EDITS_WHOLE=0
+#: Set once a degraded pass is running, so a refusal inside it is the last word rather
+#: than the beginning of another degradation — a loop inside the block that exists to
+#: end one.
+BOX_EDITS_DEGRADED=0
+#: The paths this run's heal is about, as a newline list. A global because
+#: `box_edits_choose_home` hands it to the streak block, and no helper in this script
+#: takes an argument.
+BOX_EDITS_OVERLAP=""
 
 #: The paths inside the repo that one `git status --porcelain` line names. Three
 #: characters are the status, then the path; a rename or copy names two, joined by
@@ -650,6 +841,25 @@ box_edit_paths() {
   done
 }
 
+#: Is the edit to the path in `$BOX_EDITS_STALE_PATH` older than the threshold?
+#:
+#: The path's own mtime, because it is the only clock that answers the question: the
+#: refusal memory is cleared on every tick the heal lets through, so it says nothing
+#: about age, and a deletion leaves no file to date at all. A path that cannot be
+#: dated is therefore *not* stale — the same rule as everywhere else in this block: a
+#: reading that failed is not a reason to act, and `stat` failing is a reading that
+#: failed. `--` because a path is untrusted text, and one that begins with `-` must
+#: not become an option.
+box_edit_is_stale() {
+  local modified now
+  case "${BOX_EDITS_STALE_SECONDS:-}" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$BOX_EDITS_STALE_SECONDS" -gt 0 ] || return 1
+  modified=$(stat -c %Y -- "$REPO/$BOX_EDITS_STALE_PATH" 2>/dev/null) || return 1
+  case "$modified" in ''|*[!0-9]*) return 1 ;; esac
+  now=$(date +%s)
+  [ "$((now - modified))" -ge "$BOX_EDITS_STALE_SECONDS" ]
+}
+
 #: What the refusal below is about. A global rather than an argument, because no
 #: helper in this script reads the invocation's parameters — that is what keeps the
 #: runner unsteerable from outside (`test_deploy_script_takes_no_arguments`).
@@ -658,11 +868,59 @@ BOX_EDITS_REASON=""
 #: The refusal for a heal that cannot be completed. One gate and one exit, so the
 #: page's sentence and systemd's exit code still describe the same run.
 box_edits_refuse() {
+  # Counted before the refusal is made, because a refusal the runner does not remember
+  # is one it will make again on the next tick — and the memory is what lets the tick
+  # after that choose a shape which has not failed yet (see `box_edits_choose_home`).
+  REFUSAL_PATHS="$BOX_EDITS_OVERLAP"
+  refusal_streak_record
+  [ "${REFUSAL_STREAK_COUNT:-0}" -gt 1 ] && \
+    BOX_EDITS_REASON="$BOX_EDITS_REASON (the same refusal for $REFUSAL_STREAK_COUNT ticks running)"
   log "$BOX_EDITS_REASON"
   PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 \
     PREFLIGHT_DIFF="$(preflight_diff)" \
     PREFLIGHT_DETAIL="$BOX_EDITS_REASON" preflight_write
   exit 4
+}
+
+#: The shape this run's set-aside takes, chosen *before* any of it is attempted.
+#:
+#: It cannot be decided half-way. Once a path has been moved out of the tree, a
+#: re-attempt somewhere else has already lost its own starting state — it would try to
+#: move a path that is no longer there and refuse forever — so the choice has to be
+#: made while the tree is still the box's. And it has to be made at all, because the
+#: alternative is the loop this block exists to end: the same refusal, about the same
+#: paths, on every tick.
+#:
+#: Two things change together, and each answers a different failure: the directory,
+#: because `/var` is what could not take it, and the file shape, because a diff is what
+#: could not be written. The evidence is recorded either way — the record goes beside
+#: it and the journal says where that is, so a degraded pass is louder, never quieter.
+box_edits_choose_home() {
+  BOX_EDITS_DIR_EFFECTIVE="$BOX_EDITS_DIR"
+  BOX_EDITS_WHOLE=0
+  [ "${BOX_EDITS_DEGRADED:-0}" = 0 ] || return 0
+  REFUSAL_PATHS="$BOX_EDITS_OVERLAP"
+  refusal_streak_exhausted || return 0
+  BOX_EDITS_DEGRADED=1
+  BOX_EDITS_DIR_EFFECTIVE="$REFUSAL_FALLBACK_DIR"
+  BOX_EDITS_WHOLE=1
+  # Same stamp, different directory: the record keeps naming one base.
+  BOX_EDITS_BASE="$REFUSAL_FALLBACK_DIR/${BOX_EDITS_BASE##*/}"
+  log "this refusal has been made $REFUSAL_STREAK_COUNT ticks running, so $BOX_EDITS_DIR is not tried again:"
+  log "    setting ${BOX_EDITS_OVERLAP//$'\n'/ } aside whole in $REFUSAL_FALLBACK_DIR and letting the release proceed"
+}
+
+#: The paths the newest note already names as left alone, one per line and sorted.
+#:
+#: Read back out of the record rather than remembered in a file of its own: the record
+#: *is* the memory, and a second copy of it could disagree with the thing the page
+#: reads. Empty when there is no record yet, which makes the comparison below write the
+#: first note — the only one it should.
+box_edits_noted_kept() {
+  local newest
+  newest=$(ls -1t "$BOX_EDITS_DIR"/*.txt 2>/dev/null | head -n 1)
+  [ -n "$newest" ] || return 0
+  sed -n 's/^kept //p' "$newest" 2>/dev/null | LC_ALL=C sort
 }
 
 #: Keep the newest `$BOX_EDITS_KEEP` records, and the bytes they point at.
@@ -688,22 +946,67 @@ local_edits_heal() {
   BOX_EDITS_BASE="$BOX_EDITS_DIR/$(date -u '+%Y%m%dT%H%M%SZ')-$(printf '%s' "${AFTER_FULL:-unknown}" | cut -c1-12)-$$"
 
   # Overlap is decided per path, against the release's own file list, because that
-  # list is the only thing that can be clobbered. Everything else is reported.
-  local overlap="" kept=""
+  # list is the only thing that can be clobbered. A path the release does not write,
+  # and that has stood untouched for longer than `$BOX_EDITS_STALE_SECONDS`, is set
+  # aside too — nothing clobbers it, but nobody is coming back for it either, and
+  # carrying it means a box that is dirty on every tick for ever and never says where
+  # the change went. Everything else is reported and left exactly as it is.
+  local overlap="" kept="" stale=""
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     if printf '%s\n' "$incoming" | grep -Fxq -- "$path"; then
       overlap="${overlap}${path}"$'\n'
     else
-      kept="${kept}${path}"$'\n'
+      BOX_EDITS_STALE_PATH="$path"
+      if box_edit_is_stale; then
+        stale="${stale}${path}"$'\n'
+      else
+        kept="${kept}${path}"$'\n'
+      fi
     fi
   done < <(printf '%s\n' "$status" | box_edit_paths)
   BOX_EDITS_KEPT=$(printf '%s' "$kept")
+  BOX_EDITS_STALE=$(printf '%s' "$stale")
+  # What the sentences below call the reason a path is being preserved. Two reasons
+  # start the same machinery, so the record has to say which was which: the release
+  # writing the path, or the path having stood longer than the threshold. The
+  # overlap wins the wording when both are true of the same path, because that is the
+  # reason a merge could not have gone ahead — the weaker claim must not dress it up.
+  if [ -n "${overlap//[[:space:]]/}" ] && [ -n "${stale//[[:space:]]/}" ]; then
+    BOX_EDITS_CAUSE="overlaps this release or is stale"
+  elif [ -n "${stale//[[:space:]]/}" ]; then
+    BOX_EDITS_CAUSE="is stale"
+  else
+    BOX_EDITS_CAUSE="overlaps this release"
+  fi
+  # From here a path is preserved or it is reported, and which of the two reasons put
+  # it in this set stops mattering: the shape it is kept in, the home it goes to and
+  # the record it leaves are the same either way.
+  overlap="${overlap}${stale}"
+  BOX_EDITS_OVERLAP=$(printf '%s' "$overlap")
+
+  if [ -n "${stale//[[:space:]]/}" ]; then
+    log "these local changes have stood untouched for longer than ${BOX_EDITS_STALE_SECONDS}s, so they are treated as stale and set aside rather than waited for:"
+    printf '%s\n' "$stale" | sed '/^$/d; s/^/    /'
+  fi
 
   if [ -z "${overlap//[[:space:]]/}" ]; then
+    # Nothing overlaps this release and nothing here is stale, so nothing a refusal
+    # could have been about is still here: whatever was counted is no longer this
+    # box's problem.
+    refusal_streak_clear
     [ -z "${kept//[[:space:]]/}" ] && return 0
     log "checkout has local changes this release does not write — leaving them alone:"
     printf '%s\n' "$kept" | sed '/^$/d; s/^/    /'
+    # One note per *set* of paths, not one per tick. A box carrying a local edit no
+    # release writes stays dirty for as long as somebody leaves it there, and a note
+    # every two minutes would fill the newest few the page reads with the same
+    # sentence — so the record of anything that *was* preserved would stop being
+    # named within a day, which is the opposite of what this directory is for.
+    if [ "$(printf '%s\n' "$kept" | sed '/^$/d' | LC_ALL=C sort)" \
+       = "$(box_edits_noted_kept)" ]; then
+      return 0
+    fi
     # Best effort, and only a note: nothing here is touched, so failing to write it
     # down cannot lose anything — and refusing to deploy over a missing note about
     # files this release does not even write is the forever-stall this removes.
@@ -712,8 +1015,11 @@ local_edits_heal() {
     return 0
   fi
 
-  if ! mkdir -p "$BOX_EDITS_DIR" 2>/dev/null; then
-    BOX_EDITS_REASON="a local edit overlaps this release and $BOX_EDITS_DIR cannot be created, so it could not be set aside"
+  # Decided here, before anything is attempted, and never in the middle of it.
+  box_edits_choose_home
+
+  if ! mkdir -p "$BOX_EDITS_DIR_EFFECTIVE" 2>/dev/null; then
+    BOX_EDITS_REASON="a local edit $BOX_EDITS_CAUSE and $BOX_EDITS_DIR_EFFECTIVE cannot be created, so it could not be set aside"
     box_edits_refuse
   fi
 
@@ -731,12 +1037,25 @@ local_edits_heal() {
     fi
   done < <(printf '%s\n' "$overlap")
 
-  if [ "${#touched[@]}" -gt 0 ]; then
+  if [ "${#touched[@]}" -gt 0 ] && [ "$BOX_EDITS_WHOLE" = 1 ]; then
+    # The degraded shape: it is the git in this pipe that failed, so keep the files
+    # themselves and take git out of it. A whole file is a superset of its diff, so
+    # nothing is lost — only the size — and the restore below still runs, which is
+    # what leaves the tree clean enough to merge.
+    BOX_EDITS_MOVED="$BOX_EDITS_BASE.files"
+    for path in "${touched[@]}"; do
+      if ! mkdir -p "$BOX_EDITS_MOVED/$(dirname "$path")" 2>/dev/null \
+         || ! cp -a -- "$REPO/$path" "$BOX_EDITS_MOVED/$path" 2>/dev/null; then
+        BOX_EDITS_REASON="a local edit to $path $BOX_EDITS_CAUSE and could not be kept in $BOX_EDITS_MOVED, so it would be lost rather than set aside"
+        box_edits_refuse
+      fi
+    done
+  elif [ "${#touched[@]}" -gt 0 ]; then
     BOX_EDITS_PATCH="$BOX_EDITS_BASE.patch"
     if ! as_owner git -C "$REPO" diff --no-color --no-ext-diff --no-textconv HEAD -- \
         "${touched[@]}" > "$BOX_EDITS_PATCH" 2>/dev/null; then
       rm -f "$BOX_EDITS_PATCH"
-      BOX_EDITS_REASON="a local edit to ${touched[*]} overlaps this release and could not be written to $BOX_EDITS_PATCH, so it would be lost rather than set aside"
+      BOX_EDITS_REASON="a local edit to ${touched[*]} $BOX_EDITS_CAUSE and could not be written to $BOX_EDITS_PATCH, so it would be lost rather than set aside"
       box_edits_refuse
     fi
   fi
@@ -745,11 +1064,11 @@ local_edits_heal() {
     BOX_EDITS_MOVED="$BOX_EDITS_BASE.files"
     for path in "${moved[@]}"; do
       if ! mkdir -p "$BOX_EDITS_MOVED/$(dirname "$path")" 2>/dev/null; then
-        BOX_EDITS_REASON="$path overlaps this release and cannot be copied into $BOX_EDITS_MOVED, so it would be lost rather than set aside"
+        BOX_EDITS_REASON="$path $BOX_EDITS_CAUSE and cannot be copied into $BOX_EDITS_MOVED, so it would be lost rather than set aside"
         box_edits_refuse
       fi
       if ! mv -f -- "$REPO/$path" "$BOX_EDITS_MOVED/$path" 2>/dev/null; then
-        BOX_EDITS_REASON="$path overlaps this release and could not be moved into $BOX_EDITS_MOVED, so it would be lost rather than set aside"
+        BOX_EDITS_REASON="$path $BOX_EDITS_CAUSE and could not be moved into $BOX_EDITS_MOVED, so it would be lost rather than set aside"
         box_edits_refuse
       fi
     done
@@ -772,6 +1091,9 @@ local_edits_heal() {
     log "and left these alone, because this release does not write them:"
     printf '%s\n' "$kept" | sed '/^$/d; s/^/    /'
   }
+  # The set-aside completed, so the box is past whatever it was refusing: the next tick
+  # must not inherit this count.
+  refusal_streak_clear
   box_edits_prune
   return 0
 }
@@ -791,6 +1113,7 @@ box_edits_record() {
     printf 'patch %s\n' "$BOX_EDITS_PATCH"
     printf 'files %s\n' "$BOX_EDITS_MOVED"
     printf '%s\n' "$BOX_EDITS_SET_ASIDE" | sed '/^$/d; s/^/set-aside /'
+    printf '%s\n' "${BOX_EDITS_STALE:-}" | sed '/^$/d; s/^/stale /'
     printf '%s\n' "$BOX_EDITS_KEPT" | sed '/^$/d; s/^/kept /'
   } > "$BOX_EDITS_RECORD" 2>/dev/null && {
     # Root-only: a hand edit can hold a credential, and this file is a copy of it.
@@ -800,7 +1123,7 @@ box_edits_record() {
   BOX_EDITS_RECORD=""
   # A record that cannot be written is only fatal when there is something to lose.
   if [ -n "${BOX_EDITS_SET_ASIDE//[[:space:]]/}" ]; then
-    BOX_EDITS_REASON="a local edit overlaps this release and its record could not be written to $BOX_EDITS_BASE.txt, so what was set aside could not be said"
+    BOX_EDITS_REASON="a local edit $BOX_EDITS_CAUSE and its record could not be written to $BOX_EDITS_BASE.txt, so what was set aside could not be said"
     box_edits_refuse
   fi
   log "could not record the checkout's local changes at $BOX_EDITS_BASE.txt — nothing was set aside, so nothing is lost by it"
@@ -855,10 +1178,19 @@ box_edits_record() {
 # parameters would have to (`test_deploy_script_takes_no_arguments`).
 refresh_launcher() {
   local target="$LAUNCHER_TARGET" label="$LAUNCHER_LABEL" staged=""
-  [ -f "$REPO/deploy/entrypoint.sh" ] || return 0
+  local template="${LAUNCHER_TEMPLATE:-$REPO/deploy/entrypoint.sh}"
+  local root="${LAUNCHER_ROOT:-$REPO}"
+  # Read once, then cleared: which template and which root a name renders from is a
+  # per-name decision (the two deploy names render against the checkout, the lever
+  # against the tree the fetch materialised), and the assignment-prefix form above a
+  # function call has been shell-version dependent about whether it outlives the call.
+  # A leaked root would render the *runner's* launcher against another tree — the one
+  # file whose rendered root both Gate 0 and the status page read.
+  LAUNCHER_TEMPLATE=""; LAUNCHER_ROOT=""
+  [ -f "$template" ] || return 0
 
   staged="$(dirname "$target")/.$(basename "$target").new.$$"
-  if ! sed "s|@REPO@|$REPO|" "$REPO/deploy/entrypoint.sh" > "$staged" 2>/dev/null; then
+  if ! sed "s|@REPO@|$root|" "$template" > "$staged" 2>/dev/null; then
     rm -f "$staged" 2>/dev/null || true
     log "launcher refresh: could not render deploy/entrypoint.sh — $label left as it is"
     return 0
@@ -892,16 +1224,135 @@ refresh_launcher() {
 
 # Every name the installer installs, because all of them are rendered from the same
 # template and the snapshot command is the one that was silently broken by being
-# a copy (it derived the checkout from its own location). The recovery lever is in
-# here for a sharper reason: the box that most needs it is the box that cannot
-# release, so the installer is the only thing that can put it there before the first
-# recovery — and after that this refresh keeps it current with no second console run.
+# a copy (it derived the checkout from its own location).
+#
+# The lever renders against `$LEVER_DIR` rather than the checkout, and the reason is
+# the same one that gave the block below its own block: the box that most needs the
+# lever is the box that cannot release, so a name pointing at the checkout would hand
+# that box the logic of the commit it is stuck on. `fetch-lever-logic` materialises
+# the tree from the fetched branch on every tick; this line is what keeps the name in
+# step with it after a release, and it is a no-op when the bytes already agree. A box
+# that has not ticked since that tree landed finds no template here and skips.
 refresh_installed_launchers() {
   LAUNCHER_TARGET="$INSTALLED_RUNNER" LAUNCHER_LABEL="the deploy runner" refresh_launcher
   LAUNCHER_TARGET="$INSTALLED_SNAPSHOT" LAUNCHER_LABEL="the snapshot command" refresh_launcher
-  LAUNCHER_TARGET="$INSTALLED_RECOVER" LAUNCHER_LABEL="the recovery lever" refresh_launcher
+  LAUNCHER_TARGET="$INSTALLED_RECOVER" LAUNCHER_LABEL="the recovery lever" \
+  LAUNCHER_TEMPLATE="$LEVER_DIR/deploy/entrypoint.sh" LAUNCHER_ROOT="$LEVER_DIR" \
+    refresh_launcher
 }
 # refresh-launcher-logic:end
+
+# ── The lever arrives by the fetch, not by a release ─────────────────────────
+# fetch-lever-logic:start
+# `refresh_installed_launchers` runs as the last step of a release that passed, so the
+# recovery lever reached a box only if some release had already landed there — and the
+# box that needs the lever is the box whose release is being refused. The heal that
+# taught the runner to set a box-local edit aside travels in a release too, which is
+# how a box can sit for a day refusing *before its own fetch*: its fixed commit is held
+# by the very refusal the fix exists to clear. This block is the way out of that
+# circle.
+#
+# The fetch is the only step with the property needed — it writes refs and never the
+# tree, so it succeeds on a checkout that is dirty, rolled back, held by a quarantine
+# or refused by a gate. Whatever `origin/$BRANCH` names can therefore be read out of
+# the fetched commit without merging anything, and the lever installed from there is
+# what makes recovery one word instead of a console session.
+#
+# It materialises the two files the lever is, both out of that commit:
+#
+#   * `deploy/scangrade-recover.sh` — the lever itself, which a box stuck on a commit
+#     from before it existed does not have in its checkout at all;
+#   * `deploy/entrypoint.sh` — the template `/usr/local/bin/sgfix` is rendered from,
+#     so the installed name follows however the lever is meant to be run.
+#
+# and the name is then installed from *there*. Rendered against `$LEVER_DIR` and not
+# `$REPO` on purpose: the checkout's copy is the one thing a stuck box cannot update,
+# so a lever pointing at it would hand back exactly the stale tool the fetch has just
+# beaten.
+#
+# Four properties, and each one is why the code looks the way it does:
+#
+#   * **It moves nothing.** No merge, no reset, no switch of revision, no reload — a
+#     read of the fetched commit and two writes under the state directory. That is what
+#     makes it safe on every tick, before any gate has spoken; anything that could move
+#     the tree belongs in the release, where a rollback is waiting for it.
+#   * **Both blobs are read before either lands.** A commit that carried one file and
+#     not the other must not leave a lever that half-exists.
+#   * **It parses before it installs.** This runs as root on a box that is already in
+#     trouble, so a lever that cannot run is the one failure there is no room for. A
+#     failure leaves the installed lever exactly as it was, and says so.
+#   * **It is a rename inside the target's own directory, and skipped when the bytes
+#     match.** A lever that is running keeps the inode it started with, and a tick that
+#     changed nothing raises no mtime — the same rule the launcher refresh above holds,
+#     because an mtime that moves while the content does not is a signal that lies.
+#
+# A commit from before the lever existed carries neither file, and that is not a fault:
+# it is every box's first tick after this landed. So does a commit whose lever does not
+# parse. Both cases return quietly with the installed lever untouched.
+materialise_lever_from_origin() {
+  # Two statements, not one: `local a=… b="$a/…"` declares every name local and unset
+  # *before* it assigns any of them, so the second expansion reads an unbound `a`.
+  local dir="$LEVER_DIR/deploy"
+  local staged_lever="$dir/.scangrade-recover.new.$$"
+  local staged_entry="$dir/.entrypoint.new.$$"
+
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    log "lever: cannot write $dir — the installed lever stays as it is"
+    return 0
+  fi
+
+  if ! as_owner git -C "$REPO" show "origin/$BRANCH:deploy/entrypoint.sh" \
+       > "$staged_entry" 2>/dev/null; then
+    rm -f "$staged_lever" "$staged_entry" 2>/dev/null || true
+    return 0
+  fi
+  if ! as_owner git -C "$REPO" show "origin/$BRANCH:deploy/scangrade-recover.sh" \
+       > "$staged_lever" 2>/dev/null; then
+    rm -f "$staged_lever" "$staged_entry" 2>/dev/null || true
+    return 0
+  fi
+
+  if ! bash -n "$staged_lever" 2>/dev/null; then
+    rm -f "$staged_lever" "$staged_entry" 2>/dev/null || true
+    log "lever: origin/$BRANCH's scangrade-recover.sh does not parse — keeping the installed lever"
+    return 0
+  fi
+  if ! bash -n "$staged_entry" 2>/dev/null; then
+    rm -f "$staged_lever" "$staged_entry" 2>/dev/null || true
+    log "lever: origin/$BRANCH's entrypoint.sh does not parse — keeping the installed lever"
+    return 0
+  fi
+
+  if [ -f "$dir/scangrade-recover.sh" ] && [ -f "$dir/entrypoint.sh" ] \
+     && cmp -s "$staged_lever" "$dir/scangrade-recover.sh" \
+     && cmp -s "$staged_entry" "$dir/entrypoint.sh"; then
+    rm -f "$staged_lever" "$staged_entry" 2>/dev/null || true
+  else
+    chmod 0755 "$staged_lever" 2>/dev/null || true
+    chmod 0644 "$staged_entry" 2>/dev/null || true
+    chown root:root "$staged_lever" "$staged_entry" 2>/dev/null || true
+    if ! mv -f "$staged_lever" "$dir/scangrade-recover.sh" 2>/dev/null; then
+      rm -f "$staged_lever" "$staged_entry" 2>/dev/null || true
+      log "lever: could not install origin/$BRANCH's lever — keeping the installed one"
+      return 0
+    fi
+    if ! mv -f "$staged_entry" "$dir/entrypoint.sh" 2>/dev/null; then
+      rm -f "$staged_entry" 2>/dev/null || true
+      log "lever: origin/$BRANCH's launcher template could not be installed"
+    fi
+    log "lever: installed from origin/$BRANCH into $dir"
+  fi
+
+  # The word itself, rendered from that template against that tree. Called even when the
+  # bytes matched, because the tree can be current while the installed name is missing or
+  # was rendered from an older template — and `refresh_launcher` is the one place that
+  # decides, doing nothing when the bytes agree.
+  LAUNCHER_TARGET="$INSTALLED_RECOVER" LAUNCHER_LABEL="the recovery lever" \
+  LAUNCHER_TEMPLATE="$dir/entrypoint.sh" LAUNCHER_ROOT="$LEVER_DIR" \
+    refresh_launcher
+  return 0
+}
+# fetch-lever-logic:end
 
 # ── Serialise runs ───────────────────────────────────────────────────────────
 # The timer already skips while the unit is active, but a manual run can overlap
@@ -1141,6 +1592,12 @@ REBASELINE_REQUESTED=0
 # An operator's explicit release is consumed even when there is nothing to
 # deploy, so a pending request cannot sit on the box and surprise a later tick.
 quarantine_honour_release
+
+# The lever is materialised here, and the position is the feature: after the fetch,
+# because only then does `origin/$BRANCH` name anything; before the nothing-new exit
+# below, because an up-to-date box whose lever is missing is exactly a box that needs
+# one; and long before the merge, which is the step a stuck box cannot reach.
+materialise_lever_from_origin
 
 if [ "$BEFORE" = "$AFTER" ]; then
   exit 0                      # nothing new; stay silent so the journal stays quiet
@@ -1848,6 +2305,9 @@ if [ "$HEALTHY" = "1" ]; then
   RUN_STEP="done"
   mkdir -p "$STATE_DIR"
   printf '%s\n%s\n%s\n' "$AFTER" "$(date -Is)" "$SNAPSHOT" > "$STATE_DIR/last-deploy"
+  # A release that got all the way here is not a box in a loop, whatever it was
+  # refusing before it started.
+  refusal_streak_clear
   log "DEPLOY OK: $BEFORE -> $AFTER"
   # The release is verified and serving, so this is the moment the arrangement can
   # be brought back in step with the repo — a copy that has drifted, or a launcher

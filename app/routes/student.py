@@ -17,6 +17,7 @@ from app.services.question_types import (
     default_weights, earned_points, is_objective, objective_result, public_options,
 )
 from app.services.submission_service import finish_sitting, open_sitting
+from app.services import exam_media
 from app.services import invigilation
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
@@ -569,6 +570,15 @@ def take_exam(exam_id):
             student_class_label = _name if (not _grade or _grade in _name) else f"{_name} \u00b7 {_grade}"
     except Exception:
         student_class_label = ""
+    # A question whose media was uploaded to our own bucket is handed a URL that
+    # dies with this sitting: signed over (this file, *this* pupil, this paper, an
+    # expiry), so the link in the page is worth nothing in a classmate's browser and
+    # worthless again in fifteen minutes. A pasted Drive or YouTube link is passed
+    # through exactly as it was stored — papers built before this change keep
+    # playing. See app/services/exam_media.py for why the page never sees a Storage
+    # URL at all.
+    safe_exam["question_audio"] = exam_media.with_media_urls(
+        safe_exam.get("question_audio"), subject=g.user_id, exam_id=exam_id)
     resp = make_response(render_template("student/take_exam.html", exam=safe_exam, anti_cheat_config=anti_cheat_config, exam_started_at=exam_started_at, recovery_code=recovery_code, question_options=question_options, deadline=clocks["deadline_iso"], deadline_reason=clocks["reason"], seconds_left=clocks["seconds_left"], window_end=clocks["window_end_iso"], away_grace_seconds=AWAY_GRACE_SECONDS, away_grace_chances=AWAY_GRACE_CHANCES, student_name=student_name, student_class_label=student_class_label))
     resp.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
     return resp
@@ -1103,8 +1113,10 @@ def print_result_card(submission_id):
     if not card["released"]:
         flash("Hasil ujian belum dirilis oleh guru.", "error")
         return redirect("/student/results")
-    return render_template("print/report_card.html", printed_on=print_stamp(),
-                           show_key=True, **card)
+    # A list of one: the document renders a *set* of cards so that handing back a
+    # whole class is one print, and this is the same document with a single sheet.
+    return render_template("print/report_card.html", cards=[card], printed_on=print_stamp(),
+                           show_key=True)
 
 
 @student_bp.route("/results/<submission_id>/download-pdf")

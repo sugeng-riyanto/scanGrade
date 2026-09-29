@@ -303,6 +303,12 @@ class WhiteboardCanvas {
         if (!this.calcEl) {
             if (typeof ScanGradeTools?.createCalculator === "function") {
                 this.calcEl = ScanGradeTools.createCalculator();
+                // An overlay attached to the body says where it belongs where it is
+                // attached. `.sg-calculator` draws it and names the same line, but a
+                // reader of this line should not have to go and find that: a node
+                // hung off the body is outside every page box, so its height is the
+                // one thing this statement has to state.
+                this.calcEl.classList.add('sg-layer-float');
                 document.body.appendChild(this.calcEl);
             } else { alert("Kalkulator tidak tersedia"); return; }
         }

@@ -42,10 +42,12 @@ import io
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from tests.conftest import app_instance
+from app.utils import auth as auth_utils
 
 ROOT = Path(__file__).resolve().parents[2]
 ADMIN_ROUTES = ROOT / "app" / "routes" / "admin_sekolah.py"
@@ -200,6 +202,94 @@ class TestWhatALoginCardCarries:
         card = result["rows"][0]
         assert card["identity"] == "NIP-1", card
         assert card["group"] == "Fisika", card
+
+# ── 1b. the email on a card, which is how the account is actually signed in ─
+
+class _PagedAdmin:
+    """The GoTrue listing as the server really serves it: a page at a time.
+
+    `server_cap` is the point — asking for 1000 does not promise 1000 back, so
+    "read the first page and assume it is everything" has to fail here the way it
+    fails in production.
+    """
+
+    def __init__(self, users, *, server_cap=50):
+        self._users = list(users)
+        self._cap = server_cap
+        self.pages_asked = []
+
+    def list_users(self, page=1, per_page=None):
+        per = min(per_page or 50, self._cap)
+        self.pages_asked.append((page, per))
+        start = (page - 1) * per
+        return self._users[start:start + per]
+
+
+def test_the_email_map_covers_accounts_past_the_first_page(monkeypatch):
+    """The sheet is the only place a printed password exists, and the address beside it
+    is the other half of the credential: `/auth/login-user` matches on it.
+
+    `_get_email_map` read `auth.admin.list_users()` once, and that returns a page of 50 —
+    so on a school of hundreds every card past the first fifty printed an empty Email
+    column, which is the one thing the card exists to hand over.
+    """
+    from app.routes import admin_sekolah as route
+
+    users = [SimpleNamespace(id=f"u-{i}", email=f"guru{i}@scan-grade.app")
+             for i in range(120)]
+    admin = _PagedAdmin(users, server_cap=50)
+    monkeypatch.setattr(auth_utils, "get_auth_admin", lambda: admin)
+    monkeypatch.setattr(route, "_email_cache", {"data": {}, "ts": 0.0})
+
+    found = route._get_email_map(None)
+
+    assert found.get("u-119") == "guru119@scan-grade.app", (
+        "the map holds only the first page, so every card past it prints no email "
+        "and the pupil has no address to sign in with")
+    assert len(found) == 120, len(found)
+
+
+def test_an_official_card_uses_the_auth_address_when_the_mirror_is_empty():
+    """Every account on this project predates migration 040's mirror column, so
+    `profiles.email` is empty for all of them today — and read alone, it printed a
+    blank login address for a head teacher, whose only identity at `/auth/login-user`
+    *is* the email.
+    """
+    fake = _FakeSupabase({"profiles": [
+        {"id": "p-1", "full_name": "Kepala Sekolah", "role": "principal",
+         "school_id": SCHOOL, "email": None}]})
+    result = lc.collect(fake, SCHOOL, ["p-1"], "official",
+                        emails={"p-1": "kepsek@scan-grade.app"})
+    card = result["rows"][0]
+    assert card["identity"] == "kepsek@scan-grade.app", card
+    assert card["email"] == "kepsek@scan-grade.app", card
+
+
+def test_an_official_card_falls_back_to_the_mirror_when_auth_cannot_answer():
+    """The mirror is the fallback that keeps a card printable when the auth listing is
+    refused — the same reason the column exists.
+    """
+    fake = _FakeSupabase({"profiles": [
+        {"id": "p-2", "full_name": "Wakil Kepala", "role": "vice_principal",
+         "school_id": SCHOOL, "email": "wakil@scan-grade.app"}]})
+    result = lc.collect(fake, SCHOOL, ["p-2"], "official", emails={})
+    assert result["rows"][0]["email"] == "wakil@scan-grade.app", result["rows"][0]
+
+
+def test_a_student_card_falls_back_to_the_mirror_too():
+    """The same two sources, the same order, for the other two kinds — otherwise the
+    fallback exists for one role and is forgotten for three.
+    """
+    fake = _FakeSupabase({"students": [
+        {"id": "u-9", "nisn": "1009", "school_id": SCHOOL,
+         "profiles": {"full_name": "Citra", "email": "citra@scan-grade.app"},
+         "classes": {"name": "7A"}}]})
+    result = lc.collect(fake, SCHOOL, ["u-9"], "student", emails={})
+    assert result["rows"][0]["email"] == "citra@scan-grade.app", result["rows"][0]
+
+
+class TestTheEmbeds:
+    """What each kind's card joins to, and why the wrong one is not merely empty."""
 
     def test_the_group_embed_is_the_one_each_kind_has(self):
         """A pupil has a class and a teacher has a subject; asking for the wrong embed

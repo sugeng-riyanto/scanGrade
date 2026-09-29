@@ -177,8 +177,19 @@ def test_the_session_read_carries_the_preferences():
     assert "preferences" in body, (
         "the session read does not ask for the preferences column, so every device "
         "would need its own extra query to find them")
-    assert '", preferences"' in body, (
+    # The column rides the *optional* list rather than the fixed one, and that is not
+    # a demotion: both are joined into the same select, so the round-trip is still
+    # one — while a database that has not been migrated for the column refuses a
+    # select naming it **in full**, which would blank the identity with it.
+    assert "_optional_columns_for_the_select()" in body, (
+        "the profile read does not ask which optional columns this database has")
+    assert '", ".join(' in body, (
         "the preferences are not part of the profile select that is already made")
+    declaration = next(line for line in text.splitlines()
+                       if line.startswith("_OPTIONAL_PROFILE_COLUMNS"))
+    assert '"preferences"' in declaration, (
+        "preferences is not among the columns the identity read may add, so no select "
+        "would ever ask for it")
 
 
 def test_a_database_without_the_column_does_not_take_the_whole_session_down():

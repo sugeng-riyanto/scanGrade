@@ -231,3 +231,164 @@ class TestTheAppWrapsItsClient:
 
         with app.app_context():
             assert isinstance(get_supabase(), RetryingClient)
+
+
+# ── a write whose reply was lost is settled by one read ─────────────────────
+
+class ScriptedSession:
+    """The httpx client postgrest calls, scripted: the write is dropped, the read answers.
+
+    ``session`` on a real builder is the object postgrest's ``execute`` writes through
+    and the object a read would be issued on, so swapping it in drives a **real**
+    builder with no network — which is the only way to test this fairly. A fake builder
+    would have to invent ``path``/``params``/``json``, and those are exactly the things
+    the confirmation depends on.
+    """
+
+    def __init__(self, *, rows=None, reads=None):
+        self._rows = rows if rows is not None else []
+        self._reads = list(reads or [])
+        self.writes = []
+        self.reads = []
+
+    def request(self, method, path, **kw):
+        """Every write in this file is dropped — that is the fault being answered."""
+        self.writes.append((str(method), path, dict(kw.get("params") or {}), kw.get("json")))
+        raise dropped()
+
+    def get(self, path, params=None, headers=None):
+        self.reads.append((path, list(params or [])))
+        if self._reads:
+            outcome = self._reads.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+        return answered(self._rows)
+
+
+def answered(rows, status: int = 200):
+    """A real ``httpx.Response``, so the rows are parsed the way production parses them."""
+    return httpx.Response(status, json=rows,
+                          request=httpx.Request("GET", "https://example.supabase.co/rest/v1/x"))
+
+
+def real_write(session, build):
+    """A wrapped write on postgrest's own builder, with its session swapped for the script."""
+    from supabase import create_client
+
+    query = build(create_client("https://example.supabase.co", "a.b.c"))
+    query.session = session
+    return wrap_query(query)
+
+
+def a_patch(client):
+    return client.table("profiles").update({"full_name": "Ani"}).eq("id", "u1")
+
+
+def a_delete(client):
+    return client.table("classes").delete().eq("id", "c1")
+
+
+class TestAWriteWhoseReplyWasLostIsConfirmedByARead:
+    """A dropped connection does not say whether the statement ran. A read does.
+
+    Reported live as ``Gagal: Server disconnected`` on an admin CRUD page: the row had
+    been written, the reply was lost, and the operator was told the change failed — so
+    they did it again. Re-sending the write is the one thing that must not happen (it is
+    how an insert lands twice), which leaves the read: the same recovery this repo had
+    already hand-written twice, in ``user_preferences.save`` and ``analysis_share.create``.
+    """
+
+    def test_a_patch_that_landed_is_reported_as_done(self):
+        session = ScriptedSession(rows=[{"id": "u1", "full_name": "Ani"}])
+        out = real_write(session, a_patch).execute()
+        assert out.data == [{"id": "u1", "full_name": "Ani"}], out.data
+        assert len(session.writes) == 1, (
+            "the write was re-sent — a dropped reply does not say the statement ran")
+        assert len(session.reads) == 1, "nothing asked whether the write landed"
+        assert session.reads[0][1] == [("id", "eq.u1")], session.reads[0][1]
+
+    def test_a_patch_that_did_not_land_is_still_a_failure(self):
+        session = ScriptedSession(rows=[{"id": "u1", "full_name": "Budi"}])
+        with pytest.raises(httpx.RemoteProtocolError):
+            real_write(session, a_patch).execute()
+
+    def test_a_partly_applied_patch_is_not_reported_as_done(self):
+        """One statement is atomic, so a row that does not carry the patch means the
+        statement did not run — reporting the others as done would be a guess."""
+        session = ScriptedSession(rows=[{"id": "u1", "full_name": "Ani"},
+                                        {"id": "u2", "full_name": "Budi"}])
+        with pytest.raises(httpx.RemoteProtocolError):
+            real_write(session, a_patch).execute()
+
+    def test_a_delete_that_landed_is_reported_as_done(self):
+        session = ScriptedSession(rows=[])
+        out = real_write(session, a_delete).execute()
+        assert out.data == [], out.data
+        assert session.reads[0][1][:1] == [("id", "eq.c1")], session.reads[0][1]
+        assert ("limit", "1") in session.reads[0][1], (
+            "the confirming read was not bounded, so a delete could pull the whole table")
+
+    def test_a_delete_that_did_not_land_is_still_a_failure(self):
+        session = ScriptedSession(rows=[{"id": "c1"}])
+        with pytest.raises(httpx.RemoteProtocolError):
+            real_write(session, a_delete).execute()
+
+    def test_the_confirming_read_is_itself_retried(self):
+        """The recovery is a read, and a read is the thing that is retried here."""
+        session = ScriptedSession(rows=[{"id": "u1", "full_name": "Ani"}],
+                                  reads=[dropped()])
+        assert real_write(session, a_patch).execute().data[0]["full_name"] == "Ani"
+        assert len(session.reads) == 2, "the confirming read was not retried"
+
+    def test_a_timestamp_written_in_another_spelling_still_confirms(self):
+        """The caller writes an ISO string; Postgres echoes its own. Comparing the two
+        as text would report a write that landed as lost — the very bug being fixed."""
+        written = "2026-09-29T15:26:08.498522+00:00"
+        session = ScriptedSession(rows=[{"id": "u1",
+                                         "password_changed_at": "2026-09-29T15:26:08.498522Z"}])
+        out = real_write(
+            session,
+            lambda c: c.table("profiles").update({"password_changed_at": written}).eq("id", "u1"),
+        ).execute()
+        assert out.data, "a timestamp in another spelling was read as a lost write"
+
+
+class TestWhatIsNeverConfirmed:
+    """The confirmation is only offered where it means something."""
+
+    def test_an_insert_is_never_confirmed(self):
+        """An insert has no filter, so there is no row to ask about — and the insert
+        that landed twice because it was re-sent is the reason writes are not retried."""
+        session = ScriptedSession(rows=[{"id": "x"}])
+        with pytest.raises(httpx.RemoteProtocolError):
+            real_write(session, lambda c: c.table("classes").insert({"name": "7A"})).execute()
+        assert session.reads == [], "an insert was confirmed by a read it cannot make"
+
+    def test_an_unfiltered_update_is_never_confirmed(self):
+        """With no filter the only honest read is the whole table, and a guess about a
+        table-wide update is worse than the error."""
+        session = ScriptedSession(rows=[{"full_name": "Ani"}])
+        with pytest.raises(httpx.RemoteProtocolError):
+            real_write(session, lambda c: c.table("profiles").update({"full_name": "Ani"})).execute()
+        assert session.reads == [], "an unfiltered update triggered a table-wide read"
+
+    def test_a_patch_that_moves_the_column_it_filters_on_is_never_confirmed(self):
+        """``update({"status": "done"}).eq("status", "pending")`` — after the write the
+        filter matches nothing, so the read would report a landed write as lost. The
+        invigilation retake decision has exactly this shape."""
+        session = ScriptedSession(rows=[])
+        with pytest.raises(httpx.RemoteProtocolError):
+            real_write(session, lambda c: c.table("exam_retake_requests")
+                       .update({"status": "approved"}).eq("status", "pending")).execute()
+        assert session.reads == [], "a conditional update was confirmed by a filter it moved"
+
+    def test_a_real_api_error_is_still_raised_at_once(self):
+        from postgrest.exceptions import APIError
+
+        session = ScriptedSession()
+        session.request = lambda method, path, **kw: (_ for _ in ()).throw(
+            APIError({"message": "column does not exist"}))
+        with pytest.raises(APIError):
+            real_write(session, a_patch).execute()
+        assert session.reads == [], "a server answer was second-guessed with a read"

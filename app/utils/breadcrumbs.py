@@ -109,6 +109,10 @@ ARTIFACT = frozenset({
     # names behind one placeholder, so the only literal segment is the mount the
     # downloads hang under — a file, not a page; the crumb is deploy-status.
     "perf",
+    # `/media/<token>` serves a question's own audio or video bytes, straight into
+    # an `<audio>`/`<video>` element: there is no document, so there is no chrome
+    # and no trail. The crumb is the exam page that asked for it.
+    "media",
 })
 
 #: A *login door*. `/auth/login` and its siblings render a different chrome
@@ -140,7 +144,14 @@ MODULES = frozenset({"wb"})
 
 #: A page that never renders this chrome at all: a standalone HTML document, or
 #: the load tester's verification file.
-NO_CHROME = frozenset({"loaderio-51ecf273210e88abe9f24d4eb2dba2a8.html"})
+NO_CHROME = frozenset({
+    "loaderio-51ecf273210e88abe9f24d4eb2dba2a8.html",
+    # `/teacher/results/report-cards` renders `print/report_card.html` — the same
+    # sheet as `/teacher/submissions/<id>/print`, in a loop, into one document for
+    # a class. It extends no layout, so it shows no trail; the crumb is the results
+    # page the school printed it from.
+    "report-cards",
+})
 
 #: (why, which segments). The prose is the guard's documentation *and* the reason a
 #: reader gets for a segment that is not a place — a test refuses an empty one.

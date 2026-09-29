@@ -217,6 +217,25 @@ ORIGIN_CURRENT, ORIGIN_NAMED, ORIGIN_UNMATCHED, ORIGIN_UNREADABLE = (
     "current", "named", "unmatched", "unreadable")
 ORIGIN_KEYS = frozenset({ORIGIN_CURRENT, ORIGIN_NAMED, ORIGIN_UNMATCHED, ORIGIN_UNREADABLE})
 
+#: How the code *answering this page* sits against the checkout's `HEAD`. Every
+#: other reading here comes out of a file on the box and can be perfectly happy
+#: while the running process serves older code — a release that merged and whose
+#: reload never happened looks exactly like a box with nothing waiting. So:
+#:
+#:   `current`  — the last release is loaded in this process;
+#:   `behind`   — the checkout moved on and this process never came up on it;
+#:   `ahead`    — the checkout moved *back* under a running process;
+#:   `unknown`  — the commit is not in this checkout's history at all (a reset, or
+#:                a process started from somewhere else) — never a number;
+#:   `unreadable` — the process could not read its own commit, so nothing is known.
+#:
+#: `behind` is the one that gets a verdict: it is the only one of the five that is
+#: a release which landed and was not loaded.
+RUNNING_CURRENT, RUNNING_BEHIND, RUNNING_AHEAD, RUNNING_UNKNOWN, RUNNING_UNREADABLE = (
+    "current", "behind", "ahead", "unknown", "unreadable")
+RUNNING_KEYS = frozenset({RUNNING_CURRENT, RUNNING_BEHIND, RUNNING_AHEAD,
+                          RUNNING_UNKNOWN, RUNNING_UNREADABLE})
+
 
 # ── the commit a gate refused ────────────────────────────────────────────────
 #
@@ -538,6 +557,7 @@ def _box_edits_record(text: str, *, now: _dt.datetime, name: str) -> dict:
     commit = (lines[1].strip() or None) if len(lines) > 1 else None
     patch = files = None
     set_aside: list[str] = []
+    stale: list[str] = []
     kept: list[str] = []
     for line in lines[2:]:
         kind, _, value = line.partition(" ")
@@ -548,6 +568,8 @@ def _box_edits_record(text: str, *, now: _dt.datetime, name: str) -> dict:
             files = value or None
         elif kind == "set-aside" and value:
             set_aside.append(value)
+        elif kind == "stale" and value:
+            stale.append(value)
         elif kind == "kept" and value:
             kept.append(value)
     return {
@@ -557,6 +579,10 @@ def _box_edits_record(text: str, *, now: _dt.datetime, name: str) -> dict:
         "patch": patch, "patch_bytes": _bytes_of(patch),
         "files": files, "files_present": bool(files and pathlib.Path(files).exists()),
         "set_aside": set_aside, "set_aside_total": len(set_aside),
+        # The subset of `set_aside` the runner preserved because nobody had touched it
+        # for a day rather than because the release writes it. A record from before
+        # that rule existed has no such line, and reads as the overlap it was.
+        "stale": stale, "stale_total": len(stale),
         "kept": kept, "kept_total": len(kept),
         "unreadable": False, "detail": None,
     }
@@ -581,6 +607,7 @@ def box_edits_state(directory: pathlib.Path, repo: pathlib.Path, *,
         "at": None, "age_seconds": None, "commit": None, "short": None,
         "subject": None, "patch": None, "patch_bytes": None, "files": None,
         "files_present": False, "set_aside": [], "set_aside_total": 0,
+        "stale": [], "stale_total": 0,
         "kept": [], "kept_total": 0,
     }
     try:
@@ -608,7 +635,8 @@ def box_edits_state(directory: pathlib.Path, repo: pathlib.Path, *,
                 "name": entry.name, "at": None, "commit": None, "short": None,
                 "subject": None, "age_seconds": None, "patch": None,
                 "patch_bytes": None, "files": None, "files_present": False,
-                "set_aside": [], "set_aside_total": 0, "kept": [], "kept_total": 0,
+                "set_aside": [], "set_aside_total": 0, "stale": [],
+                "stale_total": 0, "kept": [], "kept_total": 0,
                 "unreadable": True, "detail": detail,
             })
             continue
@@ -621,7 +649,7 @@ def box_edits_state(directory: pathlib.Path, repo: pathlib.Path, *,
     newest = state["records"][0]
     for field in ("at", "age_seconds", "commit", "short", "subject", "patch",
                   "patch_bytes", "files", "files_present", "set_aside", "kept",
-                  "set_aside_total", "kept_total"):
+                  "set_aside_total", "kept_total", "stale", "stale_total"):
         state[field] = newest.get(field)
     return state
 
@@ -2101,13 +2129,97 @@ def runner_state(path: pathlib.Path, repo: pathlib.Path, *,
 
 ORIGIN_REFS = ("refs/remotes/origin/main", "refs/remotes/origin/HEAD")
 
+#: The fields the app's own reading carries, copied into the placed reading as-is.
+#: Named once so a field added to `app/utils/build_info.py` has to appear here too.
+RUNNING_FIELDS = ("available", "reason_key", "detail", "repo", "commit",
+                  "full_commit", "subject", "committed_at", "loaded_at", "pid")
 
-def checkout_state(repo: pathlib.Path, *, now: _dt.datetime) -> dict:
-    """Where the checkout is relative to the `origin/main` it last fetched.
+
+def _running_base(running: dict | None, *, now: _dt.datetime) -> dict:
+    """The process's own commit, as the page's vocabulary — before any placement.
+
+    Kept separate from the placement so that a box whose checkout cannot be read
+    still reports *what code is being served*: that is the more useful half of the
+    news when the checkout is the broken thing, and it comes from a different
+    source than the checkout reading does.
+    """
+    out: dict = {field: None for field in RUNNING_FIELDS}
+    out.update({"key": RUNNING_UNREADABLE, "behind": None, "ahead": None,
+                "age_seconds": None})
+    if not running:
+        out["detail"] = "the app process did not report a commit"
+        return out
+    for field in RUNNING_FIELDS:
+        if field in running:
+            out[field] = running[field]
+    out["age_seconds"] = _age_seconds(out.get("loaded_at"), now)
+    return out
+
+
+def _place_running(state: dict, git: str | None, repo: pathlib.Path,
+                   head_full: str | None) -> None:
+    """Put the served commit where it belongs in this checkout's history.
+
+    `git rev-list --count X..HEAD` answers twice over: a non-zero count is how far
+    ahead the checkout is, and a failure means the commit is not in this
+    repository at all — a reset, or a process started from a different checkout.
+    That is a *reason*, so it is reported as one; the count is left `None` rather
+    than zeroed, because "unknown" and "the same commit" are opposite answers.
+    """
+    full = state.get("full_commit")
+    if not state.get("available"):
+        return
+    if git is None or head_full is None or not full:
+        state["key"] = RUNNING_UNKNOWN
+        return
+    rc, behind_raw = _git_out(git, repo, "rev-list", "--count", f"{full}..HEAD")
+    if rc != 0:
+        state["key"] = RUNNING_UNKNOWN
+        state["detail"] = state.get("detail") or behind_raw or None
+        return
+    rc, ahead_raw = _git_out(git, repo, "rev-list", "--count", f"HEAD..{full}")
+    behind = int(behind_raw) if behind_raw.isdigit() else None
+    ahead = int(ahead_raw) if rc == 0 and ahead_raw.isdigit() else None
+    state["behind"], state["ahead"] = behind, ahead
+    if behind is None or ahead is None:
+        state["key"] = RUNNING_UNKNOWN
+    elif behind and ahead:
+        # Neither is an ancestor of the other: the branch was rewritten under a
+        # running process. Nothing here can say which side is "the" release, so it
+        # says that instead of picking one.
+        state["key"] = RUNNING_UNKNOWN
+    elif behind:
+        state["key"] = RUNNING_BEHIND
+    elif ahead:
+        state["key"] = RUNNING_AHEAD
+    else:
+        state["key"] = RUNNING_CURRENT
+
+
+def running_state(repo: pathlib.Path, *, running: dict | None,
+                  git: str | None = None, head_full: str | None = None,
+                  now: _dt.datetime) -> dict:
+    """Where the running process's commit sits against the checkout it serves."""
+    state = _running_base(running, now=now)
+    _place_running(state, git, repo, head_full)
+    return state
+
+
+def checkout_state(repo: pathlib.Path, *, now: _dt.datetime,
+                   running: dict | None = None) -> dict:
+    """Where the checkout is relative to the `origin/main` it last fetched, and
+    where the code answering this page sits against the checkout itself.
 
     Nothing here fetches. `behind` is therefore "behind the remote-tracking ref as
     this checkout last saw it", and the age of that ref travels with the number so
     a stale figure cannot read as a live one.
+
+    `running` is the *app process's* own reading (`app/utils/build_info.py`), the
+    one input here that does not come out of a file on the box. It is placed as
+    soon as the checkout can be read; when the checkout cannot be read at all, the
+    served commit is still reported with the placement it can honestly have —
+    which is "this checkout cannot place it" — because that is the more useful
+    half of the news when the checkout is the broken thing.
     """
     state: dict = {
         "path": str(repo), "available": False, "reason_key": None, "detail": None,
@@ -2116,6 +2228,8 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime) -> dict:
         "dirty": None, "origin_updated_at": None, "origin_age_seconds": None,
         "detached": False,
     }
+    state["running"] = _running_base(running, now=now)
+    _place_running(state["running"], None, repo, None)
 
     if not (repo / ".git").exists():
         state["reason_key"] = "not_a_checkout"
@@ -2138,6 +2252,11 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime) -> dict:
 
     rc, head = _git_out(git, repo, "rev-parse", "--short", "HEAD")
     state["head"] = head if rc == 0 else None
+
+    # The full sha is what places the served commit: `rev-list` cannot be handed an
+    # abbreviation, and comparing a short one here would be a second reading.
+    rc, head_full = _git_out(git, repo, "rev-parse", "HEAD")
+    _place_running(state["running"], git, repo, head_full if rc == 0 else None)
 
     rc, line = _git_out(git, repo, "log", "-1", "--format=%s|%cI")
     if rc == 0 and "|" in line:
@@ -2259,6 +2378,15 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
     if not checkout["available"]:
         return {**out, "level": UNKNOWN, "key": checkout["reason_key"] or "checkout_unreadable",
                 "detail": checkout["detail"]}
+    # The code being *served* is older than the box — a release that merged and was
+    # never loaded. It sits above `dirty` and `behind` for the reason those two sit
+    # where they do: they describe the arrangement, i.e. what the next tick would
+    # do, and this describes what a student is being served right now. It sits
+    # below every stop, because a refusal or a heal says the run ended.
+    running = checkout.get("running") or {}
+    if running.get("key") == RUNNING_BEHIND:
+        return {**out, "level": WARN, "key": "running_behind",
+                "detail": str(running.get("behind")), "behind": checkout.get("behind")}
     if checkout.get("dirty"):
         return {**out, "level": WARN, "key": "dirty", "detail": str(checkout["dirty"])}
     behind = checkout.get("behind")
@@ -2287,6 +2415,8 @@ REASON_KEYS = frozenset({
     "refused",
     # the runner's record of a local edit it set aside so a release could merge
     "box_edits",
+    # the code answering the page is older than the checkout that holds it
+    "running_behind",
 })
 
 
@@ -2295,9 +2425,20 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            preflight_diff_file=None,
            last_stop_file=None, request_dir=None, release_request=None,
            perf_history_file=None, perf_baseline_file=None, refusals_dir=None,
-           box_edits_dir=None, now: _dt.datetime | None = None) -> dict:
-    """Everything the page shows. Any single part may be `unknown` with a reason."""
+           box_edits_dir=None, running: dict | None = None,
+           now: _dt.datetime | None = None) -> dict:
+    """Everything the page shows. Any single part may be `unknown` with a reason.
+
+    `running` is the one input that does not come from a file on the box: it is
+    the commit *this* process is serving. It defaults to the process's own reading
+    rather than to None so that a caller cannot forget it — a second caller with a
+    different surface (a download, a future JSON view) would otherwise ship
+    without the reading whose absence the page cannot show.
+    """
     now = now or _dt.datetime.now(_dt.timezone.utc)
+    if running is None:
+        from app.utils import build_info
+        running = build_info.snapshot()
     repo = pathlib.Path(repo or os.environ.get("SCANGRADE_REPO") or DEFAULT_REPO)
     runner = pathlib.Path(runner or os.environ.get("SCANGRADE_RUNNER") or DEFAULT_RUNNER)
     snapshot_runner = pathlib.Path(
@@ -2368,7 +2509,7 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
     main = runner_state(runner, repo, expect=expect)
     snapshot = runner_state(snapshot_runner, repo, expect=expect,
                             copy_of="scangrade-db-snapshot.sh")
-    checkout = checkout_state(repo, now=now)
+    checkout = checkout_state(repo, now=now, running=running)
     try:
         paused = pause_file.exists()
     except OSError:

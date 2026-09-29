@@ -21,6 +21,7 @@ quarantine lifted only when the schema gate earned it.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import shlex
 import shutil
@@ -29,6 +30,7 @@ import subprocess
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+DOC = ROOT / "docs" / "AUTO_DEPLOY.md"
 RECOVER = ROOT / "deploy" / "scangrade-recover.sh"
 ENTRYPOINT = ROOT / "deploy" / "entrypoint.sh"
 RUNNER = ROOT / "deploy" / "scangrade-deploy.sh"
@@ -406,6 +408,24 @@ def test_the_installer_installs_it_and_the_runner_refreshes_it():
         "get one by running the installer again")
 
 
+def test_the_lever_also_comes_from_the_fetch_not_only_from_a_release():
+    """The installer and the end-of-release refresh both need something the box that
+    needs the lever does not have: a release that landed. The fetch is the one step
+    that succeeds on a dirty, rolled-back or quarantined checkout, so the mark of the
+    fix is that the runner reads the lever out of the *fetched* commit and installs it
+    there — see `tests/unit/test_fetch_lever.py` for the behaviour."""
+    runner = _text(RUNNER)
+    block = runner.split("# fetch-lever-logic:start", 1)
+    assert len(block) == 2, "the fetch-lever block is gone"
+    body = block[1].split("# fetch-lever-logic:end", 1)[0]
+    assert "materialise_lever_from_origin() {" in body
+    assert 'origin/$BRANCH:deploy/scangrade-recover.sh' in body, (
+        "the lever is not read out of the fetched commit")
+    assert "\nmaterialise_lever_from_origin\n" in runner, (
+        "the materialiser is never called, so the lever still arrives only with a "
+        "release — which is the circle it exists to break")
+
+
 def test_the_arm_check_reports_the_lever_without_refusing_releases_over_it():
     """A missing lever is worth saying and is not a reason to hold a release: being
     armed means the gates can run, and folding this in would refuse every release on
@@ -424,3 +444,176 @@ def test_the_arm_check_reports_the_lever_without_refusing_releases_over_it():
 def test_the_documentation_names_the_word():
     doc = (ROOT / "docs" / "AUTO_DEPLOY.md").read_text(encoding="utf-8")
     assert "sgfix" in doc, "the lever is not documented anywhere an operator looks"
+
+
+# ── 6. the lever on a box that cannot install it ─────────────────────────────
+#
+# `sgfix` is installed by the installer and refreshed by the runner, and both of those
+# need something a stuck box does not have: a release that landed. What such a box
+# *does* have is the commit it fetched back when it was well — so the way in is one
+# line that reads this script out of `origin/$BRANCH` and pipes it into a root bash.
+# Two properties decide whether that line works at all, and both are behavioural here:
+# the piped script must reach its own end (nothing may consume its stdin), and the
+# command must be one string across the three places it is written down.
+
+
+def _literal(name: str) -> str:
+    """One of the script's own quoted constants, read out of it rather than restated."""
+    for line in _text(RECOVER).splitlines():
+        if line.startswith(f"{name}="):
+            return line.split("=", 1)[1].strip().strip('"')
+    raise AssertionError(f"deploy/scangrade-recover.sh no longer defines {name}")
+
+
+def _shim_dir(tmp_path: pathlib.Path, **commands: str) -> pathlib.Path:
+    """A PATH directory holding one stand-in per command.
+
+    The script decides through `id`, `stat`, `journalctl` and, when it is not root,
+    `sudo` — so running it is the only way to see those decisions, and a shim is a
+    one-line script executed through its shebang exactly as the box would.
+    """
+    bin_dir = tmp_path / "shim"
+    bin_dir.mkdir(exist_ok=True)
+    for name, body in commands.items():
+        path = bin_dir / name
+        path.write_text("#!/usr/bin/env bash\n" + body + "\n", encoding="utf-8",
+                        newline="\n")
+        path.chmod(0o755)
+    return bin_dir
+
+
+def _shimmed_env(tmp_path: pathlib.Path, shim: pathlib.Path) -> dict:
+    env = dict(os.environ)
+    env["PATH"] = str(shim) + os.pathsep + env.get("PATH", "")
+    env["SG_REPO"] = str(tmp_path / "repo")
+    env["SG_STATE_DIR"] = str(tmp_path / "state")
+    return env
+
+
+#: `id -u` / `id -un`. The box's own answer is what the script branches on, so these
+#: are the two values the whole file turns on: root, and an ordinary deploy user.
+AS_ROOT = 'case "$1" in -u) echo 0;; -un) echo root;; *) echo 0;; esac'
+AS_DEPLOY = 'case "$1" in -u) echo 1000;; -un) echo deploy;; *) echo 1000;; esac'
+HOP = 'echo "SUDO-HOP $*"; exit 0'
+
+
+class TestTheLeverCanBeReadOutOfTheFetchedCommit:
+    def test_a_piped_run_reaches_its_own_end(self, tmp_path):
+        """Nothing in the script reads its own stdin.
+
+        If anything did, `git show … | bash` would execute the script as far as that
+        read and stop — the tail would simply be gone, and the box would be left with
+        a recovery that ran, exited, and changed nothing.
+        """
+        repo = _repo(tmp_path)
+        # `runuser` is only asked for its existence here: with the owner reading as
+        # root, `as_owner` is the direct branch and never calls it.
+        shim = _shim_dir(tmp_path, id=AS_ROOT, stat='echo root', journalctl="exit 0",
+                         runuser="exit 0")
+        # Bytes in and out: the script is UTF-8 (em dashes in its own output), and a
+        # Windows locale would refuse to encode stdin — piped input is exactly what
+        # this test is about, so it must go in as the bytes the box would receive.
+        run = subprocess.run([BASH, "-s", "--", "--dry-run"],
+                             input=_text(RECOVER).encode("utf-8"),
+                             capture_output=True, cwd=str(repo),
+                             env=_shimmed_env(tmp_path, shim))
+        out = run.stdout.decode("utf-8", "replace")
+        assert run.returncode == 0, run.stderr.decode("utf-8", "replace")
+        assert "why this box is stuck" in out
+        assert "dry run — nothing was changed" in out, (
+            "the script did not reach its own end when it was piped in: something in "
+            "it consumed stdin, so `git show … | bash` stops halfway and reports "
+            "nothing wrong\n" + out[-2000:])
+
+    def test_without_root_it_refuses_and_names_the_line_that_works(self, tmp_path):
+        """A piped script has nothing to re-run as root, so it must not try.
+
+        Measured on this box: `cat x | bash` and `bash -s < x` both leave `$0` as the
+        shell's own path and `BASH_SOURCE` unset, while `bash x.sh` sets both to the
+        file. A hop keyed on `$0` therefore either runs whatever `bash` means in the
+        current directory or hands sudo the shell binary — and either way the
+        recovery silently does not happen, with an error about the wrong thing.
+        """
+        # Named here because it is the property, not the symptom: the shim below is
+        # what the hop would find if it ran.
+        source = _text(RECOVER)
+        assert '${BASH_SOURCE[0]:-}' in source and '[ -f "${BASH_SOURCE[0]}" ]' in source, (
+            "the hop is not guarded by whether this script came from a file")
+        shim = _shim_dir(tmp_path, id=AS_DEPLOY, sudo=HOP)
+        run = subprocess.run([BASH, "-s"], input=_text(RECOVER).encode("utf-8"),
+                             capture_output=True, cwd=str(tmp_path),
+                             env=_shimmed_env(tmp_path, shim))
+        both = (run.stdout + run.stderr).decode("utf-8", "replace")
+        assert run.returncode != 0, "a piped run without root must not claim to recover"
+        assert "SUDO-HOP" not in both, (
+            "the sudo hop ran on a piped script, where `$0` is 'bash'")
+        assert _literal("GET_LEVER") in both, (
+            "the refusal has to name the line that does work, not only decline")
+
+    def test_the_refusal_prints_that_line_and_nothing_after_it(self, tmp_path):
+        """The exit code is a decision about the refusal, not part of the sentence.
+
+        `die` takes the code as a second argument, and a message printer that joins
+        *all* of its arguments leaves it at the end of the instruction — so the one
+        thing on this page that is copied by hand reads `… | bash' 1`, which is a
+        different command. Typed on a noVNC console with no clipboard, that is the
+        difference between a recovery and a shell syntax error.
+        """
+        shim = _shim_dir(tmp_path, id=AS_DEPLOY, sudo=HOP)
+        run = subprocess.run([BASH, "-s"], input=_text(RECOVER).encode("utf-8"),
+                             capture_output=True, cwd=str(tmp_path),
+                             env=_shimmed_env(tmp_path, shim))
+        both = (run.stdout + run.stderr).decode("utf-8", "replace")
+        command = "sudo bash -c '" + _literal("GET_LEVER") + "'"
+        printed = [line.strip() for line in both.splitlines() if "show origin/" in line]
+        assert printed == [command], (
+            "the line an operator copies is not exactly the line that works:\n"
+            + "\n".join(repr(line) for line in printed))
+
+    def test_with_a_file_it_still_hops(self, tmp_path):
+        """The installed launcher execs a file, and that path has to keep working:
+        the guard above may not turn the one word into a refusal."""
+        copy = tmp_path / "sgfix.sh"
+        copy.write_text(_text(RECOVER), encoding="utf-8", newline="\n")
+        shim = _shim_dir(tmp_path, id=AS_DEPLOY, sudo=HOP)
+        run = subprocess.run([BASH, str(copy)], capture_output=True, text=True,
+                             cwd=str(tmp_path), env=_shimmed_env(tmp_path, shim))
+        assert "SUDO-HOP" in run.stdout, (
+            "the sudo hop stopped working for the installed launcher:\n"
+            + run.stdout + run.stderr)
+        assert str(copy) in run.stdout
+
+    def test_the_hop_is_guarded_before_it_runs(self):
+        """A source rule, because this failure is invisible in a passing run: the
+        `BASH_SOURCE` test has to be ahead of the exec, in the same branch."""
+        script = _text(RECOVER)
+        assert script.index('[ -f "${BASH_SOURCE[0]}" ]') < script.index("exec sudo -E bash"), (
+            "the file test moved after the exec, which is the same as not having it")
+        assert 'exec sudo -E bash "$0"' not in script, (
+            "the hop re-runs `$0`, which on a piped script is the shell itself")
+
+    def test_the_line_is_one_string_in_every_place_it_is_written_down(self):
+        """The operator types it, the refusal prints it, the docs carry it.
+
+        Three places, one string: a console handed a command that is nearly the one
+        that works is worse than a console handed none.
+        """
+        lever = _literal("GET_LEVER")
+        command = "sudo bash -c '" + lever + "'"
+        assert "show origin/main:deploy/scangrade-recover.sh" in lever
+        assert command in _text(RECOVER), (
+            "the script's own header no longer shows the line an operator types")
+        assert command in _text(DOC), (
+            "docs/AUTO_DEPLOY.md does not carry the line the refusal prints, so the "
+            "documented way back from a rolled-back checkout is a different command")
+
+    def test_the_docs_also_say_how_to_get_the_newest_lever(self):
+        """`git show` only ever returns what the box already fetched, so the one case
+        where a newer lever exists is a box that can still fetch — and the doc has to
+        say so rather than let the line look like it always gets the newest."""
+        doc = _text(DOC)
+        assert "fetch -q origin" in doc, (
+            "the docs do not say how to reach a lever newer than the fetched one")
+        assert "older than the lever" in doc, (
+            "the docs do not name the one case the line cannot answer, which is a "
+            "fetched ref from before this script existed")

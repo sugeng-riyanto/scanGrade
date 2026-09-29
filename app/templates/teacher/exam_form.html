@@ -616,11 +616,18 @@
                         </div>
                         <div>
                             <label class="block text-sm font-extrabold text-slate-700 mb-1" x-text="t('Durasi','Duration')"></label>
+                            {# Read once, by the rule the rest of the app reads it with:
+                               a *stored* 0 is Tak terbatas, while a paper being created
+                               still opens on the form's own default hour. `or 60`
+                               marked the 60-minute option on a paper the teacher had
+                               left unlimited — one conditional render away from saving
+                               60 and silently converting the paper. #}
+                            {% set dur = duration_facts(exam.duration_minutes) if exam else duration_facts(60) %}
                             <select name="duration_minutes" class="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 font-bold transition">
                                 {% for m in [10,15,20,25,30,40,45,50,60,75,90,100,120,150,180] %}
-                                <option value="{{ m }}" {% if (exam.duration_minutes or 60) == m %}selected{% endif %} x-text="'{{ m }} ' + t('menit','minutes')">{{ m }} minutes</option>
+                                <option value="{{ m }}" {% if not dur.unlimited and dur.minutes == m %}selected{% endif %} x-text="'{{ m }} ' + t('menit','minutes')">{{ m }} minutes</option>
                                 {% endfor %}
-                                 <option value="0" {% if exam and exam.duration_minutes == 0 %}selected{% endif %} x-text="t('Tak terbatas','Unlimited')">Unlimited</option>
+                                 <option value="0" {% if dur.unlimited %}selected{% endif %} x-text="t('Tak terbatas','Unlimited')">Unlimited</option>
                             </select>
                             <p class="text-xs text-slate-400 mt-1" x-text="t('Dihitung dari saat murid mulai menegerjakan, dan boleh melewati Jendela Berakhir di atas.','Counted from the moment the student starts, and it may extend beyond the assignment window end above.')"></p>
                         </div>
@@ -973,6 +980,45 @@
                                             <p data-media-unplayable x-show="q.audio && (!sgExamMedia.audioSources(q.audio).length || q._mediaFailed)"
                                                class="mt-1 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1"
                                                x-text="t('Link ini tidak bisa diputar. Tempel link berkas Drive (…/file/d/ID/view), bukan link folder atau dokumen.','This link cannot be played. Paste a Drive file link (…/file/d/ID/view), not a folder or a document link.')"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                                                <i class="fas fa-upload text-primary-500"></i>
+                                                <span x-text="t('Unggah berkas — tanpa Google Drive','Upload a file — no Google Drive')"></span>
+                                            </label>
+                                            {% if exam %}
+                                            <div class="mt-1 flex items-center gap-2 flex-wrap">
+                                                <select x-model="q.fileKind"
+                                                        class="text-xs font-bold border-2 border-slate-200 rounded-xl px-2 py-1.5 focus:border-primary-500 transition">
+                                                    <option value="audio" x-text="t('Audio','Audio')"></option>
+                                                    <option value="video" x-text="t('Video','Video')"></option>
+                                                </select>
+                                                <input type="file" accept="audio/*,video/*"
+                                                       @change="uploadMedia(i, $event.target.files[0]); $event.target.value = ''"
+                                                       class="text-xs file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:bg-primary-50 file:text-primary-700 file:text-xs file:font-bold">
+                                                <span x-show="q._uploading" class="text-xs text-slate-400" x-text="t('Mengunggah…','Uploading…')"></span>
+                                            </div>
+                                            <p class="text-xs text-slate-400 mt-0.5" x-text="t('Berkas disimpan di server ini dan hanya bisa diputar selama ujian berlangsung — tautannya tidak bisa dibagikan.','The file is stored on this server and can only be played while the exam is running — its link cannot be shared.')"></p>
+                                            <p x-show="q._uploadError" data-media-unplayable class="mt-1 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1" x-text="q._uploadError"></p>
+                                            <div x-show="q.url" class="mt-1 flex items-center gap-2">
+                                                <template x-if="q.kind === 'video'">
+                                                    <video controls class="w-full max-w-xs rounded-lg bg-black/5" preload="none" :src="q.url"></video>
+                                                </template>
+                                                <template x-if="q.kind !== 'video'">
+                                                    <audio controls class="h-8 w-full max-w-xs" preload="none" :src="q.url"></audio>
+                                                </template>
+                                                <button type="button" @click="q.file = ''; q.url = ''; q.name = ''"
+                                                        class="text-xs text-rose-600 hover:underline" x-text="t('Hapus berkas','Remove file')"></button>
+                                            </div>
+                                            <!-- What the save route reads. The path is only accepted back
+                                                 when it sits under this paper's own prefix, so the
+                                                 paper a question points at cannot be chosen by a post. -->
+                                            <input type="hidden" :name="'media_file_' + i" :value="q.file || ''">
+                                            <input type="hidden" :name="'media_kind_' + i" :value="q.kind || 'audio'">
+                                            <input type="hidden" :name="'media_name_' + i" :value="q.name || ''">
+                                            {% else %}
+                                            <p class="text-xs text-slate-400 mt-0.5" x-text="t('Simpan draf ujian dulu untuk mengunggah berkas — sebelum disimpan, pertanyaan itu belum punya tempat penyimpanan sendiri.','Save the exam draft first to upload a file — until it is saved, this paper has no storage of its own.')"></p>
+                                            {% endif %}
                                         </div>
                                         <div>
                                             <label class="text-xs font-semibold text-slate-500 flex items-center gap-1">
@@ -1526,7 +1572,14 @@ function questionManager() {
                     // is asked to measure.
                     var q = {_id: 'q' + i, type: t, pages: ppages[i] || '',
                              level: plevel[i] || '',
-                             audio: m.audio || '', youtube: m.youtube || '', _showMedia: false};
+                             audio: m.audio || '', youtube: m.youtube || '', _showMedia: false,
+                             // An uploaded file: `file` is what the save route stores,
+                             // `url` is the app's own preview link minted for this
+                             // teacher (a token, so it is good for minutes, not for
+                             // storing back), and `kind` decides which player draws.
+                             file: m.file || '', url: m.url || '', name: m.name || '',
+                             kind: m.kind || 'audio', fileKind: m.kind || 'audio',
+                             _uploading: false, _uploadError: ''};
                     var kind = SG_QT.kinds[t] || SG_QT.kinds[SG_QT.default];
                     if (kind === 'choice') {
                         q.bonus = k === 'bonus';
@@ -1762,7 +1815,9 @@ function questionManager() {
         _pgkSim: {},
         _pgkTimers: {},
         blankQuestion(type) {
-            const q = {_id: 'n' + (++this._cid), type: type, pages: '', level: '', audio: '', youtube: '', _showMedia: false};
+            const q = {_id: 'n' + (++this._cid), type: type, pages: '', level: '', audio: '', youtube: '', _showMedia: false,
+                       file: '', url: '', name: '', kind: 'audio', fileKind: 'audio',
+                       _uploading: false, _uploadError: ''};
             const kind = this.kindOf(q);
             if (kind === 'choice') { q.answers = ['A']; q.bonus = false; }
             if (kind === 'truefalse') { q.tf = 'true'; }
@@ -2025,10 +2080,61 @@ function questionManager() {
         getAudioJson() {
             return JSON.stringify(Object.fromEntries(this.questions.map((q,i) => {
                 var m = {};
+                if (q.file) { m.file = q.file; m.kind = q.kind || 'audio'; if (q.name) m.name = q.name; }
                 if (q.audio) m.audio = q.audio;
                 if (q.youtube) m.youtube = q.youtube;
                 return [i, Object.keys(m).length > 0 ? m : null];
             }).filter(([k,v]) => v !== null)));
+        },
+        // Put one question's file on the server. The reply's `file` is what gets
+        // saved and its `url` is what the preview above plays; the preview link is
+        // deliberately *not* stored, because it is a token that expires.
+        //
+        // Empty for a paper that does not exist yet: the storage path is scoped to
+        // the paper's own id, and a path outside that prefix is refused by the save
+        // route rather than trusted from the form.
+        async uploadMedia(index, file) {
+            // `| tojson` wraps the *whole* conditional on purpose: an unfiltered
+            // branch inside a <script> is autoescaped, so a paper that does not
+            // exist yet would render `const endpoint = &#34;&#34;;` — a syntax error
+            // that takes the whole builder's script down with it.
+            const endpoint = {{ (("/teacher/exams/" ~ exam.id ~ "/media") if exam else "") | tojson | safe }};
+            const q = this.questions[index];
+            if (!q || !file || !endpoint) return;
+            q._uploading = true;
+            q._uploadError = '';
+            try {
+                const body = new FormData();
+                body.append('kind', q.fileKind || 'audio');
+                body.append('index', String(index));
+                body.append('file', file);
+                const meta = document.querySelector('meta[name="csrf-token"]');
+                const r = await fetch(endpoint, {
+                    method: 'POST', body: body, headers: {
+                        'Accept': 'application/json',
+                        'X-CSRF-Token': (meta && meta.getAttribute('content')) || '',
+                    },
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok || !data.file) {
+                    q._uploadError = data.error || sgT('Berkas gagal diunggah', 'The file could not be uploaded');
+                    return;
+                }
+                q.file = data.file;
+                q.name = data.name || '';
+                q.kind = data.kind || q.fileKind;
+                q.url = data.url || '';
+                // The upload *is* this question's media now: a pasted link left
+                // over from an earlier edit is cleared, so the builder previews
+                // one thing and the pupil's page plays that same one.
+                q.audio = '';
+                q.youtube = '';
+                q._mediaFailed = false;
+            } catch (e) {
+                q._uploadError = sgT('Berkas gagal diunggah', 'The file could not be uploaded');
+            } finally {
+                q._uploading = false;
+            }
         },
         // Link rewriting is not done here any more: `sgExamMedia`, loaded above, is
         // the single implementation shared with the student's exam page, so the

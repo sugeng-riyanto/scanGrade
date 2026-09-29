@@ -2090,6 +2090,12 @@ def _refresh_harness(tmp_path: Path, repo: str) -> str:
         f'INSTALLED_RUNNER="{bins}/scangrade-deploy"\n'
         f'INSTALLED_SNAPSHOT="{bins}/scangrade-db-snapshot"\n'
         f'INSTALLED_RECOVER="{bins}/sgfix"\n'
+        # The tree the *fetch* materialises the lever from. Left absent on purpose:
+        # that is a box which has not ticked since fetch-lever-logic landed, where the
+        # lever's render is a no-op and the two deploy names are all this block
+        # installs. `tests/unit/test_fetch_lever.py` runs the lever's own path against
+        # a real checkout and a real fetched commit.
+        f'LEVER_DIR="{_posix(tmp_path / "lever")}"\n'
         'log() { echo "$*"; }\n'
         + _refresh_block()
     )

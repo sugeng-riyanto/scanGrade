@@ -380,6 +380,16 @@ def create_app(env=None):
 
     app.jinja_env.globals["q_any_essay"] = q_any_essay
 
+    # How long a paper may run, read the same way on every page. `duration_minutes`
+    # of 0 is the teacher's *Tak terbatas / Unlimited*, and four pages read that one
+    # column four different ways — the exam list as 60 minutes, the dashboard as
+    # "0 min", the builder's form as a selected 60-minute option, and the exam paper
+    # correctly, in JavaScript of its own. `exam_window.duration_facts` is that one
+    # reading; a page that decides for itself what the sentinel means is how the
+    # fifth copy gets written.
+    from app.utils.exam_window import duration_facts
+    app.jinja_env.globals["duration_facts"] = duration_facts
+
     @app.template_global()
     def school_favicon(school_info=None):
         """Generate a simple SVG favicon from school initials or default."""
@@ -631,6 +641,7 @@ def _register_blueprints(app):
     from app.routes.public import public_bp
     from app.routes.guide import guide_bp
     from app.routes.students import student_bp as students_bp
+    from app.routes.media import media_bp
 
     app.register_blueprint(super_bp)
     app.register_blueprint(public_bp)
@@ -650,6 +661,10 @@ def _register_blueprints(app):
     # them, so a single shared prefix would put two readers on one address.
     app.register_blueprint(principal_bp)
     app.register_blueprint(tools_bp, url_prefix="/tools")
+    # Question media is served at its own root rather than under a role prefix: the
+    # same URL is handed to a pupil sitting the paper and to the teacher previewing
+    # it, and the token — not the path — says who may fetch it.
+    app.register_blueprint(media_bp)
 
     # Whiteboard blueprints (registered but heavy imports deferred)
     try:

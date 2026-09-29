@@ -511,16 +511,24 @@ class TestATimeSignalMustBeANumber:
 class TestTheTermsScreenStatesTheLimit:
     def test_an_unlimited_paper_does_not_read_as_zero_minutes(self, app):
         """The first place a student reads what they are agreeing to. `0` there
-        means *Tak terbatas*, exactly as it does in the deadline arithmetic."""
+        means *Tak terbatas*, and **the page is told which branch it is in** rather
+        than deciding for itself: the rule lives in `exam_window.duration_facts`, so
+        the list, the dashboard, the builder and this page cannot answer differently
+        (see `test_duration_rule`)."""
         html = _render_page(app, duration_minutes=0)
         assert "durationMinutes: 0" in html
         assert "t('Tak terbatas','Unlimited')" in html, (
             "the duration line cannot say 'Unlimited' in either language"
         )
-        assert "durationMinutes > 0" in html, (
-            "the duration line does not tell 'unlimited' apart from a number of minutes"
+        assert "durationUnlimited: true" in html, (
+            "the duration line is not told the server's answer for a zero duration"
+        )
+        assert "durationUnlimited ? t('Tak terbatas','Unlimited')" in html, (
+            "the duration line does not read the server's branch"
         )
 
     def test_the_duration_line_reads_the_exam_row(self, app):
-        for minutes in (45, 0):
-            assert f"durationMinutes: {minutes}" in _render_page(app, duration_minutes=minutes)
+        for minutes, unlimited in ((45, "false"), (0, "true")):
+            html = _render_page(app, duration_minutes=minutes)
+            assert f"durationMinutes: {minutes}" in html
+            assert f"durationUnlimited: {unlimited}" in html

@@ -7,6 +7,14 @@
   paper does not carry the interface. Screen affordances live in `.toolbar`,
   which print hides.
 
+  It renders a **list** of cards, so handing back a whole class is one print
+  instead of thirty. `cards` is one element for a single sheet and thirty for a
+  class set; the paper markup below is in the loop, so the file a school keeps and
+  the sheet a family is handed cannot be two layouts that resemble each other.
+  That is deliberate and it is the reason there is no second class template: a
+  class document that carried its own copy of this sheet would drift from this
+  one the first time either learned about a new column.
+
   The marked answer sheet is stacked with CSS (`position: absolute`) instead of
   being flattened on the server the way the PDF export does it: a browser can
   composite two images, so the pixels never need to be rewritten here.
@@ -16,7 +24,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Laporan Hasil - {{ exam.get('title', 'Ujian') }} - {{ student_name }}</title>
+{# The *set's* title, not one paper's: a folder of class sets has to be tellable
+   apart, and the count on the cover is the count the document carries. #}
+{% set doc_title = cards[0].exam.get('title', 'Ujian') if cards else 'Ujian' %}
+<title>Laporan Hasil - {{ doc_title }}{% if cards|length > 1 %} - {{ cards|length }} kertas{% endif %}</title>
 <style>
     @page { size: A4; margin: 14mm 12mm; }
 
@@ -101,6 +112,13 @@
     }
     table.data td { border: .75pt solid #cbd5e1; padding: 4pt 5pt; vertical-align: top; }
     table.data tr { page-break-inside: avoid; }
+
+    /* ── a set of cards ──
+       A card runs to as many sheets as its marked pages need, so the break goes
+       *between* papers and never inside one: a page boundary landing halfway down
+       a pupil's answer sheet is the failure this prevents. Both properties, because
+       the browser that prints this is often not current. */
+    .sheet + .sheet { break-before: page; page-break-before: always; }
     .center { text-align: center; }
     .ok { color: #059669; font-weight: bold; }
     .no { color: #dc2626; font-weight: bold; }
@@ -151,13 +169,32 @@
 <body>
 
 <div class="toolbar">
+    {% if cards|length > 1 %}
+    {# The count is on the document's own face for the same reason the item
+       analysis counts its appendix: a set that came out short has to say so, or
+       it is filed as complete. #}
+    <span class="hint">{{ cards|length }} kertas, urut menurut nama &middot; satu dokumen, sekali cetak &middot; A4.</span>
+    {% else %}
     <span class="hint">Dokumen siap dicetak — ukuran A4.</span>
+    {% endif %}
     <span>
         <button onclick="window.print()"><i>&#128424;</i> Cetak</button>
         <button class="ghost" onclick="window.close()">Tutup</button>
     </span>
 </div>
 
+{# `show_key` is the caller's, and it stays the caller's: the key belongs to a
+   released paper, so it is resolved per card below rather than once for the set. #}
+{% set show_key_page = show_key if show_key is defined else none %}
+{% for card in cards %}
+{% set submission = card.submission %}
+{% set exam = card.exam %}
+{% set released = card.released %}
+{% set student_name = card.student_name %}
+{% set student_nisn = card.student_nisn %}
+{% set student_nis = card.student_nis %}
+{% set teacher_name = card.teacher_name %}
+{% set school = card.school or {} %}
 {% set fb = submission.teacher_feedback or {} %}
 {% set fb_scores = fb.get('scores', {}) or {} %}
 {% set fb_comments = fb.get('comments', {}) or {} %}
@@ -173,9 +210,8 @@
    own copy prints them whatever the status, because they are the marking. #}
 {% set graded = submission.status in ('graded', 'published') %}
 {# The key belongs to the teacher's own copy whatever the status, but a release
-   is what makes it part of the student's. #}
-{% set show_key = show_key if show_key is defined else graded %}
-{% set school = school or {} %}
+   is what makes it part of the student's. #}{% set show_key = show_key_page if show_key_page is not none else graded %}
+ %}
 
 <div class="sheet">
 
@@ -434,5 +470,6 @@
     </div>
 
 </div>
+{% endfor %}
 </body>
 </html>

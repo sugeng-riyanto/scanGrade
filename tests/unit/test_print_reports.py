@@ -219,20 +219,30 @@ class TestTheReportCard:
     """One student's result, as the sheet a parent is handed."""
 
     def render(self, app, **overrides):
-        context = {
+        """One card, through the template a whole class also goes through.
+
+        The document takes a *list* of cards — that is what makes a class set one
+        print instead of thirty pages — so the single sheet is a list of one, and
+        this renders exactly what the single-card route renders.
+        """
+        card = {
             "submission": _submission("sub-released", "murid-1", "Ahmad Pratama",
                                       "published", True, 55.5),
-            "exam": dict(EXAM), "released": True, "show_key": True,
+            "exam": dict(EXAM), "released": True,
             "student_name": "Ahmad Pratama", "student_nisn": "1234567890",
             "student_nis": "1001", "teacher_name": "LT Guru 01",
             "school": {"name": "SMP Negeri 1 Contoh", "address": "Jl. Pendidikan 1",
                        "city": "Bandung", "npsn": "12345678"},
-            "printed_on": "13-09-2026 18:00 WIB",
         }
-        context.update(overrides)
-        # The embedded exam row would otherwise shadow the exam kwarg.
-        context["submission"].pop("exams", None)
-        return app.jinja_env.get_template("print/report_card.html").render(**context)
+        page = {"printed_on": "13-09-2026 18:00 WIB", "show_key": True}
+        for key in list(overrides):
+            if key in card:
+                card[key] = overrides.pop(key)
+        page.update(overrides)
+        # The embedded exam row would otherwise shadow the card's exam row.
+        card["submission"].pop("exams", None)
+        return app.jinja_env.get_template("print/report_card.html").render(
+            cards=[card], **page)
 
     def test_it_carries_the_result_a_school_records(self, app):
         html = self.render(app)

@@ -51,6 +51,8 @@ BASH = shutil.which("bash")
 
 BOX_START = "# box-edits-logic:start"
 BOX_END = "# box-edits-logic:end"
+STREAK_START = "# refusal-streak-logic:start"
+STREAK_END = "# refusal-streak-logic:end"
 
 pytestmark = pytest.mark.skipif(BASH is None, reason="needs a bash to run the section")
 
@@ -61,6 +63,16 @@ def _box_block() -> str:
         "the section's delimiters are what let it be run on its own, the way the "
         "quarantine's, the preflight record's and the lock heal's are; keep them")
     return script.split(BOX_START, 1)[1].split(BOX_END, 1)[0]
+
+
+def _streak_block() -> str:
+    """The refusal memory, which the heal reads to decide whether it has been here
+    before. Run alongside the box-edits section because that is how the runner runs
+    them: one script, the definitions in it, the heal called for real."""
+    script = DEPLOY_SH.read_text(encoding="utf-8")
+    assert STREAK_START in script and STREAK_END in script, (
+        "the streak section's delimiters are what let it be run on its own")
+    return script.split(STREAK_START, 1)[1].split(STREAK_END, 1)[0]
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -103,7 +115,7 @@ def _harness_text(repo: Path, state: Path, tail: str) -> str:
               .replace("__REPO__", shlex.quote(repo.as_posix()))
               .replace("__STATE__", shlex.quote(state.as_posix()))
               .replace("__SHA__", "c" * 40))
-    return header + _box_block() + tail
+    return header + _streak_block() + _box_block() + tail
 
 
 def _run(tmp_path: Path, repo: Path, state: Path, incoming: list[str],
@@ -235,6 +247,127 @@ def test_a_set_aside_that_cannot_be_written_refuses_with_the_dirty_gate(tmp_path
         "it cleared a tree whose version it could not record")
 
 
+def test_a_refusal_is_recorded_so_the_next_tick_knows_it_repeated(tmp_path):
+    """The memory that makes a loop visible. One refusal, written down with the paths
+    it was about — that is all the next tick needs to know it is the same problem."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    (repo / "app" / "routes" / "admin_sekolah.py").write_text("the box's hotfix\n",
+                                                              encoding="utf-8")
+    (state / "set-aside").write_text("in the way\n", encoding="utf-8")
+
+    done = _run(tmp_path, repo, state, ["app/routes/admin_sekolah.py"])
+
+    assert done.returncode == 4, done.stdout
+    assert (state / "refusal-streak").read_text(encoding="utf-8").strip() == "1", (
+        "the refusal was not counted, so the next tick cannot tell a loop from a "
+        "first attempt")
+    assert (state / "refusal-streak.paths").read_text(encoding="utf-8") == (
+        "app/routes/admin_sekolah.py\n"), "the streak does not say what it is about"
+
+
+def test_a_streak_file_with_carriage_returns_is_still_the_same_refusal(tmp_path):
+    """The comparison is byte for byte, and these are files a person can look at: a
+    `\r\n` would make every refusal a first refusal — a memory that is a no-op while
+    looking like it works."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    target = repo / "app" / "routes" / "admin_sekolah.py"
+    target.write_text("the box's hotfix\n", encoding="utf-8")
+    (state / "set-aside").write_text("in the way\n", encoding="utf-8")
+    (state / "refusal-streak").write_text("3\r\n", encoding="utf-8", newline="")
+    (state / "refusal-streak.paths").write_text("app/routes/admin_sekolah.py\r\n",
+                                                encoding="utf-8", newline="")
+    fallback = tmp_path / "run" / "set-aside"
+
+    done = _run(tmp_path, repo, state, ["app/routes/admin_sekolah.py"],
+                tail=('REFUSAL_FALLBACK_DIR=' + shlex.quote(fallback.as_posix()) + '\n'
+                      'DIRTY=$(git -C "$REPO" status --porcelain)\n'
+                      f'CHANGED={shlex.quote("app/routes/admin_sekolah.py")}\n'
+                      'local_edits_heal\n'
+                      "printf 'FINISHED\\n'\n"))
+
+    assert done.returncode == 0, done.stderr
+    assert "FINISHED" in done.stdout, (
+        f"a carriage return in the streak turned a loop into a first attempt: {done.stdout}")
+    assert target.read_text(encoding="utf-8") == "the release's line\n"
+
+
+def test_the_same_refusal_a_few_ticks_running_sets_the_edit_aside_anyway(tmp_path):
+    """The point of the whole block: a refusal that has repeated is answered by doing
+    the heal a different way, not by refusing again."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    target = repo / "app" / "routes" / "admin_sekolah.py"
+    target.write_text("the box's hotfix\n", encoding="utf-8")
+    # The preferred home is un-creatable, which is the shape of the reported stall,
+    # and the streak says the same refusal has already been made the threshold.
+    (state / "set-aside").write_text("in the way\n", encoding="utf-8")
+    # `newline` because this models what the runner's own run wrote: the comparison
+    # is byte for byte, and a fixture that silently carried `\r\n` would be testing
+    # the harness's line endings rather than the code's.
+    (state / "refusal-streak").write_text("3\n", encoding="utf-8", newline="\n")
+    (state / "refusal-streak.paths").write_text("app/routes/admin_sekolah.py\n",
+                                                encoding="utf-8", newline="\n")
+    fallback = tmp_path / "run" / "set-aside"
+
+    done = _run(tmp_path, repo, state, ["app/routes/admin_sekolah.py"],
+                tail=('REFUSAL_FALLBACK_DIR=' + shlex.quote(fallback.as_posix()) + '\n'
+                      'DIRTY=$(git -C "$REPO" status --porcelain)\n'
+                      f'CHANGED={shlex.quote("app/routes/admin_sekolah.py")}\n'
+                      'local_edits_heal\n'
+                      "printf 'FINISHED\\n'\n"))
+
+    assert done.returncode == 0, f"it refused the case the streak exists for: {done.stderr}"
+    assert "FINISHED" in done.stdout, done.stdout
+    assert target.read_text(encoding="utf-8") == "the release's line\n", (
+        "the tree was not restored, so the merge would still fail")
+    assert _git(repo, "status", "--porcelain").stdout.strip() == ""
+    kept = list(fallback.glob("*.txt"))
+    assert kept, "the edit was set aside with no record of where it went"
+    assert "the box's hotfix" in "".join(
+        p.read_text(encoding="utf-8", errors="replace")
+        for p in fallback.rglob("*") if p.is_file()), (
+        "the box's version is nowhere in the fallback home, so the edit was lost")
+
+
+def test_a_completed_heal_forgets_the_refusal(tmp_path):
+    """Otherwise an edit that was set aside once would count toward the next one's
+    threshold, and an unrelated stall would inherit a loop it never had.
+
+    The count starts at two rather than absent, because a streak that was never
+    written cannot show whether the heal cleared it: the assertion has to be about a
+    count the run *forgot*, not one it never had.
+    """
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    (repo / "app" / "routes" / "admin_sekolah.py").write_text("the box's hotfix\n",
+                                                              encoding="utf-8")
+    (state / "refusal-streak").write_text("2\n", encoding="utf-8", newline="\n")
+    (state / "refusal-streak.paths").write_text("app/routes/admin_sekolah.py\n",
+                                                encoding="utf-8", newline="\n")
+
+    done = _run(tmp_path, repo, state, ["app/routes/admin_sekolah.py"])
+
+    assert done.returncode == 0, done.stderr
+    assert "FINISHED" in done.stdout, done.stdout
+    assert not (state / "refusal-streak").exists(), (
+        "a heal that completed left its refusal counted, so the next stall inherits a "
+        "threshold it never earned")
+    assert not (state / "refusal-streak.paths").exists()
+
+
+def test_the_degraded_home_is_chosen_before_anything_is_set_aside():
+    """The choice cannot be made half-way: a set-aside that is part-done cannot be
+    restarted, so the fallback has to be decided while the tree is still the box's."""
+    block = DEPLOY_SH.read_text(encoding="utf-8").split(BOX_START, 1)[1].split(BOX_END, 1)[0]
+    choose = block.index("\n  box_edits_choose_home\n")
+    for late in ('mkdir -p "$BOX_EDITS_DIR_EFFECTIVE"', 'mv -f -- "$REPO/$path"'):
+        assert block.index(late) > choose, (
+            f"`{late}` can run before the home is chosen, so a half-done set-aside "
+            "would be re-attempted somewhere else")
+
+
 def test_only_the_newest_heals_keep_their_records(tmp_path):
     """A bounded record, like the refusal history: evidence, not an archive."""
     repo, state = _repo(tmp_path), tmp_path / "state"
@@ -253,6 +386,141 @@ def test_only_the_newest_heals_keep_their_records(tmp_path):
         f"the record grew without a bound: {len(list(directory.glob('*.txt')))} kept")
     assert not (directory / "20260900T000000Z-aaaaaaaaaaaa-1.patch").exists(), (
         "a pruned record left its patch behind")
+
+
+# ── 1b. an edit nobody is coming back for ───────────────────────────────────
+#
+# The overlap rule answers "would this merge clobber it". It cannot answer the other
+# question a dirty checkout raises — is anybody still working on it — and the box that
+# reported this is the shape of that gap: one hand edit to a file no release writes,
+# so nothing clobbers it, so nothing sets it aside, and nothing ever will, however
+# long the box carries it. An edit old enough that no one is coming back for it is set
+# aside too, and the record says that is why rather than letting it read as an overlap.
+
+def _older_than_the_threshold(repo: Path, rel: str) -> None:
+    """Back-date one path's own edit. The mtime is the clock the rule reads, so this is
+    how a test makes an edit old without waiting a day for one to become old."""
+    done = subprocess.run(["touch", "-d", "2020-01-01 00:00:00", str(repo / rel)],
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+
+
+def test_an_edit_older_than_the_threshold_is_set_aside_without_an_overlap(tmp_path):
+    """The case the overlap rule cannot reach: the release writes nothing this box
+    changed, so nothing would clobber it — and the box must still not carry an
+    abandoned change forever."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    (repo / "README.md").write_text("the box's own note\n", encoding="utf-8")
+    _older_than_the_threshold(repo, "README.md")
+
+    done = _run(tmp_path, repo, state, [])
+
+    assert done.returncode == 0, done.stderr
+    assert "FINISHED" in done.stdout, done.stdout
+    assert "stale" in done.stdout, (
+        f"an old edit was set aside without the run saying why: {done.stdout}")
+    record = _records(state)[0]
+    text = record.read_text(encoding="utf-8")
+    assert "set-aside README.md" in text, (
+        "the box's version is not named, so the page cannot say where it went")
+    assert "stale README.md" in text, (
+        "the record does not say the edit was old rather than overlapping — those two "
+        "need different answers from whoever reads the card")
+    assert "kept README.md" not in text
+    # Preserved and not lost: the diff holds the box's line, and the tree no longer does.
+    patch = record.with_suffix(".patch")
+    assert "the box's own note" in patch.read_text(encoding="utf-8"), (
+        "nothing was preserved, so the edit exists nowhere")
+    assert (repo / "README.md").read_text(encoding="utf-8") == "readme\n", (
+        "the path was not restored, so the box is still dirty")
+    assert _git(repo, "status", "--porcelain").stdout.strip() == "", (
+        "the tree is still dirty, so this box has not fetched cleanly after the heal")
+
+
+def test_an_edit_younger_than_the_threshold_is_still_left_alone(tmp_path):
+    """A day is the point of the number: an edit somebody made this morning is not
+    abandoned, and the runner must not clear a tree someone is working in."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    (repo / "README.md").write_text("this morning's note\n", encoding="utf-8")
+
+    done = _run(tmp_path, repo, state, [])
+
+    assert done.returncode == 0, done.stderr
+    assert (repo / "README.md").read_text(encoding="utf-8") == "this morning's note\n", (
+        "a fresh local edit was set aside")
+    text = _records(state)[0].read_text(encoding="utf-8")
+    assert "kept README.md" in text and "set-aside README.md" not in text
+    assert "stale README.md" not in text
+
+
+def test_a_path_with_nothing_to_date_is_not_stale(tmp_path):
+    """A deletion leaves no file to ask, and an edit that cannot be dated is not an
+    edit that is old: this block never acts on a reading that failed."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    (repo / "README.md").unlink()
+
+    done = _run(tmp_path, repo, state, [])
+
+    assert done.returncode == 0, done.stderr
+    assert not (repo / "README.md").exists(), (
+        "a deletion was restored on the strength of a date it does not have")
+    assert "kept README.md" in _records(state)[0].read_text(encoding="utf-8"), (
+        "the deletion was not reported at all")
+
+
+def test_an_overlapping_edit_is_not_recorded_as_stale(tmp_path):
+    """The release writing the path is the stronger reason, and naming both would make
+    the record ambiguous about why the box's version is gone."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    (repo / "app" / "routes" / "admin_sekolah.py").write_text("the box's hotfix\n",
+                                                              encoding="utf-8")
+    _older_than_the_threshold(repo, "app/routes/admin_sekolah.py")
+
+    done = _run(tmp_path, repo, state, ["app/routes/admin_sekolah.py"])
+
+    assert done.returncode == 0, done.stderr
+    text = _records(state)[0].read_text(encoding="utf-8")
+    assert "set-aside app/routes/admin_sekolah.py" in text
+    assert "stale app/routes/admin_sekolah.py" not in text, (
+        "an overlapping path was recorded as stale as well")
+
+
+def test_an_unchanged_dirty_set_is_not_noted_again_every_tick(tmp_path):
+    """Otherwise a box with one local edit writes a record every two minutes, and
+    within a day the newest few the page reads are all the same note — pushing the
+    record of something that *was* preserved off the card, which is the opposite of
+    what this directory is for."""
+    repo, state = _repo(tmp_path), tmp_path / "state"
+    state.mkdir()
+    (repo / "README.md").write_text("this morning's note\n", encoding="utf-8")
+
+    first = _run(tmp_path, repo, state, [])
+    assert first.returncode == 0, first.stderr
+    assert len(_records(state)) == 1, first.stdout
+
+    second = _run(tmp_path, repo, state, [])
+
+    assert second.returncode == 0, second.stderr
+    assert len(_records(state)) == 1, (
+        f"the same dirty set was noted {len(_records(state))} times, so the notes crowd "
+        "out every record that has something preserved to name")
+
+
+def test_the_staleness_threshold_is_one_declared_constant():
+    """A day, declared once, and never shorter than a working session: the rule stops
+    the box carrying an *abandoned* edit, so a shorter threshold would clear a tree
+    somebody is still working in."""
+    block = _box_block()
+    match = re.search(r"^BOX_EDITS_STALE_SECONDS=(\d+)$", block, re.M)
+    assert match, "the staleness threshold is not one declared constant"
+    assert int(match.group(1)) >= 12 * 3600, (
+        f"{match.group(1)} seconds mistakes an edit still being written for an "
+        "abandoned one")
+    assert re.search(r"\$BOX_EDITS_STALE_SECONDS", block), "the constant is never read"
 
 
 # ── 2. the two properties a single run cannot show ──────────────────────────

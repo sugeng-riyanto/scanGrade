@@ -8,7 +8,8 @@ from datetime import datetime, timezone, date
 
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
-from app.utils.auth import admin_sekolah_required, get_supabase, subscription_write_required
+from app.utils.auth import (admin_sekolah_required, get_supabase,
+                            subscription_write_required, list_all_auth_users)
 from app.utils.cache import cache_get, cache_set
 from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
@@ -33,14 +34,30 @@ def _gen_password(length=12) -> str:
 _email_cache = {"data": {}, "ts": 0}
 
 def _get_email_map(supabase):
-    """Return dict of user_id → email, cached for 60 seconds."""
-    now = time()
+    """Return dict of user_id → email, cached for 60 seconds.
+
+    ``auth.admin.list_users()`` returns a **page** — 50 by default — and this project
+    holds 811 accounts, so reading it once produced addresses for the first fifty and
+    nothing for the rest. Every login card past them therefore printed an empty Email
+    column, which is the half of the credential the school is handing over: the pupil
+    has a password and no address to use it with. ``list_all_auth_users`` walks the
+    pages until one comes back empty — the same reader the user-management page
+    needed, for the same reason.
+
+    The address is read from Auth rather than from ``profiles.email`` because Auth is
+    what ``/auth/login-user`` matches; the mirror is the fallback, used by the card
+    builder when this listing cannot be read at all.
+    """
+    # `time` is the *module* here (`import time` at the top of this file), so `time()`
+    # raised ``TypeError: 'module' object is not callable`` on the first line of this
+    # function — every call, since it was written. Four pages guard the call and so
+    # showed a blank Email column forever, and `/admin-sekolah/export/excel` does not
+    # guard it and answered 500. Measured: the map was empty for all 811 accounts.
+    now = time.time()
     if now - _email_cache["ts"] < 60 and _email_cache["data"]:
         return _email_cache["data"]
     try:
-        m = {}
-        for u in supabase.auth.admin.list_users():
-            m[u.id] = u.email
+        m = {u.id: u.email for u in list_all_auth_users()}
         _email_cache["data"] = m
         _email_cache["ts"] = now
         return m

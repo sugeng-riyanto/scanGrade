@@ -28,6 +28,18 @@ NO_SUBMISSION_ACCESS = ("Lembar jawaban ini tidak tersedia untuk akun Anda. Bila
                         "seharusnya Anda bisa membukanya, silakan hubungi admin sekolah.")
 NO_SUCH_EXAM = "Ujian yang Anda cari tidak ditemukan."
 
+# ── a document asked for a scope it does not cover ───────────────────────────
+#
+# Both of these are answers to *what the page asked for*, and each one is the
+# start of a sentence a reader can act on: which class, or that there is nothing
+# to hand back yet. Answering either with an empty document instead would print a
+# sheet with no names on it, which reads as "nobody sat this".
+CLASS_NOT_ASSIGNED = ("Kelas itu tidak termasuk kelas yang mengikuti ujian ini. "
+                      "Pilih kelas yang terdaftar pada ujian, atau cetak tanpa "
+                      "menyaring kelas.")
+NO_PAPERS_TO_PRINT = ("Belum ada lembar jawaban yang bisa dicetak untuk ujian ini. "
+                      "Kartu hasil dibuat dari lembar yang sudah masuk.")
+
 # ── an account that is not attached to a school ──────────────────────────────
 
 NO_SCHOOL = "Akun Anda belum terhubung ke sekolah mana pun. Silakan hubungi admin sekolah."

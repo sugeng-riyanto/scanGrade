@@ -30,12 +30,26 @@ So the retry belongs on the client, not on the call site: wrap it once and
 ``read_with_retry`` sites keep working unchanged — a retry inside a retry costs one
 extra attempt and changes no answer.
 
-Only reads are retried
-----------------------
+Only reads are retried, and a lost write reply is settled by a read
+----------------------------------------------------------------
 A dropped connection does not say whether the server ran the statement, so re-sending a
 write can apply it twice. The builder carries ``http_method``, so a GET/HEAD query —
-every ``select`` — is retried and a POST/PATCH/DELETE is not. A write that loses its
-connection still reports the failure, which is the safe direction to be wrong in.
+every ``select`` — is retried and a POST/PATCH/DELETE is not.
+
+A write that loses its connection used to report the failure outright. It often was not
+one: reported as ``Gagal: Server disconnected`` on an admin CRUD page, where the row had
+been written, the *reply* was dropped, and the operator was told the change failed — so
+they did it again. Re-sending is the one thing that must not happen, which leaves the
+read, and this repo had already hand-written that recovery twice
+(``user_preferences.save``, ``analysis_share.create``).
+
+So at ``execute()`` time a PATCH or DELETE that fails with a transport error asks one
+question — read the rows this filter names and see whether they carry the patch — and
+reports success only when the answer is yes. Everything the read cannot settle is
+unchanged: an insert (no filter), an unfiltered write (would need a table-wide read), a
+patch that moves the column it filters on (the filter no longer matches, so the read
+would call a landed write lost), and any genuine ``APIError``, which is the server
+answering and is raised at once.
 
 Nothing here changes what a caller sees except that ``Server disconnected`` stops
 reaching it. A genuine API error (a bad column, an RLS refusal) is not a transport
@@ -50,6 +64,11 @@ round-trips are the cause of which response time is only the symptom. See
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
+import httpx
+
 from app.utils import query_meter
 from app.utils.helpers import read_with_retry
 
@@ -57,10 +76,169 @@ from app.utils.helpers import read_with_retry
 # included because postgrest uses it for counts, and it is a read by definition.
 _IDEMPOTENT = ("GET", "HEAD")
 
+#: Writes whose *effect* one read can settle. Both carry the filter that names the rows
+#: they meant, so there is a row to ask about — and neither is re-sent, because a dropped
+#: reply does not say whether the statement ran.
+_CONFIRMABLE = ("PATCH", "DELETE")
+
+#: Query-string keys that are not columns of the filtered table. A filter is a mapping
+#: from column to operator-and-value, so the keys that are not one are listed here.
+_NOT_A_COLUMN = frozenset({"select", "order", "limit", "offset", "on_conflict",
+                           "columns", "or", "and", "not", "count"})
+
 
 def is_read(query) -> bool:
     """Is this postgrest query safe to run a second time?"""
     return getattr(query, "http_method", None) in _IDEMPOTENT
+
+
+def filtered_columns(query) -> set[str]:
+    """The columns this query's filter names."""
+    params = getattr(query, "params", None)
+    if params is None:
+        return set()
+    multi = getattr(params, "multi_items", None)
+    if multi is None:
+        return set()
+    return {key for key, _ in multi() if key not in _NOT_A_COLUMN}
+
+
+def is_confirmable(query) -> bool:
+    """Is there a row this write's effect can be asked about?
+
+    Four refusals, and each one is a shape where the read would answer a question the
+    operator did not ask:
+
+    * **an insert** has no filter — there is no row to look for, and the payload cannot
+      say which of its columns is unique;
+    * **an unfiltered update or delete** could only be settled by reading the whole
+      table;
+    * **a patch that moves the column it filters on** — ``update({"status": "done"})
+      .eq("status", "pending")`` — would read back *nothing* after a write that landed,
+      because the filter it was written with no longer matches. The retake decision in
+      ``app/services/invigilation.py`` has exactly this shape, and confirming it would
+      turn a landed write into a reported failure, which is the bug being fixed;
+    * **a non-dict payload** is not a column patch at all.
+    """
+    method = getattr(query, "http_method", None)
+    if method not in _CONFIRMABLE:
+        return False
+    if not getattr(query, "path", None):
+        return False
+    columns = filtered_columns(query)
+    if not columns:
+        return False
+    if method == "PATCH":
+        patch = getattr(query, "json", None)
+        if not isinstance(patch, dict) or not patch:
+            return False
+        if set(patch) & columns:
+            return False
+    return True
+
+
+def _as_instant(value):
+    """``value`` as a datetime, or ``None`` when it is not a timestamp at all."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def value_matches(stored, written) -> bool:
+    """Did the value the read-back found come from the value the caller wrote?
+
+    Text equality is not enough for the two shapes this app writes constantly. A
+    timestamp is written from Python as ``2026-09-29T15:26:08.498522+00:00`` and echoes
+    as ``…Z`` — comparing the strings would report a write that landed as lost, which is
+    the whole bug. A JSON column (``profiles.preferences``) comes back as the same
+    structure in a different key order, so it is compared as a parsed structure.
+    """
+    if stored == written:
+        return True
+    if isinstance(stored, (dict, list)) and isinstance(written, (dict, list)):
+        try:
+            return (json.dumps(stored, sort_keys=True, default=str)
+                    == json.dumps(written, sort_keys=True, default=str))
+        except (TypeError, ValueError):
+            return False
+    left, right = _as_instant(stored), _as_instant(written)
+    return left is not None and right is not None and left == right
+
+
+def patch_is_present(row, patch) -> bool:
+    """Does this row carry every column the patch wrote?"""
+    if not isinstance(row, dict):
+        return False
+    return all(key in row and value_matches(row[key], value)
+               for key, value in patch.items())
+
+
+class ConfirmedWrite:
+    """What a confirmed write returns: the rows the lost reply would have carried.
+
+    ``count`` stays ``None`` rather than guessing a number the dropped reply never
+    carried, and a confirmed delete returns ``[]`` — its rows are gone, so the
+    representation is not recoverable, while the absence of them is the proof.
+    """
+
+    __slots__ = ("data", "count")
+
+    def __init__(self, rows) -> None:
+        self.data = rows
+        self.count = None
+
+
+def _read_back(query, method: str):
+    """The one safe question to ask of a write: what does the row look like now?
+
+    Bounded twice on purpose. The filter is the write's own, so the read returns exactly
+    the rows the write meant and not the table; and a delete is read with ``limit=1``
+    because one surviving row is the whole answer.
+    """
+    params = list(query.params.multi_items())
+    if method == "DELETE":
+        params.append(("limit", "1"))
+
+    def read():
+        query_meter.trip()
+        response = query.session.get(query.path, params=params,
+                                     headers={"Accept": "application/json"})
+        if response.status_code >= 400:
+            return None
+        body = response.json()
+        return body if isinstance(body, list) else [body]
+
+    try:
+        rows = read_with_retry(read)
+    except Exception:                       # the read failed too: not a confirmation
+        return None
+    if not isinstance(rows, list):
+        return None
+    query_meter.read_rows(len(rows))
+    return rows
+
+
+def confirm_write(query, error):
+    """Settle a write whose reply was lost, or ``None`` when it cannot be settled.
+
+    ``None`` is not a failure — the caller re-raises ``error``, unchanged. It means the
+    question has no safe answer, and an operator being told the write failed is the
+    direction to be wrong in when the alternative is a guess.
+    """
+    if not is_confirmable(query):
+        return None
+    method = "DELETE" if query.http_method == "DELETE" else "PATCH"
+    rows = _read_back(query, method)
+    if rows is None:
+        return None
+    if method == "DELETE":
+        return ConfirmedWrite([]) if not rows else None
+    if rows and all(patch_is_present(row, query.json) for row in rows):
+        return ConfirmedWrite(rows)
+    return None
 
 
 def wrap_query(obj):
@@ -131,7 +309,15 @@ class RetryingQuery:
         if is_read(self._query):
             return read_with_retry(self._counted_execute)
         query_meter.trip()
-        return self._query.execute()
+        try:
+            return self._query.execute()
+        except httpx.TransportError as exc:
+            # The reply was lost, so the *write* is not re-sent — but its effect can be
+            # settled by the one safe question, a read. See ``confirm_write``.
+            confirmed = confirm_write(self._query, exc)
+            if confirmed is not None:
+                return confirmed
+            raise
 
     def __getattr__(self, name):
         attribute = getattr(self._query, name)

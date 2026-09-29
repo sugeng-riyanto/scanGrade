@@ -23,6 +23,7 @@ from app.services.question_types import (
     objective_result, question_kind, scheme_in,
 )
 from app.services import mark_scheme
+from app.services import exam_media
 from app.services import invigilation
 from app.services import session_review
 from app.services.anti_cheat_service import (
@@ -114,6 +115,86 @@ def _guard_exam(supabase, exam_id, columns="id,teacher_id,school_id", as_json=Tr
                        exam_id, g.user_id, g.get("user_role"))
         return None, _deny(NO_EXAM_ACCESS, as_json, redirect_to)
     return exam, None
+
+
+def _question_media_from_form(i):
+    """The media question ``i`` carries, as the builder posts it.
+
+    Two shapes meet here. A pasted link is ``audio_<i>``/``youtube_<i>``, as it has
+    always been. An uploaded file is ``media_file_<i>`` — a storage path this app
+    minted when the teacher dropped the file on the builder — and it is accepted
+    only when it sits under **this paper's** prefix. That check is the whole reason
+    the path is read from the form at all: without it a hand-written post could
+    point a question at an object belonging to another school, and every pupil
+    sitting that paper would then be handed a token for it.
+
+    The paper is the route's own, read from Flask's routing rather than from a form
+    field — a caller who could choose the prefix could choose whose object a
+    question points at. The create route (``/exams/new``) has no such argument and
+    so cannot attach an uploaded file at all: the builder turns its upload control
+    on once the paper has been saved, which is the only point at which a prefix
+    exists to check.
+
+    Both save paths — the create in ``exam_form`` and the update in ``exam_detail``
+    — call this unchanged, so the two cannot come to disagree about what a question's
+    media is.
+    """
+    media = {}
+    exam_id = (request.view_args or {}).get("exam_id")
+    hosted = (request.form.get(f"media_file_{i}") or "").strip()
+    if hosted and exam_id and hosted.startswith(f"{exam_id}/"):
+        media["file"] = hosted
+        kind = (request.form.get(f"media_kind_{i}") or "audio").strip().lower()
+        media["kind"] = kind if kind in exam_media.KINDS else "audio"
+        name = (request.form.get(f"media_name_{i}") or "").strip()
+        if name:
+            media["name"] = name[:120]
+    audio_url = (request.form.get(f"audio_{i}") or "").strip()
+    youtube_url = (request.form.get(f"youtube_{i}") or "").strip()
+    if audio_url:
+        media["audio"] = audio_url
+    if youtube_url:
+        media["youtube"] = youtube_url
+    return media
+
+
+def _relocate_question_media(supabase, from_exam_id, to_exam_id, question_audio):
+    """Move a duplicated paper's uploaded media under the copy's own prefix.
+
+    Duplicating a paper copies ``question_audio`` verbatim, so the copy starts out
+    pointing at the original's storage paths. Playback would still work — a token
+    names a path, not a layout — but the *next save* of the copy refuses those
+    paths (a question may only point at its own paper's prefix, see
+    ``_question_media_from_form``), and the copy would lose its audio with no
+    message anywhere. So the objects are copied across while duplicating, and a
+    file that cannot be copied is dropped — a question showing nothing is a state
+    the builder can explain, while a question pointing at a half-copied path is
+    not.
+    """
+    if not isinstance(question_audio, dict) or not question_audio:
+        return question_audio
+    prefix = f"{from_exam_id}/"
+    relocated = {}
+    for key, entry in question_audio.items():
+        if not (isinstance(entry, dict) and entry.get("file")):
+            relocated[key] = entry
+            continue
+        source = str(entry["file"])
+        if not source.startswith(prefix):
+            relocated[key] = entry
+            continue
+        target = f"{to_exam_id}/{source[len(prefix):]}"
+        try:
+            exam_media.ensure_bucket(supabase)
+            supabase.storage.from_(exam_media.MEDIA_BUCKET).copy(source, target)
+        except Exception as exc:
+            current_app.logger.warning("could not copy question media %s -> %s: %s",
+                                       source, target, exc)
+            continue
+        copied = dict(entry)
+        copied["file"] = target
+        relocated[key] = copied
+    return relocated
 
 
 def _guard_submission(supabase, submission_id, as_json=True, redirect_to="/teacher/results"):
@@ -1009,13 +1090,7 @@ def exam_form():
         # their part of the paper would cover the question.
         if is_essay(qtype):
             question_canvas[str(i)] = True
-        audio_url = request.form.get(f"audio_{i}", "").strip()
-        youtube_url = request.form.get(f"youtube_{i}", "").strip()
-        media = {}
-        if audio_url:
-            media["audio"] = audio_url
-        if youtube_url:
-            media["youtube"] = youtube_url
+        media = _question_media_from_form(i)
         if media:
             question_audio[str(i)] = media
 
@@ -1151,6 +1226,13 @@ def exam_detail(exam_id):
         if sid:
             subjects = supabase.table("subjects").select("*").eq("school_id", sid).order("name").execute().data or []
             classes = supabase.table("classes").select("*").eq("school_id", sid).order("name").execute().data or []
+        # An uploaded file is previewed from the app, never from Storage, so the
+        # builder is handed the same kind of URL a pupil's page gets — minted for
+        # *this* teacher, since the preview is theirs. A copy: `with_media_urls`
+        # never touches what is stored, and the token must not be saved back into
+        # the row (it would be expired long before anyone read it again).
+        exam_data["question_audio"] = exam_media.with_media_urls(
+            exam_data.get("question_audio"), subject=g.user_id, exam_id=exam_id)
         return render_template("teacher/exam_form.html", exam=exam_data, subjects=subjects, classes=classes)
 
     title = request.form.get("title")
@@ -1216,13 +1298,7 @@ def exam_detail(exam_id):
         # their part of the paper would cover the question.
         if is_essay(qtype):
             question_canvas[str(i)] = True
-        audio_url = request.form.get(f"audio_{i}", "").strip()
-        youtube_url = request.form.get(f"youtube_{i}", "").strip()
-        media = {}
-        if audio_url:
-            media["audio"] = audio_url
-        if youtube_url:
-            media["youtube"] = youtube_url
+        media = _question_media_from_form(i)
         if media:
             question_audio[str(i)] = media
 
@@ -1396,6 +1472,87 @@ def upload_exam_pdf(exam_id):
     return redirect(f"/teacher/preview/{exam_id}")
 
 
+@teacher_bp.route("/exams/<exam_id>/media", methods=["POST"])
+@teacher_or_admin_required
+def upload_exam_media(exam_id):
+    """Store one question's audio or video, and say where it went.
+
+    The builder's upload control posts here. The reply is JSON, and it carries two
+    different things on purpose: ``file`` is the storage path that gets saved into
+    the paper's ``question_audio``, and ``url`` is an *app* URL the builder can
+    preview with. A Storage URL is never returned to a page — a public link to the
+    bucket is exactly the arrangement this replaces (see app/services/exam_media.py).
+
+    Refusals are JSON with a sentence, and the status carries the distinction the
+    builder needs to show it: 400 for no file, 413 for a file over the ceiling, 422
+    for a file nobody could play, 403/404 for a paper the caller may not touch.
+    Everything is judged *before* the bytes reach Storage, so a refused upload
+    leaves nothing behind.
+
+    Deliberately not gated on the school's subscription: this writes bytes to our
+    own private bucket and nothing into a school's records. The paper write that
+    makes such a file visible is gated as every other write is.
+    """
+    supabase = get_supabase()
+    exam, denied = _guard_exam(supabase, exam_id, as_json=True)
+    if denied:
+        return denied
+
+    kind = (request.form.get("kind") or "audio").strip().lower()
+    upload = request.files.get("file")
+    if not upload or not (upload.filename or "").strip():
+        return jsonify({"error": "Tidak ada berkas yang diunggah"}), 400
+
+    size = _upload_size(upload)
+    spec = exam_media.KINDS.get(kind)
+    if spec and size > spec["max_bytes"]:
+        limit = spec["max_bytes"] // (1000 * 1000)
+        return jsonify({"error": f"Berkas terlalu besar — batas {limit} MB"}), 413
+
+    complaint = exam_media.validate_media_upload(kind, upload.filename,
+                                                 upload.mimetype or "", size)
+    if complaint:
+        return jsonify({"error": complaint}), 422
+
+    try:
+        index = int(request.form.get("index") or 0)
+    except (TypeError, ValueError):
+        index = 0
+
+    try:
+        entry = exam_media.upload_media(supabase, exam_id=exam_id, index=index, kind=kind,
+                                       file_obj=upload, filename=upload.filename,
+                                       content_type=upload.mimetype or "", size=size)
+    except Exception as exc:
+        current_app.logger.error("media upload failed for exam %s: %s", exam_id, exc)
+        return jsonify({"error": "Berkas gagal disimpan — coba lagi"}), 502
+
+    entry["url"] = exam_media.media_url(entry["file"], subject=g.user_id, exam_id=exam_id)
+    log_activity("upload", "exam", exam_id, new_data={"media": entry["file"]},
+                 user_id=g.user_id)
+    return jsonify(entry)
+
+
+def _upload_size(storage) -> int:
+    """The uploaded file's own length, not the request body's.
+
+    `request.content_length` covers the whole multipart body — boundaries, headers
+    and every other field — so judging a ceiling against it refuses a file that is
+    inside the limit by a few hundred bytes. The stream is seekable (a spooled temp
+    file, or an in-memory buffer for a small one), so its own length is read and the
+    position restored for the read that follows.
+    """
+    try:
+        stream = storage.stream
+        position = stream.tell()
+        stream.seek(0, os.SEEK_END)
+        size = stream.tell()
+        stream.seek(position)
+        return int(size)
+    except Exception:
+        return int(getattr(storage, "content_length", 0) or 0)
+
+
 @teacher_bp.route("/exams")
 @teacher_or_admin_required
 def my_exams():
@@ -1501,6 +1658,15 @@ def duplicate_exam(exam_id):
         new_data["source_exam_id"] = exam_id
         new_exam = supabase.table("exams").insert(new_data).execute()
         new_id = new_exam.data[0]["id"]
+        # The copy's uploaded media moves with it, so re-saving the duplicate does
+        # not drop it on the floor.
+        relocated = _relocate_question_media(supabase, exam_id, new_id,
+                                             new_data.get("question_audio"))
+        if relocated != new_data.get("question_audio"):
+            try:
+                supabase.table("exams").update({"question_audio": relocated}).eq("id", new_id).execute()
+            except Exception as exc:
+                current_app.logger.warning("could not repoint the duplicate's media: %s", exc)
         log_activity("duplicate", "exam", new_id, new_data={"source": exam_id, "title": new_data["title"]}, user_id=g.user_id)
         flash("Ujian berhasil digandakan. Silakan edit sesuai kebutuhan.", "success")
         return redirect(f"/teacher/exams/{new_id}")
@@ -2545,8 +2711,59 @@ def print_submission_card(submission_id):
     if not card:
         flash("Submission tidak ditemukan", "error")
         return redirect("/teacher/results")
-    return render_template("print/report_card.html", printed_on=print_stamp(),
-                           show_key=True, **card)
+    # A list of one: the document renders a *set* of cards, so that handing back a
+    # whole class is one print — and so this route and the class set cannot be two
+    # layouts that resemble each other.
+    return render_template("print/report_card.html", cards=[card], printed_on=print_stamp(),
+                           show_key=True)
+
+
+@teacher_bp.route("/results/report-cards")
+@teacher_or_admin_required
+def results_report_cards():
+    """A whole sitting's report cards, as the one document a school hands back.
+
+    The single card already existed at `/teacher/submissions/<id>/print`, which is
+    the right shape for one family and the wrong one for a class: thirty papers was
+    thirty tabs, thirty prints and thirty chances to hand one pupil somebody
+    else's sheet. This is the same sheet — the same template, in a loop, rather
+    than a second layout that resembles it — rendered once per paper into one
+    document, in hand-back order, which is by name and never by mark.
+
+    It carries every pupil's name and mark, so it cannot be easier to reach than
+    the results screen: the same guard, the same school scope. A `class_id`
+    outside the exam's own classes is refused rather than answered with an empty
+    set, because an empty set prints as "nobody sat this" and a fallback prints
+    whichever class holds the paper into a stack about to be handed out.
+    """
+    from app.services import report_card_service as cards
+    from app.services.report_card_service import print_stamp
+
+    exam_id = request.args.get("exam_id")
+    if not exam_id:
+        return redirect("/teacher/results")
+
+    supabase = get_supabase()
+    # `class_ids` comes from the guard's own read: the class a page may ask for is
+    # one of the classes the exam is assigned to, and a second lookup would be a
+    # second answer to that question.
+    exam, err = _guard_exam(supabase, exam_id,
+                            columns="id,teacher_id,school_id,class_ids",
+                            as_json=False, redirect_to="/teacher/results")
+    if err:
+        return err
+
+    class_id, refusal = cards.select_class(exam, request.args.get("class_id"))
+    if refusal:
+        flash(denials.CLASS_NOT_ASSIGNED, "error")
+        return redirect(f"/teacher/results?exam_id={exam_id}")
+
+    sheets = cards.load_report_cards(supabase, exam_id, class_id=class_id)
+    if not sheets:
+        flash(denials.NO_PAPERS_TO_PRINT, "error")
+        return redirect(f"/teacher/results?exam_id={exam_id}")
+    return render_template("print/report_card.html", cards=sheets,
+                           printed_on=print_stamp(), show_key=True)
 
 
 def _class_names(supabase, class_ids):

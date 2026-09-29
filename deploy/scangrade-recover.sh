@@ -14,6 +14,14 @@
 # other shapes a stuck box has. It is deliberately the only new lever: one word on
 # the console, no arguments to remember, and safe to run twice.
 #
+# A box that has no lever *installed* — a runner older than this file, or a checkout
+# that was rolled back before it landed — can still run it. The same one line reads it
+# out of the commit the box has already fetched and pipes it into a root bash: no
+# network, no credentials, nothing to install, and `git show` touches nothing in the
+# tree, so it works on a dirty, rolled-back, refused or quarantined checkout.
+#
+#     sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash'
+#
 # What it does, in order, and nothing else:
 #
 #   1. says why the box is stuck — read from the runner's own records and journal,
@@ -63,6 +71,15 @@ PY="${SG_PYTHON:-$REPO/.venv/bin/python}"
 MIGRATE="${SG_MIGRATE:-$REPO/deploy/apply_migration.py}"
 PAUSE_FILE="${SG_PAUSE_FILE:-/etc/scangrade-deploy.pause}"
 
+#: The one line an operator types on a box with no lever installed. It reads this
+#: script out of the commit the box has *already fetched* and pipes it into a root
+#: bash, which is the whole of it: `git show` is a read of the object store, so there
+#: is no fetch, no credentials and nothing to install. Short on purpose, for the same
+#: reason `sgfix` is short — it is typed by hand on a noVNC console with no clipboard.
+#: One literal, printed by the refusal below and written in docs/AUTO_DEPLOY.md;
+#: tests/unit/test_console_recover.py fails when the two drift apart.
+GET_LEVER="runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash"
+
 #: What a quarantine record's third line holds when the schema gate earned it. The
 #: runner writes the gate's own name there, and the schema gate's name is the only
 #: one this script is allowed to answer.
@@ -82,7 +99,11 @@ DRY=0
 
 say()  { printf '\n== %s\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
-die()  { printf '\n!! %s\n' "$*"; exit "${2:-1}"; }
+# `$1`, and deliberately not `$*`: the second argument is the exit code, and a printer
+# that joins its arguments puts it at the end of the sentence. One of these sentences
+# *is* a command — the piped way in — and a console operator copying `… | bash' 1` gets
+# a different command than the one that works. Held by a test in test_console_recover.py.
+die()  { printf '\n!! %s\n' "$1"; exit "${2:-1}"; }
 
 # ── the shape of a stuck box, read from its own records ──────────────────────
 # recover-logic:start
@@ -233,6 +254,10 @@ usage: sgfix [--dry-run]
 Everything it does is written to $STATE_DIR/recover/<stamp>.txt (default
 /var/lib/scangrade-deploy/recover). It never resets a branch, never discards an edit
 without recording it, and lifts a quarantine only when the schema gate earned it.
+
+On a box that has no lever installed yet, this file can be read out of the commit the
+box has already fetched and piped into a root bash — one line, no network; running it
+without root prints that line, and docs/AUTO_DEPLOY.md carries it too.
 USAGE
       exit 0 ;;
     *)
@@ -244,12 +269,32 @@ done
 # A console session is often root already; when it is not, the sudo hop is the
 # difference between one word and a failed one. Refusing is still the fallback: this
 # script restarts a unit and edits a checkout.
+#
+# The hop is skipped when this script did not come from a file, and that guard is
+# load-bearing. The documented way in on a box with no lever is
+#
+#     git show origin/main:deploy/scangrade-recover.sh | bash
+#
+# and a piped script has nothing to re-exec: `$0` is the shell's own path — `bash`,
+# or the shell's absolute path when the caller used one — so `exec sudo … "$0"` hands
+# sudo either whatever `bash` happens to mean in the current directory or the shell's
+# own binary, and the recovery does not happen either way. `BASH_SOURCE` is the one
+# thing that tells the two apart: it is unset for input read from stdin and names the
+# file otherwise. So the refusal prints the line that does work instead.
 if [ "$(id -u)" -ne 0 ]; then
-  if command -v sudo >/dev/null 2>&1; then
+  if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ] && command -v sudo >/dev/null 2>&1; then
     printf 'not root — re-running under sudo\n'
-    exec sudo -E bash "$0" "$@"
+    exec sudo -E bash "${BASH_SOURCE[0]}" "$@"
   fi
-  die "run me as root: sudo sgfix" 1
+  die "run me as root. Installed, that is one word:
+
+    sudo sgfix
+
+Installed nowhere, read this out of the commit the box has already fetched and pipe
+it into a root bash — git show touches nothing in the tree, so it works on a dirty,
+rolled-back, refused or quarantined checkout:
+
+    sudo bash -c '$GET_LEVER'" 1
 fi
 
 [ -d "$REPO/.git" ] || die "$REPO is not a git checkout (set SG_REPO=…)" 3

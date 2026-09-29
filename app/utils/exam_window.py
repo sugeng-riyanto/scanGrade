@@ -127,6 +127,39 @@ def deadline(exam, started_at, now=None):
     return by_duration
 
 
+def duration_facts(minutes) -> dict:
+    """How a duration is **read**: unlimited, or a number of minutes.
+
+    `duration_minutes` of 0 is the teacher form's "Tak terbatas / Unlimited" —
+    `deadline()` above has always treated it that way — but nothing else agreed, and
+    four pages read the same column four ways. Each was wrong in its own direction:
+    the exam list wrote ``duration_minutes or 60``, so a paper a teacher deliberately
+    left open-ended was advertised to the class as an hour; the student dashboard
+    wrote the raw value, so the same paper read "0 min" one page away; the builder's
+    own form selected the 60-minute option for it, one conditional render away from
+    *saving* 60 and converting the paper; and the exam paper had the rule right, in
+    a JavaScript ternary of its own.
+
+    Returns the branch and the number — never a finished sentence. The label is copy,
+    and copy in this app is a ``t()`` pair the template writes; a helper that
+    returned one would have to choose a language on the server, which no page here
+    does. ``minutes`` answers 0 for the unlimited branch so a template that only
+    needs a number (the exam page mirrors it into JavaScript) keeps the shape it
+    already had.
+
+    A missing value is unlimited for the same reason `deadline()` says so: the
+    arithmetic reads the column as ``or 0``, and a NULL that silently became 60
+    minutes would be the defect this function exists to remove.
+    """
+    try:
+        value = int(minutes or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value <= 0:
+        return {"unlimited": True, "minutes": 0}
+    return {"unlimited": False, "minutes": value}
+
+
 def deadline_reason(exam, started_at) -> str:
     """Which clock decided the deadline — DURATION unless the window cut it short."""
     limit = deadline(exam, started_at)
