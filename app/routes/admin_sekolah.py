@@ -10,6 +10,7 @@ from flask import Blueprint, render_template, g, request, jsonify, redirect, fla
 from openpyxl import load_workbook, Workbook
 from app.utils.auth import (admin_sekolah_required, get_supabase,
                             subscription_write_required, list_all_auth_users)
+from app.utils import failure
 from app.utils.cache import cache_get, cache_set
 from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
@@ -270,7 +271,7 @@ def profile():
             log_activity("update", "school", sid, new_data=data, user_id=g.user_id)
             flash("Profil sekolah berhasil diperbarui", "success")
         except Exception as e:
-            flash(f"Gagal: {e}", "error")
+            flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/profile")
 
     school = supabase.table("schools").select("*").eq("id", sid).single().execute().data or {}
@@ -380,7 +381,7 @@ def import_excel():
     try:
         wb = load_workbook(filename=io.BytesIO(file.read()))
     except Exception as e:
-        flash(f"Gagal membaca file: {e}", "error")
+        flash(f"Gagal membaca file: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/import")
 
     results = {"students": 0, "teachers": 0, "subjects": 0, "subjects_updated": 0, "errors": []}
@@ -678,7 +679,7 @@ def school_years():
             log_activity("create", "school_year", new_id, new_data={"name": name, "start_date": start_date, "end_date": end_date, "is_active": is_active}, user_id=g.user_id)
             flash("Tahun ajaran berhasil ditambahkan", "success")
         except Exception as e:
-            flash(f"Gagal: {e}", "error")
+            flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/school-years")
 
     years = supabase.table("school_years").select("*").eq("school_id", sid).order("name", desc=True).execute().data or []
@@ -697,7 +698,7 @@ def toggle_school_year(year_id):
         log_activity("update", "school_year", year_id, new_data={"is_active": True}, user_id=g.user_id)
         flash("Tahun ajaran berhasil diaktifkan", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/school-years")
 
 
@@ -711,7 +712,7 @@ def delete_school_year(year_id):
         log_activity("delete", "school_year", year_id, user_id=g.user_id)
         flash("Tahun ajaran berhasil dihapus", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/school-years")
 
 
@@ -898,7 +899,7 @@ def delete_class(class_id):
     except Exception as e:
         if wants_json:
             return jsonify({"error": str(e)}), 400
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect(back)
 
 
@@ -952,7 +953,7 @@ def admin_subject_create():
         log_activity("create", "subject", name, new_data={"name": name}, user_id=g.user_id)
         flash("Mapel berhasil ditambahkan", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/subjects")
 
 
@@ -978,7 +979,7 @@ def admin_subject_edit(subject_id):
         invalidate_school(sid)
         flash("Mapel berhasil diperbarui", "success")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/subjects")
 
 
@@ -1016,7 +1017,7 @@ def admin_subject_delete(subject_id):
     except Exception as e:
         if wants_json:
             return jsonify({"error": str(e)}), 400
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/subjects")
 
 
@@ -1223,7 +1224,7 @@ def create_teacher():
         log_activity("create", "teacher", uid, new_data={"full_name": nama, "employee_id": nip}, user_id=g.user_id)
         flash(f"Guru berhasil ditambahkan. Email: {user_email}, Password: {password}", "success")
     except Exception as e:
-        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/teachers")
 
 
@@ -1258,7 +1259,7 @@ def edit_teacher(teacher_id):
         flash("Guru berhasil diperbarui", "success")
         return redirect("/admin-sekolah/teachers")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/teachers")
 
 
@@ -1350,7 +1351,7 @@ def create_official():
         flash(f"Akun berhasil dibuat. Email: {user_email}, Password: {password}",
               "success")
     except Exception as e:
-        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/officials")
 
 
@@ -1367,7 +1368,7 @@ def edit_official(official_id):
         log_activity("update", "official", official_id, user_id=g.user_id)
         flash("Akun pejabat sekolah berhasil diperbarui", "success")
     except Exception as e:
-        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/officials")
 
 
@@ -1477,7 +1478,7 @@ def create_student():
         log_activity("create", "student", uid, new_data={"full_name": nama, "nisn": nisn, "class_id": class_id}, user_id=g.user_id)
         flash(f"Murid berhasil ditambahkan. Email: {user_email}, Password: {password}", "success")
     except Exception as e:
-        flash(f"Gagal: {getattr(e, 'user_message', str(e))}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
     return redirect("/admin-sekolah/students")
 
 
@@ -1508,7 +1509,7 @@ def edit_student(student_id):
         flash("Murid berhasil diperbarui", "success")
         return redirect("/admin-sekolah/students")
     except Exception as e:
-        flash(f"Gagal: {e}", "error")
+        flash(f"Gagal: {failure.sentence(e)}", "error")
         return redirect("/admin-sekolah/students")
 
 

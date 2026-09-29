@@ -9,7 +9,7 @@ from app.decorators.security import require_school_access
 from app.services.notification_service import notify_approval
 from app.services.audit_service import log_activity, log_create, log_delete, fetch_audit_logs, count_audit_logs, get_activity_summary
 from app.utils.security import sanitize_input
-from app.utils import denials
+from app.utils import denials, failure
 from app.services.student_import import discard_partial_account as discard_student
 from app.services.teacher_import import discard_partial_account as discard_teacher
 from app.services import trial_settings
@@ -552,7 +552,7 @@ def registration_request_delete(request_id):
         current_app.logger.error(f"Delete registration request error: {e}")
         if request.is_json or request.headers.get("HX-Request"):
             return jsonify({"error": str(e)}), 400
-        flash(f"Gagal menghapus: {str(e)[:60]}", "error")
+        flash(f"Gagal menghapus: {failure.sentence(e)}", "error")
     return redirect("/admin/registration-requests")
 
 

@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template, current_app, flash, redirect
+from app.utils import failure
 from app.utils.auth import login_required
 from app.services.anti_cheat_service import (
     AWAY_GRACE_CHANCES,
@@ -55,5 +56,5 @@ def guide_skor():
                                away_grace_chances=AWAY_GRACE_CHANCES)
     except Exception as e:
         current_app.logger.error("Guide skor error: %s", str(e), exc_info=True)
-        flash("Terjadi kesalahan: " + str(e)[:100], "error")
+        flash("Terjadi kesalahan: " + failure.sentence(e), "error")
         return redirect("/")
