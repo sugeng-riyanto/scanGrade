@@ -6,8 +6,8 @@ import dataclasses
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, g, send_file, current_app
-from app.utils.auth import (teacher_or_admin_required, get_supabase, login_required,
-                            role_required, subscription_write_required)
+from app.utils.auth import (teacher_or_admin_required, teacher_required, get_supabase,
+                            login_required, role_required, subscription_write_required)
 from app.utils.cache import cache_get, cache_set, cache_delete
 from app.utils.helpers import read_with_retry, row_or_none
 from app.decorators.security import require_school_access
@@ -23,6 +23,7 @@ from app.services.question_types import (
     objective_result, question_kind, scheme_in,
 )
 from app.services import mark_scheme
+from app.services import invigilation
 from app.services import session_review
 from app.services.anti_cheat_service import (
     events_for_exam, events_for_student, leaving_summary,
@@ -592,6 +593,11 @@ def dashboard():
     # The session carries the school, so no profile round-trip here.
     school_id = g.get("user_school_id")
 
+    # `teachers.id` *is* `profiles.id`, so the session's own id is the teacher's id —
+    # no lookup, and no page can ask for someone else's duties.
+    board = (invigilation.teacher_board(get_supabase(), school_id, g.user_id)
+             if school_id else {"tasks": [], "exam_ids": set(), "pending_requests": []})
+
     # Assignments, classes and subjects are the same on every dashboard load and
     # the last two are identical for every teacher in the school, so they come
     # from the shared cache. A teacher who assigns a class invalidates their own
@@ -614,6 +620,12 @@ def dashboard():
         "grading_progress": grading_progress,
         "exam_stats": exam_stats[:6],
         "student_improvement": student_improvement[:5],
+        # The invigilation duties ride on this page's own 20-second per-teacher
+        # cache, so the reads behind them happen once per teacher per 20 seconds
+        # rather than once per load. A teacher with no duty pays one read (the
+        # assignment lookup, which comes back empty).
+        "invigilation_tasks": board["tasks"],
+        "invigilation_requests": board["pending_requests"],
     }
     try:
         cache_set(cache_key, template_data, ttl=20)
@@ -4202,3 +4214,56 @@ def teacher_subject_delete(subject_id):
 def teacher_settings():
     """Teacher settings page (password, data export, deletion request)."""
     return render_template("teacher/settings.html")
+
+
+# ── the teacher's own invigilation duty ──────────────────────────────────────
+#
+# What a teacher may do here is read the sittings that carry their name and decide
+# the retake requests for those exams — nothing else. The schedule is the vice
+# principal's to build, and the *set* of exams a teacher may decide is read from the
+# same `invigilated_exam_ids` the page is built from, so the page cannot offer a
+# decision the route would then refuse.
+
+def _teacher_school() -> str | None:
+    return g.get("user_school_id")
+
+
+@teacher_bp.route("/invigilation")
+@teacher_required
+def invigilation_duties():
+    """The teacher's invigilation tasks and the retake requests they may decide."""
+    school_id = _teacher_school()
+    if not school_id:
+        return redirect("/auth/login")
+    board = invigilation.teacher_board(get_supabase(), school_id, g.user_id)
+    return render_template("teacher/invigilation.html",
+                           tasks=board["tasks"],
+                           requests=board["pending_requests"])
+
+
+@teacher_bp.route("/retake-requests/<request_id>/decide", methods=["POST"])
+@teacher_required
+def retake_request_decide(request_id: str):
+    """Approve or reject a retake request for an exam this teacher invigilates.
+
+    The authority is the exam set, not the role: a teacher who does not invigilate
+    that exam is refused by the service even though they hold this route. The race
+    with the vice principal deciding the same request is closed there too.
+    """
+    school_id = _teacher_school()
+    if not school_id:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    out = invigilation.decide_retake(
+        supabase, school_id, request_id,
+        decision=request.form.get("decision", ""),
+        actor_id=g.get("user_id"),
+        note=request.form.get("note", ""),
+        within_exam_ids=invigilation.invigilated_exam_ids(supabase, school_id,
+                                                          g.user_id),
+    )
+    if out.get("ok"):
+        flash("retake_decided", "success")
+    else:
+        flash(out.get("reason") or "write_failed", "error")
+    return redirect("/teacher/invigilation")

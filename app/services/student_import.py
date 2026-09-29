@@ -6,6 +6,7 @@ Usage:
 
 import csv
 import io
+from app.services import password_change as _password_change
 from app.utils.auth import get_supabase
 from app.utils.helpers import row_or_none
 from app.utils.logger import get_logger
@@ -142,6 +143,10 @@ def create_student_account(supabase, *, school_id, nisn, full_name, email,
             profile["class_id"] = class_id
         if phone:
             profile["phone"] = phone
+        # The generated password is a one-time one: written to the account, printed on
+        # a card the school hands out, and replaced by its owner before any other
+        # page opens. See app/services/password_change.py.
+        profile.update(_password_change.account_fields(email))
         supabase.table("profiles").upsert(profile).execute()
 
         supabase.table("students").upsert({

@@ -31,6 +31,7 @@ Two traps this module exists to close, both measured against the live database:
    That is why the single-teacher form created the account and then failed.
 """
 
+from app.services import password_change as _password_change
 from app.utils.logger import get_logger
 from app.errors import ValidationError
 
@@ -140,6 +141,9 @@ def create_teacher_account(supabase, *, school_id, full_name, email, password,
         }
         if phone:
             profile["phone"] = phone
+        # The generated password is a one-time one — see
+        # app/services/password_change.py for the rule the change is held to.
+        profile.update(_password_change.account_fields(email))
         supabase.table("profiles").upsert(profile).execute()
 
         # No `status` key here on purpose: teachers.status does not exist.

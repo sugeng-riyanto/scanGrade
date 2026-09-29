@@ -73,6 +73,7 @@ class _Query:
         self.table = table
         self._eq = []
         self._in = None
+        self._update = None
 
     def select(self, *cols, **kw):
         return self
@@ -91,6 +92,10 @@ class _Query:
     def single(self):
         return self
 
+    def update(self, payload):
+        self._update = dict(payload)
+        return self
+
     def execute(self):
         rows = [dict(r) for r in self.fake.tables.get(self.table, [])]
         for col, val in self._eq:
@@ -98,6 +103,12 @@ class _Query:
         if self._in:
             col, vals = self._in
             rows = [r for r in rows if str(r.get(col)) in vals]
+        if getattr(self, "_update", None) is not None:
+            # Issuing a card also marks the account (`must_change_password`), so the
+            # stand-in has to accept a write or that step is reported as a failure on
+            # every row and the suite measures a fault it invented.
+            self.fake.writes.append((self.table, self._update, list(self._eq)))
+            return _Res(rows)
         if self._in or self._eq:
             self.fake.reads.append((self.table, list(self._eq), self._in))
         return _Res(rows)
@@ -119,6 +130,7 @@ class _FakeSupabase:
     def __init__(self, tables=None, fail_on=()):
         self.tables = tables or {}
         self.reads = []
+        self.writes = []
         self.auth = type("A", (), {"admin": _Admin(fail_on)})()
         self.admin = self.auth.admin
 
@@ -360,12 +372,21 @@ def _route_modules(monkeypatch, fake, school=SCHOOL):
     return mod
 
 
-def test_both_routes_are_registered_and_go_through_the_one_body():
+def test_every_card_route_is_registered_and_goes_through_the_one_body():
+    """Three doors now, and they must share one body.
+
+    Pupils and teachers were the first two; principal and vice_principal were added
+    with the officials work. The count is exact on purpose: a route that grew its own
+    implementation would skip the school-scope check, and that check lives only in
+    `_login_cards`.
+    """
     source = ADMIN_ROUTES.read_text(encoding="utf-8")
     assert '"/students/login-cards"' in source
     assert '"/teachers/login-cards"' in source
-    assert source.count("return _login_cards(") == 2, (
-        "one of the two routes stopped sharing the body — the school check lives there")
+    assert '"/officials/login-cards"' in source
+    assert source.count("return _login_cards(") == 3, (
+        "one of the three card routes stopped sharing the body — the school check "
+        "lives there")
 
 
 def test_a_download_with_no_selection_is_refused_in_words(monkeypatch):

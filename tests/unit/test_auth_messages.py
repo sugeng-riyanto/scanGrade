@@ -32,6 +32,11 @@ from test_language_toggle import INDONESIAN_MARKERS, _markers_in  # noqa: E402
 from app.utils.auth_messages import (  # noqa: E402
     MESSAGES, RATE_LIMIT_ACTIONS, auth_error, first, rate_limit_error,
 )
+# The forced-change rule answers with a *key* rather than calling `auth_error`, so its
+# answers never appear as a call the collector above can read. Its own declared tuple
+# is the whole set, and it is what keeps the catalogue from carrying a message no
+# reader can reach — or missing one the page can ask for.
+from app.services.password_change import REFUSALS as RULE_REFUSALS  # noqa: E402
 
 
 def _tree(path: Path) -> ast.Module:
@@ -178,11 +183,21 @@ def test_the_catalogue_is_not_larger_than_its_use():
     reviewer and drifts. Keys shared with the decorators are the exception."""
     used = set(_catalogue_call_keys(AUTH_ROUTE)["auth_error"])
     used |= set(_catalogue_call_keys(UTILS_AUTH)["auth_error"])
+    used |= set(RULE_REFUSALS)
 
     unused = sorted(set(MESSAGES) - used)
     assert not unused, (
         "these catalogue entries are never produced by a route, so no reader can "
         "reach them — delete them or wire them up:\n  " + "\n  ".join(unused))
+
+
+def test_the_change_password_rule_only_answers_with_catalogue_keys():
+    """The rule returns a key and the page looks it up, so a key the catalogue does not
+    hold renders as an empty alert in *both* languages — the reader is sent to the
+    change page, refused, and told nothing. The rule's own tuple is the full set."""
+    missing = sorted(set(RULE_REFUSALS) - set(MESSAGES))
+    assert not missing, (
+        f"the change-password rule can answer with unknown keys: {missing}")
 
 
 def test_no_auth_page_prints_a_message_raw():

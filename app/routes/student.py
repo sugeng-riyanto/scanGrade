@@ -17,6 +17,7 @@ from app.services.question_types import (
     default_weights, earned_points, is_objective, objective_result, public_options,
 )
 from app.services.submission_service import finish_sitting, open_sitting
+from app.services import invigilation
 from app.utils.rate_limiter import limiter
 from app.utils.req_cache import (active_whiteboards_for, class_row, memo,
                                  school_features, school_subject_count)
@@ -876,6 +877,67 @@ def submit_exam(exam_id):
     return redirect("/student/results")
 
 
+def _retake_candidates(supabase, submissions: list[dict]) -> list[dict]:
+    """What this pupil may ask to sit again, and what they already asked for.
+
+    Derived from the rows the page has **already read** — a paper that was handed in
+    is a paper that could be sat again — plus one read of the pupil's own requests.
+    No extra exam read, and no candidate the pupil did not sit: the request would be
+    refused by the service anyway, and offering it would be a button that always
+    fails.
+
+    A request that is still ``pending`` or already ``approved`` is carried on the
+    candidate rather than hidden, so the page can say "menunggu keputusan pengawas"
+    instead of drawing the ask button a second time.
+    """
+    school_id = g.get("user_school_id")
+    if not school_id:
+        return []
+    mine = invigilation.retake_requests(supabase, school_id, student_id=g.user_id)
+    latest: dict[str, dict] = {}
+    for row in mine:
+        latest[str(row["exam_id"])] = row
+
+    out, seen = [], set()
+    for s in submissions:
+        exam = s.get("exam") or {}
+        exam_id = str(exam.get("id") or "")
+        if not exam_id or exam_id in seen:
+            continue
+        if s.get("status") not in ("submitted", "graded", "published"):
+            continue
+        seen.add(exam_id)
+        out.append({"exam_id": exam_id, "title": exam.get("title") or "",
+                    "subject": exam.get("subject") or "",
+                    "request": latest.get(exam_id)})
+    return out
+
+
+@student_bp.route("/retake-requests", methods=["POST"])
+@login_required
+def request_retake():
+    """Ask to sit a paper again. The invigilator of that class decides.
+
+    A form POST that redirects rather than a JSON endpoint: the reader is on the
+    results page, the meaning of the action is "send this request", and a fetch that
+    answered with a payload would leave them reading it instead of their results.
+    """
+    if g.get("user_role") != "murid":
+        return redirect("/teacher/dashboard")
+    school_id = g.get("user_school_id")
+    if not school_id:
+        return redirect("/auth/login")
+    out = invigilation.request_retake(
+        get_supabase(), school_id,
+        exam_id=request.form.get("exam_id", ""),
+        student_id=g.user_id,
+        reason=request.form.get("reason", ""),
+    )
+    flash("retake_requested" if out.get("ok") else (out.get("reason") or "write_failed"),
+          "success" if out.get("ok") else "error")
+    return redirect("/student/results")
+
+
 @student_bp.route("/results")
 @login_required
 def results():
@@ -961,7 +1023,8 @@ def results():
     subject_totals.sort(key=lambda x: x["name"])
     return render_template("student/results.html", submissions=submissions,
                            subject_totals=subject_totals,
-                           chart_points=_chart_points(submissions))
+                           chart_points=_chart_points(submissions),
+                           retake_candidates=_retake_candidates(supabase, submissions))
 
 
 @student_bp.route("/results/<submission_id>")

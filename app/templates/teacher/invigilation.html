@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% from "shared/_invigilation_reasons.html" import reason_note %}
+{# Tugas pengawasan guru dan keputusan ujian ulang yang menjadi wewenangnya.
+
+   Hanya pelaksanaan yang menyebut nama guru ini yang muncul, dan hanya permintaan
+   untuk ujian yang benar-benar ia awasi yang bisa diputuskan di sini. Keduanya
+   dibaca dari satu sumber (`invigilation.teacher_board`), jadi halaman tidak bisa
+   menawarkan tombol yang akan ditolak route-nya. #}
+{% block title %}{{ 'Tugas Pengawasan' if lang == 'id' else 'Invigilation Duties' }} - ScanGrade{% endblock %}
+{% block page_title %}{{ 'Tugas Pengawasan' if lang == 'id' else 'Invigilation Duties' }}{% endblock %}
+{% block content %}
+<div class="space-y-6">
+
+    <div class="rounded-2xl bg-indigo-50 border border-indigo-200 p-3 flex items-start gap-3">
+        <i class="fas fa-clipboard-check text-indigo-600 mt-0.5"></i>
+        <div class="text-xs text-indigo-900">
+            <strong x-text="t('Hanya tugas Anda yang tampil di sini.','Only your own duties appear here.')"></strong>
+            <span x-text="t('Jadwal pengawasan disusun wakil kepala sekolah. Anda memutuskan permintaan ujian ulang untuk ujian yang Anda awasi; keputusan pihak lain dicatat dan tidak bisa ditimpa.','The schedule is built by the vice principal. You decide retake requests for the exams you invigilate; a decision already taken by someone else is recorded and cannot be overwritten.')"></span>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}{% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ reason_note(msg) }}
+    </div>
+    {% endfor %}{% endif %}
+    {% endwith %}
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="card p-5">
+            <p class="text-xs text-surface-500" x-text="t('Pelaksanaan yang Anda awasi','Sittings you invigilate')"></p>
+            <p class="text-3xl font-extrabold text-surface-800 mt-1" data-duty-count="{{ tasks|length }}">{{ tasks|length }}</p>
+        </div>
+        <div class="card p-5">
+            <p class="text-xs text-surface-500" x-text="t('Menunggu keputusan Anda','Awaiting your decision')"></p>
+            <p class="text-3xl font-extrabold text-amber-600 mt-1" data-pending-count="{{ requests|length }}">{{ requests|length }}</p>
+        </div>
+        <div class="card p-5">
+            <p class="text-xs text-surface-500" x-text="t('Tugas berikutnya','Next duty')"></p>
+            <p class="text-sm font-extrabold text-surface-800 mt-2">
+                {% if tasks %}{{ tasks[0].exam_title }} — {{ tasks[0].class_name }}
+                <span class="block text-xs font-medium text-surface-500">{{ (tasks[0].scheduled_at or '')[:16].replace('T', ' ') }}</span>
+                {% else %}<span class="text-surface-400" x-text="t('Belum ada','None yet')"></span>{% endif %}
+            </p>
+        </div>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h2 class="font-extrabold text-surface-800" x-text="t('Jadwal pengawasan saya','My invigilation schedule')"></h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[640px]">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Waktu','When')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Ujian','Exam')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Kelas','Class')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Ruang','Room')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Rekan pengawas','Co-invigilators')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in tasks %}
+                    <tr class="border-t border-surface-100" data-duty="{{ s.id }}">
+                        <td class="px-4 py-2.5 text-surface-600">{{ (s.scheduled_at or '')[:16].replace('T', ' ') }}</td>
+                        <td class="px-4 py-2.5 text-surface-700 font-medium">{{ s.exam_title }}</td>
+                        <td class="px-4 py-2.5 text-surface-600">{{ s.class_name }}</td>
+                        <td class="px-4 py-2.5 text-surface-500">{{ s.room or '—' }}</td>
+                        <td class="px-4 py-2.5 text-surface-600">
+                            {# Setiap pengawas di ruang yang sama, diri sendiri termasuk:
+                               pertanyaan yang dijawab kolom ini adalah "siapa ada di
+                               ruangan itu bersama saya", dan daftar yang menyembunyikan
+                               pembacanya tidak menjawabnya. #}
+                            {% if s.invigilators %}{% for i in s.invigilators %}<span class="block">{{ i.name }}{% if i.is_lead %} <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary-50 text-primary-700" x-text="t('Ketua','Lead')"></span>{% endif %}</span>{% endfor %}
+                            {% else %}<span class="text-surface-400">—</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not tasks %}
+                    <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada tugas pengawasan untuk Anda.','You have no invigilation duty yet.')"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100">
+            <h2 class="font-extrabold text-surface-800" x-text="t('Permintaan ujian ulang','Retake requests')"></h2>
+            <p class="text-xs text-surface-500 mt-1" x-text="t('Hanya permintaan untuk ujian yang Anda awasi. Menyetujui mengembalikan kertas murid itu ke daftar ujiannya.','Only requests for exams you invigilate. Approving returns the paper to the pupil exam list.')"></p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[640px]">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Murid','Pupil')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Ujian','Exam')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Alasan','Reason')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Keputusan','Decision')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in requests %}
+                    <tr class="border-t border-surface-100" data-request="{{ r.id }}">
+                        <td class="px-4 py-2.5 text-surface-700 font-medium">{{ r.student_name }}</td>
+                        <td class="px-4 py-2.5 text-surface-600">{{ r.exam_title }}</td>
+                        <td class="px-4 py-2.5 text-surface-500 max-w-[220px]">{{ r.reason or '—' }}</td>
+                        <td class="px-4 py-2.5">
+                            <form method="POST" action="/teacher/retake-requests/{{ r.id }}/decide" class="flex items-center gap-2">
+                                <input type="text" name="note" maxlength="120" class="px-2 py-1.5 border border-surface-200 rounded-lg text-xs text-surface-700 max-w-[140px]" placeholder="{{ 'Catatan' if lang == 'id' else 'Note' }}">
+                                <button type="submit" name="decision" value="approved" class="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg font-bold text-xs hover:bg-emerald-100 transition" x-text="t('Setujui','Approve')"></button>
+                                <button type="submit" name="decision" value="rejected" class="px-2.5 py-1.5 bg-rose-50 text-rose-700 rounded-lg font-bold text-xs hover:bg-rose-100 transition" x-text="t('Tolak','Reject')"></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not requests %}
+                    <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-surface-400" x-text="t('Belum ada permintaan ujian ulang untuk ujian Anda.','No retake request for your exams yet.')"></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{# Alasan setiap penolakan jadwal pengawasan, dalam dua bahasa.
+
+   Satu berkas, tiga halaman: halaman wakil kepala sekolah, halaman guru, dan hasil
+   unggahan murid. Kalimatnya disimpan di sini karena kuncinya (`REFUSALS` di
+   `app/services/invigilation.py`) hanya punya satu arti — dan dua salinan kalimat
+   adalah dua tempat yang bisa berbeda pendapat tentang apa yang baru saja ditolak.
+
+   Bentuk `['Indonesia', 'English']` dipilih dengan sengaja: `deploy/i18n_coverage.py`
+   mengenali larik dua bahasa sebagai satu unit bilingual, jadi kalimat di partial ini
+   ikut terhitung lantai cakupan walau partial tidak masuk daftar `TRANSLATED` (daftar
+   itu mensyaratkan setiap anggotanya meng-extend `base.html`, dan partial tidak punya
+   toggle untuk dihormati). #}
+{% set REASONS = {
+    'exam_not_in_school': ['Ujian itu bukan milik sekolah ini.', 'That exam does not belong to this school.'],
+    'class_not_in_school': ['Kelas itu bukan milik sekolah ini.', 'That class does not belong to this school.'],
+    'teacher_not_in_school': ['Guru itu bukan guru di sekolah ini.', 'That teacher does not teach at this school.'],
+    'schedule_not_in_school': ['Jadwal itu bukan milik sekolah ini.', 'That sitting does not belong to this school.'],
+    'student_not_in_school': ['Murid itu bukan murid di sekolah ini.', 'That pupil is not enrolled at this school.'],
+    'not_found': ['Barisnya tidak ditemukan lagi — mungkin sudah dihapus.', 'That row is no longer there — it may have been deleted.'],
+    'not_invigilated': ['Anda tidak mengawasi ujian ini, jadi keputusan ini bukan wewenang Anda.', 'You do not invigilate this exam, so this decision is not yours to take.'],
+    'already_decided': ['Permintaan ini sudah diputuskan lebih dulu oleh pengawas atau wakil kepala sekolah.', 'This request was already decided — by an invigilator or the vice principal.'],
+    'already_requested': ['Sudah ada permintaan yang menunggu keputusan untuk ujian ini.', 'There is already a request awaiting a decision for this exam.'],
+    'nothing_to_retake': ['Anda belum mengerjakan ujian ini, jadi belum ada yang bisa diulang.', 'You have not sat this exam yet, so there is nothing to sit again.'],
+    'bad_decision': ['Keputusan hanya boleh disetujui atau ditolak.', 'A decision can only be an approval or a rejection.'],
+    'write_failed': ['Perubahan tidak tersimpan. Coba lagi sebentar lagi.', 'The change was not saved. Please try again in a moment.'],
+    'retake_requested': ['Permintaan ujian ulang sudah dikirim ke pengawas kelas Anda.', 'Your retake request has been sent to your class invigilator.'],
+    'retake_decided': ['Keputusan sudah dicatat.', 'The decision has been recorded.'],
+} %}
+
+
+{# Renders one flashed message. A key from `REASONS` becomes a pair of spans — one per
+   language, chosen in the browser by Alpine, exactly as `auth/_chrome.html`'s
+   `alert_body` does it — and anything else (a Supabase error, a name) is data and is
+   printed as-is in whichever language it arrived in. #}
+{% macro reason_note(value) -%}
+{%- set pair = REASONS.get(value) if value is string else (value if value is sequence and value is not string else none) -%}
+{%- if pair -%}
+<span lang="id" x-show="lang!=='en'" x-cloak>{{ pair[0] }}</span><span lang="en" x-show="lang==='en'" x-cloak>{{ pair[1] }}</span>
+{%- else -%}
+<span>{{ value }}</span>
+{%- endif -%}
+{%- endmacro %}

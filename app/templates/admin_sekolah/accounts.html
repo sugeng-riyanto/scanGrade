@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{# Email akun & aktivasi. Dua hal yang tidak bisa didapat sekolah dari tempat lain:
+   memperbaiki email akun secara massal — emailnya dibuat dari nama saat impor, dan
+   justru email itu yang menerima kode reset — dan melihat berapa akun yang masih
+   memakai password dari kartu login.
+
+   Halaman ini TIDAK membuat akun. Berkas yang menyebut NISN atau NIP yang tidak ada
+   dilaporkan sebagai error di tabel bawah, bukan dijadikan akun baru: yang salah
+   ketik tidak boleh menghasilkan akun dengan password yang tidak pernah dilihat
+   siapa pun. #}
+{% block title %}{{ 'Email & Aktivasi' if lang == 'id' else 'Email & Activation' }} - ScanGrade{% endblock %}
+{% block page_title %}{{ 'Email & Aktivasi' if lang == 'id' else 'Email & Activation' }}{% endblock %}
+{% block content %}
+<div class="space-y-6">
+
+    <div class="bg-indigo-50 rounded-xl p-3 flex items-start gap-3 border border-indigo-200">
+        <i class="fas fa-circle-info text-indigo-500 mt-0.5"></i>
+        <div class="text-xs text-indigo-900">
+            <strong x-text="t('Hanya memperbaiki akun yang sudah ada.','This only repairs accounts that already exist.')"></strong>
+            <span x-text="t('Email adalah tempat kode reset password dikirim, dan salah satu cara murid/guru login. Berkas yang memuat NISN, NIP, atau nama yang tidak ada di sekolah ini dilaporkan sebagai error — tidak ada akun baru yang dibuat di sini.','The email is where a password-reset code is sent, and one of the ways a pupil or teacher signs in. Rows naming a NISN, NIP or name that is not in this school are reported as errors — no account is created here.')"></span>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}{% for cat, msg in messages %}
+    <div class="p-4 rounded-xl text-sm font-semibold flex items-center gap-2 {% if cat == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+        <i class="fas fa-{% if cat == 'success' %}check-circle{% else %}exclamation-circle{% endif %}"></i>{{ msg }}
+    </div>
+    {% endfor %}{% endif %}
+    {% endwith %}
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Unggah -->
+        <div class="card p-5 lg:col-span-2">
+            <h2 class="font-extrabold text-surface-800 mb-1" x-text="t('Unggah email akun','Upload account emails')"></h2>
+            <p class="text-xs text-surface-500 mb-4" x-text="t('Tiga kolom: Peran, Identitas, Email. Peran: murid, guru, kepala, wakil kepala. Identitas: NISN untuk murid, NIP untuk guru, nama lengkap untuk kepala/wakil.','Three columns: Role, Identity, Email. Role: murid, guru, kepala, wakil kepala. Identity: NISN for pupils, NIP for teachers, full name for the head and deputy head.')"></p>
+            <form method="POST" action="/admin-sekolah/emails/upload" enctype="multipart/form-data" class="flex flex-wrap items-center gap-3">
+                <input type="file" name="file" accept=".xlsx,.csv" required
+                       class="block text-sm text-surface-600 file:mr-3 file:px-4 file:py-2 file:rounded-xl file:border-0 file:bg-primary-50 file:text-primary-700 file:font-bold file:text-sm hover:file:bg-primary-100 transition">
+                <button type="submit" class="px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-primary-500/25 transition">
+                    <i class="fas fa-upload mr-1"></i><span x-text="t('Unggah & terapkan','Upload & apply')"></span>
+                </button>
+                <a href="/admin-sekolah/emails/template" class="px-4 py-2 border border-surface-200 rounded-xl font-bold text-sm text-surface-600 hover:bg-surface-50 transition">
+                    <i class="fas fa-download mr-1"></i><span x-text="t('Unduh template','Download template')"></span>
+                </a>
+            </form>
+        </div>
+
+        <!-- Aktivasi -->
+        <div class="card p-5">
+            <h2 class="font-extrabold text-surface-800 mb-1" x-text="t('Belum aktivasi','Not activated yet')"></h2>
+            <p class="text-xs text-surface-500 mb-3" x-text="t('Akun yang masih memakai password dari kartu login. Password itu hanya berlaku sekali.','Accounts still using the password from a login card. That password works once.')"></p>
+            {% if pending %}
+            <ul class="space-y-1.5 text-sm">
+                {% for role, label in [('murid', 'Murid'), ('guru', 'Guru'), ('principal', 'Kepala Sekolah'), ('vice_principal', 'Wakil Kepala Sekolah')] %}
+                <li class="flex items-center justify-between">
+                    <span class="text-surface-600" x-text="t('{{ label }}','{{ {'murid':'Pupils','guru':'Teachers','principal':'Principal','vice_principal':'Vice Principal'}[role] }}')"></span>
+                    <span class="font-extrabold text-surface-800" data-pending-role="{{ role }}">{{ pending.get(role, 0) }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1"
+               x-text="t('Belum bisa dibaca — migrasi 040 belum dijalankan di basis data ini.','Not readable yet — migration 040 has not been run on this database.')"></p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if report %}
+    <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-surface-100 flex flex-wrap items-center gap-3">
+            <h2 class="font-extrabold text-surface-800" x-text="t('Hasil unggahan','Upload result')"></h2>
+            <span class="text-xs font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">{{ report.updated }} <span x-text="t('diperbarui','updated')"></span></span>
+            <span class="text-xs font-bold px-2 py-1 rounded-full bg-surface-100 text-surface-600" data-report-same="{{ report.same }}">{{ report.same }} <span x-text="t('sudah sama','already the same')"></span></span>
+            <span class="text-xs font-bold px-2 py-1 rounded-full bg-red-100 text-red-700" data-report-errors="{{ report.errors }}">{{ report.errors }} <span x-text="t('error','errors')"></span></span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm min-w-[640px]">
+                <thead class="bg-surface-50 text-surface-500">
+                    <tr>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Baris','Row')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Identitas','Identity')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Email baru','New email')"></th>
+                        <th class="text-left px-4 py-3 font-bold" x-text="t('Status','Status')"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in report.rows %}
+                    <tr class="border-t border-surface-100" data-email-row="{{ r.row }}">
+                        <td class="px-4 py-2.5 text-surface-400">{{ r.row }}</td>
+                        <td class="px-4 py-2.5 text-surface-700 font-medium">{{ r.identity }} <span class="text-xs text-surface-400">{{ r.role }}</span></td>
+                        <td class="px-4 py-2.5 text-surface-700">{{ r.email }}{% if r.current and r.current != r.email %}<span class="block text-xs text-surface-400 line-through">{{ r.current }}</span>{% endif %}</td>
+                        <td class="px-4 py-2.5">
+                            {% if r.status == 'update' %}
+                            <span class="text-xs font-bold text-emerald-700" x-text="t('diperbarui','updated')"></span>
+                            {% elif r.status == 'same' %}
+                            <span class="text-xs font-bold text-surface-500" x-text="t('sudah sama','already the same')"></span>
+                            {% else %}
+                            <span class="text-xs font-bold text-red-700">{{ r.reason }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}

@@ -108,6 +108,13 @@ DEFAULT_QUARANTINE_FILE = DEFAULT_STATE_DIR + "/quarantined"
 #: and somebody came to look. This answers "what has been refused lately" from the
 #: records the runner already wrote.
 DEFAULT_REFUSALS_DIR = DEFAULT_STATE_DIR + "/refusals"
+#: Where the runner copies a box-local edit to before it restores the path, so a
+#: release that writes the same file can merge. `dirty_checkout` used to be a
+#: permanent stop — the box could not deploy, so it could not receive the release
+#: that added a way to clear it — and this directory is what replaced that deadlock:
+#: the box's version of each overlapping path, its diff or its bytes, and a record
+#: naming the commit it was moved aside for.
+DEFAULT_BOX_EDITS_DIR = DEFAULT_STATE_DIR + "/set-aside"
 DEFAULT_RELEASE_FILE = "/etc/scangrade-deploy.release"
 DEFAULT_REQUEST_DIR = DEFAULT_STATE_DIR + "/requests"
 #: The runner's record of a refusal that is about the *box* rather than about a
@@ -485,6 +492,137 @@ def refusal_history_state(directory: pathlib.Path, repo: pathlib.Path, *,
                 subjects[sha] = _commit_subject(repo, sha)
             record["subject"] = subjects[sha]
         state["records"].append(record)
+    return state
+
+
+# ── a box-local edit the release also writes ────────────────────────────────
+#
+# The runner refuses on a local change only when the incoming commits write the same
+# path — which is the case where a merge would clobber it. It then sets the box's
+# version aside (a diff, or its bytes for a path HEAD does not have), restores the
+# path, and carries on. The deadlock it replaces was invisible from outside for the
+# same reason the lock heal was: the box fetched every two minutes and deployed
+# nothing, and no card could say why, because a refusal that happens before the merge
+# had no record at all and the checkout only ever looked "1 uncommitted file" dirty.
+#
+# The vocabulary matches the quarantine card's, for the same reason: `present` and
+# `unreadable` need different remedies, absent is the ordinary answer, and a blank
+# must never stand for either.
+BOX_EDITS_NONE = "none"
+BOX_EDITS_PRESENT = "present"
+BOX_EDITS_UNREADABLE = "unreadable"
+BOX_EDITS_KEYS = frozenset({BOX_EDITS_NONE, BOX_EDITS_PRESENT, BOX_EDITS_UNREADABLE})
+#: How many heals the card renders. The runner keeps a bounded few; a reader acts on
+#: the newest, and the count of all of them travels with it.
+BOX_EDITS_SHOWN = 3
+
+
+def _bytes_of(path_text: str | None) -> int | None:
+    """How much was preserved, so a card can say a heal held something."""
+    if not path_text:
+        return None
+    try:
+        return pathlib.Path(path_text).stat().st_size
+    except OSError:
+        return None
+
+
+def _box_edits_record(text: str, *, now: _dt.datetime, name: str) -> dict:
+    """One heal, as the runner wrote it.
+
+    The record is positional on purpose — when, the commit, where the preserved
+    bytes are, then one line per path — so this is a reader and not an interpreter.
+    """
+    lines = text.splitlines()
+    at = lines[0].strip() if lines else None
+    commit = (lines[1].strip() or None) if len(lines) > 1 else None
+    patch = files = None
+    set_aside: list[str] = []
+    kept: list[str] = []
+    for line in lines[2:]:
+        kind, _, value = line.partition(" ")
+        value = value.strip()
+        if kind == "patch":
+            patch = value or None
+        elif kind == "files":
+            files = value or None
+        elif kind == "set-aside" and value:
+            set_aside.append(value)
+        elif kind == "kept" and value:
+            kept.append(value)
+    return {
+        "name": name, "at": at, "commit": commit,
+        "short": commit[:7] if commit else None, "subject": None,
+        "age_seconds": _age_seconds(at, now),
+        "patch": patch, "patch_bytes": _bytes_of(patch),
+        "files": files, "files_present": bool(files and pathlib.Path(files).exists()),
+        "set_aside": set_aside, "set_aside_total": len(set_aside),
+        "kept": kept, "kept_total": len(kept),
+        "unreadable": False, "detail": None,
+    }
+
+
+def box_edits_state(directory: pathlib.Path, repo: pathlib.Path, *,
+                    now: _dt.datetime, limit: int = BOX_EDITS_SHOWN) -> dict:
+    """The last few heals, newest first, with the newest flattened for the card.
+
+    `none`, `present` and `unreadable` are three different answers and the empty
+    directory is `none` rather than an error: a box whose edits have never overlapped
+    a release — most boxes, most of the time — is not a box whose record could not be
+    read. Only being unable to list a directory that is there is `unreadable`.
+
+    A record that cannot be parsed is reported rather than dropped, for the reason
+    the refusal history reports one: a gap in the record is how "nothing was set
+    aside" starts reading as the truth.
+    """
+    state: dict = {
+        "path": str(directory), "key": BOX_EDITS_NONE, "records": [], "total": 0,
+        "shown": limit, "detail": None, "present": False,
+        "at": None, "age_seconds": None, "commit": None, "short": None,
+        "subject": None, "patch": None, "patch_bytes": None, "files": None,
+        "files_present": False, "set_aside": [], "set_aside_total": 0,
+        "kept": [], "kept_total": 0,
+    }
+    try:
+        entries = [entry for entry in directory.iterdir() if entry.suffix == ".txt"]
+    except FileNotFoundError:
+        return state
+    except OSError as exc:                                 # pragma: no cover - rare
+        state["key"] = BOX_EDITS_UNREADABLE
+        state["present"] = False
+        state["detail"] = str(exc)
+        return state
+    # The name is `<utc stamp>-<sha12>-<pid>`, so sorting by name sorts by time and
+    # nothing has to be stat'ed. Newest first: the newest heal is the one a reader is
+    # asking about.
+    entries.sort(key=lambda entry: entry.name, reverse=True)
+    state["total"] = len(entries)
+    if not entries:
+        return state
+    state["key"] = BOX_EDITS_PRESENT
+    state["present"] = True
+    for entry in entries[:limit]:
+        text, detail = _read(entry)
+        if text is None:
+            state["records"].append({
+                "name": entry.name, "at": None, "commit": None, "short": None,
+                "subject": None, "age_seconds": None, "patch": None,
+                "patch_bytes": None, "files": None, "files_present": False,
+                "set_aside": [], "set_aside_total": 0, "kept": [], "kept_total": 0,
+                "unreadable": True, "detail": detail,
+            })
+            continue
+        record = _box_edits_record(text, now=now, name=entry.name)
+        if record["commit"]:
+            # Resolved once per commit: a retried heal names the same commit, and a
+            # page request should not ask git the same question per record.
+            record["subject"] = _commit_subject(repo, record["commit"])
+        state["records"].append(record)
+    newest = state["records"][0]
+    for field in ("at", "age_seconds", "commit", "short", "subject", "patch",
+                  "patch_bytes", "files", "files_present", "set_aside", "kept",
+                  "set_aside_total", "kept_total"):
+        state[field] = newest.get(field)
     return state
 
 
@@ -2044,7 +2182,8 @@ def checkout_state(repo: pathlib.Path, *, now: _dt.datetime) -> dict:
 # ── the verdict ──────────────────────────────────────────────────────────────
 
 def verdict(runner: dict, checkout: dict, *, paused: bool,
-            unarmed: dict | None = None, preflight: dict | None = None) -> dict:
+            unarmed: dict | None = None, preflight: dict | None = None,
+            box_edits: dict | None = None) -> dict:
     """One level and one reason key, in the order the failures actually bite.
 
     A runner that cannot pass Gate 0 is the headline even when the checkout is
@@ -2109,6 +2248,14 @@ def verdict(runner: dict, checkout: dict, *, paused: bool,
         return {**out, "level": level, "key": "refused",
                 "detail": preflight.get("gate") or gate,
                 "behind": checkout.get("behind")}
+    # A heal is a real intervention on the box — something that was there is now in
+    # the state directory instead — and it explains a checkout that is clean, or
+    # clean-but-still-dirty elsewhere. It sits below a refusal, which is a stop, and
+    # above `dirty` and `behind`, which describe a box that is otherwise well.
+    if box_edits and box_edits.get("present"):
+        return {**out, "level": WARN, "key": "box_edits",
+                "detail": box_edits.get("short") or box_edits.get("at"),
+                "behind": checkout.get("behind")}
     if not checkout["available"]:
         return {**out, "level": UNKNOWN, "key": checkout["reason_key"] or "checkout_unreadable",
                 "detail": checkout["detail"]}
@@ -2138,6 +2285,8 @@ REASON_KEYS = frozenset({
     "unarmed",
     # the runner's record of refusing a release *before* it merged it
     "refused",
+    # the runner's record of a local edit it set aside so a release could merge
+    "box_edits",
 })
 
 
@@ -2146,7 +2295,7 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
            preflight_diff_file=None,
            last_stop_file=None, request_dir=None, release_request=None,
            perf_history_file=None, perf_baseline_file=None, refusals_dir=None,
-           now: _dt.datetime | None = None) -> dict:
+           box_edits_dir=None, now: _dt.datetime | None = None) -> dict:
     """Everything the page shows. Any single part may be `unknown` with a reason."""
     now = now or _dt.datetime.now(_dt.timezone.utc)
     repo = pathlib.Path(repo or os.environ.get("SCANGRADE_REPO") or DEFAULT_REPO)
@@ -2189,6 +2338,10 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         refusals_dir or os.environ.get("SCANGRADE_REFUSALS_DIR")
         or DEFAULT_REFUSALS_DIR)
     refusals = refusal_history_state(refusals_dir, repo, now=now)
+    box_edits_dir = pathlib.Path(
+        box_edits_dir or os.environ.get("SCANGRADE_BOX_EDITS_DIR")
+        or DEFAULT_BOX_EDITS_DIR)
+    box_edits = box_edits_state(box_edits_dir, repo, now=now)
     # Every quarantined commit's own measurement, from one read of the same history
     # the perf card reads. Without this only the held commit has numbers: the older
     # refusals keep the runner's prose and lose the evidence behind it.
@@ -2231,7 +2384,7 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "pause_file": str(pause_file),
         "launcher": expect_reason,
         "verdict": verdict(main, checkout, paused=paused, unarmed=unarmed,
-                           preflight=preflight),
+                           preflight=preflight, box_edits=box_edits),
         "quarantine": quarantine,
         "quarantine_file": str(quarantine_file),
         # The same refusals, kept past the lift: what the quarantine card must
@@ -2242,6 +2395,11 @@ def report(*, repo=None, runner=None, snapshot_runner=None, pause_file=None,
         "unarmed_file": str(unarmed_file),
         "preflight": preflight,
         "preflight_file": str(preflight_file),
+        # The box's own version of anything a release had to write over, kept where
+        # the merge could not lose it: what was set aside, for which commit, and
+        # what was deliberately left alone.
+        "box_edits": box_edits,
+        "box_edits_dir": str(box_edits_dir),
         # The vocabulary the two records are read against, and the table the page
         # renders: one source for the codes, one for the steps a record can name.
         "exit_codes": EXIT_CODES,

@@ -111,6 +111,8 @@
                     <span x-text="t('Server ini belum armed untuk memeriksa rilis, jadi runner menolak seluruh proses deploy sebelum mengambil apa pun — tidak ada rilis yang bisa masuk sampai dijalankan: bash deploy/arm-auto-deploy.sh','This box is not armed to check a release, so the runner refuses the whole run before it fetches anything — no release can land until it is armed: bash deploy/arm-auto-deploy.sh')"></span>
                     {% elif v.key == 'refused' %}
                     <span x-text="t('Runner sempat mengambil commit dari GitHub lalu menolak memindahkannya ke checkout, jadi tidak ada rilis yang masuk dan rilis sebelumnya tetap melayani. Langkah yang menolak ada di kartu di bawah.','The runner did fetch the commit from GitHub and then refused to move it into the checkout, so no release landed and the previous one keeps serving. Which step refused is on the card below.')"></span>
+                    {% elif v.key == 'box_edits' %}
+                    <span x-text="t('Runner menyisihkan perubahan lokal pada checkout ini supaya rilis bisa di-merge: versi kotak dari tiap berkas yang bertabrakan disalin lebih dulu, lalu berkasnya dipulihkan, dan rilisnya tetap jalan. Detailnya, termasuk tempat salinannya, ada di kartu di bawah.','The runner set aside a local change in this checkout so a release could merge: the box’s version of each overlapping file was preserved first, then the file was restored, and the release went out. The detail, including where the copies are, is on the card below.')"></span>
                     {% elif v.key == 'behind' %}
                     <span x-text="t('Runner sudah benar, tetapi checkout tertinggal dari origin/main.','The runner is right, but the checkout is behind origin/main.')"></span>
                     {% elif v.key == 'dirty' %}
@@ -344,6 +346,122 @@
                         {% endif %}
                     </div>
                     {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ── the box's own version of a file a release had to write ───────── -->
+    {#
+        A dirty checkout used to be a permanent stop: the runner refused *before*
+        it fetched, so a box with one hand edit could never receive the release that
+        added a way to clear it. The runner now sets the box's version of each
+        overlapping path aside — the diff for a path HEAD has, the whole file for one
+        it does not — restores the path, and merges. Nothing is deleted, and this is
+        where that is visible from outside a shell.
+
+        Three answers, like the quarantine and the refusal history beside it:
+        `none` is the ordinary one; `present` names what was set aside and for which
+        commit; `unreadable` is not `none`, and must never read as it.
+    #}
+    {% set B = status.box_edits %}
+    {% set BP = B.key == 'present' %}
+    {% set BB = {'box': 'bg-surface-50 border-surface-200', 'text': 'text-surface-700', 'icon': 'fa-box-archive'} %}
+    {% set BAM = {'box': 'bg-amber-50 border-amber-200', 'text': 'text-amber-800', 'icon': 'fa-triangle-exclamation'} %}
+    {% set BL = BB if (BP or B.key == 'none') else BAM %}
+    <div class="card p-5 border {{ BL.box }}">
+        <div class="flex items-start gap-4">
+            <i class="fas {{ BL.icon }} {{ BL.text }} text-2xl mt-0.5"></i>
+            <div class="min-w-0 flex-1">
+                <h2 class="font-extrabold {{ BL.text }}">
+                    {% if BP %}
+                    <span x-text="t('Perubahan Lokal yang Disisihkan','A Local Change Set Aside')"></span>
+                    {% elif B.key == 'unreadable' %}
+                    <span x-text="t('Catatan Sisihan Tidak Terbaca','Set-Aside Record Unreadable')"></span>
+                    {% else %}
+                    <span x-text="t('Tidak Ada Perubahan Lokal yang Disisihkan','No Local Change Was Set Aside')"></span>
+                    {% endif %}
+                </h2>
+                <p class="text-sm text-surface-600 mt-1 leading-relaxed">
+                    {% if BP %}
+                    <span x-text="t('Checkout ini pernah berisi perubahan yang belum di-commit pada berkas yang juga ditulis rilis masuk. Daripada menolak tanpa akhir, runner menyalin versi kotak itu lebih dulu — diff-nya untuk berkas yang sudah ada di HEAD, salinan utuhnya untuk berkas yang belum — baru memulihkan berkasnya supaya rilis bisa di-merge. Tidak ada yang dihapus: yang disisihkan masih ada di direktori di bawah, dan perubahan yang tidak bersinggungan dengan rilis dibiarkan apa adanya.','This checkout held an uncommitted change to a file the incoming release also writes. Rather than refusing without end, the runner preserved the box’s version first — a diff for a file HEAD already has, a whole copy for one it does not — and only then restored the file so the release could merge. Nothing was deleted: what was set aside is still in the directory below, and changes that did not overlap the release were left exactly as they were.')"></span>
+                    {% elif B.key == 'unreadable' %}
+                    <span x-text="t('Ada direktori sisihan dan halaman ini tidak bisa membacanya, jadi belum bisa dipastikan runner tidak menyisihkan sesuatu.','There is a set-aside directory and this page cannot read it, so the runner cannot be said to have set nothing aside.')"></span>
+                    {% if B.detail %}<code class="block mt-2 font-mono text-xs text-amber-700 break-all">{{ B.detail }}</code>{% endif %}
+                    {% else %}
+                    <span x-text="t('Belum ada perubahan lokal yang perlu disisihkan. Ini bukan bukti checkout selalu bersih: runner versi lama justru menolak checkout yang sudah kotor sebelum mengambil apa pun, dan penolakan seperti itu tercatat di kartu di atas — bukan di sini.','No local change has had to be set aside yet. That is not proof the checkout has always been clean: an older runner refused a dirty checkout before it fetched anything, and a refusal like that is recorded on the card above — not here.')"></span>
+                    {% endif %}
+                </p>
+
+                {% if BP %}
+                <div class="mt-4">
+                    {% for b in B.records %}
+                    <div class="{% if not loop.first %}pt-4 mt-4 border-t border-surface-200{% else %}pt-2{% endif %} space-y-2">
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 text-sm">
+                            <span class="text-surface-500 shrink-0" x-text="t('Rilis yang memicu','Release that triggered it')"></span>
+                            <span class="text-right min-w-0">
+                                {% if b.short %}
+                                <code class="font-mono text-xs text-surface-700">{{ b.short }}</code>
+                                {% if b.subject %}<span class="block text-xs text-surface-500 break-words">{{ b.subject }}</span>{% endif %}
+                                {% else %}
+                                <code class="font-mono text-xs text-surface-500 break-all">{{ b.name }}</code>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% if b.at %}
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-sm">
+                            <span class="text-surface-500" x-text="t('Disisihkan pada','Set aside at')"></span>
+                            <span class="text-right min-w-0">
+                                <code class="font-mono text-xs text-surface-700">{{ b.at }}</code>
+                                {% if b.age_seconds is not none %}<span class="ml-2 text-xs text-surface-500"><strong>{{ b.age_seconds }}</strong> <span x-text="t('detik','seconds')"></span></span>{% endif %}
+                            </span>
+                        </div>
+                        {% endif %}
+                        {% if b.unreadable %}
+                        <p class="text-xs text-amber-700" x-text="t('Catatan sisihan ini tidak bisa dibaca halaman ini, jadi isinya belum bisa dipastikan.','This set-aside record cannot be read from this page, so what it holds cannot be said.')"></p>
+                        {% if b.detail %}<code class="block font-mono text-[11px] break-all text-amber-800">{{ b.detail }}</code>{% endif %}
+                        {% endif %}
+                        {% if b.set_aside %}
+                        <div>
+                            <p class="text-xs text-surface-500" x-text="t('Versi kotak dari berkas ini disalin lebih dulu, lalu berkasnya dipulihkan:','The box’s version of these files was preserved first, and then the files were restored:')"></p>
+                            <ul class="mt-1 space-y-1">
+                                {% for path in b.set_aside %}
+                                <li class="font-mono text-xs text-surface-700 break-all">{{ path }}</li>
+                                {% endfor %}
+                            </ul>
+                            {% if b.patch %}
+                            <p class="mt-1 text-xs text-surface-500"><span x-text="t('Diff terhadap HEAD:','Diff against HEAD:')></span> <code class="font-mono break-all">{{ b.patch }}</code>{% if b.patch_bytes is not none %} <span class="text-surface-400">({{ b.patch_bytes }} <span x-text="t('bita','bytes')"></span>)</span>{% endif %}</p>
+                            {% endif %}
+                            {% if b.files %}
+                            <p class="mt-1 text-xs text-surface-500"><span x-text="t('Salinan utuh berkas yang belum ada di HEAD:','Whole copies of files HEAD did not have:')></span> <code class="font-mono break-all">{{ b.files }}</code>{% if not b.files_present %} <span class="text-amber-700" x-text="t('(direktori itu sudah tidak ada)','(that directory is gone now)')"></span>{% endif %}</p>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        {% if b.kept %}
+                        <div>
+                            <p class="text-xs text-surface-500" x-text="t('Perubahan lokal yang TIDAK ditulis rilis ini, dan karenanya dibiarkan apa adanya:','Local changes this release did NOT write, and which were therefore left alone:')"></p>
+                            <ul class="mt-1 space-y-1">
+                                {% for path in b.kept %}
+                                <li class="font-mono text-xs text-surface-600 break-all">{{ path }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="mt-4 pt-4 border-t border-surface-200 space-y-2">
+                    <p class="text-[11px] text-surface-500" x-text="t('Berkas yang dipulihkan berarti perubahan kotak itu tidak lagi berlaku. Kalau itu perbaikan yang belum pernah masuk repo, ambil kembali dari diff di atas — jangan dengan mengembalikan berkasnya, karena itu menimpa rilis.','A restored file means that box change is no longer in effect. If it was a fix that never reached the repo, recover it from the diff above — not by restoring the file, which would overwrite the release.')"></p>
+                    {% if B.set_aside_total %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                        <span class="text-surface-500"><strong>{{ B.set_aside_total }}</strong> <span x-text="t('berkas disisihkan pada sisihan terbaru','files set aside in the newest heal')"></span>{% if B.kept_total %} · <strong>{{ B.kept_total }}</strong> <span x-text="t('dibiarkan','left alone')"></span>{% endif %}</span>
+                    </div>
+                    {% endif %}
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                        <span class="text-surface-500"><span x-text="t('Menampilkan','Showing')"></span> {{ B.records|length }} <span x-text="t('dari','of')"></span> {{ B.total }}</span>
+                        <code class="font-mono text-surface-500 break-all">{{ B.path }}</code>
+                    </div>
                 </div>
                 {% endif %}
             </div>

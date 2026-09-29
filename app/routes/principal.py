@@ -1,10 +1,16 @@
 """Kepala sekolah dan wakil kepala sekolah: satu dashboard, dua pembaca.
 
-Kedua peran ini ada untuk **mengawasi**, bukan mengelola. Karena itu blueprint ini
-sengaja hanya punya GET: tidak ada satu pun route di sini yang menulis. Wewenang
-tulis tetap di `admin_sekolah` (data dan akun), dan memisahkannya seperti ini
-membuat "read-only" menjadi sifat struktural halaman — bukan janji di dokumen yang
-bisa dilanggar satu tombol baru tanpa ada yang gagal.
+Kedua peran ini ada untuk **mengawasi**, bukan mengelola. Karena itu semua route
+`/principal/*` tetap hanya GET: "read-only" menjadi sifat struktural halaman, bukan
+janji di dokumen yang bisa dilanggar satu tombol baru tanpa ada yang gagal.
+
+Satu pengecualian, dan hanya satu: **jadwal pengawasan ujian**, yang wewenang
+tulisnya didelegasikan kepada wakil kepala sekolah (lihat matriks di docs/RBAC.md).
+Karena itu seluruh route tulisnya berada di prefiks `/vice-principal/*` dan tidak
+ada satu pun di `/principal/*` — kepala sekolah membuka halaman yang sama dan
+melihat jadwalnya, tanpa satu pun tombol yang menulis. Pemisahan itu diuji, bukan
+diandaikan: `tests/unit/test_invigilation.py` menolak route POST apa pun di bawah
+prefiks kepala sekolah.
 
 Satu fungsi view untuk dua alamat (`/principal/dashboard` dan
 `/vice-principal/dashboard`) karena isinya memang sama: angka sekolah yang sama,
@@ -23,11 +29,13 @@ from __future__ import annotations
 import io
 import logging
 
-from flask import Blueprint, g, redirect, render_template, request, send_file
+from flask import (Blueprint, flash, g, redirect, render_template, request,
+                   send_file)
 
-from app.utils.auth import get_supabase, school_official_required
+from app.utils.auth import (get_supabase, principal_required,
+                            school_official_required, vice_principal_required)
 from app.utils.cache import cache_get, cache_set
-from app.services import analysis_scope, official_insight
+from app.services import analysis_scope, invigilation, official_insight
 
 logger = logging.getLogger(__name__)
 
@@ -325,3 +333,136 @@ def principal_progress():
 @school_official_required
 def vice_principal_progress():
     return _progress("vice_principal")
+
+
+# ── the invigilation schedule ────────────────────────────────────────────────
+#
+# One page for both officials and one function that builds it: the head of school
+# and their deputy read the same schedule, and the difference between them is not
+# the content but the *verbs* — which is expressed by which routes exist, not by a
+# flag inside the template. `can_write` is passed only so the page can decide whether
+# to draw a form at all; the POST routes themselves live behind
+# `vice_principal_required`, so a page that drew the form anyway would still be
+# refused by the route.
+
+def _invigilation_page(role: str):
+    """The schedule, its invigilators, and the retake requests waiting on someone."""
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    supabase = get_supabase()
+    return render_template(
+        "principal/invigilation.html",
+        role=role,
+        base=_base(role),
+        can_write=role == "vice_principal",
+        school=_school(supabase, school_id),
+        schedules=invigilation.list_schedules(supabase, school_id),
+        requests=invigilation.retake_requests(supabase, school_id),
+        options=invigilation.form_options(supabase, school_id),
+    )
+
+
+def _invigilation_refused(out: dict):
+    """Flash whatever the write refused, as a key the page translates.
+
+    The key rather than a sentence: the language lives in the browser, which the
+    server never sees, so the words belong to the template — the same arrangement
+    the auth pages use for their messages.
+    """
+    if not out.get("ok"):
+        flash(out.get("reason") or "write_failed", "error")
+        return False
+    if out.get("reason"):
+        flash(out["reason"], "error")
+        return False
+    return True
+
+
+@principal_bp.route("/principal/invigilation")
+@principal_required
+def principal_invigilation():
+    """Kepala sekolah: jadwal pengawasan sekolahnya, baca saja."""
+    return _invigilation_page("principal")
+
+
+@principal_bp.route("/vice-principal/invigilation")
+@vice_principal_required
+def vice_principal_invigilation():
+    """Wakil kepala sekolah: halaman yang sama, plus wewenang menyusunnya."""
+    return _invigilation_page("vice_principal")
+
+
+@principal_bp.route("/vice-principal/invigilation/save", methods=["POST"])
+@vice_principal_required
+def vice_principal_invigilation_save():
+    """Create or move one sitting. The school is the session's, never the form's."""
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    out = invigilation.save_schedule(
+        get_supabase(), school_id,
+        exam_id=request.form.get("exam_id", ""),
+        class_id=request.form.get("class_id", ""),
+        scheduled_at=request.form.get("scheduled_at", ""),
+        room=request.form.get("room", ""),
+        notes=request.form.get("notes", ""),
+        actor_id=g.get("user_id"),
+    )
+    _invigilation_refused(out)
+    return redirect("/vice-principal/invigilation")
+
+
+@principal_bp.route("/vice-principal/invigilation/<schedule_id>/assign",
+                    methods=["POST"])
+@vice_principal_required
+def vice_principal_invigilation_assign(schedule_id: str):
+    """Put a teacher on a sitting, or make them its lead."""
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    out = invigilation.assign_invigilator(
+        get_supabase(), school_id,
+        schedule_id=schedule_id,
+        teacher_id=request.form.get("teacher_id", ""),
+        is_lead=request.form.get("is_lead") in ("1", "true", "on"),
+        actor_id=g.get("user_id"),
+    )
+    _invigilation_refused(out)
+    return redirect("/vice-principal/invigilation")
+
+
+@principal_bp.route("/vice-principal/invigilation/assignments/<assignment_id>/remove",
+                    methods=["POST"])
+@vice_principal_required
+def vice_principal_invigilation_unassign(assignment_id: str):
+    """Take a teacher off a sitting."""
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    _invigilation_refused(invigilation.remove_assignment(
+        get_supabase(), school_id, assignment_id))
+    return redirect("/vice-principal/invigilation")
+
+
+@principal_bp.route("/vice-principal/retake-requests/<request_id>/decide",
+                    methods=["POST"])
+@vice_principal_required
+def vice_principal_retake_decide(request_id: str):
+    """Decide a retake request as the school's delegated authority.
+
+    No `within_exam_ids` here: a vice principal's authority is the whole school, so
+    there is nothing to narrow. The race with an invigilator deciding at the same
+    moment is closed in the service, not here.
+    """
+    school_id = _school_id()
+    if not school_id:
+        return redirect("/auth/login")
+    out = invigilation.decide_retake(
+        get_supabase(), school_id, request_id,
+        decision=request.form.get("decision", ""),
+        actor_id=g.get("user_id"),
+        note=request.form.get("note", ""),
+    )
+    _invigilation_refused(out)
+    return redirect("/vice-principal/invigilation")
