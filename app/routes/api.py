@@ -16,7 +16,7 @@ from app.utils import lock_health
 from app.decorators.security import require_role, STAFF_ROLES
 from app.services.anti_cheat_service import validate_violation_log
 from app.services.question_types import (
-    earned_points, grade_answer, is_objective, objective_result,
+    complete_weights, earned_points, grade_answer, is_objective, objective_result,
 )
 from app.services.student_import import create_student_account
 from app.utils.logger import get_logger
@@ -1122,6 +1122,10 @@ def grade_batch():
             each = round(100 / len(objective), 2)
             for i in objective:
                 question_weights[str(i)] = each
+    # The same rule as the teacher's own recalculation, because this route is the
+    # other way a paper is marked: a question the map does not cover takes a share of
+    # the remainder rather than silently earning nothing for the teacher's mark.
+    question_weights = complete_weights(question_weights, total_q)
     subs = supabase.table("submissions").select("id,answers,penalty,teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
     graded = 0
     for sub in subs:
