@@ -3177,8 +3177,15 @@ def api_grading_queue(exam_id):
 ANALYTICS_TTL = 300
 
 
+# The roles that read the school's report here. A school admin does not: their
+# reports live at `/admin-sekolah/analytics` and `/admin-sekolah/reports`, the
+# same pages rendered with their own base path. Admitting them here as well is
+# how a move becomes a preference — the school's own address is only the address
+# once this one refuses. `super_admin` stays because there is no other door for
+# a scope that spans every school; `tests/unit/test_admin_reports_home.py` holds
+# the list.
 @teacher_bp.route("/analytics")
-@role_required("guru", "admin_sekolah", "super_admin")
+@role_required("guru", "super_admin")
 def analytics():
     """Performance over the caller's own scope: their exams, their school, or all."""
     supabase = get_supabase()
@@ -3194,7 +3201,7 @@ def analytics():
 
 
 @teacher_bp.route("/analytics/download.csv")
-@role_required("guru", "admin_sekolah", "super_admin")
+@role_required("guru", "super_admin")
 def analytics_csv():
     """The scope's report as a spreadsheet."""
     supabase = get_supabase()
@@ -3212,7 +3219,7 @@ def analytics_csv():
 
 
 @teacher_bp.route("/analytics/download.pdf")
-@role_required("guru", "admin_sekolah", "super_admin")
+@role_required("guru", "super_admin")
 def analytics_pdf():
     """The scope's report as the document a school files."""
     supabase = get_supabase()
@@ -3226,7 +3233,7 @@ def analytics_pdf():
 
 
 @teacher_bp.route("/analytics/print")
-@role_required("guru", "admin_sekolah", "super_admin")
+@role_required("guru", "super_admin")
 def analytics_print():
     """The same report as paper.
 
@@ -3293,7 +3300,7 @@ def _scope_report(supabase, lang, *, date_from=None, date_to=None,
 
 
 @teacher_bp.route("/reports")
-@role_required("guru", "admin_sekolah", "super_admin")
+@role_required("guru", "super_admin")
 def reports_hub():
     """Both reports a caller may file, as an index with a door per document.
 

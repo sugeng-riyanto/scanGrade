@@ -524,11 +524,16 @@ def test_the_page_does_not_pin_its_language_any_more():
 
 @pytest.mark.parametrize("route", ["/analytics", "/analytics/download.csv",
                                    "/analytics/download.pdf", "/analytics/print"])
-def test_every_route_is_guarded_for_the_three_roles_that_have_a_scope(route):
+def test_every_route_is_guarded_for_the_roles_that_read_it_here(route):
     """Source-level, because the decorator is what decides: a route that lost it
-    would answer a student with a report about the school."""
+    would answer a student with a report about the school.
+
+    The school admin is not on the list any more — it reads these same pages at
+    `/admin-sekolah/analytics`, so admitting it here would make the school's own
+    address optional. `tests/unit/test_admin_reports_home.py` holds that list.
+    """
     block = ROUTE_SOURCE.split(f'@teacher_bp.route("{route}")', 1)
     assert len(block) == 2, f"route {route} is gone"
     head = block[1][:400]
-    assert 'role_required("guru", "admin_sekolah", "super_admin")' in head, (
+    assert 'role_required("guru", "super_admin")' in head, (
         f"{route} lost its role guard")

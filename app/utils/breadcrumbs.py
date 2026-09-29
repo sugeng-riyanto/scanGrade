@@ -95,6 +95,11 @@ MACHINE = frozenset({
 ARTIFACT = frozenset({
     "csv", "pdf", "xlsx", "image", "export", "export-data", "bubble-sheet",
     "template", "public", "r",
+    # `/admin-sekolah/emails/template` hands over the spreadsheet a school fills
+    # in to attach account emails. `template` is already an artifact; `emails` is
+    # the mount that download hangs under, and nothing under it is a page — the
+    # crumb is the accounts page the file is built for.
+    "emails",
     # `/teacher/analysis/<exam>/learners.zip` is thirty children's files in one
     # archive: a second artifact with one name, dropped for the same reason
     # `download.xlsx` is — the crumb is the report page it was built from.
@@ -114,6 +119,10 @@ DOORS = frozenset({
     "auth", "login", "login-user", "logout", "forgot-password", "register",
     "activate", "verify-reset-code", "recover", "success", "failure",
     "reset-password",
+    # `/auth/change-password` is reached from a session that is about to be
+    # destroyed and renders `content_noauth` like the doors above, so it shows no
+    # trail either. It is a door, not a page in the reader's area.
+    "change-password",
 })
 
 #: An *address that only redirects*. `/teacher/exams/<id>/proctoring` and

@@ -268,11 +268,13 @@ class TestTheDoorIsGatedToTheRolesThatHaveAScope:
         roles. A role the page admits but the scope does not know renders an empty
         report and no error — and the sidebar would happily offer it.
 
-        The two school officials are the one exception, and it is a *named* one:
-        they have a scope (they read every exam in their school) and their reports
-        live behind their own door, `/principal/analytics` and
-        `/vice-principal/analytics`. Admitting them to this hub would hand them a
-        teacher URL — the exact thing their blueprint exists to avoid. So the
+        Three roles are the exception, and it is a *named* one: each has a scope
+        and each reads these two pages at a door of its own — the two school
+        officials at `/principal/analytics` and `/vice-principal/analytics`, the
+        school admin at `/admin-sekolah/analytics` and `/admin-sekolah/reports`.
+        Admitting any of them here as well would hand them a teacher URL, which is
+        the exact thing those blueprints exist to avoid, and would make the
+        school's own address a preference rather than the address. So the
         assertion is a set difference plus a deliberate absence, not a relaxation.
         """
         match = re.search(r'@teacher_bp\.route\("/reports"\)\s*\n'
@@ -280,10 +282,11 @@ class TestTheDoorIsGatedToTheRolesThatHaveAScope:
                           r'def reports_hub\(', TEACHER)
         assert match, "the reports hub is gone, or is reachable by any role"
         admitted = set(re.findall(r'"(\w+)"', match.group(1)))
-        assert admitted == set(analysis_scope.SCOPE_LABELS) - set(OFFICIAL_READ_ROLES), (
-            "the roles the hub admits are not the roles that have a scope")
-        assert not (admitted & set(OFFICIAL_READ_ROLES)), (
-            "a school official must read their reports at their own address")
+        own_door = set(OFFICIAL_READ_ROLES) | {"admin_sekolah"}
+        assert admitted == set(analysis_scope.SCOPE_LABELS) - own_door, (
+            "the roles the hub admits are not the roles with no door of their own")
+        assert not (admitted & own_door), (
+            "a role with its own address must read its reports there")
 
     def test_a_student_has_no_scope_at_all(self):
         assert "murid" not in analysis_scope.SCOPE_LABELS
@@ -312,12 +315,20 @@ class TestTheSidebarOffersIt:
     """The entry the request was actually about: without it the page exists and
     nobody reaches it."""
 
-    def test_every_scoped_role_gets_exactly_one_entry(self):
+    def test_every_role_that_reads_it_here_gets_exactly_one_entry(self):
         blocks = _sidebar_blocks()
-        for role in ("guru", "admin_sekolah", "super_admin"):
+        for role in ("guru", "super_admin"):
             assert blocks[role].count(f'href="{HUB}"') == 1, (
                 f"the {role} sidebar offers the reports index "
                 f"{blocks[role].count(f'href=\"{HUB}\"')} times")
+
+    def test_the_school_admin_is_offered_its_own_address_instead(self):
+        """The move, seen from the menu: the entry stays, the address changes.
+        Without this the admin has no way to the school's reports at all."""
+        branch = _sidebar_blocks()["admin_sekolah"]
+        assert f'href="{HUB}"' not in branch
+        assert 'href="/admin-sekolah/reports"' in branch, (
+            "the school admin is offered neither the teacher's index nor its own")
 
     def test_a_student_is_not_offered_a_page_it_cannot_open(self):
         """The one entry that would 404/403: a menu item for a role the guard
@@ -339,7 +350,7 @@ class TestTheSidebarOffersIt:
     def test_the_entry_is_bilingual(self):
         """A literal would be the one menu line that stops following the EN/ID
         button — and the sidebar is where that is most visible."""
-        for role in ("guru", "admin_sekolah", "super_admin"):
+        for role in ("guru", "super_admin"):
             link = _sidebar_blocks()[role].split(f'href="{HUB}"', 1)[1]
             label = link.split("</a>", 1)[0]
             assert re.search(r"t\('[^']+','[^']+'\)", label), (
