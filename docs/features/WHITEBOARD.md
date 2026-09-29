@@ -168,9 +168,9 @@ app/
 │   └── js/
 │       ├── whiteboard-canvas.js    # Operasi canvas (reuse dari OMR/ujian)
 │       ├── whiteboard-websocket.js # WebSocket client
-│       ├── whiteboard-slides.js    # Navigasi slide PDF
-│       ├── whiteboard-reactions.js # Quick reaction emoji
 │       └── whiteboard-timer.js     # Timer overlay
+│       # Navigasi slide dan reaksi emoji tidak punya berkas sendiri: keduanya
+│       # hidup inline di whiteboard_canvas.html (lihat Phase 4 di bawah).
 └── __init__.py                     # Daftarin blueprint + SocketIO init
 ```
 
@@ -297,8 +297,8 @@ app/
 |---|------|------|
 | 16 | Canvas engine — pen, eraser, text, highlight, shapes, undo/redo | `whiteboard-canvas.js` |
 | 17 | Toolbar component | inline di template |
-| 18 | Slide navigator — prev/next + thumbnail | `whiteboard-slides.js` |
-| 19 | Quick reaction — emoji bubble 👍 ❓ 🚀 | `whiteboard-reactions.js` |
+| 18 | Slide navigator — prev/next + thumbnail | inline di template (`goToSlide`, bar thumbnail) |
+| 19 | Quick reaction — emoji bubble 👍 ❓ 🚀 | inline di template (`sendReact` → `ws.sendReaction`) |
 | 20 | Timer overlay — set countdown dari guru | `whiteboard-timer.js` |
 | 21 | WebSocket client — connect/reconnect/send/receive | `whiteboard-websocket.js` |
 

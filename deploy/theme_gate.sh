@@ -80,6 +80,19 @@
 #     `question_types.PICKER_TYPES` rather than restated, because it said "3 Tipe
 #     Soal" for a while after the builder had grown to six.
 #
+#   tests/unit/test_static_tree.py
+#     whether every file under app/static is one the app asks for, and whether it
+#     is in a commit at all. The directory is served wholesale, so a scratch file
+#     dropped in it is a page on the site — reachable by anyone who guesses the
+#     name — with no template, no route and no reader; and a file git does not
+#     track is a page that exists on one machine and nowhere else. What counts as
+#     *asked for* is a static URL (`/static/<path>`, `asset_v('<path>')`,
+#     `url_for('static', filename=...)`), a file beside it under app/static that
+#     names it, or a directory the app builds URLs under. A bare mention of the
+#     name is not a reference, and that is load-bearing: a route that answers
+#     `/loaderio-<hash>.html` is exactly how a redundant static copy of that page
+#     went unnoticed in the served tree.
+#
 # All of them belong in this gate because they fail the same way — invisibly,
 # with the page answering 200 and the other theme looking fine.
 #
@@ -114,7 +127,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Word-split on purpose: pytest takes them as separate paths.
-TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py"
+TESTS="tests/unit/test_dark_theme_contrast.py tests/unit/test_tailwind_class_names.py tests/unit/test_theme_stylesheet.py tests/unit/test_language_toggle.py tests/unit/test_i18n_coverage.py tests/unit/test_css_freshness.py tests/unit/test_landing_facilities.py tests/unit/test_static_tree.py"
 
 # ── Armament ─────────────────────────────────────────────────────────────────
 # Everything that makes this a gate: the checks themselves, and the three tools
@@ -227,7 +240,7 @@ if [ "$RC" -eq 0 ]; then
   if [ "$CSS_RC" -eq 0 ]; then
     echo "$SCHEMA_OUT"
     echo "$CSS_OUT"
-    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every page declares the language of its own copy, no template translates less than it did, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds, and every facility the landing page advertises one this repository can show"
+    echo "theme gate: OK — readable in both themes, every named utility is compiled, the committed stylesheet is the one the templates produce, the app's own stylesheet stays a cached file, every file under /static/ is one the app asks for and in a commit, every page declares the language of its own copy, no template translates less than it did, and every table, column and policy the code names is one this repository declares, with every role it compares against one the database holds, and every facility the landing page advertises one this repository can show"
     exit 0
   fi
   echo >&2
@@ -276,6 +289,13 @@ The check names every offender, and the fix depends on which rule failed:
     stylesheet is committed, so any template change that names a new utility
     needs a rebuild to go with it. To see which template asked for which missing
     class before committing: `python deploy/css_freshness.py`.
+
+  a file under /static/ that nothing asks for, or that git does not track:
+  * if it is an asset, have a page ask for it — `/static/<path>`,
+    `asset_v('<path>')` or `url_for('static', filename='<path>')`; or
+  * delete it. `/static/` serves every file below it to anyone who guesses the
+    name, so a scratch page there is a page on the site. A route whose path
+    happens to contain the file's name is not a reference to it.
 
   a page that does not say which language it is in:
   * translate the page and add it to TRANSLATED in tests/unit/test_language_toggle.py;
