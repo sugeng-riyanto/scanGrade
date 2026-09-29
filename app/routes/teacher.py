@@ -17,7 +17,8 @@ from app.services.export_service import export_to_xlsx, export_to_pdf
 from app.services.answer_sheet_generator import generate_answer_sheet
 from app.services.question_types import (
     KIND_CHOICE, KIND_DRAG, KIND_ESSAY, KIND_MATCH, KIND_TRUE_FALSE, MCQ,
-    canonical_type, default_weights, describe_answer, earned_points, essay_marker,
+    canonical_type, complete_weights, default_weights, describe_answer, earned_points,
+    essay_marker,
     grade_answer, has_answer, is_essay, is_objective, normalise_key,
     objective_result, question_kind, scheme_in,
 )
@@ -218,6 +219,11 @@ def _recalculate_scores(exam_id):
     # questions.
     if not question_weights and total_q > 0:
         question_weights = default_weights(question_types, total_q)
+    # A question the map does not cover still has a share — the paper's remainder.
+    # Without this the loop below earns nothing for a teacher's mark on it, because
+    # "no stored weight" and "marked zero" are the same number here, and the paper
+    # the teacher had just corrected kept its 0.
+    question_weights = complete_weights(question_weights, total_q)
     subs = supabase.table("submissions").select("id, answers, penalty, teacher_feedback").eq("exam_id", exam_id).in_("status", ["submitted", "graded", "published"]).execute().data or []
     if not subs:
         return

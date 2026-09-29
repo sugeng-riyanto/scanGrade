@@ -1529,3 +1529,66 @@ def default_weights(
     raw = [objective_pct / len(objective)] * len(objective) if objective else []
     raw += [essay_pct / len(essay)] * len(essay) if essay else []
     return {str(i): point for i, point in zip(order, mark_scheme.normalise_to_100(raw))}
+
+
+def complete_weights(
+    question_weights: Mapping[str, Any] | None,
+    total_questions: int,
+    total: float = 100.0,
+) -> dict[str, Any]:
+    """Every question on the paper gets a share: the priced ones keep theirs, the rest
+    split what is left.
+
+    Why a paper can be missing a question
+    ------------------------------------
+    A paper is priced when it is saved, and a save prices every question it has — but
+    a row can still reach a recalculation with a question its map does not cover. A
+    legacy paper whose essay pool was stored as nothing is one ("Ujian Fisika":
+    three MCQ at 16.67 and two essays with no entry at all); a copy of one is another.
+
+    The recalculations then asked ``weights.get(index, 0)``, found nothing, and
+    dropped whatever the teacher had marked on that question — silently, because an
+    unanswered question and a question the paper does not price look identical from
+    the marks side. A teacher's correction was saved, the save reported success, and
+    the score stayed 0, because the recomputation that ran straight afterwards wrote
+    ``0 + 0 - penalty`` over the number the teacher had just set.
+
+    The rule
+    --------
+    A question with no stored share is given one out of the paper's **remainder**,
+    equally, in tenths so the parts add up to the total exactly. The questions that
+    *are* priced keep their marks byte for byte, which is what keeps this from moving
+    a paper that was already correct: with every question priced there is no
+    remainder and the map comes back unchanged.
+
+    A remainder of nothing is the honest answer rather than a reason to invent marks,
+    so a paper that already spends its whole total is returned as it is.
+    """
+    weights = dict(question_weights or {})
+    if not total_questions:
+        return weights
+
+    indexes = [str(i) for i in range(total_questions)]
+    priced: dict[str, float] = {}
+    for key, value in weights.items():
+        name = str(key)
+        if name not in indexes:
+            continue
+        try:
+            priced[name] = float(value)
+        except (TypeError, ValueError):
+            # A share that is not a number is not a price; it is treated as absent,
+            # which is the same answer a missing key gets.
+            continue
+
+    unpriced = [name for name in indexes if name not in priced]
+    if not unpriced:
+        return weights
+    remainder = round(total - sum(priced.values()), 1)
+    if remainder <= 0:
+        return weights
+
+    units, extra = divmod(int(round(remainder * 10)), len(unpriced))
+    for position, name in enumerate(unpriced):
+        weights[name] = round((units + (1 if position < extra else 0)) / 10, 1)
+    return weights
