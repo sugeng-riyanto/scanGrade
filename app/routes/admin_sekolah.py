@@ -9,6 +9,7 @@ from datetime import datetime, timezone, date
 from flask import Blueprint, render_template, g, request, jsonify, redirect, flash, send_file, current_app
 from openpyxl import load_workbook, Workbook
 from app.utils.auth import admin_sekolah_required, get_supabase, subscription_write_required
+from app.utils.cache import cache_get, cache_set
 from app.utils.helpers import row_or_none
 from app.decorators.security import require_school_access
 from app.services.audit_service import log_activity, log_create, log_update, log_delete
@@ -19,6 +20,7 @@ from app.services.teacher_import import create_teacher_account
 from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
                                           usage_message)
+from app.services import analysis_scope
 from app.services import login_cards
 from app.services import account_emails
 
@@ -2120,3 +2122,166 @@ Dicetak: {paid_at} &mdash; Terima kasih telah menggunakan ScanGrade.
 @admin_sekolah_required
 def admin_comms():
     return render_template("shared/comms.html")
+
+
+# ── the school's own reports ─────────────────────────────────────────────────
+#
+# The same two pages a teacher reads, at the school admin's own addresses. Shared
+# rather than copied: `teacher/reports.html` and `teacher/analytics.html` are
+# rendered with their base paths pointed at this blueprint, so the index's filter
+# form, the CSV, the PDF and the print view all stay inside `/admin-sekolah/`.
+# Two implementations of one report is how the school's numbers and the teacher's
+# numbers start to differ, and the reader would have no way to tell which one to
+# believe.
+#
+# The scope is the shared one: `analysis_scope.report` with the role
+# `admin_sekolah` reads every exam of the reader's **own school** and nothing
+# else. The school id comes from the session and never from the query string —
+# the one rule that keeps a report page from reading another school's children.
+
+#: The two addresses this school reads its reports at. One constant each, so the
+#: sidebar, the index's own form and its three exports cannot name two areas.
+ADMIN_REPORTS_BASE = "/admin-sekolah/reports"
+ADMIN_ANALYTICS_BASE = "/admin-sekolah/analytics"
+
+#: How long one school's report may be reused — the same five minutes the
+#: teacher's page uses. The report is rebuilt from every exam in scope with its
+#: item analysis, so it is worth caching; a quarter of an hour of staleness would
+#: be worse than the cost the cache exists to avoid.
+REPORT_TTL = 300
+
+
+def _scope_report(supabase, lang, *, date_from=None, date_to=None,
+                  school_filter=None, teacher_filter=None):
+    """The school's report, cached per reader, school, language and range.
+
+    The range is in the key for the same reason it is on the teacher's page: a
+    report narrowed to one term is not the report for the year, and serving one
+    as the other prints the wrong totals beside the right rows. The teacher
+    choice is in it for the same reason — the index's list is narrowed by it, and
+    a table narrowed while the totals still count the school is two sizes of one
+    scope printed on one page.
+    """
+    key = (f"admin-analytics:{g.get('user_id')}:"
+           f"{g.get('user_school_id') or '-'}:{lang}:"
+           f"{date_from or ''}:{date_to or ''}:"
+           f"{school_filter or ''}:{teacher_filter or ''}")
+    cached = cache_get(key)
+    if cached:
+        return analysis_scope.from_payload(cached)
+    data = analysis_scope.report(supabase, "admin_sekolah", g.get("user_id"),
+                                 g.get("user_school_id"), lang=lang,
+                                 date_from=date_from, date_to=date_to,
+                                 school_filter=school_filter,
+                                 teacher_filter=teacher_filter)
+    try:
+        cache_set(key, analysis_scope.as_payload(data), ttl=REPORT_TTL)
+    except Exception:                                          # noqa: BLE001
+        pass
+    return data
+
+
+def _kpis(data) -> dict:
+    """The four headline numbers, from the report's own totals."""
+    totals = data["totals"]
+    return {"total_exams": totals["exams"],
+            "total_submissions": totals["participants"],
+            "avg_score": totals["mean"] or 0,
+            "pass_rate": totals["pass_rate"] or 0,
+            "std_dev": totals["sd"] or 0}
+
+
+def _analytics_page(*, print_mode: bool = False):
+    """The school's statistics, read-only, at the school's own address."""
+    supabase = get_supabase()
+    lang = analysis_scope.language(request.args.get("lang"))
+    data = _scope_report(supabase, lang,
+                         date_from=request.args.get("date_from") or None,
+                         date_to=request.args.get("date_to") or None)
+    return render_template(
+        "teacher/analytics.html", report=data, stats=_kpis(data),
+        dist_bins=data["bins"], exam_breakdown=data["rows"],
+        exam_labels=[row["title"][:20] for row in data["rows"]],
+        exam_avgs=[row["mean"] or 0 for row in data["rows"]],
+        exam_medians=[row["median"] or 0 for row in data["rows"]],
+        analysis_base=ADMIN_ANALYTICS_BASE,
+        **({"print_mode": True} if print_mode else {}))
+
+
+def _analytics_file(kind: str):
+    """The school's report as the document a school files or hands on."""
+    supabase = get_supabase()
+    lang = analysis_scope.language(request.args.get("lang"))
+    data = _scope_report(supabase, lang,
+                         date_from=request.args.get("date_from") or None,
+                         date_to=request.args.get("date_to") or None)
+    if kind == "csv":
+        payload = analysis_scope.report_csv(data).encode("utf-8-sig")
+        return send_file(io.BytesIO(payload), mimetype="text/csv", as_attachment=True,
+                         download_name=analysis_scope.filename(data, "csv"))
+    pdf = analysis_scope.report_pdf(data)
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True,
+                     download_name=analysis_scope.filename(data, "pdf"))
+
+
+def _reports_page():
+    """The index of this school's own class and learner reports."""
+    supabase = get_supabase()
+    lang = analysis_scope.language(request.args.get("lang"))
+    date_from = request.args.get("date_from") or None
+    date_to = request.args.get("date_to") or None
+    school_filter = (request.args.get("school_id") or "").strip()
+    teacher_filter = (request.args.get("teacher_id") or "").strip()
+    choices = analysis_scope.scope_choices(
+        supabase, "admin_sekolah", g.get("user_id"), g.get("user_school_id"),
+        date_from=date_from, date_to=date_to)
+    data = _scope_report(supabase, lang, date_from=date_from, date_to=date_to,
+                         school_filter=school_filter,
+                         teacher_filter=teacher_filter)
+    learners = analysis_scope.learners_in_scope(supabase, data["rows"])
+    return render_template(
+        "teacher/reports.html", report=data, learners=learners,
+        learner_keys=[f"{row['name']} {row['exam_title']} {row['school']} "
+                      f"{row['teacher']}".lower() for row in learners],
+        learner_cap=analysis_scope.MAX_LEARNERS,
+        learners_truncated=len(learners) >= analysis_scope.MAX_LEARNERS,
+        scope_choices=choices,
+        # A choice the scope does not offer is not a filter at all — the page
+        # shows "all" beside it and prints the ordinary empty state.
+        school_filter=school_filter if any(o["id"] == school_filter
+                                           for o in choices["schools"]) else "",
+        teacher_filter=teacher_filter if any(o["id"] == teacher_filter
+                                             for o in choices["teachers"]) else "",
+        reports_base=ADMIN_REPORTS_BASE)
+
+
+@admin_sekolah_bp.route("/reports")
+@admin_sekolah_required
+def admin_reports():
+    """Laporan sekolah: setiap dokumen kelas dan murid yang boleh diterbitkan."""
+    return _reports_page()
+
+
+@admin_sekolah_bp.route("/analytics")
+@admin_sekolah_required
+def admin_analytics():
+    """Statistik seluruh ujian sekolah, baca saja."""
+    return _analytics_page()
+
+
+@admin_sekolah_bp.route("/analytics/download.csv")
+@admin_sekolah_required
+def admin_analytics_csv():
+    return _analytics_file("csv")
+
+
+@admin_sekolah_bp.route("/analytics/download.pdf")
+@admin_sekolah_required
+def admin_analytics_pdf():
+    return _analytics_file("pdf")
+
+
+@admin_sekolah_bp.route("/analytics/print")
+@admin_sekolah_required
+def admin_analytics_print():
+    return _analytics_page(print_mode=True)
