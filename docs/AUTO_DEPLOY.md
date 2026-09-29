@@ -1321,6 +1321,74 @@ A **manual** rollback does not write a quarantine — `git reset --hard` by hand
 leaves no record — so after one, the next tick will indeed try the same release
 again. That is the paragraph at the end of this document.
 
+### The dot at the start of ` M`: a CR in the blob, which no checkout can clear
+
+The dirty guard reports the checkout's own words, so a box can look like it is
+refusing a hand edit when the edit is not there:
+
+```
+checkout has local changes - NOT deploying:
+    M app/routes/admin_sekolah.py
+```
+
+That leading space is `git`'s code for *the worktree differs from the index*, and on
+2026-09-30 a box sat on it for hours, refusing **every two minutes**, 12 commits
+behind, with the recovery lever reporting `app/routes/admin_sekolah.py is set aside`
+and the file dirty again on the next tick. It was not an edit. Commit `0afc68e` — the
+commit that box was on — had committed that one file with **108 carriage returns**
+among its 84,502 bytes (the same path has 0 at `ec6fc5c` and on `main`).
+
+The repo carries `*.py text eol=lf`, and the two sides of that comparison are not
+treated alike:
+
+* the **worktree** is read through the clean filter, which normalises CRLF → LF
+  before comparing — so a CRLF worktree is *clean* (this repo's own Windows checkout
+  has ~100 of them and `git status` is empty);
+* the **blob** is compared as stored. A CR in it can therefore never be matched, and
+  nothing on the box moves it: `git checkout -f`, `git checkout HEAD -- <path>`,
+  `git stash` all leave the same ` M`, and `git merge --ff-only` answers `Your local
+  changes to the following files would be overwritten by merge`.
+
+**That last line is why no release can rescue this box.** `local_edits_heal` (and
+`sgfix`'s set-aside) preserve and restore an edit with `git checkout HEAD -- <path>`
+— the one operation that cannot clear this class. The healer runs, reports success,
+and the tree is dirty again.
+
+Such a blob is born from a commit built *around* the filters, which is what a
+scripted commit does: `git hash-object -w --no-filters <path>` followed by
+`git update-index --cacheinfo 100644,<sha>,<path>`. Neither normalises — where
+`git add` would have. The remedy for one is one line, measured (the blob's CR count
+goes 3 → 0):
+
+```
+git add --renormalize <path>
+```
+
+For a box already sitting on such a commit, two lines at the console make the tree
+match whatever the blob holds — the filter is neutralised **locally** (`.git/info/attributes` wins over
+`.gitattributes` and changes nothing in the repository), then
+the blob's own bytes are written verbatim:
+
+```
+printf 'app/routes/admin_sekolah.py -text\n' >> /opt/scangrade/.git/info/attributes
+cd /opt/scangrade && runuser -u scangrade -- sh -c 'git cat-file blob HEAD:app/routes/admin_sekolah.py > app/routes/admin_sekolah.py'
+```
+
+The next tick then fetches, merges and runs every gate normally. After that release
+the blob is CR-free and the attribute is no longer needed (`rm -f
+/opt/scangrade/.git/info/attributes` is safe). The shape is deliberate — it makes
+the commit the box is *on* reproducible, so if a gate refuses and the runner runs
+`git reset --hard $BEFORE`, the worktree is still byte-identical to the blob and the
+box cannot strand itself again. `git fetch origin main` + `git reset --hard
+origin/main` also works and is shorter, but it skips the gates, the migration step
+and the reload, leaving the box on new code that nothing has checked.
+
+`tests/unit/test_committed_line_endings.py` is the guard: it scans the **index and
+`HEAD` blobs** (not the worktree, which legitimately carries CRs here) with `git
+grep -l -I --cached -e $'\r'`, refuses to read a `git` that could not be asked as
+"clean", and names `0afc68e` as the commit that caused this. A scripted commit that
+builds blobs with `hash-object --no-filters` is the thing it exists to catch.
+
 ### The step it stopped at, whatever stopped it
 
 Everything above is written by a branch somebody wrote for a refusal they thought
