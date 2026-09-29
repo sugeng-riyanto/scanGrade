@@ -169,6 +169,9 @@ echo "   each execs $REPO/deploy/*.sh, so none of them can lag behind the repo"
 echo "   (a copy that differs from the checkout now refuses to run: exit 14)"
 echo "   $RECOVER_BIN is the recovery lever: one word on a console with no clipboard"
 echo "   and the only thing installed here whose name is short on purpose"
+echo "   the runner re-points it at the lever it reads out of origin/main on every"
+echo "   tick, so a box that cannot land a release can still obtain it (see"
+echo "   fetch-lever-logic in deploy/scangrade-deploy.sh)"
 
 # ── 2b. Where the snapshots go.
 #       The deploy captures a release that changes supabase/migrations — but

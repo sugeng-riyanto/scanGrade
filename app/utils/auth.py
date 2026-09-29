@@ -402,6 +402,59 @@ def _optional_columns_for_the_select() -> list[str]:
     return [c for c in _OPTIONAL_PROFILE_COLUMNS if not _missing_optional_column(c)]
 
 
+def activation_columns_available() -> bool:
+    """Whether the columns migration 040 adds are known to exist in this process.
+
+    Public because a *writer* needs the same answer the session read already paid
+    for. Reported live: clearing `must_change_password` on a database without the
+    column is refused by PostgREST (``PGRST204``) **after** the password has been
+    replaced by the admin API, so a change that landed was shown as unsaved.
+
+    One column answers for all three — `must_change_password`, `password_changed_at`
+    and `email` are added by one file and applied in one transaction, so they cannot
+    be present one at a time. The newest is the one the opt-in read already tracks.
+    """
+    return not _missing_optional_column("must_change_password")
+
+
+def password_change_record(user_id: str):
+    """Why a completed password change is written down, and where.
+
+    Returned as a ``(fields, write)`` pair rather than a bare dict, because the two
+    callers disagree about what a failure *means* and neither should have to know how
+    the write is made:
+
+    * ``fields`` is empty on a database without migration 040's columns. Asking for a
+      column that is not there is refused *after* the password has already been
+      replaced, and the gate reads an absent marker as False — so there is nothing to
+      write and nothing left undone.
+    * ``write`` performs the update and lets a real failure out, so the caller decides.
+      ``/auth/change-password`` reports it (its page is the only door the reader has);
+      ``/auth/set-new-password`` logs and continues (the password is the reset, and
+      bookkeeping must not tell a visitor their reset failed after it succeeded).
+
+    Two verbs need this — changing a password and resetting one by code — and both are
+    the same fact: this account's owner replaced their own password. Kept in one place
+    because the second copy is a second chance to forget the availability guard, and
+    because ``password_changed_at`` is the school's own record of when a password was
+    last replaced; a path that skips it reports the wrong date for exactly the accounts
+    that replaced their own.
+    """
+    fields = {}
+    if activation_columns_available():
+        from datetime import datetime, timezone
+        fields = {
+            "must_change_password": False,
+            "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def write(supabase) -> None:
+        if fields:
+            supabase.table("profiles").update(fields).eq("id", user_id).execute()
+
+    return fields, write
+
+
 def _fetch_session(token):
     """The two Supabase round-trips: validate the token, then read the profile.
 

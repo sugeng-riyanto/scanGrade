@@ -62,7 +62,12 @@ def test_the_edit_route_normalises_what_it_renders():
     source = ROUTE.read_text(encoding="utf-8")
     route = source.index('@teacher_bp.route("/exams/<exam_id>", methods=["GET", "POST", "DELETE"])')
     get_branch = source.index("if request.method == \"GET\":", route)
-    get_branch = source[get_branch:get_branch + 900]
+    # Slice to the end of the GET branch rather than to a fixed width: the branch
+    # has grown (the builder is handed preview URLs for uploaded media), and a
+    # window that stops mid-branch fails for the wrong reason — it reports "the
+    # render moved" when what moved is the boundary of this test's own reading.
+    end = source.index("title = request.form.get(\"title\")", get_branch)
+    get_branch = source[get_branch:end]
 
     assert "exam_data = _normalise_exam_json(exam_row)" in get_branch, (
         "the exam-edit form is rendered without parsing its jsonb columns, so the "

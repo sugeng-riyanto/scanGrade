@@ -47,7 +47,12 @@
                        language — one pair, both halves literal, and "1 soal" reads
                        "1 question" rather than "1 questions". #}
                     <span><i class="fas fa-question-circle mr-1"></i><span x-text="t('{{ n }} soal', '{{ n }} {{ 'question' if n == 1 else 'questions' }}')"></span></span>
-                    <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes or 60 }} <span x-text="t('menit','min')"></span></span>
+                    {# One rule reads this column (`duration_facts`): `or 60` here
+                       advertised a paper the teacher left open-ended as an hour, and
+                       a paper with no duration at all as the same hour. The number
+                       rides into the pair the way the question count above it does. #}
+                    {% set dur = duration_facts(e.duration_minutes) %}
+                    <span data-duration="{{ 'unlimited' if dur.unlimited else dur.minutes }}"><i class="fas fa-clock mr-1"></i>{% if dur.unlimited %}<span x-text="t('Tak terbatas','Unlimited')"></span>{% else %}<span x-text="t('{{ dur.minutes }} menit','{{ dur.minutes }} min')"></span>{% endif %}</span>
                     {% if has_essay %}<span class="text-amber-600"><i class="fas fa-pencil-alt mr-1"></i><span x-text="t('Esai','Essay')"></span></span>{% endif %}
                 </div>
                 {# The window on the card: the last instant a student may begin, so it is

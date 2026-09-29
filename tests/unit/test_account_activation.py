@@ -571,3 +571,35 @@ class TestTheChangePasswordRoute:
                                 admin_fails=True)
         assert out[0] == "auth/change_password.html" and "error" in out[1], out
         assert not calls["flashed"], "a failed change flashed a success"
+
+    def test_a_database_without_the_flag_column_still_completes_the_change(
+            self, monkeypatch):
+        """Reported live: `PGRST204` on `must_change_password` — migration 040 was not
+        applied, the password had *already* been written by the admin API, and the
+        reader was shown "not saved" for a change that had landed.
+
+        Clearing the flag *records* a change; a database that cannot hold the record
+        must not be able to report the change as lost. Nothing is left undone by
+        skipping it either, because the session read already reads an absent
+        `must_change_password` as False — the pre-040 behaviour, and the honest one.
+        """
+        from app.utils import auth as auth_utils
+        monkeypatch.setattr(auth_utils, "_must_change_unavailable", True)
+        out, calls = self._post(monkeypatch, {"current_password": "kartu",
+                                              "new_password": "panjang-baru",
+                                              "confirm_password": "panjang-baru"})
+        assert calls["admin"] == [("u1", {"password": "panjang-baru"})], calls
+        assert calls["logged"] == [], (
+            "the profile write named a column the database does not have")
+        assert not isinstance(out, tuple), (
+            "a change that landed was reported as unsaved")
+        assert calls["flashed"], "the reader was not told to sign in again"
+
+    def test_the_flag_is_cleared_when_the_column_is_there(self, monkeypatch):
+        """The complement, so the guard above cannot be satisfied by never writing."""
+        from app.utils import auth as auth_utils
+        monkeypatch.setattr(auth_utils, "_must_change_unavailable", False)
+        _out, calls = self._post(monkeypatch, {"current_password": "kartu",
+                                               "new_password": "panjang-baru",
+                                               "confirm_password": "panjang-baru"})
+        assert calls["logged"][0]["must_change_password"] is False, calls

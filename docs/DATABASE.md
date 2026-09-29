@@ -36,7 +36,7 @@ ScanGrade uses Supabase (PostgreSQL) with 22+ tables. All data is isolated by `s
 | school_id | UUID | FK → schools.id |
 | teacher_id | UUID | FK → profiles.id |
 | total_questions | INT | |
-| duration_minutes | INT | |
+| duration_minutes | INT | **0 (or NULL) = unlimited** — see below |
 | passing_score | INT | Default 70 |
 | status | TEXT | draft/active |
 | is_published | BOOLEAN | |
@@ -50,6 +50,19 @@ ScanGrade uses Supabase (PostgreSQL) with 22+ tables. All data is isolated by `s
 | max_attempts | INT | Default 1 |
 | start_at | TIMESTAMPTZ | Scheduled start |
 | is_template | BOOLEAN | |
+
+**`duration_minutes` of 0 is *Tak terbatas / Unlimited*** — the sentinel the teacher
+form offers by that name. Nothing enforces an end for such a paper unless
+`auto_submit_on_window_end` turns `end_at` into one, which is
+`app/utils/exam_window.py::deadline()`. The same module's `duration_facts()` is the
+**only** thing that decides how the value is *written* (`{"unlimited": bool,
+"minutes": int}`), and every page that shows a duration reads it: the exam list, the
+student dashboard, the builder's form (which selects the `Unlimited` option for a
+stored 0 or NULL, and still opens a *new* paper on the form's default hour) and the
+exam paper (which is handed the branch as `durationUnlimited` rather than
+deciding in JavaScript). A page that derives its own fallback — `duration_minutes or
+60` — turns an open-ended paper into an hour, and `tests/unit/test_duration_rule.py`
+fails if one comes back.
 
 ### submissions (student answers)
 | Column | Type | Notes |

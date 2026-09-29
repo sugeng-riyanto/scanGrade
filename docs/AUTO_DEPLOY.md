@@ -1183,6 +1183,99 @@ It is not a quarantine and it does not try to be: a fetch that could not reach
 GitHub is the world's fault, not the commit's, and the next tick simply tries again.
 Nothing in the record decides whether to retry — the exit codes already do.
 
+### A refusal that has repeated is not repeated
+
+The box-local-edit heal (`box-edits-logic`) is what ended the dirty-checkout deadlock:
+a path the release also writes is set aside — a diff against `HEAD` for a tracked path,
+the whole file for one `HEAD` has never seen — and the merge proceeds, on the *first*
+tick. Nothing about it waits for a human.
+
+What it cannot do is complete when the place it writes to is the broken thing: the
+state directory cannot be created, the filesystem holding it is full, `git diff` cannot
+write. Then the same refusal is made again on the next tick, and the one after that,
+about the same paths — a refusal that has become a loop while still reading as
+patience. A box can sit in that state for days, with every gate it never reached
+looking innocent.
+
+So the runner keeps count (`refusal-streak-logic`):
+
+```
+/var/lib/scangrade-deploy/refusal-streak         # how many ticks running
+/var/lib/scangrade-deploy/refusal-streak.paths   # what the refusal was about
+```
+
+Two files, because they answer different questions. The paths are what make two
+refusals *the same* — the same sentence about different files is a different problem,
+so a different path set starts again at one, and a `\r` in the file (it is a file a
+person can edit) is normalised away rather than read as a different refusal. The count
+is what the threshold reads: past `REFUSAL_STREAK_MAX` — three, because the timer ticks
+every two minutes and a stuck box is stuck for hours, so one would degrade on a first
+attempt and a larger number is patience pretending to be policy — the heal stops
+re-attempting the shape that failed.
+
+**What changes** is two things, and each answers a different failure:
+
+* the **directory** moves to `REFUSAL_FALLBACK_DIR`
+  (`/run/scangrade-set-aside`) — tmpfs, and therefore a different filesystem from
+  `/var/lib/scangrade-deploy`, which is the point: the failure being answered *is* a
+  `/var` that is full or read-only;
+* the **shape** keeps the files themselves rather than their diff (`cp`, not
+  `git diff` — a whole file is a superset of its diff, so nothing is lost, only the
+  size), which takes the git that failed out of the pipe.
+
+The choice is made **before** anything is attempted, never in the middle: once a path
+has been moved out of the tree, an attempt somewhere else has already lost its own
+starting state and would try to move a file that is no longer there.
+
+Every run that degrades says so, loudly, and the record names where the evidence went.
+The count is cleared the moment the tree no longer holds the edit the refusal was about,
+and after any release that lands; a stale count would make the next, unrelated stall a
+loop on its first tick. Recording it is bookkeeping and can never fail a run — a box
+whose state directory is the broken thing still refuses for the real reason.
+
+**The honest limit.** This is about a runner from this commit onwards. A runner that
+predates it — one that refuses on *any* local change, before it fetches — cannot be
+reached by any push, which is why the box stranded in that state needs its one console
+visit (see `sgfix` below). What is guaranteed from here is narrower and worth stating:
+a runner that *can* fetch will not make the same refusal forever.
+
+### An edit the release does not write, and nobody is coming back for
+
+The overlap rule answers "would this merge clobber it". It cannot answer the other
+question a dirty checkout raises — is anybody still working on it — and that gap is not
+theoretical: a box carrying one hand edit to a file no release writes is refused by
+nothing, clobbered by nothing and set aside by nothing, so it stays dirty on every tick
+for as long as the box lives, and the change exists nowhere outside the tree. That is
+what this box looked like while it sat eleven commits behind.
+
+So the heal has a second reason to preserve a path (`BOX_EDITS_STALE_SECONDS`, a day):
+a path the release does **not** write, whose own edit is older than that, is treated as
+**stale** — nobody is coming back for it — and is set aside exactly the way an
+overlapping path is. Its diff against `HEAD` (or its bytes, for a path `HEAD` has never
+seen) goes to `/var/lib/scangrade-deploy/set-aside/`, the path is restored, and the
+record names both the preserved copy and the fact that age is why it moved.
+
+Four properties, and each is what keeps this from being a way to lose work:
+
+* **A day, not an hour.** The rule stops a box carrying an *abandoned* edit; anything
+  shorter mistakes somebody's morning for an abandonment. It is one constant in the
+  script, with the reasoning beside it.
+* **Only the path's own mtime can say it.** The refusal memory is cleared on every tick
+  the heal lets through, so it says nothing about age; and a *deletion* leaves no file
+  to date at all. A path that cannot be dated is therefore **not** stale — the same rule
+  as everywhere else here: a reading that failed is not a reason to act.
+* **The record says which reason it was.** `set-aside <path>` names every preserved
+  copy; `stale <path>` names the subset that age moved, so nobody is sent looking for a
+  release that never wrote the file.
+* **The note does not repeat.** A dirty set that has not changed since the newest record
+  names it is not written down again. Otherwise a box with one local edit writes a
+  record every two minutes, and inside a day the newest few the page reads are all the
+  same note — pushing the record of anything that *was* preserved off the card, which is
+  the opposite of what this directory is for.
+
+The page reads all of it: the set-aside card lists the stale paths under their own
+sentence, in both languages, next to the ones a release wrote.
+
 ### The one refusal that heals itself instead of waiting for you
 
 That stale `.git/index.lock` is the reason the runner now looks for it **twice** in
@@ -1287,6 +1380,35 @@ where the length of the command is part of whether the job gets done. It takes n
 argument that aims it (only `--dry-run` and `--help`) — the same rule the deploy
 runner holds — because this is a thing root runs, not a thing anyone steers.
 
+### Where the lever comes from, and why it is not the checkout
+
+A lever installed only by a release that passed is a lever the box that needs it
+cannot receive: the release is what is being refused. So the runner reads it out of
+the **fetched commit** instead, on every tick, before any gate has spoken
+(`fetch-lever-logic`):
+
+* `deploy/scangrade-recover.sh` and `deploy/entrypoint.sh` are read out of
+  `origin/main` with `git show`, which is a read of the object store and touches
+  nothing in the tree;
+* they are written under `/var/lib/scangrade-deploy/lever/deploy/` — the *template*
+  and the *lever* — and `/usr/local/bin/sgfix` is rendered from that tree rather than
+  from the checkout, because the checkout is the one thing a stuck box cannot update;
+* a commit from before the lever existed carries neither file, and that is every
+  box's first tick after this landed: nothing is installed and nothing is said;
+* a lever that does not parse is refused, both blobs are read before either lands, and
+  the install is a rename inside the target's own directory — so a lever that is
+  running keeps the inode it started with, and a tick that changed nothing raises no
+  mtime.
+
+The fetch is the one step that succeeds on a dirty, rolled-back, `refused-before-merge`
+or quarantined checkout — it writes refs and never the tree — which is why this is the
+step the lever hangs off. The block moves nothing: no merge, no reset, no reload. It is
+safe to run on every tick precisely because of that.
+
+The visible consequence: `/usr/local/bin/sgfix` execs
+`/var/lib/scangrade-deploy/lever/deploy/scangrade-recover.sh`, and the checkout's copy
+of that file is only the fallback on a box that has not ticked yet.
+
 ### What it does, in order
 
 1. says why the box is stuck, read from the runner's **own records** (the quarantine,
@@ -1328,11 +1450,51 @@ attempt did — and keeps the newest five, with each set-aside tree going when i
 record goes. A recovery that cannot be read back afterwards is indistinguishable
 from a box somebody broke by hand.
 
-### A box older than the lever
+### A box that cannot fetch at all
 
-The lever is installed by `install-auto-deploy.sh`, and a box that is already stuck
-cannot fetch that either. On a box from before it existed, the console steps are the
-plain ones, and only for this once:
+There is exactly one shape this does not reach, and it is the one the boxes were in
+the day the lever was written: a runner from **before** the fetch-lever code, whose
+dirty check refuses *before* its own fetch. That runner never learns what
+`origin/main` holds, so it can never run the block that would hand it the lever — no
+push can reach it, and the fix for that refusal is carried by the release the refusal
+is holding.
+
+On a box in that state the way out is one line, and it needs no network: it reads the
+lever out of the commit the box has **already fetched** and pipes it into a root bash.
+
+```bash
+sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash'
+```
+
+Three things make that the right shape here rather than a trick. `git show` is a read
+of the object store, so it works on the checkouts this section is about — dirty, rolled
+back, refused or quarantined — where a fetch, an install or a merge does not. It asks
+git as the deploy's **own user** (`runuser -u scangrade`), because a root-side read of a
+checkout owned by `scangrade` is the disagreement the note at the end of this section is
+about. And what it runs is the real lever, not a simplified recovery: a box-local edit is
+set aside **with a patch and a record** rather than stashed, the migrations the live
+schema is missing are applied, one release runs, and the run verifies itself and writes
+down everything it did.
+
+Run that lever without root and it refuses, printing this same line — because a piped
+script has nothing to re-run as root. `git show … | bash` leaves `$0` as the shell's own
+path and `BASH_SOURCE` unset (measured: `bash x.sh` sets both to the file), so the hop it
+used to take handed sudo either whatever `bash` meant in the current directory or the
+shell's own binary, and the recovery did not happen either way, under an error about the
+wrong thing. `BASH_SOURCE` is what the hop is keyed on now.
+
+If the box can still reach GitHub and you want the very newest lever rather than the one
+it already has, put a fetch in front of it. The `;` is deliberate: a fetch that draws no
+credentials must still leave the extracted copy usable.
+
+```bash
+sudo bash -c 'runuser -u scangrade -- git -C /opt/scangrade fetch -q origin; runuser -u scangrade -- git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh | bash'
+```
+
+The one case that line cannot answer is a fetched ref **older than the lever** — a box
+that stalled before `deploy/scangrade-recover.sh` existed. Then `git show` says the path
+is not in that commit, nothing runs, and the plain console steps are all that is left,
+for this once:
 
 ```bash
 sudo -i
@@ -1343,11 +1505,61 @@ systemctl start scangrade-deploy.service
 journalctl -u scangrade-deploy.service -n 60 --no-pager
 ```
 
-Once that release lands, the checkout carries the runner's own heal and this lever,
-and neither shape needs the console again. `--check` reports the lever separately
-from the gates it is armed for: a missing lever is worth saying out loud and is not a
-reason to hold a release, since folding it in would refuse every release on every box
-installed before the lever existed — including the one that installs it.
+One complication from that first run, and it is about *who* git is: the deploy runs as
+`runuser -u scangrade`, so a box-local edit stashed by `root` can leave the deploy
+disagreeing about one path (line endings are the usual reason). Ask git as the deploy
+user rather than as root — `runuser -u scangrade -- git -C /opt/scangrade status
+--porcelain` — and read `--numstat`: a whole-file `N/N` on one path is a line-ending
+rewrite, a small one is a hotfix nobody committed.
+
+Once a release lands on a box carrying the fetch-lever code, the lever is refreshed
+out of `origin/main` on every tick from then on, and the console is not needed for
+this class of stall again. `--check` reports the lever separately from the gates it is
+armed for: a missing lever is worth saying out loud and is not a reason to hold a
+release, since folding it in would refuse every release on every box installed before
+the lever existed — including the one that installs it.
+
+## A release that landed is not a release that is being served
+
+Every other figure on `/super-admin/deploy-status` is read out of a file on the box,
+and all of them can be perfectly happy while the process answering the page is still
+running older code. The merge succeeded, the `systemctl reload` failed or has not
+happened yet, and from the outside the site looks exactly like a box with nothing
+waiting. That was the shape production was in for a day and a half: the checkout had
+fetched, the journal said a release was refused, the site answered, and nothing on the
+page could tell "the code being served is the code the box holds" from "the code being
+served is four commits older".
+
+So the app reads its **own** commit — `app/utils/build_info.py` — and the page places
+it against the checkout's `HEAD`:
+
+| placement | what it means |
+|---|---|
+| `current` | the last release is loaded in this process |
+| `behind` | the checkout moved on and this process never came up on it — a release that landed and was not loaded. The only one of the five that changes the headline verdict |
+| `ahead` | the checkout moved *back* under a running process |
+| `unknown` | the commit is not in this checkout's history at all — a reset, or a process started from elsewhere |
+| `unreadable` | the process could not read its own commit, so nothing is known |
+
+Three decisions make the reading worth trusting, and each is a test:
+
+* **it reads where this code lives, never `SCANGRADE_REPO`.** That variable names the
+  checkout the deploy will act on, and the two agree until a release has moved the
+  checkout past the running process — the one moment the distinction *is* the answer.
+  A process that read its own commit from there would report the checkout's `HEAD`
+  under the name of the running code;
+* **it is read once per process** and handed out by identity. Re-reading it per request
+  would follow the checkout as it moves, which the checkout reading already does; this
+  one has to be fixed until the process is replaced, because that is the fact the page
+  needs;
+* **`unknown` is never a number.** A commit this repository does not have is reported
+  as a reason, not as "zero commits away" — those two are opposite answers, and the
+  second one reads as reassurance.
+
+The reading sits above `dirty` and `behind` in the verdict order, and below every
+stop. Those two describe the *arrangement* — what the next tick would do — and this one
+describes what a student is being served right now; a `refused` record or a heal the
+runner performed is a stop, and a stop stays the headline.
 
 ## Why a reload and not a restart
 

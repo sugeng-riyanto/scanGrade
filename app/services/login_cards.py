@@ -131,15 +131,19 @@ def _group_name(row: dict, kind: str) -> str:
     return (embedded or {}).get("name", "") or ""
 
 
-def _official_rows(supabase, school_id, ids) -> list[dict]:
+def _official_rows(supabase, school_id, ids, emails=None) -> list[dict]:
     """This school's official accounts, in the shape the other kinds return.
 
     Scoped and role-checked in the query, not after it: the sheet is the one artefact
     that leaves the building, and an id belonging to a pupil (or to another school's
-    head teacher) must not be able to turn into a card. ``email`` comes from the
-    mirror column migration 040 adds, which is exactly the read it exists for —
-    ``auth.admin.list_users()`` is paged at 50 accounts, so reading the address per
-    row from Auth would be dozens of round-trips for one school.
+    head teacher) must not be able to turn into a card.
+
+    The address comes from **two** sources, in this order: the auth listing the caller
+    already holds (``emails``), because that is what ``/auth/login-user`` matches for
+    this role, and then the ``profiles.email`` mirror migration 040 adds. Read alone,
+    the mirror printed a blank login line on every official's card — it arrived after
+    the accounts, so all 811 rows on this project have it empty — and for
+    ``principal`` and ``vice_principal`` the email *is* the identity on the card.
     """
     rows = (supabase.table("profiles")
             .select("id, full_name, role, school_id, email")
@@ -149,7 +153,8 @@ def _official_rows(supabase, school_id, ids) -> list[dict]:
             .execute().data) or []
     out = []
     for row in rows:
-        address = (row.get("email") or "").strip()
+        address = (((emails or {}).get(str(row.get("id"))) or "").strip()
+                   or (row.get("email") or "").strip())
         out.append({
             "id": str(row.get("id")),
             "name": row.get("full_name") or "-",
@@ -176,13 +181,18 @@ def collect(supabase, school_id, user_ids, kind, emails=None) -> dict:
         return {"rows": [], "missing": []}
 
     if conf.get("table") is None:
-        out = _official_rows(supabase, school_id, ids)
+        out = _official_rows(supabase, school_id, ids, emails)
         found = {r["id"] for r in out}
         return {"rows": out, "missing": [i for i in ids if i not in found]}
 
+    # ``profiles.email`` rides along as the fallback for a card's address: the caller's
+    # auth listing is what login matches and so wins, but when that read is refused the
+    # mirror keeps the sheet printable instead of blank. Migration 040's mirror column,
+    # and the schema contract already allows an embed to name it.
     rows = (
         supabase.table(conf["table"])
-        .select(f"id, {conf['identity_column']}, profiles!inner(id, full_name, school_id), "
+        .select(f"id, {conf['identity_column']}, "
+                f"profiles!inner(id, full_name, school_id, email), "
                 f"{conf['group_embed']}")
         .in_("id", ids)
         .eq("school_id", school_id)
@@ -198,7 +208,8 @@ def collect(supabase, school_id, user_ids, kind, emails=None) -> dict:
             "name": profile.get("full_name") or "-",
             "identity": str(row.get(conf["identity_column"]) or ""),
             "group": _group_name(row, kind),
-            "email": (emails or {}).get(str(row.get("id")), ""),
+            "email": (((emails or {}).get(str(row.get("id"))) or "").strip()
+                      or (profile.get("email") or "").strip()),
             "password": "",
             "error": "",
         })

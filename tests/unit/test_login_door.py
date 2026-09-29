@@ -22,6 +22,7 @@ These tests drive the real routes as each role and assert *where the reader ends
 up* — and that the page they land on is the one headed for their role — because a
 redirect that is merely role-*aware* can still be pointed at the wrong page.
 """
+import ast
 import re
 import time
 from pathlib import Path
@@ -378,6 +379,14 @@ class TestOneMappingOwnsTheDoors:
         and they are listed so the exception is a decision rather than an
         accident: the rate limiter exempts login *URLs* from its flood bucket,
         and the smoke test walks each role's page by URL.
+
+        Prose is not a copy of a decision, so a docstring that *names* the page in
+        order to explain it is not an offender — the door is spelled where it is
+        chosen. Comments were already skipped for exactly that reason; docstrings
+        were not, and two files that document which page a reader matches were
+        therefore read as a second mapping. The prose is read out of the AST rather
+        than guessed at with a triple-quote regex, which is the guess that would
+        let one form of mention through while refusing another.
         """
         allowed = {
             "app/utils/rate_limiter.py",   # an exempt-path set, not a door choice
@@ -387,9 +396,11 @@ class TestOneMappingOwnsTheDoors:
             rel = str(path.relative_to(ROOT)).replace("\\", "/")
             if rel == "app/utils/auth.py" or rel in allowed:
                 continue
-            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            text = path.read_text(encoding="utf-8")
+            prose = _docstring_lines(text)
+            for i, line in enumerate(text.splitlines(), 1):
                 stripped = line.strip()
-                if stripped.startswith("#"):
+                if i in prose or stripped.startswith("#"):
                     continue
                 if "/auth/login-user" in line:
                     offenders.append(f"{rel}:{i}  {stripped[:90]}")
@@ -397,6 +408,43 @@ class TestOneMappingOwnsTheDoors:
             "the teacher/student door is spelled out outside app/utils/auth.py:\n  "
             + "\n  ".join(offenders)
         )
+
+    def test_a_docstring_about_the_door_is_not_read_as_a_second_copy(self):
+        """The guard above asks where the door is *chosen*.
+
+        Both halves are pinned here, because a skip that is too wide is worse than
+        no skip at all: it would quietly stop reading the code it exists to read.
+        """
+        assert _docstring_lines('"""``/auth/login-user`` is the learner door."""\nX = 1\n') \
+            == {1}
+        assert _docstring_lines('def f():\n    """read /auth/login-user"""\n    pass\n') == {2}
+        assert _docstring_lines('DOOR = "/auth/login-user"\n') == set()
+        assert _docstring_lines('') == set()
+
+
+def _docstring_lines(text):
+    """The line numbers ``text`` spends on docstrings, the module's included.
+
+    A docstring is an expression statement whose value is a string, and only in
+    first position — a bare string anywhere else is code a reader has to see, so it
+    stays in the sweep.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    lines = set()
+    nodes = [tree] + [n for n in ast.walk(tree)
+                      if isinstance(n, (ast.ClassDef, ast.FunctionDef,
+                                        ast.AsyncFunctionDef))]
+    for node in nodes:
+        body = getattr(node, "body", None)
+        if not body or not isinstance(body[0], ast.Expr):
+            continue
+        value = body[0].value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            lines.update(range(value.lineno, (value.end_lineno or value.lineno) + 1))
+    return lines
 
 
 def _function_source(name, module="app/routes/auth.py"):

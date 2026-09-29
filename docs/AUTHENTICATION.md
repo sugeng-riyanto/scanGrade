@@ -177,6 +177,36 @@ POST /auth/register
 
 Pending accounts are redirected to the activation flow and cannot enter protected application pages.
 
+### Issued credentials (a login card's password is a one-time password)
+
+A school does not ask its pupils to register — it issues them credentials. `app/services/login_cards.py`
+writes a random password for each account through the admin API and sets
+`profiles.must_change_password = true`. The address printed beside it comes from Supabase Auth
+(the value `/auth/login-user` matches), with `profiles.email` — the mirror column migration 040 adds —
+as the fallback when the auth listing cannot be read.
+
+Until that password is replaced, the account is admitted but not let in: `login_required` reads
+`g.must_change_password` and redirects every page to `/auth/change-password`. The exempt list is
+exactly the way out a locked reader needs — the change page itself (or the redirect loops), both
+login doors, logout, `/static/`, and `/api/` (a school reprints cards whenever it likes, including
+mid-sitting, and blocking an autosave would lose real answered work for a rule about what the reader
+*sees*, not what they save).
+
+`/auth/change-password` proves the **current** password rather than trusting the open session, writes
+the new one through the admin API, records `must_change_password = false` and `password_changed_at`,
+then destroys the session and lands the reader on their own login door — nothing else in the app can
+prove the new password works, so a fresh sign-in is the only honest end of the flow. Both writes are
+deliberately not one try block: the password is the change, the record only *says* it happened, so a
+database that cannot hold the record must not report a landed change as failed. `password_change_record()`
+in `app/utils/auth.py` is the one place that record is written, and both routes (this page and the
+reset by code) share it.
+
+`/auth/login-user` admits `guru`, `murid`, `principal` and `vice_principal`; `/auth/login` admits the two
+admin roles. A reset by code — `/auth/forgot-password` → `/auth/verify-reset-code` →
+`/auth/set-new-password` — is a password change like any other and clears the same flag, and the
+lookup is role-agnostic: it recognises an account by recovery phone, then NISN (pupil) or
+`employee_id` (teacher), then the address itself, so all six roles can reset without assistance.
+
 ## 10. Login Throttling
 
 Authentication calls are paced before calling Supabase Auth. The implementation can coordinate the pacing through Redis across multiple Gunicorn workers and falls back to an in-process lock when Redis is unavailable.

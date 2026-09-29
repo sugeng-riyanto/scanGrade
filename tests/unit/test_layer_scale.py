@@ -41,6 +41,17 @@ What is asserted, and why each assertion is here:
    escape of exactly the kind the rest of this file closes. `auto` is now a
    declared state beside the scale, taken by name, and a hand-picked reset
    (`z-auto`, `z-index: auto`) is swept for the same way a height is.
+
+   Assertions 5 and 6 read the *built* stylesheet as well as the sources.
+   `app/static/css/tailwind.css` is the one shipped file that is not a source: it
+   is generated, committed and served, and every sweep that opens a template or a
+   script walks past it. That is exactly why it is swept — a height or a reset
+   typed into it reaches a browser, and it is the last file a reviewer thinks to
+   open. The name sweep reads it too, since `.sg-layer-modall` is a `var` and not a
+   number, so neither height sweep can see it. Two sweeps stay sourced-only on
+   purpose: the rule sweep asks which box bounds a panel, and Tailwind's output is
+   full of words that are not panels (`.fixed`, `.absolute`); and the panel sweep
+   parses markup, which generated CSS is not.
 7. Every panel that leaves the flow says where it belongs. Assertions 5 and 6
    catch a height written by hand and a height removed by hand; neither can see a
    panel that names no height *at all*, which is the same defect one step quieter —
@@ -59,6 +70,16 @@ What is asserted, and why each assertion is here:
    detaches it in the same synchronous pass is not a panel at all — the clipboard
    fallback on `/demo` uses a scratch `<textarea>` positioned only to be selected,
    and it is gone before a click can reach it.
+8. Every overlay a script hangs off the document body names a layer *where it is
+   attached*. The three sweeps above read a panel where it is written, and all
+   three can be walked around: a runtime overlay is not in the markup, may carry
+   no rule of its own, and can set its position in a shape the script sweep does
+   not know — `setProperty('position', 'fixed')`, a style string, a class added
+   through `classList`. So this one asks about the attachment instead ("did it
+   name a layer"), which never mentions `position`, and which is why no new
+   spelling of it can slip past. A node hung off the body is outside every page
+   box by construction, so it is an overlay unless it is a scratch node removed in
+   the same pass.
 """
 from __future__ import annotations
 
@@ -71,6 +92,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 THEME_CSS = ROOT / "app" / "static" / "css" / "theme.css"
+#: The stylesheet `npm run css:build` produces from the templates. It is committed
+#: and served, and it is the one shipped file that is not a source — read by no
+#: template sweep, because it is not a template.
+BUILT_CSS = ROOT / "app" / "static" / "css" / "tailwind.css"
 TEMPLATES = ROOT / "app" / "templates"
 SCRIPTS = ROOT / "app" / "static" / "js"
 
@@ -144,6 +169,25 @@ def swept_files() -> list[Path]:
         f"only {len(found)} files found to sweep, so this test may be checking "
         "nothing")
     return found
+
+
+def written_files() -> list[Path]:
+    """Every file a stacking height can be written in *and ship from*.
+
+    The sweeps read the sources — templates, the stylesheet, the scripts this app
+    ships — and one shipped file is not a source: the committed stylesheet is
+    generated. That is exactly why it needs reading. A height in it reaches a
+    browser whatever put it there, whether it was typed in by hand or arrived
+    through a class no template sweep could see (a utility whose name is built at
+    render time, which `test_tailwind_class_names` only catches if someone builds).
+
+    Two sweeps deliberately stay sourced-only: the *rule* sweep asks which box
+    bounds a panel, and Tailwind's output is full of words that are not panels
+    (`.fixed`, `.absolute`, `.sticky`), and the *panel* sweep parses markup, which
+    generated CSS is not. What the built file can do that a template cannot is
+    state a stacking height silently — it is the bytes a browser reads.
+    """
+    return swept_files() + [BUILT_CSS]
 
 
 def raw_heights(text: str) -> list[str]:
@@ -232,9 +276,13 @@ def test_every_layer_has_a_class_that_takes_its_own_line(name):
 def test_nothing_anywhere_chooses_a_stacking_height_by_eye():
     """The assertion this file exists for. Every panel, drawer, dropdown, toast,
     badge and canvas tool names a line of the scale; a number written anywhere is
-    one kept in step by hand, and it is what let three overlays share `9999`."""
+    one kept in step by hand, and it is what let three overlays share `9999`.
+
+    "Anywhere" includes the built stylesheet: it ships, and no template sweep opens
+    it, so a height typed into generated output would otherwise be a release that
+    stacks a panel by a number nobody wrote down."""
     offenders = []
-    for path in swept_files():
+    for path in written_files():
         text = path.read_text(encoding="utf-8")
         for hit in raw_heights(text):
             offenders.append(f"{path.relative_to(ROOT).as_posix()}: {hit}")
@@ -253,6 +301,17 @@ def test_the_sweep_would_notice_a_number_if_one_came_back():
                      'zIndex = "var(--sg-layer-notice)"'):
         assert not raw_heights(innocent), (
             f"the sweep flags a named layer as a number: {innocent}")
+
+
+def test_the_height_sweeps_read_the_built_stylesheet_as_well_as_the_sources():
+    """The built stylesheet is the one shipped file that is not a source: every
+    other sweep opens a template or a script, and none of them opens this. If it
+    is not in the list, a height ships through generated output with nothing to
+    notice — so this pins the one line that puts it there."""
+    assert BUILT_CSS.exists(), f"{BUILT_CSS.name} is not there to sweep"
+    assert BUILT_CSS in written_files(), (
+        "the built stylesheet is not swept, so a height typed into generated "
+        "output ships with no sweep to catch it")
 
 
 def out_state() -> tuple[str, str]:
@@ -322,9 +381,12 @@ def test_nothing_chooses_to_leave_the_stack_by_hand():
     """Assertion 6, the one this addition exists for. A panel that leaves the
     stack names the state; `z-auto` from a template is the same defect as a
     hand-written height, one level down, and it was invisible to the height
-    sweep because `auto` is not a number."""
+    sweep because `auto` is not a number.
+
+    The built stylesheet is swept for the same reason it is swept for a height:
+    a reset in it is a panel leaving the stack, written where no other sweep looks."""
     offenders = []
-    for path in swept_files():
+    for path in written_files():
         text = path.read_text(encoding="utf-8")
         for hit in hand_picked_resets(text):
             offenders.append(f"{path.relative_to(ROOT).as_posix()}: {hit}")
@@ -690,12 +752,141 @@ def test_every_panel_written_as_a_script_says_where_it_belongs():
         "these scripts build a panel with no layer:\n  " + "\n  ".join(offenders))
 
 
-def test_every_layer_name_is_one_the_scale_declares():
-    """A name that is not on the scale resolves to nothing: the class exists, the
-    panel does not, and only document order is left."""
-    known = set(SCALE_CACHE) | NON_LAYER_NAMES
+# ── overlays a script hangs off the body ─────────────────────────────────────
+#
+# The three sweeps above all read a panel where it is *written*: the markup sweep
+# a tag, the rule sweep a declaration, the script sweep the two shapes a script
+# most often uses — `position: fixed` in an assignment, and a class string handed
+# to a created element. A runtime overlay can be positioned in neither:
+# `setProperty('position', 'fixed')` writes it through a call, `style.cssText`
+# hides it in a string, and `classList.add` attaches a class whose rule is the only
+# record of the height. A node hung off `document.body` is the case that matters —
+# it is outside every page box by construction — and none of the three sweeps is
+# guaranteed to see it.
+#
+# So this sweep asks a different question. Not *how is it positioned* — that is
+# what a new shape slips past — but *did it name a layer where it was attached*.
+# The question never mentions `position`, so no spelling of `position` can get
+# around it. The cost is deliberate: any node attached to the body is asked, not
+# only the ones that look like overlays, because recognising an overlay is exactly
+# the reading that failed. Naming a layer, or attaching elsewhere, is one word.
+
+#: Every way a script hangs a node off the document body.
+BODY_ATTACH = re.compile(
+    r"document\.body\s*\.\s*"
+    r"(appendChild|append|prepend|insertBefore|insertAdjacentHTML|replaceChildren)"
+    r"\s*\(")
+
+
+def first_argument(rest: str) -> str:
+    """The first argument of a call, read from just after its opening bracket.
+
+    Only a bare identifier can be followed to its own construction; anything
+    computed comes back as it stands and matches nothing downstream, which is the
+    honest answer for an element this sweep cannot read.
+    """
+    depth = 0
+    for index, char in enumerate(rest):
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return rest[:index].strip()
+            depth -= 1
+        elif char == "," and depth == 0:
+            return rest[:index].strip()
+    return rest.strip()
+
+
+def names_a_layer(text: str) -> bool:
+    """Whether some text names a layer this scale declares — the one acceptance
+    rule every sweep in this file shares."""
+    return any(name in SCALE_CACHE for name in LAYER.findall(text))
+
+
+def body_attach_offenders(text: str, rel: str) -> list[str]:
+    """Overlays attached to the body that name no layer.
+
+    A scratch node is the one exception, and it is read from the same block the
+    attachment is in: the clipboard textareas this app builds select themselves
+    and are gone in the same pass. A node that stays — the watermark, a toast, a
+    calculator — names its layer.
+    """
+    out: list[str] = []
+    for match in BODY_ATTACH.finditer(text):
+        _, block = statement_bounds(text, match.start())
+        if names_a_layer(block):
+            continue
+        node = first_argument(text[match.end():])
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", node):
+            escaped = re.escape(node)
+            if (re.search(rf"\b{escaped}\s*\.\s*remove\s*\(\s*\)", block)
+                    or re.search(rf"removeChild\s*\(\s*{escaped}\b", block)):
+                continue
+        line = text.count("\n", 0, match.start()) + 1
+        out.append(f"{rel}:{line} attaches {node or 'a node'} to the body and "
+                   "names no layer")
+    return out
+
+
+def test_every_overlay_attached_to_the_body_names_a_layer():
+    """Assertion 8. The last way to leave the scale was to build the overlay at
+    runtime and hang it off the body, where no sweep that reads the written page
+    can see how it is stacked."""
     offenders = []
     for path in swept_files():
+        offenders += body_attach_offenders(
+            path.read_text(encoding="utf-8"), path.relative_to(ROOT).as_posix())
+    assert not offenders, (
+        "these scripts attach an overlay to the body without naming a layer, so "
+        "what covers what is decided by document order — and the markup, rule and "
+        "script sweeps cannot see it, because the element did not exist until the "
+        "script ran:\n  " + "\n  ".join(offenders))
+
+
+def test_the_body_attach_sweep_would_notice_an_unnamed_overlay():
+    """A sweep keyed on the attachment rather than on the position is only worth
+    having if it sees every way of attaching, and if it still lets through the two
+    things that are not overlays: a node that names its layer, and a scratch node
+    removed in the same pass."""
+    flagged = [
+        "document.body.appendChild(el);",
+        "el.style.setProperty('position', 'fixed');\ndocument.body.appendChild(el);",
+        "document.body.insertAdjacentHTML('beforeend', "
+        "'<div class=\"fixed inset-0\"></div>');",
+        "console.log('attach');\ndocument.body.append(node);",
+        "document.body.appendChild(this.panel);",
+        "document.body.appendChild(wrapper);",
+    ]
+    for sample in flagged:
+        assert body_attach_offenders(sample, "sample.js"), (
+            f"the sweep misses a body-attached overlay: {sample!r}")
+
+    innocent = [
+        "el.className = 'fixed inset-0 sg-layer-dialog';\n"
+        "document.body.appendChild(el);",
+        "el.style.cssText = 'position: fixed; z-index: var(--sg-layer-notice)';\n"
+        "document.body.appendChild(el);",
+        "document.body.appendChild(el); el.remove();",
+        "document.body.appendChild(ta); ta.select(); document.body.removeChild(ta);",
+        "<div class='sg-layer-dialog'></div>",
+    ]
+    for sample in innocent:
+        assert not body_attach_offenders(sample, "sample.js"), (
+            f"the sweep flags something that is not an unnamed body overlay: "
+            f"{sample!r}")
+
+
+def test_every_layer_name_is_one_the_scale_declares():
+    """A name that is not on the scale resolves to nothing: the class exists, the
+    panel does not, and only document order is left.
+
+    The built stylesheet is read here too, and this is the one shape the two height
+    sweeps cannot see at all: `.sg-layer-modall { z-index: var(--sg-layer-modall) }`
+    is a `var`, not a number, so only the name gives it away."""
+    known = set(SCALE_CACHE) | NON_LAYER_NAMES
+    offenders = []
+    for path in written_files():
         rel = path.relative_to(ROOT).as_posix()
         for name in LAYER.findall(path.read_text(encoding="utf-8")):
             if name not in known:

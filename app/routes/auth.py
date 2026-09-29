@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify, g, session, render_template, redi
 from app.utils.auth import (login_required, get_supabase, get_auth_client, get_auth_admin,
                             find_auth_user_by_email, invalidate_session, set_auth_cookie,
                             login_door_for, session_role, _extract_token,
-                            USER_ROLES, dashboard_for)
+                            USER_ROLES, dashboard_for, password_change_record)
 from app.utils.helpers import row_or_none
 from app.services.audit_service import log_activity
 from app.utils.security import sanitize_input
@@ -842,18 +842,25 @@ def set_new_password():
         get_auth_admin().update_user_by_id(user_id, {"password": password})
         session.pop("reset_email", None)
 
-        # Role-based redirect
-        role_redirects = {
-            "super_admin": "/super-admin/dashboard",
-            "admin_sekolah": "/admin-sekolah/dashboard",
-            "guru": "/teacher/dashboard",
-            "murid": "/student/dashboard",
-        }
-        # The fallback is the door this role belongs on, from the one mapping —
-        # not a third copy of the URL. A known role never reaches it, but a role
-        # the table does not list (a new one, or a profile read that came back
-        # empty) must still land somewhere that can sign that reader in.
-        redirect_url = role_redirects.get(role) or login_door_for(role)
+        # A reset **is** a password change, so it is recorded as one. Without this the
+        # account stays marked as carrying a password the school printed, and the gate
+        # sends the reader to /auth/change-password the moment they sign in with the
+        # password they have just chosen on this page — the one-time rule firing on the
+        # wrong sentence — while `password_changed_at` stays NULL for exactly the
+        # accounts whose owners replaced their own. Best-effort and logged: the password
+        # is the reset, and bookkeeping must never report a completed reset as failed.
+        _fields, record_change = password_change_record(user_id)
+        try:
+            record_change(get_supabase())
+        except Exception as e:
+            current_app.logger.error(
+                f"reset-password record not written for {user_id}: {e}")
+
+        # One mapping for every role, including the two officials — a third copy of
+        # these URLs is a third place a new role is forgotten. An unknown role gets
+        # the admin door, which is what `dashboard_for` answers with no match and
+        # the same page `login_door_for` names when it has no role to go on.
+        redirect_url = dashboard_for(role)
         return render_template("auth/reset_success.html", redirect_url=redirect_url, role=role)
     except Exception as e:
         current_app.logger.error(f"Reset password error: {e}")
@@ -969,6 +976,12 @@ def change_password():
     sign-in uses the new one, and nothing else in this app can prove the new
     password works. The cached session is invalidated first, so the old token stops
     working immediately rather than for the remainder of its TTL.
+
+    The two writes are deliberately **not** one try block. The admin API writes the
+    password; the profile record says the password changed. A database that cannot
+    hold the record (migration 040 not yet applied) must not turn a password that has
+    already been replaced into an error page — see `password_change_record` in
+    `app/utils/auth.py`, which both this page and the by-code reset share.
     """
     from app.services import password_change
 
@@ -998,12 +1011,25 @@ def change_password():
 
     try:
         get_supabase().auth.admin.update_user_by_id(g.user_id, {"password": new})
-        get_supabase().table("profiles").update({
-            "must_change_password": False,
-            "password_changed_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", g.user_id).execute()
     except Exception as e:
         current_app.logger.error(f"change-password failed for {g.user_id}: {e}")
+        log_activity("change_password_failed", "user", g.user_id)
+        return render_template("auth/change_password.html",
+                               error=auth_error("change_not_saved"))
+
+    # The password is the change; the record only *says* it happened, so a profile write
+    # that cannot be made must not report the change as lost. Reported live: on a
+    # database where migration 040 is not applied, PostgREST refuses the update
+    # (``PGRST204``) naming a column that does not exist — the refusal happened *after*
+    # the admin API had already replaced the password, and the reader was shown "not
+    # saved" for a change that had landed. ``password_change_record`` holds both the
+    # fields and that reasoning; this page is the reader's only door, so here a real
+    # failure to record is still reported.
+    _fields, record_change = password_change_record(g.user_id)
+    try:
+        record_change(get_supabase())
+    except Exception as e:
+        current_app.logger.error(f"change-password flag not cleared for {g.user_id}: {e}")
         log_activity("change_password_failed", "user", g.user_id)
         return render_template("auth/change_password.html",
                                error=auth_error("change_not_saved"))

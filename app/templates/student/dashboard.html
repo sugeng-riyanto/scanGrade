@@ -181,7 +181,11 @@
                     <p class="text-sm text-surface-500 font-medium">{{ e.subject or '-' }}</p>
                     <div class="flex gap-3 mt-3 text-xs text-surface-500 font-semibold">
                         <span><i class="fas fa-question-circle mr-1"></i><span x-text="t('{{ e.total_questions }} soal','{{ e.total_questions }} questions')"></span></span>
-                        <span><i class="fas fa-clock mr-1"></i>{{ e.duration_minutes }} min</span>
+                        {# The raw column read "0 min" here while the exam list said an
+                           hour for the same paper; both now ask the one rule that
+                           knows 0 means *Tak terbatas*. #}
+                        {% set dur = duration_facts(e.duration_minutes) %}
+                        <span data-duration="{{ 'unlimited' if dur.unlimited else dur.minutes }}"><i class="fas fa-clock mr-1"></i>{% if dur.unlimited %}<span x-text="t('Tak terbatas','Unlimited')"></span>{% else %}<span x-text="t('{{ dur.minutes }} menit','{{ dur.minutes }} min')"></span>{% endif %}</span>
                     </div>
                     {# The window, on the card: without it a student finds out the exam
                        closed when the button refuses them. `end_at` is the last instant

@@ -60,11 +60,39 @@ class _Query:
 
 
 class _Table:
-    def __init__(self, rows):
+    def __init__(self, rows, recorder=None, refusal=None):
         self._rows = rows
+        self._recorder = recorder
+        self._refusal = refusal
 
     def select(self, *_a, **_k):
         return _Query(list(self._rows))
+
+    def update(self, patch):
+        return _Write(self._recorder, patch, self._refusal)
+
+
+class _Write:
+    """A profile write, recorded — so a test can say what the flow wrote, not only that
+    it wrote. A fake without ``update`` reports a missing write as a broken flow, which
+    is why this exists the moment the flow writes one.
+    """
+
+    def __init__(self, recorder, patch, refusal=None):
+        self._recorder = recorder
+        self._patch = patch
+        self._refusal = refusal
+        self._filters = []
+
+    def eq(self, column, value):
+        self._filters.append((column, value))
+        return self
+
+    def execute(self):
+        if self._refusal:
+            raise RuntimeError(self._refusal)
+        self._recorder.append((self._patch, self._filters))
+        return _Row([])
 
 
 class _Admin:
@@ -109,17 +137,22 @@ class _Admin:
 class _Client:
     """One object serving both roles, exactly as the app wires it."""
 
-    def __init__(self, admin, *, profiles=None, students=None, teachers=None):
+    def __init__(self, admin, *, profiles=None, students=None, teachers=None,
+                 update_refusal=None):
         self._admin = admin
         self._tables = {"profiles": profiles or [], "students": students or [],
                         "teachers": teachers or []}
+        self._update_refusal = update_refusal
+        #: Every profile write the flow made, as ``(patch, filters)``.
+        self.updates = []
 
     @property
     def auth(self):
         return SimpleNamespace(admin=self._admin)
 
     def table(self, name):
-        return _Table(self._tables.get(name, []))
+        return _Table(self._tables.get(name, []), self.updates,
+                      self._update_refusal)
 
 
 def _user(email, uid="u-1"):
@@ -298,3 +331,93 @@ def test_setting_the_new_password_uses_the_service_role_client(monkeypatch):
     user_id, payload = admin.updated[0]
     assert payload.get("password"), "the password was written empty"
     assert user_id, "the write did not name the account it belongs to"
+
+
+# ── a reset is a password change, so it has to be recorded as one ────────────
+
+def _reset(monkeypatch, client, admin, *, email="admin_smp@scan-grade.app"):
+    """Drive ``set_new_password`` through a verified code, and hand back the client."""
+    monkeypatch.setattr(mod, "get_supabase", lambda: client)
+    monkeypatch.setattr(mod, "get_auth_admin", lambda: admin)
+    monkeypatch.setattr(auth_utils, "get_auth_admin", lambda: admin)
+    app = app_instance()
+    with app.test_request_context(
+            "/auth/set-new-password", method="POST",
+            data={"email": email, "password": "new-secret",
+                  "confirm_password": "new-secret"}) as ctx:
+        ctx.session["reset_email"] = email
+        mod.set_new_password()
+
+
+def test_a_reset_clears_the_one_time_marker(monkeypatch):
+    """A reset by code is a password the *owner* chose, so the account must not still
+    be marked as carrying one the school printed.
+
+    Left set, the gate sends the reader to ``/auth/change-password`` the moment they sign
+    in with the password they have just chosen — the one-time rule firing on the wrong
+    sentence — and ``password_changed_at`` stays NULL, so the school's own record of when
+    a password was last replaced is wrong for exactly the accounts that replaced it
+    themselves.
+    """
+    admin = _Admin(PAGE_ONE + [TARGET])
+    client = _Client(admin)
+    _reset(monkeypatch, client, admin)
+
+    assert client.updates, "the reset recorded nothing about the password it changed"
+    patch, filters = client.updates[0]
+    assert patch.get("must_change_password") is False, patch
+    assert patch.get("password_changed_at"), patch
+    assert ("id", "target-1") in filters, filters
+
+
+def test_a_reset_lands_the_two_officials_on_their_own_dashboard(monkeypatch):
+    """The reset page used to keep its own copy of the role URLs — four of the six —
+    and a copy is where a new role is forgotten. `principal` and `vice_principal` were
+    added after that copy was written.
+    """
+    from app.utils.auth import DASHBOARD_FOR_ROLE
+
+    for role, home in (("principal", "/principal/dashboard"),
+                       ("vice_principal", "/vice-principal/dashboard")):
+        admin = _Admin(PAGE_ONE + [TARGET])
+        client = _Client(admin, profiles=[{"id": "target-1", "role": role}])
+        seen = {}
+        monkeypatch.setattr(mod, "render_template",
+                            lambda tpl, **kw: seen.update(kw) or tpl)
+        _reset(monkeypatch, client, admin)
+        assert seen.get("redirect_url") == home, (role, seen)
+        assert seen.get("role") == role, (role, seen)
+        assert DASHBOARD_FOR_ROLE[role] == home, "the one mapping disagrees with the route"
+
+
+def test_a_reset_on_a_database_without_the_columns_still_succeeds(monkeypatch):
+    """Migration 040 adds both columns. On a box without it the marker write is refused
+    by PostgREST *after* the password is already the new one, so the record is skipped
+    rather than allowed to turn a completed reset into a failure page — the gate reads
+    an absent marker as False, so nothing is left undone either.
+    """
+    admin = _Admin(PAGE_ONE + [TARGET])
+    client = _Client(admin)
+    monkeypatch.setattr(auth_utils, "_must_change_unavailable", True)
+    _reset(monkeypatch, client, admin)
+
+    assert admin.updated, "the password was not written"
+    assert not client.updates, (
+        "the reset recorded a marker on a database whose column does not exist")
+
+
+def test_a_refused_marker_never_reports_the_reset_as_failed(monkeypatch):
+    """The password is the reset. Bookkeeping that fails afterwards costs the reader one
+    extra change at worst; telling them the reset failed costs them the password they
+    just chose — they would open the flow again with a password that no longer works.
+    """
+    admin = _Admin(PAGE_ONE + [TARGET])
+    client = _Client(admin, update_refusal="column does not exist")
+    seen = {}
+    monkeypatch.setattr(mod, "render_template",
+                        lambda tpl, **kw: seen.update({"tpl": tpl, **kw}) or tpl)
+    _reset(monkeypatch, client, admin)
+
+    assert admin.updated, "the password was not written"
+    assert seen.get("tpl") == "auth/reset_success.html", seen
+    assert "error" not in seen, "a completed reset was reported as failed"

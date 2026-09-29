@@ -113,6 +113,13 @@
                     <span x-text="t('Runner sempat mengambil commit dari GitHub lalu menolak memindahkannya ke checkout, jadi tidak ada rilis yang masuk dan rilis sebelumnya tetap melayani. Langkah yang menolak ada di kartu di bawah.','The runner did fetch the commit from GitHub and then refused to move it into the checkout, so no release landed and the previous one keeps serving. Which step refused is on the card below.')"></span>
                     {% elif v.key == 'box_edits' %}
                     <span x-text="t('Runner menyisihkan perubahan lokal pada checkout ini supaya rilis bisa di-merge: versi kotak dari tiap berkas yang bertabrakan disalin lebih dulu, lalu berkasnya dipulihkan, dan rilisnya tetap jalan. Detailnya, termasuk tempat salinannya, ada di kartu di bawah.','The runner set aside a local change in this checkout so a release could merge: the box’s version of each overlapping file was preserved first, then the file was restored, and the release went out. The detail, including where the copies are, is on the card below.')"></span>
+                    {#
+                        The one reading on this page that describes what is being
+                        *served* rather than what the next tick would do: the merge
+                        landed and the process never came up on it.
+                    #}
+                    {% elif v.key == 'running_behind' %}
+                    <span x-text="t('Proses yang menjawab halaman ini masih menjalankan kode yang lebih lama daripada checkout-nya: sebuah rilis sudah masuk ke checkout, tetapi proses ini belum memuatnya. Situs tetap melayani versi sebelumnya.','The process answering this page is still running code older than its own checkout: a release has landed in the checkout and this process never loaded it. The site keeps serving the previous version.')"></span>
                     {% elif v.key == 'behind' %}
                     <span x-text="t('Runner sudah benar, tetapi checkout tertinggal dari origin/main.','The runner is right, but the checkout is behind origin/main.')"></span>
                     {% elif v.key == 'dirty' %}
@@ -436,6 +443,16 @@
                             {% if b.files %}
                             <p class="mt-1 text-xs text-surface-500"><span x-text="t('Salinan utuh berkas yang belum ada di HEAD:','Whole copies of files HEAD did not have:')></span> <code class="font-mono break-all">{{ b.files }}</code>{% if not b.files_present %} <span class="text-amber-700" x-text="t('(direktori itu sudah tidak ada)','(that directory is gone now)')"></span>{% endif %}</p>
                             {% endif %}
+                        </div>
+                        {% endif %}
+                        {% if b.stale %}
+                        <div>
+                            <p class="text-xs text-surface-500" x-text="t('Perubahan lokal ini sudah lama tidak disentuh — lebih lama dari ambang batas runner — jadi disisihkan tanpa menunggu ada rilis yang menulisnya:','These local changes had stood untouched for longer than the runner’s threshold, so they were set aside without waiting for a release to write them:')"></p>
+                            <ul class="mt-1 space-y-1">
+                                {% for path in b.stale %}
+                                <li class="font-mono text-xs text-surface-700 break-all">{{ path }}</li>
+                                {% endfor %}
+                            </ul>
                         </div>
                         {% endif %}
                         {% if b.kept %}
@@ -1235,11 +1252,12 @@
     </div>
 
     <!-- ── the numbers ──────────────────────────────────────────────────── -->
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-4">
         {#
             First, and deliberately so: "how far behind is the *runner*" is the
             number that answers "which fixes are missing", and it is the one nobody
-            could get without a shell. The checkout's own figures follow.
+            could get without a shell. The checkout's own figures follow — and the
+            last one is the only figure here about the code being *served*.
         #}
         <div class="card p-4">
             {% if status.runner.origin_behind is not none and status.runner.origin_behind > 0 %}
@@ -1252,6 +1270,14 @@
         <div class="card p-4">
             <p class="text-2xl font-extrabold text-surface-800">{{ status.checkout.behind if status.checkout.behind is not none else '—' }}</p>
             <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('Commit Tertinggal','Commits Behind')"></p>
+        </div>
+        <div class="card p-4">
+            {% if status.checkout.running.behind is not none and status.checkout.running.behind > 0 %}
+            <p class="text-2xl font-extrabold text-rose-700">{{ status.checkout.running.behind }}</p>
+            {% else %}
+            <p class="text-2xl font-extrabold text-surface-800">{{ status.checkout.running.behind if status.checkout.running.behind is not none else '—' }}</p>
+            {% endif %}
+            <p class="text-xs font-bold text-surface-500 mt-1" x-text="t('Tertinggal (kode yang dilayani)','Behind (code being served)')"></p>
         </div>
         <div class="card p-4">
             <p class="text-2xl font-extrabold text-surface-800">{{ status.checkout.ahead if status.checkout.ahead is not none else '—' }}</p>
@@ -1380,6 +1406,50 @@
                 <span class="text-surface-500" x-text="t('Pembacaan itu berumur','That reading is')"></span>
                 <span class="text-surface-700">
                     {% if status.checkout.origin_age_seconds is not none %}<strong>{{ status.checkout.origin_age_seconds }}</strong> <span x-text="t('detik','seconds')"></span>
+                    {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
+                </span>
+            </div>
+            {#
+                The gap the other rows cannot see: every figure above is read out of
+                a file on the box and can be perfectly happy while the process
+                answering this very page serves older code.
+            #}
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <span class="text-surface-500 shrink-0" x-text="t('Kode yang menjawab halaman ini','The code answering this page')"></span>
+                <span class="text-right min-w-0">
+                    {% if status.checkout.running.available and status.checkout.running.commit %}
+                    <code class="font-mono text-xs text-surface-700">{{ status.checkout.running.commit }}</code>
+                    {% if status.checkout.running.subject %}<span class="block text-xs text-surface-500 break-words">{{ status.checkout.running.subject }}</span>{% endif %}
+                    {% else %}
+                    <span class="text-xs text-surface-500" x-text="t('proses ini tidak bisa membaca commit-nya sendiri','this process cannot read its own commit')"></span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <span class="text-surface-500 shrink-0" x-text="t('Dibandingkan dengan HEAD checkout','Against the checkout’s HEAD')"></span>
+                <span class="text-right min-w-0">
+                    {% if status.checkout.running.key == 'current' %}
+                    <span class="text-xs font-bold text-emerald-700" x-text="t('sama — rilis terakhir sudah dimuat proses ini','the same — the last release is loaded in this process')"></span>
+                    {% elif status.checkout.running.key == 'behind' %}
+                    <span class="text-xs font-bold text-rose-700">
+                        <span x-text="t('rilis mendarat di checkout tetapi belum dimuat proses ini','a release landed in the checkout and this process never loaded it')"></span>
+                        {% if status.checkout.running.behind is not none %}<span class="ml-1">{{ status.checkout.running.behind }}</span> <span x-text="t('commit','commits')"></span>{% endif %}
+                    </span>
+                    {% elif status.checkout.running.key == 'ahead' %}
+                    <span class="text-xs font-bold text-amber-700" x-text="t('checkout mundur setelah proses ini dimulai, jadi yang dilayani justru lebih baru daripada HEAD','the checkout moved back after this process started, so what is served is newer than HEAD')"></span>
+                    {% elif status.checkout.running.key == 'unknown' %}
+                    <span class="text-xs font-bold text-amber-700" x-text="t('commit ini tidak ada di riwayat checkout ini — kotak mungkin pernah di-reset, atau prosesnya dimulai dari tempat lain','this commit is not in this checkout’s history — the box may have been reset, or the process started somewhere else')"></span>
+                    {% elif status.checkout.running.key == 'unreadable' %}
+                    <span class="text-xs text-surface-500" x-text="t('tidak bisa dinilai — proses ini tidak melaporkan commit yang dilayaninya','cannot be judged — this process reported no commit of its own')"></span>
+                    {% else %}
+                    <span class="text-surface-500">—</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span class="text-surface-500" x-text="t('Kode ini dimuat, berumur','This code was loaded, and is')"></span>
+                <span class="text-surface-700">
+                    {% if status.checkout.running.age_seconds is not none %}<strong>{{ status.checkout.running.age_seconds }}</strong> <span x-text="t('detik lalu','seconds ago')"></span>
                     {% else %}<span x-text="t('tidak diketahui','unknown')"></span>{% endif %}
                 </span>
             </div>

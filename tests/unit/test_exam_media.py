@@ -197,11 +197,18 @@ class TestAnUnplayableLinkIsSaidOutLoud:
 
     def test_the_student_page_refuses_instead_of_drawing_nothing(self):
         source = STUDENT_PAGE.read_text(encoding="utf-8")
-        assert source.count("data-media-refused") == 2, (
-            "expected one refusal note for audio and one for video in the exam page"
+        # Three ways a question's media ends up silent, each with its own note: a
+        # pasted link that could not be read, a hosted video that could not be
+        # fetched, and a pasted YouTube link that is not a readable video. A hosted
+        # *audio* file reuses the first note — the same element, the same sentence.
+        assert source.count("data-media-refused") == 3, (
+            "a silent question lost its refusal note in the exam page"
         )
         assert "tidak bisa dimuat" in source and "cannot be loaded" in source, (
             "the refusal is not bilingual"
+        )
+        assert source.count("t('Audio soal tidak bisa dimuat") == 1, (
+            "the audio refusal is no longer the one sentence both shapes show"
         )
 
     def test_the_players_are_gated_on_the_resolved_url(self):

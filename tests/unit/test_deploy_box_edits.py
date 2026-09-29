@@ -49,13 +49,15 @@ def _now():
 
 def record_text(sha: str = SHA_A, *, when: str = WHEN,
                 set_aside: tuple[str, ...] = ("app/routes/admin_sekolah.py",),
-                kept: tuple[str, ...] = (), patch: str | None = "patch",
+                stale: tuple[str, ...] = (), kept: tuple[str, ...] = (),
+                patch: str | None = "patch",
                 files: str = "") -> str:
     """One heal record, in the positional format `box_edits_record` writes."""
     lines = [when, sha,
              f"patch {patch or ''}",
              f"files {files}"]
     lines += [f"set-aside {path}" for path in set_aside]
+    lines += [f"stale {path}" for path in stale]
     lines += [f"kept {path}" for path in kept]
     return "\n".join(lines) + "\n"
 
@@ -122,6 +124,33 @@ class TestTheReader:
         assert state["patch_bytes"] == patch.stat().st_size, (
             "the card must be able to say the preserved bytes are really there")
         assert state["age_seconds"] is not None
+
+    def test_a_path_set_aside_for_being_stale_says_so(self, tmp_path):
+        """Two reasons start the set-aside now, and they need different answers from
+        an operator: one means the release wrote the file, the other means nobody had
+        touched it for a day and the runner decided it was abandoned."""
+        directory = edits_dir(tmp_path, [
+            ("20260926T050001Z-aaaaaaaaaaaa-1",
+             record_text(SHA_A, set_aside=("notes.txt",), stale=("notes.txt",),
+                         kept=("README.md",))),
+        ])
+        state = status.box_edits_state(directory, tmp_path, now=_now())
+        assert state["set_aside"] == ["notes.txt"], (
+            "the preserved copy is not named at all, so the record does not say where "
+            "the box's version went")
+        assert state["stale"] == ["notes.txt"], (
+            "the record does not say the edit was old rather than overlapping")
+        assert state["stale_total"] == 1
+
+    def test_a_path_set_aside_because_the_release_writes_it_is_not_called_stale(
+            self, tmp_path):
+        """A record written before the staleness rule existed — and every record for
+        an overlap — has no `stale` line, and must not read as if it had one."""
+        directory = edits_dir(tmp_path, [
+            ("20260926T050001Z-aaaaaaaaaaaa-1", record_text(SHA_A)),
+        ])
+        state = status.box_edits_state(directory, tmp_path, now=_now())
+        assert state["stale"] == [] and state["stale_total"] == 0
 
     def test_a_record_that_cannot_be_read_is_reported_and_not_dropped(self, tmp_path):
         directory = edits_dir(tmp_path, [
@@ -330,6 +359,25 @@ class TestThePage:
         directory = self._record(tmp_path)
         html = render_status(app, self.report(tmp_path, directory))
         assert html.count("t('") >= 8
+
+    def test_the_card_says_when_an_edit_was_set_aside_for_being_stale(self, app,
+                                                                     tmp_path):
+        """The rule acts on age, not on an overlap, so the card has to say so — a
+        reader who is told only "set aside" would go looking for the release that
+        wrote the file, and there is not one."""
+        patch = tmp_path / "heal.patch"
+        patch.write_text("diff --git a/x b/x\n+the box's line\n", encoding="utf-8")
+        directory = edits_dir(tmp_path, [
+            ("20260926T050001Z-aaaaaaaaaaaa-1",
+             record_text(SHA_A, set_aside=("notes.txt",), stale=("notes.txt",),
+                         patch=str(patch))),
+        ])
+        html = render_status(app, self.report(tmp_path, directory))
+        assert "notes.txt" in html
+        assert "had stood untouched for longer than the runner" in html, (
+            "the card does not say the edit was stale, so a preserved copy reads as an "
+            "overlap the release never had")
+        assert "sudah lama tidak disentuh" in html, "the sentence is not bilingual"
 
     def test_the_card_names_the_set_aside_directory(self, app, tmp_path):
         directory = self._record(tmp_path)

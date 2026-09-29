@@ -32,6 +32,11 @@
  * A link that cannot be read resolves to nothing **on purpose**, and nothing is not
  * a rendering instruction: both pages test for it and say so out loud, because an
  * empty black player is the one outcome a pupil cannot act on.
+ *
+ * Since question media can also be *uploaded*, a third kind of URL reaches these
+ * functions: the app's own `/media/<token>`, signed over one file, one pupil and
+ * one sitting. It needs no rewriting and gets none — it is already the thing the
+ * element should load.
  */
 const sgExamMedia = (function () {
   // The eleven characters YouTube uses for a video id. Checked against the
@@ -131,6 +136,12 @@ const sgExamMedia = (function () {
   function audioSources(url) {
     const raw = text(url);
     if (!raw) return [];
+    // The app's own `\/media\/<token>` URLs are already the source. They are relative
+    // on purpose — the same host that served the page serves the bytes — and they
+    // are only served to the sitting they were minted for, so there is nothing to
+    // rewrite and nothing to fall back to. The guard refuses `//host/path`,
+    // which is not one of ours. See app/services/exam_media.py.
+    if (/^\/(?!\/)/.test(raw)) return [raw];
     const id = driveId(raw);
     if (id) {
       return [

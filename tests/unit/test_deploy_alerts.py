@@ -84,6 +84,17 @@ def report_of(runner: dict | None = None, checkout: dict | None = None,
         "origin": "c" * 12, "behind": 0, "ahead": 0, "dirty": None,
         "origin_updated_at": "2026-09-20T00:00:00+00:00", "origin_age_seconds": 60,
         "detached": False,
+        # The code this process is serving, against the same `HEAD`. Carried here
+        # for the same reason the other keys are: the page reads it attribute by
+        # attribute, and a fixture that lags the reader is a 500 rather than a
+        # failed assertion. `status.RUNNING_KEYS` is what the template branches on.
+        "running": {"available": True, "reason_key": None, "detail": None,
+                    "repo": "/opt/scangrade", "commit": "b" * 7,
+                    "full_commit": "b" * 40, "subject": "a commit",
+                    "committed_at": "2026-09-20T00:00:00+00:00",
+                    "loaded_at": "2026-09-20T01:00:00+00:00", "pid": 4211,
+                    "key": status.RUNNING_CURRENT, "behind": 0, "ahead": 0,
+                    "age_seconds": 3600},
     }
     checkout_state.update(checkout or {})
     report = {
