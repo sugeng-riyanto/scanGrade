@@ -1476,6 +1476,22 @@ set aside **with a patch and a record** rather than stashed, the migrations the 
 schema is missing are applied, one release runs, and the run verifies itself and writes
 down everything it did.
 
+On a console with no clipboard that line has to be typed, so here is the same recovery
+in two shorter lines. They write the lever to a file first, and that is not only about
+length: a lever old enough to still carry the `sudo -E bash "$0"` hop cannot re-run
+itself out of a **pipe** (a piped script has no `$0` — it is the shell's own path), so on
+this class of box the one-line pipe can die with a message about the wrong thing. A file
+gives it one, and run as root the hop is not taken at all.
+
+```bash
+git -C /opt/scangrade show origin/main:deploy/scangrade-recover.sh > /tmp/f.sh
+bash /tmp/f.sh
+```
+
+The lever drops to the checkout's owner itself for every git read and write, so nothing
+here has to be typed as `scangrade` — and the edit it moves is preserved as a patch under
+`/var/lib/scangrade-deploy/recover/<stamp>/`, named in the record beside it.
+
 Run that lever without root and it refuses, printing this same line — because a piped
 script has nothing to re-run as root. `git show … | bash` leaves `$0` as the shell's own
 path and `BASH_SOURCE` unset (measured: `bash x.sh` sets both to the file), so the hop it
