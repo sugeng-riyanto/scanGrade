@@ -591,6 +591,219 @@ lock_heal() {
 }
 # lock-heal-logic:end
 
+# ── A box-local edit the release also touches is set aside, not refused ──────
+# box-edits-logic:start
+# The guard below used to refuse on *any* local change, before the fetch — so one
+# hand edit was a permanent stop. The box could not deploy, and could not receive
+# the release that added a way to clear it, which is the shape of a deadlock rather
+# than a matter of patience. Measured on this box: eight commits behind for hours
+# with `M app/routes/admin_sekolah.py`, and the only way out was a console.
+#
+# Refusing was the right instinct and the wrong rule. A fast-forward merge fails
+# only where the incoming commits write a path that is also changed here, so the
+# question is not "is the tree dirty" but "would this merge clobber something".
+# Three answers, and each is acted on rather than guessed at:
+#
+#   * a path this release also writes: the box's version is set aside first — its
+#     diff against HEAD written to `$BOX_EDITS_DIR`, and a path HEAD does not have
+#     copied out whole rather than diffed, because there is no blob to apply a diff
+#     to — then the path is restored so the merge can proceed;
+#   * a path this release does not write: left exactly as it is. Nothing can
+#     clobber it, so it is reported and the release proceeds. This is what ends the
+#     "dirty box fetches every two minutes and deploys nothing, forever" state;
+#   * the set-aside cannot be written: refused. A heal that cannot say what it moved
+#     is a silent loss, and that is the one failure this block exists to prevent.
+#     `dirty_checkout` is that refusal's gate, so the page keeps its sentence.
+#
+# Every heal leaves a record naming the commit, the paths, the action taken on each
+# and where the preserved bytes are — written *before* the paths are restored, so a
+# checkout that fails afterwards fails with the evidence already on disk. Nothing
+# here is deleted: a reverted path is in its patch, a moved path is in its own file.
+BOX_EDITS_DIR="$STATE_DIR/set-aside"
+#: How many heals keep their record. Small, because each record is evidence about
+#: one release and the page shows the newest — the same reasoning as `REFUSALS_KEEP`.
+BOX_EDITS_KEEP=5
+#: Set by `local_edits_heal`. Empty means the tree was clean, or nothing overlapped.
+BOX_EDITS_SET_ASIDE=""
+BOX_EDITS_KEPT=""
+BOX_EDITS_RECORD=""
+BOX_EDITS_PATCH=""
+BOX_EDITS_MOVED=""
+BOX_EDITS_BASE=""
+
+#: The paths inside the repo that one `git status --porcelain` line names. Three
+#: characters are the status, then the path; a rename or copy names two, joined by
+#: ` -> `, and a merge is blocked by either of them.
+box_edit_paths() {
+  local line path
+  while IFS= read -r line; do
+    [ -n "${line//[[:space:]]/}" ] || continue
+    path=${line:3}
+    case "$path" in
+      *' -> '*) printf '%s\n' "${path%% -> *}" "${path##* -> }" ;;
+      *)        printf '%s\n' "$path" ;;
+    esac
+  done
+}
+
+#: What the refusal below is about. A global rather than an argument, because no
+#: helper in this script reads the invocation's parameters — that is what keeps the
+#: runner unsteerable from outside (`test_deploy_script_takes_no_arguments`).
+BOX_EDITS_REASON=""
+
+#: The refusal for a heal that cannot be completed. One gate and one exit, so the
+#: page's sentence and systemd's exit code still describe the same run.
+box_edits_refuse() {
+  log "$BOX_EDITS_REASON"
+  PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 \
+    PREFLIGHT_DIFF="$(preflight_diff)" \
+    PREFLIGHT_DETAIL="$BOX_EDITS_REASON" preflight_write
+  exit 4
+}
+
+#: Keep the newest `$BOX_EDITS_KEEP` records, and the bytes they point at.
+box_edits_prune() {
+  local old
+  old=$(ls -1t "$BOX_EDITS_DIR"/*.txt 2>/dev/null | tail -n +"$((BOX_EDITS_KEEP + 1))")
+  [ -n "$old" ] || return 0
+  printf '%s\n' "$old" | while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    rm -f "$f" "${f%.txt}.patch" 2>/dev/null || true
+    rm -rf "${f%.txt}.files" 2>/dev/null || true
+  done
+}
+
+local_edits_heal() {
+  # Reads the runner's own `$DIRTY` and `$CHANGED` rather than taking arguments:
+  # no helper in this script reads the invocation's parameters, which is what keeps
+  # it unsteerable from outside — see `test_deploy_script_takes_no_arguments`.
+  local status="${DIRTY:-}" incoming="${CHANGED:-}"
+  [ -n "${status//[[:space:]]/}" ] || return 0
+
+  local path
+  BOX_EDITS_BASE="$BOX_EDITS_DIR/$(date -u '+%Y%m%dT%H%M%SZ')-$(printf '%s' "${AFTER_FULL:-unknown}" | cut -c1-12)-$$"
+
+  # Overlap is decided per path, against the release's own file list, because that
+  # list is the only thing that can be clobbered. Everything else is reported.
+  local overlap="" kept=""
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if printf '%s\n' "$incoming" | grep -Fxq -- "$path"; then
+      overlap="${overlap}${path}"$'\n'
+    else
+      kept="${kept}${path}"$'\n'
+    fi
+  done < <(printf '%s\n' "$status" | box_edit_paths)
+  BOX_EDITS_KEPT=$(printf '%s' "$kept")
+
+  if [ -z "${overlap//[[:space:]]/}" ]; then
+    [ -z "${kept//[[:space:]]/}" ] && return 0
+    log "checkout has local changes this release does not write — leaving them alone:"
+    printf '%s\n' "$kept" | sed '/^$/d; s/^/    /'
+    # Best effort, and only a note: nothing here is touched, so failing to write it
+    # down cannot lose anything — and refusing to deploy over a missing note about
+    # files this release does not even write is the forever-stall this removes.
+    mkdir -p "$BOX_EDITS_DIR" 2>/dev/null || true
+    box_edits_record
+    return 0
+  fi
+
+  if ! mkdir -p "$BOX_EDITS_DIR" 2>/dev/null; then
+    BOX_EDITS_REASON="a local edit overlaps this release and $BOX_EDITS_DIR cannot be created, so it could not be set aside"
+    box_edits_refuse
+  fi
+
+  # A path HEAD has is preserved as a diff and restored; one it does not is copied
+  # out whole, because there is no blob for a diff to apply to. Asked of git rather
+  # than inferred from the status code: an added-but-unstaged path carries a code no
+  # reader of `status` would call untracked.
+  local -a touched=() moved=()
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if as_owner git -C "$REPO" cat-file -e "HEAD:$path" 2>/dev/null; then
+      touched+=("$path")
+    else
+      moved+=("$path")
+    fi
+  done < <(printf '%s\n' "$overlap")
+
+  if [ "${#touched[@]}" -gt 0 ]; then
+    BOX_EDITS_PATCH="$BOX_EDITS_BASE.patch"
+    if ! as_owner git -C "$REPO" diff --no-color --no-ext-diff --no-textconv HEAD -- \
+        "${touched[@]}" > "$BOX_EDITS_PATCH" 2>/dev/null; then
+      rm -f "$BOX_EDITS_PATCH"
+      BOX_EDITS_REASON="a local edit to ${touched[*]} overlaps this release and could not be written to $BOX_EDITS_PATCH, so it would be lost rather than set aside"
+      box_edits_refuse
+    fi
+  fi
+
+  if [ "${#moved[@]}" -gt 0 ]; then
+    BOX_EDITS_MOVED="$BOX_EDITS_BASE.files"
+    for path in "${moved[@]}"; do
+      if ! mkdir -p "$BOX_EDITS_MOVED/$(dirname "$path")" 2>/dev/null; then
+        BOX_EDITS_REASON="$path overlaps this release and cannot be copied into $BOX_EDITS_MOVED, so it would be lost rather than set aside"
+        box_edits_refuse
+      fi
+      if ! mv -f -- "$REPO/$path" "$BOX_EDITS_MOVED/$path" 2>/dev/null; then
+        BOX_EDITS_REASON="$path overlaps this release and could not be moved into $BOX_EDITS_MOVED, so it would be lost rather than set aside"
+        box_edits_refuse
+      fi
+    done
+  fi
+
+  BOX_EDITS_SET_ASIDE=$(printf '%s' "$overlap")
+  box_edits_record
+
+  if [ "${#touched[@]}" -gt 0 ]; then
+    if ! as_owner git -C "$REPO" checkout HEAD -- "${touched[@]}" 2>/dev/null; then
+      BOX_EDITS_REASON="the box's version of ${touched[*]} is set aside at $BOX_EDITS_PATCH, but restoring those paths failed — the merge is not attempted on a tree it would clobber"
+      box_edits_refuse
+    fi
+    log "set aside ${touched[*]} (kept in $BOX_EDITS_PATCH) and restored them, so the release can merge"
+  fi
+  if [ "${#moved[@]}" -gt 0 ]; then
+    log "moved ${moved[*]} into $BOX_EDITS_MOVED, so the release can merge"
+  fi
+  [ -z "${kept//[[:space:]]/}" ] || {
+    log "and left these alone, because this release does not write them:"
+    printf '%s\n' "$kept" | sed '/^$/d; s/^/    /'
+  }
+  box_edits_prune
+  return 0
+}
+
+#: The record one heal leaves behind. A positional file format, like the refusal
+#: record's, so the page can read it without parsing prose: when, the commit, where
+#: the preserved bytes are, then one line per path — what was done with it.
+box_edits_record() {
+  # No arguments, like every helper here: it writes down what `local_edits_heal`
+  # left in the globals above.
+  local at
+  at=$(date -Is)
+  BOX_EDITS_RECORD="$BOX_EDITS_BASE.txt"
+  {
+    printf '%s\n' "$at"
+    printf '%s\n' "${AFTER_FULL:-}"
+    printf 'patch %s\n' "$BOX_EDITS_PATCH"
+    printf 'files %s\n' "$BOX_EDITS_MOVED"
+    printf '%s\n' "$BOX_EDITS_SET_ASIDE" | sed '/^$/d; s/^/set-aside /'
+    printf '%s\n' "$BOX_EDITS_KEPT" | sed '/^$/d; s/^/kept /'
+  } > "$BOX_EDITS_RECORD" 2>/dev/null && {
+    # Root-only: a hand edit can hold a credential, and this file is a copy of it.
+    chmod 0600 "$BOX_EDITS_RECORD" 2>/dev/null || true
+    return 0
+  }
+  BOX_EDITS_RECORD=""
+  # A record that cannot be written is only fatal when there is something to lose.
+  if [ -n "${BOX_EDITS_SET_ASIDE//[[:space:]]/}" ]; then
+    BOX_EDITS_REASON="a local edit overlaps this release and its record could not be written to $BOX_EDITS_BASE.txt, so what was set aside could not be said"
+    box_edits_refuse
+  fi
+  log "could not record the checkout's local changes at $BOX_EDITS_BASE.txt — nothing was set aside, so nothing is lost by it"
+  return 0
+}
+# box-edits-logic:end
+
 # ── The installed launcher refreshes itself from the checkout ─────────────
 # refresh-launcher-logic:start
 # The two installed names are rendered from `deploy/entrypoint.sh`, and nothing
@@ -853,6 +1066,13 @@ lock_heal
 # merge with a message about fast-forwards. "We could not tell" is not "it is
 # fine" — the same rule `app/utils/armament.py` follows for the armament checker —
 # so an unreadable checkout is its own refusal, with git's own error as the reason.
+#
+# What the tree *contains* is read here and decided later, on purpose. Whether a
+# local change can be clobbered depends on which paths the release writes, and that
+# list does not exist until the fetch has happened — so refusing here, before it,
+# is what made a hand edit a permanent stop rather than a warning. The read stays
+# where it is (it is the cheapest moment, and `lock_heal` above has just made the
+# index readable); the decision moved down to `local_edits_heal`, after `CHANGED`.
 DIRTY=""
 if ! DIRTY=$(as_owner git -C "$REPO" status --porcelain 2>&1); then
   log "could not read the checkout's state — NOT deploying:"
@@ -862,12 +1082,8 @@ if ! DIRTY=$(as_owner git -C "$REPO" status --porcelain 2>&1); then
   exit 4
 fi
 if [ -n "$DIRTY" ]; then
-  log "checkout has local changes — NOT deploying:"
+  log "checkout has local changes — deciding what to do once the fetch says what they touch:"
   echo "$DIRTY" | sed 's/^/    /'
-  PREFLIGHT_GATE=dirty_checkout PREFLIGHT_EXIT=4 \
-    PREFLIGHT_DIFF="$(preflight_diff)" \
-    PREFLIGHT_DETAIL="$DIRTY" preflight_write
-  exit 4
 fi
 
 BEFORE=$(as_owner git -C "$REPO" rev-parse --short HEAD)
@@ -931,6 +1147,14 @@ fi
 log "new commit on origin/$BRANCH: $BEFORE -> $AFTER"
 
 CHANGED=$(as_owner git -C "$REPO" diff --name-only "$BEFORE" "origin/$BRANCH")
+
+# ── The dirty guard's decision, now that what can be clobbered is known ───────
+# A path this release writes and the box has changed is set aside (preserved, and
+# recorded) rather than refused; a path it does not write is left alone. Only a
+# heal that cannot be *written down* refuses — `dirty_checkout`, the gate that used
+# to fire on every local change.
+RUN_STEP="checkout"
+local_edits_heal
 
 # ── Recovery point, before anything moves ────────────────────────────────────
 # A release can be put back with its code from git alone. Its *data* cannot. So a

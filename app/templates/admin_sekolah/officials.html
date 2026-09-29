@@ -10,7 +10,7 @@
 {% block title %}{{ 'Pejabat Sekolah' if lang == 'id' else 'School Officials' }} - ScanGrade{% endblock %}
 {% block page_title %}{{ 'Pejabat Sekolah' if lang == 'id' else 'School Officials' }}{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '', pwTitle: '', pwNote: '' }">
+<div class="space-y-6" x-data="{ showForm: false, showPassword: false, generatedPassword: '', pwTitle: '', pwNote: '', selected: [] }">
 
     <div class="bg-indigo-50 rounded-xl p-3 flex items-start gap-3 border border-indigo-200">
         <i class="fas fa-info-circle text-indigo-500 mt-0.5"></i>
@@ -89,11 +89,30 @@
         </form>
     </div>
 
+    {# The sheet, not a count — the same bulk download pupils and teachers have. A form
+       POST on purpose: the reply *is* the file, so the browser downloads it and stays
+       on the page with no blob plumbing, and `base.html` already injects the CSRF
+       field into every `form[method="POST"]`. #}
+    <div x-show="selected.length > 0" x-cloak class="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-sm">
+        <span class="font-bold text-amber-800" x-text="selected.length + ' ' + t('dipilih','selected')"></span>
+        <form method="POST" action="/admin-sekolah/officials/login-cards" class="inline"
+              @submit="document.getElementById('official-login-ids').value = JSON.stringify(selected); if(!confirm(t('Buat password baru untuk ' + selected.length + ' akun, pasang ke akunnya, lalu unduh kartu loginnya?', 'Create a new password for ' + selected.length + ' accounts, set it on them, and download the login cards?'))) $event.preventDefault()">
+            <input type="hidden" name="user_ids" id="official-login-ids" value="[]">
+            <input type="hidden" name="fmt" value="xlsx">
+            <button type="submit" class="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-bold hover:bg-emerald-200 transition text-xs"
+                    x-text="t('Unduh kartu login','Download login cards')"></button>
+        </form>
+    </div>
+
     <div class="card overflow-x-auto">
         {% if officials %}
         <table class="w-full text-sm min-w-[560px]">
             <thead class="bg-stone-50 text-stone-500">
                 <tr>
+                    <th class="px-4 py-3 w-8">
+                        <input type="checkbox" class="rounded border-stone-300"
+                               @change="selected = $event.target.checked ? [{% for o in officials %}'{{ o.id }}'{% if not loop.last %},{% endif %}{% endfor %}] : []">
+                    </th>
                     <th class="text-left px-4 py-3 font-bold" x-text="t('Nama','Name')"></th>
                     <th class="text-left px-4 py-3 font-bold" x-text="t('Peran','Role')"></th>
                     <th class="text-left px-4 py-3 font-bold">Email</th>
@@ -103,6 +122,11 @@
             <tbody>
                 {% for o in officials %}
                 <tr data-official-row="{{ o.id }}" class="border-t border-stone-100">
+                    <td class="px-4 py-3">
+                        <input type="checkbox" value="{{ o.id }}" x-model="selected"
+                               aria-label="{{ 'Pilih ' + (o.full_name or '') }}"
+                               class="rounded border-stone-300">
+                    </td>
                     <td class="px-4 py-3">
                         <form method="POST" action="/admin-sekolah/officials/{{ o.id }}/edit" class="flex flex-wrap items-center gap-2">
                             <input type="text" name="name" value="{{ o.full_name or '' }}" class="px-3 py-1.5 border border-stone-200 rounded-lg text-sm w-40">
@@ -115,7 +139,17 @@
                             {{ 'Kepala Sekolah' if o.role == 'principal' else 'Wakil Kepala Sekolah' }}
                         </span>
                     </td>
-                    <td class="px-4 py-3 text-stone-500 text-xs">{{ o.email or '-' }}</td>
+                    <td class="px-4 py-3 text-stone-500 text-xs">
+                        {{ o.email or '-' }}
+                        {# The card's password is a one-time one. Saying so here is the
+                           difference between a school that knows an account is still
+                           on the password it printed and one that assumes it was
+                           changed — the same state the login page enforces. #}
+                        {% if o.must_change_password %}
+                        <span class="ml-1 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700"
+                              data-must-change="1" x-text="t('Belum aktivasi','Not activated')"></span>
+                        {% endif %}
+                    </td>
                     <td class="px-4 py-3 text-right whitespace-nowrap">
                         <button type="button"
                                 @click="fetch('/admin-sekolah/officials/{{ o.id }}/reset-password',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.password){ generatedPassword=d.password; pwTitle=t('Password baru','New password'); pwNote=t('Password akun ini sudah diganti.','The password of this account was changed.'); showPassword=true } else { alert(d.error || t('Gagal mereset password','Could not reset the password')) } }).catch(()=>alert(t('Gagal mereset password','Could not reset the password')))"

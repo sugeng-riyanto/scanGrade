@@ -5,6 +5,27 @@
 <div class="space-y-6" x-data="{
     showAssignForm: false, assigningClassId: null, assigningSubjectId: null, assignLoading: false
 }">
+    {# Tugas pengawasan. Kartu ini hanya muncul kalau ada yang perlu dikerjakan:
+       seorang guru tanpa tugas tidak perlu membaca baris yang mengatakan bahwa ia
+       tidak punya tugas, dan tiap baris di sini juga tampil di halaman tugasnya. #}
+    {% if invigilation_tasks or invigilation_requests %}
+    <div class="rounded-2xl bg-indigo-50 border-2 border-indigo-200 p-4 flex items-start gap-3">
+        <i class="fas fa-clipboard-check text-indigo-600 mt-0.5"></i>
+        <div class="flex-1">
+            <p class="font-bold text-indigo-900 text-sm" x-text="t('Tugas pengawasan ujian','Invigilation duties')"></p>
+            <p class="text-xs text-indigo-800 mt-1" x-text="'{{ invigilation_tasks|length }} ' + t('pelaksanaan yang Anda awasi','sitting(s) you invigilate'){% if invigilation_requests %} + ' · {{ invigilation_requests|length }} ' + t('permintaan ujian ulang menunggu keputusan Anda','retake request(s) awaiting your decision'){% endif %}"></p>
+            {% if invigilation_tasks %}
+            <div class="flex flex-wrap gap-2 mt-2">
+                {% for d in invigilation_tasks[:3] %}
+                <span class="text-xs font-bold bg-white border border-indigo-300 px-3 py-1.5 rounded-lg">{{ d.exam_title }} · {{ d.class_name }} · {{ (d.scheduled_at or '')[:16].replace('T', ' ') }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+            <a href="/teacher/invigilation" class="inline-block mt-2 text-xs font-extrabold text-indigo-700 hover:underline" x-text="t('Buka tugas pengawasan','Open invigilation duties')"></a>
+        </div>
+    </div>
+    {% endif %}
+
     {% if exams_no_key %}
     <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4 flex items-start gap-3">
         <i class="fas fa-exclamation-triangle text-amber-600 mt-0.5"></i>

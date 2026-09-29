@@ -566,6 +566,27 @@ TRANSLATED = [
     # itself to Indonesian, so English words were read in an Indonesian voice. The
     # pin is gone; the page switches like the trial-length setting does.
     "super_admin/email_settings.html",
+    # The page a login card's one-time password lands on. It is the *only* page a
+    # reader whose password is still the printed one may open, so it is the wrong
+    # page to hold copy in one language: it renders `content_noauth` (no navbar, so
+    # no chrome toggle) and carries its own control from `auth/_chrome.html`, like
+    # every other auth page. Every word on it is a pair, including the sentence
+    # naming the school defaults it refuses.
+    "auth/change_password.html",
+    # The email-and-activation page. It repairs the address a reset code is sent to,
+    # so the reader who needs it may be the one who cannot read Indonesian — and it
+    # is reached from the pupils, teachers and officials pages, so a label in one
+    # language is a reader who does not find the upload at all. Measured at 100%
+    # coverage with nothing left to translate.
+    "admin_sekolah/accounts.html",
+    # The invigilation pages. The schedule is read by the head of school and built by
+    # the deputy, and the duty is read by the teacher it names — three readers of one
+    # feature, so a label in one language is a reader who cannot find their own row.
+    # Every string on both pages is a pair, and the refusal sentences they share live
+    # in `shared/_invigilation_reasons.html`, whose pairs are held by the coverage
+    # floor (a partial has no toggle to honour, so it cannot join this list).
+    "principal/invigilation.html",
+    "teacher/invigilation.html",
 ]
 # Partials are deliberately *not* on this list, and the assertion below says why:
 # an entry has to extend base.html, because it is the page's own scope that owns
@@ -911,7 +932,7 @@ def test_the_translated_list_only_grows_with_intent():
     a reader in the other language does. Bumping this number is the deliberate act
     that says "this page is translated now".
     """
-    assert len(TRANSLATED) == 47, (
+    assert len(TRANSLATED) == 51, (
         f"{len(TRANSLATED)} pages are on the translated list. Bump this number when "
         f"you translate another one — and if you *removed* a page, put it back, "
         f"because dropping it turns the sweep off for that page: {TRANSLATED}")

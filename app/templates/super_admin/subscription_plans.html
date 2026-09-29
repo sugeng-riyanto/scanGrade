@@ -15,18 +15,20 @@
     </div>
     {% endfor %}
 
-    {# Two tables name a plan (school_subscriptions and payment_transactions, both
-       plain REFERENCES in migration 012), so a plan the ledger still carries cannot
-       simply be deleted — the database refuses it. The card therefore says what
-       holds the plan *before* the trash is pressed, and offers the action that is
-       actually wanted in that case: deactivating it, which stops offering the plan
-       without touching a single payment row. The delete form still sends
-       `confirm=1`, and the server counts again, because a bare POST carries no
-       dialog — the same shape the class delete already uses. #}
+    {# Three tables name a plan (school_subscriptions and payment_transactions in
+       migration 012, invoices in _COMPLETE_SETUP.sql), all plain REFERENCES, so a
+       plan the ledger still carries cannot simply be deleted — the database refuses
+       it. The card therefore says what holds the plan *before* the trash is pressed,
+       and offers the action that is actually wanted in that case: deactivating it,
+       which stops offering the plan without touching a single ledger row. The total
+       comes from `plan_held`, the same service function the route refuses on: a
+       hand-written sum here was how the third table stayed invisible on the card.
+       The delete form still sends `confirm=1`, and the server counts again, because
+       a bare POST carries no dialog — the same shape the class delete already uses. #}
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {% for p in plans %}
         {% set pu = usage.get(p.id, {}) %}
-        {% set held = (pu.get('subscription', 0) or 0) + (pu.get('payment', 0) or 0) %}
+        {% set held = plan_held(pu) %}
         {% set unmeasured = pu and not pu.get('measured', True) %}
         <div class="card p-5 {% if p.is_active %}border-l-4 border-l-primary-500{% else %}opacity-60{% endif %}"{% if held %} data-plan-held="{{ held }}"{% elif unmeasured %} data-plan-unmeasured="1"{% endif %}>
             <div class="flex items-start justify-between mb-3">

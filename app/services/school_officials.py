@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import logging
 
+from app.services import password_change as _password_change
+
 logger = logging.getLogger(__name__)
 
 #: The roles this module owns, and the whole vocabulary the school admin may hand
@@ -25,6 +27,22 @@ logger = logging.getLogger(__name__)
 OFFICIAL_ROLES = ("principal", "vice_principal")
 
 PROFILE_FIELDS = "id, full_name, role, phone, status, school_id"
+
+#: What migration 040 adds, asked for apart from the rest.
+#:
+#: PostgREST refuses a select naming a column it cannot find **in full**, so asking for
+#: `email` unconditionally would make this page empty on a database that has not run 040
+#: yet — and an empty roster reads as "this school has no head teacher", which is a worse
+#: lie than a dash in the email column.
+PROFILE_FIELDS_040 = "email, must_change_password"
+
+
+def _read(supabase, build):
+    """``build(columns)``, with the newest columns first and without them if refused."""
+    try:
+        return build(PROFILE_FIELDS + ", " + PROFILE_FIELDS_040)
+    except Exception:                                         # noqa: BLE001
+        return build(PROFILE_FIELDS)
 
 
 class OfficialError(Exception):
@@ -60,10 +78,11 @@ def list_officials(supabase, school_id: str) -> list[dict]:
     if not school_id:
         return []
     try:
-        rows = (supabase.table("profiles").select(PROFILE_FIELDS)
-                .eq("school_id", school_id)
-                .in_("role", list(OFFICIAL_ROLES))
-                .order("full_name").execute().data) or []
+        rows = _read(supabase, lambda cols: (
+            supabase.table("profiles").select(cols)
+            .eq("school_id", school_id)
+            .in_("role", list(OFFICIAL_ROLES))
+            .order("full_name").execute().data)) or []
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("could not list officials for school %s: %s", school_id, exc)
         return []
@@ -111,6 +130,11 @@ def create_official(supabase, *, school_id: str, role: str, full_name: str,
         }
         if phone:
             profile["phone"] = phone
+        # Same two fields as a pupil's or a teacher's account, for the same reasons:
+        # `profiles.email` is the mirror migration 040 describes (the page printed
+        # `o.email` before the column existed, so it always showed a dash), and the
+        # generated password is a one-time one that must be replaced on first login.
+        profile.update(_password_change.account_fields(email))
         supabase.table("profiles").upsert(profile).execute()
     except Exception as exc:                                  # noqa: BLE001
         _discard(supabase, uid)
@@ -160,8 +184,9 @@ def _assert_own(supabase, official_id: str, school_id: str) -> dict:
     if not school_id:
         raise OfficialError("Akun ini tidak terhubung ke sekolah mana pun.")
     try:
-        row = (supabase.table("profiles").select(PROFILE_FIELDS)
-               .eq("id", official_id).single().execute().data) or {}
+        row = _read(supabase, lambda cols: (
+            supabase.table("profiles").select(cols)
+            .eq("id", official_id).single().execute().data)) or {}
     except Exception as exc:                                  # noqa: BLE001
         raise OfficialError("Akun tidak ditemukan.", detail=str(exc)) from exc
     if not row:

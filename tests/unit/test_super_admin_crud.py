@@ -61,6 +61,24 @@ from app.services import subscription_plans as sp  # noqa: E402
 
 # ── a supabase stand-in whose tables are named, not guessed at ───────────────
 
+class _FkError(Exception):
+    """The driver's foreign-key refusal, in the two shapes it arrives in.
+
+    supabase-py raises an error carrying ``code``/``details``/``message``, and its
+    string form is the payload dict — which is what the page printed, truncated at 60
+    characters, so the *table* it named never survived to the operator.
+    """
+
+    def __init__(self, table: str = "invoices", code: str = "23503"):
+        self.code = code
+        self.details = f'Key (id)=(7) is still referenced from table "{table}".'
+        self.message = ('update or delete on table "subscription_plans" violates '
+                        f'foreign key constraint "{table}_plan_id_fkey" on table '
+                        f'"{table}"')
+        super().__init__({"code": code, "details": self.details,
+                          "message": self.message})
+
+
 class _Res:
     def __init__(self, data, count=0):
         self.data = data
@@ -73,6 +91,7 @@ class _Query:
         self.table = table
         self._eq = []
         self._count = None
+        self._op = None
 
     def select(self, *cols, **kw):
         self._count = kw.get("count")
@@ -94,13 +113,17 @@ class _Query:
 
     def update(self, patch):
         self.fake.writes.append(("update", self.table, dict(patch)))
+        self._op = "update"
         return self
 
     def delete(self):
         self.fake.writes.append(("delete", self.table, None))
+        self._op = "delete"
         return self
 
     def execute(self):
+        if self._op and self.fake.fail_writes.get(self.table) == self._op:
+            raise _FkError(self.fake.fail_writes_table or "invoices")
         if self.table in self.fake.fail:
             raise RuntimeError("connection reset while counting")
         rows = list(self.fake.tables.get(self.table, []))
@@ -115,9 +138,13 @@ class _Query:
 
 
 class _Fake:
-    def __init__(self, tables=None, fail=None):
+    def __init__(self, tables=None, fail=None, fail_writes=None, fail_writes_table=None):
         self.tables = tables or {}
         self.fail = set(fail or ())
+        #: ``{table: "delete"|"update"}`` — a write the database refuses, so the
+        #: sentence built for that refusal can be read through the route itself.
+        self.fail_writes = dict(fail_writes or {})
+        self.fail_writes_table = fail_writes_table
         self.writes: list[tuple] = []
         self.asked: list[str] = []
 
@@ -164,18 +191,103 @@ def _route_fake(monkeypatch, fake):
 
 # ── 1. the counts, and the sentence built out of them ────────────────────────
 
+#: Every place the repository declares a foreign key to `subscription_plans`, read out
+#: of the SQL: the defect this pins was a constant with one fewer entry than the
+#: schema, so a plan held only by an invoice read as free and the delete raised.
+_CREATES = re.compile(r"\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+"
+                      r"([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)", re.I)
+_PLAN_FK = re.compile(r"plan_id\s+\S+\s+REFERENCES\s+subscription_plans", re.I)
+
+
+def _sql_files() -> list[Path]:
+    directory = ROOT / "supabase"
+    return (sorted(directory.glob("*.sql"))
+            + sorted((directory / "migrations").glob("*.sql")))
+
+
+def _referencing_tables() -> set[str]:
+    """Every table the repository declares a plan foreign key on, by CREATE TABLE."""
+    found: set[str] = set()
+    for path in _sql_files():
+        table = None
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            declared = _CREATES.search(line)
+            if declared:
+                table = declared.group(1).split(".")[-1]
+            if table and _PLAN_FK.search(line):
+                found.add(table)
+    return found
+
+
+def _declared_references() -> int:
+    """How many plan foreign keys the SQL declares at all — attributed or not."""
+    return sum(len(_PLAN_FK.findall(path.read_text(encoding="utf-8", errors="replace")))
+               for path in _sql_files())
+
+
+class TestTheHolderListCannotDrift:
+    """`invoices` declares the same foreign key as the two tables the list already
+    held, and it was not in the list — so a plan an invoice still names was treated as
+    free: the route skipped the detach, the delete raised, and the operator got the
+    payload back. The list is pinned to the schema now, not to a comment."""
+
+    def test_the_scan_finds_the_references_the_repository_declares(self):
+        declared = _referencing_tables()
+        assert declared >= {"school_subscriptions", "payment_transactions",
+                            "invoices"}, declared
+
+    def test_every_declared_reference_is_attributed_to_a_table(self):
+        """A reference written somewhere this scan does not read (an `ALTER TABLE`, a
+        file in another directory) would otherwise be silently missing from the list
+        this test exists to protect."""
+        assert _declared_references() == sum(
+            len(_PLAN_FK.findall(path.read_text(encoding="utf-8", errors="replace")))
+            for path in _sql_files()), "the scan read a different number of references"
+        assert _declared_references() >= 3, (
+            "the scan found fewer references than the schema declares, so it is "
+            "reading the wrong thing")
+
+    def test_the_holder_list_covers_them_all(self):
+        assert {table for table, _key in sp.PLAN_HOLDERS} == _referencing_tables(), (
+            "a table declares a plan foreign key and the delete does not know about "
+            "it, which is exactly how the delete raised on a plan nothing "
+            "'held'")
+
+    def test_every_kind_of_holder_has_a_label(self):
+        """The sentence is built from these keys, so a holder without a label is a
+        number with no noun."""
+        assert {key for _table, key in sp.PLAN_HOLDERS} <= set(sp.HOLDER_LABELS), (
+            sp.HOLDER_LABELS)
+
+
 class TestWhatHoldsAPlan:
-    def test_it_counts_both_tables_that_name_a_plan(self):
-        """Migration 012 declares both references. A guard that watched one of them
-        would refuse on a subscription and happily delete a plan the ledger still
-        names — and the FK would then raise the payload this change removes."""
+    def test_it_counts_every_table_that_names_a_plan(self):
+        """Migration 012 declares two of the three references. A guard that watched
+        only some of them refuses on a subscription and happily deletes a plan the
+        ledger still names — and the FK then raises the payload this change removes."""
         fake = _Fake({"school_subscriptions": [{"id": 1, "plan_id": 7}],
                       "payment_transactions": [{"id": 20, "plan_id": 7},
-                                               {"id": 21, "plan_id": 7}]})
+                                               {"id": 21, "plan_id": 7}],
+                      "invoices": [{"id": 30, "plan_id": 7}]})
         usage = sp.plan_usage(fake, 7)
         assert usage["subscription"] == 1, usage
         assert usage["payment"] == 2, usage
+        assert usage["invoice"] == 1, usage
         assert usage["measured"] is True
+
+    def test_a_plan_held_only_by_an_invoice_is_not_free(self):
+        fake = _Fake({"school_subscriptions": [], "payment_transactions": [],
+                      "invoices": [{"id": 30, "plan_id": 7}]})
+        usage = sp.plan_usage(fake, 7)
+        assert sp.used_total(usage) == 1, usage
+        assert sp.usage_confirmation_needed(usage) is True, usage
+
+    def test_the_sentence_names_an_invoice_holder(self):
+        message = sp.usage_message({"subscription": 0, "payment": 0, "invoice": 1,
+                                    "measured": True})
+        assert "1" in message, message
+        low = message.lower()
+        assert "invoice" in low or "faktur" in low, message
 
     def test_a_read_that_failed_is_not_a_count_of_zero(self):
         fake = _Fake({"school_subscriptions": [{"id": 1, "plan_id": 7}],
@@ -230,6 +342,40 @@ class TestWhatHoldsAPlan:
         assert "tidak bisa" in low or "could not" in low, message
 
 
+class TestARefusalThatStillHappens:
+    """The list can be right and the delete can still be refused — a reference this
+    repository does not declare, a constraint added on the box. When that happens the
+    operator gets one sentence naming the table, not the payload truncated at 60
+    characters, which is what the reported failure actually was."""
+
+    def test_a_foreign_key_refusal_names_the_table(self):
+        message = sp.plan_failure_sentence(_FkError(table="invoices"))
+        assert "invoices" in message, message
+        assert "23503" not in message, message
+        assert "'code'" not in message and "code" not in message.lower(), message
+
+    def test_it_names_a_table_it_was_not_told_about(self):
+        """The whole point: the table is read out of the refusal, so a reference the
+        code does not know is still named instead of becoming a mystery."""
+        message = sp.plan_failure_sentence(_FkError(table="some_future_table"))
+        assert "some_future_table" in message, message
+
+    def test_an_error_with_no_payload_still_reads_as_a_sentence(self):
+        message = sp.plan_failure_sentence(RuntimeError("connection reset"))
+        assert "23503" not in message
+        assert "{'code'" not in message, message
+        low = message.lower()
+        assert "gagal" in low or "failed" in low or "coba" in low or "try" in low, message
+
+    def test_a_payload_string_never_leaks_through_the_fallback(self):
+        """A driver that raises with only the payload as its text must not turn into
+        the message: that is the defect being removed, one table over."""
+        exc = Exception(str(_FkError(table="invoices")))
+        message = sp.plan_failure_sentence(exc)
+        assert "{'code'" not in message, message
+        assert "invoices" in message, message
+
+
 # ── 2. the page shows what a held plan costs, before you click ───────────────
 
 def _plans_page(usage_per_plan):
@@ -254,7 +400,7 @@ def _plans_page(usage_per_plan):
         g.tz_offset = 7
         g.show = {}
         return app.jinja_env.get_template("super_admin/subscription_plans.html").render(
-            plans=plans, usage=usage_per_plan)
+            plans=plans, usage=usage_per_plan, plan_held=sp.used_total)
 
 
 class TestThePageShowsTheCost:
@@ -265,6 +411,15 @@ class TestThePageShowsTheCost:
             "the page does not mark a plan something still holds")
         assert re.search(r"data-plan-held=\"3\"", html), (
             "the mark does not total what holds the plan (1 + 2)")
+
+    def test_the_card_counts_every_kind_of_holder(self):
+        """The card is where the operator looks *before* pressing the trash, so a
+        total summed by hand here is the same omission as a holder list one entry
+        short — the third table invisible exactly where the decision is made."""
+        html = _plans_page({7: {"subscription": 1, "payment": 2, "invoice": 4,
+                                "measured": True}})
+        assert re.search(r'data-plan-held="7"', html), (
+            "the card's total omits a holder the refusal counts (1 + 2 + 4)")
 
     def test_a_free_plan_is_not_dressed_up_as_a_problem(self):
         html = _plans_page({8: {"subscription": 0, "payment": 0,
@@ -343,8 +498,8 @@ class TestDeletingAPlan:
         writes = fake.writes
         detaches = [(kind, table, payload) for kind, table, payload in writes
                     if kind == "update"]
-        assert {t for _k, t, _p in detaches} == {"school_subscriptions",
-                                                 "payment_transactions"}, detaches
+        assert {t for _k, t, _p in detaches} == {table for table, _key in sp.PLAN_HOLDERS}, (
+            detaches)
         assert all(p == {"plan_id": None} for _k, _t, p in detaches), detaches
         delete_at = [i for i, (k, t, _p) in enumerate(writes)
                      if (k, t) == ("delete", "subscription_plans")]
@@ -366,6 +521,60 @@ class TestDeletingAPlan:
         assert not [k for k in kinds if k[0] == "update"], (
             "there was nothing to detach, so nothing should have been rewritten")
         assert flashed, "a successful delete said nothing"
+
+    def test_a_plan_held_only_by_an_invoice_is_not_deleted_as_unreferenced(
+            self, monkeypatch):
+        """The reported failure, reproduced: an invoice names the plan, the code does
+        not ask about invoices, so nothing is detached, the delete is issued, and the
+        database refuses it."""
+        fake = _Fake({"school_subscriptions": [], "payment_transactions": [],
+                      "invoices": [{"id": 30, "plan_id": 7}]})
+        _route_fake(monkeypatch, fake)
+
+        with _post("/super-admin/plans/7/delete"):
+            _body("plan_delete")(7)
+            flashed = _flashed()
+
+        kinds = [(kind, table) for kind, table, _ in fake.writes]
+        assert ("delete", "subscription_plans") not in kinds, kinds
+        assert flashed, "the operator is told nothing at all"
+
+    def test_confirming_detaches_the_invoice_pointer_too(self, monkeypatch):
+        fake = _Fake({"school_subscriptions": [], "payment_transactions": [],
+                      "invoices": [{"id": 30, "plan_id": 7}]})
+        _route_fake(monkeypatch, fake)
+
+        with _post("/super-admin/plans/7/delete", {"confirm": "1"}):
+            _body("plan_delete")(7)
+            _flashed()
+
+        writes = fake.writes
+        detached = [table for kind, table, payload in writes
+                    if kind == "update" and payload == {"plan_id": None}]
+        assert "invoices" in detached, writes
+        delete_at = [i for i, (kind, table, _p) in enumerate(writes)
+                     if (kind, table) == ("delete", "subscription_plans")]
+        assert delete_at, writes
+        assert max(i for i, (kind, _t, _p) in enumerate(writes)
+                   if kind == "update") < delete_at[0], (
+            "the delete was issued before the invoice pointer was detached")
+
+    def test_a_refusal_the_list_cannot_see_names_the_table(self, monkeypatch):
+        """A constraint the code does not know about (or one added on the box) still
+        reaches the operator as a sentence naming where it is held."""
+        fake = _Fake({"school_subscriptions": [], "payment_transactions": [],
+                      "invoices": []},
+                     fail_writes={"subscription_plans": "delete"},
+                     fail_writes_table="some_future_table")
+        _route_fake(monkeypatch, fake)
+
+        with _post("/super-admin/plans/7/delete"):
+            _body("plan_delete")(7)
+            flashed = _flashed()
+
+        joined = " ".join(flashed)
+        assert "some_future_table" in joined, joined
+        assert "23503" not in joined and "{'code'" not in joined, joined
 
     def test_deactivating_keeps_the_row_and_flips_the_flag(self, monkeypatch):
         fake = _Fake({"school_subscriptions": [{"id": 1, "plan_id": 7}],
@@ -402,10 +611,13 @@ class TestDeletingAPlan:
         assert tpl == "super_admin/subscription_plans.html"
         usage = ctx["usage"]
         assert usage[7]["payment"] == 1, usage
-        counted = [t for t in fake.asked
-                   if t in ("school_subscriptions", "payment_transactions")]
-        assert len(counted) <= 2, (
-            f"the page counted per plan: {counted}")
+        assert ctx["plan_held"] is sp.used_total, (
+            "the page is handed a different totaller than the one the refusal uses, "
+            "so the count on the card can disagree with what the server enforces")
+        holder_tables = {table for table, _key in sp.PLAN_HOLDERS}
+        counted = [t for t in fake.asked if t in holder_tables]
+        assert sorted(counted) == sorted(holder_tables), (
+            f"the page did not ask each referencing table exactly once: {counted}")
 
 
 # ── 4. a page that flashes must be able to show it ──────────────────────────

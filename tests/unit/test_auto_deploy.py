@@ -3081,9 +3081,17 @@ def test_an_unreadable_checkout_is_not_read_as_clean():
     assert "checkout_unreadable" in guard, (
         "a failed `git status` is still treated as a clean checkout")
     assert "2>&1" in guard, "the failure is still thrown away instead of recorded"
-    assert guard.index("checkout_unreadable") < guard.index("dirty_checkout"), (
+    assert guard.index("checkout_unreadable") < guard.index('if [ -n "$DIRTY" ]'), (
         "the unreadable arm has to come first: afterwards the empty answer has "
         "already been read as a clean tree")
+    # What the tree *contains* is no longer decided here, and that is the point: a
+    # local change used to refuse at this line, before the fetch, so the box could
+    # never receive the release that would let it deploy again. The decision needs
+    # the release's file list, so it moved to `local_edits_heal` — see
+    # `tests/unit/test_box_edits.py`.
+    assert "dirty_checkout" not in guard, (
+        "a local change is refused before the fetch again — the deadlock where the "
+        "box cannot deploy, so it cannot receive the release that would let it")
     assert not re.search(r'DIRTY=\$\(as_owner git -C "\$REPO" status --porcelain\)', script), (
         "the uncaptured assignment is back, so an empty answer means both "
         "\"clean\" and \"git said nothing\"")

@@ -702,7 +702,7 @@ def subscription_plans():
     # queries for the whole page, not two per plan.
     usage = plan_cfg.plan_usage_map(supabase, [p.get("id") for p in plans])
     return render_template("super_admin/subscription_plans.html", plans=plans,
-                           usage=usage)
+                           usage=usage, plan_held=plan_cfg.used_total)
 
 
 @super_bp.route("/plans/new", methods=["GET", "POST"])
@@ -723,7 +723,7 @@ def plan_new():
             log_activity("create", "subscription_plan", data["name"], new_data=data, user_id=g.user_id)
             flash("Plan berhasil ditambahkan", "success")
         except Exception as e:
-            flash(f"Gagal: {str(e)[:60]}", "error")
+            flash(plan_cfg.plan_failure_sentence(e), "error")
         return redirect("/super-admin/plans")
     return render_template("super_admin/subscription_plan_form.html", plan=None)
 
@@ -746,7 +746,7 @@ def plan_edit(plan_id):
             log_activity("update", "subscription_plan", str(plan_id), new_data=data, user_id=g.user_id)
             flash("Plan berhasil diperbarui", "success")
         except Exception as e:
-            flash(f"Gagal: {str(e)[:60]}", "error")
+            flash(plan_cfg.plan_failure_sentence(e), "error")
         return redirect("/super-admin/plans")
 
     plan = None
@@ -816,7 +816,10 @@ def plan_delete(plan_id):
         else:
             flash("Plan berhasil dihapus", "success")
     except Exception as e:
-        flash(f"Gagal: {str(e)[:60]}", "error")
+            # A reference this list does not know about — a constraint added on the
+            # box, or a table no file in this repository declares — still reaches the
+            # operator as a sentence naming that table, never as the payload.
+            flash(plan_cfg.plan_failure_sentence(e), "error")
     return redirect("/super-admin/plans")
 
 

@@ -24,6 +24,39 @@ MESSAGES: dict[str, tuple[str, str]] = {
     "password_short": ("Password minimal 6 karakter", "Password must be at least 6 characters"),
     "password_mismatch": ("Password tidak cocok", "Passwords do not match"),
 
+    # ── the change forced by a password a school printed ───────────────────
+    # A login card carries a one-time password, so the first page its owner sees is
+    # this one. Both sentences say *why*, because "change your password" with no
+    # reason reads like a demand from the software rather than from the school.
+    # There is deliberately no `change_required` entry: the only sentence that could
+    # say *why* a reader was sent here is already the change-password page's own
+    # opening paragraph, in both languages. A catalogue key nothing calls picks up no
+    # reviewer and drifts, which `tests/unit/test_auth_messages.py` fails on.
+    "change_current_wrong": (
+        "Password saat ini salah. Periksa kembali kartu login Anda.",
+        "That current password is wrong. Check your login card again.",
+    ),
+    "change_same": (
+        "Password baru masih sama dengan password saat ini — itu belum berubah.",
+        "The new password is still the current one — nothing would change.",
+    ),
+    "change_short": (
+        "Password baru minimal 8 karakter.",
+        "The new password must be at least 8 characters.",
+    ),
+    "change_weak": (
+        "Password itu termasuk yang paling sering ditebak orang. Pilih yang lain.",
+        "That password is among the most commonly guessed. Choose another.",
+    ),
+    "change_not_saved": (
+        "Password tidak bisa diganti sekarang. Coba lagi sebentar lagi.",
+        "The password could not be changed right now. Try again in a moment.",
+    ),
+    "changed_sign_in_again": (
+        "Password berhasil diganti. Silakan login lagi dengan password baru Anda.",
+        "Your password was changed. Please sign in again with your new password.",
+    ),
+
     # ── registration ───────────────────────────────────────────────
     "tos_required": (
         "Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi",

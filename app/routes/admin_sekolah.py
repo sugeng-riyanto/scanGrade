@@ -20,6 +20,7 @@ from app.services import school_officials as officials_service
 from app.services.subject_service import (subject_usage, usage_confirmation_needed,
                                           usage_message)
 from app.services import login_cards
+from app.services import account_emails
 
 def _gen_password(length=12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -69,6 +70,21 @@ def _get_email_domain(sid) -> str:
     if not sid or sid == "None":
         return "scan-grade.app"
     return "scan-grade.app"
+
+
+def _school_row(supabase, sid) -> dict:
+    """Baris sekolah ini untuk kepala halaman, atau ``{}`` kalau tidak terbaca.
+
+    Best-effort dengan sengaja: halaman email & aktivasi tetap harus terbuka walaupun
+    satu bacaan nama sekolah gagal, sebab yang dikerjakan di sana bukan namanya.
+    """
+    if not sid:
+        return {}
+    try:
+        return (supabase.table("schools").select("name, npsn").eq("id", sid)
+                .single().execute().data) or {}
+    except Exception:
+        return {}
 
 
 def _school_id() -> str | None:
@@ -1596,7 +1612,8 @@ def _login_cards(kind: str):
     else:
         user_ids = []
 
-    back = "/admin-sekolah/teachers" if kind == "teacher" else "/admin-sekolah/students"
+    back = {"teacher": "/admin-sekolah/teachers",
+            "official": "/admin-sekolah/officials"}.get(kind, "/admin-sekolah/students")
     if not user_ids:
         flash("Pilih dulu akun yang kartu loginnya ingin diunduh.", "warning")
         return redirect(back)
@@ -1656,6 +1673,113 @@ def student_login_cards():
 @admin_sekolah_required
 def teacher_login_cards():
     return _login_cards("teacher")
+
+
+@admin_sekolah_bp.route("/officials/login-cards", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+def official_login_cards():
+    """The same sheet as pupils and teachers get, for the head and deputy head.
+
+    One route for both official roles rather than one each: they are one list on the
+    page, one page of cards in the school's hands, and nothing about the sheet differs
+    between them — the role is a column, and `login_cards.collect` refuses any id that
+    is not one of this school's two official roles.
+    """
+    return _login_cards("official")
+
+
+# ─── EMAIL AKUN & AKTIVASI ─────────────────────────────────────────────
+#
+# Dua hal yang tidak bisa didapat sekolah dari mana pun: memperbaiki email akun
+# secara massal (emailnya dibuat dari nama saat impor, dan ia yang menerima kode
+# reset), dan melihat berapa akun yang masih memakai password dari kartu login.
+# Yang pertama menulis, jadi ia dijaga `subscription_write_required` seperti setiap
+# tulis lain di halaman ini.
+
+def _pending_activation(supabase, sid) -> dict | None:
+    """``{role: count}`` akun yang masih memakai password terbitan, atau ``None``.
+
+    ``None`` dan bukan ``{}`` ketika kolomnya belum ada (basis data yang belum
+    menjalankan migrasi 040): nol berarti "semua akun sudah memakai password
+    sendiri", dan itu klaim yang berbeda dari "tidak bisa dibaca".
+    """
+    counts = {"murid": 0, "guru": 0, "principal": 0, "vice_principal": 0}
+    try:
+        rows = (supabase.table("profiles")
+                .select("role").eq("school_id", sid)
+                .eq("must_change_password", True).execute().data) or []
+    except Exception:
+        return None
+    for row in rows:
+        role = row.get("role")
+        if role in counts:
+            counts[role] += 1
+    return counts
+
+
+@admin_sekolah_bp.route("/accounts")
+@admin_sekolah_required
+def accounts():
+    """Halaman email & aktivasi: satu unggahan, satu unduhan, satu hitungan."""
+    supabase = get_supabase()
+    sid = _school_id()
+    return render_template("admin_sekolah/accounts.html",
+                           pending=_pending_activation(supabase, sid),
+                           report=None, school=_school_row(supabase, sid))
+
+
+@admin_sekolah_bp.route("/emails/template")
+@admin_sekolah_required
+def email_template():
+    """Template unggahan email — kolomnya sama dengan yang dibaca `read_rows`."""
+    school = _school_row(get_supabase(), _school_id())
+    payload = account_emails.template_bytes((school or {}).get("name", ""))
+    return send_file(io.BytesIO(payload), as_attachment=True,
+                     download_name="template-email-akun.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument"
+                              ".spreadsheetml.sheet")
+
+
+@admin_sekolah_bp.route("/emails/upload", methods=["POST"])
+@subscription_write_required
+@admin_sekolah_required
+def upload_emails():
+    """Pasang atau perbaiki email akun yang **sudah ada**, berlingkup sekolah ini.
+
+    Membaca, merencanakan, lalu menulis — tiga langkah terpisah, bukan satu loop:
+    baris yang salah harus ketahuan sebelum alamat pertama ditulis, supaya satu
+    lembar dengan dua murid di satu alamat email tidak setengah-terpasang.
+    """
+    supabase = get_supabase()
+    sid = _school_id()
+    file = request.files.get("file")
+
+    def back(report=None, error=None):
+        if error:
+            flash(error, "error")
+        return render_template("admin_sekolah/accounts.html",
+                               pending=_pending_activation(supabase, sid),
+                               report=report, school=_school_row(supabase, sid))
+
+    if not file or not (file.filename or "").strip():
+        return back(error="Pilih berkasnya dulu.")
+
+    try:
+        rows = account_emails.read_rows(file.stream, file.filename)
+    except Exception as exc:
+        return back(error=f"Berkas tidak bisa dibaca: {str(exc)[:80]}")
+    if not rows:
+        return back(error="Tidak ada baris yang bisa dibaca di berkas itu.")
+
+    planned = account_emails.apply(account_emails.plan(supabase, sid, rows), supabase)
+    counts = account_emails.summarise(planned)
+    # Mengubah email akun mengubah tempat kode reset dikirim — persis bentuk akses
+    # yang kebijakan retensi ingin tercatat, seperti unduhan kartu login.
+    log_activity("update", "account_email", str(sid),
+                 new_data={"updated": counts["updated"], "errors": counts["errors"],
+                           "rows": counts["total"]}, user_id=g.user_id)
+    return back(report={"rows": planned, **counts})
 
 
 @admin_sekolah_bp.route("/students/bulk-delete", methods=["POST"])

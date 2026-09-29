@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 # login URL spelled in exactly one place, and a sheet that printed its own string
 # would be a second copy to keep in sync.
 from app.utils.auth import LOGIN_URL_USER
+from app.services.school_officials import OFFICIAL_ROLES
 
 #: ``kind -> everything that differs between a pupil's card and a teacher's``.
 KINDS = {
@@ -71,6 +72,33 @@ KINDS = {
         "filename": "kartu-login-guru",
         "role": "guru",
     },
+    # The officials have no table of their own, and that was a decision (see
+    # app/services/school_officials.py): the role lives in `profiles.role`. So this is
+    # the one kind whose rows are read from `profiles` directly, and the one whose
+    # identity is the **email** — `/auth/login-user` has no NISN or NIP to match for
+    # these two roles, so the address typed by the school is what they sign in with.
+    # A card that printed an "identity" they cannot use would look right and not work.
+    "official": {
+        "table": None,
+        "identity_column": None,
+        "identity_label": ("Email login", "Login email"),
+        "group_embed": None,
+        "group_label": ("Peran", "Role"),
+        "title": ("Kartu Login Pejabat Sekolah", "School Official Login Cards"),
+        "filename": "kartu-login-pejabat",
+    },
+}
+
+
+#: ``kind -> the log/audit label``: what the export is recorded as.
+def audit_label(kind: str) -> str:
+    return "official" if kind == "official" else kind
+
+
+#: The words the sheet uses for the two official roles, in both languages.
+OFFICIAL_ROLE_LABELS = {
+    "principal": ("Kepala Sekolah", "Principal"),
+    "vice_principal": ("Wakil Kepala Sekolah", "Vice Principal"),
 }
 
 #: The columns of the sheet, in order. Named once so the CSV and the XLSX cannot
@@ -93,12 +121,45 @@ def new_password(length: int = 12) -> str:
 
 
 def _group_name(row: dict, kind: str) -> str:
+    if kind == "official":
+        return OFFICIAL_ROLE_LABELS.get(row.get("role"), ("", ""))[0]
     embedded = None
     if kind == "student":
         embedded = row.get("classes") or {}
     else:
         embedded = row.get("subjects") or {}
     return (embedded or {}).get("name", "") or ""
+
+
+def _official_rows(supabase, school_id, ids) -> list[dict]:
+    """This school's official accounts, in the shape the other kinds return.
+
+    Scoped and role-checked in the query, not after it: the sheet is the one artefact
+    that leaves the building, and an id belonging to a pupil (or to another school's
+    head teacher) must not be able to turn into a card. ``email`` comes from the
+    mirror column migration 040 adds, which is exactly the read it exists for —
+    ``auth.admin.list_users()`` is paged at 50 accounts, so reading the address per
+    row from Auth would be dozens of round-trips for one school.
+    """
+    rows = (supabase.table("profiles")
+            .select("id, full_name, role, school_id, email")
+            .in_("id", ids)
+            .eq("school_id", school_id)
+            .in_("role", list(OFFICIAL_ROLES))
+            .execute().data) or []
+    out = []
+    for row in rows:
+        address = (row.get("email") or "").strip()
+        out.append({
+            "id": str(row.get("id")),
+            "name": row.get("full_name") or "-",
+            "identity": address,
+            "group": _group_name(row, "official"),
+            "email": address,
+            "password": "",
+            "error": "",
+        })
+    return out
 
 
 def collect(supabase, school_id, user_ids, kind, emails=None) -> dict:
@@ -113,6 +174,11 @@ def collect(supabase, school_id, user_ids, kind, emails=None) -> dict:
     ids = [str(u) for u in (user_ids or []) if u]
     if not ids:
         return {"rows": [], "missing": []}
+
+    if conf.get("table") is None:
+        out = _official_rows(supabase, school_id, ids)
+        found = {r["id"] for r in out}
+        return {"rows": out, "missing": [i for i in ids if i not in found]}
 
     rows = (
         supabase.table(conf["table"])
@@ -162,6 +228,19 @@ def set_passwords(supabase, rows, password_factory=None) -> list[dict]:
             row["password"] = password
         except Exception as exc:  # noqa: BLE001 — the note is the report
             row["error"] = f"password tidak dapat direset: {str(exc)[:60]}"
+            continue
+        # Issuing a card is the moment a password becomes a *one-time* one, so the
+        # flag is set here rather than at the caller — there is exactly one place that
+        # writes a password to an account, and this is the side of it that knows the
+        # credential is now on a piece of paper in a school bag. Best-effort but
+        # reported: the password is real and stays on the sheet either way, so a
+        # failure here is a note in the row, never a reason to drop the password.
+        try:
+            supabase.table("profiles").update({"must_change_password": True}) \
+                .eq("id", row["id"]).execute()
+        except Exception as exc:  # noqa: BLE001
+            row["error"] = (f"password terpasang, tetapi penanda ganti-password gagal "
+                            f"disetel: {str(exc)[:60]}")
     return rows
 
 
@@ -226,10 +305,11 @@ def meta_for(school_name: str, requested: int, issued: int, failed: int,
             "School": school_name, "Made": stamp,
             "Accounts requested": str(requested), "Passwords issued": str(issued),
             "Could not be reset": str(failed),
-            "Login page": LOGIN_URL_USER,
-            "Note": ("Passwords are shown only in this file — nothing on the site can "
+            "Login page": LOGIN_URL_USER,            "Note": ("Passwords are shown only in this file — nothing on the site can "
                      "read them back. Each one was set on the account just now."),
-        }
+            "First sign-in": ("This is a one-time password: the account is asked to "
+                              "choose its own before any other page opens."),
+    }
     return {
         "Sekolah": school_name, "Dibuat": stamp,
         "Akun diminta": str(requested), "Password diterbitkan": str(issued),
@@ -237,6 +317,8 @@ def meta_for(school_name: str, requested: int, issued: int, failed: int,
         "Halaman login": LOGIN_URL_USER,
         "Catatan": ("Password hanya ada di berkas ini — tidak ada halaman yang bisa "
                     "membacanya kembali. Setiap password baru saja dipasang ke akunnya."),
+        "Login pertama": ("Ini password sekali pakai: akunnya diminta membuat password "
+                          "sendiri sebelum halaman lain terbuka."),
     }
 
 

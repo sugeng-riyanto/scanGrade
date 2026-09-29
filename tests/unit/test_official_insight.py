@@ -462,10 +462,24 @@ class TestTheOfficialBlueprint:
     def test_the_blueprint_has_routes_to_judge(self):
         assert self.ROUTES, "the official blueprint lost every route"
 
-    def test_there_is_no_writing_route(self):
-        for spec in self.ROUTES:
-            assert not re.search(r"(POST|PUT|PATCH|DELETE)", spec), (
-                f"official route {spec} writes; this blueprint is read-only by construction")
+    def test_the_head_of_school_prefix_has_no_writing_route(self):
+        """`/principal/*` is read-only by construction — the head of school oversees.
+
+        The one delegated write authority this blueprint carries — the invigilation
+        schedule — lives entirely under `/vice-principal/*`, so the separation is a
+        property of the *addresses* rather than a flag inside a template. That is why
+        this assertion is about the prefix and not about the blueprint: `for spec in
+        self.ROUTES` used to forbid every write here, which made a delegated authority
+        impossible to express anywhere except by breaking this guard.
+        """
+        writing = [spec for spec in self.ROUTES
+                   if re.search(r"(POST|PUT|PATCH|DELETE)", spec)]
+        offenders = [spec for spec in writing if spec.lstrip("(").lstrip("'").startswith("/principal/")]
+        assert not offenders, (
+            f"the head of school's own prefix writes: {offenders}")
+        for spec in writing:
+            assert "invigilation" in spec or "retake" in spec, (
+                f"a writing route outside the one delegated authority: {spec}")
 
     @pytest.mark.parametrize("path", ["/principal/analytics", "/vice-principal/analytics",
                                       "/principal/progress", "/vice-principal/progress"])
@@ -479,10 +493,20 @@ class TestTheOfficialBlueprint:
         assert PRINCIPAL_PY.count("def _progress(") == 1
 
     def test_the_official_routes_are_guarded(self):
+        """No official page is open to any signed-in reader.
+
+        Three guards, and each is narrowing rather than weaker:
+        `school_official_required` admits both oversight roles, while
+        `principal_required` and `vice_principal_required` admit only one — which is
+        what makes "the head of school reads, the deputy writes" expressible.
+        """
+        allowed = ("school_official_required", "principal_required",
+                   "vice_principal_required")
         for block in PRINCIPAL_PY.split("@principal_bp.route")[1:]:
             guard = block.split("\ndef ")[0]
-            assert "school_official_required" in guard, (
-                "an official route without its guard is a page any signed-in reader can open")
+            assert any(name in guard for name in allowed), (
+                "an official route without its guard is a page any signed-in reader "
+                f"can open: {guard.strip()[:80]}")
 
 
 @contextlib.contextmanager

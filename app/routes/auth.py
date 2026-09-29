@@ -3,7 +3,7 @@ import logging
 import os
 import threading
 import time
-from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app
+from flask import Blueprint, request, jsonify, g, session, render_template, redirect, url_for, make_response, current_app, flash
 from app.utils.auth import (login_required, get_supabase, get_auth_client, get_auth_admin,
                             find_auth_user_by_email, invalidate_session, set_auth_cookie,
                             login_door_for, session_role, _extract_token,
@@ -944,6 +944,80 @@ def logout():
         pass
     if uid:
         log_activity("logout", "user", uid)
+    resp = make_response(redirect(door))
+    resp.delete_cookie("access_token", path="/")
+    resp.delete_cookie("refresh_token", path="/")
+    return resp
+
+
+# ─── CHANGE THE PASSWORD A SCHOOL PRINTED ─────────────
+
+@auth_bp.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    """The page a login card's one-time password lands on.
+
+    `login_required` lets this path through while the flag is set (it is on the
+    exempt list), which is what keeps the redirect from looping. The two things
+    that must not be skippable are both here: the **current** password has to be
+    proven, because a session left open on a shared laptop is otherwise enough to
+    take the account over; and the new password is written by the admin API, the
+    only door this app has ever had to a credential.
+
+    On success the session is deliberately **destroyed** and the reader is sent to
+    their own login door: the whole point of a one-time password is that the next
+    sign-in uses the new one, and nothing else in this app can prove the new
+    password works. The cached session is invalidated first, so the old token stops
+    working immediately rather than for the remainder of its TTL.
+    """
+    from app.services import password_change
+
+    if request.method == "GET":
+        return render_template("auth/change_password.html")
+
+    current = request.form.get("current_password", "")
+    new = request.form.get("new_password", "")
+    confirm = request.form.get("confirm_password", "")
+
+    problem = password_change.change_problem(current, new, confirm)
+    if problem:
+        return render_template("auth/change_password.html",
+                               error=auth_error(problem))
+
+    # Prove the current password rather than trusting the session. A wrong one is
+    # reported as such, not as a server fault: the reader can act on the first and
+    # cannot act on the second.
+    try:
+        get_auth_client().auth.sign_in_with_password(
+            {"email": g.user_email, "password": current})
+    except Exception:
+        log_activity("change_password_failed", "user", g.user_id,
+                     new_data={"reason": "current_password"})
+        return render_template("auth/change_password.html",
+                               error=auth_error("change_current_wrong"))
+
+    try:
+        get_supabase().auth.admin.update_user_by_id(g.user_id, {"password": new})
+        get_supabase().table("profiles").update({
+            "must_change_password": False,
+            "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", g.user_id).execute()
+    except Exception as e:
+        current_app.logger.error(f"change-password failed for {g.user_id}: {e}")
+        log_activity("change_password_failed", "user", g.user_id)
+        return render_template("auth/change_password.html",
+                               error=auth_error("change_not_saved"))
+
+    door = login_door_for(g.user_role, request.path)
+    log_activity("change_password", "user", g.user_id)
+    flash(auth_error("changed_sign_in_again"), "success")
+    # Same teardown as /auth/logout, in the same order, for the same reason: the
+    # cached session goes first so the old token cannot ride its TTL.
+    invalidate_session(_extract_token())
+    try:
+        get_auth_client().auth.sign_out()
+    except Exception:
+        pass
     resp = make_response(redirect(door))
     resp.delete_cookie("access_token", path="/")
     resp.delete_cookie("refresh_token", path="/")

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -426,14 +427,35 @@ class TestThisRepositoryPasses:
             "a statement that fails takes the rest of its file with it, so every "
             f"migration after that line is silently unapplied: {found}")
 
-    def test_a_profiles_email_select_cannot_come_back(self):
-        """`profiles` has no `email`; addresses live in `auth.users`."""
-        assert "email" not in sc.schema_from_migrations().get("profiles", set())
+    def test_every_column_a_profiles_embed_names_really_exists(self):
+        """An embed is a query the database answers, so a name it invents is a 500.
+
+        This guard used to say the stronger, narrower thing — ``profiles`` has no
+        ``email`` at all, so a ``profiles!inner(email)`` embed "cannot come back".
+        Migration 040 made that untrue on purpose: the address is now mirrored onto
+        ``profiles`` so a school's own sheet can be built in one query instead of
+        paging ``auth.admin.list_users()`` at fifty accounts a page. The credential
+        still lives in ``auth.users`` — the mirror is derived — but a guard that
+        forbids the column outright would now forbid the feature.
+
+        What survives, and is what the guard was actually protecting, is that every
+        column an embed names is one this repository declares: the embed may not
+        guess. A name that no migration creates is a PostgREST error at runtime, in
+        whichever page happens to make the call.
+        """
+        declared = sc.schema_from_migrations().get("profiles", set())
+        assert "email" in declared, (
+            "the mirror is gone: `app/services/account_emails.py` writes it and every "
+            "school's account sheet reads it")
         sql = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "app").rglob("*.py"))
         for line in sql.splitlines():
-            if "profiles!inner(" in line or "profiles!" in line:
-                assert "email" not in line, (
-                    f"a profiles embed names a column that does not exist: {line.strip()}")
+            if "profiles!" not in line:
+                continue
+            for named in re.findall(r"profiles![a-z]*\(([^)]*)\)", line):
+                for column in (c.strip() for c in named.split(",") if c.strip()):
+                    assert column in declared, (
+                        f"a profiles embed names a column no migration creates: "
+                        f"{column} in {line.strip()}")
 
 
 # ── the check bites ─────────────────────────────────────────────────────────

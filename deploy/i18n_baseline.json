@@ -73,6 +73,12 @@
       "coverage": 88.9,
       "frozen": true
     },
+    "admin_sekolah/accounts.html": {
+      "pairs": 19,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "admin_sekolah/classes.html": {
       "pairs": 1,
       "leftovers": 15,
@@ -98,7 +104,7 @@
       "frozen": true
     },
     "admin_sekolah/officials.html": {
-      "pairs": 28,
+      "pairs": 31,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -177,6 +183,12 @@
     },
     "auth/activate_success.html": {
       "pairs": 4,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "auth/change_password.html": {
+      "pairs": 10,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -307,6 +319,12 @@
       "coverage": 100.0,
       "frozen": false
     },
+    "principal/invigilation.html": {
+      "pairs": 41,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
     "principal/progress.html": {
       "pairs": 49,
       "leftovers": 0,
@@ -315,6 +333,12 @@
     },
     "public/capacity.html": {
       "pairs": 64,
+      "leftovers": 0,
+      "coverage": 100.0,
+      "frozen": false
+    },
+    "shared/_invigilation_reasons.html": {
+      "pairs": 15,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -356,7 +380,7 @@
       "frozen": true
     },
     "student/results.html": {
-      "pairs": 36,
+      "pairs": 41,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -399,12 +423,12 @@
     },
     "super_admin/demo_settings.html": {
       "pairs": 0,
-      "leftovers": 11,
+      "leftovers": 12,
       "coverage": 0.0,
       "frozen": false
     },
     "super_admin/deploy_status.html": {
-      "pairs": 351,
+      "pairs": 373,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -572,7 +596,7 @@
       "frozen": false
     },
     "teacher/dashboard.html": {
-      "pairs": 59,
+      "pairs": 63,
       "leftovers": 0,
       "coverage": 100.0,
       "frozen": false
@@ -617,6 +641,12 @@
       "pairs": 0,
       "leftovers": 11,
       "coverage": 0.0,
+      "frozen": false
+    },
+    "teacher/invigilation.html": {
+      "pairs": 23,
+      "leftovers": 0,
+      "coverage": 100.0,
       "frozen": false
     },
     "teacher/penalty_appeals.html": {

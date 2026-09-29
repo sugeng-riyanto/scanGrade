@@ -78,6 +78,23 @@ LOGIN_URL_ADMIN = "/auth/login"
 LOGIN_URL_USER = "/auth/login-user"
 USER_ROLES = ("guru", "murid", "principal", "vice_principal")
 
+#: Where a user goes when their password is still the one a school printed on a card.
+CHANGE_PASSWORD_URL = "/auth/change-password"
+
+#: Paths that must stay reachable while the change is due.
+#:
+#: * the page itself, or the redirect loops;
+#: * both login doors and logout, because the way out of the page *is* a fresh
+#:   login — there is no other way to prove the new password works;
+#: * ``/static/`` for the page's own CSS and icons;
+#: * ``/api/``, and this one is a decision, not an oversight. A school reprints
+#:   login cards whenever it likes, including in the middle of a sitting. Blocking
+#:   writes there would fail a pupil's autosave mid-exam — a real loss of answered
+#:   work — for a rule whose whole purpose is what they see, not what they save. The
+#:   change is still demanded on the next page they load, which is every page.
+_CHANGE_PASSWORD_EXEMPT = (CHANGE_PASSWORD_URL, "/auth/logout", LOGIN_URL_ADMIN,
+                           LOGIN_URL_USER, "/static/", "/api/")
+
 # When the role is not known, the URL being opened decides. The space is already
 # partitioned by role, and this only chooses which page to *show*: both doors can
 # sign anyone in, so a misread costs a click rather than an authorization call.
@@ -340,6 +357,13 @@ def _jwt_expired(token):
 #: fallback below is the same read minus one column.
 _PROFILE_COLUMNS = "role, school_id, status, class_id"
 
+#: The columns that arrived after this code did, newest last. A select naming one the
+#: database has not been migrated for is refused by PostgREST, and losing the whole
+#: profile over it would lose the identity with it. Dropping from this end is exact,
+#: not a guess: migrations apply in file order, so a later column can be missing while
+#: every earlier one is present, and never the other way round.
+_OPTIONAL_PROFILE_COLUMNS = ("preferences", "must_change_password")
+
 #: Set once per process when the database has no `preferences` column yet. The
 #: column arrives with migration 036, and PostgREST refuses a select that names a
 #: column it cannot find (42703) **in full** — so asking for it unconditionally
@@ -349,6 +373,33 @@ _PROFILE_COLUMNS = "role, school_id, status, class_id"
 #: columns until the process restarts (which a deploy does), so the window costs
 #: one wasted read per worker rather than one per request.
 _preferences_unavailable = False
+
+#: The same guard, for the same reason, for `must_change_password` (migration 040).
+#: Until it is applied the flag reads as False, which is the pre-040 behaviour and
+#: the honest one: nothing could have asked anyone to replace a password if there is
+#: nowhere to record the asking.
+_must_change_unavailable = False
+
+#: ``column -> the flag that records it is missing``.
+_UNAVAILABLE_FLAG = {
+    "preferences": "_preferences_unavailable",
+    "must_change_password": "_must_change_unavailable",
+}
+
+
+def _missing_optional_column(column: str) -> bool:
+    return bool(globals().get(_UNAVAILABLE_FLAG.get(column, ""), False))
+
+
+def _mark_optional_column_missing(column: str) -> None:
+    name = _UNAVAILABLE_FLAG.get(column)
+    if name:
+        globals()[name] = True
+
+
+def _optional_columns_for_the_select() -> list[str]:
+    """The optional columns this process has not already learned are absent."""
+    return [c for c in _OPTIONAL_PROFILE_COLUMNS if not _missing_optional_column(c)]
 
 
 def _fetch_session(token):
@@ -364,10 +415,8 @@ def _fetch_session(token):
     row is already being read, so carrying them costs nothing. See
     app/services/user_preferences.py.
     """
-    global _preferences_unavailable
     user = get_auth_client().auth.get_user(token)
     meta = user.user.user_metadata or {}
-    columns = _PROFILE_COLUMNS if _preferences_unavailable else _PROFILE_COLUMNS + ", preferences"
 
     def _read(cols):
         return (
@@ -381,20 +430,23 @@ def _fetch_session(token):
             or {}
         )
 
-    try:
-        pd = _read(columns)
-    except Exception:
-        # A database that predates migration 036 refuses the select that names the
-        # new column; fall back to the columns that have always existed rather than
-        # losing the identity with it.
-        if _preferences_unavailable:
-            pd = {}
-        else:
-            _preferences_unavailable = True
-            try:
-                pd = _read(_PROFILE_COLUMNS)
-            except Exception:
+    # A database that has not been migrated yet refuses the select that names the
+    # column it lacks, and PostgREST refuses it **in full** — so the newest column is
+    # dropped and the read retried, down to the columns that have always existed,
+    # rather than losing the identity with it. Which column was missing is remembered
+    # for the rest of the process (a deploy restarts it), so the window between a
+    # release and its migration costs one wasted read per worker, not one per request.
+    optional = _optional_columns_for_the_select()
+    while True:
+        columns = ", ".join([_PROFILE_COLUMNS, *optional]) if optional else _PROFILE_COLUMNS
+        try:
+            pd = _read(columns)
+            break
+        except Exception:
+            if not optional:
                 pd = {}
+                break
+            _mark_optional_column_missing(optional.pop())
 
     school_id = pd.get("school_id") or meta.get("school_id")
     if school_id == "None":
@@ -413,6 +465,7 @@ def _fetch_session(token):
         "class_id": class_id,
         "status": pd.get("status", "active"),
         "prefs": _normalize_prefs(pd.get("preferences") or {}),
+        "must_change_password": bool(pd.get("must_change_password")),
     }
 
 
@@ -442,6 +495,9 @@ def _apply_session(data, token):
     g.user_school_id = data.get("school_id")
     g.user_class_id = data.get("class_id")
     g.user_status = data.get("status", "active")
+    # Whether the password on this account is still the one the school printed. False
+    # for a database that has not run migration 040 yet.
+    g.must_change_password = bool(data.get("must_change_password"))
     # The UI preferences (theme, language, alert level) the user set on any device.
     # Empty for a database that has not run migration 036 yet.
     g.user_prefs = data.get("prefs") or {}
@@ -505,6 +561,12 @@ def invalidate_session(token):
     cache_delete(_session_key(token))
 
 
+def _change_password_exempt(path: str) -> bool:
+    """Whether ``path`` stays open while a password change is due."""
+    return any(path == p or (p.endswith("/") and path.startswith(p))
+               for p in _CHANGE_PASSWORD_EXEMPT)
+
+
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -517,6 +579,15 @@ def login_required(f):
             # Block pending users from accessing protected routes
             if g.get("user_status") == "pending":
                 return redirect("/auth/activate?email={}&pending=1".format(g.user_email))
+
+            # A password a school printed on a login card is a one-time password.
+            # Until its owner replaces it, every page is closed — the same shape as
+            # the pending branch above, and it is a *redirect* rather than a 403 on
+            # purpose: the reader is not being refused, they are being sent to the
+            # one page that lets them in.
+            if g.get("must_change_password") and not _change_password_exempt(
+                    request.path):
+                return redirect(CHANGE_PASSWORD_URL)
 
             # Session timeout check (idle + absolute)
             role = g.get("user_role")
@@ -584,6 +655,7 @@ def _refresh_token():
             g.user_class_id = pd.get("class_id")
             if g.user_class_id in ("None", ""): g.user_class_id = None
             g.user_status = pd.get("status", "active")
+            g.must_change_password = bool(pd.get("must_change_password"))
         else:
             meta = res.user.user_metadata
             g.user_role = _normalize_role(meta.get("role", "murid"))
@@ -592,6 +664,7 @@ def _refresh_token():
             g.user_class_id = meta.get("class_id")
             if g.user_class_id == "None": g.user_class_id = None
             g.user_status = "active"
+            g.must_change_password = False
         g._new_access_token = token
         return token
     except Exception:
