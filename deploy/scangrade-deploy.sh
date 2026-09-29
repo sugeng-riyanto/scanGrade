@@ -1372,6 +1372,108 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 2
 fi
 
+# ── The way in: the box installs its own key, out of the repository ───────────
+# deploy-key-logic:start
+# A stuck box is one whose runner refuses *before* it fetches, and while it refuses
+# no push, no request and no release can reach it: the thing that would apply any of
+# them is the thing that is refusing. Measured on this box — 19 commits behind with
+# `M app/routes/admin_sekolah.py`, three ssh keys and every stored password refused,
+# and the provider's console behind a captcha — the only channel left was a human at
+# a console that cannot paste.
+#
+# So the box installs its own way in, out of the repository it already trusts. Every
+# `deploy/authorized-keys/*.pub` is appended to the deploy account's
+# `authorized_keys`, and the private half stays on the operator's machine. Four
+# properties make this an install rather than a decoration:
+#
+#   * **idempotent by key material, not by line** — a second tick appends nothing,
+#     and the same key under a different comment is the same key. A runner that
+#     appended every two minutes would grow that file forever and turn one
+#     inspection into a scroll;
+#   * **appended, never rewritten** — a key somebody else put there is not this
+#     runner's to remove, and removing one of these is an edit on the box, not a
+#     change here;
+#   * **plain public keys only** — a line carrying `authorized_keys` options is
+#     refused and named, because a file sshd parses is not a place for this script
+#     to author options into, and options are how a copied file becomes a command;
+#   * **nothing is printed from the key itself** — only the file it landed in, so a
+#     file that should never have been called `.pub` is not echoed into the journal
+#     by the install that refuses it.
+#
+# It runs after the root check (writing root's key is what it is for) and before the
+# pause check, deliberately: a box frozen for exam week is exactly a box nobody is
+# watching, and a runner far enough behind to be refusing before its own fetch is
+# exactly a box somebody would otherwise have to reach by hand.
+DEPLOY_KEYS_DIR="$REPO/deploy/authorized-keys"
+#: Where the keys land. `getent` rather than a literal, because a box whose root
+#: lives elsewhere is a box this should still reach; the override is for an
+#: `sshd_config` naming a different file, and for the tests.
+DEPLOY_KEYS_FILE="${SCANGRADE_AUTHORIZED_KEYS:-}"
+if [ -z "$DEPLOY_KEYS_FILE" ]; then
+  DEPLOY_ROOT_HOME=$(getent passwd root | cut -d: -f6)
+  [ -n "$DEPLOY_ROOT_HOME" ] || DEPLOY_ROOT_HOME=/root
+  DEPLOY_KEYS_FILE="$DEPLOY_ROOT_HOME/.ssh/authorized_keys"
+fi
+#: One line of a key file, and that line's identity — the type and the blob, without
+#: the comment after them. Globals rather than arguments: no helper in this script
+#: takes a positional parameter, at any level, which is what keeps it unsteerable.
+DEPLOY_KEY_LINE=""
+DEPLOY_KEY_SCAN_LINE=""
+DEPLOY_KEY_MATERIAL=""
+
+#: `<type> <blob> [comment]` with the runs of whitespace collapsed and both ends
+#: trimmed, so a hand-edited file that used two spaces is still the same key.
+deploy_key_normalise() {
+  tr -s '[:blank:]' ' ' | sed -e 's/^ *//' -e 's/ *$//'
+}
+
+#: Is the key in `$DEPLOY_KEY_MATERIAL` already in the file?
+deploy_key_installed() {
+  [ -f "$DEPLOY_KEYS_FILE" ] || return 1
+  while IFS= read -r DEPLOY_KEY_SCAN_LINE || [ -n "$DEPLOY_KEY_SCAN_LINE" ]; do
+    [ -n "$DEPLOY_KEY_SCAN_LINE" ] || continue
+    if [ "$(printf '%s\n' "$DEPLOY_KEY_SCAN_LINE" | deploy_key_normalise \
+            | cut -d' ' -f1,2)" = "$DEPLOY_KEY_MATERIAL" ]; then
+      return 0
+    fi
+  done < "$DEPLOY_KEYS_FILE"
+  return 1
+}
+
+deploy_keys_install() {
+  local source parent
+  [ -d "$DEPLOY_KEYS_DIR" ] || return 0
+  parent=$(dirname "$DEPLOY_KEYS_FILE")
+  for source in "$DEPLOY_KEYS_DIR"/*.pub; do
+    [ -f "$source" ] || continue
+    while IFS= read -r DEPLOY_KEY_LINE || [ -n "$DEPLOY_KEY_LINE" ]; do
+      DEPLOY_KEY_LINE=$(printf '%s\n' "$DEPLOY_KEY_LINE" | deploy_key_normalise)
+      case "$DEPLOY_KEY_LINE" in
+        ''|'#'*) continue ;;
+        ssh-*|ecdsa-*|sk-*) ;;
+        *) log "deploy key: ${source##*/} has a line that is not a plain public key — nothing installed from it"
+           continue ;;
+      esac
+      DEPLOY_KEY_MATERIAL=$(printf '%s\n' "$DEPLOY_KEY_LINE" | cut -d' ' -f1,2)
+      [ -n "$DEPLOY_KEY_MATERIAL" ] || continue
+      deploy_key_installed && continue
+      if ! mkdir -p "$parent" 2>/dev/null; then
+        log "deploy key: cannot create $parent — the way in was not installed"
+        continue
+      fi
+      chmod 0700 "$parent" 2>/dev/null || true
+      if ! printf '%s\n' "$DEPLOY_KEY_LINE" >> "$DEPLOY_KEYS_FILE" 2>/dev/null; then
+        log "deploy key: cannot append to $DEPLOY_KEYS_FILE — the way in was not installed"
+        continue
+      fi
+      chmod 0600 "$DEPLOY_KEYS_FILE" 2>/dev/null || true
+      log "deploy key installed in $DEPLOY_KEYS_FILE (from ${source##*/})"
+    done < "$source"
+  done
+}
+deploy_keys_install
+# deploy-key-logic:end
+
 # ── Maintenance window ───────────────────────────────────────────────────────
 # Create the file to freeze deploys (e.g. during exam week) without touching the
 # timer; remove it to let the next tick catch up.
