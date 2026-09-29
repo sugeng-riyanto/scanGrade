@@ -1622,6 +1622,66 @@ The marker is the one thing here with a source-level coupling, and it is deliber
 held together by that test. If they ever diverge the gate degrades to "cannot measure"
 on every tick — loudly, in the journal, never as a silent pass.
 
+## The way in: the box installs its own key
+
+Every section above assumes something can reach the box. A runner that refuses
+*before* it fetches breaks that assumption completely: no push, no release request and
+no page can move it, because the thing that would apply any of them is the thing that
+is refusing. Measured on the box this was written for — 19 commits behind with
+`M app/routes/admin_sekolah.py` — every stored password and all three local ssh keys
+were refused, and the provider's console sat behind a captcha. The only channel left
+was a human at a terminal that cannot paste.
+
+So the box installs its own way in, out of the repository it already trusts. Every
+`deploy/authorized-keys/*.pub` is appended by the runner to the deploy account's
+`authorized_keys`, once, on the first tick after the release that carries it. The
+private half stays on the operator's machine; a public half in a git history is not a
+secret, and it is the half that opens nothing.
+
+Four properties, each of them a way this could be an install in name only:
+
+* **idempotent by key material, not by line.** A second tick appends nothing, and the
+  same key under a different trailing comment is the same key. A runner that appended
+  every two minutes would grow that file forever and turn one inspection into a scroll;
+* **appended, never rewritten.** A key somebody else put there is not this runner's to
+  remove — and removing one of these is an edit on the box, not a change here:
+
+  ```bash
+  sed -i '/ scangrade-deploy$/d' /root/.ssh/authorized_keys
+  ```
+
+* **plain public keys only.** A line carrying `authorized_keys` options is refused and
+  named in the journal, because a file sshd parses is not a place for this script to
+  author options into — options are how a copied file becomes a command on every login;
+* **nothing is printed from the key itself.** Only the file it landed in, so a file
+  that should never have been called `.pub` is not echoed into the journal by the
+  install that refuses it.
+
+It runs **after the root check** — writing root's key is what it is for — and **before
+the pause check**, deliberately: a box frozen for exam week is exactly a box nobody is
+watching, and a runner far enough behind to be refusing before its own fetch is exactly
+a box somebody would otherwise have to reach by hand. An absent
+`deploy/authorized-keys/` is a no-op, which is what lets this land on a box whose
+release predates it.
+
+The path is root's own home from `getent passwd root`, and `SCANGRADE_AUTHORIZED_KEYS`
+overrides it for an `sshd_config` that names a different file. Guards:
+`tests/unit/test_deploy_key.py` (11 tests — the install, the second tick, other keys,
+the comment, the options line, the no-op, the order, and the shape of the directory
+itself, including that no private half is committed beside the public one),
+mutation-checked **10/10** (`.freebuff/mutate_deploy_key.py`).
+
+### What it does not do
+
+There is still exactly one box this cannot be installed on by itself: one whose runner
+predates the block, because that runner is the thing that would install it. For that
+box, the way in arrives with the recovery — one line typed at the console, and every
+recovery after it is an `ssh`:
+
+```bash
+ssh -i ~/.ssh/scangrade_deploy root@<box> 'systemctl start scangrade-deploy'
+```
+
 ## Why a reload and not a restart
 
 `scangrade.service` carries `ExecReload=/bin/kill -s HUP $MAINPID`. SIGHUP makes
